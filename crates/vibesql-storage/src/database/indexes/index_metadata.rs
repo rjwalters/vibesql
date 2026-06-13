@@ -118,22 +118,32 @@ pub enum IndexData {
     /// Note: The B+ tree stores (key, row_id) pairs. For non-unique indexes,
     /// we serialize Vec<usize> as the row_id value to support multiple rows per key.
     ///
-    /// **Transaction-rollback gap (#5419, follow-on of #5413):** `Clone`
+    /// **Transaction rollback (#5425, follow-on of #5413/#5419):** `Clone`
     /// for this variant is a *shallow* `Arc` bump — the cloned snapshot and
     /// the live index share the same `Arc<Mutex<BTreeIndex>>`. The #5413 /
-    /// #5419 rollback snapshot of `Operations` therefore does **not** undo
-    /// mutations made to a spilled (disk-backed) index inside a transaction:
-    /// restoring the shallow clone restores a handle to the *same, already-
-    /// mutated* B+ tree. This is the same class of leak #5413 closed for the
-    /// in-memory index, but for spilled indexes.
+    /// #5419 copy-on-write rollback snapshot of `Operations` therefore cannot
+    /// undo mutations to a spilled index by restoring the shallow clone alone
+    /// (it would just re-point at the *same, already-mutated* B+ tree).
     ///
-    /// This is **not reachable in replicated mode** today: the state machine
-    /// builds the database via `Database::new()` (no `database_path`), so
-    /// index spilling — which requires a path — never triggers there. It is
-    /// a latent gap only for standalone-with-path databases that spill an
-    /// index and then ROLLBACK. Tracked as a focused follow-on; the
-    /// copy-on-write change in #5419 deliberately preserves the existing
-    /// #5413 behavior here rather than expanding scope.
+    /// To fix this, disk-backed mutations are undone via a per-tree **undo-log**
+    /// (#5425): when a transaction's first index mutation arms the COW snapshot,
+    /// [`BTreeIndex::begin_undo_logging`] is also called on every disk-backed
+    /// tree (see [`IndexManager::begin_disk_undo_logging`]). ROLLBACK reverses
+    /// the log ([`IndexManager::rollback_disk_undo_logs`]); COMMIT discards it
+    /// ([`IndexManager::clear_disk_undo_logs`]). The cost is proportional to the
+    /// transaction's own mutations, not the (by definition large) spilled index
+    /// size, which would defeat the purpose of spilling. Note: this covers
+    /// full-transaction ROLLBACK; savepoint-scoped rollback of disk-backed
+    /// mutations is tracked as a separate follow-on.
+    ///
+    /// This path is **not reachable in replicated mode**: the state machine
+    /// builds the database via `Database::new()` (no `database_path`), so index
+    /// spilling — which requires a path — never triggers there. It applies to
+    /// standalone-with-path databases that spill an index and then ROLLBACK.
+    ///
+    /// [`IndexManager::begin_disk_undo_logging`]: super::IndexManager::begin_disk_undo_logging
+    /// [`IndexManager::rollback_disk_undo_logs`]: super::IndexManager::rollback_disk_undo_logs
+    /// [`IndexManager::clear_disk_undo_logs`]: super::IndexManager::clear_disk_undo_logs
     DiskBacked { btree: Arc<Mutex<BTreeIndex>>, page_manager: Arc<PageManager> },
     /// IVFFlat index for approximate nearest neighbor search on vectors
     IVFFlat { index: IVFFlatIndex },

@@ -1378,3 +1378,182 @@ fn test_delete_batch_empty() {
     // Original entry should still exist
     assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![1]);
 }
+
+// ============================================================================
+// Transaction undo-log (issue #5425)
+//
+// `IndexData::DiskBacked` clones as a shallow `Arc<Mutex<BTreeIndex>>` bump, so
+// the copy-on-write `Operations` rollback snapshot does not undo spilled-index
+// mutations. The undo-log records the inverse of each mutation so ROLLBACK can
+// reverse it; COMMIT discards it. These tests pin the reversibility of every
+// mutating B+ tree operation.
+// ============================================================================
+
+/// Build a fresh disk-backed B+ tree seeded with `(int_key, row_id)` entries.
+fn undo_test_index(seed: &[(i64, RowId)]) -> (BTreeIndex, tempfile::TempDir) {
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
+    let page_manager = Arc::new(PageManager::new("undo_test.db", storage).unwrap());
+
+    let mut index = BTreeIndex::new(page_manager, vec![DataType::Integer]).unwrap();
+    for (k, row_id) in seed {
+        index.insert(vec![SqlValue::Integer(*k)], *row_id).unwrap();
+    }
+    (index, temp_dir)
+}
+
+/// Capture every key's row_ids so two B+ tree states can be compared.
+fn snapshot_keys(index: &BTreeIndex, keys: &[i64]) -> Vec<(i64, Vec<RowId>)> {
+    keys.iter()
+        .map(|k| {
+            let mut rows = index.lookup(&vec![SqlValue::Integer(*k)]).unwrap();
+            rows.sort_unstable();
+            (*k, rows)
+        })
+        .collect()
+}
+
+#[test]
+fn undo_log_reverses_inserts_on_rollback() {
+    let (mut index, _dir) = undo_test_index(&[(10, 1), (20, 2)]);
+    let before = snapshot_keys(&index, &[10, 20, 30, 40]);
+
+    index.begin_undo_logging();
+    assert!(index.is_undo_logging());
+
+    // Mutate: insert a brand-new key and a duplicate row on an existing key.
+    index.insert(vec![SqlValue::Integer(30)], 3).unwrap();
+    index.insert(vec![SqlValue::Integer(40)], 4).unwrap();
+    index.insert(vec![SqlValue::Integer(10)], 5).unwrap();
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(30)]).unwrap(), vec![3]);
+    assert_eq!(snapshot_keys(&index, &[10]), vec![(10, vec![1, 5])]);
+
+    index.rollback_undo_log().unwrap();
+    assert!(!index.is_undo_logging(), "rollback disables logging");
+
+    assert_eq!(
+        snapshot_keys(&index, &[10, 20, 30, 40]),
+        before,
+        "ROLLBACK must reverse all inserts, restoring the pre-transaction tree"
+    );
+}
+
+#[test]
+fn undo_log_reverses_delete_specific_on_rollback() {
+    // Non-unique key 10 holds two rows; delete one specifically.
+    let (mut index, _dir) = undo_test_index(&[(10, 1), (10, 2), (20, 3)]);
+    let before = snapshot_keys(&index, &[10, 20]);
+
+    index.begin_undo_logging();
+    assert!(index.delete_specific(&vec![SqlValue::Integer(10)], 1).unwrap());
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![2]);
+
+    index.rollback_undo_log().unwrap();
+    assert_eq!(
+        snapshot_keys(&index, &[10, 20]),
+        before,
+        "ROLLBACK must re-insert the specifically-deleted row"
+    );
+}
+
+#[test]
+fn undo_log_reverses_full_key_delete_on_rollback() {
+    // Full-key delete removes ALL rows for the key; undo must restore them all.
+    let (mut index, _dir) = undo_test_index(&[(10, 1), (10, 2), (10, 3), (20, 4)]);
+    let before = snapshot_keys(&index, &[10, 20]);
+
+    index.begin_undo_logging();
+    assert!(index.delete(&vec![SqlValue::Integer(10)]).unwrap());
+    assert!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty());
+
+    index.rollback_undo_log().unwrap();
+    assert_eq!(
+        snapshot_keys(&index, &[10, 20]),
+        before,
+        "ROLLBACK must re-insert every row removed by a full-key delete"
+    );
+}
+
+#[test]
+fn undo_log_reverses_delete_batch_on_rollback() {
+    let (mut index, _dir) = undo_test_index(&[(10, 1), (20, 2), (30, 3), (40, 4)]);
+    let before = snapshot_keys(&index, &[10, 20, 30, 40]);
+
+    index.begin_undo_logging();
+    let deleted = index
+        .delete_batch(&[
+            (vec![SqlValue::Integer(10)], 1),
+            (vec![SqlValue::Integer(30)], 3),
+        ])
+        .unwrap();
+    assert_eq!(deleted, 2);
+    assert!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty());
+
+    index.rollback_undo_log().unwrap();
+    assert_eq!(
+        snapshot_keys(&index, &[10, 20, 30, 40]),
+        before,
+        "ROLLBACK must reverse a batch delete"
+    );
+}
+
+#[test]
+fn undo_log_reverses_mixed_mutations_lifo() {
+    // Interleave inserts and deletes (including on the same key) and confirm
+    // the LIFO reversal restores the exact starting state.
+    let (mut index, _dir) = undo_test_index(&[(10, 1), (20, 2)]);
+    let before = snapshot_keys(&index, &[10, 20, 30]);
+
+    index.begin_undo_logging();
+    index.insert(vec![SqlValue::Integer(30)], 3).unwrap(); // add new key
+    index.delete(&vec![SqlValue::Integer(20)]).unwrap(); // remove existing key
+    index.insert(vec![SqlValue::Integer(20)], 9).unwrap(); // re-add with new row
+    index.delete_specific(&vec![SqlValue::Integer(10)], 1).unwrap();
+    index.insert(vec![SqlValue::Integer(10)], 7).unwrap();
+
+    index.rollback_undo_log().unwrap();
+    assert_eq!(
+        snapshot_keys(&index, &[10, 20, 30]),
+        before,
+        "interleaved mutations must unwind in LIFO order to the original tree"
+    );
+}
+
+#[test]
+fn clear_undo_log_keeps_committed_mutations() {
+    // COMMIT path: clearing the log must NOT reverse anything.
+    let (mut index, _dir) = undo_test_index(&[(10, 1)]);
+
+    index.begin_undo_logging();
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+    index.delete_specific(&vec![SqlValue::Integer(10)], 1).unwrap();
+    index.clear_undo_log();
+    assert!(!index.is_undo_logging());
+
+    assert!(
+        index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty(),
+        "committed delete must persist"
+    );
+    assert_eq!(
+        index.lookup(&vec![SqlValue::Integer(20)]).unwrap(),
+        vec![2],
+        "committed insert must persist"
+    );
+
+    // A subsequent rollback (no active log) is a harmless no-op.
+    index.rollback_undo_log().unwrap();
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
+}
+
+#[test]
+fn no_undo_logging_has_no_overhead_and_no_reversal() {
+    // Without begin_undo_logging, mutations are not recorded and a stray
+    // rollback call does nothing.
+    let (mut index, _dir) = undo_test_index(&[(10, 1)]);
+    assert!(!index.is_undo_logging());
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+    index.rollback_undo_log().unwrap(); // no log => no-op
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
+}

@@ -79,6 +79,13 @@ impl BTreeIndex {
     /// 3. Handling splits that may propagate up the tree
     /// 4. Creating a new root if split reaches the original root
     pub fn insert(&mut self, key: Key, row_id: RowId) -> Result<(), StorageError> {
+        // Transaction undo-logging (#5425): record the inverse of this insert
+        // (a delete of the specific (key, row_id) pair) *before* mutating, so
+        // ROLLBACK can reverse it. Recorded only when logging is active.
+        if let Some(log) = self.undo_log.as_mut() {
+            log.push(super::DiskUndoOp::DeleteSpecific { key: key.clone(), row_id });
+        }
+
         // Special case: height 1 means root is a leaf
         if self.height == 1 {
             // Read root as leaf

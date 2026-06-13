@@ -66,11 +66,21 @@ impl BTreeIndex {
     /// 4. Propagate rebalancing up the tree if necessary
     /// 5. Collapse the root if it has only one child
     pub fn delete(&mut self, key: &Key) -> Result<bool, StorageError> {
+        // Transaction undo-logging (#5425): a full-key delete removes *all*
+        // row_ids for the key, so the inverse must re-insert every one of
+        // them. Capture them before mutating, but only when logging is active
+        // (the lookup is otherwise wasted work).
+        let undo_row_ids =
+            if self.undo_log.is_some() { Some(self.lookup(key)?) } else { None };
+
         // Handle single-level tree (root is leaf)
         if self.height == 1 {
             let mut root_leaf = self.read_leaf_node(self.root_page_id)?;
             let deleted = root_leaf.delete_all(key);
             if deleted {
+                if let Some(row_ids) = undo_row_ids {
+                    self.record_undo_reinsert(key.clone(), row_ids);
+                }
                 self.write_leaf_node(&root_leaf)?;
             }
             return Ok(deleted);
@@ -82,6 +92,10 @@ impl BTreeIndex {
         // Delete all row_ids for the key from leaf
         if !leaf.delete_all(key) {
             return Ok(false); // Key not found
+        }
+
+        if let Some(row_ids) = undo_row_ids {
+            self.record_undo_reinsert(key.clone(), row_ids);
         }
 
         // Write leaf back
@@ -134,6 +148,7 @@ impl BTreeIndex {
             let mut root_leaf = self.read_leaf_node(self.root_page_id)?;
             let deleted = root_leaf.delete(key, row_id);
             if deleted {
+                self.record_undo_reinsert(key.clone(), vec![row_id]);
                 self.write_leaf_node(&root_leaf)?;
             }
             return Ok(deleted);
@@ -146,6 +161,10 @@ impl BTreeIndex {
         if !leaf.delete(key, row_id) {
             return Ok(false); // Key or row_id not found
         }
+
+        // Transaction undo-logging (#5425): the row was removed, so its
+        // inverse is a re-insert of (key, row_id).
+        self.record_undo_reinsert(key.clone(), vec![row_id]);
 
         // Write leaf back
         self.write_leaf_node(&leaf)?;
@@ -216,6 +235,9 @@ impl BTreeIndex {
                 if root_leaf.delete(key, *row_id) {
                     deleted_count += 1;
                     modified = true;
+                    // Transaction undo-logging (#5425): inverse of a batch
+                    // delete is a re-insert of each removed (key, row_id).
+                    self.record_undo_reinsert(key.clone(), vec![*row_id]);
                 }
             }
 
@@ -268,6 +290,9 @@ impl BTreeIndex {
                 if current_leaf.delete(key, *row_id) {
                     deleted_count += 1;
                     leaf_modified = true;
+                    // Transaction undo-logging (#5425): record the re-insert
+                    // inverse for each removed (key, row_id) pair.
+                    self.record_undo_reinsert(key.clone(), vec![*row_id]);
                 }
                 entry_idx += 1;
             } else {

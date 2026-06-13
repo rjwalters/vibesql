@@ -418,6 +418,19 @@ impl TransactionManager {
                 // keys inserted during the transaction must be undone,
                 // otherwise a later legitimate write spuriously fails the
                 // uniqueness check against a stale, rolled-back key (#5413).
+                // #5425: Reverse any disk-backed (spilled) index mutations
+                // *before* swapping in the snapshot. The copy-on-write snapshot
+                // shares the same `Arc<Mutex<BTreeIndex>>` as the live spilled
+                // index, so restoring the shallow clone alone is a no-op for
+                // disk-backed indexes — their mutations must be undone via the
+                // per-tree undo-log armed at the first mutation. Reversing on
+                // the live `operations` reverts the shared B+ tree; the
+                // subsequent snapshot restore then re-points at the reverted
+                // tree (and drops any index that only began spilling mid-txn,
+                // which is correct for rollback). When no snapshot was taken
+                // (read-only txn) no undo-log was armed, so this is a no-op.
+                operations.rollback_disk_undo_logs();
+
                 if let Some(snapshot) = original_operations {
                     *operations = snapshot.clone();
                 }

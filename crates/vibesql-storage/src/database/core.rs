@@ -152,7 +152,20 @@ impl Database {
     /// [`TransactionManager::ensure_operations_snapshot`]: crate::database::transactions::TransactionManager::ensure_operations_snapshot
     #[inline]
     pub(super) fn snapshot_operations_for_mutation(&mut self) {
+        let before = self.lifecycle.transaction_manager().operations_snapshot_clones();
         self.lifecycle.transaction_manager_mut().ensure_operations_snapshot(&self.operations);
+        let after = self.lifecycle.transaction_manager().operations_snapshot_clones();
+
+        // #5425: A *fresh* snapshot was just taken for this transaction (the
+        // clone counter advanced), meaning this is the first index mutation of
+        // the transaction. The copy-on-write snapshot restores in-memory index
+        // state on ROLLBACK, but it shares the *same* `Arc<Mutex<BTreeIndex>>`
+        // as any spilled (disk-backed) index, so shallow-clone restore is a
+        // no-op for those. Arm a per-tree undo-log now so ROLLBACK can reverse
+        // disk-backed mutations and COMMIT can discard the log.
+        if after != before {
+            self.operations.begin_disk_undo_logging();
+        }
     }
 
     // NOTE: Other method groups are defined in their respective modules:
