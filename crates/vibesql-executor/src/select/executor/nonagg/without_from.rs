@@ -85,9 +85,18 @@ impl SelectExecutor<'_> {
         // resolve to a select-list alias, so evaluate the select list first and
         // bind the aliases for the WHERE evaluation.
         if let Some(where_clause) = &stmt.where_clause {
+            // #5445: inside a trigger body the WHERE can reference NEW/OLD
+            // pseudo-variables, which resolve from the firing row rather than a
+            // select-list alias; only divert non-pseudo column references to the
+            // alias-binding path.
+            let references_alias_candidate = if self.trigger_context.is_some() {
+                self.expression_references_non_pseudo_column(where_clause)
+            } else {
+                self.expression_references_column(where_clause)
+            };
             if !has_outer_context
                 && !has_window_functions(&stmt.select_list)
-                && self.expression_references_column(where_clause)
+                && references_alias_candidate
             {
                 return self.execute_select_without_from_alias_where(stmt, where_clause, cte_ctx);
             }
@@ -111,9 +120,17 @@ impl SelectExecutor<'_> {
                 }
                 evaluator.eval(where_clause, outer_row)?
             } else {
+                // No outer context - thread the trigger NEW/OLD context (#5445)
+                // so a WHERE over NEW/OLD inside a trigger-body SELECT resolves.
                 let empty_schema = vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-                let mut evaluator =
-                    ExpressionEvaluator::with_database(&empty_schema, self.database);
+                let mut evaluator = match self.trigger_context {
+                    Some(trigger_ctx) => ExpressionEvaluator::with_trigger_context(
+                        &empty_schema,
+                        self.database,
+                        trigger_ctx,
+                    ),
+                    None => ExpressionEvaluator::with_database(&empty_schema, self.database),
+                };
                 if let Some(cte) = cte_ctx {
                     evaluator = evaluator.with_cte_context(cte);
                 }
@@ -161,8 +178,19 @@ impl SelectExecutor<'_> {
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
                     // Check if expression references a column
                     // FIX for select1-18.1: Only error if we don't have outer context
-                    // When outer context exists, columns can be resolved from outer scope
-                    if !has_outer_context && self.expression_references_column(expr) {
+                    // When outer context exists, columns can be resolved from outer scope.
+                    //
+                    // #5445: when this from-less SELECT runs inside a trigger body
+                    // (self.trigger_context is set), NEW/OLD pseudo-variables are
+                    // resolvable from the firing row's context, so they must not be
+                    // rejected here. A plain (non-pseudo) column reference still
+                    // requires a FROM clause — it has nothing to bind to.
+                    let column_check_fails = if self.trigger_context.is_some() {
+                        self.expression_references_non_pseudo_column(expr)
+                    } else {
+                        self.expression_references_column(expr)
+                    };
+                    if !has_outer_context && column_check_fails {
                         return Err(ExecutorError::UnsupportedFeature(
                             "Column reference requires FROM clause".to_string(),
                         ));
@@ -188,11 +216,18 @@ impl SelectExecutor<'_> {
                         }
                         evaluator.eval(expr, outer_row)?
                     } else {
-                        // No outer context - use simple evaluation
+                        // No outer context - use simple evaluation, threading the
+                        // trigger NEW/OLD context (#5445) so pseudo-variables resolve.
                         let empty_schema =
                             vibesql_catalog::TableSchema::new("".to_string(), vec![]);
-                        let mut evaluator =
-                            ExpressionEvaluator::with_database(&empty_schema, self.database);
+                        let mut evaluator = match self.trigger_context {
+                            Some(trigger_ctx) => ExpressionEvaluator::with_trigger_context(
+                                &empty_schema,
+                                self.database,
+                                trigger_ctx,
+                            ),
+                            None => ExpressionEvaluator::with_database(&empty_schema, self.database),
+                        };
                         if let Some(cte) = cte_ctx {
                             evaluator = evaluator.with_cte_context(cte);
                         }
