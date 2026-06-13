@@ -416,6 +416,102 @@ impl SelectExecutor<'_> {
         }
     }
 
+    /// Resolve the output column names of a SELECT statement WITHOUT returning rows.
+    ///
+    /// This is the read-only column-name resolver used by the PostgreSQL extended
+    /// query protocol's `Describe` message (#5429), which must report the
+    /// `RowDescription` before any `Execute`. It reuses the exact wildcard
+    /// expansion and expression-naming logic as [`execute_with_columns`]
+    /// (`derive_column_names`), so the names match the simple-query path
+    /// label-for-label, including:
+    /// - explicit columns and aliases (`SELECT a, b AS x` -> `[a, x]`)
+    /// - `SELECT *` / `t.*` expanded against the catalog schema
+    /// - join wildcards (`SELECT t1.*, t2.c` -> t1's columns then `c`)
+    /// - derived names for expression columns
+    ///
+    /// Unlike `execute_with_columns`, this does NOT materialize result rows: it
+    /// builds the FROM-clause schema (the same `FromResult` the executor uses)
+    /// purely to expand wildcards, then derives the names.
+    pub fn resolve_column_names(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> Result<Vec<String>, ExecutorError> {
+        // Guard exponentially self-referential view nests before touching the
+        // FROM clause (which materializes views), mirroring execute_with_columns
+        // (#5394, view3.test).
+        crate::select::view_reference_guard::check_view_reference_limit(stmt, self.database)?;
+
+        // Resolve SELECT aliases in WHERE clause for schema construction, matching
+        // execute_with_columns so the FROM schema is built identically.
+        let resolved_where = if stmt.where_clause.is_some()
+            && crate::select::order::select_list_has_aliases(&stmt.select_list)
+        {
+            stmt.where_clause.as_ref().map(|where_expr| {
+                if let Some(from_clause) = &stmt.from {
+                    if let Some(early_schema) =
+                        super::aggregation::build_early_schema(from_clause, self.database)
+                    {
+                        return crate::select::order::resolve_where_aliases_with_schema(
+                            where_expr,
+                            &stmt.select_list,
+                            &early_schema,
+                        );
+                    }
+                }
+                crate::select::order::resolve_where_aliases(where_expr, &stmt.select_list)
+            })
+        } else {
+            stmt.where_clause.clone()
+        };
+
+        // Build the FROM result to access the combined schema. This is required
+        // to expand `*` / `table.*` against the real column layout (including
+        // joins and NATURAL/USING deduplication). We do not return the rows.
+        let from_result = if let Some(from_clause) = &stmt.from {
+            let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
+                execute_ctes(with_clause, self.database, |query, cte_ctx| {
+                    self.execute_with_ctes(query, cte_ctx)
+                })?
+            } else {
+                HashMap::new()
+            };
+            if let Some(outer_cte_ctx) = self.cte_context {
+                for (name, result) in outer_cte_ctx {
+                    cte_results.entry(name.clone()).or_insert_with(|| result.clone());
+                }
+            }
+            let limit_val = stmt
+                .limit
+                .as_ref()
+                .map(|expr| self.eval_limit_offset_expr(expr, "LIMIT"))
+                .transpose()?;
+            Some(self.execute_from_with_where(
+                from_clause,
+                &cte_results,
+                resolved_where.as_ref(),
+                stmt.order_by.as_deref(),
+                limit_val,
+                Some(&stmt.select_list),
+            )?)
+        } else {
+            None
+        };
+
+        // Derive column names exactly as execute_with_columns does.
+        let columns = if stmt.select_list.is_empty() {
+            if let Some(values_rows) = &stmt.values {
+                let num_cols = values_rows.first().map(|r| r.len()).unwrap_or(0);
+                (1..=num_cols).map(|i| format!("column{}", i)).collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            self.derive_column_names(&stmt.select_list, from_result.as_ref())?
+        };
+
+        Ok(columns)
+    }
+
     /// Execute a SELECT statement and return both columns and rows
     pub fn execute_with_columns(
         &self,

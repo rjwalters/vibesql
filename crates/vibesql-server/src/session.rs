@@ -416,6 +416,44 @@ impl Session {
         self.execute_prepared(&prepared, params).await
     }
 
+    /// Resolve the output column names of a query for the extended-protocol
+    /// `Describe` message (#5429), WITHOUT executing it.
+    ///
+    /// `Describe` must report the `RowDescription` before any `Execute`, so for
+    /// a SELECT we resolve the result column names (explicit columns, aliases,
+    /// derived expression names, and `SELECT *` / `table.*` expanded against the
+    /// catalog schema). Returns:
+    /// - `Ok(Some(names))` for a SELECT — these match the simple-query path
+    ///   label-for-label (`SelectExecutor::resolve_column_names`, the same
+    ///   `derive_column_names` used by `execute_with_columns`).
+    /// - `Ok(None)` for a non-SELECT (the protocol sends `NoData`).
+    ///
+    /// Standalone resolves directly against the local database; replicated
+    /// resolves via a local read through consensus (the state machine already
+    /// resolves names the same way, #5428), so both modes agree.
+    pub async fn describe_columns(&self, sql: &str) -> Result<Option<Vec<String>>> {
+        let prepared = self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let statement = prepared.statement();
+
+        let select_stmt = match statement {
+            vibesql_ast::Statement::Select(select_stmt) => select_stmt,
+            _ => return Ok(None),
+        };
+
+        if let Some(state) = self.replication.as_ref() {
+            // Replicated: the database lives in the consensus state machine.
+            // A local read resolves the same column names the simple-query
+            // path uses (#5428); we keep only the names, discarding rows.
+            let result = state.handle.query_local(sql)?;
+            return Ok(Some(result.columns));
+        }
+
+        let db = self.db.read().await;
+        let executor = vibesql_executor::SelectExecutor::new(&db);
+        let columns = executor.resolve_column_names(select_stmt)?;
+        Ok(Some(columns))
+    }
+
     /// Execute one statement of a **replicated** session (#5383): writes
     /// are proposed through consensus (`MvccRaftNode::execute_replicated`,
     /// leader-only, freeze-at-propose), reads run against the replicated

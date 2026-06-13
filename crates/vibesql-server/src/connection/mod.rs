@@ -475,6 +475,7 @@ impl ConnectionHandler {
 
             FrontendMessage::Describe { target_type, name } => {
                 handle_describe(
+                    &self.session,
                     &self.extended_state,
                     &mut self.write_half,
                     &mut self.write_buf,

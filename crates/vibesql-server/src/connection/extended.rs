@@ -36,6 +36,78 @@ use vibesql_ast::{SelectItem, Statement};
 /// PostgreSQL OID for TEXT type (used as default for unspecified parameter types)
 const TEXT_OID: i32 = 25;
 
+/// Resolve a query's output column names and send the appropriate Describe
+/// reply: `RowDescription` for a SELECT (column names resolved against the
+/// schema, so `SELECT *` / `table.*` report their real columns — #5429), or
+/// `NoData` for a non-SELECT / unresolvable query.
+///
+/// Resolution goes through [`Session::describe_columns`], which uses the same
+/// `derive_column_names` logic as the executed simple-query path
+/// (`execute_with_columns`), so the metadata clients fetch via Describe matches
+/// the rows they later receive. If no session is available, or schema-aware
+/// resolution fails, it falls back to the static-AST extractor
+/// ([`extract_select_columns`]) which handles explicit/aliased columns.
+async fn send_row_description(
+    session: &Option<Session>,
+    query: &str,
+    write_half: &mut OwnedWriteHalf,
+    write_buf: &mut BytesMut,
+) -> anyhow::Result<()> {
+    // Prefer schema-aware resolution (expands `*` / `table.*`).
+    if let Some(s) = session.as_ref() {
+        match s.describe_columns(query).await {
+            Ok(Some(columns)) => {
+                send_fields(write_half, write_buf, columns).await?;
+                return Ok(());
+            }
+            // Not a SELECT (or resolved to no columns) - NoData.
+            Ok(None) => {
+                send_message(write_half, write_buf, &BackendMessage::NoData).await?;
+                return Ok(());
+            }
+            // Schema-aware resolution failed (e.g. table not yet created at
+            // Describe time): fall through to the static-AST extractor, which
+            // still covers explicit/aliased columns. Errors surface at Execute.
+            Err(e) => {
+                debug!("describe_columns failed, falling back to static AST: {}", e);
+            }
+        }
+    }
+
+    // Fallback: static AST extraction (no schema, so `*` yields NoData).
+    match Parser::parse_sql(query) {
+        Ok(parsed) => match extract_select_columns(&parsed) {
+            Some(columns) => send_fields(write_half, write_buf, columns).await?,
+            None => send_message(write_half, write_buf, &BackendMessage::NoData).await?,
+        },
+        // Parse failed - NoData (error will occur at execute time).
+        Err(_) => send_message(write_half, write_buf, &BackendMessage::NoData).await?,
+    }
+
+    Ok(())
+}
+
+/// Send a `RowDescription` for the given resolved column names.
+async fn send_fields(
+    write_half: &mut OwnedWriteHalf,
+    write_buf: &mut BytesMut,
+    columns: Vec<String>,
+) -> anyhow::Result<()> {
+    let fields: Vec<FieldDescription> = columns
+        .into_iter()
+        .map(|name| FieldDescription {
+            name,
+            table_oid: 0,
+            column_attr_number: 0,
+            data_type_oid: TEXT_OID,
+            data_type_size: -1,
+            type_modifier: -1,
+            format_code: 0,
+        })
+        .collect();
+    send_message(write_half, write_buf, &BackendMessage::RowDescription { fields }).await
+}
+
 /// Extract column names from a SELECT statement without executing it
 fn extract_select_columns(stmt: &Statement) -> Option<Vec<String>> {
     match stmt {
@@ -228,6 +300,7 @@ pub async fn handle_bind(
 
 /// Handle Describe message - get information about a statement or portal
 pub async fn handle_describe(
+    session: &Option<Session>,
     extended_state: &ExtendedQueryState,
     write_half: &mut OwnedWriteHalf,
     write_buf: &mut BytesMut,
@@ -263,36 +336,15 @@ pub async fn handle_describe(
             )
             .await?;
 
-            // Try to extract column names from the parsed query AST
-            if let Ok(parsed) = Parser::parse_sql(&stmt.query) {
-                if let Some(columns) = extract_select_columns(&parsed) {
-                    let fields: Vec<FieldDescription> = columns
-                        .into_iter()
-                        .map(|name| FieldDescription {
-                            name,
-                            table_oid: 0,
-                            column_attr_number: 0,
-                            data_type_oid: TEXT_OID,
-                            data_type_size: -1,
-                            type_modifier: -1,
-                            format_code: 0,
-                        })
-                        .collect();
-                    send_message(write_half, write_buf, &BackendMessage::RowDescription { fields })
-                        .await?;
-                } else {
-                    // Query has wildcards or is not a SELECT - send NoData
-                    send_message(write_half, write_buf, &BackendMessage::NoData).await?;
-                }
-            } else {
-                // Parse failed - send NoData (error will occur at execute time)
-                send_message(write_half, write_buf, &BackendMessage::NoData).await?;
-            }
+            // Resolve the SELECT's output column names against the schema so
+            // that `SELECT *` / `table.*` report their real columns in the
+            // RowDescription (#5429), matching the simple-query path.
+            send_row_description(session, &stmt.query, write_half, write_buf).await?;
         }
         b'P' => {
             // Describe portal
             let portal = match extended_state.get_portal(&name) {
-                Some(p) => p,
+                Some(p) => p.clone(),
                 None => {
                     send_error(
                         write_half,
@@ -305,31 +357,9 @@ pub async fn handle_describe(
                 }
             };
 
-            // Try to extract column names from the bound query AST
-            if let Ok(parsed) = Parser::parse_sql(&portal.bound_query) {
-                if let Some(columns) = extract_select_columns(&parsed) {
-                    let fields: Vec<FieldDescription> = columns
-                        .into_iter()
-                        .map(|name| FieldDescription {
-                            name,
-                            table_oid: 0,
-                            column_attr_number: 0,
-                            data_type_oid: TEXT_OID,
-                            data_type_size: -1,
-                            type_modifier: -1,
-                            format_code: 0,
-                        })
-                        .collect();
-                    send_message(write_half, write_buf, &BackendMessage::RowDescription { fields })
-                        .await?;
-                } else {
-                    // Query has wildcards or is not a SELECT - send NoData
-                    send_message(write_half, write_buf, &BackendMessage::NoData).await?;
-                }
-            } else {
-                // Parse failed - send NoData
-                send_message(write_half, write_buf, &BackendMessage::NoData).await?;
-            }
+            // Resolve the bound query's output column names (with `*` expanded
+            // against the schema) for the RowDescription (#5429).
+            send_row_description(session, &portal.bound_query, write_half, write_buf).await?;
         }
         _ => {
             send_error(
