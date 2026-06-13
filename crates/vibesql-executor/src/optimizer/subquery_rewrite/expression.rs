@@ -462,6 +462,13 @@ pub(super) fn rewrite_expression_with_context(
             collation: collation.clone(),
         },
 
+        Expression::Raise { action, error_message } => Expression::Raise {
+            action: *action,
+            error_message: error_message.as_ref().map(|msg| {
+                Box::new(rewrite_expression_with_context(msg, rewrite_subquery_fn, outer_tables))
+            }),
+        },
+
         // Literals, column refs, and special expressions don't need rewriting
         Expression::Literal(_)
         | Expression::ColumnRef(_)

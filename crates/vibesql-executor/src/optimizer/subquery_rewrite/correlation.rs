@@ -225,6 +225,10 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
 
         Expression::Collate { expr, .. } => has_external_column_refs(expr, subquery),
 
+        Expression::Raise { error_message, .. } => {
+            error_message.as_ref().is_some_and(|msg| has_external_column_refs(msg, subquery))
+        }
+
         // Literals and special expressions don't reference columns
         Expression::Literal(_)
         | Expression::Wildcard

@@ -19,6 +19,7 @@ pub(crate) mod parallel;
 #[cfg(not(feature = "parallel"))]
 mod parallel;
 pub(crate) mod pattern;
+pub(crate) mod raise;
 mod schema_context;
 mod single;
 mod subqueries_shared;

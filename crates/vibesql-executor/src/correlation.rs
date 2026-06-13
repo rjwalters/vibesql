@@ -439,6 +439,10 @@ fn is_expression_correlated(
             is_expression_correlated(expr, outer_schema, subquery_tables)
         }
 
+        Expression::Raise { error_message, .. } => error_message
+            .as_ref()
+            .is_some_and(|msg| is_expression_correlated(msg, outer_schema, subquery_tables)),
+
         Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. }
         | Expression::DuplicateKeyValue { .. }

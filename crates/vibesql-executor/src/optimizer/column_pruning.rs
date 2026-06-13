@@ -371,6 +371,12 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
             collect_columns_from_expr(expr, columns);
         }
 
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                collect_columns_from_expr(msg, columns);
+            }
+        }
+
         // Expressions that don't reference columns
         Expression::Literal(_)
         | Expression::Placeholder(_)

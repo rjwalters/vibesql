@@ -23,8 +23,8 @@ use vibesql_types::{DataType, SqlValue};
 use crate::{
     expression::{
         CaseWhen, CharacterUnit, Expression, FrameBound, FrameExclude, FrameUnit, FulltextMode,
-        IntervalUnit, PseudoTable, Quantifier, TrimPosition, WindowFrame, WindowFunctionSpec,
-        WindowSpec,
+        IntervalUnit, PseudoTable, Quantifier, RaiseAction, TrimPosition, WindowFrame,
+        WindowFunctionSpec, WindowSpec,
     },
     operators::{BinaryOperator, UnaryOperator},
     select::{
@@ -598,6 +598,11 @@ impl ToSql for Expression {
             Expression::Collate { expr, collation } => {
                 format!("{} COLLATE {}", expr.to_sql(), collation)
             }
+
+            Expression::Raise { action, error_message } => match error_message {
+                Some(msg) => format!("RAISE({}, {})", action.to_sql(), msg.to_sql()),
+                None => format!("RAISE({})", action.to_sql()),
+            },
         }
     }
 }
@@ -684,6 +689,17 @@ impl ToSql for CharacterUnit {
         match self {
             CharacterUnit::Characters => "CHARACTERS".to_string(),
             CharacterUnit::Octets => "OCTETS".to_string(),
+        }
+    }
+}
+
+impl ToSql for RaiseAction {
+    fn to_sql(&self) -> String {
+        match self {
+            RaiseAction::Ignore => "IGNORE".to_string(),
+            RaiseAction::Abort => "ABORT".to_string(),
+            RaiseAction::Fail => "FAIL".to_string(),
+            RaiseAction::Rollback => "ROLLBACK".to_string(),
         }
     }
 }

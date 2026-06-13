@@ -81,6 +81,14 @@ impl Parser {
         self.advance(); // consume '('
         let first = function_name;
 
+        // Special case for RAISE(ABORT|FAIL|ROLLBACK, msg) and RAISE(IGNORE).
+        // SQLite's trigger-program error/abort expression. The first argument is
+        // one of the conflict-resolution keywords (not a normal expression), so
+        // it cannot go through the generic argument loop.
+        if first.to_uppercase() == "RAISE" {
+            return Ok(Some(self.parse_raise_expression()?));
+        }
+
         // Special case for VALUES(column) - MySQL ON DUPLICATE KEY UPDATE
         // Returns the value that would have been inserted
         if first.to_uppercase() == "VALUES" {
@@ -423,5 +431,54 @@ impl Parser {
             }
             Ok(Some(vibesql_ast::Expression::Function { name: func_id, args, character_unit }))
         }
+    }
+
+    /// Parse a `RAISE(...)` trigger-program expression.
+    ///
+    /// The opening `RAISE` identifier and the `(` have already been consumed.
+    /// Accepts SQLite's four forms:
+    /// - `RAISE(ABORT, error-message)`
+    /// - `RAISE(FAIL, error-message)`
+    /// - `RAISE(ROLLBACK, error-message)`
+    /// - `RAISE(IGNORE)`
+    ///
+    /// The error-message is required for ABORT/FAIL/ROLLBACK and forbidden for
+    /// IGNORE (matching SQLite, which reports a `near ","`/`near ")"` syntax
+    /// error for the mismatched forms).
+    fn parse_raise_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        use vibesql_ast::RaiseAction;
+
+        // First argument: one of the conflict-resolution keywords.
+        let action = match self.peek() {
+            Token::Keyword { keyword: Keyword::Abort, .. } => RaiseAction::Abort,
+            Token::Keyword { keyword: Keyword::Fail, .. } => RaiseAction::Fail,
+            Token::Keyword { keyword: Keyword::Rollback, .. } => RaiseAction::Rollback,
+            Token::Keyword { keyword: Keyword::Ignore, .. } => RaiseAction::Ignore,
+            other => {
+                return Err(ParseError {
+                    message: format!(
+                        "near \"{}\": syntax error (expected ABORT, FAIL, ROLLBACK, or IGNORE in RAISE())",
+                        other
+                    ),
+                });
+            }
+        };
+        self.advance(); // consume the action keyword
+
+        let error_message = if matches!(action, RaiseAction::Ignore) {
+            // RAISE(IGNORE) takes no message.
+            self.expect_token(Token::RParen)?;
+            None
+        } else {
+            // RAISE(ABORT|FAIL|ROLLBACK, error-message) requires a message.
+            self.expect_token(Token::Comma)?;
+            let message = self.parse_expression()?;
+            self.expect_token(Token::RParen)?;
+            Some(Box::new(message))
+        };
+
+        Ok(vibesql_ast::Expression::Raise { action, error_message })
     }
 }

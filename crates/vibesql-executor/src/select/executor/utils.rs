@@ -136,6 +136,10 @@ fn expression_references_column(expr: &vibesql_ast::Expression) -> bool {
         }
 
         vibesql_ast::Expression::Collate { expr, .. } => expression_references_column(expr),
+
+        vibesql_ast::Expression::Raise { error_message, .. } => {
+            error_message.as_ref().is_some_and(|msg| expression_references_column(msg))
+        }
     }
 }
 

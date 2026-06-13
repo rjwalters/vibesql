@@ -460,17 +460,24 @@ impl DeleteExecutor {
             )?;
         }
 
-        // Step 3: Fire BEFORE DELETE ROW triggers only if triggers exist
+        // Step 3: Fire BEFORE DELETE ROW triggers only if triggers exist.
+        // A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that row: drop it
+        // from the batch so it is neither deleted nor counted (SQLite).
         if has_delete_triggers {
-            for (_, row) in &rows_and_indices_to_delete {
-                crate::TriggerFirer::execute_before_triggers(
+            let mut keep = Vec::with_capacity(rows_and_indices_to_delete.len());
+            for (idx, row) in rows_and_indices_to_delete {
+                let outcome = crate::TriggerFirer::execute_before_triggers(
                     database,
                     table_name,
                     vibesql_ast::TriggerEvent::Delete,
-                    Some(row),
+                    Some(&row),
                     None,
                 )?;
+                if outcome != crate::TriggerOutcome::SkipRow {
+                    keep.push((idx, row));
+                }
             }
+            rows_and_indices_to_delete = keep;
         }
 
         // Step 4: Handle referential integrity for each row to be deleted

@@ -148,6 +148,12 @@ impl SelectExecutor<'_> {
             vibesql_ast::Expression::Collate { .. } => {
                 simple::evaluate(self, expr, group_rows, group_key, evaluator)
             }
+
+            // RAISE() has no aggregate semantics; evaluating it surfaces the
+            // trigger abort/error via the normal evaluator.
+            vibesql_ast::Expression::Raise { .. } => {
+                simple::evaluate(self, expr, group_rows, group_key, evaluator)
+            }
         }
     }
 

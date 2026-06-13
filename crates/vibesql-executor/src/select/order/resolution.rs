@@ -1416,6 +1416,14 @@ fn resolve_where_expression_with_schema(
             }
         }
 
+        // RAISE: resolve aliases inside the error-message expression.
+        Expression::Raise { action, error_message } => Expression::Raise {
+            action: *action,
+            error_message: error_message.as_ref().map(|msg| {
+                Box::new(resolve_where_expression_with_schema(msg, select_list, table_columns))
+            }),
+        },
+
         // Expressions that don't need alias resolution (pass through)
         Expression::Literal(_)
         | Expression::Wildcard
@@ -1732,6 +1740,11 @@ fn collect_aggregates_from_expr(
         }
         Expression::Collate { expr: inner, .. } => {
             collect_aggregates_from_expr(inner, aggregates);
+        }
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                collect_aggregates_from_expr(msg, aggregates);
+            }
         }
         Expression::MatchAgainst { .. } => {}
     }

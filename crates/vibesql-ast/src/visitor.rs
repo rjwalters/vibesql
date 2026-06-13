@@ -454,6 +454,18 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
         }
 
         Expression::Collate { expr: inner, .. } => walk_expression(visitor, inner),
+
+        // Descend into the RAISE error-message expression so any nested
+        // function call (e.g. a volatile call inside the message) is still
+        // visited by detectors such as the replication freeze pass. RAISE
+        // itself is non-volatile.
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                walk_expression(visitor, msg)
+            } else {
+                VisitResult::Continue
+            }
+        }
     };
 
     if result.should_stop() {
@@ -753,6 +765,12 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
         Expression::Collate { expr: inner, collation } => {
             Expression::Collate { expr: Box::new(transform_expression(visitor, *inner)), collation }
         }
+
+        Expression::Raise { action, error_message } => Expression::Raise {
+            action,
+            error_message: error_message
+                .map(|msg| Box::new(transform_expression(visitor, *msg))),
+        },
     };
 
     // Post-order transform

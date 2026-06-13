@@ -78,6 +78,7 @@ enum ExprTag {
     RowValueConstructor = 0x23,
     Collate = 0x24,
     Glob = 0x25,
+    Raise = 0x26,
 }
 
 impl ExprTag {
@@ -121,6 +122,7 @@ impl ExprTag {
             0x23 => Ok(ExprTag::RowValueConstructor),
             0x24 => Ok(ExprTag::Collate),
             0x25 => Ok(ExprTag::Glob),
+            0x26 => Ok(ExprTag::Raise),
             _ => {
                 Err(StorageError::NotImplemented(format!("Unknown expression tag: 0x{:02X}", tag)))
             }
@@ -448,6 +450,22 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_expression(writer, expr)?;
             write_string(writer, collation)?;
         }
+        Expression::Raise { action, error_message } => {
+            write_tag!(writer, ExprTag::Raise);
+            write_u8(
+                writer,
+                match action {
+                    vibesql_ast::RaiseAction::Ignore => 0,
+                    vibesql_ast::RaiseAction::Abort => 1,
+                    vibesql_ast::RaiseAction::Fail => 2,
+                    vibesql_ast::RaiseAction::Rollback => 3,
+                },
+            )?;
+            write_bool(writer, error_message.is_some())?;
+            if let Some(msg) = error_message {
+                write_expression(writer, msg)?;
+            }
+        }
     }
     Ok(())
 }
@@ -733,6 +751,24 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let collation = read_string(reader)?;
             Ok(Expression::Collate { expr: Box::new(expr), collation })
         }
+        ExprTag::Raise => {
+            let action = match read_u8(reader)? {
+                0 => vibesql_ast::RaiseAction::Ignore,
+                1 => vibesql_ast::RaiseAction::Abort,
+                2 => vibesql_ast::RaiseAction::Fail,
+                3 => vibesql_ast::RaiseAction::Rollback,
+                other => {
+                    return Err(StorageError::NotImplemented(format!(
+                        "Unknown RAISE action tag: {}",
+                        other
+                    )))
+                }
+            };
+            let has_message = read_bool(reader)?;
+            let error_message =
+                if has_message { Some(Box::new(read_expression(reader)?)) } else { None };
+            Ok(Expression::Raise { action, error_message })
+        }
     }
 }
 
@@ -806,6 +842,36 @@ mod tests {
                 result: Expression::Literal(SqlValue::Integer(1)),
             }],
             else_result: Some(Box::new(Expression::Literal(SqlValue::Integer(0)))),
+        };
+        let mut buf = Vec::new();
+        write_expression(&mut buf, &expr).unwrap();
+
+        let mut reader = &buf[..];
+        let result = read_expression(&mut reader).unwrap();
+        assert_eq!(result, expr);
+    }
+
+    #[test]
+    fn test_raise_with_message_roundtrip() {
+        let expr = Expression::Raise {
+            action: vibesql_ast::RaiseAction::Abort,
+            error_message: Some(Box::new(Expression::Literal(SqlValue::Varchar(
+                arcstr::ArcStr::from("boom"),
+            )))),
+        };
+        let mut buf = Vec::new();
+        write_expression(&mut buf, &expr).unwrap();
+
+        let mut reader = &buf[..];
+        let result = read_expression(&mut reader).unwrap();
+        assert_eq!(result, expr);
+    }
+
+    #[test]
+    fn test_raise_ignore_roundtrip() {
+        let expr = Expression::Raise {
+            action: vibesql_ast::RaiseAction::Ignore,
+            error_message: None,
         };
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();

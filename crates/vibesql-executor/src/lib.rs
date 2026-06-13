@@ -109,7 +109,7 @@ pub use transaction::{
     ReleaseSavepointExecutor, RollbackExecutor, RollbackToSavepointExecutor, SavepointExecutor,
 };
 pub use trigger_ddl::TriggerExecutor;
-pub use trigger_execution::TriggerFirer;
+pub use trigger_execution::{TriggerFirer, TriggerOutcome};
 pub use truncate_table::TruncateTableExecutor;
 pub use type_ddl::TypeExecutor;
 pub use update::UpdateExecutor;

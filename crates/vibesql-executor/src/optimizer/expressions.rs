@@ -446,6 +446,10 @@ pub fn optimize_expression(
             let optimized_expr = optimize_expression(expr, evaluator)?;
             Ok(Expression::Collate { expr: Box::new(optimized_expr), collation: collation.clone() })
         }
+
+        // RAISE() aborts at evaluation; never constant-fold it (it must run,
+        // not be precomputed away). Leave it untouched.
+        Expression::Raise { .. } => Ok(expr.clone()),
     }
 }
 

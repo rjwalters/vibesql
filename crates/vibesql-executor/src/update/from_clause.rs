@@ -601,6 +601,13 @@ fn substitute_pseudo_vars(
             expr: Box::new(substitute_pseudo_vars(inner, trigger_context)?),
             collation: collation.clone(),
         },
+        Expression::Raise { action, error_message } => Expression::Raise {
+            action: *action,
+            error_message: match error_message {
+                Some(msg) => Some(Box::new(substitute_pseudo_vars(msg, trigger_context)?)),
+                None => None,
+            },
+        },
     })
 }
 

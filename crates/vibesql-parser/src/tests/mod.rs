@@ -35,6 +35,7 @@ mod pragma;
 mod predicates;
 mod prepared;
 mod quantified;
+mod raise;
 mod revoke;
 mod role;
 mod routines;

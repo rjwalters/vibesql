@@ -279,6 +279,12 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(expr, params);
         }
 
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                bind_expression_mut(msg, params);
+            }
+        }
+
         Expression::UnaryOp { expr: inner, .. } => {
             bind_expression_mut(inner, params);
         }
@@ -661,6 +667,12 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
 
         Expression::Collate { expr, .. } => {
             bind_expression_named_mut(expr, params);
+        }
+
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                bind_expression_named_mut(msg, params);
+            }
         }
 
         Expression::UnaryOp { expr: inner, .. } => {

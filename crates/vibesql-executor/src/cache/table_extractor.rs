@@ -186,6 +186,12 @@ fn extract_from_expression(expr: &vibesql_ast::Expression, tables: &mut HashSet<
             extract_from_expression(expr, tables);
         }
 
+        vibesql_ast::Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                extract_from_expression(msg, tables);
+            }
+        }
+
         // Leaf expressions - no tables to extract
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)

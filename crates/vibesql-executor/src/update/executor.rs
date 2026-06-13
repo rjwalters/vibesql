@@ -588,17 +588,24 @@ pub(super) fn execute_internal(
         }
     }
 
-    // Fire BEFORE UPDATE triggers for all rows (before database mutation)
+    // Fire BEFORE UPDATE triggers for all rows (before database mutation).
+    // A RAISE(IGNORE) in a BEFORE UPDATE trigger abandons that row: drop it
+    // from the batch so it is neither updated nor counted (SQLite semantics).
     if has_triggers {
-        for u in &updates {
-            crate::TriggerFirer::execute_before_triggers(
+        let mut keep = Vec::with_capacity(updates.len());
+        for u in updates {
+            let outcome = crate::TriggerFirer::execute_before_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
                 Some(&u.old_row),
                 Some(&u.new_row),
             )?;
+            if outcome != crate::TriggerOutcome::SkipRow {
+                keep.push(u);
+            }
         }
+        updates = keep;
     }
 
     // Step 8: Apply all updates (after evaluation phase completes)
@@ -910,6 +917,14 @@ fn validate_expression(
 
         // Collate
         Expression::Collate { expr, .. } => validate_expression(expr, schema, database),
+
+        // RAISE: validate the error-message expression if present
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                validate_expression(msg, schema, database)?;
+            }
+            Ok(())
+        }
 
         // POSITION
         Expression::Position { substring, string, .. } => {

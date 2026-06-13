@@ -162,6 +162,12 @@ pub fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
             extract_column_refs(expr, refs);
         }
 
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                extract_column_refs(msg, refs);
+            }
+        }
+
         // Terminals with no column references
         Expression::Literal(_)
         | Expression::Wildcard

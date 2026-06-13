@@ -187,7 +187,7 @@ pub use dml::{
 };
 pub use expression::{
     CaseWhen, CharacterUnit, Expression, FrameBound, FrameExclude, FrameUnit, FulltextMode,
-    IntervalUnit, PseudoTable, Quantifier, TrimPosition, TruthValue, WindowFrame,
+    IntervalUnit, PseudoTable, Quantifier, RaiseAction, TrimPosition, TruthValue, WindowFrame,
     WindowFunctionSpec, WindowSpec,
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};

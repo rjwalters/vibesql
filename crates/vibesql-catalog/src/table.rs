@@ -664,6 +664,10 @@ impl TableSchema {
             vibesql_ast::Expression::Collate { expr, .. } => {
                 Self::expression_references_column(expr, column_name)
             }
+
+            vibesql_ast::Expression::Raise { error_message, .. } => error_message
+                .as_ref()
+                .is_some_and(|msg| Self::expression_references_column(msg, column_name)),
         }
     }
 }
