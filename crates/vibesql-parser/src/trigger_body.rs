@@ -197,6 +197,45 @@ mod tests {
     }
 
     #[test]
+    fn case_end_inside_statement_does_not_split_or_truncate_body() {
+        // #5439: the END of a CASE...END expression must not be treated as the
+        // body terminator. Both body statements must come through whole.
+        let body = "BEGIN \
+                    SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END; \
+                    INSERT INTO base(id, v) VALUES(NEW.id, NEW.v); \
+                    END";
+        let stmts = split_trigger_body_statements(body);
+        assert_eq!(
+            stmts,
+            vec![
+                "SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END",
+                "INSERT INTO base(id, v) VALUES(NEW.id, NEW.v)"
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_case_end_does_not_truncate_body() {
+        let body = "BEGIN \
+                    UPDATE t SET v = CASE WHEN NEW.v > 0 \
+                      THEN CASE WHEN NEW.v > 10 THEN 'big' ELSE 'small' END \
+                      ELSE 'neg' END; \
+                    INSERT INTO log VALUES('done'); \
+                    END";
+        let stmts = split_trigger_body_statements(body);
+        assert_eq!(stmts.len(), 2, "got: {:?}", stmts);
+        assert!(stmts[0].to_uppercase().starts_with("UPDATE T"));
+        assert_eq!(stmts[1], "INSERT INTO log VALUES('done')");
+    }
+
+    #[test]
+    fn case_end_as_last_statement_without_trailing_semicolon() {
+        let body = "BEGIN SELECT CASE WHEN NEW.v > 0 THEN 1 ELSE 0 END END";
+        let stmts = split_trigger_body_statements(body);
+        assert_eq!(stmts, vec!["SELECT CASE WHEN NEW.v > 0 THEN 1 ELSE 0 END"]);
+    }
+
+    #[test]
     fn does_not_strip_begin_inside_identifier() {
         // A body that does not start with the BEGIN keyword should be left as
         // is (defensive: callers always pass a wrapped body, but guard anyway).

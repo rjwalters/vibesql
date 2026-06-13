@@ -1,0 +1,235 @@
+//! Execution tests for `CASE ... END` expressions inside trigger bodies (#5439).
+//!
+//! Regression for the trigger-body statement splitter / token collector: the
+//! `END` of a `CASE ... END` expression inside a body statement was treated as
+//! the trigger-body terminator, truncating the body so that statements after a
+//! CASE-bearing statement were silently dropped (and create-time parsing failed
+//! with `incomplete input`).
+//!
+//! Behavior verified against sqlite3 3.51.0:
+//! - `BEGIN UPDATE ... CASE ... END; INSERT INTO log ...; END` fires BOTH
+//!   statements (the CASE...END does not truncate the body).
+//! - Multiple CASE expressions across statements, nested CASE, and CASE in a
+//!   WHERE clause all leave the trailing statements intact.
+//! - `INSTEAD OF INSERT` with `SELECT CASE WHEN ... THEN raise(IGNORE) END`
+//!   followed by an `INSERT INTO base` skips the matching row but still runs the
+//!   base write for non-matching rows.
+
+use vibesql_ast::Statement;
+use vibesql_parser::Parser;
+use vibesql_types::SqlValue;
+
+use super::super::*;
+
+/// Execute setup SQL that is expected to succeed.
+fn exec_ok(db: &mut vibesql_storage::Database, sql: &str) {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::CreateTable(s) => {
+            CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
+        }
+        Statement::CreateTrigger(s) => {
+            crate::advanced_objects::execute_create_trigger(&s, db).expect("CREATE TRIGGER failed");
+        }
+        Statement::CreateView(s) => {
+            crate::advanced_objects::execute_create_view(&s, db).expect("CREATE VIEW failed");
+        }
+        Statement::Insert(s) => {
+            InsertExecutor::execute(db, &s).expect("INSERT failed");
+        }
+        Statement::Update(s) => {
+            UpdateExecutor::execute(&s, db).expect("UPDATE failed");
+        }
+        Statement::Delete(s) => {
+            DeleteExecutor::execute(&s, db).expect("DELETE failed");
+        }
+        other => panic!("Unsupported setup statement: {:?}", other),
+    }
+}
+
+/// Read column `col` of every row in `table`, ordered by physical position.
+fn column_values(db: &vibesql_storage::Database, table: &str, col: &str) -> Vec<SqlValue> {
+    let schema = db.catalog.get_table(table).expect("table exists");
+    let idx = schema.columns.iter().position(|c| c.name == col).expect("column exists");
+    db.get_table(table)
+        .expect("table exists")
+        .scan()
+        .iter()
+        .map(|row| row.values[idx].clone())
+        .collect()
+}
+
+fn strings(db: &vibesql_storage::Database, table: &str, col: &str) -> Vec<String> {
+    column_values(db, table, col)
+        .into_iter()
+        .map(|v| match v {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+            other => panic!("expected text, got {:?}", other),
+        })
+        .collect()
+}
+
+fn ints(db: &vibesql_storage::Database, table: &str, col: &str) -> Vec<i64> {
+    column_values(db, table, col)
+        .into_iter()
+        .map(|v| match v {
+            SqlValue::Integer(i) => i,
+            SqlValue::Bigint(i) => i,
+            other => panic!("expected integer, got {:?}", other),
+        })
+        .collect()
+}
+
+#[test]
+fn case_end_then_insert_fires_both_statements() {
+    // sqlite3 3.51.0: both the UPDATE (with CASE...END) and the trailing INSERT
+    // fire — the CASE's END does not terminate the body.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(16))");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t BEGIN \
+         UPDATE t SET v = CASE WHEN NEW.v > 0 THEN 1 ELSE 0 END; \
+         INSERT INTO log VALUES ('x'); \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 5)");
+
+    // Trailing INSERT ran: log has one row.
+    assert_eq!(strings(&db, "log", "msg"), vec!["x".to_string()]);
+    // The CASE-driven UPDATE ran: v became 1.
+    assert_eq!(ints(&db, "t", "v"), vec![1]);
+}
+
+#[test]
+fn multiple_case_expressions_across_statements() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(16))");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t BEGIN \
+         UPDATE t SET v = CASE WHEN NEW.v > 0 THEN 1 ELSE 0 END; \
+         INSERT INTO log VALUES (CASE WHEN NEW.v > 0 THEN 'pos' ELSE 'neg' END); \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 5)");
+
+    assert_eq!(ints(&db, "t", "v"), vec![1]);
+    assert_eq!(strings(&db, "log", "msg"), vec!["pos".to_string()]);
+}
+
+#[test]
+fn nested_case_end_does_not_truncate_body() {
+    // sqlite3 3.51.0: a nested CASE...END (inner CASE in the THEN of the outer)
+    // closes both blocks before the body terminator; trailing INSERT fires.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(16))");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t BEGIN \
+         UPDATE t SET v = CASE WHEN NEW.v > 0 \
+           THEN CASE WHEN NEW.v > 10 THEN 99 ELSE 5 END \
+           ELSE 0 END; \
+         INSERT INTO log VALUES ('done'); \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 20)");
+
+    assert_eq!(ints(&db, "t", "v"), vec![99]);
+    assert_eq!(strings(&db, "log", "msg"), vec!["done".to_string()]);
+}
+
+#[test]
+fn case_in_where_clause_does_not_truncate_body() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(16))");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 0)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER UPDATE ON t BEGIN \
+         UPDATE t SET v = 7 WHERE id = CASE WHEN NEW.id > 0 THEN NEW.id ELSE -1 END; \
+         INSERT INTO log VALUES ('w'); \
+         END",
+    );
+
+    // Fire the AFTER UPDATE trigger. Recursion is prevented by SQLite/VibeSQL so
+    // the inner UPDATE does not re-fire infinitely.
+    exec_ok(&mut db, "UPDATE t SET v = 1 WHERE id = 1");
+
+    assert_eq!(strings(&db, "log", "msg"), vec!["w".to_string()]);
+}
+
+#[test]
+fn instead_of_insert_case_raise_ignore_body_parses_at_create_time() {
+    // #5439 (filed by the #5436 judge): the direct repro. Before the fix this
+    // CREATE TRIGGER failed with `incomplete input` because the CASE's `END`
+    // was treated as the body terminator, dropping the trailing base INSERT.
+    // The trigger must now CREATE successfully with the full body retained.
+    //
+    // NOTE: This is a *create-time* assertion. Actually *firing* this trigger
+    // additionally requires resolving `NEW.id` inside a from-less
+    // `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END` — a separate
+    // executor limitation ("Column reference requires FROM clause") that PR
+    // #5436 worked around and that is out of scope for #5439. See the filed
+    // follow-on.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+
+    let sql = "CREATE TRIGGER trg INSTEAD OF INSERT ON vw BEGIN \
+               SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END; \
+               INSERT INTO base (id, v) VALUES (NEW.id, NEW.v); \
+               END";
+    let stmt = Parser::parse_sql(sql)
+        .unwrap_or_else(|e| panic!("CREATE TRIGGER with CASE...END must parse (#5439): {:?}", e));
+    match stmt {
+        Statement::CreateTrigger(s) => {
+            // Body retains BOTH the CASE-bearing SELECT and the trailing INSERT.
+            let vibesql_ast::TriggerAction::RawSql(body) = &s.triggered_action;
+            let up = body.to_uppercase();
+            assert!(up.contains("CASE"), "body lost the CASE expression: {}", body);
+            assert!(
+                up.contains("INSERT INTO BASE"),
+                "body truncated before the trailing INSERT (the #5439 bug): {}",
+                body
+            );
+            crate::advanced_objects::execute_create_trigger(&s, &mut db)
+                .expect("CREATE TRIGGER should succeed");
+        }
+        other => panic!("expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn instead_of_insert_case_then_base_write_fires_both() {
+    // End-to-end INSTEAD OF variant that avoids the from-less `NEW` resolution
+    // limitation: the CASE...END lives in the INSERT's VALUES (which carries the
+    // NEW row context), so both the conditional column and the base write run.
+    // sqlite3 3.51.0: base receives one row with v = 'pos' (NEW.v = 10 > 0).
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, label VARCHAR(8))");
+    exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(8))");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, label FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF INSERT ON vw BEGIN \
+         INSERT INTO base (id, label) VALUES (NEW.id, CASE WHEN NEW.id > 0 THEN 'pos' ELSE 'neg' END); \
+         INSERT INTO log VALUES ('fired'); \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO vw (id, label) VALUES (10, 'ignored')");
+
+    assert_eq!(ints(&db, "base", "id"), vec![10]);
+    assert_eq!(strings(&db, "base", "label"), vec!["pos".to_string()]);
+    // The statement after the CASE-bearing INSERT also fired.
+    assert_eq!(strings(&db, "log", "msg"), vec!["fired".to_string()]);
+}

@@ -532,3 +532,126 @@ fn test_create_trigger_empty_body_parses() {
     let result = Parser::parse_sql("CREATE TRIGGER tr5 AFTER INSERT ON t1 BEGIN END;");
     assert!(result.is_ok(), "empty trigger body should parse: {:?}", result.err());
 }
+
+// --- CASE...END nesting in trigger bodies (#5439) ---
+//
+// The trigger-body token collector and statement splitter must track block
+// nesting: a `CASE ... END` *expression* inside a body statement opens a block
+// that its own `END` closes. The body's terminating `END` is the one at
+// nesting depth 0 — so a body statement containing `CASE ... END` followed by
+// another statement must not be truncated at the CASE's `END`.
+
+#[test]
+fn test_create_trigger_body_case_end_not_treated_as_body_terminator() {
+    // Direct repro from #5439: a CASE ... END inside the first body statement
+    // must not truncate the body — the trailing INSERT must be preserved.
+    use vibesql_ast::TriggerAction;
+
+    let sql = "CREATE TRIGGER trg INSTEAD OF INSERT ON vw BEGIN \
+               SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END; \
+               INSERT INTO base(id, v) VALUES(NEW.id, NEW.v); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body with CASE...END must not be truncated: {:?}",
+        result.err()
+    );
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.triggered_action {
+            TriggerAction::RawSql(body) => {
+                let up = body.to_uppercase();
+                // Both the CASE expression and the trailing INSERT survive.
+                assert!(up.contains("CASE"), "Body should retain the CASE expression. Got: {}", body);
+                assert!(
+                    up.contains("INSERT INTO BASE"),
+                    "Body should retain the statement after the CASE...END. Got: {}",
+                    body
+                );
+                // The body terminator END must be present (not consumed by CASE).
+                assert!(up.trim_end().ends_with("END"), "Body should end with END. Got: {}", body);
+            }
+        },
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_multiple_case_expressions() {
+    // Two separate body statements each containing a CASE...END.
+    let sql = "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+               UPDATE t SET v = CASE WHEN NEW.v > 0 THEN 'pos' ELSE 'neg' END; \
+               INSERT INTO log VALUES(CASE WHEN NEW.v > 0 THEN 'a' ELSE 'b' END); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body with multiple CASE...END must parse: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_create_trigger_body_nested_case_expressions() {
+    // A nested CASE...END (CASE inside the THEN of an outer CASE) must close
+    // both blocks before the body terminator.
+    use vibesql_ast::TriggerAction;
+
+    let sql = "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+               UPDATE t SET v = CASE WHEN NEW.v > 0 \
+                 THEN CASE WHEN NEW.v > 10 THEN 'big' ELSE 'small' END \
+                 ELSE 'neg' END; \
+               INSERT INTO log VALUES('done'); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body with nested CASE...END must parse: {:?}",
+        result.err()
+    );
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.triggered_action {
+            TriggerAction::RawSql(body) => {
+                let up = body.to_uppercase();
+                assert!(
+                    up.contains("INSERT INTO LOG"),
+                    "Body after nested CASE...END must be preserved. Got: {}",
+                    body
+                );
+            }
+        },
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_case_in_where_clause() {
+    // CASE...END in a WHERE clause (different statement position).
+    let sql = "CREATE TRIGGER trg AFTER UPDATE ON t BEGIN \
+               UPDATE t SET v = 1 WHERE id = CASE WHEN NEW.id > 0 THEN NEW.id ELSE 0 END; \
+               INSERT INTO log VALUES('w'); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body with CASE...END in WHERE must parse: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_create_trigger_body_case_as_last_statement_no_trailing_semicolon() {
+    // A CASE...END in the final body statement (no trailing `;`) must not have
+    // its END mistaken for the body terminator nor leave the body unterminated.
+    let sql = "CREATE TRIGGER trg AFTER INSERT ON t BEGIN \
+               SELECT CASE WHEN NEW.v > 0 THEN 1 ELSE 0 END \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "trigger body ending with CASE...END (no trailing ;) must parse: {:?}",
+        result.err()
+    );
+}
