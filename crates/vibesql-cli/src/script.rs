@@ -323,6 +323,15 @@ fn parse_statements(script: &str) -> Vec<String> {
     let mut in_string = false;
     let mut in_multiline_comment = false;
     let mut begin_depth = 0; // Track BEGIN...END nesting for trigger bodies
+    // Track CASE...END nesting *within* a trigger body. A `CASE ... END`
+    // expression in a trigger action (e.g. `SELECT CASE WHEN ... THEN
+    // RAISE(IGNORE) END`) introduces an inner `END` that must NOT be counted
+    // as the trigger's terminating `END`. Without this, the splitter closes
+    // the `CREATE TRIGGER` at the CASE's `END`, slicing one statement into
+    // several malformed fragments (issue #5468). We only track CASE depth when
+    // already inside a trigger body (`begin_depth > 0`); top-level CASE
+    // expressions split correctly on their trailing `;` and need no tracking.
+    let mut case_depth = 0;
     let mut chars = script.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -399,6 +408,17 @@ fn parse_statements(script: &str) -> Vec<String> {
                     begin_depth += 1;
                 }
                 continue;
+            } else if word == "CASE" && begin_depth > 0 {
+                // A CASE expression inside a trigger body opens a block that is
+                // closed by its own END. Track it so that END does not
+                // prematurely terminate the trigger body (issue #5468).
+                for _ in 0..(rest.len()) {
+                    if let Some(c) = chars.next() {
+                        current_statement.push(c);
+                    }
+                }
+                case_depth += 1;
+                continue;
             } else if word == "END" && begin_depth > 0 {
                 // Consume the rest of the word
                 for _ in 0..(rest.len()) {
@@ -406,7 +426,13 @@ fn parse_statements(script: &str) -> Vec<String> {
                         current_statement.push(c);
                     }
                 }
-                begin_depth -= 1;
+                if case_depth > 0 {
+                    // This END closes an inner CASE expression, not the
+                    // trigger body.
+                    case_depth -= 1;
+                } else {
+                    begin_depth -= 1;
+                }
                 continue;
             }
             // Not BEGIN/END, let normal processing continue
@@ -614,5 +640,74 @@ INSERT INTO logs VALUES (2, 'Success');
         assert_eq!(stmts[0], ".mode json");
         assert_eq!(stmts[1], "SELECT * FROM users;");
         assert_eq!(stmts[2], ".tables");
+    }
+
+    #[test]
+    fn test_parse_trigger_body_simple() {
+        // A trigger body with an inner `;` must stay a single statement.
+        let script = "CREATE TRIGGER t AFTER INSERT ON tbl BEGIN \
+            INSERT INTO log VALUES (1); UPDATE log SET x = 2; END;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 1, "trigger body should be one statement");
+        assert!(stmts[0].starts_with("CREATE TRIGGER t"));
+        assert!(stmts[0].trim_end().ends_with("END;"));
+    }
+
+    #[test]
+    fn test_parse_trigger_body_with_case_end() {
+        // Issue #5468: the END of a CASE...END expression inside a trigger body
+        // must not be treated as the trigger's terminating END.
+        let script = "CREATE TRIGGER before_tbl_insert BEFORE INSERT ON tbl BEGIN \
+            SELECT CASE WHEN (new.a = 4) THEN RAISE(IGNORE) END; END;";
+        let stmts = parse_statements(script);
+        assert_eq!(
+            stmts.len(),
+            1,
+            "CASE...END inside a trigger body must not split the statement, got: {:?}",
+            stmts
+        );
+        assert!(stmts[0].contains("CASE WHEN"));
+        assert!(stmts[0].contains("RAISE(IGNORE)"));
+        // The whole CREATE TRIGGER, including its terminating END, is captured.
+        assert!(stmts[0].trim_end().ends_with("END;"));
+    }
+
+    #[test]
+    fn test_parse_case_trigger_followed_by_statements() {
+        // A CASE-trigger must split cleanly from statements that follow it.
+        let script = "CREATE TABLE tbl(a, b, c); \
+            CREATE TRIGGER before_tbl_insert BEFORE INSERT ON tbl BEGIN \
+            SELECT CASE WHEN (new.a = 4) THEN RAISE(IGNORE) END; END; \
+            INSERT INTO tbl VALUES (1, 2, 3); SELECT * FROM tbl;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 4, "expected 4 statements, got: {:?}", stmts);
+        assert!(stmts[0].starts_with("CREATE TABLE tbl"));
+        assert!(stmts[1].starts_with("CREATE TRIGGER"));
+        assert!(stmts[1].contains("CASE WHEN"));
+        assert!(stmts[1].trim_end().ends_with("END;"));
+        assert!(stmts[2].starts_with("INSERT INTO tbl"));
+        assert!(stmts[3].starts_with("SELECT * FROM tbl"));
+    }
+
+    #[test]
+    fn test_parse_trigger_body_with_nested_case() {
+        // Multiple / nested CASE...END expressions in one trigger body.
+        let script = "CREATE TRIGGER t BEFORE UPDATE ON tbl BEGIN \
+            SELECT CASE WHEN a = 1 THEN CASE WHEN b = 2 THEN RAISE(ABORT, 'x') END END; \
+            SELECT CASE WHEN c = 3 THEN RAISE(IGNORE) END; END;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 1, "nested CASE...END must stay one statement: {:?}", stmts);
+        assert!(stmts[0].trim_end().ends_with("END;"));
+    }
+
+    #[test]
+    fn test_parse_top_level_case_still_splits() {
+        // A CASE...END expression OUTSIDE any trigger body must split normally
+        // on its trailing semicolon (no false CASE tracking).
+        let script = "SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t; SELECT 2;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].contains("CASE WHEN"));
+        assert_eq!(stmts[1], "SELECT 2;");
     }
 }
