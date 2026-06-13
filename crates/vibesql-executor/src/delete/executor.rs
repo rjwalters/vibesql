@@ -458,7 +458,10 @@ impl DeleteExecutor {
         // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger
         // context (Statement-level triggers don't fire for deletes within trigger bodies)
         if has_delete_triggers && trigger_context.is_none() {
-            crate::TriggerFirer::execute_before_statement_triggers(
+            // Statement-level RAISE(IGNORE) has no sqlite3 analog (SQLite
+            // triggers are always FOR EACH ROW); drop the must-use outcome and
+            // keep the pre-#5418 proceed behavior (#5418).
+            let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Delete,
@@ -575,10 +578,13 @@ impl DeleteExecutor {
             database.invalidate_columnar_cache(table_name);
         }
 
-        // Step 6: Fire AFTER DELETE ROW triggers only if triggers exist
+        // Step 6: Fire AFTER DELETE ROW triggers only if triggers exist.
+        // AFTER triggers run once the row is already deleted; a RAISE(IGNORE)
+        // here cannot un-delete it (sqlite3 3.51 keeps the row deleted), so
+        // SkipRow is a no-op — drop the must-use outcome (#5418).
         if has_delete_triggers {
             for (_, row) in &rows_and_indices_to_delete {
-                crate::TriggerFirer::execute_after_triggers(
+                let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                     database,
                     table_name,
                     vibesql_ast::TriggerEvent::Delete,
@@ -591,7 +597,9 @@ impl DeleteExecutor {
         // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger
         // context (Statement-level triggers don't fire for deletes within trigger bodies)
         if has_delete_triggers && trigger_context.is_none() {
-            crate::TriggerFirer::execute_after_statement_triggers(
+            // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+            // must-use outcome (#5418).
+            let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Delete,
@@ -1048,11 +1056,23 @@ fn execute_delete_on_view(
         collected_rows
     }; // evaluator dropped here
 
-    // Now fire triggers (database can be mutably borrowed)
+    // Now fire triggers (database can be mutably borrowed).
+    //
+    // RAISE(IGNORE) inside an INSTEAD OF DELETE trigger abandons the view
+    // operation for that row (#5418): the trigger body stops at the RAISE
+    // (`execute_trigger` returns SkipRow) and we move on to the next row. On
+    // SkipRow we `break` out of this row's remaining INSTEAD OF triggers,
+    // following the first-SkipRow-wins convention of the primary DML loops
+    // (#5415). The common single-trigger case matches sqlite3 3.51 exactly —
+    // the row's operation is skipped.
     let rows_processed = rows_to_delete.len();
     for old_row in &rows_to_delete {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), None)?;
+            if crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), None)?
+                == crate::TriggerOutcome::SkipRow
+            {
+                break;
+            }
         }
     }
 

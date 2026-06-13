@@ -33,6 +33,9 @@ fn exec_ok(db: &mut vibesql_storage::Database, sql: &str) {
         Statement::CreateTrigger(s) => {
             crate::advanced_objects::execute_create_trigger(&s, db).expect("CREATE TRIGGER failed");
         }
+        Statement::CreateView(s) => {
+            crate::advanced_objects::execute_create_view(&s, db).expect("CREATE VIEW failed");
+        }
         Statement::Insert(s) => {
             InsertExecutor::execute(db, &s).expect("INSERT failed");
         }
@@ -439,4 +442,258 @@ fn raise_abort_in_insert_trigger_aborts() {
     }
     // Nothing inserted.
     assert!(db.get_table("t").unwrap().scan().is_empty());
+}
+
+// ===========================================================================
+// RAISE(IGNORE) in secondary trigger paths (#5418)
+//
+// PR #5415 wired RAISE(IGNORE) -> TriggerOutcome::SkipRow through the primary
+// INSERT/UPDATE/DELETE row loops. #5418 extends it to the REPLACE
+// conflict-resolution path, the UPDATE ... FROM secondary-update path, and the
+// INSTEAD OF (view) trigger paths. Each test below mirrors a scenario verified
+// against sqlite3 3.51.0.
+// ===========================================================================
+
+/// REPLACE / INSERT OR REPLACE: a BEFORE DELETE trigger that RAISE(IGNORE)s the
+/// conflicting row's delete leaves the row in place, so the REPLACE's insert
+/// then fails with a UNIQUE constraint error and the table is unchanged.
+///
+/// sqlite3 3.51.0 (PRAGMA recursive_triggers=ON):
+///   CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT);
+///   INSERT INTO t VALUES(1,'a'),(2,'b');
+///   CREATE TRIGGER trg BEFORE DELETE ON t BEGIN SELECT RAISE(IGNORE); END;
+///   REPLACE INTO t VALUES(1,'NEW');  -- Error: UNIQUE constraint failed: t.id
+///   -- table unchanged: 1|a, 2|b
+#[test]
+fn raise_ignore_in_before_delete_blocks_replace_conflict() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 20)");
+    // BEFORE DELETE always ignores: the conflicting row can never be deleted.
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE DELETE ON t \
+         BEGIN SELECT raise(IGNORE); END",
+    );
+
+    // REPLACE on id=1 must resolve the conflict by deleting the old row, but
+    // the BEFORE DELETE trigger IGNOREs that delete. The surviving row then
+    // collides with the new row on the PK -> UNIQUE constraint error.
+    let result = exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (1, 99)");
+    assert!(
+        result.is_err(),
+        "REPLACE must fail: the IGNORE'd conflicting row still collides on the PK"
+    );
+
+    // Table unchanged: the old row survives, the new row was not inserted.
+    assert_eq!(ints(&db, "t", "id"), vec![1, 2]);
+    assert_eq!(ints(&db, "t", "v"), vec![10, 20]);
+}
+
+// NOTE: a companion test for "REPLACE where the BEFORE DELETE trigger IGNOREs
+// only SOME conflicts (the unguarded conflict still resolves)" was intentionally
+// omitted: VibeSQL has a pre-existing bug where REPLACE with ANY BEFORE DELETE
+// trigger present (even a non-firing / always-Proceed one) leaves a duplicate
+// row instead of deleting the conflicting one. That defect is independent of
+// SkipRow plumbing (it reproduces with a trigger that never raises) and is
+// tracked as a separate follow-on. The `blocks_replace_conflict` test above
+// still exercises the SkipRow wiring because every conflicting delete is
+// IGNORE'd, which correctly surfaces the UNIQUE error.
+
+/// UPDATE ... FROM (secondary-update path): a BEFORE UPDATE trigger that
+/// RAISE(IGNORE)s one matched row skips just that row; the rest update.
+///
+/// sqlite3 3.51.0:
+///   UPDATE t SET v=d.nv FROM d WHERE t.id=d.id;  -- d maps id 2 -> 999
+///   -- trigger ignores NEW.v=999, so row 2 keeps its old value, 1 and 3 update.
+#[test]
+fn raise_ignore_skips_only_matching_row_in_update_from() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (3, 30)");
+    exec_ok(&mut db, "CREATE TABLE d (id INTEGER PRIMARY KEY, nv INTEGER)");
+    exec_ok(&mut db, "INSERT INTO d (id, nv) VALUES (1, 111)");
+    exec_ok(&mut db, "INSERT INTO d (id, nv) VALUES (2, 999)");
+    exec_ok(&mut db, "INSERT INTO d (id, nv) VALUES (3, 333)");
+    // The sentinel 999 is ignored.
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE UPDATE ON t WHEN NEW.v = 999 \
+         BEGIN SELECT raise(IGNORE); END",
+    );
+
+    let affected = exec_dml(&mut db, "UPDATE t SET v = d.nv FROM d WHERE t.id = d.id")
+        .expect("RAISE(IGNORE) must not error");
+
+    // Rows 1 and 3 updated; row 2 unchanged at 20 (its NEW value 999 ignored).
+    assert_eq!(ints(&db, "t", "v"), vec![111, 20, 333]);
+    assert_eq!(affected, 2, "the ignored row must not be counted as updated");
+}
+
+// INSTEAD OF (view) trigger tests.
+//
+// These use the trigger-level WHEN guard plus an unconditional `SELECT
+// raise(IGNORE)` placed BEFORE the base-table write, rather than an in-body
+// `CASE WHEN ... THEN raise(IGNORE) END`. VibeSQL's trigger-body statement
+// splitter currently treats the `END` of a `CASE ... END` as the trigger-body
+// terminator (a pre-existing splitter limitation, separate from #5418), so a
+// `CASE` inside a trigger body fails to parse. The WHEN-guard form exercises
+// the same INSTEAD OF SkipRow plumbing without tripping that limitation.
+//
+// SkipRow semantics for INSTEAD OF (verified against sqlite3 3.51.0): a
+// `SELECT raise(IGNORE)` aborts the rest of the current trigger's program for
+// that row — so a base-table write placed after the RAISE does not run — while
+// other rows proceed normally.
+
+/// INSTEAD OF INSERT: when the trigger fires and RAISE(IGNORE)s before its base
+/// insert, the base table is not written for that view row.
+#[test]
+fn raise_ignore_in_instead_of_insert_skips_base_write() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    // The IGNORE comes before the base insert, so the base insert is abandoned.
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF INSERT ON vw \
+         BEGIN \
+           SELECT raise(IGNORE); \
+           INSERT INTO base (id, v) VALUES (NEW.id, NEW.v); \
+         END",
+    );
+
+    exec_dml(&mut db, "INSERT INTO vw (id, v) VALUES (1, 10)")
+        .expect("RAISE(IGNORE) must not error");
+
+    // The view insert was abandoned: nothing reached the base table.
+    assert!(db.get_table("base").unwrap().scan().is_empty());
+}
+
+/// Control: the same INSTEAD OF INSERT trigger WITHOUT the RAISE writes the base
+/// table normally (confirms the path applies the operation when not skipped).
+#[test]
+fn instead_of_insert_without_ignore_writes_base() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF INSERT ON vw \
+         BEGIN \
+           INSERT INTO base (id, v) VALUES (NEW.id, NEW.v); \
+         END",
+    );
+
+    exec_dml(&mut db, "INSERT INTO vw (id, v) VALUES (1, 10)").expect("view insert must succeed");
+
+    assert_eq!(ints(&db, "base", "id"), vec![1]);
+    assert_eq!(ints(&db, "base", "v"), vec![10]);
+}
+
+// NOTE: the INSTEAD OF UPDATE/DELETE tests below use a single, *unconditional*
+// trigger (no trigger-level WHEN clause). VibeSQL has a pre-existing limitation
+// where an INSTEAD OF trigger's WHEN condition cannot be evaluated on a view —
+// `evaluate_when_condition` resolves the schema via `catalog.get_table`, which
+// returns None for a view, yielding `TableNotFound`. That gap is independent of
+// #5418 (SkipRow plumbing) and is tracked as a separate follow-on. The
+// unconditional form still exercises the INSTEAD OF SkipRow path: a
+// `SELECT raise(IGNORE)` placed before the base write abandons the operation.
+
+/// INSTEAD OF UPDATE: RAISE(IGNORE) before the base UPDATE abandons the view
+/// update, so the base table is not written.
+#[test]
+fn raise_ignore_in_instead_of_update_abandons_row() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF UPDATE ON vw \
+         BEGIN \
+           SELECT raise(IGNORE); \
+           UPDATE base SET v = NEW.v WHERE id = OLD.id; \
+         END",
+    );
+
+    exec_dml(&mut db, "UPDATE vw SET v = 999")
+        .expect("RAISE(IGNORE) in INSTEAD OF UPDATE must not error");
+
+    // Base unchanged: every row's view update was abandoned.
+    assert_eq!(ints(&db, "base", "id"), vec![1, 2]);
+    assert_eq!(ints(&db, "base", "v"), vec![10, 20]);
+}
+
+/// Control: the same INSTEAD OF UPDATE trigger WITHOUT the RAISE writes the base
+/// table for every matched view row.
+#[test]
+fn instead_of_update_without_ignore_writes_base() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF UPDATE ON vw \
+         BEGIN \
+           UPDATE base SET v = NEW.v WHERE id = OLD.id; \
+         END",
+    );
+
+    exec_dml(&mut db, "UPDATE vw SET v = 999").expect("INSTEAD OF UPDATE must succeed");
+
+    assert_eq!(ints(&db, "base", "v"), vec![999, 999]);
+}
+
+/// INSTEAD OF DELETE: RAISE(IGNORE) before the base DELETE abandons the view
+/// delete, so no base rows are removed.
+#[test]
+fn raise_ignore_in_instead_of_delete_abandons_row() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF DELETE ON vw \
+         BEGIN \
+           SELECT raise(IGNORE); \
+           DELETE FROM base WHERE id = OLD.id; \
+         END",
+    );
+
+    exec_dml(&mut db, "DELETE FROM vw")
+        .expect("RAISE(IGNORE) in INSTEAD OF DELETE must not error");
+
+    // Base unchanged: every row's view delete was abandoned.
+    assert_eq!(ints(&db, "base", "id"), vec![1, 2]);
+    assert_eq!(ints(&db, "base", "v"), vec![10, 20]);
+}
+
+/// Control: the same INSTEAD OF DELETE trigger WITHOUT the RAISE deletes the
+/// base rows.
+#[test]
+fn instead_of_delete_without_ignore_deletes_base() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF DELETE ON vw \
+         BEGIN \
+           DELETE FROM base WHERE id = OLD.id; \
+         END",
+    );
+
+    exec_dml(&mut db, "DELETE FROM vw").expect("INSTEAD OF DELETE must succeed");
+
+    assert!(db.get_table("base").unwrap().scan().is_empty());
 }

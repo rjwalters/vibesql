@@ -123,6 +123,14 @@ impl<'a> TriggerContext<'a> {
 /// DML caller can drop that row; every other (real) error still propagates via
 /// `Err`. `RAISE(ABORT|FAIL|ROLLBACK, ..)` are *not* represented here — they are
 /// genuine aborts and propagate as [`ExecutorError::Raise`].
+///
+/// Marked `#[must_use]` (#5418): the trigger-firing helpers return this so the
+/// DML caller can drop the current row on [`TriggerOutcome::SkipRow`]. A call
+/// site that writes `fire(..)?;` and discards the value would silently swallow
+/// a `RAISE(IGNORE)` and apply the row anyway. The attribute turns every such
+/// drop into a compile-time warning so new call sites must decide explicitly
+/// what to do with `SkipRow`.
+#[must_use = "a TriggerOutcome::SkipRow must be honored (skip the row); discarding it silently applies a RAISE(IGNORE)'d row"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerOutcome {
     /// Triggers completed normally; the DML operation should proceed.
