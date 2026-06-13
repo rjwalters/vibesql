@@ -1540,6 +1540,20 @@ impl Operations {
         self.index_manager.clear_disk_undo_logs();
     }
 
+    /// Capture per-tree disk undo-log markers for a statement-level savepoint
+    /// (issue #5434). See [`super::indexes::IndexManager::mark_disk_undo_logs`].
+    pub fn mark_disk_undo_logs(&self) -> HashMap<String, usize> {
+        self.index_manager.mark_disk_undo_logs()
+    }
+
+    /// Reverse the disk-backed index undo-log suffix recorded since the given
+    /// statement-savepoint markers (issue #5434 — `RAISE(ABORT)` scope),
+    /// leaving the enclosing transaction's undo-log intact. See
+    /// [`super::indexes::IndexManager::rollback_disk_undo_logs_to`].
+    pub fn rollback_disk_undo_logs_to(&mut self, markers: &HashMap<String, usize>) {
+        self.index_manager.rollback_disk_undo_logs_to(markers);
+    }
+
     /// Reset the operations manager to empty state (clears all indexes).
     ///
     /// Clears all index data but preserves configuration (database path, storage backend, config).

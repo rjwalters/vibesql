@@ -93,6 +93,18 @@ pub struct StatementSavepoint {
     /// Length of the deferred-FK queue at statement start, so violations
     /// queued by the aborted statement are discarded on rollback.
     deferred_fk_len: usize,
+    /// Per-tree disk undo-log markers captured at statement start (issue
+    /// #5434), keyed by normalized index name.
+    ///
+    /// The wholesale `operations` clone above shares the same live
+    /// `Arc<Mutex<BTreeIndex>>` as the spilled (disk-backed) indexes, so
+    /// restoring it is a no-op for their key mutations (the same shallow-clone
+    /// gap #5425/#5433 fixed at transaction scope). Instead, on
+    /// `RAISE(ABORT)` we reverse just the disk undo-log entries appended since
+    /// these markers — undoing the statement's spilled-index mutations while
+    /// leaving the enclosing transaction's undo-log (pre-statement mutations)
+    /// intact. Empty when no disk-backed index was undo-logging at arm time.
+    disk_undo_markers: HashMap<String, usize>,
 }
 
 /// Transaction state
@@ -760,6 +772,10 @@ impl TransactionManager {
                     operations: operations.clone(),
                     changes_len: changes.len(),
                     deferred_fk_len: deferred_fk_violations.len(),
+                    // #5434: snapshot per-tree disk undo-log positions so a
+                    // RAISE(ABORT) reverses only this statement's spilled-index
+                    // mutations, not earlier ones in the same transaction.
+                    disk_undo_markers: operations.mark_disk_undo_logs(),
                 }));
                 true
             }
@@ -784,6 +800,18 @@ impl TransactionManager {
                 statement_savepoint, changes, deferred_fk_violations, ..
             } => match statement_savepoint.take() {
                 Some(sp) => {
+                    // #5434: reverse this statement's disk-backed (spilled)
+                    // index mutations *before* swapping in the wholesale
+                    // snapshot — mirroring `rollback_transaction`'s ordering.
+                    // The snapshot's `operations` clone shares the same live
+                    // `Arc<Mutex<BTreeIndex>>` as the spilled indexes, so the
+                    // clone restore is a no-op for them; reversing the undo-log
+                    // suffix on the live `operations` reverts the shared B+ tree
+                    // back to its pre-statement state, and the prefix (earlier
+                    // statements' mutations) stays in the enclosing txn's
+                    // undo-log for a potential outer ROLLBACK. No-op when no
+                    // disk-backed index was undo-logging at arm time.
+                    operations.rollback_disk_undo_logs_to(&sp.disk_undo_markers);
                     *catalog = sp.catalog;
                     *tables = sp.tables;
                     *operations = sp.operations;

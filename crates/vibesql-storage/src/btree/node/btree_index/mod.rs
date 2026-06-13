@@ -167,6 +167,59 @@ impl BTreeIndex {
             None => return Ok(()),
         };
 
+        self.replay_inverses(log)
+    }
+
+    /// Current length of the active undo-log, or `None` when logging is not
+    /// armed. Used as a *nested savepoint marker* (issue #5434): a statement
+    /// savepoint records this length when it is armed, and
+    /// [`Self::rollback_undo_log_to`] later reverses only the entries appended
+    /// after that point — restoring the tree to its pre-statement state while
+    /// leaving the enclosing transaction's undo-log (and its recording) intact.
+    pub fn undo_log_marker(&self) -> Option<usize> {
+        self.undo_log.as_ref().map(|log| log.len())
+    }
+
+    /// Reverse only the undo-log entries recorded *after* `marker`, restoring
+    /// the tree to the state it had when the marker was taken, while keeping
+    /// undo-logging armed for the enclosing transaction (issue #5434 —
+    /// statement-savepoint rollback).
+    ///
+    /// The retained prefix (entries `0..marker`) stays in the log so a later
+    /// full-transaction ROLLBACK still reverses the mutations made *before* the
+    /// statement savepoint was armed. The replay of the reversed suffix runs
+    /// with logging detached so it does not record new entries; the prefix is
+    /// re-attached afterwards.
+    ///
+    /// No-op when logging is not armed. A `marker` past the current log length
+    /// (e.g. the log was already shortened) reverses nothing.
+    pub fn rollback_undo_log_to(&mut self, marker: usize) -> Result<(), StorageError> {
+        let suffix = match self.undo_log.as_mut() {
+            Some(log) if log.len() > marker => log.split_off(marker),
+            // Logging not armed, or nothing recorded since the marker.
+            _ => return Ok(()),
+        };
+
+        // Detach the retained prefix so the inverse operations below run on the
+        // non-logging fast path (they must not append to the prefix), then
+        // re-attach it so the enclosing transaction keeps recording.
+        let prefix = self.undo_log.take();
+        let result = self.replay_inverses(suffix);
+        self.undo_log = prefix.or(Some(Vec::new()));
+        result
+    }
+
+    /// Apply the logical inverses in `log` in reverse order (LIFO) so
+    /// overlapping mutations on the same key unwind correctly. Logging must be
+    /// detached on `self` so the inverse operations run on the non-logging fast
+    /// path and do not record new entries. Shared by [`Self::rollback_undo_log`]
+    /// (full reverse) and [`Self::rollback_undo_log_to`] (suffix reverse).
+    fn replay_inverses(&mut self, log: Vec<DiskUndoOp>) -> Result<(), StorageError> {
+        debug_assert!(
+            self.undo_log.is_none(),
+            "replay_inverses must run with the undo-log detached so inverses are \
+             not re-recorded",
+        );
         for op in log.into_iter().rev() {
             match op {
                 DiskUndoOp::DeleteSpecific { key, row_id } => {
@@ -179,7 +232,6 @@ impl BTreeIndex {
                 }
             }
         }
-
         Ok(())
     }
 
