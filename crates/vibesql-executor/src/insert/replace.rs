@@ -17,6 +17,13 @@ use crate::{
 /// triggers complete. This matches SQLite semantics where BEFORE DELETE trigger INSERTs
 /// fail on rowid conflict, but AFTER DELETE trigger INSERTs can succeed (and may fail
 /// on other constraints).
+///
+/// Deletion is a bitmap tombstone, not a physical removal: the conflicting old
+/// version stays in `Table`'s backing storage (and is visible to the raw
+/// `Table::scan()`) until compaction. Live reads (`scan_live()`, MVCC-aware
+/// scans, and every `SELECT`) skip tombstones, so callers and clients see
+/// exactly one row per key. (#5437 mistook a raw-`scan()` read of a tombstone
+/// for a duplicate row; the conflict-delete itself is correct.)
 pub fn handle_replace_conflicts(
     db: &mut vibesql_storage::Database,
     table_name: &str,
