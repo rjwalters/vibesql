@@ -121,7 +121,14 @@ impl IndexManager {
                         IndexData::Hnsw { index } => {
                             // HnswIndex::remove unlinks the node from every graph
                             // layer (and repairs the entry point), so the deleted
-                            // row is no longer reachable by search.
+                            // row is no longer reachable by search. Lazy unlinks
+                            // erode graph connectivity / recall over time, so
+                            // remove also tracks a tombstone counter and auto-
+                            // rebuilds the graph from the live vectors once the
+                            // deleted ratio crosses its compaction threshold
+                            // (#5454). The rebuilt graph is in-memory and part of
+                            // the COW snapshot of `Operations`, so an
+                            // in-transaction rebuild is reversed on ROLLBACK.
                             index.remove(row_index);
                         }
                     }

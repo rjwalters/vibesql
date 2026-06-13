@@ -52,7 +52,38 @@ pub struct HnswIndex {
     ef_search: usize,
     /// Level multiplier for probabilistic layer assignment (1 / ln(m))
     ml: f64,
+    /// Number of nodes removed since the last full rebuild (tombstone counter).
+    ///
+    /// Lazy `remove` unlinks a node but does not re-optimize the connectivity of
+    /// the affected neighborhoods, so repeated deletes thin the proximity graph
+    /// and degrade recall over time. This counter drives the auto-compaction
+    /// trigger: once the deleted ratio exceeds `compaction_threshold`, the graph
+    /// is rebuilt from the live vectors (which restores recall) and this resets
+    /// to 0. Analogous to the table-level >50% compaction trigger.
+    removed_count: usize,
+    /// Deleted-ratio threshold that triggers an automatic graph rebuild.
+    ///
+    /// When `removed_count / (live + removed) > compaction_threshold`, `remove`
+    /// rebuilds the graph from the current live vectors. Defaults to
+    /// [`DEFAULT_COMPACTION_THRESHOLD`] (0.5), mirroring `Table` compaction.
+    compaction_threshold: f64,
+    /// When `false`, `remove` never auto-triggers a rebuild; callers must invoke
+    /// [`HnswIndex::compact`] explicitly. Enabled by default.
+    auto_compact: bool,
+    /// Set to `true` whenever a full graph rebuild occurs (auto or explicit).
+    ///
+    /// Lets tests assert that compaction actually happened (a rebuild-happened
+    /// flag) without depending on wall-clock timing. Cleared by
+    /// [`HnswIndex::take_compacted`].
+    compacted: bool,
 }
+
+/// Default deleted-ratio threshold that triggers an automatic HNSW rebuild.
+///
+/// Mirrors the table-level >50% compaction trigger: once more than half of the
+/// nodes that have ever been live are tombstoned, the proximity graph is rebuilt
+/// from the surviving vectors to restore recall.
+pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.5;
 
 /// Result entry for nearest neighbor search
 #[derive(Clone, Debug)]
@@ -138,6 +169,10 @@ impl HnswIndex {
             ef_construction: ef_construction as usize,
             ef_search: 40,             // Default ef_search
             ml: 1.0 / (m as f64).ln(), // Level multiplier
+            removed_count: 0,
+            compaction_threshold: DEFAULT_COMPACTION_THRESHOLD,
+            auto_compact: true,
+            compacted: false,
         }
     }
 
@@ -279,19 +314,41 @@ impl HnswIndex {
         Ok(())
     }
 
-    /// Remove a vector from the index
+    /// Remove a vector from the index.
     ///
-    /// Note: This is a lazy removal - we remove the node from the graph but don't
-    /// restructure to maintain optimal connectivity. For heavy deletion workloads,
-    /// consider rebuilding the index periodically.
+    /// This is a *lazy unlink*: the node is dropped from every layer and its
+    /// reverse edges are pruned, but the connectivity of the affected
+    /// neighborhoods is not re-optimized. Removal keeps correctness (deleted
+    /// nodes become unreachable and are never returned by `search`) but, over
+    /// many deletes, thins the proximity graph and degrades recall.
+    ///
+    /// To counteract that, each removal bumps a tombstone counter; once the
+    /// deleted ratio exceeds `compaction_threshold` the graph is automatically
+    /// rebuilt from the surviving vectors (see [`HnswIndex::compact`]), which
+    /// restores recall. Auto-compaction can be disabled with
+    /// [`HnswIndex::set_auto_compact`] in favor of an explicit
+    /// [`HnswIndex::compact`] call from the maintenance layer.
     pub fn remove(&mut self, row_id: usize) {
+        if self.unlink(row_id) {
+            self.removed_count += 1;
+            if self.auto_compact && self.should_compact() {
+                self.compact();
+            }
+        }
+    }
+
+    /// Unlink a single node from the graph without touching the tombstone
+    /// counter or triggering compaction.
+    ///
+    /// Returns `true` if a node was actually removed (i.e. it existed).
+    fn unlink(&mut self, row_id: usize) -> bool {
         // Remove from vectors
-        self.vectors.remove(&row_id);
+        let existed = self.vectors.remove(&row_id).is_some();
 
         // Get node level
         let level = match self.node_levels.remove(&row_id) {
             Some(l) => l,
-            None => return,
+            None => return existed,
         };
 
         // Remove from all layers
@@ -317,6 +374,98 @@ impl HnswIndex {
                 }
             }
         }
+
+        existed
+    }
+
+    /// Whether the deleted ratio has crossed the compaction threshold.
+    ///
+    /// The ratio is `removed_count / (live + removed_count)` — the fraction of
+    /// nodes that have ever been live which are now tombstoned. Mirrors
+    /// `Table::should_compact`'s deleted-ratio test.
+    pub fn should_compact(&self) -> bool {
+        let total = self.vectors.len() + self.removed_count;
+        if total == 0 {
+            return false;
+        }
+        (self.removed_count as f64 / total as f64) > self.compaction_threshold
+    }
+
+    /// Rebuild the proximity graph from the current live vectors.
+    ///
+    /// Compaction discards the degraded graph (layers, neighbor lists, entry
+    /// point, level assignments) and reconstructs it from scratch using only the
+    /// surviving vectors via the standard [`HnswIndex::build`]/`insert` path —
+    /// the same full reconstruction used to (re)build an index. This restores
+    /// the small-world connectivity that lazy `remove` erodes, recovering recall.
+    /// The tombstone counter is reset to 0 and the rebuild-happened flag is set.
+    ///
+    /// Transaction safety: `HnswIndex` is a deep-`Clone` value (all owned
+    /// `HashMap`/`Vec` state), so the #5419 copy-on-write `Operations` snapshot
+    /// captures a full copy of the pre-mutation index. A ROLLBACK restores that
+    /// snapshot wholesale, undoing a compaction (or any mutation) — unlike the
+    /// shallow-`Arc` disk-backed B-tree path, no separate undo log is required.
+    pub fn compact(&mut self) {
+        // Snapshot live vectors before tearing down the graph.
+        let live: Vec<(usize, Vec<f64>)> =
+            self.vectors.iter().map(|(&id, v)| (id, v.clone())).collect();
+
+        // Reset graph state to an empty index, preserving configuration.
+        self.vectors.clear();
+        self.layers = vec![HashMap::new()];
+        self.node_levels.clear();
+        self.entry_point = None;
+        self.max_level = 0;
+        self.removed_count = 0;
+
+        // Reconstruct from live vectors using the standard insertion path.
+        for (row_id, vector) in live {
+            // Dimensions were validated on the original insert; ignore errors so
+            // compaction is infallible and never poisons the index.
+            let _ = self.insert(row_id, vector);
+        }
+
+        self.compacted = true;
+    }
+
+    /// Number of tombstoned (removed) nodes since the last full rebuild.
+    pub fn removed_count(&self) -> usize {
+        self.removed_count
+    }
+
+    /// Current deleted-ratio compaction threshold.
+    pub fn compaction_threshold(&self) -> f64 {
+        self.compaction_threshold
+    }
+
+    /// Configure the deleted-ratio threshold that triggers auto-compaction.
+    ///
+    /// Clamped to `[0.0, 1.0]`. A value of `1.0` effectively disables the
+    /// threshold trigger (the ratio can never strictly exceed 1.0).
+    pub fn set_compaction_threshold(&mut self, threshold: f64) {
+        self.compaction_threshold = threshold.clamp(0.0, 1.0);
+    }
+
+    /// Enable or disable automatic compaction on `remove`.
+    ///
+    /// When disabled, callers drive compaction explicitly via
+    /// [`HnswIndex::compact`] (e.g. from a maintenance pass).
+    pub fn set_auto_compact(&mut self, enabled: bool) {
+        self.auto_compact = enabled;
+    }
+
+    /// Whether automatic compaction on `remove` is enabled.
+    pub fn auto_compact(&self) -> bool {
+        self.auto_compact
+    }
+
+    /// Take and clear the rebuild-happened flag.
+    ///
+    /// Returns `true` if a full rebuild (auto or explicit) occurred since the
+    /// last call. Useful for tests/maintenance to observe that compaction fired
+    /// without relying on timing.
+    pub fn take_compacted(&mut self) -> bool {
+        std::mem::replace(&mut self.compacted, false)
     }
 
     /// Perform approximate nearest neighbor search
@@ -656,5 +805,324 @@ mod tests {
 
         // First result should be (5, 5) which is row 55
         assert_eq!(results[0].0, 55);
+    }
+
+    // ---- Compaction / recall regression tests (#5454) ----
+
+    /// Deterministic pseudo-random generator (xorshift64) so the recall
+    /// dataset is reproducible across runs without depending on `rand`.
+    struct DetRng(u64);
+    impl DetRng {
+        fn new(seed: u64) -> Self {
+            DetRng(seed.max(1))
+        }
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        /// Uniform f64 in [0, 1).
+        fn next_f64(&mut self) -> f64 {
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// Build a deterministic dataset of `n` vectors of `dim` dimensions.
+    fn deterministic_dataset(n: usize, dim: usize, seed: u64) -> Vec<(usize, Vec<f64>)> {
+        let mut rng = DetRng::new(seed);
+        (0..n)
+            .map(|i| {
+                let v: Vec<f64> = (0..dim).map(|_| rng.next_f64()).collect();
+                (i, v)
+            })
+            .collect()
+    }
+
+    /// Brute-force ground-truth: the `k` nearest *live* row ids to `query`
+    /// (L2), restricted to `live`.
+    fn brute_force_knn(
+        dataset: &[(usize, Vec<f64>)],
+        live: &HashSet<usize>,
+        query: &[f64],
+        k: usize,
+    ) -> Vec<usize> {
+        let mut scored: Vec<(usize, f64)> = dataset
+            .iter()
+            .filter(|(id, _)| live.contains(id))
+            .map(|(id, v)| {
+                let d: f64 =
+                    query.iter().zip(v.iter()).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+                (*id, d)
+            })
+            .collect();
+        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+        scored.into_iter().take(k).map(|(id, _)| id).collect()
+    }
+
+    /// Average recall@k of `index` over `num_queries` queries drawn from the
+    /// live vectors, against brute-force ground truth.
+    fn measure_recall(
+        index: &HnswIndex,
+        dataset: &[(usize, Vec<f64>)],
+        live: &HashSet<usize>,
+        k: usize,
+        num_queries: usize,
+    ) -> f64 {
+        let live_ids: Vec<usize> =
+            dataset.iter().map(|(id, _)| *id).filter(|id| live.contains(id)).collect();
+        if live_ids.is_empty() {
+            return 1.0;
+        }
+
+        let mut total_hits = 0usize;
+        let mut total_truth = 0usize;
+        for qi in 0..num_queries {
+            // Use an existing live vector as the query (its own neighborhood).
+            let qid = live_ids[qi % live_ids.len()];
+            let query = &dataset[qid].1;
+
+            let truth = brute_force_knn(dataset, live, query, k);
+            let truth_set: HashSet<usize> = truth.iter().copied().collect();
+
+            let approx = index.search(query, k).unwrap();
+            let hits = approx.iter().filter(|(id, _)| truth_set.contains(id)).count();
+
+            total_hits += hits;
+            total_truth += truth.len();
+        }
+
+        if total_truth == 0 {
+            1.0
+        } else {
+            total_hits as f64 / total_truth as f64
+        }
+    }
+
+    #[test]
+    fn test_recall_degrades_without_compaction_then_restored() {
+        const N: usize = 1500;
+        const DIM: usize = 16;
+        const K: usize = 10;
+        const QUERIES: usize = 100;
+        // A small ef_search makes the graph's navigability (small-world
+        // property) — exactly what lazy unlink erodes — the limiting factor for
+        // recall, so degradation is observable rather than masked by an
+        // over-wide search beam.
+        const EF_SEARCH: usize = 12;
+
+        let dataset = deterministic_dataset(N, DIM, 0xC0FFEE);
+
+        // Delete a large, *scattered* fraction so removed nodes (including
+        // graph hubs / entry-point candidates) are interleaved with survivors,
+        // fragmenting the survivor subgraph the way a real delete-heavy
+        // workload does. Keep id `i` iff `i % 5 == 0` -> delete 80%.
+        let live: HashSet<usize> = (0..N).filter(|i| i % 5 == 0).collect();
+        let to_delete: Vec<usize> = (0..N).filter(|i| i % 5 != 0).collect();
+
+        // --- Index A: deletes WITHOUT compaction (auto disabled) ---
+        let mut idx_no_compact = HnswIndex::new(DIM, 16, 64, VectorDistanceMetric::L2);
+        idx_no_compact.set_ef_search(EF_SEARCH);
+        idx_no_compact.set_auto_compact(false);
+        idx_no_compact.build(dataset.clone()).unwrap();
+        for &id in &to_delete {
+            idx_no_compact.remove(id);
+        }
+        assert!(!idx_no_compact.take_compacted(), "auto-compaction must be disabled here");
+        assert_eq!(idx_no_compact.len(), live.len());
+
+        let recall_degraded = measure_recall(&idx_no_compact, &dataset, &live, K, QUERIES);
+
+        // --- Index B: same deletes then explicit compaction ---
+        let mut idx_compact = HnswIndex::new(DIM, 16, 64, VectorDistanceMetric::L2);
+        idx_compact.set_ef_search(EF_SEARCH);
+        idx_compact.set_auto_compact(false);
+        idx_compact.build(dataset.clone()).unwrap();
+        for &id in &to_delete {
+            idx_compact.remove(id);
+        }
+        idx_compact.compact();
+        assert!(idx_compact.take_compacted(), "compact() must set the rebuild flag");
+        assert_eq!(idx_compact.len(), live.len());
+        assert_eq!(idx_compact.removed_count(), 0, "compaction resets the tombstone counter");
+
+        let recall_compacted = measure_recall(&idx_compact, &dataset, &live, K, QUERIES);
+
+        // --- Reference: a freshly-built index over only the live vectors. ---
+        // Acceptance criterion (issue): post-compaction recall stays within an
+        // acceptable bound of a freshly-built index.
+        let mut idx_fresh = HnswIndex::new(DIM, 16, 64, VectorDistanceMetric::L2);
+        idx_fresh.set_ef_search(EF_SEARCH);
+        let fresh_vectors: Vec<(usize, Vec<f64>)> =
+            dataset.iter().filter(|(id, _)| live.contains(id)).cloned().collect();
+        idx_fresh.build(fresh_vectors).unwrap();
+        let recall_fresh = measure_recall(&idx_fresh, &dataset, &live, K, QUERIES);
+
+        // Correctness invariant for BOTH degraded and compacted indexes: no
+        // deleted id ever returned, and every live vector is findable.
+        for &id in live.iter().take(100) {
+            let q = &dataset[id].1;
+            let res_a = idx_no_compact.search(q, K).unwrap();
+            let res_b = idx_compact.search(q, K).unwrap();
+            assert!(res_a.iter().all(|(r, _)| live.contains(r)), "deleted id leaked (no-compact)");
+            assert!(res_b.iter().all(|(r, _)| live.contains(r)), "deleted id leaked (compact)");
+            assert!(res_b.iter().any(|(r, _)| *r == id), "live vector not findable post-compact");
+        }
+
+        eprintln!(
+            "recall@{K} (ef_search={EF_SEARCH}, {} live / {} deleted): \
+             degraded(no-compact)={:.3}  compacted={:.3}  fresh-rebuild={:.3}",
+            live.len(),
+            to_delete.len(),
+            recall_degraded,
+            recall_compacted,
+            recall_fresh
+        );
+
+        // The feature does its job:
+        // 1. Lazy deletes measurably degrade recall.
+        assert!(
+            recall_degraded < recall_fresh - 0.02,
+            "expected measurable recall degradation: degraded={:.3} not < fresh={:.3}",
+            recall_degraded,
+            recall_fresh
+        );
+        // 2. Compaction restores recall to (essentially) the fresh-rebuild level.
+        assert!(
+            recall_compacted >= recall_fresh - 0.02,
+            "compaction did not restore recall: compacted={:.3} fresh={:.3}",
+            recall_compacted,
+            recall_fresh
+        );
+        // 3. Compaction is a strict improvement over the degraded graph.
+        assert!(
+            recall_compacted > recall_degraded,
+            "compaction must improve recall: {:.3} <= {:.3}",
+            recall_compacted,
+            recall_degraded
+        );
+    }
+
+    #[test]
+    fn test_auto_compaction_triggers_at_threshold() {
+        const N: usize = 100;
+        const DIM: usize = 4;
+
+        let dataset = deterministic_dataset(N, DIM, 42);
+        let mut index = HnswIndex::new(DIM, 16, 64, VectorDistanceMetric::L2);
+        // Default: auto_compact = true, threshold = 0.5.
+        assert!(index.auto_compact());
+        assert_eq!(index.compaction_threshold(), DEFAULT_COMPACTION_THRESHOLD);
+        index.build(dataset.clone()).unwrap();
+
+        // Remove just under half (49 of 100): 49/100 = 0.49 <= 0.5 -> no rebuild.
+        for id in 0..49 {
+            index.remove(id);
+        }
+        assert!(!index.take_compacted(), "should not compact below threshold");
+        assert_eq!(index.removed_count(), 49);
+
+        // One more delete: 50/100 = 0.50, still not > 0.5 -> no rebuild yet.
+        index.remove(49);
+        assert!(!index.take_compacted(), "ratio == threshold must not trigger");
+
+        // Next delete: 51/101 (live=50,removed=51) > 0.5 -> rebuild fires.
+        index.remove(50);
+        assert!(index.take_compacted(), "should auto-compact once ratio exceeds threshold");
+        assert_eq!(index.removed_count(), 0, "rebuild resets tombstone counter");
+        assert_eq!(index.len(), 49, "live vectors preserved across rebuild");
+    }
+
+    #[test]
+    fn test_post_compaction_search_correctness() {
+        const N: usize = 200;
+        const DIM: usize = 6;
+
+        let dataset = deterministic_dataset(N, DIM, 7);
+        let mut index = HnswIndex::new(DIM, 16, 64, VectorDistanceMetric::L2);
+        index.set_auto_compact(false);
+        index.build(dataset.clone()).unwrap();
+
+        // Delete every even id (including id 0 / likely entry point candidates).
+        let mut live = HashSet::new();
+        for id in 0..N {
+            if id % 2 == 0 {
+                index.remove(id);
+            } else {
+                live.insert(id);
+            }
+        }
+        index.compact();
+
+        assert_eq!(index.len(), live.len());
+        // Every live vector finds itself; no deleted (even) id ever appears.
+        for &id in &live {
+            let q = &dataset[id].1;
+            let res = index.search(q, 5).unwrap();
+            assert!(res.iter().any(|(r, _)| *r == id), "live id {id} not findable");
+            assert!(res.iter().all(|(r, _)| *r % 2 == 1), "deleted (even) id returned");
+        }
+    }
+
+    #[test]
+    fn test_explicit_compact_vs_auto_disabled() {
+        let dataset = deterministic_dataset(60, 4, 99);
+        let mut index = HnswIndex::new(4, 16, 64, VectorDistanceMetric::L2);
+        index.set_auto_compact(false);
+        index.build(dataset).unwrap();
+
+        // Delete well past threshold but with auto disabled: no rebuild.
+        for id in 0..50 {
+            index.remove(id);
+        }
+        assert!(!index.take_compacted());
+        assert_eq!(index.removed_count(), 50);
+        assert!(index.should_compact(), "ratio is above threshold");
+
+        // Maintenance layer drives it explicitly.
+        index.compact();
+        assert!(index.take_compacted());
+        assert_eq!(index.removed_count(), 0);
+        assert_eq!(index.len(), 10);
+    }
+
+    #[test]
+    fn test_compaction_rolls_back_via_cow_clone() {
+        // HNSW is a deep-Clone value, so the #5419 COW Operations snapshot
+        // captures a full copy. Simulate a transaction: snapshot (clone),
+        // mutate+compact, then ROLLBACK by restoring the snapshot.
+        let dataset = deterministic_dataset(80, 4, 0xABCD);
+        let mut index = HnswIndex::new(4, 16, 64, VectorDistanceMetric::L2);
+        index.build(dataset.clone()).unwrap();
+        let original_len = index.len();
+        let original_removed = index.removed_count();
+
+        // Arm COW snapshot (deep clone of pre-mutation state).
+        let snapshot = index.clone();
+
+        // Mutate within the "transaction": delete enough to force compaction.
+        for id in 0..60 {
+            index.remove(id);
+        }
+        index.compact();
+        assert!(index.take_compacted());
+        assert_ne!(index.len(), original_len, "transaction changed live count");
+
+        // ROLLBACK: restore the COW snapshot.
+        index = snapshot;
+
+        // State is fully restored — including all originally-deleted vectors.
+        assert_eq!(index.len(), original_len);
+        assert_eq!(index.removed_count(), original_removed);
+        for id in 0..60 {
+            let q = &dataset[id].1;
+            let res = index.search(q, 3).unwrap();
+            assert!(
+                res.iter().any(|(r, _)| *r == id),
+                "rolled-back vector {id} should be searchable again"
+            );
+        }
     }
 }
