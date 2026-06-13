@@ -438,27 +438,112 @@ impl IndexManager {
                             }
                         }
                         IndexData::IVFFlat { index } => {
-                            // IVFFlat indexes need to be rebuilt via build()
-                            // This requires extracting vectors from the table
-                            log::debug!(
-                                "IVFFlat index rebuild not yet implemented. Index '{}' needs manual rebuild.",
-                                index_name
+                            // Rebuild the IVFFlat index from the post-compaction table
+                            // rows so its internal row_id references match the new
+                            // (renumbered) row positions. A full rebuild re-runs
+                            // k-means clustering; compaction is rare, so correctness
+                            // is preferred over incremental maintenance here.
+                            //
+                            // Vector indexes are in-memory and part of the COW
+                            // snapshot of `Operations` (#5419/#5425): a rebuild that
+                            // runs inside a transaction is restored on ROLLBACK by
+                            // the snapshot clone — no disk undo-log is involved.
+                            let col_idx = match table_schema
+                                .get_column_index(metadata.columns[0].expect_column_name())
+                            {
+                                Some(idx) => idx,
+                                None => {
+                                    log::warn!(
+                                        "IVFFlat index '{}' column not found during rebuild; skipping",
+                                        index_name
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let vectors = Self::extract_vectors_for_rebuild(table_rows, col_idx);
+
+                            // Preserve the configured parameters of the existing index.
+                            let mut rebuilt = crate::database::indexes::ivfflat::IVFFlatIndex::new(
+                                index.dimensions(),
+                                index.num_lists() as u32,
+                                index.metric(),
                             );
-                            let _ = index; // Suppress unused warning
+                            rebuilt.set_probes(index.probes());
+
+                            if let Err(e) = rebuilt.build(vectors) {
+                                log::warn!(
+                                    "Failed to rebuild IVFFlat index '{}': {}",
+                                    index_name,
+                                    e
+                                );
+                            } else {
+                                *index = rebuilt;
+                            }
                         }
                         IndexData::Hnsw { index } => {
-                            // HNSW indexes need to be rebuilt via build()
-                            // This requires extracting vectors from the table
-                            log::debug!(
-                                "HNSW index rebuild not yet implemented. Index '{}' needs manual rebuild.",
-                                index_name
+                            // Rebuild the HNSW graph from the post-compaction table
+                            // rows so its internal row_id references match the new
+                            // (renumbered) row positions. HNSW graph construction is
+                            // O(n log n); compaction is rare, so a full rebuild is
+                            // acceptable in exchange for correctness.
+                            //
+                            // Like IVFFlat, HNSW indexes are in-memory and part of
+                            // the COW snapshot of `Operations`, so an in-transaction
+                            // rebuild is reversed on ROLLBACK by the snapshot clone.
+                            let col_idx = match table_schema
+                                .get_column_index(metadata.columns[0].expect_column_name())
+                            {
+                                Some(idx) => idx,
+                                None => {
+                                    log::warn!(
+                                        "HNSW index '{}' column not found during rebuild; skipping",
+                                        index_name
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let vectors = Self::extract_vectors_for_rebuild(table_rows, col_idx);
+
+                            // Preserve the configured parameters of the existing index.
+                            let mut rebuilt = crate::database::indexes::hnsw::HnswIndex::new(
+                                index.dimensions(),
+                                index.m() as u32,
+                                index.ef_construction() as u32,
+                                index.metric(),
                             );
-                            let _ = index; // Suppress unused warning
+                            rebuilt.set_ef_search(index.ef_search());
+
+                            if let Err(e) = rebuilt.build(vectors) {
+                                log::warn!("Failed to rebuild HNSW index '{}': {}", index_name, e);
+                            } else {
+                                *index = rebuilt;
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    /// Extract `(row_id, vector)` pairs from the given table rows for the vector
+    /// column at `col_idx`, for rebuilding an IVFFlat/HNSW index after compaction.
+    ///
+    /// `row_id` is the row's position in `table_rows` (the post-compaction
+    /// position), which is exactly what vector search must return so callers can
+    /// look the row back up in the compacted table. NULL / non-vector cells are
+    /// skipped, mirroring the create path.
+    fn extract_vectors_for_rebuild(table_rows: &[Row], col_idx: usize) -> Vec<(usize, Vec<f64>)> {
+        let mut vectors = Vec::new();
+        for (row_index, row) in table_rows.iter().enumerate() {
+            if col_idx < row.values.len() {
+                if let Some(vec_data) = IndexManager::extract_vector(&row.values[col_idx]) {
+                    vectors.push((row_index, vec_data));
+                }
+            }
+        }
+        vectors
     }
 
     // ============================================================================

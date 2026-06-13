@@ -90,6 +90,11 @@ impl IVFFlatIndex {
         self.inverted_lists.len()
     }
 
+    /// Get the number of dimensions of vectors in this index
+    pub fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
     /// Check if the index is trained
     pub fn is_trained(&self) -> bool {
         self.trained
