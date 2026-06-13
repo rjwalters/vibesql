@@ -56,7 +56,9 @@
 //! bare [`Database`] with no session state, and that is load-bearing.
 //! The session-scoped knobs that could change write-statement *semantics*
 //! (`sql_mode`, `foreign_keys_enabled` / `defer_foreign_keys`,
-//! `case_sensitive_like`, roles/security, session variables — see
+//! `case_sensitive_like`, `reverse_unordered_selects` — which flips the
+//! row order an `INSERT ... SELECT` (no `ORDER BY`) materializes, hence
+//! the rowids it assigns — roles/security, session variables — see
 //! `vibesql-storage::database::session`) all sit at their defaults on
 //! every machine, because the replicated statement surface has no way
 //! to mutate them: PRAGMA/SET/GRANT-style statements are rejected by
@@ -1436,10 +1438,21 @@ mod tests {
     //   - `case_sensitive_like`   (changes which rows a LIKE predicate selects,
     //                              so it changes UPDATE/DELETE *effects*, not
     //                              just SELECT presentation)
+    //   - `reverse_unordered_selects`
+    //                             (reverses the output order of an unordered
+    //                              SELECT — so an `INSERT ... SELECT` with no
+    //                              `ORDER BY` materializes rows in the opposite
+    //                              order and assigns rowids accordingly; a write
+    //                              effect, not just SELECT presentation)
     //   - `sql_mode`              (MySQL vs SQLite type coercion / division /
     //                              REPLACE semantics)
     //   - generic `session_variables` read by SQL functions
     //   - role / security enforcement (`is_security_enabled`)
+    //
+    // `full_column_names` / `short_column_names` were considered and *excluded*:
+    // they are read only by SELECT column-naming (`select::executor::columns`),
+    // never by any DML/DDL/SELECT-materialization path, so they affect result
+    // presentation only — never a write's effects.
     //
     // and concluded all are write-semantics-neutral *as deployed* because the
     // replicated surface cannot mutate them: PRAGMA / SET / GRANT statements
@@ -1471,6 +1484,10 @@ mod tests {
                 "case_sensitive_like must default OFF on the replicated machine (#5392)"
             );
             assert!(
+                !db.reverse_unordered_selects(),
+                "reverse_unordered_selects must default OFF on the replicated machine (#5392)"
+            );
+            assert!(
                 matches!(db.sql_mode(), vibesql_types::SqlMode::MySQL { .. }),
                 "sql_mode must default to MySQL on the replicated machine (#5392); got {:?}",
                 db.sql_mode()
@@ -1486,6 +1503,7 @@ mod tests {
             assert!(!db.foreign_keys_enabled());
             assert!(!db.defer_foreign_keys());
             assert!(!db.case_sensitive_like());
+            assert!(!db.reverse_unordered_selects());
             assert!(matches!(db.sql_mode(), vibesql_types::SqlMode::MySQL { .. }));
         });
     }
