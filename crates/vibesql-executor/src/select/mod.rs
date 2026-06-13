@@ -19,6 +19,7 @@ mod projection_simd;
 pub(crate) mod scan;
 mod set_operations;
 mod vectorized;
+pub(crate) mod view_reference_guard;
 pub(crate) mod window;
 
 pub use cte::CteResult;

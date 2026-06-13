@@ -266,6 +266,23 @@ fn visible_columns(names: Vec<String>) -> Vec<WildcardColumn> {
     names.into_iter().map(|name| WildcardColumn { name, hidden_for_star: false }).collect()
 }
 
+/// Resolve a catalog view's output column names *statically*, without executing
+/// its body.
+///
+/// Prefers the view's stored column list (populated at CREATE VIEW time). When
+/// that is absent, derives the names from the view's defining query's SELECT
+/// list (recursively expanding wildcards over its own sources). Returns `None`
+/// when `name` is not a view or its columns cannot be determined statically.
+fn view_column_names(name: &str, database: &vibesql_storage::Database) -> Option<Vec<String>> {
+    let view = database.catalog.get_view(name)?;
+    if let Some(cols) = &view.columns {
+        return Some(cols.clone());
+    }
+    // Fall back to deriving from the view's defining query. No prior CTEs are in
+    // scope for a stored view definition.
+    collect_select_list_columns(&view.query, database, &HashMap::new())
+}
+
 /// Expand a wildcard SELECT item (`*` or `qualifier.*`) into column names
 /// using the statement's FROM clause.
 ///
@@ -332,8 +349,16 @@ fn collect_from_sources(
                 schema.columns.iter().map(|c| c.name.clone()).collect()
             } else if let Some(table) = database.get_table(name) {
                 table.schema.columns.iter().map(|c| c.name.clone()).collect()
+            } else if let Some(cols) = view_column_names(name, database) {
+                // A catalog view whose output columns are known statically.
+                // Resolving views from their stored column list (rather than
+                // executing their bodies) is essential to keep deeply nested
+                // views cheap: it lets CREATE VIEW derive columns without the
+                // exponential re-materialization of doubling view nests
+                // (#5394, view3.test).
+                cols
             } else {
-                // Unknown source (e.g. a view) - cannot resolve statically
+                // Unknown source we cannot resolve statically.
                 return None;
             };
 
@@ -426,6 +451,24 @@ fn collect_from_sources(
             }])
         }
     }
+}
+
+/// Statically compute a SELECT statement's output column names, expanding
+/// wildcards (resolving tables, CTEs, and views from catalog metadata) without
+/// executing the query.
+///
+/// For compound queries (UNION/INTERSECT/EXCEPT) the column names come from the
+/// leftmost SELECT, matching SQL/SQLite semantics.
+///
+/// Used by CREATE VIEW to derive a view's columns cheaply, avoiding the
+/// exponential re-materialization of deeply nested views (#5394, view3.test).
+/// Returns `None` when names cannot be determined statically; callers then fall
+/// back to executing the body.
+pub(crate) fn try_static_select_columns(
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+) -> Option<Vec<String>> {
+    collect_select_list_columns(stmt, database, &HashMap::new())
 }
 
 /// Compute the output column names of a SELECT statement, expanding any
