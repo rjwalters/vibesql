@@ -43,8 +43,34 @@ use crate::errors::ExecutorError;
 /// A `RAISE()` can only originate from a trigger body, so a table with no
 /// triggers can never need a statement savepoint. This lets the common
 /// (trigger-free) DML path skip the snapshot entirely.
+///
+/// FK cascade caveat (#5440): a DELETE/UPDATE on `table` can cascade into
+/// child tables and fire *their* row triggers, which may `RAISE(ABORT)`. So
+/// when foreign keys are enabled and any table in the database carries a
+/// trigger, this statement could still fire a `RAISE()` even if `table`
+/// itself has none. We arm the savepoint conservatively in that case so a
+/// cascade-fired `RAISE(ABORT)` rolls back the whole statement (matching
+/// sqlite3 3.51). The check is cheap: it only walks the catalog, and only
+/// when FKs are on.
 pub(crate) fn table_may_fire_trigger(db: &Database, table: &str) -> bool {
-    db.catalog.get_triggers_for_table(table, None).next().is_some()
+    if db.catalog.get_triggers_for_table(table, None).next().is_some() {
+        return true;
+    }
+
+    // Cascade can reach another table's trigger only when FK enforcement is
+    // active. Bail out cheaply otherwise.
+    if !db.foreign_keys_enabled() {
+        return false;
+    }
+
+    // Conservative: any trigger anywhere in the DB could be reached by a
+    // cascade chain rooted at `table`. We don't trace the full FK graph here
+    // — arming an unused savepoint is harmless (it is released on success),
+    // whereas missing one would silently skip statement rollback.
+    db.catalog
+        .list_tables()
+        .iter()
+        .any(|t| db.catalog.get_triggers_for_table(t, None).next().is_some())
 }
 
 /// Apply the transaction-scope rollback for a `RAISE(action, msg)` that

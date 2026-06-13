@@ -80,6 +80,7 @@ mod error_display;
 mod expression_eval;
 mod expression_index_dml_tests;
 mod expression_index_tests;
+mod fk_cascade_triggers;
 mod foreign_key_mismatch;
 mod fulltext_search;
 mod function_tests;

@@ -189,8 +189,15 @@ impl ForeignKeyValidator {
         let session_defer = db.defer_foreign_keys();
         let in_txn = db.in_transaction();
 
-        // Collect cascade updates to apply after scanning (to avoid borrow checker issues)
-        let mut cascade_updates: Vec<(String, Vec<(usize, vibesql_storage::Row)>)> = Vec::new();
+        // Collect cascade updates to apply after scanning (to avoid borrow
+        // checker issues). Each entry carries the row index, the OLD child
+        // row, and the NEW child row so the cascade can fire the child
+        // table's BEFORE/AFTER UPDATE triggers with both pseudo-rows (#5440).
+        #[allow(clippy::type_complexity)]
+        let mut cascade_updates: Vec<(
+            String,
+            Vec<(usize, vibesql_storage::Row, vibesql_storage::Row)>,
+        )> = Vec::new();
 
         // Phase C2: collected NO ACTION orphans to queue after scanning
         // (queueing requires &mut Database, which conflicts with the
@@ -289,17 +296,23 @@ impl ForeignKeyValidator {
                     // Check the referential action
                     match fk.on_update {
                         vibesql_catalog::ReferentialAction::Cascade => {
-                            // Prepare cascade updates for this table
-                            let updated_rows: Vec<(usize, vibesql_storage::Row)> = matching_rows
+                            // Prepare cascade updates for this table, keeping
+                            // the OLD row so child UPDATE triggers see it.
+                            let updated_rows: Vec<(
+                                usize,
+                                vibesql_storage::Row,
+                                vibesql_storage::Row,
+                            )> = matching_rows
                                 .into_iter()
-                                .map(|(row_idx, mut child_row)| {
+                                .map(|(row_idx, old_child_row)| {
+                                    let mut child_row = old_child_row.clone();
                                     // Update the FK columns to match the new parent key
                                     for (fk_col_idx, new_parent_val) in
                                         fk.column_indices.iter().zip(&new_parent_key_values)
                                     {
                                         child_row.values[*fk_col_idx] = new_parent_val.clone();
                                     }
-                                    (row_idx, child_row)
+                                    (row_idx, old_child_row, child_row)
                                 })
                                 .collect();
 
@@ -307,15 +320,20 @@ impl ForeignKeyValidator {
                         }
                         vibesql_catalog::ReferentialAction::SetNull => {
                             // Set child FK columns to NULL
-                            let updated_rows: Vec<(usize, vibesql_storage::Row)> = matching_rows
+                            let updated_rows: Vec<(
+                                usize,
+                                vibesql_storage::Row,
+                                vibesql_storage::Row,
+                            )> = matching_rows
                                 .into_iter()
-                                .map(|(row_idx, mut child_row)| {
+                                .map(|(row_idx, old_child_row)| {
+                                    let mut child_row = old_child_row.clone();
                                     // Set FK columns to NULL
                                     for &fk_col_idx in &fk.column_indices {
                                         child_row.values[fk_col_idx] =
                                             vibesql_types::SqlValue::Null;
                                     }
-                                    (row_idx, child_row)
+                                    (row_idx, old_child_row, child_row)
                                 })
                                 .collect();
 
@@ -369,14 +387,19 @@ impl ForeignKeyValidator {
                             }
 
                             // Apply default values to matching rows
-                            let updated_rows: Vec<(usize, vibesql_storage::Row)> = matching_rows
+                            let updated_rows: Vec<(
+                                usize,
+                                vibesql_storage::Row,
+                                vibesql_storage::Row,
+                            )> = matching_rows
                                 .into_iter()
-                                .map(|(row_idx, mut child_row)| {
+                                .map(|(row_idx, old_child_row)| {
+                                    let mut child_row = old_child_row.clone();
                                     // Set FK columns to their default values
                                     for (i, &fk_col_idx) in fk.column_indices.iter().enumerate() {
                                         child_row.values[fk_col_idx] = default_values[i].clone();
                                     }
-                                    (row_idx, child_row)
+                                    (row_idx, old_child_row, child_row)
                                 })
                                 .collect();
 
@@ -437,17 +460,60 @@ impl ForeignKeyValidator {
         // xmin on every cascade-update new row version. Off-state is a
         // no-op. We capture the txn id once outside the per-table loop
         // since the txn doesn't change within an UPDATE.
+        //
+        // FK cascade fires the child table's BEFORE/AFTER UPDATE row
+        // triggers for every cascaded row, matching sqlite3 3.51 (#5440).
+        // sqlite3 fires these regardless of the `recursive_triggers`
+        // pragma; the depth-16 RecursionGuard inside the firing helpers
+        // bounds multi-level FK chains. Per row the order is
+        //   BEFORE child trigger -> update -> AFTER child trigger
+        // (verified against sqlite3 3.51.0). A RAISE(IGNORE) (SkipRow) in a
+        // BEFORE trigger abandons that child row's cascade update; a
+        // RAISE(ABORT|FAIL|ROLLBACK) propagates as Err and aborts the
+        // whole statement.
         let txn_id = db.transaction_id();
         for (table_name, mut updates) in cascade_updates {
-            for (_row_idx, new_row) in updates.iter_mut() {
+            for (_row_idx, _old_row, new_row) in updates.iter_mut() {
                 vibesql_storage::stamp_xmin_for_write(new_row, txn_id);
                 new_row.xmax = None;
             }
-            let child_table = db.get_table_mut(&table_name).unwrap();
-            for (row_idx, new_row) in updates {
+
+            let has_child_update_triggers = db
+                .catalog
+                .get_triggers_for_table(&table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
+                .next()
+                .is_some();
+
+            for (row_idx, old_row, new_row) in updates {
+                // BEFORE UPDATE row triggers on the child.
+                if has_child_update_triggers {
+                    let outcome = crate::TriggerFirer::execute_before_triggers(
+                        db,
+                        &table_name,
+                        vibesql_ast::TriggerEvent::Update(None),
+                        Some(&old_row),
+                        Some(&new_row),
+                    )?;
+                    if outcome == crate::TriggerOutcome::SkipRow {
+                        continue;
+                    }
+                }
+
+                let child_table = db.get_table_mut(&table_name).unwrap();
                 child_table
-                    .update_row(row_idx, new_row)
+                    .update_row(row_idx, new_row.clone())
                     .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+                // AFTER UPDATE row triggers fire once the row is updated.
+                if has_child_update_triggers {
+                    let _after = crate::TriggerFirer::execute_after_triggers(
+                        db,
+                        &table_name,
+                        vibesql_ast::TriggerEvent::Update(None),
+                        Some(&old_row),
+                        Some(&new_row),
+                    )?;
+                }
             }
             // Rebuild indexes after updates (following the same pattern as DELETE operations)
             db.rebuild_indexes(&table_name);
