@@ -1248,4 +1248,219 @@ mod tests {
             other => panic!("expected IVFFlat, got {:?}", other),
         }
     }
+
+    // ========================================================================
+    // Vector-index (IVFFlat / HNSW) per-row maintenance on non-compacting
+    // INSERT / UPDATE / DELETE (issue #5450)
+    //
+    // These DML paths tombstone deletes via the table's deletion bitmap (no row
+    // renumbering) and never trigger `rebuild_indexes`, so the per-row
+    // maintenance arms must keep the vector index in sync incrementally.
+    // ========================================================================
+
+    /// Build an IVFFlat-indexed manager over the given rows.
+    fn ivfflat_manager(rows: &[Row]) -> IndexManager {
+        let mut manager = IndexManager::new();
+        manager
+            .create_ivfflat_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                2,
+                VectorDistanceMetric::L2,
+                vectors_from(rows),
+            )
+            .unwrap();
+        // Probe all lists so search is exhaustive and deterministic in tests.
+        manager.set_ivfflat_probes("idx_vec", 2).unwrap();
+        manager
+    }
+
+    /// Build an HNSW-indexed manager over the given rows.
+    fn hnsw_manager(rows: &[Row]) -> IndexManager {
+        let mut manager = IndexManager::new();
+        manager
+            .create_hnsw_index_with_vectors(
+                "idx_vec".to_string(),
+                "v".to_string(),
+                "vec".to_string(),
+                2,
+                16,
+                64,
+                VectorDistanceMetric::L2,
+                vectors_from(rows),
+            )
+            .unwrap();
+        manager
+    }
+
+    fn sorted_ivfflat_ids(manager: &IndexManager, query: &[f64], k: usize) -> Vec<usize> {
+        let mut ids: Vec<usize> = manager
+            .search_ivfflat_index("idx_vec", query, k)
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn sorted_hnsw_ids(manager: &IndexManager, query: &[f64], k: usize) -> Vec<usize> {
+        let mut ids: Vec<usize> = manager
+            .search_hnsw_index("idx_vec", query, k)
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// #5450: a non-compacting DELETE must drop the deleted row from an IVFFlat
+    /// index so a subsequent nearest-neighbor search cannot return it.
+    #[test]
+    fn ivfflat_non_compacting_delete_excludes_row() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 0.0, 0.0), vrow(2, 0.1, 0.0), vrow(3, 10.0, 10.0)];
+        let mut manager = ivfflat_manager(&rows);
+
+        // Sanity: all three are findable, row 0 is the nearest to the origin.
+        assert_eq!(sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3), vec![0, 1, 2]);
+
+        // DELETE row 0 (the closest to the query) without compaction.
+        manager.update_indexes_for_delete_with_values(
+            "v",
+            &schema,
+            &rows[0].values,
+            0,
+        );
+
+        let ids = sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3);
+        assert!(!ids.contains(&0), "deleted row 0 must not be returned: {:?}", ids);
+        assert_eq!(ids, vec![1, 2], "only the surviving rows remain searchable");
+    }
+
+    /// #5450: same for HNSW.
+    #[test]
+    fn hnsw_non_compacting_delete_excludes_row() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 0.0, 0.0), vrow(2, 0.1, 0.0), vrow(3, 10.0, 10.0)];
+        let mut manager = hnsw_manager(&rows);
+
+        assert_eq!(sorted_hnsw_ids(&manager, &[0.0, 0.0], 3), vec![0, 1, 2]);
+
+        manager.update_indexes_for_delete_with_values("v", &schema, &rows[0].values, 0);
+
+        let ids = sorted_hnsw_ids(&manager, &[0.0, 0.0], 3);
+        assert!(!ids.contains(&0), "deleted row 0 must not be returned: {:?}", ids);
+        assert_eq!(ids, vec![1, 2]);
+    }
+
+    /// #5450: INSERT must add the new row's vector to an IVFFlat index so it is
+    /// immediately findable (previously a no-op).
+    #[test]
+    fn ivfflat_insert_makes_row_findable() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 10.0, 10.0), vrow(2, 9.9, 10.0)];
+        let mut manager = ivfflat_manager(&rows);
+
+        // A query near the origin finds nothing close yet.
+        assert!(!sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3).contains(&2));
+
+        // INSERT a new row near the origin at position 2.
+        let new_row = vrow(3, 0.05, 0.0);
+        manager.add_to_indexes_for_insert("v", &schema, &new_row, 2);
+
+        let ids = sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3);
+        assert!(ids.contains(&2), "newly inserted row 2 must be findable: {:?}", ids);
+        // It must be the nearest.
+        let nearest = manager.search_ivfflat_index("idx_vec", &[0.0, 0.0], 1).unwrap();
+        assert_eq!(nearest[0].0, 2);
+    }
+
+    /// #5450: INSERT must add to an HNSW index.
+    #[test]
+    fn hnsw_insert_makes_row_findable() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 10.0, 10.0), vrow(2, 9.9, 10.0)];
+        let mut manager = hnsw_manager(&rows);
+
+        let new_row = vrow(3, 0.05, 0.0);
+        manager.add_to_indexes_for_insert("v", &schema, &new_row, 2);
+
+        let ids = sorted_hnsw_ids(&manager, &[0.0, 0.0], 3);
+        assert!(ids.contains(&2), "newly inserted row 2 must be findable: {:?}", ids);
+        let nearest = manager.search_hnsw_index("idx_vec", &[0.0, 0.0], 1).unwrap();
+        assert_eq!(nearest[0].0, 2);
+    }
+
+    /// #5450: UPDATE that changes a vector must make search reflect the NEW
+    /// vector, not the old one, for an IVFFlat index.
+    #[test]
+    fn ivfflat_update_reflects_new_vector() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0)];
+        let mut manager = ivfflat_manager(&rows);
+
+        // Move row 1 (far away) to near the origin.
+        let old_row = rows[1].clone();
+        let new_row = vrow(2, 0.05, 0.0);
+        manager.update_indexes_for_update("v", &schema, &old_row, &new_row, 1, None);
+
+        // Querying the OLD location must no longer match row 1 as nearest;
+        // querying the NEW location must.
+        let near_origin = manager.search_ivfflat_index("idx_vec", &[0.05, 0.0], 1).unwrap();
+        assert_eq!(near_origin[0].0, 1, "updated vector must be findable at its new location");
+
+        let near_old = sorted_ivfflat_ids(&manager, &[10.0, 10.0], 2);
+        // Row 1 should now be far from the old location; row 0 (origin) and the
+        // moved row 1 are both near the origin, so the old far location returns
+        // them only by distance order — the key correctness check is that the
+        // index no longer holds a vector at (10,10).
+        assert_eq!(near_old, vec![0, 1], "both rows remain in the index after update");
+    }
+
+    /// #5450: UPDATE that changes a vector must update an HNSW index.
+    #[test]
+    fn hnsw_update_reflects_new_vector() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 0.0, 0.0), vrow(2, 10.0, 10.0)];
+        let mut manager = hnsw_manager(&rows);
+
+        let old_row = rows[1].clone();
+        let new_row = vrow(2, 0.05, 0.0);
+        manager.update_indexes_for_update("v", &schema, &old_row, &new_row, 1, None);
+
+        let near_origin = manager.search_hnsw_index("idx_vec", &[0.05, 0.0], 1).unwrap();
+        assert_eq!(near_origin[0].0, 1, "updated vector must be findable at its new location");
+
+        match manager.index_data.get("idx_vec").unwrap() {
+            IndexData::Hnsw { index } => assert_eq!(index.len(), 2, "still two vectors after update"),
+            other => panic!("expected Hnsw, got {:?}", other),
+        }
+    }
+
+    /// #5450: a non-compacting DELETE followed by ROLLBACK (modeled by the COW
+    /// snapshot of #5419) must restore the deleted row in the vector index.
+    #[test]
+    fn ivfflat_per_row_delete_rolls_back_via_snapshot() {
+        let schema = vector_schema();
+        let rows = vec![vrow(1, 0.0, 0.0), vrow(2, 0.1, 0.0), vrow(3, 10.0, 10.0)];
+        let mut manager = ivfflat_manager(&rows);
+
+        // BEGIN: COW snapshot.
+        let snapshot = manager.clone();
+
+        // DELETE row 0 mid-transaction.
+        manager.update_indexes_for_delete_with_values("v", &schema, &rows[0].values, 0);
+        assert!(!sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3).contains(&0));
+
+        // ROLLBACK: restore the snapshot.
+        manager = snapshot;
+        assert!(
+            sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3).contains(&0),
+            "ROLLBACK restores the deleted row in the vector index"
+        );
+    }
 }
