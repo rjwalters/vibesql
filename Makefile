@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-hnsw benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -138,6 +138,7 @@ help:
 	@echo "  make benchmark-tpcc          - TPC-C OLTP benchmark (embedded engines)"
 	@echo "  make benchmark-tpcds         - TPC-DS decision support (embedded engines)"
 	@echo "  make benchmark-sysbench      - Sysbench OLTP (embedded engines)"
+	@echo "  make benchmark-hnsw          - HNSW recall@k vector-index quality (VibeSQL)"
 	@echo ""
 	@echo "Server benchmarks (VibeSQL-server, MySQL - client-server, requires Docker for MySQL):"
 	@echo "  make benchmark-server-all    - All server benchmarks × all server engines"
@@ -465,6 +466,12 @@ benchmark-tpcds:
 benchmark-sysbench:
 	@echo "Running Sysbench benchmarks (embedded engines)..."
 	@./scripts/bench --test=sysbench --engine=vibesql,sqlite,duckdb
+
+# Run HNSW recall@k quality benchmark (vector index, VibeSQL only)
+# Tracks recall under delete-heavy workloads (fresh / degraded / compacted).
+benchmark-hnsw:
+	@echo "Running HNSW recall@k benchmark (VibeSQL)..."
+	@./scripts/bench --test=hnsw --engine=vibesql
 
 #
 # CLI Benchmarks (apples-to-apples comparison via CLI tools)

@@ -1309,10 +1309,150 @@ class SysbenchParser(BenchmarkParser):
 
 
 # =============================================================================
+# HNSW Recall Parser
+# =============================================================================
+
+class HnswRecallParser(BenchmarkParser):
+    """Parser for HNSW recall@k quality benchmark results.
+
+    Unlike the latency-oriented parsers this stores a *quality* metric
+    (recall@k) for three index states (fresh / degraded / compacted) across a
+    sweep of ef_search and delete ratio. See #5466.
+
+    Expected output (from crates/vibesql-storage/benches/hnsw_recall_benchmark.rs):
+
+        === HNSW Recall@10 Benchmark ===
+        Dataset: 3000 vectors, dim=16, queries=100, M=16, ef_construction=64
+
+        --- VibeSQL Recall Results ---
+        EfSearch    DeleteRatio     Live   Deleted      Fresh   Degraded  Compacted
+        ---------- ------------ -------- --------- ---------- ---------- ----------
+        12                 0.50     1500      1500     0.9980     0.9850     0.9970
+        ...
+    """
+
+    @property
+    def benchmark_suite(self) -> str:
+        return 'hnsw'
+
+    @classmethod
+    def can_parse(cls, content: str) -> bool:
+        return ('HNSW Recall@' in content or
+                '--- VibeSQL Recall Results ---' in content)
+
+    def parse(self, content: str) -> Tuple[List[Dict], Dict]:
+        results: List[Dict] = []
+
+        # Header: "=== HNSW Recall@10 Benchmark ==="
+        k = 10
+        k_match = re.search(r'HNSW Recall@(\d+)', content)
+        if k_match:
+            k = int(k_match.group(1))
+
+        # Config: "Dataset: 3000 vectors, dim=16, queries=100, ..."
+        dataset_size = None
+        dimensions = None
+        cfg_match = re.search(r'Dataset:\s+(\d+)\s+vectors,\s+dim=(\d+)', content)
+        if cfg_match:
+            dataset_size = int(cfg_match.group(1))
+            dimensions = int(cfg_match.group(2))
+
+        # Data rows:
+        # "12   0.50   1500   1500   0.9980   0.9850   0.9970"
+        # ef_search delete_ratio live deleted fresh degraded compacted
+        row_pattern = re.compile(
+            r'^\s*(\d+)\s+'        # ef_search
+            r'([\d.]+)\s+'        # delete_ratio
+            r'(\d+)\s+'           # live
+            r'(\d+)\s+'           # deleted
+            r'([\d.]+)\s+'        # fresh
+            r'([\d.]+)\s+'        # degraded
+            r'([\d.]+)\s*$',      # compacted
+            re.MULTILINE
+        )
+
+        for m in row_pattern.finditer(content):
+            ef_search = int(m.group(1))
+            delete_ratio = float(m.group(2))
+            live = int(m.group(3))
+            deleted = int(m.group(4))
+            recalls = {
+                'fresh': float(m.group(5)),
+                'degraded': float(m.group(6)),
+                'compacted': float(m.group(7)),
+            }
+            for state, recall in recalls.items():
+                results.append({
+                    'database_engine': 'vibesql',
+                    'k': k,
+                    'dataset_size': dataset_size,
+                    'dimensions': dimensions,
+                    'ef_search': ef_search,
+                    'delete_ratio': delete_ratio,
+                    'live_count': live,
+                    'deleted_count': deleted,
+                    'index_state': state,
+                    'recall': recall,
+                })
+
+        summary = {
+            'k': k,
+            'dataset_size': dataset_size,
+            'dimensions': dimensions,
+            'total_results': len(results),
+            'total_queries': len(results),
+        }
+        return results, summary
+
+    def insert_results(self, db, cursor, results: List[Dict], summary: Dict,
+                       config: Dict) -> int:
+        """Insert HNSW recall results into the database."""
+        git_commit, git_branch = get_git_info()
+        notes = config.get('notes')
+
+        execute_insert(cursor, "benchmark_runs", [
+            "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
+            "scale_factor", "total_queries", "notes"
+        ], [
+            datetime.now().isoformat(),
+            git_commit,
+            git_branch,
+            'hnsw',
+            str(summary.get('dataset_size') or ''),
+            len(results),
+            notes
+        ])
+
+        run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
+
+        for result in results:
+            execute_insert(cursor, "hnsw_recall_results", [
+                "run_id", "database_engine", "k", "dataset_size", "dimensions",
+                "ef_search_param", "delete_ratio", "live_count", "deleted_count",
+                "index_state", "recall"
+            ], [
+                run_id,
+                result.get('database_engine', 'vibesql'),
+                result.get('k'),
+                result.get('dataset_size'),
+                result.get('dimensions'),
+                result.get('ef_search'),
+                result.get('delete_ratio'),
+                result.get('live_count'),
+                result.get('deleted_count'),
+                result.get('index_state', 'unknown'),
+                result.get('recall'),
+            ])
+
+        save_connection(db)
+        return run_id
+
+
+# =============================================================================
 # Auto-detection and Parser Registry
 # =============================================================================
 
-PARSERS = [TPCHParser, TPCCParser, TPCDSParser, SysbenchParser]
+PARSERS = [TPCHParser, TPCCParser, TPCDSParser, SysbenchParser, HnswRecallParser]
 
 def detect_benchmark_type(content: str) -> Optional[BenchmarkParser]:
     """Auto-detect benchmark type from content and return appropriate parser."""
@@ -1329,6 +1469,7 @@ def get_parser(benchmark_type: str) -> Optional[BenchmarkParser]:
         'tpcc': TPCCParser,
         'tpcds': TPCDSParser,
         'sysbench': SysbenchParser,
+        'hnsw': HnswRecallParser,
     }
     parser_cls = type_map.get(benchmark_type.lower())
     return parser_cls() if parser_cls else None
@@ -1395,7 +1536,7 @@ Examples:
     # Type specification
     parser.add_argument(
         "--type", "-t",
-        choices=["tpch", "tpcc", "tpcds", "sysbench"],
+        choices=["tpch", "tpcc", "tpcds", "sysbench", "hnsw"],
         help="Benchmark type (auto-detected if not specified)"
     )
 
@@ -1498,6 +1639,7 @@ Examples:
             'tpcc': '/tmp/tpcc_results.txt',
             'tpcds': '/tmp/tpcds_results.txt',
             'sysbench': '/tmp/sysbench_results.txt',
+            'hnsw': '/tmp/hnsw_results.txt',
         }
 
         if args.type and args.type in default_inputs:

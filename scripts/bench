@@ -229,7 +229,7 @@ Transaction Filter (--txn):
     # Server tests: tpch-server, tpcc-server, sysbench-server
     parser.add_argument(
         "--test",
-        choices=["tpch", "tpcc", "tpcds", "sysbench", "tpch-server", "tpcc-server", "sysbench-server", "all"],
+        choices=["tpch", "tpcc", "tpcds", "sysbench", "hnsw", "tpch-server", "tpcc-server", "sysbench-server", "all"],
         default="tpch",
         help="Benchmark to run (default: tpch). Server tests use client-server protocol."
     )
@@ -861,6 +861,68 @@ def run_sysbench(config: BenchConfig) -> int:
     return 0
 
 
+def run_hnsw(config: BenchConfig) -> int:
+    """Run the HNSW recall@k quality benchmark (#5466).
+
+    Unlike the latency-oriented suites this measures a *quality* metric: HNSW
+    recall@k vs brute-force ground truth across fresh / degraded (lazy delete) /
+    compacted index states. VibeSQL-only (recall is an engine-internal metric).
+    """
+    print("\n" + "=" * 60)
+    print("HNSW Recall@k Benchmark")
+    print("=" * 60)
+
+    repo_root = Path(__file__).parent.parent
+
+    # Build the benchmark binary (in-memory-indexes keeps benchmark data fast).
+    print("\nBuilding benchmark...")
+    binary = build_bench_and_get_binary(
+        "vibesql-storage", "hnsw_recall_benchmark", features=["in-memory-indexes"]
+    )
+    if not binary:
+        print("❌ Build failed")
+        return 1
+
+    strip_quarantine()
+
+    # Allow quick/smoke runs to shrink the dataset for faster pipeline checks.
+    env = os.environ.copy()
+    if config.test_mode:
+        env.setdefault("HNSW_RECALL_DATASET_SIZE", "800")
+        env.setdefault("HNSW_RECALL_QUERIES", "40")
+    elif config.quick:
+        env.setdefault("HNSW_RECALL_DATASET_SIZE", "1500")
+        env.setdefault("HNSW_RECALL_QUERIES", "60")
+
+    print("\nRunning HNSW recall benchmark...")
+    result = subprocess.run(
+        [binary],
+        cwd=repo_root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+
+    print(result.stdout)
+
+    with open("/tmp/hnsw_results.txt", "w") as f:
+        f.write(result.stdout)
+
+    if result.returncode != 0:
+        print("❌ HNSW recall benchmark failed (recall invariants not met)")
+        return 1
+
+    # Process results into the dogfooded results DB.
+    print("\nProcessing results into database...")
+    subprocess.run(
+        ["./scripts/process_results.py", "--type=hnsw", "--input", "/tmp/hnsw_results.txt"],
+        cwd=repo_root
+    )
+
+    return 0
+
+
 def run_sysbench_server(config: BenchConfig) -> int:
     """Run Sysbench server benchmark (VibeSQL server vs MySQL)."""
     print("\n" + "=" * 60)
@@ -1284,11 +1346,11 @@ def run_all(config: BenchConfig) -> int:
     # In smoke test mode, include server benchmarks for fair MySQL comparison
     # TPC-DS now supports QUERY_FILTER, so we include it for full pipeline validation
     if config.test_mode:
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server", "tpcc-server"]
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "hnsw", "sysbench-server", "tpch-server", "tpcc-server"]
         print("Note: Skipping footprint in smoke test mode")
     else:
         # Full benchmark suite includes server benchmarks and footprint
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server", "tpcc-server", "footprint"]
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "hnsw", "sysbench-server", "tpch-server", "tpcc-server", "footprint"]
 
     for test in benchmarks:
         config.test = test
@@ -1303,6 +1365,8 @@ def run_all(config: BenchConfig) -> int:
             ret = run_tpcds(config)
         elif test == "sysbench":
             ret = run_sysbench(config)
+        elif test == "hnsw":
+            ret = run_hnsw(config)
         elif test == "sysbench-server":
             ret = run_sysbench_server(config)
         elif test == "tpch-server":
@@ -1465,6 +1529,8 @@ def main():
         return run_tpcds(config)
     elif config.test == "sysbench":
         return run_sysbench(config)
+    elif config.test == "hnsw":
+        return run_hnsw(config)
     elif config.test == "tpch-server":
         return run_tpch_server(config)
     elif config.test == "tpcc-server":
