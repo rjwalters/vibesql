@@ -809,6 +809,19 @@ fn execute_write_statement(
         }
     }
 
+    // 2b. The #5398 residual: TIME→TIMESTAMP casts whose operand is not
+    //     the target-table TIME column — an other-table column or a
+    //     computed TIME expression, in a SET/WHERE root or inside an
+    //     `INSERT … SELECT` body / subquery. The target-schema audit in
+    //     (2) only resolves the target table and does not walk query
+    //     bodies; this conservative, schema-free backstop rejects any
+    //     such cast not provably non-TIME, on every replica alike. (A
+    //     properly frozen entry never reaches here with a live cast —
+    //     literal TIME operands substitute to a TIMESTAMP literal.)
+    if let Some(reason) = freeze::time_cast_query_violation(&statement) {
+        return Err(StatementFailure::Rejected(reason));
+    }
+
     // 3. Trigger-body backstop (#5381): this DML may fire triggers
     //    whose bodies were audited at CREATE time against a schema that
     //    later DDL may have invalidated (drop + recreate with a
@@ -1256,6 +1269,57 @@ mod tests {
             .apply(5, &TxnEntry::single("UPDATE sched SET s = CAST(id AS TEXT) WHERE id = 1"))
             .unwrap();
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+    }
+
+    /// The #5398 residual: `CAST(<TIME> AS TIMESTAMP)` over an operand
+    /// that is neither a literal nor the *target* table's TIME column —
+    /// an other-table TIME column or a computed TIME expression. Before,
+    /// these slipped past both the literal-only propose freeze and the
+    /// target-schema apply audit and silently stamped the apply-time
+    /// date, diverging across replicas. Now they are rejected
+    /// deterministically — identically on a second machine (the
+    /// acceptance criterion's convergence check).
+    #[test]
+    fn residual_time_casts_are_rejected_identically_on_every_node() {
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        let setup = [
+            (1, "CREATE TABLE sched (id INTEGER PRIMARY KEY, t TIME, s TEXT)"),
+            (2, "CREATE TABLE src (id INTEGER PRIMARY KEY, t TIME)"),
+            (3, "INSERT INTO sched VALUES (1, '12:34:56', 'x')"),
+            (4, "INSERT INTO src VALUES (1, '09:00:00')"),
+        ];
+        for (i, sql) in setup {
+            let entry = TxnEntry::single(sql);
+            assert_eq!(a.apply(i, &entry).unwrap(), b.apply(i, &entry).unwrap(), "{sql}");
+        }
+
+        // The residual cases, each a per-row apply-time clock read.
+        for (i, sql) in [
+            // Other-table TIME column inside an UPDATE … FROM-style SET
+            // (caught by the apply-side type guard).
+            (5, "UPDATE sched SET s = CAST(src.t AS TIMESTAMP) WHERE id = 1"),
+            // Computed TIME expression in a SET.
+            (6, "UPDATE sched SET s = CAST(time(t) AS TIMESTAMP) WHERE id = 1"),
+            // Other-table TIME column inside INSERT … SELECT (caught by
+            // the propose-side query-bearing guard; rejected at apply when
+            // the entry was crafted without a freeze pass, as here).
+            (7, "INSERT INTO sched (id, s) SELECT 2, CAST(src.t AS TIMESTAMP) FROM src"),
+        ] {
+            let entry = TxnEntry::single(sql);
+            let outcome = a.apply(i, &entry).unwrap();
+            assert!(
+                matches!(&outcome, ApplyOutcome::Rejected { .. }),
+                "{sql} must be rejected as a residual TIME cast, got: {outcome:?}"
+            );
+            assert_eq!(outcome, b.apply(i, &entry).unwrap(), "{sql} must reject identically");
+        }
+
+        // Convergence: both machines applied exactly the setup rows and
+        // nothing from the rejected residual entries.
+        let rows_a = a.query("SELECT * FROM sched").unwrap();
+        assert_eq!(rows_a, b.query("SELECT * FROM sched").unwrap());
+        assert_eq!(rows_a.len(), 1, "only the single setup row may remain; no residual cast applied");
     }
 
     /// The deterministic-vs-resource error split (judge note on PR

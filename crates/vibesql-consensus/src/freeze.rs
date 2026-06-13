@@ -1020,6 +1020,145 @@ pub fn time_cast_violation(
     detector.error
 }
 
+/// Apply-side audit for the #5398 residual *inside query-bearing parts*:
+/// a TIME→TIMESTAMP cast in an `INSERT … SELECT` body (or any subquery)
+/// over an operand that could be TIME. [`time_cast_violation`] resolves
+/// only the target-table schema and does not descend into query bodies,
+/// and the propose-side guard ([`StrictDetector`]) only runs at propose;
+/// an entry crafted around the freeze pass therefore needs this
+/// deterministic apply-time backstop. No schema is available for the
+/// queried tables, so the check is the conservative schema-free one
+/// ([`cast_operand_could_be_time_no_schema`]) — sound: a per-row clock
+/// read that cannot be ruled out is rejected on every replica alike.
+pub fn time_cast_query_violation(statement: &Statement) -> Option<String> {
+    // The SET / WHERE / ORDER BY roots of UPDATE/DELETE and the
+    // ON CONFLICT parts of INSERT are already audited *with* the target
+    // schema by [`time_cast_violation`] — including the other-table /
+    // computed-TIME residual at those roots — so this pass only covers
+    // the query-bearing parts that audit skips, where no schema is in
+    // scope: the `INSERT … SELECT` body, and any subquery nested in an
+    // UPDATE/DELETE root (which `TimeCastDetector` skips).
+    match statement {
+        Statement::Insert(stmt) => {
+            if let InsertSource::Select(query) = &stmt.source {
+                // The whole SELECT is a schema-free query body.
+                let mut detector = QueryTimeCastDetector::active();
+                walk_select(&mut detector, query);
+                return detector.error;
+            }
+            // ON CONFLICT … values are deterministic literals/refs to the
+            // target schema, already covered by (2).
+            None
+        }
+        Statement::Update(stmt) => {
+            let mut detector = QueryTimeCastDetector::subqueries_only();
+            for assignment in &stmt.assignments {
+                if detector.error.is_some() {
+                    break;
+                }
+                let _ = walk_expression(&mut detector, &assignment.value);
+            }
+            if detector.error.is_none() {
+                if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                    let _ = walk_expression(&mut detector, expr);
+                }
+            }
+            detector.error
+        }
+        Statement::Delete(stmt) => {
+            let mut detector = QueryTimeCastDetector::subqueries_only();
+            if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
+                let _ = walk_expression(&mut detector, expr);
+            }
+            detector.error
+        }
+        _ => None,
+    }
+}
+
+/// Flags `CAST(<possibly-TIME expression> AS TIMESTAMP)` inside a
+/// schema-free query body (#5398). Schema-free, so it errs toward
+/// rejection ([`cast_operand_could_be_time_no_schema`]).
+///
+/// Two modes: `active` flags casts everywhere it walks (the whole
+/// `INSERT … SELECT` body is a query body); `subqueries_only` walks an
+/// UPDATE/DELETE root but flags casts *only* inside nested subqueries —
+/// the root SET/WHERE operands are already audited with the schema by
+/// [`time_cast_violation`], and re-flagging them schema-free would
+/// wrongly reject a provably non-TIME column cast.
+struct QueryTimeCastDetector {
+    error: Option<String>,
+    /// When false, casts are flagged only after descending into a
+    /// subquery; the immediate root is left to the schema-aware audit.
+    active: bool,
+}
+
+impl QueryTimeCastDetector {
+    fn active() -> Self {
+        Self { error: None, active: true }
+    }
+
+    fn subqueries_only() -> Self {
+        Self { error: None, active: false }
+    }
+
+    fn flag(&mut self) -> VisitResult {
+        self.error = Some(
+            "CAST(<TIME-typed expression> AS TIMESTAMP) inside a query body stamps the apply-time \
+             current date per row (SQL:1999) and cannot be replicated deterministically; the \
+             replicated path conservatively rejects any TIME→TIMESTAMP cast whose operand is not \
+             provably non-TIME (#5398)"
+            .to_string(),
+        );
+        VisitResult::Stop
+    }
+
+    /// Walk a nested subquery with casts fully active, propagating any
+    /// hit back to `self`.
+    fn descend_subquery(&mut self, query: &SelectStmt) -> VisitResult {
+        let mut inner = QueryTimeCastDetector::active();
+        walk_select(&mut inner, query);
+        if let Some(reason) = inner.error {
+            self.error = Some(reason);
+            return VisitResult::Stop;
+        }
+        VisitResult::Skip
+    }
+}
+
+impl ExpressionVisitor for QueryTimeCastDetector {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.error.is_some() {
+            return VisitResult::Stop;
+        }
+        match expr {
+            // In `subqueries_only` mode, enter nested subqueries with
+            // casts active; in `active` mode `walk_select` already
+            // descends, so just continue.
+            Expression::ScalarSubquery(query) | Expression::Exists { subquery: query, .. }
+                if !self.active =>
+            {
+                self.descend_subquery(query)
+            }
+            Expression::In { expr: operand, subquery, .. }
+            | Expression::QuantifiedComparison { expr: operand, subquery, .. }
+                if !self.active =>
+            {
+                if walk_expression(self, operand).should_stop() {
+                    return VisitResult::Stop;
+                }
+                self.descend_subquery(subquery)
+            }
+            Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
+                if self.active && cast_operand_could_be_time_no_schema(operand) =>
+            {
+                self.flag()
+            }
+            _ => VisitResult::Continue,
+        }
+    }
+}
+
 /// Flags `CAST(<target-table TIME column> AS TIMESTAMP)`. Subqueries
 /// are skipped: their columns bind to other tables, whose schemas this
 /// audit does not resolve (#5381).
@@ -1044,29 +1183,57 @@ impl ExpressionVisitor for TimeCastDetector<'_> {
                 VisitResult::Skip
             }
             Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } } => {
-                let Expression::ColumnRef(col) = operand.as_ref() else {
-                    return VisitResult::Continue;
-                };
-                // Unqualified references and references qualified with
-                // the target table (or the ON CONFLICT `excluded` alias,
-                // which shares its schema) bind to the target table.
-                let binds_to_target = col.table_canonical().is_none_or(|t| {
-                    t.eq_ignore_ascii_case(&self.schema.name) || t.eq_ignore_ascii_case("excluded")
-                });
-                let is_time_column = binds_to_target
-                    && self.schema.columns.iter().any(|c| {
-                        c.name.eq_ignore_ascii_case(col.column_canonical())
-                            && matches!(c.data_type, DataType::Time { .. })
+                // The direct target-table TIME column gets a precise,
+                // schema-named diagnostic (the #5377/#5382 case).
+                if let Expression::ColumnRef(col) = operand.as_ref() {
+                    // Unqualified references and references qualified with
+                    // the target table (or the ON CONFLICT `excluded`
+                    // alias, which shares its schema) bind to the target
+                    // table.
+                    let binds_to_target = col.table_canonical().is_none_or(|t| {
+                        t.eq_ignore_ascii_case(&self.schema.name)
+                            || t.eq_ignore_ascii_case("excluded")
                     });
-                if is_time_column {
+                    let is_time_column = binds_to_target
+                        && self.schema.columns.iter().any(|c| {
+                            c.name.eq_ignore_ascii_case(col.column_canonical())
+                                && matches!(c.data_type, DataType::Time { .. })
+                        });
+                    if is_time_column {
+                        self.error = Some(format!(
+                            "CAST({} AS TIMESTAMP) on TIME column '{}' of table '{}' stamps the \
+                             current date per row at apply time (SQL:1999) and cannot be \
+                             replicated deterministically; combine the column with an explicit \
+                             date instead (#5377)",
+                            col.column_display(),
+                            col.column_display(),
+                            self.schema.name
+                        ));
+                        return VisitResult::Stop;
+                    }
+                }
+                // Residual (#5398): any other operand that could yield a
+                // TIME value — a column of *another* table (unresolvable
+                // here, so treated conservatively), or a computed TIME
+                // expression (`CASE … THEN time_col END`, `time(col)`,
+                // `CAST(x AS TIME)`, `CURRENT_TIME`). SQL:1999 stamps the
+                // apply-time current date onto any TIME→TIMESTAMP cast, so
+                // these are per-row clock reads too. We have no general
+                // multi-table expression typer, so we reject
+                // conservatively: any operand not *provably* non-TIME is
+                // refused (sound — no silent divergence — at the cost of
+                // over-rejecting some always-safe casts; precise typing is
+                // tracked as a follow-on). Literal TIME operands never
+                // reach here: they freeze at propose and arrive
+                // substituted to a TIMESTAMP literal.
+                if cast_operand_could_be_time(operand, self.schema) {
                     self.error = Some(format!(
-                        "CAST({} AS TIMESTAMP) on TIME column '{}' of table '{}' stamps the \
-                         current date per row at apply time (SQL:1999) and cannot be replicated \
-                         deterministically; combine the column with an explicit date instead \
-                         (#5377)",
-                        col.column_display(),
-                        col.column_display(),
-                        self.schema.name
+                        "CAST(<expression> AS TIMESTAMP) where the operand may be a TIME value \
+                         stamps the apply-time current date per row (SQL:1999) and cannot be \
+                         replicated deterministically; freeze the value at propose (use a TIME \
+                         literal) or combine it with an explicit date instead. The replicated \
+                         path conservatively rejects any TIME→TIMESTAMP cast whose operand is \
+                         not provably non-TIME (#5398)"
                     ));
                     return VisitResult::Stop;
                 }
@@ -1074,6 +1241,137 @@ impl ExpressionVisitor for TimeCastDetector<'_> {
             }
             _ => VisitResult::Continue,
         }
+    }
+}
+
+/// Conservative static type guard for `CAST(<operand> AS TIMESTAMP)`
+/// (#5398): could `operand` evaluate to a `TIME` value?
+///
+/// This is the residual companion to the precise target-table-column
+/// check above. There is no general multi-table expression typer in
+/// scope here (the apply path resolves only the target-table schema, the
+/// propose-side freeze pass no schema at all), so we cannot prove the
+/// type of an arbitrary operand. To stay **sound** — never silently
+/// accept a per-row clock read that would diverge across replicas — this
+/// returns `true` (reject) unless the operand is *provably non-TIME*:
+///
+/// * a non-TIME literal — the only literal that could be TIME is
+///   `Time`, but those freeze at propose and arrive substituted, so a
+///   literal operand here is non-TIME;
+/// * a target-table column whose schema type is known and not TIME;
+/// * an expression whose result type is structurally non-TIME (string /
+///   numeric / boolean operators and the obvious non-TIME-returning
+///   value functions);
+/// * a nested `CAST(… AS <non-TIME>)` — the cast fixes the output type.
+///
+/// Everything else — a column of another table (unresolvable), a `time(…)`
+/// call, `CURRENT_TIME`, `CAST(… AS TIME)`, a `CASE` with any TIME-or-
+/// unknown branch, or any expression shape not enumerated as safe — is
+/// treated as possibly-TIME and rejected. Over-rejection is sound (it
+/// only refuses some always-safe casts); silent acceptance is not.
+fn cast_operand_could_be_time(
+    operand: &Expression,
+    schema: &vibesql_catalog::TableSchema,
+) -> bool {
+    cast_operand_could_be_time_inner(operand, Some(schema))
+}
+
+/// Schema-free variant for query-bearing parts (`INSERT … SELECT`,
+/// subqueries, CTEs) that the **propose** pass validates without any
+/// catalog access (#5398). Without a schema, every column reference is
+/// unresolvable and so treated as possibly-TIME — a conservative
+/// rejection that keeps `INSERT INTO t SELECT CAST(s.time_col AS
+/// TIMESTAMP) FROM s` from slipping past both the propose pass (its
+/// operand is not a literal, so the literal-only freeze does not fire)
+/// and the apply audit (which resolves only the target-table schema and
+/// does not walk the SELECT body).
+fn cast_operand_could_be_time_no_schema(operand: &Expression) -> bool {
+    cast_operand_could_be_time_inner(operand, None)
+}
+
+fn cast_operand_could_be_time_inner(
+    operand: &Expression,
+    schema: Option<&vibesql_catalog::TableSchema>,
+) -> bool {
+    match operand {
+        // Literals: only a TIME literal is TIME, and those are frozen at
+        // propose, so a literal reaching apply is non-TIME. NULL casts to
+        // a NULL timestamp deterministically.
+        Expression::Literal(v) => matches!(v, SqlValue::Time(_)),
+
+        // The apply-time clock reads that *produce* TIME.
+        Expression::CurrentTime { .. } => true,
+
+        // A column reference: provably non-TIME only when a schema is in
+        // scope, it binds to the target table, and that column's type is
+        // known and not TIME. Other-table / unqualified-but-absent
+        // columns (and *all* columns when no schema is available) are
+        // unresolvable → conservatively possibly-TIME.
+        Expression::ColumnRef(col) => {
+            let Some(schema) = schema else {
+                return true;
+            };
+            let binds_to_target = col.table_canonical().is_none_or(|t| {
+                t.eq_ignore_ascii_case(&schema.name) || t.eq_ignore_ascii_case("excluded")
+            });
+            if !binds_to_target {
+                return true;
+            }
+            match schema
+                .columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(col.column_canonical()))
+            {
+                Some(c) => matches!(c.data_type, DataType::Time { .. }),
+                // Unknown column on the target table: be conservative.
+                None => true,
+            }
+        }
+
+        // A nested cast fixes the output type: TIME-producing only when
+        // the target type is TIME.
+        Expression::Cast { data_type, .. } => matches!(data_type, DataType::Time { .. }),
+
+        // CASE yields one of its branch results: possibly-TIME if any
+        // result (or the implicit NULL else) could be TIME.
+        Expression::Case { when_clauses, else_result, .. } => {
+            when_clauses.iter().any(|w| cast_operand_could_be_time_inner(&w.result, schema))
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| cast_operand_could_be_time_inner(e, schema))
+        }
+
+        // Structurally non-TIME result shapes: arithmetic / string
+        // concatenation produce numbers or strings; comparison and
+        // logical operators produce booleans; string/position value
+        // functions produce strings or integers. EXTRACT yields a
+        // numeric field. None of these can be TIME.
+        Expression::BinaryOp { .. }
+        | Expression::UnaryOp { .. }
+        | Expression::Conjunction(_)
+        | Expression::Disjunction(_)
+        | Expression::IsNull { .. }
+        | Expression::IsDistinctFrom { .. }
+        | Expression::IsTruthValue { .. }
+        | Expression::In { .. }
+        | Expression::InList { .. }
+        | Expression::Between { .. }
+        | Expression::Like { .. }
+        | Expression::Glob { .. }
+        | Expression::Exists { .. }
+        | Expression::QuantifiedComparison { .. }
+        | Expression::Position { .. }
+        | Expression::Trim { .. }
+        | Expression::Extract { .. } => false,
+
+        // CURRENT_DATE / CURRENT_TIMESTAMP are not TIME-typed (and freeze
+        // at propose anyway).
+        Expression::CurrentDate | Expression::CurrentTimestamp { .. } => false,
+
+        // Everything else — function calls (which may return TIME, e.g.
+        // `time(col)`), subqueries, window functions, sequences, etc. —
+        // is not provably non-TIME, so reject conservatively.
+        _ => true,
     }
 }
 
@@ -1622,8 +1920,15 @@ impl ExpressionVisitor for StrictDetector<'_> {
             return VisitResult::Stop;
         }
         let volatile = match expr {
-            e if is_time_to_timestamp_cast(e) => {
-                Some("CAST(TIME AS TIMESTAMP) clock reading (stamps the current date)".to_string())
+            // A TIME→TIMESTAMP cast stamps the apply-time current date
+            // (SQL:1999). In a query-bearing part there is no schema to
+            // resolve the operand's type, so reject any such cast whose
+            // operand is not provably non-TIME — the literal-operand form
+            // and the other-table/computed-TIME residual alike (#5398).
+            Expression::Cast { expr: operand, data_type: DataType::Timestamp { .. } }
+                if cast_operand_could_be_time_no_schema(operand) =>
+            {
+                Some("CAST(<TIME-typed expression> AS TIMESTAMP) clock reading (stamps the current date)".to_string())
             }
             Expression::CurrentDate
             | Expression::CurrentTime { .. }
@@ -2245,20 +2550,67 @@ mod tests {
         }
     }
 
+    /// False-positive guard (#5398): TIME→TIMESTAMP casts whose operand
+    /// is *provably* non-TIME must keep passing. The conservative
+    /// residual rejection (below) must not catch these.
     #[test]
-    fn non_time_casts_and_other_tables_are_not_flagged() {
+    fn provably_non_time_casts_are_not_flagged() {
         let schema = sched_schema_with_time_column();
         for sql in [
-            // TEXT column: CAST to TIMESTAMP is a deterministic parse.
+            // Target TEXT column: CAST to TIMESTAMP is a deterministic
+            // parse, no clock read.
             "UPDATE sched SET s = CAST(s AS TIMESTAMP)",
             // Casting the TIME column to something other than TIMESTAMP.
             "UPDATE sched SET s = CAST(t AS TEXT)",
-            // Qualified with a different table: binds elsewhere.
-            "UPDATE sched SET s = CAST(other.t AS TIMESTAMP)",
-            // Subqueries are skipped (their columns bind to other tables).
+            // Non-TIME literal operands (post-freeze, literals are what a
+            // frozen TIME literal becomes too).
+            "UPDATE sched SET s = CAST('2026-06-11 12:00:00' AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(1700000000 AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(NULL AS TIMESTAMP)",
+            // Nested cast fixes a non-TIME output type.
+            "UPDATE sched SET s = CAST(CAST(t AS DATE) AS TIMESTAMP)",
+            // CURRENT_TIMESTAMP / CURRENT_DATE are not TIME-typed.
+            "UPDATE sched SET s = CAST(CURRENT_TIMESTAMP AS TIMESTAMP)",
+            // Arithmetic / string shapes are structurally non-TIME.
+            "UPDATE sched SET s = CAST(id + 1 AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(EXTRACT(HOUR FROM t) AS TIMESTAMP)",
+            // CASE all of whose results are provably non-TIME.
+            "UPDATE sched SET s = CAST(CASE WHEN id > 0 THEN s ELSE 'x' END AS TIMESTAMP)",
+            // Subqueries are skipped (their columns bind to other tables;
+            // the DML-root residual does not descend into them — #5398
+            // covers the root operands, not subquery interiors).
             "DELETE FROM sched WHERE id IN (SELECT id FROM x WHERE CAST(t AS TIMESTAMP) > y)",
         ] {
             assert_eq!(time_cast_violation(&parse(sql), &schema), None, "{sql}");
+        }
+    }
+
+    /// The residual (#5398): TIME→TIMESTAMP casts over operands that are
+    /// neither literals nor the target-table TIME column, but could still
+    /// yield a TIME value — an other-table column or a computed TIME
+    /// expression. These were silently accepted before; now they are
+    /// rejected deterministically (sound conservative over-rejection).
+    #[test]
+    fn residual_time_casts_are_rejected() {
+        let schema = sched_schema_with_time_column();
+        for sql in [
+            // Column of *another* table (unresolvable here): conservative.
+            "UPDATE sched SET s = CAST(other.t AS TIMESTAMP)",
+            "INSERT INTO sched (id, s) VALUES (1, 'x') \
+             ON CONFLICT (id) DO UPDATE SET s = CAST(other.col AS TIMESTAMP)",
+            // Unqualified column absent from the target schema.
+            "UPDATE sched SET s = CAST(unknown_col AS TIMESTAMP)",
+            // Computed TIME expressions.
+            "UPDATE sched SET s = CAST(time(t) AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(CAST(s AS TIME) AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(CURRENT_TIME AS TIMESTAMP)",
+            "UPDATE sched SET s = CAST(CASE WHEN id > 0 THEN t ELSE t END AS TIMESTAMP)",
+        ] {
+            let violation = time_cast_violation(&parse(sql), &schema);
+            assert!(
+                violation.as_deref().is_some_and(|m| m.contains("#5398")),
+                "{sql} must be rejected as a residual TIME cast, got: {violation:?}"
+            );
         }
     }
 
