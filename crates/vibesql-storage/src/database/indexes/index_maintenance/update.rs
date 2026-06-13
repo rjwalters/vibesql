@@ -380,20 +380,60 @@ impl IndexManager {
                                 })
                                 .collect();
 
-                            // Use bulk_load to create new B+tree
-                            if let Ok(new_btree) = BTreeIndex::bulk_load(
-                                sorted_entries,
-                                key_schema,
-                                page_manager.clone(),
-                            ) {
-                                // Safely acquire lock and replace old btree with new one
-                                match acquire_btree_lock(btree) {
-                                    Ok(mut guard) => {
-                                        *guard = new_btree;
+                            // Acquire the lock once and decide on the rebuild
+                            // strategy based on whether a transaction undo-log
+                            // is armed (issue #5435).
+                            //
+                            // A wholesale `bulk_load` + `*guard = new_btree`
+                            // swap is the fast path, but it replaces the live
+                            // tree object and discards any armed undo-log — so a
+                            // rebuild that runs *inside* a transaction (e.g. a
+                            // DELETE that compacts away >50% of a table's rows,
+                            // see `Database::delete_row`'s
+                            // `delete_result.compacted` branch) would not be
+                            // reversed on ROLLBACK. When undo-logging is armed
+                            // we instead rebuild the *same* tree in place
+                            // through the logged delete/insert paths, so the
+                            // inverse of the rebuild is captured and ROLLBACK
+                            // restores the exact pre-rebuild contents (matching
+                            // the #5425 soundness bar). Outside a transaction
+                            // the undo-log is `None` and we keep the fast swap.
+                            match acquire_btree_lock(btree) {
+                                Ok(mut guard) => {
+                                    if guard.is_undo_logging() {
+                                        if let Err(e) =
+                                            guard.rebuild_in_place_logged(sorted_entries)
+                                        {
+                                            log::warn!(
+                                                "Logged in-place rebuild failed for index '{}': {}",
+                                                index_name,
+                                                e
+                                            );
+                                        }
+                                    } else {
+                                        match BTreeIndex::bulk_load(
+                                            sorted_entries,
+                                            key_schema,
+                                            page_manager.clone(),
+                                        ) {
+                                            Ok(new_btree) => {
+                                                *guard = new_btree;
+                                            }
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "bulk_load failed for index '{}': {}",
+                                                    index_name,
+                                                    e
+                                                );
+                                            }
+                                        }
                                     }
-                                    Err(e) => {
-                                        log::warn!("BTreeIndex lock acquisition failed in rebuild_indexes: {}", e);
-                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "BTreeIndex lock acquisition failed in rebuild_indexes: {}",
+                                        e
+                                    );
                                 }
                             }
                         }

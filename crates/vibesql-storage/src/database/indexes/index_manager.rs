@@ -751,9 +751,10 @@ mod tests {
                 where_clause: None,
             },
         );
-        manager
-            .index_data
-            .insert(index_name.to_string(), IndexData::InMemory { data, pending_deletions: vec![] });
+        manager.index_data.insert(
+            index_name.to_string(),
+            IndexData::InMemory { data, pending_deletions: vec![] },
+        );
 
         manager.spill_index_to_disk(index_name).unwrap();
         match manager.index_data.get(index_name).unwrap() {
@@ -788,8 +789,7 @@ mod tests {
     /// survived.
     #[test]
     fn spilled_index_rollback_restores_state() {
-        let (mut manager, schema, _dir) =
-            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
 
         // Begin the (simulated) transaction: arm undo-logging on disk-backed
         // indexes — exactly what the COW snapshot chokepoint does on the first
@@ -799,12 +799,7 @@ mod tests {
         // Mutate the spilled index through the real maintenance entry points.
         manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
         manager.add_to_indexes_for_insert("t", &schema, &row(10), 3); // duplicate key
-        manager.update_indexes_for_delete_with_values(
-            "t",
-            &schema,
-            &[SqlValue::Integer(20)],
-            1,
-        );
+        manager.update_indexes_for_delete_with_values("t", &schema, &[SqlValue::Integer(20)], 1);
 
         // Sanity: mutations are visible mid-transaction.
         assert_eq!(disk_lookup(&manager, "idx_t_id", 30), vec![2]);
@@ -834,17 +829,11 @@ mod tests {
     /// (clearing the undo-log must not reverse anything).
     #[test]
     fn spilled_index_commit_persists_state() {
-        let (mut manager, schema, _dir) =
-            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0), (20, 1)]);
 
         manager.begin_disk_undo_logging();
         manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
-        manager.update_indexes_for_delete_with_values(
-            "t",
-            &schema,
-            &[SqlValue::Integer(20)],
-            1,
-        );
+        manager.update_indexes_for_delete_with_values("t", &schema, &[SqlValue::Integer(20)], 1);
 
         // COMMIT: discard the undo-log without reversing.
         manager.clear_disk_undo_logs();
@@ -894,17 +883,19 @@ mod tests {
         let mut mem_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         mem_data.entry(vec![normalize_int(10)]).or_default().push(0);
         manager.indexes.insert("idx_mem".to_string(), mk_meta("idx_mem"));
-        manager
-            .index_data
-            .insert("idx_mem".to_string(), IndexData::InMemory { data: mem_data, pending_deletions: vec![] });
+        manager.index_data.insert(
+            "idx_mem".to_string(),
+            IndexData::InMemory { data: mem_data, pending_deletions: vec![] },
+        );
 
         // Disk-backed (spilled) index.
         let mut disk_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         disk_data.entry(vec![normalize_int(10)]).or_default().push(0);
         manager.indexes.insert("idx_disk".to_string(), mk_meta("idx_disk"));
-        manager
-            .index_data
-            .insert("idx_disk".to_string(), IndexData::InMemory { data: disk_data, pending_deletions: vec![] });
+        manager.index_data.insert(
+            "idx_disk".to_string(),
+            IndexData::InMemory { data: disk_data, pending_deletions: vec![] },
+        );
         manager.spill_index_to_disk("idx_disk").unwrap();
 
         // BEGIN: copy-on-write snapshot of the whole manager (restores in-memory
@@ -941,5 +932,121 @@ mod tests {
         // the same now-reverted B+ tree Arc).
         assert!(disk_lookup(&manager, "idx_disk", 30).is_empty(), "disk-backed rolled back");
         assert_eq!(disk_lookup(&manager, "idx_disk", 10), vec![0]);
+    }
+
+    // ========================================================================
+    // Spilled-index full-tree rebuild rollback (issue #5435)
+    // ========================================================================
+
+    /// #5435: a full-tree `rebuild_indexes` on a *spilled* (disk-backed) index
+    /// that runs *inside* a transaction must be reversible. This is reachable
+    /// today: a DELETE that compacts away >50% of a table's rows triggers
+    /// `Database::delete_row`'s `delete_result.compacted` branch, which calls
+    /// `rebuild_indexes` while the disk undo-log is armed.
+    ///
+    /// Before this fix the rebuild swapped in a freshly `bulk_load`ed tree
+    /// (`*guard = new_btree`), discarding the armed undo-log and replacing the
+    /// live tree wholesale, so ROLLBACK could not restore the pre-rebuild
+    /// contents. The fix rebuilds the same tree in place via logged
+    /// delete/insert when undo-logging is armed.
+    #[test]
+    fn spilled_index_rebuild_in_txn_rolls_back() {
+        // Seed: keys 10,20,30 at row positions 0,1,2.
+        let (mut manager, schema, _dir) =
+            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1), (30, 2)]);
+
+        // BEGIN: arm undo-logging (what the COW snapshot chokepoint does on the
+        // first index mutation of a transaction).
+        manager.begin_disk_undo_logging();
+
+        // Simulate a DELETE that compacts the table: rows 20 and 30 were
+        // deleted, so the live table now holds only key 10 — and compaction
+        // shifted its position to row 0. `rebuild_indexes` rebuilds the index
+        // from the post-compaction table rows.
+        let post_compaction_rows = vec![row(10)];
+        manager.rebuild_indexes("t", &schema, &post_compaction_rows);
+
+        // Mid-transaction: the index reflects the rebuilt (post-compaction)
+        // contents.
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 20).is_empty(),
+            "rebuilt index drops the deleted key mid-txn"
+        );
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 30).is_empty(),
+            "rebuilt index drops the deleted key mid-txn"
+        );
+
+        // ROLLBACK: the in-place logged rebuild must be fully reversed.
+        manager.rollback_disk_undo_logs();
+
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 10),
+            vec![0],
+            "key 10 restored to its pre-rebuild position"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 20),
+            vec![1],
+            "key 20 dropped by the rebuild must be restored on ROLLBACK"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 30),
+            vec![2],
+            "key 30 dropped by the rebuild must be restored on ROLLBACK"
+        );
+    }
+
+    /// #5435: COMMIT of a transaction whose spilled index was rebuilt must
+    /// persist the rebuilt contents (clearing the undo-log must not reverse the
+    /// rebuild).
+    #[test]
+    fn spilled_index_rebuild_in_txn_commits() {
+        let (mut manager, schema, _dir) =
+            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1), (30, 2)]);
+
+        manager.begin_disk_undo_logging();
+
+        let post_compaction_rows = vec![row(10), row(30)];
+        manager.rebuild_indexes("t", &schema, &post_compaction_rows);
+
+        // COMMIT: discard the undo-log without reversing.
+        manager.clear_disk_undo_logs();
+
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 20).is_empty(),
+            "committed rebuild must persist the dropped key"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 30),
+            vec![1],
+            "committed rebuild must persist the new row position"
+        );
+    }
+
+    /// #5435: outside a transaction (no undo-log armed) the rebuild still uses
+    /// the fast wholesale `bulk_load` swap and produces correct contents.
+    #[test]
+    fn spilled_index_rebuild_without_txn_uses_fast_path() {
+        let (mut manager, schema, _dir) =
+            spilled_index_manager("idx_t_id", &[(10, 0), (20, 1), (30, 2)]);
+
+        // No begin_disk_undo_logging(): the index is not undo-logging.
+        match manager.index_data.get("idx_t_id").unwrap() {
+            IndexData::DiskBacked { btree, .. } => {
+                assert!(!acquire_btree_lock(btree).unwrap().is_undo_logging());
+            }
+            other => panic!("expected DiskBacked, got {:?}", other),
+        }
+
+        let new_rows = vec![row(10), row(40)];
+        manager.rebuild_indexes("t", &schema, &new_rows);
+
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 40), vec![1]);
+        assert!(disk_lookup(&manager, "idx_t_id", 20).is_empty());
+        assert!(disk_lookup(&manager, "idx_t_id", 30).is_empty());
     }
 }

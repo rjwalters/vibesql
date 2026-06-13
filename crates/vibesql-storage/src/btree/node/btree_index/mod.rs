@@ -183,6 +183,81 @@ impl BTreeIndex {
         Ok(())
     }
 
+    /// Collect every `(key, row_ids)` entry currently stored in the tree, in
+    /// key order, by walking the leaf chain from the leftmost leaf.
+    ///
+    /// Used by [`Self::rebuild_in_place_logged`] to capture the pre-rebuild
+    /// contents so a full-tree rebuild can be expressed as logged per-key
+    /// deletes (issue #5435). O(n) in the number of entries.
+    pub(crate) fn collect_all_entries(&self) -> Result<Vec<(Key, Vec<RowId>)>, StorageError> {
+        let mut entries: Vec<(Key, Vec<RowId>)> = Vec::new();
+
+        // Empty tree (height 0) has nothing to collect.
+        if self.height == 0 {
+            return Ok(entries);
+        }
+
+        let mut current_leaf = self.find_leftmost_leaf()?;
+        loop {
+            for (key, row_ids) in &current_leaf.entries {
+                entries.push((key.clone(), row_ids.clone()));
+            }
+            if current_leaf.next_leaf == super::super::NULL_PAGE_ID {
+                break;
+            }
+            current_leaf = self.read_leaf_node(current_leaf.next_leaf)?;
+        }
+
+        Ok(entries)
+    }
+
+    /// Rebuild this tree's contents in place to exactly `new_entries`, recording
+    /// every mutation in the transaction undo-log (issue #5435).
+    ///
+    /// A full-tree rebuild / bulk-load normally swaps in a freshly built
+    /// `BTreeIndex` (see `IndexManager::rebuild_indexes`). For a spilled
+    /// (disk-backed) index that swap discards the armed undo-log and replaces
+    /// the live tree wholesale, so a rebuild that runs *inside* a transaction
+    /// would not be reversed on ROLLBACK. This method instead mutates the
+    /// *same* tree object through the logged `delete`/`insert` paths so the
+    /// inverse of the rebuild is captured in the undo-log and ROLLBACK restores
+    /// the exact pre-rebuild contents.
+    ///
+    /// Must only be called when [`Self::is_undo_logging`] is `true`; outside a
+    /// transaction the wholesale `bulk_load` swap is preferred (it is faster
+    /// and avoids growing an undo-log that would never be replayed).
+    ///
+    /// `new_entries` are `(key, row_id)` pairs (duplicates allowed for non-
+    /// unique indexes). Cost is O(existing + new) entries, paid once per
+    /// in-transaction rebuild (rebuilds are rare — they only fire when a single
+    /// DELETE compacts away >50% of a table's rows).
+    pub(crate) fn rebuild_in_place_logged(
+        &mut self,
+        new_entries: Vec<(Key, RowId)>,
+    ) -> Result<(), StorageError> {
+        debug_assert!(
+            self.is_undo_logging(),
+            "rebuild_in_place_logged must only be used while undo-logging is armed; \
+             the non-transactional path should use bulk_load + swap",
+        );
+
+        // Delete every existing key via the logged delete path. `delete`
+        // removes all row_ids for a key and records a `Reinsert` undo entry,
+        // so the prior contents are fully recoverable on ROLLBACK.
+        let existing = self.collect_all_entries()?;
+        for (key, _row_ids) in existing {
+            self.delete(&key)?;
+        }
+
+        // Insert the new contents via the logged insert path. Each insert
+        // records a `DeleteSpecific` undo entry.
+        for (key, row_id) in new_entries {
+            self.insert(key, row_id)?;
+        }
+
+        Ok(())
+    }
+
     /// Create a new B+ tree index
     ///
     /// Creates a new disk-backed B+ tree index that supports both unique and
