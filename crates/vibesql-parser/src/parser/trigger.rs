@@ -124,7 +124,15 @@ impl Parser {
             } else {
                 false
             };
-            let expr = self.parse_expression()?;
+            // The WHEN condition is part of the trigger-program, so SQLite
+            // permits RAISE() there too. Mark the parser as inside a trigger
+            // body for the duration of the WHEN expression so RAISE() is
+            // admitted (it is rejected at parse time everywhere else).
+            let prev_in_trigger_body = self.in_trigger_body;
+            self.in_trigger_body = true;
+            let expr_result = self.parse_expression();
+            self.in_trigger_body = prev_in_trigger_body;
+            let expr = expr_result?;
             if has_paren {
                 self.expect_token(Token::RParen)?;
             }
@@ -241,7 +249,11 @@ impl Parser {
     /// (but SQLite accepts at create time) are preserved as before.
     fn validate_trigger_body(raw_sql: &str) -> Result<(), ParseError> {
         for stmt_sql in crate::split_trigger_body_statements(raw_sql) {
-            if let Err(e) = Self::parse_sql(&stmt_sql) {
+            // Parse each body statement as a trigger-program statement so
+            // `RAISE()` is admitted (SQLite only permits RAISE() within a
+            // trigger-program; `parse_sql` rejects it at parse time, but a
+            // trigger body legitimately contains it).
+            if let Err(e) = Self::parse_sql_in_trigger_body(&stmt_sql) {
                 if Self::is_create_time_rejection(&e) {
                     // Propagate verbatim so the message (e.g.
                     // `unsupported use of NULLS FIRST`) matches the

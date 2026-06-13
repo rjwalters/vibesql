@@ -51,12 +51,19 @@ pub struct Parser {
     /// Counter for placeholder parameters (?)
     /// Incremented each time a placeholder is parsed, providing 0-indexed parameter positions
     placeholder_count: usize,
+    /// Whether the parser is currently inside a `CREATE TRIGGER` body
+    /// (a trigger-program). SQLite only permits the `RAISE()` expression
+    /// within a trigger-program and rejects it at prepare/parse time
+    /// elsewhere; this flag lets [`Parser::parse_raise_expression`] accept
+    /// `RAISE()` inside a trigger body and reject it everywhere else,
+    /// matching sqlite3 (`RAISE() may only be used within a trigger-program`).
+    in_trigger_body: bool,
 }
 
 impl Parser {
     /// Create a new parser from tokens
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, position: 0, placeholder_count: 0 }
+        Parser { tokens, position: 0, placeholder_count: 0, in_trigger_body: false }
     }
 
     /// Parse a comma-separated list of items using a provided parser function
@@ -105,6 +112,29 @@ impl Parser {
             lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
 
         let mut parser = Parser::new(tokens);
+        parser.parse_statement()
+    }
+
+    /// Parse a single SQL statement that originates from a `CREATE TRIGGER`
+    /// body (a trigger-program).
+    ///
+    /// This is identical to [`Parser::parse_sql`] except that the parser is
+    /// marked as being inside a trigger body, so the `RAISE()` expression is
+    /// accepted (SQLite only permits `RAISE()` within a trigger-program and
+    /// rejects it at parse time everywhere else). Both the create-time
+    /// validation pass ([`Parser::validate_trigger_body`]) and the executor's
+    /// fire-time re-parse (`TriggerFirer::parse_trigger_sql`) must use this
+    /// entry point so a trigger body containing `RAISE()` is admitted on both
+    /// paths.
+    pub fn parse_sql_in_trigger_body(
+        input: &str,
+    ) -> Result<vibesql_ast::Statement, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens =
+            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+
+        let mut parser = Parser::new(tokens);
+        parser.in_trigger_body = true;
         parser.parse_statement()
     }
 
