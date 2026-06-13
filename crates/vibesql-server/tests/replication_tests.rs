@@ -125,6 +125,16 @@ fn select_rows(result: ExecutionResult) -> Vec<vibesql_server::Row> {
     }
 }
 
+/// The resolved column names of a SELECT result (#5427 parity checks).
+fn select_columns(result: ExecutionResult) -> Vec<String> {
+    match result {
+        ExecutionResult::Select { columns, .. } => {
+            columns.into_iter().map(|c| c.name).collect()
+        }
+        other => panic!("expected Select result, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Session-level: single node
 // ---------------------------------------------------------------------------
@@ -166,6 +176,84 @@ async fn replicated_session_writes_and_read_modes() {
     // (the entry was rejected identically on every replica).
     let err = session.execute("INSERT INTO no_such_table VALUES (1)").await.unwrap_err();
     assert!(err.downcast_ref::<SqlError>().is_none(), "rejection keeps the executor error: {err}");
+}
+
+/// Replicated SELECT results carry the **real** column names — the same
+/// labels the standalone executor produces — not the `col0`, `col1`, …
+/// placeholders the consensus read path used to force (#5427). Standalone
+/// is the correctness oracle: the replicated read must label its columns
+/// identically for simple columns, aliases, expressions, `SELECT *`,
+/// aggregates, and joins.
+#[tokio::test]
+async fn replicated_select_column_names_match_standalone() {
+    // Schema + data, applied to both a standalone session and a
+    // replicated single-node leader so the two answer the same queries.
+    let setup = [
+        "CREATE TABLE t (a INT, b INT)",
+        "CREATE TABLE u (a INT, c VARCHAR(10))",
+        "INSERT INTO t VALUES (1, 10)",
+        "INSERT INTO t VALUES (2, 20)",
+        "INSERT INTO u VALUES (1, 'one')",
+        "INSERT INTO u VALUES (2, 'two')",
+    ];
+
+    // The SELECTs whose column labels must match. Each exercises a
+    // different name-resolution path.
+    let selects = [
+        "SELECT a, b FROM t ORDER BY a",            // simple columns
+        "SELECT a AS x, b AS y FROM t ORDER BY a",  // aliases
+        "SELECT a + 1, b * 2 FROM t ORDER BY a",    // expressions
+        "SELECT * FROM t ORDER BY a",               // wildcard expansion
+        "SELECT count(*), sum(b) FROM t",           // aggregates
+        "SELECT count(*) AS n FROM t",              // aggregate + alias
+        "SELECT t.a, u.c FROM t JOIN u ON t.a = u.a ORDER BY t.a", // join
+    ];
+
+    // Standalone session is the oracle.
+    let mut standalone =
+        Session::new("testdb".to_string(), "testuser".to_string(), SharedDatabase::new(Database::new()));
+    for sql in setup {
+        standalone.execute(sql).await.expect("standalone setup");
+    }
+
+    // Replicated leader session.
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut replicated = replicated_session(&handles[0]);
+    for sql in setup {
+        replicated.execute(sql).await.expect("replicated setup");
+    }
+
+    for sql in selects {
+        let standalone_cols =
+            select_columns(standalone.execute(sql).await.expect("standalone select"));
+        let replicated_cols =
+            select_columns(replicated.execute(sql).await.expect("replicated select"));
+
+        // The placeholders the bug produced must be gone.
+        assert!(
+            !replicated_cols.iter().any(|name| name.starts_with("col")),
+            "{sql}: replicated columns must not be col0/col1 placeholders, got {replicated_cols:?}",
+        );
+        // And the replicated labels must match the standalone oracle.
+        assert_eq!(
+            replicated_cols, standalone_cols,
+            "{sql}: replicated column names must match standalone",
+        );
+    }
+
+    // Spot-check the resolved names so a regression in BOTH paths cannot
+    // pass silently by agreeing on placeholders.
+    let aliased = select_columns(
+        replicated
+            .execute("SELECT a AS x, b AS y FROM t ORDER BY a")
+            .await
+            .expect("replicated aliased select"),
+    );
+    assert_eq!(aliased, vec!["x".to_string(), "y".to_string()]);
+    let star =
+        select_columns(replicated.execute("SELECT * FROM t ORDER BY a").await.expect("star select"));
+    assert_eq!(star, vec!["a".to_string(), "b".to_string()]);
 }
 
 /// Unsupported features fail with SQLSTATE 0A000 and a follow-on
@@ -905,6 +993,12 @@ async fn wire_protocol_replicated_end_to_end() {
     assert_eq!(rows[0].get(0), Some("1"));
     assert_eq!(rows[0].get(1), Some("Alice"));
 
+    // The wire RowDescription carries the real column names, not the
+    // col0/col1 placeholders the replicated read path used to force
+    // (#5427).
+    let col_names: Vec<&str> = rows[0].columns().iter().map(|c| c.name()).collect();
+    assert_eq!(col_names, vec!["id", "name"]);
+
     // The replicated write is in the consensus state machine.
     assert_eq!(
         handles[0].node().query("SELECT COUNT(*) FROM wire_test").unwrap()[0][0].to_string(),
@@ -1185,6 +1279,25 @@ async fn http_query_writes_route_through_consensus() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     assert_eq!(body["row_count"], 1, "the replicated read must see the row");
+
+    // The JSON response carries the real column names, not col0/col1
+    // placeholders — a REST/JSON consumer keys on `id`/`name` (#5427).
+    assert_eq!(
+        body["columns"],
+        serde_json::json!(["id", "name"]),
+        "replicated HTTP SELECT must return real column names, got {body}",
+    );
+    // An aliased + expression SELECT resolves the same labels standalone
+    // would (alias wins; the expression gets its derived name).
+    let resp = post_sql("SELECT id AS pk, id + 1 FROM http_t").await;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let cols = body["columns"].as_array().expect("columns array");
+    assert_eq!(cols[0], "pk", "alias must be the JSON key, got {body}");
+    assert!(
+        !cols[1].as_str().unwrap().starts_with("col"),
+        "expression column must not be a col1 placeholder, got {body}",
+    );
 }
 
 /// A deterministic SQL rejection over `/api/query` in replicated mode (one

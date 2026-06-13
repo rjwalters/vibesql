@@ -306,6 +306,78 @@ pub struct VibesqlStateMachine {
     inner: Arc<Mutex<MachineInner>>,
 }
 
+/// Result of a replicated read-only SELECT: the resolved column names
+/// plus the row values (#5427).
+///
+/// Reads against the replicated state machine used to return only the
+/// `Vec<Vec<SqlValue>>` rows, forcing the server to label result columns
+/// with `col0`, `col1`, … placeholders. Carrying the executor's resolved
+/// `columns` up through the consensus query API lets the wire
+/// `RowDescription` and HTTP JSON keys use the real column names —
+/// matching standalone behavior exactly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryResult {
+    /// Column names as resolved by the executor (same as standalone:
+    /// real names, aliases, derived expression names, `*`-expansion).
+    pub columns: Vec<String>,
+    /// Result rows.
+    pub rows: Vec<Vec<SqlValue>>,
+}
+
+impl QueryResult {
+    /// Number of result rows.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether the result has no rows.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Iterate the result rows (column names are read via `columns`).
+    pub fn iter(&self) -> std::slice::Iter<'_, Vec<SqlValue>> {
+        self.rows.iter()
+    }
+
+    /// The first result row, if any.
+    pub fn first(&self) -> Option<&Vec<SqlValue>> {
+        self.rows.first()
+    }
+}
+
+impl std::ops::Index<usize> for QueryResult {
+    type Output = Vec<SqlValue>;
+    fn index(&self, i: usize) -> &Self::Output {
+        &self.rows[i]
+    }
+}
+
+impl IntoIterator for QueryResult {
+    type Item = Vec<SqlValue>;
+    type IntoIter = std::vec::IntoIter<Vec<SqlValue>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a QueryResult {
+    type Item = &'a Vec<SqlValue>;
+    type IntoIter = std::slice::Iter<'a, Vec<SqlValue>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.rows.iter()
+    }
+}
+
+impl From<vibesql_executor::SelectResult> for QueryResult {
+    fn from(result: vibesql_executor::SelectResult) -> Self {
+        QueryResult {
+            columns: result.columns,
+            rows: result.rows.into_iter().map(|r| r.values.to_vec()).collect(),
+        }
+    }
+}
+
 impl Default for VibesqlStateMachine {
     fn default() -> Self {
         Self::new()
@@ -485,10 +557,20 @@ impl VibesqlStateMachine {
         freeze::freeze_statement_with_schema(sql, schema.as_ref())
     }
 
-    /// Run a read-only SELECT against the applied state, returning row
-    /// values. Reads are local (not replicated); this is the query
-    /// surface the PR 1 tests assert convergence with.
-    pub fn query(&self, sql: &str) -> Result<Vec<Vec<SqlValue>>> {
+    // (QueryResult is defined at module scope, below the impl block.)
+
+    /// Run a read-only SELECT against the applied state, returning the
+    /// resolved column names alongside the row values (#5427). Reads are
+    /// local (not replicated); this is the query surface the PR 1 tests
+    /// assert convergence with.
+    ///
+    /// Column names are resolved by the executor exactly as in standalone
+    /// mode (`SelectExecutor::execute_with_columns`), so a replicated
+    /// SELECT labels its columns identically to the standalone path —
+    /// real names for `a`, aliases for `b AS x`, derived names for
+    /// expressions, and schema-expanded names for `SELECT *` — instead of
+    /// the `col0`, `col1`, … placeholders the row-only path forced.
+    pub fn query(&self, sql: &str) -> Result<QueryResult> {
         let inner = self.lock();
         let statement = vibesql_parser::parse_with_arena_fallback(sql)
             .map_err(|e| ConsensusError::Backend(format!("parse error: {e}")))?;
@@ -497,10 +579,10 @@ impl VibesqlStateMachine {
                 "query() only accepts SELECT statements, got: {sql}"
             )));
         };
-        let rows = vibesql_executor::SelectExecutor::new(&inner.db)
-            .execute(&select)
+        let result = vibesql_executor::SelectExecutor::new(&inner.db)
+            .execute_with_columns(&select)
             .map_err(|e| ConsensusError::Backend(format!("query failed: {e}")))?;
-        Ok(rows.into_iter().map(|r| r.values.to_vec()).collect())
+        Ok(QueryResult::from(result))
     }
 
     /// Speculatively read inside an open replicated transaction so the
@@ -534,7 +616,7 @@ impl VibesqlStateMachine {
         &self,
         entry: &TxnEntry,
         select_sql: &str,
-    ) -> Result<Vec<Vec<SqlValue>>> {
+    ) -> Result<QueryResult> {
         let select = match vibesql_parser::parse_with_arena_fallback(select_sql)
             .map_err(|e| ConsensusError::Backend(format!("parse error: {e}")))?
         {
@@ -579,8 +661,8 @@ impl VibesqlStateMachine {
                 )?;
             }
             vibesql_executor::SelectExecutor::new(&inner.db)
-                .execute(&select)
-                .map(|rows| rows.into_iter().map(|r| r.values.to_vec()).collect::<Vec<_>>())
+                .execute_with_columns(&select)
+                .map(QueryResult::from)
                 .map_err(|e| {
                     ConsensusError::Backend(format!("speculative query failed: {e}"))
                 })
@@ -1037,6 +1119,7 @@ mod tests {
         machine
             .query("SELECT name FROM users ORDER BY id")
             .unwrap()
+            .rows
             .into_iter()
             .map(|row| row[0].to_string())
             .collect()
@@ -1352,7 +1435,7 @@ mod tests {
                 assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
             }
         }
-        assert_eq!(a.query("SELECT r FROM t").unwrap(), vec![vec![SqlValue::Integer(30)]]);
+        assert_eq!(a.query("SELECT r FROM t").unwrap().rows, vec![vec![SqlValue::Integer(30)]]);
     }
 
     /// A frozen-value/site-count mismatch indicates proposer/applier
@@ -1380,7 +1463,7 @@ mod tests {
         let frozen = TxnEntry::frozen_batch(statements, vec![vec![FrozenValue::Integer(7)]]);
         assert_eq!(machine.apply(2, &frozen).unwrap(), ApplyOutcome::Applied { rows_affected: 1 });
         assert_eq!(
-            machine.query("SELECT r FROM t WHERE id = 1").unwrap(),
+            machine.query("SELECT r FROM t WHERE id = 1").unwrap().rows,
             vec![vec![SqlValue::Integer(7)]]
         );
     }

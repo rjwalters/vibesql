@@ -231,7 +231,9 @@ use crate::openraft_backend::{
     InMemoryLogStore, RaftTuning, RecoveredDurable, TypeConfig,
 };
 use crate::snapshot::SnapshotStore;
-use crate::state_machine::{deserialize_database, ApplyOutcome, TxnEntry, VibesqlStateMachine};
+use crate::state_machine::{
+    deserialize_database, ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine,
+};
 
 // ---------------------------------------------------------------------------
 // Snapshot payload framing: dense index header + vbsql database blob
@@ -936,7 +938,7 @@ impl MvccRaftNode {
         &self,
         entry: &TxnEntry,
         select_sql: &str,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+    ) -> Result<QueryResult> {
         if self.role() != Role::Leader {
             return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
         }
@@ -1006,7 +1008,7 @@ impl MvccRaftNode {
     /// trail the cluster's committed state arbitrarily. For reads that
     /// must observe every committed write, use
     /// [`query_linearizable`](Self::query_linearizable).
-    pub fn query(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+    pub fn query(&self, sql: &str) -> Result<QueryResult> {
         self.sm.machine.query(sql)
     }
 
@@ -1028,7 +1030,7 @@ impl MvccRaftNode {
     ///   could not confirm a quorum (e.g. partitioned into a minority) —
     ///   its own view is exactly what could not be confirmed, so hinting
     ///   at itself would route callers back to a possibly-stale node.
-    pub async fn query_linearizable(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+    pub async fn query_linearizable(&self, sql: &str) -> Result<QueryResult> {
         self.raft.ensure_linearizable().await.map_err(|e| self.map_read_error(e))?;
         self.sm.machine.query(sql)
     }
@@ -1086,7 +1088,7 @@ impl MvccRaftNode {
         min_index: LogIndex,
         sql: &str,
         wait: Duration,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+    ) -> Result<QueryResult> {
         let mut rx = self.sm.applied.subscribe();
         // A closed channel (the inner `Err`) cannot happen while `self`
         // is alive — the sender lives on `self.sm` — so it folds into
@@ -1143,7 +1145,7 @@ impl MvccRaftNode {
         &self,
         max_staleness: Duration,
         sql: &str,
-    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+    ) -> Result<QueryResult> {
         if max_staleness.is_zero() {
             return self.query_linearizable(sql).await;
         }
@@ -1557,7 +1559,7 @@ mod tests {
                     ids[0]
                 );
             }
-            reference
+            reference.rows
         }
 
         async fn wait_until<T>(&self, what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
@@ -1603,7 +1605,7 @@ mod tests {
 
         // The session reads its own write immediately after the propose.
         assert_eq!(
-            node.query("SELECT name FROM users").unwrap(),
+            node.query("SELECT name FROM users").unwrap().rows,
             vec![vec![SqlValue::Varchar("alice".into())]]
         );
 
@@ -2014,7 +2016,7 @@ mod tests {
         node.execute_replicated("INSERT INTO t VALUES (1, 'one')").await.unwrap();
 
         let rows = node.query_linearizable("SELECT id, v FROM t").await.unwrap();
-        assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+        assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
         assert_eq!(rows, node.query("SELECT id, v FROM t").unwrap());
     }
 
@@ -2045,7 +2047,7 @@ mod tests {
         // The stale-allowed local read stays available on the follower.
         cluster.wait_for_apply(follower, idx).await;
         assert_eq!(
-            cluster.node(follower).query("SELECT id FROM t").unwrap(),
+            cluster.node(follower).query("SELECT id FROM t").unwrap().rows,
             Vec::<Vec<SqlValue>>::new()
         );
 
@@ -2077,7 +2079,7 @@ mod tests {
                 .query_at_least(token, "SELECT id, v FROM t", WAIT_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("node {id} must serve the token read: {e:?}"));
-            assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+            assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
         }
     }
 
@@ -2142,7 +2144,7 @@ mod tests {
         node.execute_replicated("INSERT INTO t VALUES (7)").await.unwrap();
 
         let rows = node.query_bounded_staleness(Duration::ZERO, "SELECT id FROM t").await.unwrap();
-        assert_eq!(rows, vec![vec![SqlValue::Integer(7)]]);
+        assert_eq!(rows.rows, vec![vec![SqlValue::Integer(7)]]);
     }
 
     /// Pre-#5200 (unstamped) entries through the real mount: the dense
@@ -2229,7 +2231,7 @@ mod tests {
             .query_at_least(token, "SELECT id FROM t", WAIT_TIMEOUT)
             .await
             .unwrap();
-        assert_eq!(rows, vec![vec![SqlValue::Integer(1)]]);
+        assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1)]]);
     }
 
     /// The opt-in staleness beacon keeps an IDLE cluster's bounded reads
@@ -2259,7 +2261,7 @@ mod tests {
         loop {
             match cluster.node(follower).query_bounded_staleness(bound, "SELECT id FROM t").await {
                 Ok(rows) => {
-                    assert_eq!(rows, vec![vec![SqlValue::Integer(1)]]);
+                    assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1)]]);
                     break;
                 }
                 Err(ConsensusError::StalenessExceeded { .. }) => {} // beacon not landed yet

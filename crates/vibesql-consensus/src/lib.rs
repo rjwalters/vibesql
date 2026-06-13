@@ -171,4 +171,4 @@ pub use mvcc_raft::MvccRaftNode;
 pub use openraft_backend::{OpenraftBackend, RaftTuning};
 pub use replicated::ReplicatedDb;
 pub use single_node::SingleNodeBackend;
-pub use state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine};
+pub use state_machine::{ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine};

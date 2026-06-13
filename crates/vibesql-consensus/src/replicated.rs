@@ -18,11 +18,10 @@
 //! voter; the harness's catch-up loop then becomes the recovery/replay
 //! path only.
 
-use vibesql_types::SqlValue;
 
 use crate::{
     backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Snapshot},
-    state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine},
+    state_machine::{ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine},
 };
 
 /// A database whose writes flow through a consensus backend.
@@ -130,7 +129,7 @@ where
 
     /// Run a read-only SELECT against the applied state (reads are
     /// local, not replicated).
-    pub fn query(&self, sql: &str) -> Result<Vec<Vec<SqlValue>>> {
+    pub fn query(&self, sql: &str) -> Result<QueryResult> {
         self.machine.query(sql)
     }
 
@@ -146,6 +145,7 @@ where
 mod tests {
     use super::*;
     use crate::single_node::SingleNodeBackend;
+    use vibesql_types::SqlValue;
     use crate::ConsensusError;
 
     fn replicated() -> ReplicatedDb<SingleNodeBackend<TxnEntry>> {
@@ -164,6 +164,7 @@ mod tests {
     fn names(db: &ReplicatedDb<SingleNodeBackend<TxnEntry>>) -> Vec<String> {
         db.query("SELECT name FROM users ORDER BY id")
             .unwrap()
+            .rows
             .into_iter()
             .map(|row| row[0].to_string())
             .collect()
@@ -351,7 +352,7 @@ mod tests {
             "curdate, curtime, age, CAST(TIME AS TIMESTAMP) must all freeze"
         );
         let rows = db.query("SELECT d, t, a, c FROM clk WHERE id = 1").unwrap();
-        for (got, frozen) in rows[0].iter().zip(&alias_entry.frozen[0]) {
+        for (got, frozen) in rows.rows[0].iter().zip(&alias_entry.frozen[0]) {
             assert_eq!(
                 *got,
                 SqlValue::from(frozen.clone()),
@@ -366,8 +367,8 @@ mod tests {
         assert_eq!(entry.frozen.len(), 1);
         assert_eq!(entry.frozen[0].len(), 3, "random, randomblob, CURRENT_TIMESTAMP");
         let rows = db.query("SELECT r, b FROM t WHERE id = 1").unwrap();
-        assert_eq!(rows[0][0], SqlValue::from(entry.frozen[0][0].clone()));
-        assert_eq!(rows[0][1], SqlValue::from(entry.frozen[0][1].clone()));
+        assert_eq!(rows.rows[0][0], SqlValue::from(entry.frozen[0][0].clone()));
+        assert_eq!(rows.rows[0][1], SqlValue::from(entry.frozen[0][1].clone()));
 
         // A second machine replaying the same log converges exactly.
         let recovered = ReplicatedDb::new(clone_log(&db).await);
@@ -515,7 +516,7 @@ mod tests {
         // WHERE + ORDER BY
         let rows = db.query("SELECT a, b FROM t1 WHERE b >= 20 ORDER BY b DESC").unwrap();
         assert_eq!(
-            rows,
+            rows.rows,
             vec![
                 vec![SqlValue::Integer(4), SqlValue::Integer(41)],
                 vec![SqlValue::Integer(3), SqlValue::Integer(31)],
@@ -525,7 +526,7 @@ mod tests {
 
         // Aggregates
         let rows = db.query("SELECT count(*), sum(b) FROM t1").unwrap();
-        assert_eq!(rows, vec![vec![SqlValue::Integer(3), SqlValue::Integer(92)]]);
+        assert_eq!(rows.rows, vec![vec![SqlValue::Integer(3), SqlValue::Integer(92)]]);
 
         // JOIN
         let rows = db
@@ -667,7 +668,7 @@ mod tests {
         let entry = db.backend().read_committed(index).await.unwrap();
         assert_eq!(entry.frozen_defaults[0].len(), 1, "the SET = DEFAULT site freezes one value");
         assert_eq!(
-            db.query("SELECT ts FROM events WHERE id = 1").unwrap(),
+            db.query("SELECT ts FROM events WHERE id = 1").unwrap().rows,
             vec![vec![SqlValue::from(entry.frozen_defaults[0][0].clone())]]
         );
 
@@ -774,7 +775,7 @@ mod tests {
         let (_, outcome) = db.execute_replicated("INSERT INTO t VALUES (1, 42)").await.unwrap();
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
         assert_eq!(
-            db.query("SELECT k, v FROM audit ORDER BY k").unwrap(),
+            db.query("SELECT k, v FROM audit ORDER BY k").unwrap().rows,
             vec![vec![SqlValue::Integer(1), SqlValue::Integer(42)]],
             "the trigger body fired and wrote the audit row from NEW"
         );

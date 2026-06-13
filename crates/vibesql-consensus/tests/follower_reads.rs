@@ -315,7 +315,7 @@ async fn read_your_writes_token_serves_on_any_node() {
             .query_at_least(token, "SELECT id, v FROM accounts", WAIT_TIMEOUT)
             .await
             .unwrap_or_else(|e| panic!("node {id} must serve the token read: {e:?}"));
-        assert_eq!(rows, expected, "node {id}");
+        assert_eq!(rows.rows, expected, "node {id}");
     }
 
     // Token 0 degenerates to a plain local read.
@@ -325,7 +325,7 @@ async fn read_your_writes_token_serves_on_any_node() {
         .query_at_least(0, "SELECT id, v FROM accounts", WAIT_TIMEOUT)
         .await
         .unwrap();
-    assert_eq!(rows, expected);
+    assert_eq!(rows.rows, expected);
 
     // A token beyond anything committed must NOT serve — typed timeout.
     let err = cluster
@@ -392,7 +392,7 @@ async fn token_read_on_lagging_follower_blocks_until_catch_up() {
         .query_at_least(token, "SELECT id, v FROM t", WAIT_TIMEOUT)
         .await
         .expect("the healed follower must catch up and serve the token read");
-    assert_eq!(rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+    assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
 
     cluster.shutdown().await;
 }
@@ -425,7 +425,7 @@ async fn fresh_follower_serves_bounded_reads_and_zero_redirects() {
         .query_bounded_staleness(Duration::from_secs(10), "SELECT id, v FROM t")
         .await
         .expect("a freshly-applied follower must serve within a 10s bound");
-    assert_eq!(rows, expected);
+    assert_eq!(rows.rows, expected);
 
     // staleness = 0 on a follower: redirect to the leader.
     match cluster.node(follower).query_bounded_staleness(Duration::ZERO, "SELECT id FROM t").await {
@@ -439,7 +439,7 @@ async fn fresh_follower_serves_bounded_reads_and_zero_redirects() {
         .query_bounded_staleness(Duration::ZERO, "SELECT id, v FROM t")
         .await
         .expect("the leader serves staleness=0 through the linearizable path");
-    assert_eq!(rows, expected);
+    assert_eq!(rows.rows, expected);
 
     cluster.shutdown().await;
 }
@@ -485,7 +485,7 @@ async fn partitioned_follower_refuses_bounded_reads_once_the_bound_elapses() {
         {
             Ok(rows) => {
                 assert_eq!(
-                    rows, seeded,
+                    rows.rows, seeded,
                     "a bounded read served inside the bound must be the pre-partition prefix"
                 );
             }
@@ -525,7 +525,7 @@ async fn partitioned_follower_refuses_bounded_reads_once_the_bound_elapses() {
         .query_at_least(majority_idx, "SELECT id, v FROM t ORDER BY id", WAIT_TIMEOUT)
         .await
         .expect("the healed follower must catch up to the majority write");
-    assert_eq!(rows, both);
+    assert_eq!(rows.rows, both);
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     loop {
         match cluster
@@ -534,7 +534,7 @@ async fn partitioned_follower_refuses_bounded_reads_once_the_bound_elapses() {
             .await
         {
             Ok(rows) => {
-                assert_eq!(rows, both);
+                assert_eq!(rows.rows, both);
                 break;
             }
             Err(ConsensusError::StalenessExceeded { .. }) => {} // beacon not landed yet
