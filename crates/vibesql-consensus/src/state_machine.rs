@@ -606,6 +606,27 @@ impl VibesqlStateMachine {
         }
     }
 
+    /// Snapshot every table's schema from the **applied replicated catalog**
+    /// (#5421), keyed by table name. This is the replicated-mode counterpart
+    /// of reading the local registry catalog: the HTTP GraphQL surface builds
+    /// its GraphQL type/relationship model (table types, columns, foreign-key
+    /// relationships) from these schemas, but in replicated mode the catalog
+    /// lives here in the state machine, not in the (empty) local registry
+    /// database. Like [`query`](Self::query) and
+    /// [`primary_key_column`](Self::primary_key_column) it is a local read of
+    /// the applied state — no leadership check or network round.
+    pub fn schema_snapshot(
+        &self,
+    ) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+        let inner = self.lock();
+        inner
+            .db
+            .list_tables()
+            .into_iter()
+            .filter_map(|name| inner.db.get_table(&name).map(|table| (name, table.schema.clone())))
+            .collect()
+    }
+
     /// Speculatively read inside an open replicated transaction so the
     /// session observes its **own** buffered (not-yet-committed) writes —
     /// full mid-transaction read-your-own-writes (#5401).

@@ -1485,7 +1485,7 @@ fn set_value_ms(expr: &vibesql_ast::Expression, variable: &str) -> Result<u64> {
 /// [`vibesql_ast::ToSql`] (the same escaping the wire `Bind` path uses), so
 /// values containing quotes cannot break out of the statement. Placeholders
 /// inside string literals are not substituted.
-fn substitute_named_params(sql: &str, params: &[SqlValue]) -> String {
+pub(crate) fn substitute_named_params(sql: &str, params: &[SqlValue]) -> String {
     use vibesql_ast::pretty_print::ToSql;
 
     let mut out = String::with_capacity(sql.len());
