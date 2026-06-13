@@ -779,3 +779,78 @@ fn test_allow_lazy_downgrades_durable_mode() {
         "AllowLazy should downgrade durable mode and not trigger explicit flush on commit"
     );
 }
+
+// ============================================================================
+// Rollback restores index state (regression for #5413)
+// ============================================================================
+
+/// Regression for #5413: `rollback_transaction` is the SHARED rollback path
+/// used by standalone transactions too. The B-tree `IndexManager` lives in
+/// `Operations`, which is NOT part of the catalog/tables snapshot — so before
+/// the fix an index mutated inside a transaction survived ROLLBACK. This test
+/// mutates the index manager inside a transaction (CREATE INDEX), rolls back,
+/// and asserts the index is gone, proving `Operations` is restored alongside
+/// catalog/tables.
+#[test]
+fn rollback_restores_index_manager_state() {
+    use vibesql_ast::IndexColumn;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    let mut db = Database::new();
+
+    // A table with a single column to index.
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+    );
+    db.create_table(schema).unwrap();
+
+    db.begin_transaction().unwrap();
+    db.create_index(
+        "idx_t_id".to_string(),
+        "t".to_string(),
+        false,
+        vec![IndexColumn::new_column("id".to_string(), vibesql_ast::OrderDirection::Asc)],
+    )
+    .unwrap();
+    assert!(db.index_exists("idx_t_id"), "index exists inside the transaction");
+
+    db.rollback_transaction().unwrap();
+
+    // Before the #5413 fix, the IndexManager mutation survived rollback and
+    // this assertion failed.
+    assert!(
+        !db.index_exists("idx_t_id"),
+        "ROLLBACK must restore the IndexManager, removing the index created in the txn"
+    );
+}
+
+/// Regression for #5413: committed index mutations must persist (the fix must
+/// only undo rolled-back index changes, never committed ones).
+#[test]
+fn commit_keeps_index_manager_state() {
+    use vibesql_ast::IndexColumn;
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+    );
+    db.create_table(schema).unwrap();
+
+    db.begin_transaction().unwrap();
+    db.create_index(
+        "idx_t_id".to_string(),
+        "t".to_string(),
+        false,
+        vec![IndexColumn::new_column("id".to_string(), vibesql_ast::OrderDirection::Asc)],
+    )
+    .unwrap();
+    db.commit_transaction().unwrap();
+
+    assert!(db.index_exists("idx_t_id"), "COMMIT must keep the index created in the txn");
+}

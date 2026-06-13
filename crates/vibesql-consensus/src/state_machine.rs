@@ -1169,6 +1169,71 @@ mod tests {
         assert_eq!(names(&machine), vec!["alice", "bob"]);
     }
 
+    /// Regression for #5413: a speculative read of a buffered PK insert
+    /// must leave the leader's PK/UNIQUE index bit-for-bit identical to
+    /// before the read. Previously the scratch transaction's rollback
+    /// restored `catalog`/`tables` but **not** the `IndexManager`, so the
+    /// replayed PK key survived rollback and a later legitimate apply
+    /// reusing that PK was wrongly `Rejected` cluster-wide.
+    #[test]
+    fn speculative_query_leaves_pk_index_clean_for_later_apply() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+
+        // Buffer a brand-new PK (id = 2) and read through the speculative
+        // path. The read sees its own write...
+        let buffer = TxnEntry::batch(["INSERT INTO users VALUES (2, 'spec')"]);
+        let rows =
+            machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
+        let seen: Vec<String> = rows.into_iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(seen, vec!["spec"], "RYW: speculative read sees the buffered PK");
+
+        // ...but committed state stays empty and last_applied is unchanged.
+        assert!(names(&machine).is_empty(), "speculative read must not commit");
+        assert_eq!(machine.last_applied(), 1);
+
+        // A FRESH entry committing the same PK must now land `Applied` —
+        // the rolled-back speculative key must not leak into the index and
+        // trigger a spurious UNIQUE rejection.
+        let outcome =
+            machine.apply(2, &TxnEntry::single("INSERT INTO users VALUES (2, 'real')")).unwrap();
+        assert_eq!(
+            outcome,
+            ApplyOutcome::Applied { rows_affected: 1 },
+            "fresh PK reuse after a rolled-back speculative read must apply, not reject"
+        );
+        assert_eq!(names(&machine), vec!["real"]);
+        assert_eq!(machine.last_applied(), 2);
+    }
+
+    /// Regression for #5413: read-your-own-writes must be idempotent.
+    /// Two consecutive speculative reads after one buffered PK insert must
+    /// both succeed and return the same single row. Previously the first
+    /// read's scratch INSERT key leaked into the index, so the second
+    /// read's replay failed its own `UNIQUE constraint` check.
+    #[test]
+    fn two_speculative_reads_of_one_buffered_pk_are_idempotent() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+
+        let buffer = TxnEntry::batch(["INSERT INTO users VALUES (2, 'spec')"]);
+
+        let first =
+            machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
+        let first_seen: Vec<String> = first.into_iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(first_seen, vec!["spec"], "first speculative read");
+
+        // The second read replays the same buffer into a fresh scratch txn;
+        // it must not see a stale key from the first read's rollback.
+        let second =
+            machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
+        let second_seen: Vec<String> = second.into_iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(second_seen, vec!["spec"], "second speculative read must match the first");
+
+        assert!(names(&machine).is_empty(), "neither speculative read commits");
+        assert_eq!(machine.last_applied(), 1);
+    }
+
     /// commit_ts = log index: every MVCC stamp written by entry `N`
     /// carries `xmin = N`. Only observable with the MVCC feature on
     /// (stamping is compiled out otherwise).
