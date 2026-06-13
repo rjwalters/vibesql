@@ -384,10 +384,54 @@ impl Default for VibesqlStateMachine {
     }
 }
 
+/// Buffer size for the apply-path change-event channel (#5422). The state
+/// machine's database broadcasts a [`ChangeEvent`](vibesql_storage::ChangeEvent)
+/// for every row mutated by [`apply`](VibesqlStateMachine::apply); a subscriber
+/// (the server's replicated subscription loop) drains them and re-runs its
+/// SELECTs against the applied state. A ring this size tolerates large bursts
+/// of applied rows between drains; lagging only forces a conservative
+/// full-table re-check, never incorrect results.
+const APPLY_CHANGE_BUFFER: usize = 4096;
+
 impl VibesqlStateMachine {
     /// A fresh state machine over an empty in-memory database.
+    ///
+    /// Change-event broadcasting is enabled on the underlying database so the
+    /// apply path emits a [`ChangeEvent`](vibesql_storage::ChangeEvent) per
+    /// mutated row (#5422). This is what lets HTTP SSE subscriptions on any
+    /// node — leader or follower — observe **committed/applied** changes: a
+    /// subscriber taps this feed via [`subscribe_changes`](Self::subscribe_changes)
+    /// and re-queries the applied state. It is harmless in the non-subscription
+    /// paths (the events are simply buffered and dropped when no receiver
+    /// exists).
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(MachineInner { db: Database::new(), last_applied: 0 })) }
+        let mut db = Database::new();
+        db.enable_change_events(APPLY_CHANGE_BUFFER);
+        Self { inner: Arc::new(Mutex::new(MachineInner { db, last_applied: 0 })) }
+    }
+
+    /// Subscribe to the apply-path change feed (#5422): a
+    /// [`ChangeEventReceiver`](vibesql_storage::ChangeEventReceiver) that
+    /// yields a [`ChangeEvent`](vibesql_storage::ChangeEvent) for every row the
+    /// [`apply`](Self::apply) path mutates, in apply (commit) order. Returns
+    /// `None` only if change events were never enabled (they always are for a
+    /// machine built via [`new`](Self::new) / [`from_snapshot`](Self::from_snapshot)).
+    ///
+    /// The receiver starts at the current position (no historical backlog): a
+    /// fresh subscriber observes changes applied *after* it subscribes, having
+    /// taken its own initial snapshot via a query against the applied state —
+    /// exactly the standalone subscription contract.
+    pub fn subscribe_changes(&self) -> Option<vibesql_storage::ChangeEventReceiver> {
+        self.lock().db.subscribe_changes()
+    }
+
+    /// Run a closure against the applied database under the machine lock
+    /// (#5422). The replicated subscription loop uses this to execute a
+    /// subscription's SELECT against the **committed** state when a change
+    /// event fires. The closure must not block or `.await` — it runs while the
+    /// apply mutex is held, serializing with [`apply`](Self::apply).
+    pub fn with_applied_db<R>(&self, f: impl FnOnce(&Database) -> R) -> R {
+        f(&self.lock().db)
     }
 
     /// Rebuild a state machine from a snapshot produced by
@@ -773,6 +817,13 @@ impl VibesqlStateMachine {
     ) -> Result<()> {
         db.set_next_txn_id(last_included_index + 1)
             .map_err(|e| ConsensusError::SnapshotCodec(format!("failed to seed commit_ts: {e}")))?;
+        // Re-arm the apply-path change feed on the freshly decoded database
+        // (#5422): the deserialized database has no change sender, so without
+        // this a post-snapshot apply would emit no events. Replacing the
+        // database closes the previous sender, so any subscriber tapping the
+        // old feed observes a closed channel and must re-subscribe + re-snapshot
+        // — the correct response to the applied state jumping forward.
+        db.enable_change_events(APPLY_CHANGE_BUFFER);
         let mut inner = self.lock();
         inner.db = db;
         inner.last_applied = last_included_index;

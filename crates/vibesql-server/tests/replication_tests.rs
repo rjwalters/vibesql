@@ -1870,13 +1870,13 @@ async fn http_write_replicates_to_followers() {
     }
 }
 
-/// In replicated mode the subscription and blob-storage surfaces remain gated
-/// to a clear 503 (they depend on local-database change-feed/state
-/// introspection that is not yet wired through consensus — follow-ons to
-/// #5410). They must never silently execute against the local database. The
-/// CRUD by-id endpoints (#5420) and the GraphQL endpoint (#5421) are no longer
-/// gated — they route through consensus; see `http_crud_by_id_*` and
-/// `http_graphql_*` below.
+/// In replicated mode the **blob-storage** surface remains gated to a clear 503
+/// (the `BlobStorageService` byte store does not route through the
+/// SQL/consensus write path — replicating it is a separate design problem,
+/// deferred to a focused follow-on of #5410/#5422). It must never silently
+/// accept a write that never replicates. The subscription endpoint (#5422), the
+/// CRUD by-id endpoints (#5420), and the GraphQL endpoint (#5421) are no longer
+/// gated — they route through consensus.
 #[tokio::test]
 async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     let (handles, _dir) = boot_cluster(1).await;
@@ -1884,11 +1884,35 @@ async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
     let client = reqwest::Client::new();
 
-    // Subscriptions.
-    let resp = client.get(format!("{base}/api/subscribe?query=SELECT%201")).send().await.unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    // Subscriptions are no longer gated (#5422): the SSE endpoint opens a
+    // text/event-stream (200) fed by the apply-path change feed rather than the
+    // old 503. (A keep-alive stream stays open, so cap the request.)
+    let resp = client
+        .get(format!("{base}/api/subscribe?query=SELECT%201"))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await;
+    match resp {
+        Ok(resp) => {
+            assert_eq!(
+                resp.status(),
+                reqwest::StatusCode::OK,
+                "the SSE subscription endpoint must be wired (200), not gated"
+            );
+            let ct = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            assert!(ct.starts_with("text/event-stream"), "expected an SSE stream, got {ct:?}");
+        }
+        // A read timeout while the keep-alive stream is open also proves the
+        // endpoint is wired (it did not return a 503 body).
+        Err(e) => assert!(e.is_timeout(), "expected an SSE stream or timeout, got {e}"),
+    }
 
-    // Blob storage.
+    // Blob storage stays gated.
     let resp = client.get(format!("{base}/api/storage/anything")).send().await.unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 
@@ -2207,4 +2231,117 @@ async fn http_standalone_unaffected() {
     let rows = body["data"]["data"].as_array().expect("data.data array");
     assert_eq!(rows.len(), 1, "standalone GraphQL query must still work: {body}");
     assert_eq!(rows[0]["name"], "Alice", "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions over consensus (#5422)
+// ---------------------------------------------------------------------------
+
+/// Wait (bounded) until every handle has applied dense index `idx`.
+async fn wait_all_applied(handles: &[Arc<ReplicationHandle>], idx: u64) {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        if handles.iter().all(|h| h.node().last_applied() >= idx) {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for apply of {idx}");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// A subscriber driven by the **replicated apply-path change feed** observes a
+/// write committed on the leader while subscribed against a **follower** —
+/// end-to-end through the server's `SubscriptionManager` (#5422). This is the
+/// server-side equivalent of the consensus crate's apply-feed test, exercising
+/// `run_replicated_event_loop` + `with_applied_db` + `notify_with_rows`.
+#[tokio::test]
+async fn replicated_subscription_on_follower_sees_leader_write() {
+    use vibesql_server::SubscriptionUpdate;
+
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader_idx = wait_for_leader(&handles).await;
+
+    // Schema + a first row, committed via the leader.
+    let mut leader = replicated_session(&handles[leader_idx]);
+    leader.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await.unwrap();
+    let res = leader.execute("INSERT INTO users VALUES (1, 'alice')").await.unwrap();
+    assert!(matches!(res, ExecutionResult::Insert { rows_affected: 1 }));
+
+    let setup_idx = handles[leader_idx].node().last_applied();
+    wait_all_applied(&handles, setup_idx).await;
+
+    // Pick a follower and drive a subscription against ITS applied state.
+    let follower_pos =
+        (0..handles.len()).find(|i| *i != leader_idx).expect("a follower exists");
+    let follower = Arc::clone(&handles[follower_pos]);
+
+    let manager = Arc::new(SubscriptionManager::new());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let query = "SELECT id, name FROM users ORDER BY id".to_string();
+    let sub_id = manager.subscribe(query.clone(), tx).expect("subscribe");
+
+    // Prime the initial snapshot from the follower's applied state, exactly as
+    // the replicated SSE handler does.
+    let initial = follower
+        .with_applied_db(|db| SubscriptionManager::execute_query_against(&query, db))
+        .expect("initial query")
+        .into_iter()
+        .map(|r| vibesql_server::Row { values: r.values.to_vec() })
+        .collect::<Vec<_>>();
+    manager.prime_initial_result(sub_id, initial).await.expect("prime initial");
+
+    // The initial Full update reflects the row already committed.
+    match tokio::time::timeout(WAIT_TIMEOUT, rx.recv()).await.expect("initial event") {
+        Some(SubscriptionUpdate::Full { rows, .. }) => {
+            assert_eq!(rows.len(), 1, "initial snapshot should have one row");
+        }
+        other => panic!("expected initial Full update, got {other:?}"),
+    }
+
+    // Spawn the replicated event loop against the follower's apply-path feed.
+    let change_rx = follower.subscribe_changes().expect("apply-path feed");
+    let manager_for_loop = Arc::clone(&manager);
+    let follower_for_query = Arc::clone(&follower);
+    let loop_task = tokio::spawn(async move {
+        let query_fn = move |q: &str| {
+            follower_for_query.with_applied_db(|db| SubscriptionManager::execute_query_against(q, db))
+        };
+        manager_for_loop.run_replicated_event_loop(change_rx, query_fn).await;
+    });
+
+    // Commit a second row on the leader; the follower applies it, its feed
+    // fires, and the subscriber is notified with the updated result.
+    let res = leader.execute("INSERT INTO users VALUES (2, 'bob')").await.unwrap();
+    assert!(matches!(res, ExecutionResult::Insert { rows_affected: 1 }));
+    let write_idx = handles[leader_idx].node().last_applied();
+    wait_all_applied(&handles, write_idx).await;
+
+    // Drain updates until we observe a result containing both rows. The change
+    // feed may emit a delta or a full update depending on PK detection; either
+    // way the subscriber must end up seeing two rows.
+    let observed_two = tokio::time::timeout(WAIT_TIMEOUT, async {
+        loop {
+            match rx.recv().await {
+                Some(SubscriptionUpdate::Full { rows, .. }) => {
+                    if rows.len() == 2 {
+                        return true;
+                    }
+                }
+                Some(SubscriptionUpdate::Delta { inserts, .. }) => {
+                    if inserts.iter().any(|r| {
+                        r.values.first() == Some(&SqlValue::Integer(2))
+                    }) {
+                        return true;
+                    }
+                }
+                Some(_) => {}
+                None => return false,
+            }
+        }
+    })
+    .await
+    .expect("subscriber should be notified of the leader's committed write");
+    assert!(observed_two, "subscriber must observe the second committed row");
+
+    loop_task.abort();
 }

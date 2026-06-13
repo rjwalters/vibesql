@@ -290,6 +290,28 @@ impl ReplicationHandle {
         self.node.query(sql).map_err(|e| self.sql_error("the query", e))
     }
 
+    /// Subscribe to the apply-path change feed (#5422): a
+    /// [`ChangeEventReceiver`](vibesql_storage::ChangeEventReceiver) yielding a
+    /// [`ChangeEvent`](vibesql_storage::ChangeEvent) per row the consensus state
+    /// machine applies, in commit order. Available on every node — apply runs
+    /// on all replicas — so a subscriber connected to a follower observes
+    /// committed changes as that follower applies them. This is the replicated
+    /// counterpart of `Database::subscribe_changes` that drives standalone
+    /// subscriptions; the server's replicated subscription loop drains it and
+    /// re-runs each subscription's SELECT against the applied state via
+    /// [`with_applied_db`](Self::with_applied_db).
+    pub fn subscribe_changes(&self) -> Option<vibesql_storage::ChangeEventReceiver> {
+        self.node.subscribe_changes()
+    }
+
+    /// Run a closure against the applied (committed) database under the state
+    /// machine lock (#5422). The replicated subscription loop uses this to
+    /// re-execute a subscription's SELECT against committed state. The closure
+    /// must not block or `.await` — it holds the apply mutex.
+    pub fn with_applied_db<R>(&self, f: impl FnOnce(&vibesql_storage::Database) -> R) -> R {
+        self.node.with_applied_db(f)
+    }
+
     /// Resolve the single-column primary key of `table_name` from the
     /// applied replicated catalog (#5420). The HTTP CRUD by-id endpoints
     /// use this to introspect the PK in replicated mode — where the schema

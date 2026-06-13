@@ -141,12 +141,50 @@ async fn main() -> Result<()> {
     let subscription_manager = Arc::new(SubscriptionManager::new());
     let subscription_manager_for_handler = Arc::clone(&subscription_manager);
 
-    // Spawn the subscription manager event loop in a background task
+    // Spawn the subscription manager event loop in a background task.
+    //
+    // Standalone mode drives subscriptions from the local HTTP `Database`'s
+    // change stream. Replicated mode (#5422) instead drives them from the
+    // consensus **apply-path** change feed: every node — leader or follower —
+    // emits a change event as it applies a committed entry, and the loop
+    // re-runs affected subscriptions against the applied state machine. This is
+    // what lets a subscriber on any node observe committed writes (the local
+    // HTTP `Database` receives no replicated writes, so its change stream would
+    // never fire). On a snapshot install the feed closes; the loop exits and is
+    // restarted with a fresh receiver.
     let db_for_subscription_task = Arc::clone(&db);
     let subscription_manager_for_loop = Arc::clone(&subscription_manager);
+    let replication_for_subs = replication.clone();
     tokio::spawn(async move {
-        info!("Starting subscription manager event loop");
-        subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
+        match replication_for_subs {
+            Some(handle) => {
+                info!("Starting replicated (apply-path) subscription event loop");
+                loop {
+                    let Some(change_rx) = handle.subscribe_changes() else {
+                        warn!("Apply-path change feed unavailable; subscriptions disabled");
+                        break;
+                    };
+                    let handle_for_query = Arc::clone(&handle);
+                    let query_fn = move |query: &str| {
+                        handle_for_query.with_applied_db(|db| {
+                            SubscriptionManager::execute_query_against(query, db)
+                        })
+                    };
+                    subscription_manager_for_loop
+                        .run_replicated_event_loop(change_rx, query_fn)
+                        .await;
+                    // The feed closed (snapshot install or shutdown). Re-subscribe
+                    // to pick up the new state machine; if it is gone, stop.
+                    info!("Apply-path change feed closed; re-subscribing");
+                }
+            }
+            None => {
+                info!("Starting subscription manager event loop");
+                subscription_manager_for_loop
+                    .run_event_loop(change_rx, db_for_subscription_task)
+                    .await;
+            }
+        }
         info!("Subscription manager event loop stopped");
     });
 

@@ -1012,6 +1012,28 @@ impl MvccRaftNode {
         self.sm.machine.query(sql)
     }
 
+    /// Subscribe to this node's apply-path change feed (#5422): a
+    /// [`ChangeEventReceiver`](vibesql_storage::ChangeEventReceiver) yielding a
+    /// [`ChangeEvent`](vibesql_storage::ChangeEvent) per row mutated by the
+    /// state machine's [`apply`](VibesqlStateMachine::apply), in apply (commit)
+    /// order. Available on **every** node — leader or follower — because apply
+    /// runs on all replicas; this is what lets a subscriber connected to a
+    /// follower observe committed changes as that follower applies them. The
+    /// receiver carries no historical backlog (see
+    /// [`VibesqlStateMachine::subscribe_changes`]).
+    pub fn subscribe_changes(&self) -> Option<vibesql_storage::ChangeEventReceiver> {
+        self.sm.machine.subscribe_changes()
+    }
+
+    /// Run a closure against the locally applied database under the state
+    /// machine lock (#5422). The replicated subscription loop uses this to
+    /// re-execute a subscription's SELECT against the **committed** state when a
+    /// change event fires. The closure must not block or `.await` — it holds
+    /// the apply mutex, serializing with [`apply`](VibesqlStateMachine::apply).
+    pub fn with_applied_db<R>(&self, f: impl FnOnce(&vibesql_storage::Database) -> R) -> R {
+        self.sm.machine.with_applied_db(f)
+    }
+
     /// Resolve the single-column primary key of `table_name` against the
     /// locally applied replicated catalog (#5420). Local read of the
     /// applied schema — no leadership check or network round — used by the

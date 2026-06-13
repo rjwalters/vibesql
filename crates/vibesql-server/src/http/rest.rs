@@ -80,14 +80,19 @@ pub struct HttpState {
     /// key from the replicated catalog via
     /// [`ReplicationHandle::primary_key_column`]; #5421 — the GraphQL endpoint,
     /// which introspects the replicated catalog via
-    /// [`ReplicationHandle::schema_snapshot`]) build a **replicated** session
-    /// via [`Self::session`], so writes propose through this handle (leader-only,
+    /// [`ReplicationHandle::schema_snapshot`]; #5422 — SSE subscriptions, which
+    /// are fed from the consensus **apply-path change feed**
+    /// ([`ReplicationHandle::subscribe_changes`]) and re-query the applied state
+    /// via [`ReplicationHandle::with_applied_db`], so a subscriber on any node
+    /// observes committed writes) build a **replicated** session via
+    /// [`Self::session`], so writes propose through this handle (leader-only,
     /// freeze-at-propose) and reads run against the replicated state machine —
-    /// never against the unreplicated local registry database. Surfaces that
-    /// still depend on local-database change-feed/state introspection
-    /// (subscriptions, blob storage) remain gated (see [`Self::replicated_gate`])
-    /// to a clear error rather than silently reading stale data or accepting a
-    /// write that never replicates; those are tracked as follow-ons to #5410.
+    /// never against the unreplicated local registry database. The only HTTP
+    /// surface still gated in replicated mode is the **blob storage** API
+    /// (`/api/storage/*`), whose `BlobStorageService` is a separate byte store
+    /// that does not route through the SQL/consensus write path; it remains
+    /// gated to a clear 503 (deferred to a focused follow-on of #5410) rather
+    /// than accepting a write that never replicates.
     /// `/health` uses the handle to report node role/writability.
     pub replication: Option<StdArc<ReplicationHandle>>,
 }
@@ -147,29 +152,6 @@ impl HttpState {
         }
     }
 
-    /// `Some(error_response)` when this request hits a surface that is not
-    /// yet coherent in replicated mode and must be refused; `None` in
-    /// standalone mode (where every path is sound). Returning a `503` with
-    /// a `Retry-After`-style hint matches how a non-leader PostgreSQL
-    /// session refuses writes — the caller should route to the dedicated
-    /// PostgreSQL wire port, which is fully replicated.
-    pub(crate) fn replicated_gate(
-        &self,
-        feature: &str,
-    ) -> Option<(StatusCode, Json<ErrorResponse>)> {
-        self.replication.as_ref().map(|_| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse::with_code(
-                    format!(
-                        "{feature} is not available over the HTTP API in replicated mode; use the \
-                         PostgreSQL wire protocol port (writes route through consensus there)"
-                    ),
-                    "58000",
-                )),
-            )
-        })
-    }
 }
 
 /// Map an execution error to an HTTP response, translating a structured
@@ -287,9 +269,13 @@ pub fn create_http_router(
         .route("/stats/subscriptions/efficiency", get(get_efficiency_stats))
         .with_state(state);
 
-    // Create storage sub-router with its own state. The blob storage API
-    // also writes to the local registry database, so in replicated mode it
-    // is gated to a uniform 503 rather than nested (#5393).
+    // Create storage sub-router with its own state. The blob storage API is a
+    // separate `BlobStorageService` byte store that does not route through the
+    // SQL/consensus write path, so replicating it is its own design problem
+    // (wrap blob bytes in consensus entries, or a dedicated blob-replication
+    // path). It is therefore deferred to a focused follow-on of #5410/#5422 and
+    // remains gated to a uniform 503 in replicated mode rather than nested
+    // (#5393) — accepting a blob write here would never replicate.
     if is_replicated {
         let gated = Router::new().fallback(|| async {
             (
@@ -947,13 +933,15 @@ async fn subscribe_stream(
 
     debug!("SSE subscription requested for query: {}", params.query);
 
-    // Subscriptions are fed by change events from the local registry
-    // database, which receives no replicated writes — gate them in
-    // replicated mode (feeding subscriptions from applied consensus entries
-    // is follow-on #5410).
-    if let Some((code, body)) = state.replicated_gate("subscriptions") {
-        return (code, body).into_response();
-    }
+    // Subscriptions are coherent in both modes (#5422):
+    //   * Standalone: fed by the local HTTP `Database`'s change stream.
+    //   * Replicated: fed by the consensus **apply-path** change feed — every
+    //     node emits a change event as it applies a committed entry, so a
+    //     subscriber on any node (leader or follower) observes committed writes.
+    // The initial snapshot, PK detection, and initial result below therefore
+    // read from the replicated state machine (not the empty local registry DB)
+    // when in replicated mode, keeping the snapshot consistent with the feed.
+    let replicated = state.is_replicated();
 
     // Get the database name from headers
     let db_name = get_database_name(&headers);
@@ -1001,9 +989,11 @@ async fn subscribe_stream(
         }
     }
 
-    // Execute initial query with the shared database
-    let mut session =
-        crate::session::Session::new(db_name.clone(), "http_user".to_string(), shared_db);
+    // Execute the initial query. In replicated mode `state.session()` returns a
+    // replicated session that reads from the applied state machine; in
+    // standalone mode it is the ordinary local session — so the initial
+    // snapshot always comes from the same source that drives the change feed.
+    let mut session = state.session(&db_name, shared_db.clone());
 
     // Execute the initial query
     let result = if params_vec.is_empty() {
@@ -1012,10 +1002,12 @@ async fn subscribe_stream(
         session.execute_with_params(&params.query, &params_vec).await
     };
 
-    // Validate it's a SELECT statement
-    let columns = match result {
-        Ok(crate::session::ExecutionResult::Select { rows: _, columns }) => {
-            columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
+    // Validate it's a SELECT statement. In replicated mode we also keep the
+    // initial rows to prime the subscription's snapshot directly (the change
+    // feed re-queries the same applied state for subsequent updates).
+    let (columns, initial_rows) = match result {
+        Ok(crate::session::ExecutionResult::Select { rows, columns }) => {
+            (columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>(), rows)
         }
         Ok(_) => {
             error!("Subscription query must be a SELECT statement");
@@ -1104,11 +1096,17 @@ async fn subscribe_stream(
     // Detect PK columns for selective column updates
     // Parse the subscription query to detect primary key columns
     if let Ok(stmt) = vibesql_parser::Parser::parse_sql(&params.query) {
-        // Get the database for PK detection
-        let db_for_pk = state.registry.get_or_create(&db_name).await;
-        let db_guard_pk = db_for_pk.read().await;
-        let pk_detection = detect_pk_columns_from_stmt(&stmt, &db_guard_pk);
-        drop(db_guard_pk);
+        // Detect against the applied state machine in replicated mode (where the
+        // schema lives), or the local registry DB in standalone mode.
+        let pk_detection = if let Some(handle) = &state.replication {
+            handle.with_applied_db(|db| detect_pk_columns_from_stmt(&stmt, db))
+        } else {
+            let db_for_pk = state.registry.get_or_create(&db_name).await;
+            let db_guard_pk = db_for_pk.read().await;
+            let detection = detect_pk_columns_from_stmt(&stmt, &db_guard_pk);
+            drop(db_guard_pk);
+            detection
+        };
 
         debug!(
             subscription_id = %subscription_id,
@@ -1132,15 +1130,22 @@ async fn subscribe_stream(
         }
     }
 
-    // Send initial results using the database from the registry
+    // Send initial results. In replicated mode the snapshot is primed directly
+    // from the rows already read off the applied state machine (`initial_rows`),
+    // keeping it consistent with the apply-path change feed. In standalone mode
+    // it re-reads the local registry DB.
     let columns_clone = columns.clone();
-    // Re-get the database from registry and send initial results
-    let db_for_initial = state.registry.get_or_create(&db_name).await;
-    let db_guard = db_for_initial.read().await;
-    if let Err(e) =
-        state.subscription_manager.send_initial_results(subscription_id, &db_guard).await
-    {
+    let initial_result = if replicated {
+        // `ExecutionResult::Select` rows are already `crate::Row`.
+        state.subscription_manager.prime_initial_result(subscription_id, initial_rows).await
+    } else {
+        let db_for_initial = state.registry.get_or_create(&db_name).await;
+        let db_guard = db_for_initial.read().await;
+        let res = state.subscription_manager.send_initial_results(subscription_id, &db_guard).await;
         drop(db_guard);
+        res
+    };
+    if let Err(e) = initial_result {
         error!("Failed to send initial results: {}", e);
         let was_selective_eligible = state.subscription_manager.unsubscribe(subscription_id);
         if let Some(ref metrics) = state.metrics {
@@ -1166,7 +1171,6 @@ async fn subscribe_stream(
 
         return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
     }
-    drop(db_guard); // Release the read lock before entering the streaming loop
 
     // Create stream that receives updates from subscription and converts to SSE events
     let stream = async_stream::stream! {
