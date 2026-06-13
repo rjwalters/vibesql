@@ -303,6 +303,19 @@ impl ReplicationHandle {
         self.node.primary_key_column(table_name)
     }
 
+    /// Snapshot every table's schema from the applied replicated catalog
+    /// (#5421), keyed by table name. The HTTP GraphQL surface uses this to
+    /// build its GraphQL type and relationship model in replicated mode —
+    /// where the schema lives in the consensus state machine, not the
+    /// (empty) local registry database — exactly as it would read the local
+    /// catalog in standalone mode. Local read of the applied catalog: no
+    /// leadership check or network round.
+    pub fn schema_snapshot(
+        &self,
+    ) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+        self.node.schema_snapshot()
+    }
+
     /// Linearizable read (quorum-confirmed leadership).
     pub async fn query_linearizable(
         &self,

@@ -1870,28 +1870,19 @@ async fn http_write_replicates_to_followers() {
     }
 }
 
-/// In replicated mode the GraphQL, subscription, and blob-storage surfaces
-/// remain gated to a clear 503 (they depend on local-database schema/state
+/// In replicated mode the subscription and blob-storage surfaces remain gated
+/// to a clear 503 (they depend on local-database change-feed/state
 /// introspection that is not yet wired through consensus — follow-ons to
 /// #5410). They must never silently execute against the local database. The
-/// CRUD by-id endpoints are no longer gated (#5420 wired them through
-/// consensus); see `http_crud_by_id_*` below.
+/// CRUD by-id endpoints (#5420) and the GraphQL endpoint (#5421) are no longer
+/// gated — they route through consensus; see `http_crud_by_id_*` and
+/// `http_graphql_*` below.
 #[tokio::test]
 async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     let (handles, _dir) = boot_cluster(1).await;
     wait_for_leader(&handles).await;
     let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
     let client = reqwest::Client::new();
-
-    // GraphQL.
-    let resp = client
-        .post(format!("{base}/api/graphql"))
-        .header("content-type", "application/json")
-        .body(r#"{"query":"{ __typename }"}"#)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 
     // Subscriptions.
     let resp = client.get(format!("{base}/api/subscribe?query=SELECT%201")).send().await.unwrap();
@@ -1900,6 +1891,261 @@ async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     // Blob storage.
     let resp = client.get(format!("{base}/api/storage/anything")).send().await.unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+    // GraphQL is no longer gated — an introspection query succeeds (200)
+    // against the replicated catalog rather than returning the old 503.
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(r#"{"query":"{ __schema { types { name } } }"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+/// In replicated mode a GraphQL **mutation** routes through consensus and a
+/// GraphQL **query** reads it back from the replicated state machine (#5421):
+/// the inserted row lands in the consensus state machine (not the unreplicated
+/// local database) and a subsequent GraphQL query observes it.
+#[tokio::test]
+async fn http_graphql_mutation_and_query_route_through_consensus() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
+    let post_graphql = |query: &str| {
+        let client = client.clone();
+        let base = base.clone();
+        let body = serde_json::json!({ "query": query }).to_string();
+        async move {
+            client
+                .post(format!("{base}/api/graphql"))
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // Create the table through the SQL surface (DDL has no GraphQL form).
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"CREATE TABLE gql_t (id INT, name VARCHAR(100))"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // GraphQL INSERT mutation → proposes through consensus (200).
+    let resp = post_graphql(
+        r#"mutation { insertInto(table: "gql_t", values: {"id": 1, "name": "Alice"}) }"#,
+    )
+    .await;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // The write is in the consensus state machine, not the local database.
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM gql_t").unwrap()[0][0].to_string(),
+        "1",
+        "a GraphQL mutation must land in the replicated state machine"
+    );
+
+    // A GraphQL query reads it back through the replicated state machine.
+    let resp = post_graphql(r#"{ gql_t { id name } }"#).await;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let rows = body["data"]["data"].as_array().expect("data.data array");
+    assert_eq!(rows.len(), 1, "the replicated GraphQL query must see the row: {body}");
+    assert_eq!(rows[0]["name"], "Alice", "{body}");
+}
+
+/// A GraphQL mutation replicates to every node (#5421): after an INSERT on the
+/// leader's HTTP GraphQL port, every follower converges to the row.
+#[tokio::test]
+async fn http_graphql_mutation_replicates_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+    let client = reqwest::Client::new();
+
+    // Create + seed through the leader's SQL surface.
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"CREATE TABLE gql_repl (id INT, name VARCHAR(100))"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    // GraphQL INSERT mutation on the leader.
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "query": r#"mutation { insertInto(table: "gql_repl", values: {"id": 7, "name": "Bob"}) }"#
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Every follower converges to the row.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let n = h
+                .node()
+                .query("SELECT name FROM gql_repl WHERE id = 7")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if n.as_deref() == Some("Bob") {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to the GraphQL-inserted row (saw {n:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+/// A GraphQL mutation on a **follower** is refused with `421 Misdirected
+/// Request` carrying the leader hint, and is never executed against the
+/// follower's local database (the split-brain invariant, #5421). The redirect
+/// contract matches the SQL surfaces; the body is a GraphQL `errors` array.
+#[tokio::test]
+async fn http_graphql_mutation_on_follower_redirects_with_leader_hint() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    // Create + seed the table through the leader.
+    for sql in [
+        "CREATE TABLE gql_redir (id INT, name VARCHAR(100))",
+        "INSERT INTO gql_redir VALUES (1, 'Alice')",
+    ] {
+        replicated_session(&handles[leader]).execute(sql).await.unwrap();
+    }
+    let leader_id = handles[leader].node_id();
+
+    // Pick a follower that knows who leads (so the hint is populated) and that
+    // has applied the seed row (so introspection sees the table).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles.iter().position(|h| {
+            h.role() == Role::Follower
+                && h.node().current_leader().is_some()
+                && h.schema_snapshot().contains_key("gql_redir")
+        }) {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[follower]))).await;
+    let client = reqwest::Client::new();
+
+    // GraphQL UPDATE mutation on the follower → 421 + leader hint header.
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "query": r#"mutation { update(table: "gql_redir", values: {"name": "Bob"}, where: {"id": {"eq": 1}}) }"#
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::MISDIRECTED_REQUEST);
+    let leader_hint = resp
+        .headers()
+        .get("X-VibeSQL-Leader")
+        .expect("leader-hint header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(leader_hint.contains(&format!("node {leader_id}")), "{leader_hint}");
+
+    // The response body is a valid GraphQL error envelope.
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert!(body["errors"].is_array(), "expected a GraphQL errors array, got {body}");
+
+    // The follower's local state machine never executed the write.
+    assert_eq!(
+        handles[follower].node().query("SELECT name FROM gql_redir WHERE id = 1").unwrap()[0][0]
+            .to_string(),
+        "Alice",
+        "a GraphQL mutation on a follower must not mutate state outside consensus"
+    );
+}
+
+/// A GraphQL query string arg is parameterized, not interpolated, so a value
+/// crafted to break out of the SQL string cannot inject (#5421). The malicious
+/// value is bound as a literal and simply matches no row.
+#[tokio::test]
+async fn http_graphql_string_arg_is_injection_safe() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+    let client = reqwest::Client::new();
+
+    for sql in [
+        "CREATE TABLE gql_inj (id INT, name VARCHAR(100))",
+        "INSERT INTO gql_inj VALUES (1, 'Alice')",
+    ] {
+        let resp = client
+            .post(format!("{base}/api/query"))
+            .header("content-type", "application/json")
+            .body(serde_json::json!({ "sql": sql }).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{sql}: {}", resp.status());
+    }
+
+    // A classic injection payload in a GraphQL `where` string equality arg.
+    // If naively interpolated this would become `WHERE name = '' OR '1'='1'`
+    // and return every row; parameterized, it matches the literal string and
+    // returns nothing.
+    let payload = "' OR '1'='1";
+    let query = serde_json::json!({
+        "query": format!(r#"{{ gql_inj(where: {{"name": {{"eq": "{payload}"}}}}) {{ id name }} }}"#)
+    })
+    .to_string();
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(query)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let rows = body["data"]["data"].as_array().expect("data.data array");
+    assert!(
+        rows.is_empty(),
+        "an injection payload must be bound as a literal (match nothing), got {body}"
+    );
+
+    // The table is untouched — the real row is still present and queryable.
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM gql_inj").unwrap()[0][0].to_string(),
+        "1"
+    );
 }
 
 /// Standalone HTTP is unaffected: `/health` is 200 with no `replication`
@@ -1923,4 +2169,42 @@ async fn http_standalone_unaffected() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // GraphQL is unchanged standalone (#5421): a mutation + query round-trip
+    // works against the local database (no consensus handle present).
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"CREATE TABLE gql_std (id INT, name VARCHAR(100))"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "query": r#"mutation { insertInto(table: "gql_std", values: {"id": 1, "name": "Alice"}) }"#
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    let resp = client
+        .post(format!("{base}/api/graphql"))
+        .header("content-type", "application/json")
+        .body(r#"{"query":"{ gql_std { id name } }"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let rows = body["data"]["data"].as_array().expect("data.data array");
+    assert_eq!(rows.len(), 1, "standalone GraphQL query must still work: {body}");
+    assert_eq!(rows[0]["name"], "Alice", "{body}");
 }

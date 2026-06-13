@@ -1023,6 +1023,18 @@ impl MvccRaftNode {
         self.sm.machine.primary_key_column(table_name)
     }
 
+    /// Snapshot every table's schema from the locally applied replicated
+    /// catalog (#5421), keyed by table name. Local read of the applied
+    /// catalog — no leadership check or network round — used by the HTTP
+    /// GraphQL surface to build its GraphQL type and relationship model in
+    /// replicated mode, where the schema lives in the state machine rather
+    /// than the (empty) local registry database.
+    pub fn schema_snapshot(
+        &self,
+    ) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+        self.sm.machine.schema_snapshot()
+    }
+
     /// Run a read-only SELECT with **linearizable** semantics (Raft
     /// Phase B2, #5200, PR 1): openraft's ReadIndex protocol
     /// ([`Raft::ensure_linearizable`]) first confirms this node's

@@ -1,33 +1,51 @@
 //! GraphQL schema introspection support
 //!
 //! Handles __schema and __type queries for GraphQL introspection.
+//!
+//! Introspection is driven by a schema map (table name → [`TableSchema`])
+//! rather than the live database handle, so the same code path serves both
+//! standalone mode (the map is built from the local registry catalog) and
+//! replicated mode (the map is built from the applied consensus catalog via
+//! [`ReplicationHandle::schema_snapshot`](crate::replication::ReplicationHandle::schema_snapshot)),
+//! #5421. Reading the catalog through the map keeps the GraphQL surface from
+//! ever introspecting the unreplicated local database on a replicated node.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use serde_json::{json, Value as JsonValue};
-use vibesql_storage::Database;
+use vibesql_catalog::TableSchema;
 
 /// Try to handle introspection queries (__schema, __type)
 /// Returns Some(result) if this was an introspection query, None otherwise
-pub fn try_introspection_query(db: &Arc<Database>, query: &str) -> Option<JsonValue> {
+pub fn try_introspection_query(
+    schemas: &HashMap<String, TableSchema>,
+    query: &str,
+) -> Option<JsonValue> {
     let query = query.trim();
 
     // Check for __schema query
     if query.contains("__schema") {
-        return try_schema_query(db, query);
+        return try_schema_query(schemas, query);
     }
 
     // Check for __type query
     if query.contains("__type") {
-        return try_type_query(db, query);
+        return try_type_query(schemas, query);
     }
 
     None
 }
 
+/// Look up a table schema in the map case-insensitively.
+fn find_schema<'a>(
+    schemas: &'a HashMap<String, TableSchema>,
+    table_name: &str,
+) -> Option<&'a TableSchema> {
+    schemas.iter().find(|(name, _)| name.eq_ignore_ascii_case(table_name)).map(|(_, schema)| schema)
+}
+
 /// Handle __schema introspection query
-fn try_schema_query(db: &Arc<Database>, _query: &str) -> Option<JsonValue> {
-    let table_names = db.list_tables();
+fn try_schema_query(schemas: &HashMap<String, TableSchema>, _query: &str) -> Option<JsonValue> {
     let mut types = Vec::new();
 
     // Add built-in scalar types
@@ -40,9 +58,11 @@ fn try_schema_query(db: &Arc<Database>, _query: &str) -> Option<JsonValue> {
         }));
     }
 
-    // Add table types
-    for table_name in &table_names {
-        let fields = get_table_fields(db, table_name);
+    // Add table types (sorted for deterministic output across runs).
+    let mut table_names: Vec<&String> = schemas.keys().collect();
+    table_names.sort();
+    for table_name in table_names {
+        let fields = get_table_fields(schemas, table_name);
         types.push(json!({
             "kind": "OBJECT",
             "name": table_name,
@@ -94,7 +114,7 @@ fn try_schema_query(db: &Arc<Database>, _query: &str) -> Option<JsonValue> {
 }
 
 /// Handle __type(name: "...") introspection query
-fn try_type_query(db: &Arc<Database>, query: &str) -> Option<JsonValue> {
+fn try_type_query(schemas: &HashMap<String, TableSchema>, query: &str) -> Option<JsonValue> {
     // Simple pattern matching for __type(name: "TypeName")
     let type_name = extract_type_name(query)?;
 
@@ -113,9 +133,8 @@ fn try_type_query(db: &Arc<Database>, query: &str) -> Option<JsonValue> {
     }
 
     // Check if it's a table
-    let table_names = db.list_tables();
-    if table_names.contains(&type_name) {
-        let fields = get_table_fields(db, &type_name);
+    if find_schema(schemas, &type_name).is_some() {
+        let fields = get_table_fields(schemas, &type_name);
         return Some(json!({
             "__type": {
                 "kind": "OBJECT",
@@ -145,33 +164,71 @@ pub fn extract_type_name(query: &str) -> Option<String> {
     Some(remaining[..closing_quote].to_string())
 }
 
-/// Get fields for a table (map SQLite columns to GraphQL fields)
-fn get_table_fields(db: &Arc<Database>, table_name: &str) -> Vec<JsonValue> {
-    let fields = Vec::new();
+/// Get fields for a table (map columns to GraphQL fields), driven by the
+/// resolved [`TableSchema`]. In replicated mode the schema comes from the
+/// applied consensus catalog, so the fields are no longer the empty list the
+/// pre-#5421 local-only path returned for an empty local database.
+fn get_table_fields(schemas: &HashMap<String, TableSchema>, table_name: &str) -> Vec<JsonValue> {
+    let Some(schema) = find_schema(schemas, table_name) else {
+        return Vec::new();
+    };
 
-    // Get table schema from database
-    let table_names = db.list_tables();
-    if !table_names.iter().any(|t| t == table_name) {
-        return fields;
+    schema
+        .columns
+        .iter()
+        .map(|col| {
+            json!({
+                "name": col.name,
+                "type": graphql_type_name(&col.data_type, col.nullable),
+            })
+        })
+        .collect()
+}
+
+/// Map a SQL [`DataType`](vibesql_types::DataType) onto a GraphQL scalar type
+/// name, appending `!` for NOT NULL columns (GraphQL non-null marker).
+fn graphql_type_name(data_type: &vibesql_types::DataType, nullable: bool) -> String {
+    use vibesql_types::DataType;
+    let base = match data_type {
+        DataType::Boolean => "Boolean",
+        DataType::Smallint | DataType::Integer | DataType::Bigint | DataType::Unsigned => "Int",
+        DataType::Real
+        | DataType::DoublePrecision
+        | DataType::Float { .. }
+        | DataType::Numeric { .. }
+        | DataType::Decimal { .. } => "Float",
+        _ => "String",
+    };
+    if nullable {
+        base.to_string()
+    } else {
+        format!("{base}!")
     }
-
-    // Try to get table schema from database metadata
-    // Use a basic introspection approach that queries the database
-    // to determine column names
-
-    // Note: Table introspection disabled for now - requires async context.
-    // In a real implementation, this should query the database catalog to get column information.
-    // For now, return generic fields based on table existence check above.
-    let _ = table_name; // Silence unused variable warning
-
-    // If we couldn't get fields from introspection, return an empty list
-    // This prevents errors when a table exists but has no schema info
-    fields
 }
 
 #[cfg(test)]
 mod tests {
+    use vibesql_catalog::ColumnSchema;
+    use vibesql_types::DataType;
+
     use super::*;
+
+    fn sample_schemas() -> HashMap<String, TableSchema> {
+        let mut schemas = HashMap::new();
+        let users = TableSchema::new(
+            "users".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(255) },
+                    true,
+                ),
+            ],
+        );
+        schemas.insert("users".to_string(), users);
+        schemas
+    }
 
     #[test]
     fn test_extract_type_name() {
@@ -184,25 +241,51 @@ mod tests {
 
     #[test]
     fn test_schema_query_detection() {
-        let db = Arc::new(Database::new());
+        let schemas = HashMap::new();
         let query = "query { __schema { types { name } } }";
-        assert!(try_introspection_query(&db, query).is_some());
+        assert!(try_introspection_query(&schemas, query).is_some());
     }
 
     #[test]
     fn test_type_query_detection() {
-        let db = Arc::new(Database::new());
+        let schemas = HashMap::new();
         let query = r#"{ __type(name: "String") { kind } }"#;
-        assert!(try_introspection_query(&db, query).is_some());
+        assert!(try_introspection_query(&schemas, query).is_some());
     }
 
     #[test]
     fn test_builtin_scalar_type() {
-        let db = Arc::new(Database::new());
+        let schemas = HashMap::new();
         let query = r#"{ __type(name: "Int") { kind name fields } }"#;
-        let result = try_type_query(&db, query).unwrap();
+        let result = try_type_query(&schemas, query).unwrap();
         assert_eq!(result["__type"]["kind"], "SCALAR");
         assert_eq!(result["__type"]["name"], "Int");
         assert!(result["__type"]["fields"].is_null());
+    }
+
+    #[test]
+    fn test_table_type_fields_from_schema() {
+        let schemas = sample_schemas();
+        let query = r#"{ __type(name: "users") { kind name fields { name } } }"#;
+        let result = try_type_query(&schemas, query).unwrap();
+        assert_eq!(result["__type"]["kind"], "OBJECT");
+        assert_eq!(result["__type"]["name"], "users");
+        let fields = result["__type"]["fields"].as_array().expect("fields array");
+        // The schema's columns are reflected as GraphQL fields (no longer the
+        // empty list the local-only path returned).
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0]["name"], "id");
+        assert_eq!(fields[0]["type"], "Int!"); // NOT NULL → non-null marker
+        assert_eq!(fields[1]["name"], "name");
+        assert_eq!(fields[1]["type"], "String"); // nullable
+    }
+
+    #[test]
+    fn test_schema_query_includes_tables() {
+        let schemas = sample_schemas();
+        let query = "query { __schema { types { name } } }";
+        let result = try_schema_query(&schemas, query).unwrap();
+        let types = result["__schema"]["types"].as_array().unwrap();
+        assert!(types.iter().any(|t| t["name"] == "users"));
     }
 }

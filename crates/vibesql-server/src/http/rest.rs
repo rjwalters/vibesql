@@ -78,12 +78,14 @@ pub struct HttpState {
     /// consensus (#5410 — the `/api/query` endpoint and the CRUD collection
     /// endpoints; #5420 — the CRUD by-id endpoints, which resolve the primary
     /// key from the replicated catalog via
-    /// [`ReplicationHandle::primary_key_column`]) build a **replicated** session
+    /// [`ReplicationHandle::primary_key_column`]; #5421 — the GraphQL endpoint,
+    /// which introspects the replicated catalog via
+    /// [`ReplicationHandle::schema_snapshot`]) build a **replicated** session
     /// via [`Self::session`], so writes propose through this handle (leader-only,
     /// freeze-at-propose) and reads run against the replicated state machine —
     /// never against the unreplicated local registry database. Surfaces that
-    /// still depend on local-database schema/state introspection (GraphQL,
-    /// subscriptions, blob storage) remain gated (see [`Self::replicated_gate`])
+    /// still depend on local-database change-feed/state introspection
+    /// (subscriptions, blob storage) remain gated (see [`Self::replicated_gate`])
     /// to a clear error rather than silently reading stale data or accepting a
     /// write that never replicates; those are tracked as follow-ons to #5410.
     /// `/health` uses the handle to report node role/writability.
@@ -120,6 +122,28 @@ impl HttpState {
                 StdArc::clone(handle),
             ),
             None => Session::new(db_name.to_string(), "http_user".to_string(), shared_db),
+        }
+    }
+
+    /// Resolve the GraphQL schema map (table name → [`TableSchema`]) for
+    /// `shared_db`, used to answer introspection queries and to drive nested
+    /// relationship resolution (#5421).
+    ///
+    /// In replicated mode the schema lives in the consensus state machine, not
+    /// the (empty) local registry database, so it is read from the **applied
+    /// replicated catalog** via [`ReplicationHandle::schema_snapshot`]. In
+    /// standalone mode it is built from the local registry database, exactly as
+    /// the pre-#5421 path did — keeping standalone GraphQL behavior unchanged.
+    pub(crate) async fn graphql_schema_map(
+        &self,
+        shared_db: &crate::registry::SharedDatabase,
+    ) -> std::collections::HashMap<String, vibesql_catalog::TableSchema> {
+        match &self.replication {
+            Some(handle) => handle.schema_snapshot(),
+            None => {
+                let db_guard = shared_db.read().await;
+                build_schema_map(&db_guard)
+            }
         }
     }
 
@@ -293,7 +317,22 @@ pub fn get_database_name(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| DEFAULT_DATABASE_NAME.to_string())
 }
 
-/// GraphQL endpoint handler with relationship resolution support
+/// GraphQL endpoint handler with relationship resolution support.
+///
+/// In replicated mode the GraphQL surface is no longer gated (#5421): both
+/// queries and mutations route through consensus via the [`HttpState::session`]
+/// choke point — a GraphQL **query** lowers to a SELECT served from the
+/// replicated state machine, and a GraphQL **mutation** lowers to an
+/// INSERT/UPDATE/DELETE proposed through consensus (leader-only,
+/// freeze-at-propose). A mutation on a follower surfaces the NOT_LEADER refusal
+/// as a `421` with a leader hint (via [`execution_error_response`]) and is never
+/// executed against the follower's local database (the split-brain invariant).
+/// Schema/relationship introspection reads the **applied replicated catalog**
+/// (via [`ReplicationHandle::schema_snapshot`]) rather than the (empty) local
+/// registry database. The GraphQL→SQL lowering parameterizes every value arg
+/// (`graphql::graphql_to_sql`), so string args cannot inject SQL. In standalone
+/// mode every step is identical to before (the schema comes from the local
+/// catalog, the session is the local executor).
 async fn graphql_handler(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -301,30 +340,25 @@ async fn graphql_handler(
 ) -> impl IntoResponse {
     debug!("Received GraphQL request: {}", req.query);
 
-    // The GraphQL surface executes against the local registry database,
-    // which receives no replicated writes — gate it in replicated mode
-    // (#5393).
-    if let Some((code, body)) = state.replicated_gate("the GraphQL API") {
-        return (code, body).into_response();
-    }
-
     // Get the database name from headers
     let db_name = get_database_name(&headers);
 
     // Get or create the shared database from the registry
     let shared_db = state.registry.get_or_create(&db_name).await;
 
-    // For introspection, we need a read lock on the database
-    {
-        let db_guard = shared_db.read().await;
-        let db_arc = std::sync::Arc::new((*db_guard).clone());
-        if let Some(introspection_result) = graphql::try_introspection_query(&db_arc, &req.query) {
-            return (
-                StatusCode::OK,
-                Json(graphql::GraphQLResponse { data: Some(introspection_result), errors: None }),
-            )
-                .into_response();
-        }
+    // Resolve the schema map (table → TableSchema) used for both introspection
+    // and relationship resolution. In replicated mode it comes from the applied
+    // consensus catalog; in standalone mode from the local registry database.
+    let schemas = state.graphql_schema_map(&shared_db).await;
+
+    // Introspection (__schema / __type) is answered directly from the schema
+    // map — no SQL executes.
+    if let Some(introspection_result) = graphql::try_introspection_query(&schemas, &req.query) {
+        return (
+            StatusCode::OK,
+            Json(graphql::GraphQLResponse { data: Some(introspection_result), errors: None }),
+        )
+            .into_response();
     }
 
     // Parse the GraphQL query
@@ -368,21 +402,26 @@ async fn graphql_handler(
         }
     };
 
+    // Inline the bound value params (`$1`, `$2`, …) into the SQL as escaped
+    // literals before execution (#5421). The GraphQL→SQL lowering parameterizes
+    // every value arg, but the replicated write path proposes a SQL *string*
+    // through consensus (it carries no param vector), and the replicated session
+    // rejects the prepared-statement path outright. Rendering the params with
+    // the same `ToSql` escaping the wire `Bind`/`EXECUTE` paths use keeps string
+    // args injection-safe (a quote in a value is doubled, never breaks out) while
+    // producing a self-contained statement that executes identically standalone
+    // and over consensus.
+    let sql = crate::session::substitute_named_params(&sql, &params);
+
     debug!("Generated SQL: {}", sql);
 
-    // Create a session with the shared database
-    let mut session = crate::session::Session::new(
-        db_name.clone(),
-        "graphql_user".to_string(),
-        shared_db.clone(),
-    );
+    // Build the session through the replicated choke point: in replicated mode
+    // queries read the state machine and mutations propose through consensus;
+    // in standalone mode it is the ordinary local-executor session (#5421).
+    let mut session = state.session(&db_name, shared_db.clone());
 
-    // Execute the main query
-    let result = if params.is_empty() {
-        session.execute(&sql).await
-    } else {
-        session.execute_with_params(&sql, &params).await
-    };
+    // Execute the main query (params are already inlined as literals above).
+    let result = session.execute(&sql).await;
 
     match result {
         Ok(exec_result) => {
@@ -406,17 +445,14 @@ async fn graphql_handler(
                         })
                         .collect();
 
-                    // If we have nested fields, resolve relationships
+                    // If we have nested fields, resolve relationships using the
+                    // schema map resolved above (replicated catalog in
+                    // replicated mode, local catalog in standalone mode).
                     if has_nested {
                         if let graphql::GraphQLQueryInfo::Query {
                             table_name, nested_fields, ..
                         } = &query_info
                         {
-                            // Build schema map from database
-                            let db_guard = shared_db.read().await;
-                            let schemas = build_schema_map(&db_guard);
-                            drop(db_guard);
-
                             if !schemas.is_empty() {
                                 let ctx = graphql::GraphQLExecutionContext::new(&schemas);
                                 let nested_queries =
@@ -496,19 +532,49 @@ async fn graphql_handler(
         }
         Err(e) => {
             error!("Query execution failed: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(graphql::GraphQLResponse {
-                    data: None,
-                    errors: Some(vec![graphql::GraphQLError::new(format!(
-                        "Query execution failed: {}",
-                        e
-                    ))]),
-                }),
-            )
-                .into_response()
+            // Map a consensus refusal of a GraphQL mutation/query onto the same
+            // HTTP semantics the SQL surfaces use (#5421): NOT_LEADER → 421 with
+            // the leader-hint header, staleness/FATAL → 503, any other consensus
+            // error → 500, and a deterministic SQL rejection → 400. The body is
+            // a GraphQL `errors` array either way, so a GraphQL client still
+            // parses the failure; the status code + leader hint give a smart
+            // client the redirect contract. In standalone mode every error is a
+            // plain executor error → 400, exactly as before.
+            graphql_execution_error_response(&e)
         }
     }
+}
+
+/// Map a GraphQL execution error onto an HTTP response with a GraphQL-shaped
+/// body. Reuses [`execution_error_response`]'s consensus→HTTP mapping (status
+/// code + `X-VibeSQL-Leader` header for NOT_LEADER) but replaces the
+/// `ErrorResponse` JSON body with a [`graphql::GraphQLResponse`] carrying the
+/// flattened message in its `errors` array, so the response is valid GraphQL
+/// regardless of the status code (#5421).
+fn graphql_execution_error_response(err: &anyhow::Error) -> axum::response::Response {
+    // Derive the status + headers from the shared consensus mapping.
+    let mut mapped = execution_error_response(err);
+    let status = mapped.status();
+    let leader_hint = mapped.headers_mut().remove(LEADER_HINT_HEADER);
+    let retry_after = mapped.headers_mut().remove("Retry-After");
+
+    let message = match err.downcast_ref::<SqlError>() {
+        Some(sql_error) => sql_error_message(sql_error),
+        None => format!("Query execution failed: {err}"),
+    };
+
+    let body = Json(graphql::GraphQLResponse {
+        data: None,
+        errors: Some(vec![graphql::GraphQLError::new(message)]),
+    });
+    let mut resp = (status, body).into_response();
+    if let Some(hint) = leader_hint {
+        resp.headers_mut().insert(LEADER_HINT_HEADER, hint);
+    }
+    if let Some(retry) = retry_after {
+        resp.headers_mut().insert("Retry-After", retry);
+    }
+    resp
 }
 
 /// Build a map of table schemas from the database
