@@ -500,7 +500,14 @@ impl Session {
             // Session-local settings for the replicated read modes.
             Statement::SetVariable(stmt) => self.execute_replicated_set(stmt),
 
-            // PRAGMA stays the no-op it is in standalone mode.
+            // PRAGMA stays the no-op it is in standalone mode. SESSION-CONTEXT
+            // AUDIT (#5392): a write-semantics PRAGMA (`foreign_keys`,
+            // `case_sensitive_like`, `defer_foreign_keys`, …) must not become
+            // a meaningful-but-ignored setting here — the replicated executor
+            // ignores session PRAGMAs (they are never proposed, and the state
+            // machine rejects PRAGMA inside an entry). If a PRAGMA must affect
+            // replicated writes, capture it into the `TxnEntry`; do not honor
+            // it only in this session.
             Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
 
             // Transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) is
@@ -808,6 +815,19 @@ impl Session {
             }
             // Anything else: same lenient no-op as the standalone
             // catch-all (PG clients SET all sorts of things at startup).
+            //
+            // SESSION-CONTEXT AUDIT (#5392): this no-op is only sound for
+            // settings that do not change *write* semantics. The replicated
+            // executor runs against a bare state-machine `Database` at fixed
+            // defaults (see `vibesql-consensus::state_machine` module docs),
+            // so a write-semantics-affecting SET accepted-and-ignored here
+            // (e.g. `SET foreign_keys`, `SET sql_mode`, a session var a
+            // function reads) would make this session *believe* a setting is
+            // in effect while replicated writes ignore it. Do NOT add such a
+            // setting to this no-op: either reject it, or capture it into the
+            // proposed `TxnEntry` and materialize it deterministically. The
+            // settings handled above are read-routing only and never enter a
+            // replicated entry.
             _ => Ok(ExecutionResult::Other { message: "SET".to_string() }),
         }
     }

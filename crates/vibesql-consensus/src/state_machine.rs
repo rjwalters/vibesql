@@ -52,20 +52,30 @@
 //! node must halt and resync (snapshot + replay) rather than record an
 //! outcome other replicas may not reproduce.
 //!
-//! **Session context**: statements run against a bare [`Database`] with
-//! no session state, and that is load-bearing. The session-scoped knobs
-//! that could change write-statement semantics (`sql_mode`,
-//! `foreign_keys_enabled` / `defer_foreign_keys`,
+//! **Session context** (audited in #5392): statements run against a
+//! bare [`Database`] with no session state, and that is load-bearing.
+//! The session-scoped knobs that could change write-statement *semantics*
+//! (`sql_mode`, `foreign_keys_enabled` / `defer_foreign_keys`,
 //! `case_sensitive_like`, roles/security, session variables — see
 //! `vibesql-storage::database::session`) all sit at their defaults on
 //! every machine, because the replicated statement surface has no way
 //! to mutate them: PRAGMA/SET/GRANT-style statements are rejected by
 //! the dispatch below, and snapshots serialize only catalog + data.
 //! Session functions that *read* such state (`last_insert_rowid()`,
-//! `changes()`, `total_changes()`) are rejected by the freeze pass. If
-//! PR 2+ server wiring ever threads session-scoped settings into
-//! replicated writes, those settings must be captured in [`TxnEntry`] —
-//! do not execute session statements against the machine's database.
+//! `changes()`, `total_changes()`) are rejected by the freeze pass. The
+//! server's replicated session (`vibesql-server::session`) likewise
+//! never threads session settings into a write: the only `SET`s it
+//! honors are the read-consistency knobs (`vibesql_read_consistency`,
+//! `vibesql_max_staleness_ms`, `vibesql_ryw_wait_ms`), which are local
+//! read-routing state and never enter a `TxnEntry`. This invariant is
+//! pinned by the guard tests
+//! `state_machine_session_settings_are_at_safe_write_semantics_defaults`
+//! and `session_state_mutations_are_rejected_at_the_replicated_boundary`
+//! below: if a future change moves the machine's default session state,
+//! or lets a session-state mutation enter the replicated write surface,
+//! the guard fails. Any setting that must travel with a write has to be
+//! captured in [`TxnEntry`] and materialized deterministically — do not
+//! execute session statements against the machine's database.
 //!
 //! The effects-form write-set (row-level mutations instead of SQL text)
 //! remains the preferred long-term representation; see #5199 for why it
@@ -569,6 +579,16 @@ impl VibesqlStateMachine {
     /// Only the `mvcc_enabled`-gated tests need it.
     #[cfg(all(test, feature = "mvcc_enabled"))]
     pub(crate) fn with_db<R>(&self, f: impl FnOnce(&Database) -> R) -> R {
+        f(&self.lock().db)
+    }
+
+    /// Read-only access to the underlying database for the session-context
+    /// guard test (#5392), which asserts the replicated state machine's
+    /// write-semantics-affecting session settings sit at their documented
+    /// defaults. Available without the `mvcc_enabled` feature (the guard is
+    /// about session state, not MVCC stamps).
+    #[cfg(test)]
+    pub(crate) fn inspect_db<R>(&self, f: impl FnOnce(&Database) -> R) -> R {
         f(&self.lock().db)
     }
 
@@ -1397,5 +1417,116 @@ mod tests {
         // The build's pin was released with the build; the dead version
         // is reclaimable again.
         assert_eq!(machine.vacuum().unwrap(), 1, "the build must not leak its horizon pin");
+    }
+
+    // -----------------------------------------------------------------------
+    // Session-context capture guard (#5392)
+    // -----------------------------------------------------------------------
+    //
+    // The replicated state machine executes every entry against a bare
+    // `Database` with no session context (module docs, "Session context").
+    // That is only safe while every session-scoped setting that could change
+    // a *write*'s semantics sits at the same fixed default on every replica.
+    //
+    // The audit (#5392) enumerated the write-semantics-affecting settings the
+    // storage `Database` carries — `vibesql-storage::database::session`:
+    //
+    //   - `foreign_keys_enabled`  (whether FK constraints are enforced on DML)
+    //   - `defer_foreign_keys`    (whether FK checks defer to COMMIT)
+    //   - `case_sensitive_like`   (changes which rows a LIKE predicate selects,
+    //                              so it changes UPDATE/DELETE *effects*, not
+    //                              just SELECT presentation)
+    //   - `sql_mode`              (MySQL vs SQLite type coercion / division /
+    //                              REPLACE semantics)
+    //   - generic `session_variables` read by SQL functions
+    //   - role / security enforcement (`is_security_enabled`)
+    //
+    // and concluded all are write-semantics-neutral *as deployed* because the
+    // replicated surface cannot mutate them: PRAGMA / SET / GRANT statements
+    // are rejected by `execute_write_statement`'s dispatch, and snapshots
+    // serialize only catalog + data (not session vars), so a recovering
+    // replica's machine also boots at defaults. The two tests below are the
+    // regression guard: they fail loudly if a future change either (a) shifts
+    // the state machine's default session state, or (b) lets a session-state
+    // mutation (PRAGMA/SET) enter the replicated write surface unmaterialized.
+
+    /// The state machine's database boots at the documented write-semantics
+    /// defaults. If a future change moves any of these off-default, the
+    /// replicated-determinism implications must be re-audited (and the
+    /// setting either captured into `TxnEntry` or kept off the machine).
+    #[test]
+    fn state_machine_session_settings_are_at_safe_write_semantics_defaults() {
+        let machine = VibesqlStateMachine::new();
+        machine.inspect_db(|db| {
+            assert!(
+                !db.foreign_keys_enabled(),
+                "FK enforcement must default OFF on the replicated machine (#5392)"
+            );
+            assert!(
+                !db.defer_foreign_keys(),
+                "FK deferral must default OFF on the replicated machine (#5392)"
+            );
+            assert!(
+                !db.case_sensitive_like(),
+                "case_sensitive_like must default OFF on the replicated machine (#5392)"
+            );
+            assert!(
+                matches!(db.sql_mode(), vibesql_types::SqlMode::MySQL { .. }),
+                "sql_mode must default to MySQL on the replicated machine (#5392); got {:?}",
+                db.sql_mode()
+            );
+        });
+
+        // A snapshot roundtrip must not be able to smuggle non-default
+        // session state into a recovering replica (snapshots serialize
+        // catalog + data only).
+        let snapshot = machine.snapshot().unwrap();
+        let restored = VibesqlStateMachine::from_snapshot(&snapshot).unwrap();
+        restored.inspect_db(|db| {
+            assert!(!db.foreign_keys_enabled());
+            assert!(!db.defer_foreign_keys());
+            assert!(!db.case_sensitive_like());
+            assert!(matches!(db.sql_mode(), vibesql_types::SqlMode::MySQL { .. }));
+        });
+    }
+
+    /// Session-state mutations must never reach the replicated executor
+    /// unmaterialized: a PRAGMA or SET inside an entry is rejected (so it
+    /// cannot flip `foreign_keys` / `case_sensitive_like` / `sql_mode` on the
+    /// state machine), and — proving the guard bites — the setting it would
+    /// have changed is observably untouched afterward.
+    #[test]
+    fn session_state_mutations_are_rejected_at_the_replicated_boundary() {
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+
+        let mut index = 1;
+        for sql in [
+            "PRAGMA foreign_keys = ON",
+            "PRAGMA case_sensitive_like = ON",
+            "SET sql_mode = 'SQLITE'",
+            "SET foreign_keys = 1",
+            "SET @my_var = 7",
+        ] {
+            index += 1;
+            let outcome = machine.apply(index, &TxnEntry::single(sql)).unwrap();
+            assert!(
+                matches!(outcome, ApplyOutcome::Rejected { .. }),
+                "session-state mutation `{sql}` must be rejected at the replicated boundary, \
+                 not silently applied against the state machine's session (#5392); got: \
+                 {outcome:?}"
+            );
+            // The rejected entry consumed its index (every replica rejects it
+            // identically) but must not have moved the session setting.
+            machine.inspect_db(|db| {
+                assert!(!db.foreign_keys_enabled(), "{sql} must not enable FK enforcement");
+                assert!(!db.case_sensitive_like(), "{sql} must not flip case_sensitive_like");
+                assert!(
+                    matches!(db.sql_mode(), vibesql_types::SqlMode::MySQL { .. }),
+                    "{sql} must not change sql_mode"
+                );
+            });
+        }
+        assert_eq!(machine.last_applied(), index);
     }
 }
