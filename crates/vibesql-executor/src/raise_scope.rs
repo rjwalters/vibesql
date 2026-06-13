@@ -18,10 +18,22 @@
 //! - `RAISE(IGNORE)` is handled earlier as a control-flow signal
 //!   ([`ExecutorError::RaiseIgnore`]) and never reaches this module.
 //!
-//! The distinction is only observable inside an explicit transaction: outside
-//! one, every statement is its own auto-commit unit, so all three variants
-//! leave identical state (the failing statement's changes vanish either way).
-//! See [`apply_raise_scope`] and [`run_top_level_dml`].
+//! `ABORT` vs `ROLLBACK` is only observable inside an explicit transaction
+//! (whether earlier statements survive); in auto-commit both undo the whole
+//! statement. `FAIL` differs from `ABORT` in *both* modes — it keeps the rows
+//! the statement applied before the abort — so #5464 wires the auto-commit path
+//! to commit-on-`FAIL` / rollback-otherwise, not to treat all three variants
+//! identically. See [`apply_raise_scope`] and [`run_top_level_dml`].
+//!
+//! ## Statement atomicity (auto-commit, #5464)
+//!
+//! SQLite wraps every top-level statement in an implicit transaction. Inside an
+//! explicit transaction VibeSQL uses an implicit *statement savepoint*; in
+//! auto-commit it wraps the statement in an implicit *transaction* so a
+//! mid-statement abort (RAISE(ABORT), FK cascade abort, constraint violation)
+//! rolls back the statement's already-applied rows — matching sqlite3 3.51,
+//! where e.g. a multi-row DML or cascade that aborts on a later row undoes the
+//! earlier ones too. See [`run_top_level_dml`].
 //!
 //! ## Replication determinism
 //!
@@ -123,17 +135,34 @@ pub(crate) fn apply_raise_scope(
 }
 
 /// Run a top-level DML statement with SQLite per-variant `RAISE` scope
-/// handling.
+/// handling and statement-level atomicity.
 ///
-/// When a transaction is active **and** `may_fire_trigger` is true (the only
-/// way a `RAISE()` can fire), this arms an implicit statement savepoint before
-/// running `f`, so a `RAISE(ABORT)` can undo just this statement. On a
-/// `RAISE(..)` error it applies the per-variant scope; on success or any other
-/// error it releases the savepoint (leaving the changes in place — non-RAISE
-/// errors keep their existing rollback behavior, unchanged by this wrapper).
+/// SQLite wraps **every** top-level statement in an implicit transaction that
+/// commits on success and rolls back atomically on any error — so a statement
+/// that partially applies then aborts (a multi-row DML / FK cascade firing a
+/// `RAISE(ABORT)`, an AFTER-trigger abort after earlier rows already landed,
+/// or a constraint violation) leaves *no* partial changes. VibeSQL realizes
+/// the two modes a statement can run in:
 ///
-/// When no transaction is active, or the table has no triggers, this is a
-/// thin pass-through with zero snapshot cost — preserving the hot path.
+/// 1. **Inside an explicit transaction** (`db.in_transaction()`): arm an
+///    implicit *statement savepoint* before `f` so a `RAISE(ABORT)` undoes just
+///    this statement while earlier statements in the transaction survive, the
+///    transaction staying open. This is the #5417/#5431/#5440 path, unchanged.
+///
+/// 2. **In auto-commit** (no explicit transaction, #5464): wrap the statement
+///    in an *implicit transaction* (`begin_transaction`) so the same partial
+///    changes can be rolled back. On success the implicit transaction commits;
+///    on `RAISE(ABORT)`/`RAISE(ROLLBACK)` or any other error it rolls back the
+///    whole statement; on `RAISE(FAIL)` it commits the rows applied so far
+///    (matching sqlite3 3.51 FAIL semantics). The implicit transaction emits
+///    the usual `TxnBegin`/`TxnCommit`/`TxnRollback` WAL markers, so crash
+///    recovery buffers and applies-or-discards the statement atomically too.
+///
+/// In both modes the work only happens when `may_fire_trigger` is true (the
+/// only way a `RAISE()` can fire, and the only way a single statement applies
+/// rows incrementally across trigger programs). When no trigger can fire this
+/// is a thin pass-through with zero transaction/snapshot cost — preserving the
+/// hot path for the common trigger-free statement.
 pub(crate) fn run_top_level_dml<T, F>(
     db: &mut Database,
     may_fire_trigger: bool,
@@ -142,14 +171,29 @@ pub(crate) fn run_top_level_dml<T, F>(
 where
     F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
 {
-    // Fast path: nothing can RAISE (no triggers) or there is no surrounding
-    // transaction whose earlier statements must survive — run directly.
-    let armed =
-        if may_fire_trigger && db.in_transaction() { db.arm_statement_savepoint() } else { false };
+    // Fast path: nothing can RAISE and no trigger program can apply rows
+    // incrementally — run directly with no transaction/snapshot overhead.
+    if !may_fire_trigger {
+        return f(db);
+    }
 
-    let result = f(db);
+    if db.in_transaction() {
+        run_inside_transaction(db, f)
+    } else {
+        run_auto_commit(db, f)
+    }
+}
 
-    match result {
+/// Statement-scope handling when an explicit transaction is already open: arm
+/// an implicit statement savepoint so a `RAISE(ABORT)` undoes just this
+/// statement, leaving earlier statements (and the transaction) intact.
+fn run_inside_transaction<T, F>(db: &mut Database, f: F) -> Result<T, ExecutorError>
+where
+    F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
+{
+    let armed = db.arm_statement_savepoint();
+
+    match f(db) {
         Ok(v) => {
             if armed {
                 db.release_statement_savepoint();
@@ -170,5 +214,76 @@ where
             }
             Err(other)
         }
+    }
+}
+
+/// Statement-scope handling in auto-commit mode (#5464): wrap the statement in
+/// an implicit transaction so its partial changes can be rolled back as a unit,
+/// matching SQLite's implicit per-statement transaction.
+///
+/// If the implicit `begin_transaction` fails (it should not in auto-commit, but
+/// be defensive) we fall back to running `f` directly — no worse than the
+/// pre-#5464 behavior.
+fn run_auto_commit<T, F>(db: &mut Database, f: F) -> Result<T, ExecutorError>
+where
+    F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
+{
+    if db.begin_transaction().is_err() {
+        return f(db);
+    }
+
+    match f(db) {
+        Ok(v) => {
+            // Statement succeeded: commit the implicit transaction so the
+            // changes (and their WAL ops) become durable as one auto-commit
+            // unit. A failed commit surfaces as the statement's error.
+            commit_implicit(db)?;
+            Ok(v)
+        }
+        Err(ExecutorError::Raise { action, message }) => {
+            // Map the RAISE variant onto the implicit transaction, mirroring
+            // the savepoint scopes (the implicit txn *is* the statement scope
+            // here, so statement-rollback == transaction-rollback):
+            //   ABORT / ROLLBACK -> undo the whole statement
+            //   FAIL             -> keep the rows applied before the abort
+            match action {
+                RaiseAction::Fail => {
+                    commit_implicit_best_effort(db);
+                }
+                _ => {
+                    rollback_implicit_best_effort(db);
+                }
+            }
+            Err(ExecutorError::Raise { action, message })
+        }
+        Err(other) => {
+            // Any other error (constraint violation, FK failure, …) rolls back
+            // the whole statement — SQLite's statement atomicity. This undoes
+            // partial multi-row / cascade changes that the executor's own
+            // targeted rollback may have left behind.
+            rollback_implicit_best_effort(db);
+            Err(other)
+        }
+    }
+}
+
+/// Commit the implicit auto-commit transaction, propagating a commit failure as
+/// an executor error (so e.g. a deferred-FK COMMIT abort surfaces correctly).
+fn commit_implicit(db: &mut Database) -> Result<(), ExecutorError> {
+    db.commit_transaction().map_err(ExecutorError::from)
+}
+
+/// Commit the implicit transaction on a path that already carries the error to
+/// return (RAISE(FAIL)); a commit failure here cannot change the reported
+/// error, so it is best-effort.
+fn commit_implicit_best_effort(db: &mut Database) {
+    let _ = db.commit_transaction();
+}
+
+/// Roll back the implicit transaction, best-effort: the statement already has
+/// an error to propagate, and rollback restores the pre-statement snapshot.
+fn rollback_implicit_best_effort(db: &mut Database) {
+    if db.in_transaction() {
+        let _ = db.rollback_transaction();
     }
 }
