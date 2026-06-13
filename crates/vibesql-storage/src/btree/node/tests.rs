@@ -1557,3 +1557,88 @@ fn no_undo_logging_has_no_overhead_and_no_reversal() {
     index.rollback_undo_log().unwrap(); // no log => no-op
     assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
 }
+
+// ----------------------------------------------------------------------------
+// Statement-scoped nested undo markers (issue #5434)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn undo_log_marker_reverses_only_suffix() {
+    // A statement savepoint marks the log mid-transaction; rollback_to reverses
+    // only entries recorded after the mark, leaving earlier mutations in place
+    // and undo-logging still armed.
+    let (mut index, _dir) = undo_test_index(&[(10, 1)]);
+
+    index.begin_undo_logging();
+    assert_eq!(index.undo_log_marker(), Some(0));
+
+    // Pre-savepoint mutation.
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+
+    // Statement savepoint marker.
+    let marker = index.undo_log_marker().unwrap();
+    assert_eq!(marker, 1, "one entry recorded before the marker");
+
+    // Post-savepoint (statement) mutations.
+    index.insert(vec![SqlValue::Integer(30)], 3).unwrap();
+    index.delete(&vec![SqlValue::Integer(10)]).unwrap();
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(30)]).unwrap(), vec![3]);
+    assert!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty());
+
+    // Roll back only the statement.
+    index.rollback_undo_log_to(marker).unwrap();
+
+    assert!(
+        index.lookup(&vec![SqlValue::Integer(30)]).unwrap().is_empty(),
+        "statement insert reversed"
+    );
+    assert_eq!(
+        index.lookup(&vec![SqlValue::Integer(10)]).unwrap(),
+        vec![1],
+        "statement delete restored"
+    );
+    assert_eq!(
+        index.lookup(&vec![SqlValue::Integer(20)]).unwrap(),
+        vec![2],
+        "pre-savepoint mutation preserved"
+    );
+
+    // Logging is still armed and the retained prefix is intact.
+    assert!(index.is_undo_logging(), "logging stays armed after a partial rollback");
+    assert_eq!(index.undo_log_marker(), Some(marker), "prefix retained");
+
+    // A subsequent full rollback reverses the surviving prefix too.
+    index.rollback_undo_log().unwrap();
+    assert!(
+        index.lookup(&vec![SqlValue::Integer(20)]).unwrap().is_empty(),
+        "full ROLLBACK reverses the retained prefix"
+    );
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap(), vec![1]);
+}
+
+#[test]
+fn undo_log_marker_at_end_reverses_nothing() {
+    // Marking at the current tail then rolling back to it is a no-op for the
+    // tree, and keeps logging armed.
+    let (mut index, _dir) = undo_test_index(&[(10, 1)]);
+
+    index.begin_undo_logging();
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+
+    let marker = index.undo_log_marker().unwrap();
+    index.rollback_undo_log_to(marker).unwrap();
+
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
+    assert!(index.is_undo_logging());
+    assert_eq!(index.undo_log_marker(), Some(marker));
+}
+
+#[test]
+fn undo_log_marker_without_logging_is_noop() {
+    // No log armed: marker is None and rollback_to does nothing.
+    let (mut index, _dir) = undo_test_index(&[(10, 1)]);
+    assert_eq!(index.undo_log_marker(), None);
+    index.insert(vec![SqlValue::Integer(20)], 2).unwrap();
+    index.rollback_undo_log_to(0).unwrap(); // no log => no-op
+    assert_eq!(index.lookup(&vec![SqlValue::Integer(20)]).unwrap(), vec![2]);
+}

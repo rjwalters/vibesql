@@ -196,6 +196,69 @@ impl IndexManager {
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Statement-scoped nested undo markers (issue #5434)
+    //
+    // A statement-level savepoint (`RAISE(ABORT)` scope, #5431) snapshots the
+    // in-memory `Operations` wholesale, but a disk-backed tree clones as a
+    // shallow `Arc<Mutex<BTreeIndex>>` bump — the snapshot shares the *same*
+    // live spilled tree, so restoring the clone does not undo the statement's
+    // spilled-index mutations (the same class of bug #5425/#5433 fixed at
+    // transaction scope). To scope the disk undo-log to a single statement we
+    // record a *marker* (per-tree undo-log length) when the savepoint is armed
+    // and reverse only the entries appended since that marker on rollback. The
+    // retained prefix stays in the enclosing transaction's undo-log so a later
+    // full ROLLBACK still reverses pre-statement mutations.
+    // ------------------------------------------------------------------------
+
+    /// Capture a per-tree undo-log marker for every disk-backed B+ tree that is
+    /// currently undo-logging, keyed by normalized index name. Returned to the
+    /// statement savepoint, which passes it back to
+    /// [`Self::rollback_disk_undo_logs_to`] on `RAISE(ABORT)` (issue #5434).
+    ///
+    /// Trees that are not undo-logging (no enclosing transaction armed the log)
+    /// contribute no marker — there is nothing disk-backed to reverse for them.
+    pub fn mark_disk_undo_logs(&self) -> HashMap<String, usize> {
+        let mut markers = HashMap::new();
+        for (name, index_data) in &self.index_data {
+            if let IndexData::DiskBacked { btree, .. } = index_data {
+                if let Ok(guard) = acquire_btree_lock(btree) {
+                    if let Some(marker) = guard.undo_log_marker() {
+                        markers.insert(name.clone(), marker);
+                    }
+                }
+            }
+        }
+        markers
+    }
+
+    /// Reverse the undo-log suffix recorded since the markers captured by
+    /// [`Self::mark_disk_undo_logs`], restoring every spilled index to its
+    /// pre-statement state while leaving undo-logging armed for the enclosing
+    /// transaction (issue #5434 — statement-savepoint rollback).
+    ///
+    /// A tree present at mark time but missing here is reversed in full back to
+    /// its empty marker only if it has a marker entry; trees without a marker
+    /// entry (they were not disk-backed / not logging when armed) are left
+    /// untouched. A tree that began spilling *after* the marker was taken has
+    /// no entry and is handled by the wholesale in-memory snapshot restore.
+    pub fn rollback_disk_undo_logs_to(&mut self, markers: &HashMap<String, usize>) {
+        for (name, index_data) in self.index_data.iter_mut() {
+            if let IndexData::DiskBacked { btree, .. } = index_data {
+                if let Some(&marker) = markers.get(name) {
+                    if let Ok(mut guard) = acquire_btree_lock(btree) {
+                        if let Err(e) = guard.rollback_undo_log_to(marker) {
+                            log::warn!(
+                                "Failed to roll back disk-backed index undo-log to \
+                                 statement marker for '{name}': {e:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Check if an index exists
     pub fn index_exists(&self, index_name: &str) -> bool {
         let normalized = normalize_index_name(index_name);
@@ -1048,6 +1111,175 @@ mod tests {
         assert_eq!(disk_lookup(&manager, "idx_t_id", 40), vec![1]);
         assert!(disk_lookup(&manager, "idx_t_id", 20).is_empty());
         assert!(disk_lookup(&manager, "idx_t_id", 30).is_empty());
+    }
+
+    // ========================================================================
+    // Statement-scoped disk undo markers (issue #5434 — RAISE(ABORT) scope)
+    // ========================================================================
+
+    /// #5434 core: a `RAISE(ABORT)` statement on a *spilled* (disk-backed) index
+    /// table must reverse ONLY the current statement's index-key mutations.
+    /// Mutations made by earlier statements in the same transaction (before the
+    /// statement savepoint was armed) must survive, exactly as #5431 specifies
+    /// for in-memory state.
+    #[test]
+    fn statement_marker_reverses_only_current_statement() {
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0)]);
+
+        // BEGIN: arm the transaction-level undo-log on disk-backed indexes.
+        manager.begin_disk_undo_logging();
+
+        // --- Statement 1 (before the statement savepoint): insert key 20. ---
+        manager.add_to_indexes_for_insert("t", &schema, &row(20), 1);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 20), vec![1]);
+
+        // --- Arm the statement savepoint (mark the disk undo-log position). ---
+        let markers = manager.mark_disk_undo_logs();
+
+        // --- Statement 2 (the aborting statement): insert 30, delete 10. ---
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
+        manager.update_indexes_for_delete_with_values("t", &schema, &[SqlValue::Integer(10)], 0);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 30), vec![2]);
+        assert!(disk_lookup(&manager, "idx_t_id", 10).is_empty());
+
+        // --- RAISE(ABORT): roll back only statement 2's disk mutations. ---
+        manager.rollback_disk_undo_logs_to(&markers);
+
+        // Statement 2's mutations are reversed:
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 30).is_empty(),
+            "current statement's inserted key must be reversed"
+        );
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 10),
+            vec![0],
+            "current statement's deleted key must be restored"
+        );
+        // Statement 1's mutation survives (it predates the savepoint):
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 20),
+            vec![1],
+            "prior statement's index key must NOT be reversed by RAISE(ABORT)"
+        );
+
+        // The enclosing transaction's undo-log is still armed (so an outer
+        // ROLLBACK would still reverse statement 1).
+        match manager.index_data.get("idx_t_id").unwrap() {
+            IndexData::DiskBacked { btree, .. } => {
+                assert!(
+                    acquire_btree_lock(btree).unwrap().is_undo_logging(),
+                    "undo-logging stays armed after a statement-savepoint rollback"
+                );
+            }
+            other => panic!("expected DiskBacked, got {:?}", other),
+        }
+    }
+
+    /// #5434: after a statement-savepoint rollback, a subsequent full-
+    /// transaction ROLLBACK still reverses the surviving prior-statement
+    /// mutations (the retained undo-log prefix).
+    #[test]
+    fn statement_marker_rollback_then_txn_rollback() {
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0)]);
+
+        manager.begin_disk_undo_logging();
+
+        // Statement 1: insert key 20 (survives the statement abort).
+        manager.add_to_indexes_for_insert("t", &schema, &row(20), 1);
+
+        // Statement savepoint + statement 2 that aborts.
+        let markers = manager.mark_disk_undo_logs();
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
+        manager.rollback_disk_undo_logs_to(&markers);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 20), vec![1]);
+        assert!(disk_lookup(&manager, "idx_t_id", 30).is_empty());
+
+        // Now ROLLBACK the whole transaction: even statement 1's surviving
+        // insert must be reversed back to the pre-transaction state.
+        manager.rollback_disk_undo_logs();
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 20).is_empty(),
+            "outer ROLLBACK reverses the surviving prior-statement key"
+        );
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+    }
+
+    /// #5434: after a statement-savepoint rollback, COMMIT persists the
+    /// surviving prior-statement mutations (the retained prefix is discarded,
+    /// not reversed).
+    #[test]
+    fn statement_marker_rollback_then_txn_commit() {
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0)]);
+
+        manager.begin_disk_undo_logging();
+
+        manager.add_to_indexes_for_insert("t", &schema, &row(20), 1);
+
+        let markers = manager.mark_disk_undo_logs();
+        manager.add_to_indexes_for_insert("t", &schema, &row(30), 2);
+        manager.rollback_disk_undo_logs_to(&markers);
+
+        // COMMIT.
+        manager.clear_disk_undo_logs();
+
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 20),
+            vec![1],
+            "prior-statement insert persists on COMMIT after a statement abort"
+        );
+        assert!(
+            disk_lookup(&manager, "idx_t_id", 30).is_empty(),
+            "aborted statement's insert never persists"
+        );
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
+    }
+
+    /// #5434: a key inserted EARLIER in the same transaction (before the
+    /// statement savepoint) and re-touched by the aborting statement must keep
+    /// its pre-statement value. Here statement 1 inserts row 1 under key 50, the
+    /// aborting statement adds a duplicate row 2 under the same key; RAISE(ABORT)
+    /// must leave exactly the pre-statement row set {1}.
+    #[test]
+    fn statement_marker_preserves_prior_value_on_shared_key() {
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[]);
+
+        manager.begin_disk_undo_logging();
+
+        // Statement 1: insert key 50 -> row 1.
+        manager.add_to_indexes_for_insert("t", &schema, &row(50), 1);
+
+        // Statement savepoint, then the aborting statement adds a duplicate.
+        let markers = manager.mark_disk_undo_logs();
+        manager.add_to_indexes_for_insert("t", &schema, &row(50), 2);
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 50), vec![1, 2]);
+
+        manager.rollback_disk_undo_logs_to(&markers);
+        assert_eq!(
+            disk_lookup(&manager, "idx_t_id", 50),
+            vec![1],
+            "only the aborting statement's duplicate is removed; prior row kept"
+        );
+    }
+
+    /// #5434: `rollback_disk_undo_logs_to` with empty markers (no disk-backed
+    /// index was undo-logging at arm time) is a no-op and does not disturb the
+    /// undo-log — the wholesale in-memory snapshot handles those cases.
+    #[test]
+    fn statement_marker_empty_is_noop() {
+        let (mut manager, schema, _dir) = spilled_index_manager("idx_t_id", &[(10, 0)]);
+
+        manager.begin_disk_undo_logging();
+        manager.add_to_indexes_for_insert("t", &schema, &row(20), 1);
+
+        let empty: HashMap<String, usize> = HashMap::new();
+        manager.rollback_disk_undo_logs_to(&empty);
+
+        // Nothing reversed; the transaction undo-log is intact and a full
+        // ROLLBACK still works.
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 20), vec![1]);
+        manager.rollback_disk_undo_logs();
+        assert!(disk_lookup(&manager, "idx_t_id", 20).is_empty());
+        assert_eq!(disk_lookup(&manager, "idx_t_id", 10), vec![0]);
     }
 
     // ========================================================================
