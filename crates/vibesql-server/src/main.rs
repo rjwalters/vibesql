@@ -161,12 +161,14 @@ async fn main() -> Result<()> {
         let registry_for_http = database_registry.clone();
 
         let metrics_for_http = observability.metrics().cloned();
+        let replication_for_http = replication.clone();
         tokio::spawn(async move {
             let app = create_http_router(
                 db_for_http,
                 registry_for_http,
                 subscription_manager_for_http,
                 metrics_for_http,
+                replication_for_http,
             );
             let listener = tokio::net::TcpListener::bind(&http_addr)
                 .await
