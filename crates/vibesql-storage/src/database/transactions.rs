@@ -67,6 +67,34 @@ pub struct Savepoint {
     pub deferred_fk_snapshot_index: usize,
 }
 
+/// An implicit statement-level savepoint (#5417).
+///
+/// SQLite wraps every top-level statement in an implicit savepoint so that
+/// `RAISE(ABORT)` (and ordinary constraint failures) can undo just that
+/// statement's partial changes while leaving earlier statements in the
+/// enclosing transaction intact. This struct captures the same wholesale
+/// catalog/tables/operations snapshot the transaction-start path uses, so a
+/// statement-level rollback is bit-for-bit equivalent to a full rollback
+/// scoped to the moment the statement began.
+///
+/// Boxed inside [`TransactionState::Active`] to keep the common (no
+/// statement savepoint armed) case cheap.
+#[derive(Debug, Clone)]
+pub struct StatementSavepoint {
+    /// Catalog snapshot taken at statement start.
+    catalog: vibesql_catalog::Catalog,
+    /// Table snapshots taken at statement start.
+    tables: HashMap<String, Table>,
+    /// Index/spatial-index (`Operations`) snapshot taken at statement start.
+    operations: Operations,
+    /// Length of the transaction's `changes` undo-log at statement start, so
+    /// the statement's own change-log entries can be truncated on rollback.
+    changes_len: usize,
+    /// Length of the deferred-FK queue at statement start, so violations
+    /// queued by the aborted statement are discarded on rollback.
+    deferred_fk_len: usize,
+}
+
 /// Transaction state
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
@@ -104,6 +132,19 @@ pub enum TransactionState {
         /// it is taken *before* the mutation is applied, preserving the
         /// exact restore semantics #5413 established.
         original_operations: Option<Operations>,
+        /// Implicit statement-level savepoint for SQLite `RAISE(ABORT)`
+        /// semantics (#5417). Captured at the start of a top-level DML
+        /// statement that *may* fire a trigger, and used to undo just that
+        /// statement's changes when a `RAISE(ABORT)` aborts it without
+        /// rolling back the enclosing transaction.
+        ///
+        /// `None` whenever no statement savepoint is currently armed (the
+        /// common case — most statements never arm one, and the no-trigger
+        /// fast path skips it entirely). It snapshots `catalog`, `tables`,
+        /// and `operations` wholesale, exactly like the transaction-start
+        /// snapshot above, so it correctly undoes INSERT/UPDATE/DELETE row
+        /// data *and* index/PK/UNIQUE key mutations made by the statement.
+        statement_savepoint: Option<Box<StatementSavepoint>>,
         /// Stack of savepoints (newest at end)
         savepoints: Vec<Savepoint>,
         /// All changes made since transaction start (for incremental undo)
@@ -269,6 +310,7 @@ impl TransactionManager {
                     original_catalog,
                     original_tables,
                     original_operations: None,
+                    statement_savepoint: None,
                     savepoints: Vec::new(),
                     changes: Vec::new(),
                     durability,
@@ -673,6 +715,90 @@ impl TransactionManager {
                 Ok(())
             }
         }
+    }
+
+    // ========================================================================
+    // Implicit statement-level savepoint (#5417 — RAISE(ABORT) scope)
+    // ========================================================================
+
+    /// Arm an implicit statement-level savepoint, snapshotting the current
+    /// catalog/tables/operations so a later [`Self::rollback_statement_savepoint`]
+    /// can undo just this statement's changes.
+    ///
+    /// No-op (returns `false`) when no transaction is active — outside an
+    /// explicit transaction every statement is its own auto-commit unit and
+    /// there is nothing to scope. Overwrites any previously-armed statement
+    /// savepoint (the caller arms exactly one per top-level statement and
+    /// releases it before the next).
+    pub fn arm_statement_savepoint(
+        &mut self,
+        catalog: &vibesql_catalog::Catalog,
+        tables: &HashMap<String, Table>,
+        operations: &Operations,
+    ) -> bool {
+        match &mut self.transaction_state {
+            TransactionState::None => false,
+            TransactionState::Active {
+                statement_savepoint, changes, deferred_fk_violations, ..
+            } => {
+                *statement_savepoint = Some(Box::new(StatementSavepoint {
+                    catalog: catalog.clone(),
+                    tables: tables.clone(),
+                    operations: operations.clone(),
+                    changes_len: changes.len(),
+                    deferred_fk_len: deferred_fk_violations.len(),
+                }));
+                true
+            }
+        }
+    }
+
+    /// Roll back to the armed statement savepoint, restoring the
+    /// catalog/tables/operations captured by [`Self::arm_statement_savepoint`]
+    /// and truncating the change / deferred-FK logs back to statement start.
+    /// Consumes (disarms) the savepoint.
+    ///
+    /// Returns `true` when a savepoint was armed and restored, `false`
+    /// otherwise (no active transaction or none armed).
+    pub fn rollback_statement_savepoint(
+        &mut self,
+        catalog: &mut vibesql_catalog::Catalog,
+        tables: &mut HashMap<String, Table>,
+        operations: &mut Operations,
+    ) -> bool {
+        match &mut self.transaction_state {
+            TransactionState::Active {
+                statement_savepoint, changes, deferred_fk_violations, ..
+            } => match statement_savepoint.take() {
+                Some(sp) => {
+                    *catalog = sp.catalog;
+                    *tables = sp.tables;
+                    *operations = sp.operations;
+                    changes.truncate(sp.changes_len);
+                    deferred_fk_violations.truncate(sp.deferred_fk_len);
+                    true
+                }
+                None => false,
+            },
+            TransactionState::None => false,
+        }
+    }
+
+    /// Disarm (release) the statement savepoint without rolling back —
+    /// the statement succeeded (or `RAISE(FAIL)`/`RAISE(ROLLBACK)` chose a
+    /// different scope). Cheap: just drops the snapshot.
+    pub fn release_statement_savepoint(&mut self) {
+        if let TransactionState::Active { statement_savepoint, .. } = &mut self.transaction_state {
+            *statement_savepoint = None;
+        }
+    }
+
+    /// True when an implicit statement savepoint is currently armed.
+    pub fn has_statement_savepoint(&self) -> bool {
+        matches!(
+            &self.transaction_state,
+            TransactionState::Active { statement_savepoint: Some(_), .. }
+        )
     }
 }
 

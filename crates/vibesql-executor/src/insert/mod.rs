@@ -23,7 +23,12 @@ impl InsertExecutor {
         db: &mut vibesql_storage::Database,
         stmt: &vibesql_ast::InsertStmt,
     ) -> Result<usize, ExecutorError> {
-        execution::execute_insert(db, stmt)
+        // Wrap the top-level statement in SQLite's per-variant RAISE scope
+        // handling (#5417): inside an explicit transaction, RAISE(ABORT) undoes
+        // just this statement, RAISE(FAIL) keeps its partial changes, and
+        // RAISE(ROLLBACK) rolls back the whole transaction.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(db, may_fire, |db| execution::execute_insert(db, stmt))
     }
 
     /// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)

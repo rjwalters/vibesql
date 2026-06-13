@@ -1198,6 +1198,69 @@ mod tests {
         assert_eq!(machine.last_applied(), 4);
     }
 
+    /// A `RAISE()` fired from a replicated trigger rejects the whole applied
+    /// entry deterministically (#5417): the per-variant abort scope is a pure
+    /// function of the entry + applied state, so every replica records the
+    /// same `Rejected` outcome and the same (rolled-back, empty) rows. The
+    /// replicated apply path applies a buffered batch as one storage
+    /// transaction and rolls the whole batch back on any rejected statement —
+    /// a coarser-but-equally-deterministic scope than the local
+    /// per-statement RAISE handling.
+    #[test]
+    fn raise_in_replicated_trigger_rejects_entry_deterministically() {
+        let build = || {
+            let machine = VibesqlStateMachine::new();
+            create_users(&machine, 1);
+            machine
+                .apply(
+                    2,
+                    &TxnEntry::single(
+                        "CREATE TRIGGER trg BEFORE INSERT ON users WHEN NEW.name = 'BAD' \
+                         BEGIN SELECT raise(ABORT, 'no bad names'); END",
+                    ),
+                )
+                .unwrap();
+            machine
+        };
+
+        // The offending entry inserts a good row then a row the trigger
+        // RAISEs on: the entry is rejected and nothing from it survives.
+        let raising_entry = || {
+            TxnEntry::batch([
+                "INSERT INTO users VALUES (1, 'alice')",
+                "INSERT INTO users VALUES (2, 'BAD')",
+            ])
+        };
+
+        let machine_a = build();
+        let outcome_a = machine_a.apply(3, &raising_entry()).unwrap();
+        assert!(
+            matches!(outcome_a, ApplyOutcome::Rejected { .. }),
+            "RAISE entry must be rejected, got {outcome_a:?}"
+        );
+        // Whole batch rolled back — not even the 'alice' row survives.
+        assert!(names(&machine_a).is_empty(), "rejected entry leaves no rows");
+        // Index is still consumed (rejected identically everywhere).
+        assert_eq!(machine_a.last_applied(), 3);
+
+        // A second, independent replica applying the same log produces the
+        // identical outcome and state — replication determinism.
+        let machine_b = build();
+        let outcome_b = machine_b.apply(3, &raising_entry()).unwrap();
+        assert_eq!(
+            format!("{outcome_a:?}"),
+            format!("{outcome_b:?}"),
+            "both replicas reject with the identical outcome"
+        );
+        assert!(names(&machine_b).is_empty());
+
+        // Re-applying the already-consumed index is idempotent.
+        assert_eq!(
+            machine_a.apply(3, &raising_entry()).unwrap(),
+            ApplyOutcome::AlreadyApplied
+        );
+    }
+
     /// Speculative reads (#5401) see the buffer's own writes but never
     /// commit them: after a `speculative_query`, the applied state is
     /// unchanged (no double-apply), and the entry can still be applied
@@ -1683,6 +1746,17 @@ mod tests {
             E::TableNotFound("t".to_string()),
             E::DivisionByZero,
             E::IntegerOverflow,
+            // RAISE(ABORT|FAIL|ROLLBACK) from a trigger (#5409/#5417): a pure
+            // function of the (replicated) statement + state, so it rejects the
+            // entry identically on every replica — never a node-local halt.
+            E::Raise {
+                action: vibesql_ast::RaiseAction::Abort,
+                message: "boom".to_string(),
+            },
+            E::Raise {
+                action: vibesql_ast::RaiseAction::Rollback,
+                message: "boom".to_string(),
+            },
         ];
         for e in &deterministic {
             assert!(
