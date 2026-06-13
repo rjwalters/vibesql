@@ -491,15 +491,14 @@ fn raise_ignore_in_before_delete_blocks_replace_conflict() {
     assert_eq!(ints(&db, "t", "v"), vec![10, 20]);
 }
 
-// NOTE: a companion test for "REPLACE where the BEFORE DELETE trigger IGNOREs
-// only SOME conflicts (the unguarded conflict still resolves)" was intentionally
-// omitted: VibeSQL has a pre-existing bug where REPLACE with ANY BEFORE DELETE
-// trigger present (even a non-firing / always-Proceed one) leaves a duplicate
-// row instead of deleting the conflicting one. That defect is independent of
-// SkipRow plumbing (it reproduces with a trigger that never raises) and is
-// tracked as a separate follow-on. The `blocks_replace_conflict` test above
-// still exercises the SkipRow wiring because every conflicting delete is
-// IGNORE'd, which correctly surfaces the UNIQUE error.
+// The companion "REPLACE where the BEFORE DELETE trigger is present but does
+// NOT veto the conflicting delete" scenarios — including the WHEN-false /
+// non-firing trigger that #5437 flagged — are covered in the "REPLACE
+// conflict-delete with a BEFORE DELETE trigger present (#5437)" section at the
+// end of this file. (The #5437 "duplicate row" report turned out to be a read
+// artifact of `Table::scan()` surfacing tombstoned rows; the conflict-delete
+// itself was already correct, and those tests assert it through a live
+// `SELECT`.)
 
 /// UPDATE ... FROM (secondary-update path): a BEFORE UPDATE trigger that
 /// RAISE(IGNORE)s one matched row skips just that row; the rest update.
@@ -696,4 +695,228 @@ fn instead_of_delete_without_ignore_deletes_base() {
     exec_dml(&mut db, "DELETE FROM vw").expect("INSTEAD OF DELETE must succeed");
 
     assert!(db.get_table("base").unwrap().scan().is_empty());
+}
+
+// ===========================================================================
+// REPLACE conflict-delete with a BEFORE DELETE trigger present (#5437)
+//
+// #5437 reported that `INSERT OR REPLACE` left a DUPLICATE row whenever ANY
+// BEFORE DELETE trigger existed on the table — even a never-firing (WHEN-false)
+// one. The duplicate, however, was a *read artifact*: the bug report inspected
+// raw storage (`Table::scan()`), which intentionally still contains
+// bitmap-deleted (tombstoned) rows that have not yet been compacted. Through
+// any live read — `Table::scan_live()` or a real `SELECT` — the REPLACE
+// conflict-delete path correctly removes the conflicting row, so there is
+// exactly one row per key.
+//
+// These tests assert the invariant through the user-facing `SELECT` path (the
+// path a client query actually takes) so a future regression that leaves a
+// conflicting row live would fail. Every expected result below is verified
+// against sqlite3 3.51.0 with `PRAGMA recursive_triggers=ON`.
+// ===========================================================================
+
+/// Run `SELECT <cols> FROM <table> ORDER BY <order_by>` and return the rows'
+/// raw `SqlValue` cells — exercising the live read path a client would see.
+fn select_rows(
+    db: &vibesql_storage::Database,
+    sql: &str,
+) -> Vec<Vec<SqlValue>> {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Select(s) => {
+            let executor = crate::SelectExecutor::new(db);
+            let result = executor.execute_with_columns(&s).expect("SELECT failed");
+            result.rows.into_iter().map(|row| row.values.to_vec()).collect()
+        }
+        other => panic!("Expected SELECT, got {:?}", other),
+    }
+}
+
+fn ipk(i: i64) -> SqlValue {
+    SqlValue::Integer(i)
+}
+
+/// A BEFORE DELETE trigger that never fires (its WHEN can never match) must not
+/// prevent the REPLACE conflict-delete: the conflicting row is removed and the
+/// new row replaces it, leaving exactly one row.
+///
+/// sqlite3 3.51.0: `1|10, 2|222`.
+#[test]
+fn replace_with_when_false_before_delete_trigger_leaves_one_row() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
+    // WHEN can never be true, so the trigger never fires and never raises.
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t WHEN OLD.id = 999 \
+         BEGIN SELECT raise(IGNORE); END",
+    );
+
+    exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (2, 222)")
+        .expect("REPLACE must resolve the conflict");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(10)], vec![ipk(2), ipk(222)]],
+        "the conflicting row must be deleted, not duplicated"
+    );
+}
+
+/// A plain (non-RAISE) BEFORE DELETE trigger fires exactly once during the
+/// REPLACE conflict-delete and the row is then deleted normally — no duplicate.
+///
+/// sqlite3 3.51.0: rows `1|10, 2|222`; the trigger fired once (one log row).
+#[test]
+fn replace_with_non_raise_before_delete_trigger_fires_once_and_replaces() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (n INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
+    // Side-effecting trigger that fires (no WHEN) but never raises.
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t \
+         BEGIN INSERT INTO log (n) VALUES (OLD.id); END",
+    );
+
+    exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (2, 222)")
+        .expect("REPLACE must resolve the conflict");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(10)], vec![ipk(2), ipk(222)]],
+        "exactly one row per id after REPLACE"
+    );
+    // The BEFORE DELETE trigger fired exactly once, for the conflicting row.
+    assert_eq!(
+        select_rows(&db, "SELECT n FROM log"),
+        vec![vec![ipk(2)]],
+        "BEFORE DELETE trigger must fire exactly once for the conflicting row"
+    );
+}
+
+/// REPLACE conflicting on a (multi-column) UNIQUE constraint, with a non-firing
+/// BEFORE DELETE trigger present, resolves the conflict to a single row.
+///
+/// sqlite3 3.51.0: `1|100|10, 2|200|222`.
+#[test]
+fn replace_unique_conflict_with_before_delete_trigger_leaves_one_row() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, u INTEGER UNIQUE, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, u, v) VALUES (1, 100, 10), (2, 200, 20)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t WHEN OLD.id = 999 \
+         BEGIN SELECT raise(IGNORE); END",
+    );
+
+    // Conflicts on the PK (id=2) — replace it.
+    exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, u, v) VALUES (2, 200, 222)")
+        .expect("REPLACE must resolve the UNIQUE conflict");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, u, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(100), ipk(10)], vec![ipk(2), ipk(200), ipk(222)]],
+    );
+}
+
+/// A single REPLACE that conflicts with TWO distinct existing rows (one on the
+/// PK, one on a UNIQUE column) deletes BOTH conflicting rows, with a non-firing
+/// BEFORE DELETE trigger present.
+///
+/// sqlite3 3.51.0: new row (2, 300, 222) collides with id=2 (PK) and u=300
+/// (id=3's UNIQUE value); both are removed, leaving `1|100|10, 2|300|222`.
+#[test]
+fn replace_multiple_conflicts_with_before_delete_trigger_deletes_all() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, u INTEGER UNIQUE, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, u, v) VALUES (1, 100, 10), (2, 200, 20), (3, 300, 30)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t WHEN OLD.id = 999 \
+         BEGIN SELECT raise(IGNORE); END",
+    );
+
+    exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, u, v) VALUES (2, 300, 222)")
+        .expect("REPLACE must resolve both conflicts");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, u, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(100), ipk(10)], vec![ipk(2), ipk(300), ipk(222)]],
+        "both conflicting rows (id=2 and id=3) must be deleted"
+    );
+}
+
+/// Control: REPLACE with NO trigger present is unaffected (one row per key).
+///
+/// sqlite3 3.51.0: `1|10, 2|222`.
+#[test]
+fn replace_without_trigger_leaves_one_row() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
+
+    exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (2, 222)")
+        .expect("REPLACE must resolve the conflict");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(10)], vec![ipk(2), ipk(222)]],
+    );
+}
+
+/// Regression for the #5418 SkipRow wiring: a BEFORE DELETE trigger that ALWAYS
+/// RAISE(IGNORE)s the conflicting delete leaves the row in place, so the
+/// REPLACE's insert collides on the PK and errors; the table is unchanged.
+///
+/// sqlite3 3.51.0: `UNIQUE constraint failed: t.id`; rows stay `1|10, 2|20`.
+#[test]
+fn replace_with_raise_ignore_before_delete_errors_and_leaves_table_unchanged() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
+    exec_ok(&mut db, "CREATE TRIGGER bd BEFORE DELETE ON t BEGIN SELECT raise(IGNORE); END");
+
+    let result = exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (1, 99)");
+    assert!(
+        result.is_err(),
+        "the IGNORE'd conflicting row still collides on the PK -> error"
+    );
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(10)], vec![ipk(2), ipk(20)]],
+        "table must be unchanged after the failed REPLACE"
+    );
+}
+
+/// Regression: a BEFORE DELETE trigger that RAISE(ABORT)s the conflicting
+/// delete aborts the REPLACE; the table is unchanged.
+///
+/// sqlite3 3.51.0: error `no delete`; rows stay `1|10, 2|20`.
+#[test]
+fn replace_with_raise_abort_before_delete_aborts() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t BEGIN SELECT raise(ABORT, 'no delete'); END",
+    );
+
+    match exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (1, 99)") {
+        Err(ExecutorError::Raise { action, message }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+            assert_eq!(message, "no delete");
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(1), ipk(10)], vec![ipk(2), ipk(20)]],
+        "table must be unchanged after the aborted REPLACE"
+    );
 }
