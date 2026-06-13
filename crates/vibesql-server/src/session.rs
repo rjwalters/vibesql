@@ -5,6 +5,7 @@ use vibesql_executor::{
     CursorExecutor, CursorStore, FetchResult as CursorFetchResult, PreparedStatement,
     PreparedStatementCache, PreparedStatementCacheStats,
 };
+use vibesql_consensus::TxnEntry;
 use vibesql_types::SqlValue;
 
 use crate::{
@@ -50,18 +51,62 @@ struct ReplicatedSessionState {
     /// Dense log index of this session's last replicated write (`0` =
     /// none) — the read-your-writes token `execute_replicated` returned.
     last_write_token: vibesql_consensus::LogIndex,
-    /// Open interactive transaction (#5391): `Some` between `BEGIN` and
-    /// `COMMIT`/`ROLLBACK`. Holds the buffered write statements (in
-    /// execution order) that are proposed as **one** `TxnEntry` at
-    /// `COMMIT` — the one-entry-per-committed-transaction design.
+    /// Open interactive transaction (#5391, #5401): `Some` between `BEGIN`
+    /// and `COMMIT`/`ROLLBACK`. Holds the buffered, already-frozen write
+    /// statements (in execution order) that are merged and proposed as
+    /// **one** `TxnEntry` at `COMMIT` — the one-entry-per-committed-
+    /// transaction design — plus the savepoint stack.
     ///
     /// During the open transaction the buffer is *not yet* proposed, so:
     /// - write statements return an optimistic ack (`rows_affected = 0`); the authoritative row
     ///   counts are knowable only after the atomic apply at `COMMIT`;
-    /// - reads are refused once the buffer is non-empty, because the buffered writes are not
-    ///   applied anywhere yet and a local read would silently miss the session's own writes (full
-    ///   mid-txn read fidelity is the scoped follow-on #5401).
-    open_txn: Option<Vec<String>>,
+    /// - reads see the session's own buffered writes via leader-local speculative replay (#5401):
+    ///   the buffer is merged into a `TxnEntry` and replayed into a discardable scratch transaction,
+    ///   then the read runs against it. Nothing commits until `COMMIT`.
+    open_txn: Option<OpenTxn>,
+}
+
+/// State of an open interactive replicated transaction (#5401): the
+/// frozen write buffer plus the savepoint stack.
+///
+/// Each buffered write is frozen **once**, at buffer time
+/// ([`ReplicationHandle::freeze_buffered_write`]), into a single-statement
+/// `TxnEntry`. The same frozen values feed both the speculative mid-txn
+/// reads ([`ReplicationHandle::speculative_query`]) and the authoritative
+/// propose at `COMMIT` ([`ReplicationHandle::propose_txn_entry`]) — so a
+/// `random()` / `now()` write sees one frozen value mid-transaction and
+/// commits that same value (freeze-consistency).
+#[derive(Default)]
+struct OpenTxn {
+    /// Buffered writes, in execution order; each is a single-statement
+    /// frozen `TxnEntry`.
+    writes: Vec<TxnEntry>,
+    /// Savepoint stack (newest last): `(name, writes.len() at creation)`.
+    /// `ROLLBACK TO` truncates `writes` back to the recorded length and
+    /// pops every later savepoint; `RELEASE` pops the savepoint (and any
+    /// nested ones) without touching `writes`.
+    savepoints: Vec<(String, usize)>,
+}
+
+impl OpenTxn {
+    /// Merge the buffered single-statement entries into one `TxnEntry`
+    /// (statements + frozen values + frozen defaults concatenated in
+    /// execution order) for speculative replay or the COMMIT propose.
+    fn merged_entry(&self) -> TxnEntry {
+        let mut statements = Vec::with_capacity(self.writes.len());
+        let mut frozen = Vec::with_capacity(self.writes.len());
+        let mut frozen_defaults = Vec::with_capacity(self.writes.len());
+        for entry in &self.writes {
+            // Each buffered entry is single-statement, but iterate to be
+            // robust to that representation.
+            for (i, sql) in entry.statements.iter().enumerate() {
+                statements.push(sql.clone());
+                frozen.push(entry.frozen.get(i).cloned().unwrap_or_default());
+                frozen_defaults.push(entry.frozen_defaults.get(i).cloned().unwrap_or_default());
+            }
+        }
+        TxnEntry::frozen_batch(statements, frozen).with_frozen_defaults(frozen_defaults)
+    }
 }
 
 /// Session state for a database connection
@@ -391,23 +436,21 @@ impl Session {
             Statement::BeginTransaction(_) => return self.replicated_begin(),
             Statement::Commit(_) => return self.replicated_commit().await,
             Statement::Rollback(_) => return self.replicated_rollback(),
-            // Savepoints are out of scope (#5391); standalone sessions do
-            // not support them either. Refuse clearly.
-            Statement::Savepoint(_)
-            | Statement::RollbackToSavepoint(_)
-            | Statement::ReleaseSavepoint(_) => {
-                return Err(SqlError::not_supported(
-                    "savepoints in replicated transactions",
-                    "#5401",
-                )
-                .into())
+            // Savepoints (#5401): sub-transaction markers over the buffered
+            // batch. Handled here so they apply to the open transaction's
+            // write buffer (each errors if no transaction is open).
+            Statement::Savepoint(stmt) => return self.replicated_savepoint(stmt),
+            Statement::RollbackToSavepoint(stmt) => {
+                return self.replicated_rollback_to_savepoint(stmt)
             }
+            Statement::ReleaseSavepoint(stmt) => return self.replicated_release_savepoint(stmt),
             _ => {}
         }
 
-        // Inside an open transaction, writes are buffered (proposed as
-        // one entry at COMMIT) and reads are gated once the buffer is
-        // non-empty. Re-borrow `state` after this returns where needed.
+        // Inside an open transaction, writes are frozen and buffered
+        // (proposed as one entry at COMMIT) and reads observe the session's
+        // own buffered writes via leader-local speculative replay (#5401).
+        // Re-borrow `state` after this returns where needed.
         if self.replication.as_ref().is_some_and(|s| s.open_txn.is_some()) {
             return self.execute_in_open_txn(sql, statement);
         }
@@ -569,7 +612,7 @@ impl Session {
         if state.open_txn.is_some() {
             return Err(anyhow::anyhow!("a transaction is already in progress"));
         }
-        state.open_txn = Some(Vec::new());
+        state.open_txn = Some(OpenTxn::default());
         Ok(ExecutionResult::Begin)
     }
 
@@ -587,27 +630,29 @@ impl Session {
     /// An empty transaction (`BEGIN; COMMIT;` with no writes) consumes no
     /// log index — there is nothing to replicate.
     async fn replicated_commit(&mut self) -> Result<ExecutionResult> {
-        let buffered = {
+        let open = {
             let state = self.replication.as_mut().expect("replicated_commit without state");
             match state.open_txn.take() {
-                Some(buf) => buf,
+                Some(open) => open,
                 None => return Err(anyhow::anyhow!("no transaction is in progress")),
             }
         };
 
         // Empty transaction: nothing to propose.
-        if buffered.is_empty() {
+        if open.writes.is_empty() {
             return Ok(ExecutionResult::Commit);
         }
 
         let state = self.replication.as_ref().expect("replicated_commit without state");
         let handle = Arc::clone(&state.handle);
-        let statements: Vec<&str> = buffered.iter().map(String::as_str).collect();
 
-        // Propose the batch as one entry. `NotLeader`/`FatalApply`/etc.
-        // surface as a structured SqlError; the buffer is already cleared
-        // above so the session is back in autocommit on any error.
-        let (index, outcome) = handle.execute_txn(&statements).await?;
+        // Propose the already-frozen buffer as one entry — no re-freeze, so
+        // the committed rows match exactly what the session saw via the
+        // mid-transaction speculative reads (#5401). `NotLeader`/
+        // `FatalApply`/etc. surface as a structured SqlError; the buffer is
+        // already cleared above so the session is back in autocommit on any
+        // error.
+        let (index, outcome) = handle.propose_txn_entry(open.merged_entry()).await?;
 
         let state = self.replication.as_mut().expect("replicated_commit without state");
         state.last_write_token = index;
@@ -690,19 +735,92 @@ impl Session {
         Ok(ExecutionResult::Rollback)
     }
 
+    /// `SAVEPOINT name` in an open replicated transaction (#5401): record a
+    /// sub-transaction marker at the current buffer length. Re-declaring an
+    /// existing name shadows it (matching PostgreSQL, where the newer
+    /// savepoint is the one a later `ROLLBACK TO`/`RELEASE` of that name
+    /// targets). Errors if no transaction is open.
+    fn replicated_savepoint(
+        &mut self,
+        stmt: &vibesql_ast::SavepointStmt,
+    ) -> Result<ExecutionResult> {
+        let open = self
+            .replication
+            .as_mut()
+            .and_then(|s| s.open_txn.as_mut())
+            .ok_or_else(|| anyhow::anyhow!("SAVEPOINT can only be used inside a transaction"))?;
+        let depth = open.writes.len();
+        open.savepoints.push((stmt.name.clone(), depth));
+        Ok(ExecutionResult::Other { message: "SAVEPOINT".to_string() })
+    }
+
+    /// `ROLLBACK TO SAVEPOINT name` (#5401): truncate the buffered write
+    /// batch back to the savepoint's marker — discarding every write
+    /// issued after it — and pop the savepoints created after it. The
+    /// savepoint itself remains active (PostgreSQL semantics: you can
+    /// `ROLLBACK TO` the same savepoint repeatedly). Subsequent
+    /// speculative reads and the eventual COMMIT propose see only the
+    /// surviving writes.
+    fn replicated_rollback_to_savepoint(
+        &mut self,
+        stmt: &vibesql_ast::RollbackToSavepointStmt,
+    ) -> Result<ExecutionResult> {
+        let open = self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
+            anyhow::anyhow!("ROLLBACK TO SAVEPOINT can only be used inside a transaction")
+        })?;
+        // Find the most recent savepoint with this name.
+        let pos = open
+            .savepoints
+            .iter()
+            .rposition(|(name, _)| name == &stmt.name)
+            .ok_or_else(|| anyhow::anyhow!("no such savepoint: {}", stmt.name))?;
+        let depth = open.savepoints[pos].1;
+        // Discard writes buffered after the savepoint.
+        open.writes.truncate(depth);
+        // Pop savepoints created strictly after this one; keep this one
+        // active for repeated ROLLBACK TO.
+        open.savepoints.truncate(pos + 1);
+        Ok(ExecutionResult::Other { message: "ROLLBACK".to_string() })
+    }
+
+    /// `RELEASE SAVEPOINT name` (#5401): destroy the named savepoint (and
+    /// any nested savepoints created after it) without touching the
+    /// buffered writes — those writes stay in the batch and commit with the
+    /// transaction. Errors if no transaction is open or the name is unknown.
+    fn replicated_release_savepoint(
+        &mut self,
+        stmt: &vibesql_ast::ReleaseSavepointStmt,
+    ) -> Result<ExecutionResult> {
+        let open = self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
+            anyhow::anyhow!("RELEASE SAVEPOINT can only be used inside a transaction")
+        })?;
+        let pos = open
+            .savepoints
+            .iter()
+            .rposition(|(name, _)| name == &stmt.name)
+            .ok_or_else(|| anyhow::anyhow!("no such savepoint: {}", stmt.name))?;
+        // Releasing a savepoint also releases all savepoints nested within
+        // it; the writes themselves remain buffered.
+        open.savepoints.truncate(pos);
+        Ok(ExecutionResult::Other { message: "RELEASE".to_string() })
+    }
+
     /// Execute one statement inside an open replicated transaction
-    /// (#5391). Writes are appended to the buffer and acknowledged
-    /// optimistically; reads are gated; unsupported features keep their
-    /// `0A000` refusal.
+    /// (#5391, #5401). Writes are frozen and appended to the buffer and
+    /// acknowledged optimistically; reads see the session's own buffered
+    /// writes via leader-local speculative replay; unsupported features
+    /// keep their `0A000` refusal.
     ///
     /// Mid-transaction result semantics (documented contract):
-    /// - **Writes** return their command tag with `rows_affected = 0`. The buffer is not proposed
-    ///   until `COMMIT`, so the authoritative row count is not yet known; clients learn the outcome
-    ///   (success or a deterministic rejection) at `COMMIT`.
-    /// - **Reads** are refused with `0A000` once the buffer holds any writes: those writes are
-    ///   applied nowhere yet, so a local read would silently miss the session's own writes. A read
-    ///   before any buffered write (it observes committed state coherently) is allowed. Full
-    ///   read-your-own-writes inside the transaction is the scoped follow-on #5401.
+    /// - **Writes** are frozen at buffer time and return their command tag with `rows_affected = 0`.
+    ///   The buffer is not proposed until `COMMIT`, so the authoritative row count is not yet known;
+    ///   clients learn the outcome (success or a deterministic rejection) at `COMMIT`.
+    /// - **Reads** observe the session's own buffered writes (full read-your-own-writes, #5401): the
+    ///   frozen buffer is replayed into a discardable leader-local scratch transaction and the read
+    ///   runs against it. Because the replay reuses the buffer's already-frozen values, a read of a
+    ///   `random()` / `now()` write sees exactly the value the committed row will carry. Reads with
+    ///   no buffered writes yet serve committed state through the normal local read path. Nothing is
+    ///   committed until `COMMIT`.
     fn execute_in_open_txn(
         &mut self,
         sql: &str,
@@ -710,89 +828,99 @@ impl Session {
     ) -> Result<ExecutionResult> {
         use vibesql_ast::Statement;
 
-        // Whether the buffer already holds writes (read gating).
+        // Whether the buffer already holds writes (selects the read path).
         let buffer_has_writes = self
             .replication
             .as_ref()
             .and_then(|s| s.open_txn.as_ref())
-            .is_some_and(|buf| !buf.is_empty());
+            .is_some_and(|open| !open.writes.is_empty());
 
-        // Append `sql` to the open transaction buffer.
-        let buffer = |this: &mut Self| {
+        // Freeze `sql` at buffer time and append it to the open transaction
+        // buffer. Freezing here (once) — and reusing the frozen values for
+        // both speculative reads and the COMMIT propose — is what keeps
+        // mid-txn reads of volatile writes consistent with the committed
+        // rows. A statement whose nondeterminism cannot be frozen fails
+        // here (mid-transaction) rather than silently at COMMIT.
+        let buffer = |this: &mut Self| -> Result<()> {
+            let handle = Arc::clone(
+                &this.replication.as_ref().expect("execute_in_open_txn without state").handle,
+            );
+            let entry = handle.freeze_buffered_write(sql)?;
             this.replication
                 .as_mut()
                 .and_then(|s| s.open_txn.as_mut())
                 .expect("execute_in_open_txn without open transaction")
-                .push(sql.to_string());
+                .writes
+                .push(entry);
+            Ok(())
         };
 
         match statement {
             Statement::Select(_) => {
-                if buffer_has_writes {
-                    Err(SqlError::not_supported(
-                        "reads of a replicated transaction's own buffered writes",
-                        "#5401",
-                    )
-                    .into())
+                let handle = Arc::clone(
+                    &self.replication.as_ref().expect("execute_in_open_txn without state").handle,
+                );
+                let rows = if buffer_has_writes {
+                    // Read-your-own-writes: replay the frozen buffer into a
+                    // discardable leader-local scratch transaction, then read.
+                    let entry = self
+                        .replication
+                        .as_ref()
+                        .and_then(|s| s.open_txn.as_ref())
+                        .expect("execute_in_open_txn without open transaction")
+                        .merged_entry();
+                    handle.speculative_query(&entry, sql)?
                 } else {
-                    // No buffered writes yet: serve against committed
-                    // state through the normal local read path.
-                    let handle = Arc::clone(
-                        &self
-                            .replication
-                            .as_ref()
-                            .expect("execute_in_open_txn without state")
-                            .handle,
-                    );
-                    let rows = handle.query_local(sql)?;
-                    let columns = rows
-                        .first()
-                        .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
-                        .unwrap_or_default();
-                    let rows = rows.into_iter().map(|values| Row { values }).collect();
-                    Ok(ExecutionResult::Select { rows, columns })
-                }
+                    // No buffered writes yet: serve against committed state.
+                    handle.query_local(sql)?
+                };
+                let columns = rows
+                    .first()
+                    .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
+                    .unwrap_or_default();
+                let rows = rows.into_iter().map(|values| Row { values }).collect();
+                Ok(ExecutionResult::Select { rows, columns })
             }
 
-            // Writes: buffer for the COMMIT batch, ack optimistically.
+            // Writes: freeze + buffer for the COMMIT batch, ack optimistically.
             Statement::Insert(stmt) => {
-                buffer(self);
+                buffer(self)?;
                 self.stmt_cache.invalidate_table(&stmt.table_name);
                 Ok(ExecutionResult::Insert { rows_affected: 0 })
             }
             Statement::Update(stmt) => {
-                buffer(self);
+                buffer(self)?;
                 self.stmt_cache.invalidate_table(&stmt.table_name);
                 Ok(ExecutionResult::Update { rows_affected: 0 })
             }
             Statement::Delete(stmt) => {
-                buffer(self);
+                buffer(self)?;
                 self.stmt_cache.invalidate_table(&stmt.table_name);
                 Ok(ExecutionResult::Delete { rows_affected: 0 })
             }
             Statement::CreateTable(_) => {
-                buffer(self);
+                buffer(self)?;
                 Ok(ExecutionResult::CreateTable)
             }
             Statement::CreateIndex(_) => {
-                buffer(self);
+                buffer(self)?;
                 Ok(ExecutionResult::CreateIndex)
             }
             Statement::CreateView(_) => {
-                buffer(self);
+                buffer(self)?;
                 Ok(ExecutionResult::CreateView)
             }
             Statement::DropTable(stmt) => {
-                buffer(self);
+                buffer(self)?;
                 self.stmt_cache.invalidate_table(&stmt.table_name);
                 Ok(ExecutionResult::DropTable)
             }
             Statement::DropIndex(_) => {
-                buffer(self);
+                buffer(self)?;
                 Ok(ExecutionResult::DropIndex)
             }
             Statement::DropView(_) => {
-                buffer(self);
+                buffer(self)?;
                 Ok(ExecutionResult::DropView)
             }
 

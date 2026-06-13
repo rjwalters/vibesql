@@ -38,6 +38,7 @@ impl Database {
         self.lifecycle.transaction_manager_mut().begin_transaction_with_durability(
             catalog,
             &self.tables,
+            &self.operations,
             durability,
         )?;
 
@@ -89,7 +90,11 @@ impl Database {
         // Get transaction ID before rolling back (it will be cleared after)
         let txn_id = self.transaction_id();
 
-        self.lifecycle.perform_rollback(&mut self.catalog, &mut self.tables)?;
+        self.lifecycle.perform_rollback(
+            &mut self.catalog,
+            &mut self.tables,
+            &mut self.operations,
+        )?;
 
         // SQLite: PRAGMA defer_foreign_keys is automatically reset to OFF at
         // every COMMIT or ROLLBACK (R-21752-26913, fkey6-1.10.1).

@@ -30,6 +30,7 @@ use vibesql_server::{
     ExecutionResult, Session, SharedDatabase, SqlError, SubscriptionManager,
 };
 use vibesql_storage::Database;
+use vibesql_types::SqlValue;
 
 /// Upper bound for any single cluster-level wait (election, catch-up).
 const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -437,47 +438,150 @@ async fn replicated_empty_txn_consumes_no_index() {
     assert_eq!(handles[0].node().last_applied(), applied_before, "empty txn must not propose");
 }
 
-/// Reads inside a transaction are coherent before any buffered write
-/// (committed state) and refused once writes are buffered (the buffer is
-/// applied nowhere yet — full mid-txn read fidelity is #5401).
+/// Full mid-transaction read-your-own-writes (#5401): a read after a
+/// buffered INSERT sees the session's own uncommitted write, via
+/// leader-local speculative replay — without proposing anything until
+/// COMMIT.
 #[tokio::test]
-async fn replicated_txn_read_gating() {
+async fn replicated_txn_read_sees_own_buffered_writes() {
     let (handles, _dir) = boot_cluster(1).await;
     wait_for_leader(&handles).await;
     let mut session = replicated_session(&handles[0]);
 
     session.execute("CREATE TABLE t (id INT)").await.unwrap();
     session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
 
     session.execute("BEGIN").await.unwrap();
     // No buffered writes yet: a read observes committed state.
     let rows = select_rows(session.execute("SELECT id FROM t").await.unwrap());
     assert_eq!(rows.len(), 1, "pre-write read sees committed state");
 
-    // After a buffered write, reads are refused with 0A000 → #5401.
+    // After a buffered INSERT, the read sees the session's own write.
     session.execute("INSERT INTO t VALUES (2)").await.unwrap();
-    let err = session.execute("SELECT id FROM t").await.unwrap_err();
-    let err = sql_error(&err);
-    assert_eq!(err.code, "0A000");
-    assert!(err.hint.as_deref().unwrap_or_default().contains("#5401"), "{err:?}");
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    assert_eq!(rows.len(), 2, "read-your-own-writes: the buffered INSERT is visible");
 
-    session.execute("ROLLBACK").await.unwrap();
+    // Nothing was proposed: the speculative read does not consume an index.
+    assert_eq!(
+        handles[0].node().last_applied(),
+        applied_before,
+        "speculative reads must not propose"
+    );
+
+    // A mid-txn UPDATE then SELECT reflects it.
+    session.execute("UPDATE t SET id = 99 WHERE id = 2").await.unwrap();
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    let ids: Vec<_> = rows.iter().map(|r| r.values[0].clone()).collect();
+    assert_eq!(ids, vec![SqlValue::Integer(1), SqlValue::Integer(99)], "UPDATE reflected mid-txn");
+
+    session.execute("COMMIT").await.unwrap();
+    // Committed state matches what the session saw mid-transaction.
+    assert_eq!(handles[0].node().last_applied(), applied_before + 1, "one entry for the txn");
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    let ids: Vec<_> = rows.iter().map(|r| r.values[0].clone()).collect();
+    assert_eq!(ids, vec![SqlValue::Integer(1), SqlValue::Integer(99)]);
 }
 
-/// Savepoints inside a replicated transaction are refused with 0A000 and
-/// a pointer to the scoped follow-on (#5401).
+/// SAVEPOINT / ROLLBACK TO truncates the buffered batch to the marker:
+/// writes after the savepoint are discarded, the survivors commit as one
+/// entry, and the committed state equals what the client saw.
 #[tokio::test]
-async fn replicated_txn_savepoints_refused() {
+async fn replicated_txn_savepoint_rollback_to_discards_later_writes() {
     let (handles, _dir) = boot_cluster(1).await;
     wait_for_leader(&handles).await;
     let mut session = replicated_session(&handles[0]);
 
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
     session.execute("BEGIN").await.unwrap();
-    let err = session.execute("SAVEPOINT s1").await.unwrap_err();
-    let err = sql_error(&err);
-    assert_eq!(err.code, "0A000");
-    assert!(err.hint.as_deref().unwrap_or_default().contains("#5401"), "{err:?}");
-    session.execute("ROLLBACK").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    session.execute("SAVEPOINT s1").await.unwrap();
+    session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+    session.execute("INSERT INTO t VALUES (3)").await.unwrap();
+
+    // Before ROLLBACK TO, the reads see all three.
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    assert_eq!(rows.len(), 3, "all buffered writes visible before ROLLBACK TO");
+
+    // ROLLBACK TO discards the two writes after the savepoint.
+    session.execute("ROLLBACK TO SAVEPOINT s1").await.unwrap();
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    let ids: Vec<_> = rows.iter().map(|r| r.values[0].clone()).collect();
+    assert_eq!(ids, vec![SqlValue::Integer(1)], "only the pre-savepoint write survives");
+
+    // COMMIT applies only the survivor, as one entry.
+    session.execute("COMMIT").await.unwrap();
+    assert_eq!(handles[0].node().last_applied(), applied_before + 1);
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    let ids: Vec<_> = rows.iter().map(|r| r.values[0].clone()).collect();
+    assert_eq!(ids, vec![SqlValue::Integer(1)], "committed state matches what the client saw");
+}
+
+/// RELEASE SAVEPOINT keeps the buffered writes; they commit with the
+/// transaction.
+#[tokio::test]
+async fn replicated_txn_release_savepoint_keeps_writes() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    session.execute("SAVEPOINT s1").await.unwrap();
+    session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+    session.execute("RELEASE SAVEPOINT s1").await.unwrap();
+
+    // ROLLBACK TO a released savepoint is an error.
+    let err = session.execute("ROLLBACK TO SAVEPOINT s1").await.unwrap_err();
+    assert!(err.to_string().contains("no such savepoint"), "{err}");
+
+    session.execute("COMMIT").await.unwrap();
+    let rows = select_rows(session.execute("SELECT id FROM t ORDER BY id").await.unwrap());
+    assert_eq!(rows.len(), 2, "released savepoint keeps both writes");
+}
+
+/// A volatile write inside a transaction freezes its value once: the
+/// mid-transaction read and the committed row carry the same value.
+#[tokio::test]
+async fn replicated_txn_volatile_write_frozen_value_is_consistent() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT, r INT)").await.unwrap();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1, abs(random()))").await.unwrap();
+    // Read the frozen value mid-transaction.
+    let rows = select_rows(session.execute("SELECT r FROM t WHERE id = 1").await.unwrap());
+    assert_eq!(rows.len(), 1);
+    let mid_txn_value = rows[0].values[0].clone();
+
+    session.execute("COMMIT").await.unwrap();
+    // The committed row carries the same frozen value.
+    let rows = select_rows(session.execute("SELECT r FROM t WHERE id = 1").await.unwrap());
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].values[0], mid_txn_value,
+        "the committed volatile value must equal what the session saw mid-transaction"
+    );
+}
+
+/// SAVEPOINT / ROLLBACK TO / RELEASE outside a transaction are errors.
+#[tokio::test]
+async fn replicated_savepoint_outside_txn_errors() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    for sql in ["SAVEPOINT s1", "ROLLBACK TO SAVEPOINT s1", "RELEASE SAVEPOINT s1"] {
+        let err = session.execute(sql).await.unwrap_err();
+        assert!(err.to_string().contains("inside a transaction"), "{sql}: {err}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -553,11 +657,14 @@ async fn follower_rejects_writes_with_redirect_hint() {
     assert_not_redirected(session.execute("SELECT * FROM t").await, "token-0 read");
 }
 
-/// A transaction's COMMIT on a follower fails with SQLSTATE 25006 (the
-/// leader-redirect contract) and discards the buffer, so the follower is
-/// back in autocommit afterward.
+/// A buffered write inside a transaction on a follower fails fast with
+/// SQLSTATE 25006 (the leader-redirect contract): freezing a buffered
+/// write — like the speculative read path — is leader-only (#5401), so the
+/// follower surfaces "not the leader" at the write rather than deferring it
+/// to COMMIT. The transaction stays open (nothing was buffered) and a
+/// ROLLBACK cleanly closes it.
 #[tokio::test]
-async fn replicated_txn_commit_on_follower_redirects_and_discards() {
+async fn replicated_txn_buffered_write_on_follower_redirects() {
     let (handles, _dir) = boot_cluster(3).await;
     let leader = wait_for_leader(&handles).await;
 
@@ -579,18 +686,14 @@ async fn replicated_txn_commit_on_follower_redirects_and_discards() {
 
     let mut session = replicated_session(&handles[follower]);
 
-    // BEGIN/INSERT buffer locally (no propose yet, so no error here).
+    // BEGIN succeeds (session-local), but the buffered write fails fast:
+    // freezing is leader-only, so the follower surfaces 25006 immediately.
     session.execute("BEGIN").await.unwrap();
-    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
-
-    // COMMIT proposes on the follower → 25006.
-    let err = session.execute("COMMIT").await.unwrap_err();
+    let err = session.execute("INSERT INTO t VALUES (1)").await.unwrap_err();
     assert_eq!(sql_error(&err).code, "25006");
 
-    // The buffer was discarded: the session is back in autocommit, so a
-    // ROLLBACK now errors with "no transaction in progress".
-    let err = session.execute("ROLLBACK").await.unwrap_err();
-    assert!(err.downcast_ref::<SqlError>().is_none(), "buffer should be discarded: {err}");
+    // The transaction is still open (nothing buffered); ROLLBACK closes it.
+    assert!(matches!(session.execute("ROLLBACK").await.unwrap(), ExecutionResult::Rollback));
 }
 
 /// A committed transaction replicates atomically to a second node: after
@@ -632,6 +735,57 @@ async fn replicated_txn_replicates_atomically_to_followers() {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "follower {i} did not converge to 3 rows (saw {count:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+/// A transaction with SAVEPOINT + ROLLBACK TO commits only the surviving
+/// writes, and a follower converges to exactly that state (#5401): the
+/// committed state matches what the client saw, on a second node.
+#[tokio::test]
+async fn replicated_txn_savepoint_survivors_replicate_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[leader]);
+
+    session.execute("CREATE TABLE kv (id INT)").await.unwrap();
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (1)").await.unwrap();
+    session.execute("SAVEPOINT s1").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (2)").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (3)").await.unwrap();
+    session.execute("ROLLBACK TO SAVEPOINT s1").await.unwrap();
+    session.execute("COMMIT").await.unwrap();
+
+    // Every follower converges to exactly the one surviving row (id = 1),
+    // never the rolled-back 2/3.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let count = h
+                .node()
+                .query("SELECT COUNT(*) FROM kv")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if count.as_deref() == Some("1") {
+                // The single surviving row must be id = 1, not a later one.
+                let ids = h.node().query("SELECT id FROM kv").expect("query ids");
+                assert_eq!(ids.len(), 1);
+                assert_eq!(ids[0][0], SqlValue::Integer(1), "follower {i} kept the wrong row");
+                break;
+            }
+            assert!(
+                matches!(count.as_deref(), None | Some("0") | Some("1")),
+                "follower {i} saw an unexpected count: {count:?}"
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to 1 row (saw {count:?})"
             );
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -776,11 +930,26 @@ async fn wire_protocol_replicated_end_to_end() {
         "3"
     );
 
-    // Savepoints remain feature_not_supported (#5401).
+    // Read-your-own-writes and savepoints work end-to-end (#5401): a read
+    // after a buffered INSERT sees it, ROLLBACK TO discards later writes,
+    // and only the survivors commit.
     client.simple_query("BEGIN").await.unwrap();
-    let err = client.simple_query("SAVEPOINT s1").await.unwrap_err();
-    assert_eq!(err.as_db_error().expect("db error").code(), &SqlState::FEATURE_NOT_SUPPORTED);
-    client.simple_query("ROLLBACK").await.unwrap();
+    client.simple_query("INSERT INTO wire_test VALUES (4, 'Dan')").await.unwrap();
+    let messages = client.simple_query("SELECT COUNT(*) FROM wire_test").await.unwrap();
+    let mid = messages.iter().find_map(|m| match m {
+        tokio_postgres::SimpleQueryMessage::Row(row) => row.get(0).map(str::to_string),
+        _ => None,
+    });
+    assert_eq!(mid.as_deref(), Some("4"), "read-your-own-writes: the buffered INSERT is visible");
+    client.simple_query("SAVEPOINT s1").await.unwrap();
+    client.simple_query("INSERT INTO wire_test VALUES (5, 'Eve')").await.unwrap();
+    client.simple_query("ROLLBACK TO SAVEPOINT s1").await.unwrap();
+    client.simple_query("COMMIT").await.unwrap();
+    // Dan (4) survives; Eve (5) was rolled back to the savepoint.
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM wire_test").unwrap()[0][0].to_string(),
+        "4"
+    );
 }
 
 /// End to end on a follower: a write gets SQLSTATE 25006 with the

@@ -892,6 +892,71 @@ impl MvccRaftNode {
         self.propose_entry(entry).await
     }
 
+    /// Freeze an interactive transaction's buffered write statements into
+    /// a single [`TxnEntry`] **without proposing it** (#5401). This is the
+    /// freeze-at-buffer-time half of full mid-transaction read fidelity:
+    /// the returned entry's frozen values are reused both for speculative
+    /// mid-txn reads ([`speculative_query`](Self::speculative_query)) and
+    /// for the authoritative propose at `COMMIT`
+    /// ([`propose_txn_entry`](Self::propose_txn_entry)), so a `random()` /
+    /// `now()` write sees one frozen value mid-transaction and commits the
+    /// same one.
+    ///
+    /// Leader-only, like [`execute_replicated_txn`](Self::execute_replicated_txn):
+    /// freezing draws random values / reads the clock, so it must not run
+    /// on a node whose proposal would be refused. Returns
+    /// [`ConsensusError::NotLeader`] otherwise.
+    pub fn freeze_txn_batch(&self, statements: &[&str]) -> Result<TxnEntry> {
+        if self.role() != Role::Leader {
+            return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
+        }
+        let mut frozen = Vec::with_capacity(statements.len());
+        let mut frozen_defaults = Vec::with_capacity(statements.len());
+        for sql in statements {
+            let (values, defaults) = self.sm.machine.freeze_for_propose(sql).map_err(|e| {
+                ConsensusError::Backend(format!("statement cannot be replicated: {e}"))
+            })?;
+            frozen.push(values);
+            frozen_defaults.push(defaults);
+        }
+        Ok(
+            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen)
+                .with_frozen_defaults(frozen_defaults),
+        )
+    }
+
+    /// Speculatively read inside an open replicated transaction so the
+    /// session sees its own buffered writes — full mid-transaction
+    /// read-your-own-writes (#5401). Replays `entry`'s frozen statements
+    /// into a discardable scratch transaction on the leader's applied
+    /// state, runs `select_sql`, and rolls the scratch transaction back;
+    /// see [`VibesqlStateMachine::speculative_query`] for the no-double-apply
+    /// argument. Leader-only (it replays writes).
+    pub fn speculative_query(
+        &self,
+        entry: &TxnEntry,
+        select_sql: &str,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>> {
+        if self.role() != Role::Leader {
+            return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
+        }
+        self.sm.machine.speculative_query(entry, select_sql)
+    }
+
+    /// Propose an already-frozen [`TxnEntry`] (built by
+    /// [`freeze_txn_batch`](Self::freeze_txn_batch)) as one consensus
+    /// entry at `COMMIT` (#5401). Unlike
+    /// [`execute_replicated_txn`](Self::execute_replicated_txn) it does not
+    /// re-freeze — the entry's frozen values are exactly those the session
+    /// already observed mid-transaction, so the committed rows match what
+    /// the client saw.
+    pub async fn propose_txn_entry(&self, entry: TxnEntry) -> Result<(LogIndex, ApplyOutcome)> {
+        if self.role() != Role::Leader {
+            return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
+        }
+        self.propose_entry(entry).await
+    }
+
     /// Propose a pre-built entry. Internal: the public surface freezes
     /// statements first (tests use this to exercise the apply-side
     /// defenses with hand-crafted entries). Every entry proposed here is

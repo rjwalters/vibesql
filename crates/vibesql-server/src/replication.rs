@@ -44,7 +44,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use vibesql_consensus::{
-    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role,
+    ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role, TxnEntry,
 };
 
 use crate::config::ReplicationConfig;
@@ -249,6 +249,39 @@ impl ReplicationHandle {
             .execute_replicated_txn(statements)
             .await
             .map_err(|e| self.sql_error("the transaction", e))
+    }
+
+    /// Freeze an open transaction's buffered write into a single-statement
+    /// [`TxnEntry`] at buffer time (#5401), so the same frozen values feed
+    /// both mid-transaction speculative reads and the authoritative propose
+    /// at COMMIT. Leader-only; surfaces `NotLeader` otherwise.
+    pub fn freeze_buffered_write(&self, sql: &str) -> Result<TxnEntry, SqlError> {
+        self.node.freeze_txn_batch(&[sql]).map_err(|e| self.sql_error("the statement", e))
+    }
+
+    /// Speculatively read inside an open replicated transaction (#5401):
+    /// replay the buffered (already-frozen) `entry` into a discardable
+    /// scratch transaction on the leader and run `select_sql` against it,
+    /// so the session observes its own uncommitted writes. Nothing is
+    /// committed — the authoritative write happens only at COMMIT.
+    /// Leader-only.
+    pub fn speculative_query(
+        &self,
+        entry: &TxnEntry,
+        select_sql: &str,
+    ) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
+        self.node.speculative_query(entry, select_sql).map_err(|e| self.sql_error("the query", e))
+    }
+
+    /// Propose an already-frozen [`TxnEntry`] (the merged open-transaction
+    /// buffer) as one consensus entry at COMMIT (#5401), without
+    /// re-freezing — the committed rows match what the session saw
+    /// mid-transaction. Returns the entry's log index and apply outcome.
+    pub async fn propose_txn_entry(
+        &self,
+        entry: TxnEntry,
+    ) -> Result<(LogIndex, ApplyOutcome), SqlError> {
+        self.node.propose_txn_entry(entry).await.map_err(|e| self.sql_error("the transaction", e))
     }
 
     /// Local, stale-allowed read (the default read mode).
