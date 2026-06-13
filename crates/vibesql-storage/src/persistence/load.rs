@@ -102,6 +102,15 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
     // BEGIN/END nesting depth. While > 0, semicolons inside the trigger body do
     // not terminate the outer statement.
     let mut begin_depth: u32 = 0;
+    // CASE...END nesting depth *within* a trigger body. A `CASE ... END`
+    // expression in a trigger action (e.g.
+    // `SELECT CASE WHEN new.a = 4 THEN RAISE(IGNORE) END`) introduces an inner
+    // `END` that must NOT be counted as the trigger's terminating `END`.
+    // Without this, reloading a dumped `CREATE TRIGGER ... BEGIN ... CASE ...
+    // END ... END;` is split at the CASE's `END`, truncating the trigger body
+    // (issue #5468). Only tracked while inside a trigger body
+    // (`begin_depth > 0`); top-level CASE expressions split on their `;`.
+    let mut case_depth: u32 = 0;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -143,8 +152,22 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
                         i += consumed;
                         continue;
                     }
+                    // A CASE expression inside a trigger body opens a block that
+                    // its own END closes; track it so END does not prematurely
+                    // close the trigger body (issue #5468).
+                    if begin_depth > 0 {
+                        if let Some(consumed) = match_keyword(&chars, i, "CASE") {
+                            case_depth += 1;
+                            current_statement.push_str("CASE");
+                            i += consumed;
+                            continue;
+                        }
+                    }
                     if let Some(consumed) = match_keyword(&chars, i, "END") {
-                        if begin_depth > 0 {
+                        if case_depth > 0 {
+                            // Closes an inner CASE expression, not the body.
+                            case_depth -= 1;
+                        } else if begin_depth > 0 {
                             begin_depth -= 1;
                         }
                         current_statement.push_str("END");
@@ -353,6 +376,49 @@ SELECT 1;
 "#;
         let statements = parse_sql_statements(content).unwrap();
         assert_eq!(statements.len(), 2);
+        assert!(statements[0].contains("CREATE TRIGGER"));
+        assert!(statements[1].trim().starts_with("SELECT 1"));
+    }
+
+    #[test]
+    fn test_parse_trigger_body_with_case_end() {
+        // Issue #5468: a CASE...END expression inside a trigger body must not
+        // have its END counted as the trigger's terminating END when a dump is
+        // reloaded.
+        let content = r#"
+CREATE TABLE tbl(a, b, c);
+CREATE TRIGGER before_tbl_insert BEFORE INSERT ON tbl BEGIN SELECT CASE WHEN (new.a = 4) THEN RAISE(IGNORE) END; END;
+INSERT INTO tbl VALUES(1, 2, 3);
+"#;
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 3, "got: {:#?}", statements);
+        assert!(statements[0].contains("CREATE TABLE"));
+        assert!(statements[1].contains("CREATE TRIGGER"));
+        assert!(statements[1].contains("CASE WHEN"));
+        assert!(statements[1].contains("RAISE(IGNORE)"));
+        // The trigger body's terminating END must be captured; without the
+        // CASE-depth fix the statement is truncated at the CASE's END and the
+        // trailing `END;` becomes a separate fragment.
+        assert!(
+            statements[1].contains("RAISE(IGNORE) END; END"),
+            "trigger body truncated at CASE END: {:?}",
+            statements[1]
+        );
+        assert!(statements[2].contains("INSERT INTO tbl VALUES(1, 2, 3)"));
+    }
+
+    #[test]
+    fn test_parse_trigger_body_with_nested_case() {
+        // Multiple / nested CASE...END expressions inside one trigger body.
+        let content = r#"
+CREATE TRIGGER tr BEFORE UPDATE ON t BEGIN
+  SELECT CASE WHEN a = 1 THEN CASE WHEN b = 2 THEN RAISE(ABORT, 'x') END END;
+  SELECT CASE WHEN c = 3 THEN RAISE(IGNORE) END;
+END;
+SELECT 1;
+"#;
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {:#?}", statements);
         assert!(statements[0].contains("CREATE TRIGGER"));
         assert!(statements[1].trim().starts_with("SELECT 1"));
     }
