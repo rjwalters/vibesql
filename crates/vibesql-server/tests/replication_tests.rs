@@ -256,6 +256,83 @@ async fn replicated_select_column_names_match_standalone() {
     assert_eq!(star, vec!["a".to_string(), "b".to_string()]);
 }
 
+/// Extended-protocol `Describe` (#5429) must report the same column names in
+/// replicated mode as it does standalone, with `SELECT *` / `table.*` expanded
+/// against the schema. `Session::describe_columns` resolves names WITHOUT
+/// executing — for a replicated session it routes through a local consensus
+/// read (`query_local`), which resolves names the same way the executed read
+/// path does (#5428). Standalone (the local executor's `resolve_column_names`)
+/// is the oracle: the two must agree label-for-label, and neither may regress
+/// to `col0`/`col1` placeholders.
+#[tokio::test]
+async fn replicated_describe_columns_match_standalone() {
+    let setup = [
+        "CREATE TABLE t (a INT, b INT)",
+        "CREATE TABLE u (a INT, c VARCHAR(10))",
+        "INSERT INTO t VALUES (1, 10)",
+        "INSERT INTO u VALUES (1, 'one')",
+    ];
+
+    // Describe targets: each query shape that must resolve identically.
+    let selects = [
+        "SELECT a, b FROM t",                          // explicit columns
+        "SELECT a AS x, b AS y FROM t",                // aliases
+        "SELECT a + 1 FROM t",                         // derived expression
+        "SELECT * FROM t",                             // wildcard expansion
+        "SELECT t.* FROM t",                           // table wildcard
+        "SELECT t.*, u.c FROM t JOIN u ON t.a = u.a",  // join wildcard
+    ];
+
+    // Standalone oracle.
+    let mut standalone = Session::new(
+        "testdb".to_string(),
+        "testuser".to_string(),
+        SharedDatabase::new(Database::new()),
+    );
+    for sql in setup {
+        standalone.execute(sql).await.expect("standalone setup");
+    }
+
+    // Replicated leader session.
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut replicated = replicated_session(&handles[0]);
+    for sql in setup {
+        replicated.execute(sql).await.expect("replicated setup");
+    }
+
+    for sql in selects {
+        let standalone_cols = standalone
+            .describe_columns(sql)
+            .await
+            .expect("standalone describe")
+            .unwrap_or_else(|| panic!("{sql}: standalone describe returned None for a SELECT"));
+        let replicated_cols = replicated
+            .describe_columns(sql)
+            .await
+            .expect("replicated describe")
+            .unwrap_or_else(|| panic!("{sql}: replicated describe returned None for a SELECT"));
+
+        assert!(
+            !replicated_cols.iter().any(|name| name.starts_with("col")),
+            "{sql}: replicated Describe must not emit col0/col1 placeholders, got {replicated_cols:?}",
+        );
+        assert_eq!(
+            replicated_cols, standalone_cols,
+            "{sql}: replicated Describe column names must match standalone",
+        );
+    }
+
+    // Spot-check the resolved wildcard names so a regression in BOTH paths
+    // cannot pass silently by agreeing on the wrong answer.
+    let star = replicated.describe_columns("SELECT * FROM t").await.unwrap().unwrap();
+    assert_eq!(star, vec!["a".to_string(), "b".to_string()]);
+
+    // A non-SELECT Describe resolves to None (the protocol sends NoData).
+    let non_select = replicated.describe_columns("INSERT INTO t VALUES (2, 20)").await.unwrap();
+    assert!(non_select.is_none(), "non-SELECT Describe must be None, got {non_select:?}");
+}
+
 /// Unsupported features fail with SQLSTATE 0A000 and a follow-on
 /// pointer; invalid SET values fail with 22023.
 #[tokio::test]
