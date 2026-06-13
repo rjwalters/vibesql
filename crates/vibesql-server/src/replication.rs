@@ -194,6 +194,22 @@ impl ReplicationHandle {
         self.node.execute_replicated(sql).await.map_err(|e| self.sql_error("the statement", e))
     }
 
+    /// Propose an interactive transaction's buffered write statements as
+    /// **one** consensus entry (#5391): the whole batch becomes a single
+    /// `TxnEntry`, applied atomically with `commit_ts` = its dense log
+    /// index. Freeze-at-propose runs once, on the leader, at COMMIT.
+    /// Returns the entry's log index (the session's read-your-writes
+    /// token) and the apply outcome.
+    pub async fn execute_txn(
+        &self,
+        statements: &[&str],
+    ) -> Result<(LogIndex, ApplyOutcome), SqlError> {
+        self.node
+            .execute_replicated_txn(statements)
+            .await
+            .map_err(|e| self.sql_error("the transaction", e))
+    }
+
     /// Local, stale-allowed read (the default read mode).
     pub fn query_local(&self, sql: &str) -> Result<Vec<Vec<vibesql_types::SqlValue>>, SqlError> {
         self.node.query(sql).map_err(|e| self.sql_error("the query", e))

@@ -174,10 +174,8 @@ async fn replicated_session_rejects_unsupported_features() {
     wait_for_leader(&handles).await;
     let mut session = replicated_session(&handles[0]);
 
-    let err = session.execute("BEGIN").await.unwrap_err();
-    let err = sql_error(&err);
-    assert_eq!(err.code, "0A000");
-    assert!(err.hint.as_deref().unwrap_or_default().contains("#5391"), "{err:?}");
+    // BEGIN/COMMIT/ROLLBACK are supported as of #5391 (see the dedicated
+    // interactive-transaction tests); they are no longer refused here.
 
     for (sql, follow_on) in [
         ("PREPARE p FROM 'SELECT 1'", "#5393"),
@@ -206,6 +204,154 @@ async fn replicated_session_rejects_unsupported_features() {
 
     // PRAGMA stays a no-op, as in standalone mode.
     session.execute("PRAGMA journal_mode = WAL").await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Session-level: interactive transactions (#5391)
+// ---------------------------------------------------------------------------
+
+/// BEGIN ... INSERT ... INSERT ... COMMIT replicates the whole batch as
+/// **one** consensus entry: a single log index is consumed and both rows
+/// are visible afterward.
+#[tokio::test]
+async fn replicated_txn_commits_batch_as_one_entry() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE accounts (id INT, balance INT)").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
+    // Open transaction: writes buffer and ack optimistically (rows = 0).
+    assert!(matches!(session.execute("BEGIN").await.unwrap(), ExecutionResult::Begin));
+    let r = session.execute("INSERT INTO accounts VALUES (1, 100)").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 0 }), "{r:?}");
+    let r = session.execute("INSERT INTO accounts VALUES (2, 200)").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 0 }), "{r:?}");
+
+    // Nothing is applied yet — the batch is not proposed until COMMIT.
+    assert_eq!(handles[0].node().last_applied(), applied_before, "buffer must not apply early");
+
+    assert!(matches!(session.execute("COMMIT").await.unwrap(), ExecutionResult::Commit));
+
+    // Exactly one entry was consumed for the whole transaction.
+    assert_eq!(
+        handles[0].node().last_applied(),
+        applied_before + 1,
+        "the transaction must be a single log entry"
+    );
+
+    // Both rows replicated atomically.
+    let rows = select_rows(session.execute("SELECT id, balance FROM accounts").await.unwrap());
+    assert_eq!(rows.len(), 2);
+}
+
+/// ROLLBACK discards the buffer without proposing anything: no log index
+/// is consumed and none of the buffered writes land.
+#[tokio::test]
+async fn replicated_txn_rollback_discards_buffer() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+    assert!(matches!(session.execute("ROLLBACK").await.unwrap(), ExecutionResult::Rollback));
+
+    // No entry consumed, no rows landed.
+    assert_eq!(handles[0].node().last_applied(), applied_before, "rollback must not propose");
+    let rows = select_rows(session.execute("SELECT id FROM t").await.unwrap());
+    assert!(rows.is_empty(), "rolled-back writes must not be visible");
+
+    // The session is back in autocommit: a write proposes immediately.
+    let r = session.execute("INSERT INTO t VALUES (3)").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 1 }), "{r:?}");
+    assert_eq!(handles[0].node().last_applied(), applied_before + 1);
+}
+
+/// A deterministic statement failure in the batch rejects the whole
+/// COMMIT — no partial state is committed.
+#[tokio::test]
+async fn replicated_txn_deterministic_failure_rejects_whole_batch() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)").await.unwrap();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    // Duplicate primary key: deterministic rejection at apply.
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+
+    let err = session.execute("COMMIT").await.unwrap_err();
+    // A rejection surfaces the executor error, not a structured SqlError.
+    assert!(err.downcast_ref::<SqlError>().is_none(), "rejection keeps the executor error: {err}");
+
+    // No partial state: the first INSERT did not commit either.
+    let rows = select_rows(session.execute("SELECT id FROM t").await.unwrap());
+    assert!(rows.is_empty(), "a rejected batch must commit nothing: {rows:?}");
+}
+
+/// An empty transaction (BEGIN; COMMIT; with no writes) consumes no log
+/// index — there is nothing to replicate.
+#[tokio::test]
+async fn replicated_empty_txn_consumes_no_index() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    let applied_before = handles[0].node().last_applied();
+    session.execute("BEGIN").await.unwrap();
+    assert!(matches!(session.execute("COMMIT").await.unwrap(), ExecutionResult::Commit));
+    assert_eq!(handles[0].node().last_applied(), applied_before, "empty txn must not propose");
+}
+
+/// Reads inside a transaction are coherent before any buffered write
+/// (committed state) and refused once writes are buffered (the buffer is
+/// applied nowhere yet — full mid-txn read fidelity is #5401).
+#[tokio::test]
+async fn replicated_txn_read_gating() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+
+    session.execute("BEGIN").await.unwrap();
+    // No buffered writes yet: a read observes committed state.
+    let rows = select_rows(session.execute("SELECT id FROM t").await.unwrap());
+    assert_eq!(rows.len(), 1, "pre-write read sees committed state");
+
+    // After a buffered write, reads are refused with 0A000 → #5401.
+    session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+    let err = session.execute("SELECT id FROM t").await.unwrap_err();
+    let err = sql_error(&err);
+    assert_eq!(err.code, "0A000");
+    assert!(err.hint.as_deref().unwrap_or_default().contains("#5401"), "{err:?}");
+
+    session.execute("ROLLBACK").await.unwrap();
+}
+
+/// Savepoints inside a replicated transaction are refused with 0A000 and
+/// a pointer to the scoped follow-on (#5401).
+#[tokio::test]
+async fn replicated_txn_savepoints_refused() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("BEGIN").await.unwrap();
+    let err = session.execute("SAVEPOINT s1").await.unwrap_err();
+    let err = sql_error(&err);
+    assert_eq!(err.code, "0A000");
+    assert!(err.hint.as_deref().unwrap_or_default().contains("#5401"), "{err:?}");
+    session.execute("ROLLBACK").await.unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +424,91 @@ async fn follower_rejects_writes_with_redirect_hint() {
     // (token 0 degenerates to a local read) the read serves locally.
     session.execute("SET vibesql_read_consistency = 'read_your_writes'").await.unwrap();
     assert_not_redirected(session.execute("SELECT * FROM t").await, "token-0 read");
+}
+
+/// A transaction's COMMIT on a follower fails with SQLSTATE 25006 (the
+/// leader-redirect contract) and discards the buffer, so the follower is
+/// back in autocommit afterward.
+#[tokio::test]
+async fn replicated_txn_commit_on_follower_redirects_and_discards() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    // Create the table through the leader.
+    replicated_session(&handles[leader]).execute("CREATE TABLE t (id INT)").await.unwrap();
+
+    // Pick a follower that knows who leads.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let mut session = replicated_session(&handles[follower]);
+
+    // BEGIN/INSERT buffer locally (no propose yet, so no error here).
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+
+    // COMMIT proposes on the follower → 25006.
+    let err = session.execute("COMMIT").await.unwrap_err();
+    assert_eq!(sql_error(&err).code, "25006");
+
+    // The buffer was discarded: the session is back in autocommit, so a
+    // ROLLBACK now errors with "no transaction in progress".
+    let err = session.execute("ROLLBACK").await.unwrap_err();
+    assert!(err.downcast_ref::<SqlError>().is_none(), "buffer should be discarded: {err}");
+}
+
+/// A committed transaction replicates atomically to a second node: after
+/// COMMIT on the leader, a follower converges to **all** of the
+/// transaction's rows (one entry applies all or none).
+#[tokio::test]
+async fn replicated_txn_replicates_atomically_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[leader]);
+
+    session.execute("CREATE TABLE kv (id INT, v INT)").await.unwrap();
+    session.execute("BEGIN").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (1, 10)").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (2, 20)").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (3, 30)").await.unwrap();
+    session.execute("COMMIT").await.unwrap();
+
+    // Every follower converges to all three rows (never a partial 1 or 2).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let count = h
+                .node()
+                .query("SELECT COUNT(*) FROM kv")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if count.as_deref() == Some("3") {
+                break;
+            }
+            // A partial count would mean the batch did not apply atomically.
+            assert!(
+                matches!(count.as_deref(), None | Some("0") | Some("3")),
+                "follower {i} saw a non-atomic count: {count:?}"
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to 3 rows (saw {count:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -400,10 +631,30 @@ async fn wire_protocol_replicated_end_to_end() {
         "1"
     );
 
-    // BEGIN is refused with feature_not_supported.
-    let err = client.simple_query("BEGIN").await.unwrap_err();
-    let db_err = err.as_db_error().expect("db error");
-    assert_eq!(db_err.code(), &SqlState::FEATURE_NOT_SUPPORTED);
+    // A wire-level interactive transaction commits atomically (#5391).
+    client.simple_query("BEGIN").await.unwrap();
+    client.simple_query("INSERT INTO wire_test VALUES (2, 'Bob')").await.unwrap();
+    client.simple_query("INSERT INTO wire_test VALUES (3, 'Carol')").await.unwrap();
+    client.simple_query("COMMIT").await.unwrap();
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM wire_test").unwrap()[0][0].to_string(),
+        "3"
+    );
+
+    // ROLLBACK discards a buffered write.
+    client.simple_query("BEGIN").await.unwrap();
+    client.simple_query("INSERT INTO wire_test VALUES (4, 'Dan')").await.unwrap();
+    client.simple_query("ROLLBACK").await.unwrap();
+    assert_eq!(
+        handles[0].node().query("SELECT COUNT(*) FROM wire_test").unwrap()[0][0].to_string(),
+        "3"
+    );
+
+    // Savepoints remain feature_not_supported (#5401).
+    client.simple_query("BEGIN").await.unwrap();
+    let err = client.simple_query("SAVEPOINT s1").await.unwrap_err();
+    assert_eq!(err.as_db_error().expect("db error").code(), &SqlState::FEATURE_NOT_SUPPORTED);
+    client.simple_query("ROLLBACK").await.unwrap();
 }
 
 /// End to end on a follower: a write gets SQLSTATE 25006 with the
