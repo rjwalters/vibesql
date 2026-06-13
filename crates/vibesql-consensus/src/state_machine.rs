@@ -587,7 +587,20 @@ impl VibesqlStateMachine {
         let schema: Option<vibesql_catalog::TableSchema> =
             vibesql_parser::parse_with_arena_fallback(sql).ok().and_then(|statement| {
                 let inner = self.lock();
-                match &statement {
+                // Precise propose-side audit of the #5398 residual against
+                // the leader's applied catalog (#5406): reject a
+                // genuinely-TIME TIME→TIMESTAMP cast in a query body now,
+                // with an actionable error, before a log index is
+                // consumed — while accepting provably-non-TIME casts that
+                // the schema-free propose validator would over-reject.
+                // The authoritative deterministic rejection still happens
+                // at apply on every replica.
+                if let Some(reason) =
+                    freeze::time_cast_query_violation_with_db(&statement, &inner.db)
+                {
+                    return Some(Err(reason));
+                }
+                let resolved = match &statement {
                     Statement::Insert(stmt) => {
                         lookup_table_schema(&inner.db, stmt.schema_name.as_deref(), &stmt.table_name)
                             .cloned()
@@ -596,8 +609,9 @@ impl VibesqlStateMachine {
                         lookup_table_schema(&inner.db, None, &stmt.table_name).cloned()
                     }
                     _ => None,
-                }
-            });
+                };
+                resolved.map(Ok)
+            }).transpose().map_err(freeze::FreezeError::NotReplicable)?;
         freeze::freeze_statement_with_schema(sql, schema.as_ref())
     }
 
@@ -1085,11 +1099,16 @@ fn execute_write_statement(
     //     computed TIME expression, in a SET/WHERE root or inside an
     //     `INSERT … SELECT` body / subquery. The target-schema audit in
     //     (2) only resolves the target table and does not walk query
-    //     bodies; this conservative, schema-free backstop rejects any
-    //     such cast not provably non-TIME, on every replica alike. (A
+    //     bodies. This pass resolves every in-scope table/alias against
+    //     the replicated catalog (#5406), so a `CAST(<provably-non-TIME>
+    //     AS TIMESTAMP)` over an other-table column / function / query
+    //     body is *accepted*, while a genuinely-TIME (or unresolvable)
+    //     operand is rejected — deterministically, on every replica
+    //     (the catalog is identical state). It falls back to conservative
+    //     rejection wherever the scope cannot be resolved precisely. (A
     //     properly frozen entry never reaches here with a live cast —
     //     literal TIME operands substitute to a TIMESTAMP literal.)
-    if let Some(reason) = freeze::time_cast_query_violation(&statement) {
+    if let Some(reason) = freeze::time_cast_query_violation_with_db(&statement, db) {
         return Err(StatementFailure::Rejected(reason));
     }
 
@@ -2132,5 +2151,68 @@ mod tests {
             });
         }
         assert_eq!(machine.last_applied(), index);
+    }
+
+    /// #5406: an `INSERT … SELECT` whose `CAST(<other-table column> AS
+    /// TIMESTAMP)` operand is provably non-TIME against the replicated
+    /// catalog is **accepted** (no over-rejection) and applies identically
+    /// on two machines replaying the same log — while a genuinely-TIME
+    /// operand is rejected identically on both.
+    #[test]
+    fn query_body_time_cast_disposition_converges() {
+        let setup = [
+            "CREATE TABLE sched (id INTEGER PRIMARY KEY, ts TIMESTAMP)",
+            "CREATE TABLE src (id INTEGER PRIMARY KEY, txt TEXT, tm TIME)",
+            "INSERT INTO src (id, txt, tm) VALUES (1, '2026-06-13 09:00:00', '09:00:00')",
+        ];
+        let accept =
+            "INSERT INTO sched (id, ts) SELECT id, CAST(src.txt AS TIMESTAMP) FROM src";
+        let reject =
+            "INSERT INTO sched (id, ts) SELECT id, CAST(src.tm AS TIMESTAMP) FROM src";
+
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        let mut index = 0;
+        for sql in setup {
+            index += 1;
+            let entry = TxnEntry::single(sql);
+            assert_eq!(
+                a.apply(index, &entry).unwrap(),
+                b.apply(index, &entry).unwrap(),
+                "setup `{sql}` must apply identically"
+            );
+        }
+
+        // Provably-non-TIME operand: accepted, identical outcome.
+        index += 1;
+        let entry = TxnEntry::single(accept);
+        let oa = a.apply(index, &entry).unwrap();
+        let ob = b.apply(index, &entry).unwrap();
+        assert_eq!(oa, ob, "accepted cast must apply identically on both machines");
+        assert!(
+            matches!(oa, ApplyOutcome::Applied { rows_affected: 1 }),
+            "provably-non-TIME query-body cast must be accepted, got: {oa:?}"
+        );
+        // Both machines hold the same converged row.
+        let qa = a.query("SELECT id, ts FROM sched ORDER BY id").unwrap().rows;
+        let qb = b.query("SELECT id, ts FROM sched ORDER BY id").unwrap().rows;
+        assert_eq!(qa, qb, "applied rows must be identical (deterministic)");
+        assert_eq!(qa.len(), 1, "exactly one row inserted");
+
+        // Genuinely-TIME operand: rejected, identically, on both.
+        index += 1;
+        let entry = TxnEntry::single(reject);
+        let ra = a.apply(index, &entry).unwrap();
+        let rb = b.apply(index, &entry).unwrap();
+        assert_eq!(ra, rb, "rejection must be identical on both machines");
+        assert!(
+            matches!(&ra, ApplyOutcome::Rejected { reason } if reason.contains("#5406")),
+            "genuinely-TIME query-body cast must be rejected, got: {ra:?}"
+        );
+        // The rejected entry changed nothing; state stays converged.
+        let qa2 = a.query("SELECT id, ts FROM sched ORDER BY id").unwrap().rows;
+        let qb2 = b.query("SELECT id, ts FROM sched ORDER BY id").unwrap().rows;
+        assert_eq!(qa2, qb2, "state must remain identical after rejection");
+        assert_eq!(qa2, qa, "rejected entry must not mutate state");
     }
 }
