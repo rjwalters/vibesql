@@ -4,21 +4,22 @@
 //! SQLSTATE surface.
 //!
 //! Two layers are exercised:
-//! - **Session-level**: `Session::new_replicated` against real consensus
-//!   nodes (single-node and 3-node TCP clusters on ephemeral ports).
-//! - **Wire-level**: a full `ConnectionHandler` server in replicated
-//!   mode, driven by `tokio-postgres`, asserting the SQLSTATEs and
-//!   redirect fields real clients see.
+//! - **Session-level**: `Session::new_replicated` against real consensus nodes (single-node and
+//!   3-node TCP clusters on ephemeral ports).
+//! - **Wire-level**: a full `ConnectionHandler` server in replicated mode, driven by
+//!   `tokio-postgres`, asserting the SQLSTATEs and redirect fields real clients see.
 
-use std::net::TcpListener as StdTcpListener;
-use std::sync::{atomic::AtomicUsize, Arc};
-use std::time::Duration;
+use std::{
+    net::TcpListener as StdTcpListener,
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
+};
 
-use tokio::net::TcpListener as TokioTcpListener;
-use tokio::sync::{broadcast, oneshot};
-use tokio_postgres::error::SqlState;
-use tokio_postgres::NoTls;
-
+use tokio::{
+    net::TcpListener as TokioTcpListener,
+    sync::{broadcast, oneshot},
+};
+use tokio_postgres::{error::SqlState, NoTls};
 use vibesql_consensus::Role;
 use vibesql_server::{
     config::{Config, ReplicationConfig},
@@ -175,10 +176,11 @@ async fn replicated_session_rejects_unsupported_features() {
     let mut session = replicated_session(&handles[0]);
 
     // BEGIN/COMMIT/ROLLBACK are supported as of #5391 (see the dedicated
-    // interactive-transaction tests); they are no longer refused here.
+    // interactive-transaction tests); PREPARE/EXECUTE syntax is supported
+    // as of #5393 (see the dedicated prepared-statement tests). Neither is
+    // refused here any longer.
 
     for (sql, follow_on) in [
-        ("PREPARE p FROM 'SELECT 1'", "#5393"),
         ("DECLARE c CURSOR FOR SELECT 1", "#5393"),
         ("EXPLAIN SELECT 1", "#5393"),
         ("ANALYZE", "#5393"),
@@ -204,6 +206,130 @@ async fn replicated_session_rejects_unsupported_features() {
 
     // PRAGMA stays a no-op, as in standalone mode.
     session.execute("PRAGMA journal_mode = WAL").await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Session-level: PREPARE/EXECUTE statement syntax (#5393)
+// ---------------------------------------------------------------------------
+
+/// A PREPARE'd INSERT routes its EXECUTE through consensus (one log entry
+/// per EXECUTE), exactly like the simple-query write path: the rows land in
+/// the replicated state machine and the row count comes back from the apply.
+#[tokio::test]
+async fn replicated_prepared_insert_routes_through_consensus() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+
+    // PREPARE captures the SQL text; EXECUTE substitutes the literals and
+    // proposes through consensus.
+    session.execute("PREPARE ins FROM 'INSERT INTO users VALUES (?, ?)'").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
+    let r = session.execute("EXECUTE ins (1, 'Alice')").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 1 }), "{r:?}");
+    let r = session.execute("EXECUTE ins USING 2, 'Bob'").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 1 }), "{r:?}");
+
+    // Each EXECUTE was its own replicated entry.
+    assert_eq!(handles[0].node().last_applied(), applied_before + 2);
+
+    // Both rows are in the consensus state machine, with the quoted string
+    // preserved (no SQL injection / quote-escaping breakage).
+    let rows = handles[0].node().query("SELECT id, name FROM users ORDER BY id").unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1][1].to_string(), "Bob");
+
+    // DEALLOCATE drops the named statement; a later EXECUTE errors.
+    session.execute("DEALLOCATE ins").await.unwrap();
+    assert!(session.execute("EXECUTE ins (3, 'Carol')").await.is_err());
+}
+
+/// A PREPARE'd SELECT honors the session's read-consistency mode and reads
+/// from the replicated state machine (not the empty local database).
+#[tokio::test]
+async fn replicated_prepared_select_reads_state_machine() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+    session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+    session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+
+    session.execute("PREPARE sel FROM 'SELECT id FROM t WHERE id = ?'").await.unwrap();
+    session.execute("SET vibesql_read_consistency = 'linearizable'").await.unwrap();
+
+    let rows = select_rows(session.execute("EXECUTE sel (2)").await.unwrap());
+    assert_eq!(rows.len(), 1, "prepared SELECT must read the replicated data");
+    assert_eq!(rows[0].values[0].to_string(), "2");
+}
+
+/// A PREPARE'd write on a follower is refused with the same NOT_LEADER
+/// surface (SQLSTATE 25006 + redirect hint) as a simple-query write — the
+/// prepared path is not a bypass.
+#[tokio::test]
+async fn replicated_prepared_write_on_follower_redirects() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    let mut leader_session = replicated_session(&handles[leader]);
+    leader_session.execute("CREATE TABLE t (id INT)").await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let mut follower_session = replicated_session(&handles[follower]);
+    // The follower may not have applied the leader's CREATE TABLE yet; the
+    // propose itself is refused before any local execution regardless.
+    follower_session.execute("PREPARE ins FROM 'INSERT INTO t VALUES (?)'").await.unwrap();
+    let err = follower_session.execute("EXECUTE ins (1)").await.unwrap_err();
+    assert_eq!(sql_error(&err).code, "25006", "prepared write must redirect like a simple write");
+}
+
+// ---------------------------------------------------------------------------
+// Session-level: health snapshot (#5393)
+// ---------------------------------------------------------------------------
+
+/// The leader reports writable; a follower reports not-writable with the
+/// leader's id; both expose a monotonic applied index.
+#[tokio::test]
+async fn health_snapshot_reports_role_and_writability() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    let leader_snap = handles[leader].health_snapshot();
+    assert_eq!(leader_snap.role, Role::Leader);
+    assert!(leader_snap.can_serve_writes, "a healthy leader must be writable");
+    assert!(leader_snap.fatal_reason.is_none());
+
+    // Wait for a follower that knows the leader, then check its snapshot.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+    let follower_snap = handles[follower].health_snapshot();
+    assert_eq!(follower_snap.role, Role::Follower);
+    assert!(!follower_snap.can_serve_writes, "a follower must not be writable");
+    assert_eq!(follower_snap.leader_id, Some(handles[leader].node_id()));
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +499,10 @@ async fn follower_rejects_writes_with_redirect_hint() {
     // hint is populated deterministically).
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     let follower = loop {
-        if let Some(i) = handles.iter().position(|h| {
-            h.role() == Role::Follower && h.node().current_leader().is_some()
-        }) {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
             break i;
         }
         assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
@@ -523,8 +650,7 @@ struct TestServer {
 
 impl TestServer {
     async fn start(replication: Option<Arc<ReplicationHandle>>) -> Self {
-        let listener =
-            TokioTcpListener::bind("127.0.0.1:0").await.expect("bind test server port");
+        let listener = TokioTcpListener::bind("127.0.0.1:0").await.expect("bind test server port");
         let port = listener.local_addr().expect("server port").port();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
@@ -672,9 +798,10 @@ async fn wire_protocol_follower_write_redirects() {
     // Wait for a follower that knows the leader.
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     let follower = loop {
-        if let Some(i) = handles.iter().position(|h| {
-            h.role() == Role::Follower && h.node().current_leader().is_some()
-        }) {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
             break i;
         }
         assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
@@ -706,9 +833,193 @@ async fn wire_protocol_standalone_unaffected() {
     client.simple_query("COMMIT").await.unwrap();
 
     let messages = client.simple_query("SELECT * FROM standalone_test").await.unwrap();
-    let rows = messages
-        .iter()
-        .filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_)))
-        .count();
+    let rows =
+        messages.iter().filter(|m| matches!(m, tokio_postgres::SimpleQueryMessage::Row(_))).count();
     assert_eq!(rows, 1);
+}
+
+/// The PostgreSQL **extended** query protocol (Parse/Bind/Execute, used by
+/// `tokio_postgres::Client::execute`/`query`) routes a write through
+/// consensus in replicated mode: `handle_execute` runs the bound query via
+/// `Session::execute`, which dispatches through the replicated path exactly
+/// like the simple-query path. This guards the contract that the extended
+/// protocol is not a write bypass (#5393).
+///
+/// (Bound `$N` parameters are exercised by the simple-query and
+/// session-level PREPARE/EXECUTE tests; VibeSQL's extended-protocol
+/// Describe does not infer parameter OIDs, so this test drives the
+/// Parse/Bind/Execute path the same param-free way the other
+/// extended-protocol integration tests do.)
+#[tokio::test]
+async fn wire_protocol_extended_write_replicates() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let server = TestServer::start(Some(Arc::clone(&handles[0]))).await;
+    let client = connect(&server).await;
+
+    // `execute`/`query` drive Parse/Bind/Execute (not the simple-query
+    // protocol). The write must land in the consensus state machine.
+    client.execute("CREATE TABLE ext (id INT, name VARCHAR(100))", &[]).await.unwrap();
+    let affected = client.execute("INSERT INTO ext VALUES (1, 'Alice')", &[]).await.unwrap();
+    assert_eq!(affected, 1);
+    assert_eq!(handles[0].node().query("SELECT COUNT(*) FROM ext").unwrap()[0][0].to_string(), "1");
+
+    // A read over the extended protocol reads it back from the state machine.
+    let rows = client.query("SELECT name FROM ext WHERE id = 1", &[]).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let name: &str = rows[0].get(0);
+    assert_eq!(name, "Alice");
+}
+
+/// An extended-protocol write on a follower is refused with SQLSTATE 25006,
+/// exactly like the simple-query path — the extended path is not a bypass.
+#[tokio::test]
+async fn wire_protocol_extended_write_on_follower_redirects() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    let mut leader_session = replicated_session(&handles[leader]);
+    leader_session.execute("CREATE TABLE ext_redirect (id INT)").await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let server = TestServer::start(Some(Arc::clone(&handles[follower]))).await;
+    let client = connect(&server).await;
+
+    let err = client.execute("INSERT INTO ext_redirect VALUES (1)", &[]).await.unwrap_err();
+    assert_eq!(err.as_db_error().expect("db error").code(), &SqlState::READ_ONLY_SQL_TRANSACTION);
+}
+
+// ---------------------------------------------------------------------------
+// HTTP /health endpoint in replicated mode (#5393)
+// ---------------------------------------------------------------------------
+
+/// Bind the HTTP router (in replicated mode against `handle`) to an
+/// ephemeral port and return its base URL plus a shutdown sender.
+async fn start_http(handle: Option<Arc<ReplicationHandle>>) -> (String, oneshot::Sender<()>) {
+    use vibesql_server::{http::create_http_router, registry::DatabaseRegistry};
+    use vibesql_storage::Database;
+
+    let listener = TokioTcpListener::bind("127.0.0.1:0").await.expect("bind http");
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel::<()>();
+
+    let db = Arc::new(Database::new());
+    let registry = DatabaseRegistry::new();
+    let subs = Arc::new(SubscriptionManager::new());
+    let app = create_http_router(db, registry, subs, None, handle);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = rx.await;
+            })
+            .await
+            .ok();
+    });
+
+    (format!("http://{addr}"), tx)
+}
+
+/// `/health` on the leader is 200 `ok` with role `"leader"` and
+/// `can_serve_writes: true`; on a follower it is 503 `unavailable` with
+/// role `"follower"` and the leader's id — the load-balancer routing
+/// contract.
+#[tokio::test]
+async fn http_health_reports_leader_and_follower() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    // Leader: 200 OK, writable.
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+    let resp = reqwest::get(format!("{base}/health")).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["replication"]["role"], "leader");
+    assert_eq!(body["replication"]["can_serve_writes"], true);
+
+    // Follower: 503, not writable, leader id present.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+    let (base, _tx2) = start_http(Some(Arc::clone(&handles[follower]))).await;
+    let resp = reqwest::get(format!("{base}/health")).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["status"], "unavailable");
+    assert_eq!(body["replication"]["role"], "follower");
+    assert_eq!(body["replication"]["can_serve_writes"], false);
+    assert_eq!(body["replication"]["leader_id"], handles[leader].node_id());
+}
+
+/// In replicated mode the HTTP query/CRUD/subscription surface is gated to
+/// a clear 503 (it would otherwise execute against the unreplicated local
+/// database) — never silent wrong behavior.
+#[tokio::test]
+async fn http_query_surface_gated_in_replicated_mode() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let (base, _tx) = start_http(Some(Arc::clone(&handles[0]))).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"SELECT 1"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+    // CRUD writes are gated too.
+    let resp = client
+        .post(format!("{base}/api/tables/t/rows"))
+        .header("content-type", "application/json")
+        .body(r#"{"id":1}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Standalone HTTP is unaffected: `/health` is 200 with no `replication`
+/// block and the query surface works (regression guard for the optional
+/// wiring).
+#[tokio::test]
+async fn http_standalone_unaffected() {
+    let (base, _tx) = start_http(None).await;
+    let resp = reqwest::get(format!("{base}/health")).await.unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    assert_eq!(body["status"], "ok");
+    assert!(body.get("replication").is_none() || body["replication"].is_null());
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{base}/api/query"))
+        .header("content-type", "application/json")
+        .body(r#"{"sql":"SELECT 1"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 }

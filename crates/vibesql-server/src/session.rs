@@ -56,13 +56,11 @@ struct ReplicatedSessionState {
     /// `COMMIT` — the one-entry-per-committed-transaction design.
     ///
     /// During the open transaction the buffer is *not yet* proposed, so:
-    /// - write statements return an optimistic ack (`rows_affected = 0`);
-    ///   the authoritative row counts are knowable only after the atomic
-    ///   apply at `COMMIT`;
-    /// - reads are refused once the buffer is non-empty, because the
-    ///   buffered writes are not applied anywhere yet and a local read
-    ///   would silently miss the session's own writes (full mid-txn read
-    ///   fidelity is the scoped follow-on #5401).
+    /// - write statements return an optimistic ack (`rows_affected = 0`); the authoritative row
+    ///   counts are knowable only after the atomic apply at `COMMIT`;
+    /// - reads are refused once the buffer is non-empty, because the buffered writes are not
+    ///   applied anywhere yet and a local read would silently miss the session's own writes (full
+    ///   mid-txn read fidelity is the scoped follow-on #5401).
     open_txn: Option<Vec<String>>,
 }
 
@@ -513,23 +511,24 @@ impl Session {
             // Transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) is
             // intercepted above, before this autocommit dispatch.
 
-            // Named prepared statements execute from a bound AST without
-            // the SQL text the propose path replicates; cursors, EXPLAIN,
-            // ANALYZE, and VACUUM would all run against the local (empty)
-            // database. Refuse clearly rather than mislead (#5393).
-            Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
-                Err(SqlError::not_supported(
-                    "PREPARE/EXECUTE statement syntax",
-                    "#5393",
-                )
-                .into())
-            }
+            // Named prepared-statement syntax (#5393): PREPARE captures the
+            // SQL *text* (not a bound AST), EXECUTE substitutes its literal
+            // parameters back into that text and re-routes through this same
+            // replicated dispatch — so a PREPARE'd INSERT proposes through
+            // consensus with freeze-at-propose exactly like the simple path,
+            // and a PREPARE'd SELECT honors the session read-consistency mode.
+            // DEALLOCATE drops the named statement. None of these execute
+            // against the local (empty) database.
+            Statement::Prepare(stmt) => self.replicated_prepare(stmt),
+            Statement::Execute(stmt) => self.replicated_execute(stmt).await,
+            Statement::Deallocate(stmt) => self.execute_deallocate(stmt),
+
+            // Cursors, EXPLAIN, ANALYZE, and VACUUM would all run against the
+            // local (empty) database. Refuse clearly rather than mislead.
             Statement::DeclareCursor(_)
             | Statement::OpenCursor(_)
             | Statement::Fetch(_)
-            | Statement::CloseCursor(_) => {
-                Err(SqlError::not_supported("cursors", "#5393").into())
-            }
+            | Statement::CloseCursor(_) => Err(SqlError::not_supported("cursors", "#5393").into()),
             Statement::Explain(_) => Err(SqlError::not_supported("EXPLAIN", "#5393").into()),
             Statement::Analyze(_) => Err(SqlError::not_supported("ANALYZE", "#5393").into()),
             Statement::Vacuum(_) => Err(SqlError::not_supported("VACUUM", "#5393").into()),
@@ -580,11 +579,10 @@ impl Session {
     /// leader, at COMMIT) and map the outcome:
     ///
     /// - `Applied` → the transaction committed atomically (`COMMIT`);
-    /// - `Rejected` → a deterministic statement failure rolled the whole
-    ///   batch back identically on every replica; the buffer is discarded
-    ///   and the executor error surfaced (no partial state);
-    /// - `NotLeader` / `FatalApply` → surfaced as the usual SQLSTATE; the
-    ///   buffer is discarded so a retry against the leader starts clean.
+    /// - `Rejected` → a deterministic statement failure rolled the whole batch back identically on
+    ///   every replica; the buffer is discarded and the executor error surfaced (no partial state);
+    /// - `NotLeader` / `FatalApply` → surfaced as the usual SQLSTATE; the buffer is discarded so a
+    ///   retry against the leader starts clean.
     ///
     /// An empty transaction (`BEGIN; COMMIT;` with no writes) consumes no
     /// log index — there is nothing to replicate.
@@ -626,6 +624,61 @@ impl Session {
         }
     }
 
+    /// PREPARE in a replicated session (#5393): store the statement's SQL
+    /// *text* under its name. EXECUTE substitutes literal parameters back
+    /// into that text and routes it through the normal replicated dispatch,
+    /// so a PREPARE'd write proposes through consensus (freeze-at-propose)
+    /// exactly like the simple-query path. Shares the `named_statements`
+    /// registry with standalone mode; only the EXECUTE path differs.
+    fn replicated_prepare(
+        &mut self,
+        prepare_stmt: &vibesql_ast::PrepareStmt,
+    ) -> Result<ExecutionResult> {
+        // Reuse the standalone PREPARE machinery: it parses + caches the
+        // SQL and retains the original text (PreparedStatement::sql()),
+        // which is exactly what the consensus propose path needs.
+        self.execute_prepare(prepare_stmt)
+    }
+
+    /// EXECUTE in a replicated session (#5393): bind the statement's literal
+    /// parameters into the prepared SQL *text* and re-route the result
+    /// through `execute` (→ `execute_replicated`). Writes therefore propose
+    /// through consensus and reads honor the session read-consistency mode,
+    /// identically to issuing the substituted SQL directly.
+    async fn replicated_execute(
+        &mut self,
+        execute_stmt: &vibesql_ast::ExecuteStmt,
+    ) -> Result<ExecutionResult> {
+        let name = execute_stmt.name.clone();
+        let prepared = self
+            .named_statements
+            .get(&name)
+            .ok_or_else(|| anyhow::anyhow!("Prepared statement '{}' not found", name))?
+            .clone();
+
+        // Evaluate the EXECUTE arguments to literal values, then render them
+        // back into the prepared statement's SQL text by replacing the `?`
+        // / `$N` placeholders in order — the same text-substitution contract
+        // the extended wire protocol's Bind path already uses to route
+        // parameterized writes through consensus.
+        let params: Vec<SqlValue> =
+            execute_stmt.params.iter().map(evaluate_expression).collect::<Result<Vec<_>>>()?;
+
+        if params.len() != prepared.param_count() {
+            return Err(anyhow::anyhow!(
+                "EXECUTE for '{}' expected {} parameter(s), got {}",
+                name,
+                prepared.param_count(),
+                params.len()
+            ));
+        }
+
+        let sql = substitute_named_params(prepared.sql(), &params);
+        // Box the recursive dispatch: `execute` → `execute_replicated` →
+        // here → `execute` would otherwise be an infinitely sized future.
+        Box::pin(self.execute(&sql)).await
+    }
+
     /// Roll back an open replicated transaction (#5391): discard the
     /// buffered writes without proposing anything — the batch never
     /// reached consensus, so no log index is consumed.
@@ -643,16 +696,13 @@ impl Session {
     /// `0A000` refusal.
     ///
     /// Mid-transaction result semantics (documented contract):
-    /// - **Writes** return their command tag with `rows_affected = 0`.
-    ///   The buffer is not proposed until `COMMIT`, so the authoritative
-    ///   row count is not yet known; clients learn the outcome (success
-    ///   or a deterministic rejection) at `COMMIT`.
-    /// - **Reads** are refused with `0A000` once the buffer holds any
-    ///   writes: those writes are applied nowhere yet, so a local read
-    ///   would silently miss the session's own writes. A read before any
-    ///   buffered write (it observes committed state coherently) is
-    ///   allowed. Full read-your-own-writes inside the transaction is the
-    ///   scoped follow-on #5401.
+    /// - **Writes** return their command tag with `rows_affected = 0`. The buffer is not proposed
+    ///   until `COMMIT`, so the authoritative row count is not yet known; clients learn the outcome
+    ///   (success or a deterministic rejection) at `COMMIT`.
+    /// - **Reads** are refused with `0A000` once the buffer holds any writes: those writes are
+    ///   applied nowhere yet, so a local read would silently miss the session's own writes. A read
+    ///   before any buffered write (it observes committed state coherently) is allowed. Full
+    ///   read-your-own-writes inside the transaction is the scoped follow-on #5401.
     fn execute_in_open_txn(
         &mut self,
         sql: &str,
@@ -697,9 +747,7 @@ impl Session {
                     let rows = handle.query_local(sql)?;
                     let columns = rows
                         .first()
-                        .map(|r| {
-                            (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect()
-                        })
+                        .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
                         .unwrap_or_default();
                     let rows = rows.into_iter().map(|values| Row { values }).collect();
                     Ok(ExecutionResult::Select { rows, columns })
@@ -755,18 +803,25 @@ impl Session {
             // PRAGMA stays the no-op it is in standalone mode.
             Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
 
-            // Everything else (PREPARE/EXECUTE, cursors, EXPLAIN, ANALYZE,
-            // VACUUM, ...) keeps its autocommit refusal inside the
-            // transaction too.
-            Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
-                Err(SqlError::not_supported("PREPARE/EXECUTE statement syntax", "#5393").into())
-            }
+            // PREPARE/DEALLOCATE are session-local and harmless inside a
+            // transaction. EXECUTE of a prepared *write* inside a
+            // transaction is refused: `execute_in_open_txn` is synchronous
+            // (it cannot re-enter the async replicated dispatch to buffer the
+            // substituted SQL), and silently dropping it would be unsound.
+            // Use the substituted SQL directly inside the transaction, or
+            // run the prepared statement outside one (full prepared-EXECUTE
+            // inside replicated transactions is the scoped follow-on #5401).
+            Statement::Prepare(stmt) => self.replicated_prepare(stmt),
+            Statement::Deallocate(stmt) => self.execute_deallocate(stmt),
+            Statement::Execute(_) => Err(SqlError::not_supported(
+                "EXECUTE of a prepared statement inside a replicated transaction",
+                "#5401",
+            )
+            .into()),
             Statement::DeclareCursor(_)
             | Statement::OpenCursor(_)
             | Statement::Fetch(_)
-            | Statement::CloseCursor(_) => {
-                Err(SqlError::not_supported("cursors", "#5393").into())
-            }
+            | Statement::CloseCursor(_) => Err(SqlError::not_supported("cursors", "#5393").into()),
             Statement::Explain(_) => Err(SqlError::not_supported("EXPLAIN", "#5393").into()),
             Statement::Analyze(_) => Err(SqlError::not_supported("ANALYZE", "#5393").into()),
             Statement::Vacuum(_) => Err(SqlError::not_supported("VACUUM", "#5393").into()),
@@ -1267,6 +1322,63 @@ fn set_value_ms(expr: &vibesql_ast::Expression, variable: &str) -> Result<u64> {
     })
 }
 
+/// Substitute a prepared statement's positional (`?`) and numbered (`$N`)
+/// placeholders with rendered SQL literals, for routing a replicated
+/// `EXECUTE` through the SQL-text propose path (#5393).
+///
+/// `?` placeholders are consumed left to right; `$N` placeholders refer to
+/// `params[N - 1]`. String/quote-bearing literals are rendered safely via
+/// [`vibesql_ast::ToSql`] (the same escaping the wire `Bind` path uses), so
+/// values containing quotes cannot break out of the statement. Placeholders
+/// inside string literals are not substituted.
+fn substitute_named_params(sql: &str, params: &[SqlValue]) -> String {
+    use vibesql_ast::pretty_print::ToSql;
+
+    let mut out = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    let mut positional = 0usize;
+    // Track whether we are inside a single- or double-quoted string literal
+    // so placeholders in literal text are left untouched.
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                out.push(c);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                out.push(c);
+            }
+            '?' if !in_single && !in_double => {
+                match params.get(positional) {
+                    Some(v) => out.push_str(&v.to_sql()),
+                    None => out.push('?'),
+                }
+                positional += 1;
+            }
+            '$' if !in_single && !in_double && chars.peek().is_some_and(char::is_ascii_digit) => {
+                let mut digits = String::new();
+                while chars.peek().is_some_and(char::is_ascii_digit) {
+                    digits.push(chars.next().unwrap());
+                }
+                let idx: usize = digits.parse().unwrap_or(0);
+                match idx.checked_sub(1).and_then(|i| params.get(i)) {
+                    Some(v) => out.push_str(&v.to_sql()),
+                    None => {
+                        out.push('$');
+                        out.push_str(&digits);
+                    }
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Evaluate an expression to a SqlValue (for EXECUTE parameters)
 fn evaluate_expression(expr: &vibesql_ast::Expression) -> Result<SqlValue> {
     use vibesql_ast::Expression;
@@ -1608,6 +1720,48 @@ mod tests {
             }
             other => panic!("Expected Explain result, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_substitute_named_params_positional_and_numbered() {
+        // Positional `?` consumed in order.
+        assert_eq!(
+            substitute_named_params(
+                "INSERT INTO t VALUES (?, ?)",
+                &[SqlValue::Integer(1), SqlValue::Varchar("Alice".into())]
+            ),
+            "INSERT INTO t VALUES (1, 'Alice')"
+        );
+        // Numbered `$N` indexes into params; reuse is allowed.
+        assert_eq!(
+            substitute_named_params(
+                "SELECT $1, $2, $1",
+                &[SqlValue::Integer(7), SqlValue::Integer(8)]
+            ),
+            "SELECT 7, 8, 7"
+        );
+    }
+
+    #[test]
+    fn test_substitute_named_params_escapes_quotes() {
+        // A value containing a single quote is escaped (no statement
+        // break-out): `O'Brien` -> `'O''Brien'`.
+        assert_eq!(
+            substitute_named_params(
+                "INSERT INTO t VALUES (?)",
+                &[SqlValue::Varchar("O'Brien".into())]
+            ),
+            "INSERT INTO t VALUES ('O''Brien')"
+        );
+    }
+
+    #[test]
+    fn test_substitute_named_params_ignores_placeholders_in_string_literals() {
+        // A `?` / `$1` already inside a quoted literal is left untouched.
+        assert_eq!(
+            substitute_named_params("SELECT '? and $1', ?", &[SqlValue::Integer(5)]),
+            "SELECT '? and $1', 5"
+        );
     }
 
     #[test]

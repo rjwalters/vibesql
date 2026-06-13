@@ -142,6 +142,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                 registry_for_http,
                 subscription_manager_for_http,
                 metrics_for_http,
+                None,
             );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
@@ -344,6 +345,7 @@ pub async fn start_test_server_with_metrics(mut config: Config) -> TestServerWit
                 registry_for_http,
                 subscription_manager_for_http,
                 metrics_for_http,
+                None,
             );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });

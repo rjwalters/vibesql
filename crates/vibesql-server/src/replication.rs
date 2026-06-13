@@ -11,41 +11,36 @@
 //! Consensus refusals surface as PostgreSQL errors with deliberately
 //! chosen SQLSTATEs (see [`SqlError`]):
 //!
-//! - [`ConsensusError::NotLeader`] → **`25006`** (`read_only_sql_transaction`).
-//!   This is exactly what real PostgreSQL returns when a write reaches a
-//!   hot-standby replica ("cannot execute INSERT in a read-only
-//!   transaction"), so PG-aware clients and poolers that already handle
-//!   primary/replica routing (libpq `target_session_attrs=read-write`,
-//!   JDBC `targetServerType=primary`, pgpool) treat it as "wrong node,
-//!   find the primary". The error's DETAIL carries the leader hint (node
-//!   id + consensus address from this node's `cluster.toml` view) so a
-//!   client can redirect without re-probing the whole cluster.
-//! - [`ConsensusError::StalenessExceeded`] / [`ConsensusError::ReadTimeout`]
-//!   → **`57P03`** (`cannot_connect_now`): the node cannot serve this
-//!   read *right now* — the same retryable class PostgreSQL uses while a
-//!   standby is catching up ("the database system is starting up").
-//!   DETAIL carries the observed staleness / applied-vs-required indices
-//!   and the leader hint.
-//! - [`ConsensusError::FatalApply`] → **`58000`** (`system_error`): this
-//!   node halted on a fatal apply and must be restarted to resync; every
-//!   statement on the halted node fails with the retained reason rather
-//!   than silently serving stale reads. (Failing health checks / refusing
-//!   new sessions is follow-on #5393.)
-//! - Anything else → **`XX000`** (`internal_error`), matching the
-//!   server's existing catch-all.
+//! - [`ConsensusError::NotLeader`] → **`25006`** (`read_only_sql_transaction`). This is exactly
+//!   what real PostgreSQL returns when a write reaches a hot-standby replica ("cannot execute
+//!   INSERT in a read-only transaction"), so PG-aware clients and poolers that already handle
+//!   primary/replica routing (libpq `target_session_attrs=read-write`, JDBC
+//!   `targetServerType=primary`, pgpool) treat it as "wrong node, find the primary". The error's
+//!   DETAIL carries the leader hint (node id + consensus address from this node's `cluster.toml`
+//!   view) so a client can redirect without re-probing the whole cluster.
+//! - [`ConsensusError::StalenessExceeded`] / [`ConsensusError::ReadTimeout`] → **`57P03`**
+//!   (`cannot_connect_now`): the node cannot serve this read *right now* — the same retryable class
+//!   PostgreSQL uses while a standby is catching up ("the database system is starting up"). DETAIL
+//!   carries the observed staleness / applied-vs-required indices and the leader hint.
+//! - [`ConsensusError::FatalApply`] → **`58000`** (`system_error`): this node halted on a fatal
+//!   apply and must be restarted to resync; every statement on the halted node fails with the
+//!   retained reason rather than silently serving stale reads. The node also reports
+//!   `can_serve_writes = false` from [`ReplicationHandle::health_snapshot`] so the `/health`
+//!   endpoint returns 503 and load balancers route around it (#5393).
+//! - Anything else → **`XX000`** (`internal_error`), matching the server's existing catch-all.
 //!
 //! Features a replicated session does not support yet return **`0A000`**
 //! (`feature_not_supported`) with a pointer to the follow-on issue:
-//! interactive transactions (#5391), `PREPARE`/`EXECUTE`-syntax writes,
-//! cursors, `EXPLAIN`, `ANALYZE`, `VACUUM` (#5393).
+//! cursors, `EXPLAIN`, `ANALYZE`, `VACUUM` (#5393). `PREPARE`/`EXECUTE`
+//! statement syntax is supported (the EXECUTE substitutes its literals into
+//! the prepared SQL text and routes through the consensus propose path).
 //!
 //! [`ConsensusError::NotLeader`]: vibesql_consensus::ConsensusError::NotLeader
 //! [`ConsensusError::StalenessExceeded`]: vibesql_consensus::ConsensusError::StalenessExceeded
 //! [`ConsensusError::ReadTimeout`]: vibesql_consensus::ConsensusError::ReadTimeout
 //! [`ConsensusError::FatalApply`]: vibesql_consensus::ConsensusError::FatalApply
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
 use vibesql_consensus::{
@@ -107,6 +102,33 @@ impl SqlError {
             detail: None,
             hint: Some(format!("tracked in {follow_on}")),
         }
+    }
+}
+
+/// A point-in-time view of a node's consensus health, produced by
+/// [`ReplicationHandle::health_snapshot`] for the `/health` endpoint.
+#[derive(Debug, Clone)]
+pub struct HealthSnapshot {
+    /// This node's id within the cluster.
+    pub node_id: u64,
+    /// This node's current consensus role.
+    pub role: Role,
+    /// Whether this node can currently accept writes (a healthy leader).
+    pub can_serve_writes: bool,
+    /// Dense application index of the last locally applied entry.
+    pub applied_index: LogIndex,
+    /// The node this one currently believes leads the cluster, if known.
+    pub leader_id: Option<u64>,
+    /// The fatal-apply reason if this node has halted, else `None`.
+    pub fatal_reason: Option<String>,
+}
+
+/// Lower-case string name of a consensus [`Role`], for JSON/observability.
+pub fn role_str(role: Role) -> &'static str {
+    match role {
+        Role::Leader => "leader",
+        Role::Follower => "follower",
+        Role::Candidate => "candidate",
     }
 }
 
@@ -185,6 +207,25 @@ impl ReplicationHandle {
     /// The reason this node halted on a fatal apply, if it did.
     pub fn fatal_reason(&self) -> Option<String> {
         self.node.fatal_reason()
+    }
+
+    /// A point-in-time snapshot of this node's consensus health, for the
+    /// `/health` endpoint (#5393). `can_serve_writes` is true only on a
+    /// healthy leader (a halted leader cannot serve writes); load balancers
+    /// route writes to a node reporting `can_serve_writes = true`, and route
+    /// around any node that has a `fatal_reason`.
+    pub fn health_snapshot(&self) -> HealthSnapshot {
+        let fatal_reason = self.node.fatal_reason();
+        let role = self.node.role();
+        HealthSnapshot {
+            node_id: self.node_id,
+            role,
+            // A halted node serves nothing further, even if it was leader.
+            can_serve_writes: role == Role::Leader && fatal_reason.is_none(),
+            applied_index: self.node.last_applied(),
+            leader_id: self.node.current_leader(),
+            fatal_reason,
+        }
     }
 
     /// Execute one autocommit write statement through consensus,

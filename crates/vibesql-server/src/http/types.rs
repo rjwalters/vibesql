@@ -96,11 +96,46 @@ impl ErrorResponse {
     }
 }
 
-/// Health check response
+/// Health check response.
+///
+/// In standalone mode `replication` is omitted and `status` is always
+/// `"ok"`. In replicated mode the endpoint reports the node's consensus
+/// role and writability so load balancers / orchestration can route writes
+/// to the leader and route around halted or lagging nodes (#5393). The
+/// handler also returns HTTP 503 (instead of 200) whenever the node is not
+/// currently able to serve writes, so a plain TCP/HTTP health check (no
+/// body parsing) already avoids non-leader and halted nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
+    /// `"ok"` when this node can serve writes; `"unavailable"` otherwise.
     pub status: String,
     pub version: String,
+    /// Replicated-mode consensus status; absent in standalone mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replication: Option<ReplicationStatus>,
+}
+
+/// Consensus-node status surfaced by `/health` in replicated mode (#5393).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplicationStatus {
+    /// This node's id within the cluster.
+    pub node_id: u64,
+    /// Consensus role: `"leader"`, `"follower"`, or `"candidate"`.
+    pub role: String,
+    /// Whether this node can currently accept writes (true only on a
+    /// healthy leader — false on followers/candidates and on a halted node).
+    pub can_serve_writes: bool,
+    /// Dense application index of the last entry applied locally — a
+    /// monotonic progress marker for observing replication lag against the
+    /// leader's `applied_index`.
+    pub applied_index: u64,
+    /// The node this one currently believes leads the cluster, if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leader_id: Option<u64>,
+    /// Set when this node has halted on a fatal apply and must be
+    /// restarted to resync; carries the retained reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fatal_reason: Option<String>,
 }
 
 /// Convert SqlValue to JSON

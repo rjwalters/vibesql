@@ -1,6 +1,6 @@
 //! REST API endpoints for VibeSQL HTTP interface
 
-use std::sync::Arc;
+use std::sync::{Arc, Arc as StdArc};
 
 use axum::{
     extract::{Path, Query, State},
@@ -19,6 +19,7 @@ use super::{graphql, types::*};
 use crate::{
     observability::ServerMetrics,
     registry::DatabaseRegistry,
+    replication::{role_str, ReplicationHandle},
     subscription::{
         detect_pk_columns_from_stmt, SelectiveColumnConfig, SubscriptionManager, SubscriptionUpdate,
     },
@@ -64,6 +65,43 @@ pub struct HttpState {
     pub subscription_manager: Arc<SubscriptionManager>,
     /// Optional server metrics for observability
     pub metrics: Option<ServerMetrics>,
+    /// Consensus handle when the server runs in replicated mode (#5393).
+    ///
+    /// Present only in replicated mode. The HTTP REST/GraphQL/subscription
+    /// surface executes against the local registry database, which does NOT
+    /// receive replicated writes — so in replicated mode those paths are
+    /// gated (see [`replicated_gate`]) to refuse with a clear error rather
+    /// than silently read stale data or accept a write that never
+    /// replicates. `/health` uses it to report node role/writability. Full
+    /// routing of HTTP writes/subscriptions through consensus is follow-on
+    /// #5410.
+    pub replication: Option<StdArc<ReplicationHandle>>,
+}
+
+impl HttpState {
+    /// `Some(error_response)` when this request hits a surface that is not
+    /// yet coherent in replicated mode and must be refused; `None` in
+    /// standalone mode (where every path is sound). Returning a `503` with
+    /// a `Retry-After`-style hint matches how a non-leader PostgreSQL
+    /// session refuses writes — the caller should route to the dedicated
+    /// PostgreSQL wire port, which is fully replicated.
+    pub(crate) fn replicated_gate(
+        &self,
+        feature: &str,
+    ) -> Option<(StatusCode, Json<ErrorResponse>)> {
+        self.replication.as_ref().map(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse::with_code(
+                    format!(
+                        "{feature} is not available over the HTTP API in replicated mode; use the \
+                         PostgreSQL wire protocol port (writes route through consensus there)"
+                    ),
+                    "58000",
+                )),
+            )
+        })
+    }
 }
 
 /// Create the HTTP API router
@@ -78,13 +116,16 @@ pub fn create_http_router(
     registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
     metrics: Option<ServerMetrics>,
+    replication: Option<StdArc<ReplicationHandle>>,
 ) -> Router {
     let state = HttpState {
         registry: registry.clone(),
         db: db.clone(),
         subscription_manager: subscription_manager.clone(),
         metrics,
+        replication,
     };
+    let is_replicated = state.replication.is_some();
 
     // Create main router with state
     let main_router = Router::new()
@@ -106,11 +147,25 @@ pub fn create_http_router(
         .route("/stats/subscriptions/efficiency", get(get_efficiency_stats))
         .with_state(state);
 
-    // Create storage sub-router with its own state
-    // We nest it after the main router is state-resolved
-    let storage_router = super::storage::create_storage_router(db, registry);
-
-    main_router.nest("/api/storage", storage_router)
+    // Create storage sub-router with its own state. The blob storage API
+    // also writes to the local registry database, so in replicated mode it
+    // is gated to a uniform 503 rather than nested (#5393).
+    if is_replicated {
+        let gated = Router::new().fallback(|| async {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse::with_code(
+                    "the blob storage API is not available over HTTP in replicated mode; use the \
+                     PostgreSQL wire protocol port",
+                    "58000",
+                )),
+            )
+        });
+        main_router.nest("/api/storage", gated)
+    } else {
+        let storage_router = super::storage::create_storage_router(db, registry);
+        main_router.nest("/api/storage", storage_router)
+    }
 }
 
 /// Extract database name from request headers, falling back to default
@@ -129,6 +184,13 @@ async fn graphql_handler(
     Json(req): Json<graphql::GraphQLRequest>,
 ) -> impl IntoResponse {
     debug!("Received GraphQL request: {}", req.query);
+
+    // The GraphQL surface executes against the local registry database,
+    // which receives no replicated writes — gate it in replicated mode
+    // (#5393).
+    if let Some((code, body)) = state.replicated_gate("the GraphQL API") {
+        return (code, body).into_response();
+    }
 
     // Get the database name from headers
     let db_name = get_database_name(&headers);
@@ -425,12 +487,47 @@ async fn execute_nested_query(
     Ok(())
 }
 
-/// Health check endpoint
-async fn health_check() -> impl IntoResponse {
-    Json(HealthResponse {
-        status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
+/// Health check endpoint.
+///
+/// Standalone mode: always `200 {"status":"ok"}`. Replicated mode (#5393):
+/// reports the node's consensus role, writability, applied index, and any
+/// fatal-halt reason, and returns `503` (with the same JSON body) whenever
+/// the node cannot currently serve writes — so a load balancer routes
+/// writes to the leader and routes around halted/lagging nodes even with a
+/// status-code-only health check.
+async fn health_check(State(state): State<HttpState>) -> impl IntoResponse {
+    let version = env!("CARGO_PKG_VERSION").to_string();
+
+    match &state.replication {
+        None => (
+            StatusCode::OK,
+            Json(HealthResponse { status: "ok".to_string(), version, replication: None }),
+        ),
+        Some(handle) => {
+            let snap = handle.health_snapshot();
+            let status = if snap.can_serve_writes { "ok" } else { "unavailable" };
+            let code = if snap.can_serve_writes {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            };
+            (
+                code,
+                Json(HealthResponse {
+                    status: status.to_string(),
+                    version,
+                    replication: Some(ReplicationStatus {
+                        node_id: snap.node_id,
+                        role: role_str(snap.role).to_string(),
+                        can_serve_writes: snap.can_serve_writes,
+                        applied_index: snap.applied_index,
+                        leader_id: snap.leader_id,
+                        fatal_reason: snap.fatal_reason,
+                    }),
+                }),
+            )
+        }
+    }
 }
 
 /// Get subscription partial update efficiency statistics
@@ -451,6 +548,14 @@ async fn execute_query(
     Json(req): Json<QueryRequest>,
 ) -> impl IntoResponse {
     debug!("Executing query: {} (limit: {:?}, offset: {:?})", req.sql, req.limit, req.offset);
+
+    // The /api/query surface executes against the local registry database,
+    // which receives no replicated writes — a write would never replicate
+    // and a read would silently return stale/empty data. Gate it in
+    // replicated mode and point clients at the wire protocol (#5393).
+    if let Some((code, body)) = state.replicated_gate("the /api/query endpoint") {
+        return (code, body).into_response();
+    }
 
     // Convert JSON parameters to SqlValue
     let params = match req.to_sql_values() {
@@ -663,6 +768,14 @@ async fn subscribe_stream(
     use axum::response::sse::{Event, KeepAlive, Sse};
 
     debug!("SSE subscription requested for query: {}", params.query);
+
+    // Subscriptions are fed by change events from the local registry
+    // database, which receives no replicated writes — gate them in
+    // replicated mode (feeding subscriptions from applied consensus entries
+    // is follow-on #5410).
+    if let Some((code, body)) = state.replicated_gate("subscriptions") {
+        return (code, body).into_response();
+    }
 
     // Get the database name from headers
     let db_name = get_database_name(&headers);
