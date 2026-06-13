@@ -19,6 +19,7 @@ use vibesql_server::{
     observability::ObservabilityProvider,
     protocol::BackendMessage,
     registry::DatabaseRegistry,
+    replication::ReplicationHandle,
     subscription::SubscriptionManager,
 };
 use vibesql_storage::Database;
@@ -60,6 +61,22 @@ async fn main() -> Result<()> {
     }
     info!("  Auth method: {}", config.auth.method);
     info!("  Observability enabled: {}", config.observability.enabled);
+    info!("  Replication enabled: {}", config.replication.enabled);
+
+    // Boot the consensus voter when replicated mode is configured
+    // (#5383). Sessions then route writes through it; standalone mode
+    // (the default) is untouched.
+    let replication = if config.replication.enabled {
+        let handle = ReplicationHandle::start(&config.replication).await?;
+        info!(
+            "Replicated mode: node {} of a {}-node cluster (writes route through consensus)",
+            handle.node_id(),
+            handle.cluster_size(),
+        );
+        Some(handle)
+    } else {
+        None
+    };
 
     // Load password store if password file is configured
     let password_store = if let Some(ref password_file) = config.auth.password_file {
@@ -229,6 +246,9 @@ async fn main() -> Result<()> {
                             // Clone the mutation broadcast sender for this connection
                             let mutation_broadcast_tx = mutation_broadcast_tx.clone();
 
+                            // Clone the replication handle for this connection
+                            let replication = replication.clone();
+
                             // Spawn a new task for each connection
                             tokio::spawn(async move {
                                 let mut handler = ConnectionHandler::new(
@@ -242,6 +262,9 @@ async fn main() -> Result<()> {
                                     subscription_manager,
                                     mutation_broadcast_tx,
                                 );
+                                if let Some(handle) = replication {
+                                    handler = handler.with_replication(handle);
+                                }
                                 if let Err(e) = handler.handle().await {
                                     error!("Connection error from {}: {}", peer_addr, e);
                                 }

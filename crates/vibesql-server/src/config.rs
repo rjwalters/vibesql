@@ -17,6 +17,40 @@ pub struct Config {
     pub observability: ObservabilityConfig,
     #[serde(default)]
     pub subscriptions: SubscriptionConfig,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
+}
+
+/// Replicated-mode configuration (#5383).
+///
+/// When `enabled`, the server boots one voter of a Raft cluster
+/// (`MvccRaftNode`) from `cluster_config` (a `cluster.toml`, see
+/// `vibesql_consensus::ClusterConfig`) and routes every PostgreSQL
+/// session's writes through consensus. When disabled (the default), the
+/// server runs standalone and today's execution path is untouched.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReplicationConfig {
+    /// Enable replicated mode (default: false — standalone).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to the cluster membership file (`cluster.toml`). Required
+    /// when `enabled`.
+    #[serde(default)]
+    pub cluster_config: Option<PathBuf>,
+    /// This node's id in the cluster config. Required when `enabled`.
+    #[serde(default)]
+    pub node_id: Option<u64>,
+    /// Directory for the durable Raft log, vote, and snapshots. When
+    /// absent the log is kept in memory (a restart forgets it) — fine
+    /// for tests, not for production.
+    #[serde(default)]
+    pub data_dir: Option<PathBuf>,
+    /// Staleness-beacon interval in milliseconds (see
+    /// `vibesql_consensus::RaftTuning::staleness_beacon_ms`). `0` (the
+    /// default) disables the beacon; an idle cluster then ages out of
+    /// bounded-staleness reads until the next write.
+    #[serde(default)]
+    pub staleness_beacon_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +203,7 @@ impl Default for Config {
             http: HttpConfig::default(),
             observability: ObservabilityConfig::default(),
             subscriptions: SubscriptionConfig::default(),
+            replication: ReplicationConfig::default(),
         }
     }
 }
@@ -239,6 +274,11 @@ impl Config {
     /// | `VIBESQL_HTTP_AUTH_JWT_ISSUER` | `http.auth.jwt.issuer` |
     /// | `VIBESQL_HTTP_AUTH_JWT_AUDIENCE` | `http.auth.jwt.audience` |
     /// | `VIBESQL_HTTP_AUTH_JWT_EXPIRATION` | `http.auth.jwt.expiration_secs` |
+    /// | `VIBESQL_REPLICATION_ENABLED` | `replication.enabled` |
+    /// | `VIBESQL_REPLICATION_CLUSTER_CONFIG` | `replication.cluster_config` |
+    /// | `VIBESQL_REPLICATION_NODE_ID` | `replication.node_id` |
+    /// | `VIBESQL_REPLICATION_DATA_DIR` | `replication.data_dir` |
+    /// | `VIBESQL_REPLICATION_STALENESS_BEACON_MS` | `replication.staleness_beacon_ms` |
     pub fn apply_env_overrides(&mut self) {
         // Server configuration
         if let Ok(val) = env::var("VIBESQL_SERVER_HOST") {
@@ -332,6 +372,27 @@ impl Config {
         if let Ok(val) = env::var("VIBESQL_HTTP_AUTH_JWT_EXPIRATION") {
             if let Ok(secs) = val.parse() {
                 self.http.auth.jwt.expiration_secs = secs;
+            }
+        }
+
+        // Replication configuration
+        if let Ok(val) = env::var("VIBESQL_REPLICATION_ENABLED") {
+            self.replication.enabled = parse_bool(&val);
+        }
+        if let Ok(val) = env::var("VIBESQL_REPLICATION_CLUSTER_CONFIG") {
+            self.replication.cluster_config = Some(PathBuf::from(val));
+        }
+        if let Ok(val) = env::var("VIBESQL_REPLICATION_NODE_ID") {
+            if let Ok(id) = val.parse() {
+                self.replication.node_id = Some(id);
+            }
+        }
+        if let Ok(val) = env::var("VIBESQL_REPLICATION_DATA_DIR") {
+            self.replication.data_dir = Some(PathBuf::from(val));
+        }
+        if let Ok(val) = env::var("VIBESQL_REPLICATION_STALENESS_BEACON_MS") {
+            if let Ok(ms) = val.parse() {
+                self.replication.staleness_beacon_ms = ms;
             }
         }
     }

@@ -10,6 +10,7 @@ pub mod http;
 pub mod observability;
 pub mod protocol;
 pub mod registry;
+pub mod replication;
 pub mod scheduler;
 pub mod session;
 pub mod subscription;
@@ -18,7 +19,7 @@ pub mod transaction;
 pub use auth::PasswordStore;
 pub use config::{
     ApiKeyConfig, AuthConfig, Config, HttpAuthConfig, HttpAuthMethod, HttpConfig, JwtConfig,
-    LoggingConfig, ServerConfig,
+    LoggingConfig, ReplicationConfig, ServerConfig,
 };
 pub use connection::{ConnectionHandler, TableMutationNotification};
 pub use observability::ObservabilityProvider;
@@ -26,10 +27,11 @@ pub use protocol::{
     BackendMessage, FieldDescription, FrontendMessage, SubscriptionUpdateType, TransactionStatus,
 };
 pub use registry::{DatabaseRegistry, SharedDatabase};
+pub use replication::{ReplicationHandle, SqlError};
 pub use scheduler::{
     ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig,
 };
-pub use session::{Column, ExecutionResult, Row, Session};
+pub use session::{Column, ExecutionResult, ReadConsistency, Row, Session};
 pub use subscription::{
     create_partial_row_update, extract_table_dependencies, extract_table_refs,
     SelectiveColumnConfig, Subscription, SubscriptionConfig, SubscriptionError, SubscriptionId,

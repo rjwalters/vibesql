@@ -113,6 +113,9 @@ pub struct ConnectionHandler {
     mutation_broadcast_rx: broadcast::Receiver<TableMutationNotification>,
     /// Extended query protocol state (prepared statements and portals)
     extended_state: ExtendedQueryState,
+    /// Replicated-mode handle (#5383): when set, sessions route their
+    /// statements through consensus (`Session::new_replicated`).
+    replication: Option<Arc<crate::replication::ReplicationHandle>>,
 }
 
 impl ConnectionHandler {
@@ -157,7 +160,18 @@ impl ConnectionHandler {
             mutation_broadcast_tx,
             mutation_broadcast_rx,
             extended_state: ExtendedQueryState::new(),
+            replication: None,
         }
+    }
+
+    /// Route this connection's sessions through consensus (#5383). The
+    /// builder form keeps every existing standalone call site untouched.
+    pub fn with_replication(
+        mut self,
+        replication: Arc<crate::replication::ReplicationHandle>,
+    ) -> Self {
+        self.replication = Some(replication);
+        self
     }
 
     /// Handle the connection
@@ -231,8 +245,18 @@ impl ConnectionHandler {
                 // Get or create shared database from registry
                 let shared_db = self.database_registry.get_or_create(&database).await;
 
-                // Create session with shared database
-                self.session = Some(Session::new(database.clone(), user.clone(), shared_db));
+                // Create session with shared database; in replicated
+                // mode the session routes statements through consensus
+                // instead (#5383).
+                self.session = Some(match &self.replication {
+                    Some(handle) => Session::new_replicated(
+                        database.clone(),
+                        user.clone(),
+                        shared_db,
+                        Arc::clone(handle),
+                    ),
+                    None => Session::new(database.clone(), user.clone(), shared_db),
+                });
 
                 info!("User '{}' connected to database '{}'", user, database);
 

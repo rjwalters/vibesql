@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use vibesql_executor::{
@@ -7,7 +7,50 @@ use vibesql_executor::{
 };
 use vibesql_types::SqlValue;
 
-use crate::{registry::SharedDatabase, transaction::SessionTransactionManager};
+use crate::{
+    registry::SharedDatabase,
+    replication::{ReplicationHandle, SqlError, SQLSTATE_INVALID_PARAMETER},
+    transaction::SessionTransactionManager,
+};
+
+/// Read-consistency mode of a replicated session (#5383), selected with
+/// `SET vibesql_read_consistency = '...'`. Maps onto the `MvccRaftNode`
+/// read paths (Raft Phase B2, #5200).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadConsistency {
+    /// Local, stale-allowed (the default): read whatever this node has
+    /// applied, no leadership check, no network round.
+    Local,
+    /// Linearizable: quorum-confirmed leadership (ReadIndex). On a
+    /// follower this fails with SQLSTATE 25006 and a leader hint.
+    Linearizable,
+    /// Bounded staleness: served locally iff this node can prove its
+    /// state is no staler than `vibesql_max_staleness_ms`. A bound of 0
+    /// delegates to linearizable (the "staleness 0 redirects to the
+    /// leader" contract).
+    BoundedStaleness,
+    /// Read-your-writes: waits (up to `vibesql_ryw_wait_ms`) until this
+    /// node has applied the session's last write token.
+    ReadYourWrites,
+}
+
+/// Default wait bound for read-your-writes reads (overridable with
+/// `SET vibesql_ryw_wait_ms = N`).
+const DEFAULT_RYW_WAIT_MS: u64 = 5_000;
+
+/// Per-session replicated-mode state: the shared consensus handle plus
+/// the session's read-consistency settings and write token.
+struct ReplicatedSessionState {
+    handle: Arc<ReplicationHandle>,
+    read_consistency: ReadConsistency,
+    /// Staleness bound for [`ReadConsistency::BoundedStaleness`], in ms.
+    max_staleness_ms: u64,
+    /// Wait bound for [`ReadConsistency::ReadYourWrites`], in ms.
+    ryw_wait_ms: u64,
+    /// Dense log index of this session's last replicated write (`0` =
+    /// none) — the read-your-writes token `execute_replicated` returned.
+    last_write_token: vibesql_consensus::LogIndex,
+}
 
 /// Session state for a database connection
 pub struct Session {
@@ -28,6 +71,9 @@ pub struct Session {
     /// Session-level transaction manager for READ COMMITTED isolation
     /// Tracks uncommitted changes that should only be visible to this session
     txn_manager: SessionTransactionManager,
+    /// Replicated-mode state (#5383): `Some` when this session routes
+    /// statements through consensus instead of the local executor.
+    replication: Option<ReplicatedSessionState>,
 }
 
 /// Simplified execution result for wire protocol
@@ -163,7 +209,39 @@ impl Session {
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
             txn_manager: SessionTransactionManager::new(),
+            replication: None,
         }
+    }
+
+    /// Create a session that routes statements through consensus (#5383):
+    /// writes go through `MvccRaftNode::execute_replicated` (leader-only,
+    /// `NotLeader` surfaces as SQLSTATE 25006 with a leader hint), reads
+    /// run against the replicated state machine per the session's
+    /// `vibesql_read_consistency` setting (local by default).
+    ///
+    /// The `db` handle is retained for API compatibility but replicated
+    /// sessions do not execute against it — the replicated database lives
+    /// inside the consensus state machine.
+    pub fn new_replicated(
+        database: String,
+        user: String,
+        db: SharedDatabase,
+        handle: Arc<ReplicationHandle>,
+    ) -> Self {
+        let mut session = Self::new(database, user, db);
+        session.replication = Some(ReplicatedSessionState {
+            handle,
+            read_consistency: ReadConsistency::Local,
+            max_staleness_ms: 0,
+            ryw_wait_ms: DEFAULT_RYW_WAIT_MS,
+            last_write_token: 0,
+        });
+        session
+    }
+
+    /// Whether this session routes statements through consensus.
+    pub fn is_replicated(&self) -> bool {
+        self.replication.is_some()
     }
 
     /// Create a new standalone session with its own isolated database
@@ -201,6 +279,7 @@ impl Session {
             named_statements: HashMap::new(),
             cursors: CursorStore::new(),
             txn_manager: SessionTransactionManager::new(),
+            replication: None,
         }
     }
 
@@ -244,6 +323,12 @@ impl Session {
         // Try to get from cache or prepare
         let prepared = self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
+        // Replicated sessions route by statement kind, with the original
+        // SQL text in hand (the consensus propose path replicates SQL).
+        if self.replication.is_some() {
+            return self.execute_replicated(sql, prepared.statement()).await;
+        }
+
         // For non-parameterized queries, execute directly from cached AST
         self.execute_statement(prepared.statement()).await
     }
@@ -261,6 +346,224 @@ impl Session {
         self.execute_prepared(&prepared, params).await
     }
 
+    /// Execute one statement of a **replicated** session (#5383): writes
+    /// are proposed through consensus (`MvccRaftNode::execute_replicated`,
+    /// leader-only, freeze-at-propose), reads run against the replicated
+    /// state machine per the session's read-consistency setting, and
+    /// features without a sound replicated semantic yet fail with
+    /// SQLSTATE `0A000` and a follow-on pointer instead of silently
+    /// executing against the (empty) local database.
+    async fn execute_replicated(
+        &mut self,
+        sql: &str,
+        statement: &vibesql_ast::Statement,
+    ) -> Result<ExecutionResult> {
+        use vibesql_ast::Statement;
+
+        let state = self.replication.as_ref().expect("execute_replicated without state");
+
+        // A halted node serves nothing further (fatal apply, see
+        // ConsensusError::FatalApply): every statement gets the retained
+        // reason instead of a stale read or a hung write.
+        if let Some(reason) = state.handle.fatal_reason() {
+            return Err(state.handle.halted_error(reason).into());
+        }
+
+        match statement {
+            // Reads: dispatch on the session's read-consistency mode.
+            Statement::Select(_) => {
+                let handle = Arc::clone(&state.handle);
+                let rows = match state.read_consistency {
+                    ReadConsistency::Local => handle.query_local(sql)?,
+                    ReadConsistency::Linearizable => handle.query_linearizable(sql).await?,
+                    ReadConsistency::BoundedStaleness => {
+                        handle
+                            .query_bounded_staleness(
+                                Duration::from_millis(state.max_staleness_ms),
+                                sql,
+                            )
+                            .await?
+                    }
+                    ReadConsistency::ReadYourWrites => {
+                        handle
+                            .query_at_least(
+                                state.last_write_token,
+                                sql,
+                                Duration::from_millis(state.ryw_wait_ms),
+                            )
+                            .await?
+                    }
+                };
+                // Placeholder column names, matching the standalone
+                // SELECT path (which also does not resolve real names
+                // yet — see the TODO there).
+                let columns = rows
+                    .first()
+                    .map(|r| (0..r.len()).map(|i| Column { name: format!("col{i}") }).collect())
+                    .unwrap_or_default();
+                let rows = rows.into_iter().map(|values| Row { values }).collect();
+                Ok(ExecutionResult::Select { rows, columns })
+            }
+
+            // Writes: one autocommit statement = one replicated entry.
+            Statement::Insert(stmt) => {
+                let affected = self.replicated_write(sql).await?;
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Insert { rows_affected: affected })
+            }
+            Statement::Update(stmt) => {
+                let affected = self.replicated_write(sql).await?;
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Update { rows_affected: affected })
+            }
+            Statement::Delete(stmt) => {
+                let affected = self.replicated_write(sql).await?;
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::Delete { rows_affected: affected })
+            }
+
+            // DDL: replicated like any write (schema changes must apply
+            // on every voter in log order).
+            Statement::CreateTable(_) => {
+                self.replicated_write(sql).await?;
+                Ok(ExecutionResult::CreateTable)
+            }
+            Statement::CreateIndex(_) => {
+                self.replicated_write(sql).await?;
+                Ok(ExecutionResult::CreateIndex)
+            }
+            Statement::CreateView(_) => {
+                self.replicated_write(sql).await?;
+                Ok(ExecutionResult::CreateView)
+            }
+            Statement::DropTable(stmt) => {
+                self.replicated_write(sql).await?;
+                self.stmt_cache.invalidate_table(&stmt.table_name);
+                Ok(ExecutionResult::DropTable)
+            }
+            Statement::DropIndex(_) => {
+                self.replicated_write(sql).await?;
+                Ok(ExecutionResult::DropIndex)
+            }
+            Statement::DropView(_) => {
+                self.replicated_write(sql).await?;
+                Ok(ExecutionResult::DropView)
+            }
+
+            // Session-local settings for the replicated read modes.
+            Statement::SetVariable(stmt) => self.execute_replicated_set(stmt),
+
+            // PRAGMA stays the no-op it is in standalone mode.
+            Statement::Pragma(_) => Ok(ExecutionResult::Other { message: "PRAGMA".to_string() }),
+
+            // Interactive transactions are follow-on #5391: buffering the
+            // statements and proposing one TxnEntry at COMMIT needs its
+            // own design review (results during the open transaction,
+            // reads of buffered writes). Refusing is sound; guessing is
+            // not.
+            Statement::BeginTransaction(_)
+            | Statement::Commit(_)
+            | Statement::Rollback(_)
+            | Statement::Savepoint(_)
+            | Statement::RollbackToSavepoint(_)
+            | Statement::ReleaseSavepoint(_) => Err(SqlError::not_supported(
+                "interactive transaction control (BEGIN/COMMIT/ROLLBACK)",
+                "#5391",
+            )
+            .into()),
+
+            // Named prepared statements execute from a bound AST without
+            // the SQL text the propose path replicates; cursors, EXPLAIN,
+            // ANALYZE, and VACUUM would all run against the local (empty)
+            // database. Refuse clearly rather than mislead (#5393).
+            Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
+                Err(SqlError::not_supported(
+                    "PREPARE/EXECUTE statement syntax",
+                    "#5393",
+                )
+                .into())
+            }
+            Statement::DeclareCursor(_)
+            | Statement::OpenCursor(_)
+            | Statement::Fetch(_)
+            | Statement::CloseCursor(_) => {
+                Err(SqlError::not_supported("cursors", "#5393").into())
+            }
+            Statement::Explain(_) => Err(SqlError::not_supported("EXPLAIN", "#5393").into()),
+            Statement::Analyze(_) => Err(SqlError::not_supported("ANALYZE", "#5393").into()),
+            Statement::Vacuum(_) => Err(SqlError::not_supported("VACUUM", "#5393").into()),
+
+            _ => Err(SqlError::not_supported("this statement", "#5393").into()),
+        }
+    }
+
+    /// Propose one autocommit write through consensus and update the
+    /// session's read-your-writes token. Returns the rows affected.
+    async fn replicated_write(&mut self, sql: &str) -> Result<usize> {
+        let state = self.replication.as_ref().expect("replicated_write without state");
+        let handle = Arc::clone(&state.handle);
+        let (index, outcome) = handle.execute_write(sql).await?;
+        // The entry consumed its index whether it applied or rolled
+        // back; either way this session's reads may rely on it.
+        let state = self.replication.as_mut().expect("replicated_write without state");
+        state.last_write_token = index;
+        match outcome {
+            vibesql_consensus::ApplyOutcome::Applied { rows_affected } => Ok(rows_affected),
+            // A deterministic statement failure, rejected identically on
+            // every replica: surface the original executor error.
+            vibesql_consensus::ApplyOutcome::Rejected { reason } => {
+                Err(anyhow::anyhow!("{}", reason))
+            }
+            // Unreachable from a fresh propose (idempotence replays only
+            // overlap snapshot-install with log replay), but harmless.
+            vibesql_consensus::ApplyOutcome::AlreadyApplied => Ok(0),
+        }
+    }
+
+    /// Handle `SET vibesql_*` in a replicated session. Unknown variables
+    /// keep the standalone behavior (accepted as a no-op).
+    fn execute_replicated_set(
+        &mut self,
+        stmt: &vibesql_ast::SetVariableStmt,
+    ) -> Result<ExecutionResult> {
+        let state = self.replication.as_mut().expect("replicated SET without state");
+        let name = stmt.variable.to_ascii_lowercase();
+        match name.as_str() {
+            "vibesql_read_consistency" => {
+                let value = set_value_string(&stmt.value)?;
+                state.read_consistency = match value.to_ascii_lowercase().as_str() {
+                    "local" => ReadConsistency::Local,
+                    "linearizable" => ReadConsistency::Linearizable,
+                    "bounded_staleness" => ReadConsistency::BoundedStaleness,
+                    "read_your_writes" => ReadConsistency::ReadYourWrites,
+                    other => {
+                        return Err(SqlError::new(
+                            SQLSTATE_INVALID_PARAMETER,
+                            format!(
+                                "invalid value for vibesql_read_consistency: '{other}' (expected \
+                                 'local', 'linearizable', 'bounded_staleness', or \
+                                 'read_your_writes')"
+                            ),
+                        )
+                        .into())
+                    }
+                };
+                Ok(ExecutionResult::Other { message: "SET".to_string() })
+            }
+            "vibesql_max_staleness_ms" => {
+                state.max_staleness_ms = set_value_ms(&stmt.value, "vibesql_max_staleness_ms")?;
+                Ok(ExecutionResult::Other { message: "SET".to_string() })
+            }
+            "vibesql_ryw_wait_ms" => {
+                state.ryw_wait_ms = set_value_ms(&stmt.value, "vibesql_ryw_wait_ms")?;
+                Ok(ExecutionResult::Other { message: "SET".to_string() })
+            }
+            // Anything else: same lenient no-op as the standalone
+            // catch-all (PG clients SET all sorts of things at startup).
+            _ => Ok(ExecutionResult::Other { message: "SET".to_string() }),
+        }
+    }
+
     /// Execute a parsed statement
     ///
     /// This method uses read locks for SELECT queries to enable concurrent execution,
@@ -270,6 +573,18 @@ impl Session {
         statement: &vibesql_ast::Statement,
     ) -> Result<ExecutionResult> {
         use vibesql_ast::Statement;
+
+        // Replicated sessions never reach this path through `execute`;
+        // the only way in is the named prepared-statement machinery
+        // (`execute_prepared`), which executes from a bound AST without
+        // the SQL text the consensus propose path needs.
+        if self.replication.is_some() {
+            return Err(SqlError::not_supported(
+                "prepared-statement execution against the replicated database",
+                "#5393",
+            )
+            .into());
+        }
 
         match statement {
             // Read-only operations use read lock for concurrent execution
@@ -645,6 +960,43 @@ impl Session {
         CursorExecutor::close(&mut self.cursors, stmt).map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(ExecutionResult::CloseCursor { cursor_name: stmt.cursor_name.clone() })
     }
+}
+
+/// Extract a string value from a `SET` statement's value expression.
+fn set_value_string(expr: &vibesql_ast::Expression) -> Result<String> {
+    match evaluate_expression(expr)? {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(s.to_string()),
+        other => Err(SqlError::new(
+            SQLSTATE_INVALID_PARAMETER,
+            format!("expected a string value, got {}", other.type_name()),
+        )
+        .into()),
+    }
+}
+
+/// Extract a non-negative millisecond value from a `SET` statement's
+/// value expression.
+fn set_value_ms(expr: &vibesql_ast::Expression, variable: &str) -> Result<u64> {
+    let value = evaluate_expression(expr)?;
+    let ms = match value {
+        SqlValue::Integer(n) | SqlValue::Bigint(n) => n,
+        SqlValue::Smallint(n) => i64::from(n),
+        // Already a non-negative `u64`; no range check needed.
+        SqlValue::Unsigned(n) => return Ok(n),
+        other => {
+            return Err(SqlError::new(
+                SQLSTATE_INVALID_PARAMETER,
+                format!("{variable} expects a non-negative integer, got {}", other.type_name()),
+            )
+            .into())
+        }
+    };
+    u64::try_from(ms).map_err(|_| {
+        anyhow::Error::from(SqlError::new(
+            SQLSTATE_INVALID_PARAMETER,
+            format!("{variable} must be non-negative"),
+        ))
+    })
 }
 
 /// Evaluate an expression to a SqlValue (for EXECUTE parameters)

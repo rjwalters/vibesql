@@ -491,7 +491,17 @@ pub async fn handle_execute(
             }
         }
         Err(e) => {
-            send_error(write_half, write_buf, "42000", &e.to_string()).await?;
+            // Preserve a structured SqlError's SQLSTATE (#5383: NotLeader
+            // redirects, staleness refusals); other errors keep the
+            // protocol-level syntax-error code this path always used.
+            match e.downcast_ref::<crate::replication::SqlError>() {
+                Some(sql_error) => {
+                    send_sql_error(write_half, write_buf, sql_error).await?;
+                }
+                None => {
+                    send_error(write_half, write_buf, "42000", &e.to_string()).await?;
+                }
+            }
             return Ok(false);
         }
     }
@@ -610,6 +620,28 @@ async fn send_error(
     fields.insert(b'V', "ERROR".to_string());
     fields.insert(b'C', code.to_string());
     fields.insert(b'M', message.to_string());
+
+    send_message(write_half, write_buf, &BackendMessage::ErrorResponse { fields }).await
+}
+
+/// Send a structured [`SqlError`](crate::replication::SqlError) with its
+/// SQLSTATE, detail, and hint fields (#5383).
+async fn send_sql_error(
+    write_half: &mut OwnedWriteHalf,
+    write_buf: &mut BytesMut,
+    error: &crate::replication::SqlError,
+) -> anyhow::Result<()> {
+    let mut fields = HashMap::new();
+    fields.insert(b'S', "ERROR".to_string());
+    fields.insert(b'V', "ERROR".to_string());
+    fields.insert(b'C', error.code.to_string());
+    fields.insert(b'M', error.message.clone());
+    if let Some(detail) = &error.detail {
+        fields.insert(b'D', detail.clone());
+    }
+    if let Some(hint) = &error.hint {
+        fields.insert(b'H', hint.clone());
+    }
 
     send_message(write_half, write_buf, &BackendMessage::ErrorResponse { fields }).await
 }
