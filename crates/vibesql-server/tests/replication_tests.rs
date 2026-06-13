@@ -1870,13 +1870,12 @@ async fn http_write_replicates_to_followers() {
     }
 }
 
-/// In replicated mode the **blob-storage** surface remains gated to a clear 503
-/// (the `BlobStorageService` byte store does not route through the
-/// SQL/consensus write path — replicating it is a separate design problem,
-/// deferred to a focused follow-on of #5410/#5422). It must never silently
-/// accept a write that never replicates. The subscription endpoint (#5422), the
-/// CRUD by-id endpoints (#5420), and the GraphQL endpoint (#5421) are no longer
-/// gated — they route through consensus.
+/// In replicated mode every HTTP surface now routes through consensus — none
+/// stays gated to 503 (#5455). The subscription endpoint (#5422), the CRUD
+/// by-id endpoints (#5420), the GraphQL endpoint (#5421), and the **blob
+/// storage** API (#5455 — blobs as rows in the replicated `__vibesql_blobs`
+/// table) all route through the consensus path. This test name is retained for
+/// history; it now asserts the surfaces are wired, not gated.
 #[tokio::test]
 async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
     let (handles, _dir) = boot_cluster(1).await;
@@ -1912,9 +1911,19 @@ async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
         Err(e) => assert!(e.is_timeout(), "expected an SSE stream or timeout, got {e}"),
     }
 
-    // Blob storage stays gated.
-    let resp = client.get(format!("{base}/api/storage/anything")).send().await.unwrap();
-    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    // Blob storage is no longer gated (#5455): GET of a well-formed but unknown
+    // blob id reads the replicated state machine and returns 404 (not the old
+    // 503). A malformed id returns 400. Either way it is wired, not gated.
+    let resp = client
+        .get(format!("{base}/api/storage/550e8400-e29b-41d4-a716-446655440000"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "the blob storage API must be wired (404 for an unknown blob), not gated (503)"
+    );
 
     // GraphQL is no longer gated — an introspection query succeeds (200)
     // against the replicated catalog rather than returning the old 503.
@@ -1926,6 +1935,213 @@ async fn http_unwired_surfaces_still_gated_in_replicated_mode() {
         .await
         .unwrap();
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
+}
+
+/// A blob uploaded on the leader's HTTP port replicates through consensus and
+/// is readable on a **follower's** HTTP port (#5455): the blob is a row in the
+/// replicated `__vibesql_blobs` table, so it rides the same consensus write
+/// path as every other replicated HTTP write. A `GET` on node B returns the
+/// exact bytes and content-type, and a `DELETE` on the leader replicates so the
+/// follower's `GET` then 404s.
+#[tokio::test]
+async fn http_blob_put_replicates_and_reads_on_follower() {
+    let (handles, _dir) = boot_cluster(3).await;
+    wait_for_leader(&handles).await;
+    let client = reqwest::Client::new();
+
+    let blob_bytes = b"hello replicated blob \x00\x01\x02\xff".to_vec();
+
+    // Upload through whichever node currently leads, retrying across leadership
+    // changes (a 421 means the chosen node stopped leading): the write must land
+    // on the leader and replicate.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let (blob_id, _leader_tx, leader_base) = loop {
+        let leader = wait_for_leader(&handles).await;
+        let (leader_base, leader_tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+        let resp = client
+            .post(format!("{leader_base}/api/storage/upload"))
+            .header("content-type", "application/octet-stream")
+            .body(blob_bytes.clone())
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == reqwest::StatusCode::CREATED {
+            let upload: serde_json::Value =
+                serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+            assert_eq!(upload["size"].as_i64(), Some(blob_bytes.len() as i64));
+            let blob_id = upload["id"].as_str().expect("blob id").to_string();
+            break (blob_id, leader_tx, leader_base);
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "leader upload never succeeded (last status {})",
+            resp.status()
+        );
+        drop(leader_tx);
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    // Pick a follower and serve its HTTP port.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles.iter().position(|h| h.role() == Role::Follower) {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+    let (follower_base, _txf) = start_http(Some(Arc::clone(&handles[follower]))).await;
+
+    // The follower converges: a GET returns the exact bytes once it has applied
+    // the upload entry.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let resp = client
+            .get(format!("{follower_base}/api/storage/{blob_id}"))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == reqwest::StatusCode::OK {
+            let ct = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            assert!(ct.starts_with("application/octet-stream"), "content-type {ct:?}");
+            let got = resp.bytes().await.unwrap().to_vec();
+            assert_eq!(got, blob_bytes, "follower GET must return the exact replicated bytes");
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "follower did not converge to the replicated blob (status {})",
+            resp.status()
+        );
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+
+    // DELETE on the leader replicates; the follower's GET then 404s. Retry
+    // across leadership changes (a 421 means the bound node stopped leading).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let mut delete_base = leader_base;
+    let mut _delete_txs = Vec::new();
+    loop {
+        let resp = client
+            .delete(format!("{delete_base}/api/storage/{blob_id}"))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == reqwest::StatusCode::NO_CONTENT {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "leader delete never succeeded (last status {})",
+            resp.status()
+        );
+        let leader = wait_for_leader(&handles).await;
+        let (base, tx) = start_http(Some(Arc::clone(&handles[leader]))).await;
+        delete_base = base;
+        _delete_txs.push(tx);
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let resp = client
+            .get(format!("{follower_base}/api/storage/{blob_id}"))
+            .send()
+            .await
+            .unwrap();
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "follower did not converge to the replicated delete (status {})",
+            resp.status()
+        );
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// A blob upload on a **follower** is refused with a 421 + leader hint and is
+/// never stored locally (#5455 — the split-brain invariant): the blob write
+/// proposes through consensus, which a follower cannot accept, so it surfaces
+/// the NOT_LEADER refusal exactly like every other replicated HTTP write.
+#[tokio::test]
+async fn http_blob_upload_on_follower_redirects_with_leader_hint() {
+    let (handles, _dir) = boot_cluster(3).await;
+    wait_for_leader(&handles).await;
+    let client = reqwest::Client::new();
+
+    // Upload on whichever node is *currently* a follower (re-resolved each
+    // attempt so leadership flux does not race us): the write must be refused
+    // with 421 + a leader hint and must never be stored locally. Retry while a
+    // request lands on a node that has just become leader.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        // A follower that knows who leads (so the hint is populated).
+        let follower = match handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            Some(i) => i,
+            None => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out waiting for a follower"
+                );
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+        };
+        let leader_id = handles[follower].node().current_leader().unwrap();
+
+        let (base, _tx) = start_http(Some(Arc::clone(&handles[follower]))).await;
+        let resp = client
+            .post(format!("{base}/api/storage/upload"))
+            .header("content-type", "text/plain")
+            .body("follower blob")
+            .send()
+            .await
+            .unwrap();
+
+        if resp.status() != reqwest::StatusCode::MISDIRECTED_REQUEST {
+            // The chosen node became leader between selection and the request;
+            // retry with a freshly resolved follower.
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "a follower upload was not refused with 421 (status {})",
+                resp.status()
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+            continue;
+        }
+
+        let leader_hint = resp
+            .headers()
+            .get("X-VibeSQL-Leader")
+            .expect("leader-hint header")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(leader_hint.contains(&format!("node {leader_id}")), "{leader_hint}");
+
+        // The follower's local state machine never stored a blob: the blob table
+        // is either absent or empty — no local-only blob write (split-brain).
+        let count = handles[follower]
+            .node()
+            .query("SELECT COUNT(*) FROM __vibesql_blobs")
+            .ok()
+            .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+        assert!(
+            count.is_none() || count.as_deref() == Some("0"),
+            "a blob upload on a follower must not store anything locally (saw {count:?})"
+        );
+        break;
+    }
 }
 
 /// In replicated mode a GraphQL **mutation** routes through consensus and a

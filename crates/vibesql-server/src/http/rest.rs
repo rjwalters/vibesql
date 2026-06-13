@@ -87,12 +87,13 @@ pub struct HttpState {
     /// observes committed writes) build a **replicated** session via
     /// [`Self::session`], so writes propose through this handle (leader-only,
     /// freeze-at-propose) and reads run against the replicated state machine —
-    /// never against the unreplicated local registry database. The only HTTP
-    /// surface still gated in replicated mode is the **blob storage** API
-    /// (`/api/storage/*`), whose `BlobStorageService` is a separate byte store
-    /// that does not route through the SQL/consensus write path; it remains
-    /// gated to a clear 503 (deferred to a focused follow-on of #5410) rather
-    /// than accepting a write that never replicates.
+    /// never against the unreplicated local registry database. #5455 wired the
+    /// last gated surface — the **blob storage** API (`/api/storage/*`): in
+    /// replicated mode blobs are stored as rows in the replicated
+    /// `__vibesql_blobs` table, so an upload/delete proposes through this handle
+    /// (leader-only; a follower write is refused with 421, never stored locally)
+    /// and a download reads the replicated state machine. No HTTP surface
+    /// remains gated to 503 in replicated mode.
     /// `/health` uses the handle to report node role/writability.
     pub replication: Option<StdArc<ReplicationHandle>>,
 }
@@ -249,6 +250,10 @@ pub fn create_http_router(
     };
     let is_replicated = state.replication.is_some();
 
+    // Clone the state for the replicated storage sub-router before the main
+    // router consumes `state` via `.with_state` (#5455).
+    let storage_state = state.clone();
+
     // Create main router with state
     let main_router = Router::new()
         .route("/health", get(health_check))
@@ -269,25 +274,19 @@ pub fn create_http_router(
         .route("/stats/subscriptions/efficiency", get(get_efficiency_stats))
         .with_state(state);
 
-    // Create storage sub-router with its own state. The blob storage API is a
-    // separate `BlobStorageService` byte store that does not route through the
-    // SQL/consensus write path, so replicating it is its own design problem
-    // (wrap blob bytes in consensus entries, or a dedicated blob-replication
-    // path). It is therefore deferred to a focused follow-on of #5410/#5422 and
-    // remains gated to a uniform 503 in replicated mode rather than nested
-    // (#5393) — accepting a blob write here would never replicate.
+    // Create the storage sub-router. The blob storage API is backed by a
+    // separate `BlobStorageService` byte store in standalone mode, which would
+    // never replicate on its own. In replicated mode (#5455) blob writes are
+    // therefore routed through the **same consensus SQL write path** as every
+    // other replicated HTTP surface: each blob is a row in the replicated
+    // `__vibesql_blobs` table, so an upload/delete proposes through consensus
+    // (leader-only; a follower write surfaces as 421, never stored locally —
+    // the split-brain invariant) and a download reads the replicated state
+    // machine. This is the last #5410 child: with blob storage wired, no HTTP
+    // surface remains gated to 503 in replicated mode.
     if is_replicated {
-        let gated = Router::new().fallback(|| async {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(ErrorResponse::with_code(
-                    "the blob storage API is not available over HTTP in replicated mode; use the \
-                     PostgreSQL wire protocol port",
-                    "58000",
-                )),
-            )
-        });
-        main_router.nest("/api/storage", gated)
+        let storage_router = super::storage::create_replicated_storage_router(storage_state);
+        main_router.nest("/api/storage", storage_router)
     } else {
         let storage_router = super::storage::create_storage_router(db, registry);
         main_router.nest("/api/storage", storage_router)
