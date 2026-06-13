@@ -117,6 +117,20 @@
         </div>
       </div>
 
+      <!-- HNSW Recall Trend Chart -->
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
+        <h2 class="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+          HNSW Recall@k Trend
+        </h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Vector index search quality under delete-heavy workloads - showing recall@k for fresh,
+          degraded (lazy deletes), and compacted index states (higher is better)
+        </p>
+        <div class="relative" style="height: 350px;">
+          <canvas id="hnsw-recall-chart"></canvas>
+        </div>
+      </div>
+
       <!-- Methodology Note -->
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-300 dark:border-gray-600">
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -131,6 +145,7 @@
             <li><strong>TPC-H & TPC-DS:</strong> Decision support benchmarks measuring query execution time (lower is better)</li>
             <li><strong>TPC-C:</strong> OLTP benchmark measuring transactions per second (higher is better)</li>
             <li><strong>Sysbench:</strong> Micro-benchmarks measuring individual operation latency (lower is better)</li>
+            <li><strong>HNSW Recall@k:</strong> Approximate vector search quality (fraction of true k-nearest neighbours returned vs brute-force ground truth) under delete-heavy workloads; recall collapses under lazy deletes ("degraded") and recovers after compaction (higher is better)</li>
           </ul>
           <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
             Charts show the min (best), avg, and max (worst) performance for each run.

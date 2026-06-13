@@ -2,7 +2,8 @@
  * Performance Trends page
  *
  * Loads and displays historical benchmark performance data for VibeSQL Embedded.
- * Shows trends over time for TPC-H, TPC-DS, TPC-C, and Sysbench benchmarks.
+ * Shows trends over time for TPC-H, TPC-DS, TPC-C, Sysbench, and HNSW recall@k
+ * benchmarks.
  */
 
 import './styles/main.css'
@@ -48,6 +49,9 @@ interface TrendDataPoint {
   tps?: number
   latency_us?: number
   workloads?: Record<string, number>
+  recall_fresh?: number
+  recall_degraded?: number
+  recall_compacted?: number
 }
 
 interface BenchmarkTrend {
@@ -68,6 +72,7 @@ interface TrendData {
     tpcds?: BenchmarkTrend
     tpcc?: BenchmarkTrend
     sysbench?: BenchmarkTrend
+    hnsw_recall?: BenchmarkTrend
   }
 }
 
@@ -92,6 +97,18 @@ const COLORS = {
     bg: 'rgba(34, 197, 94, 0.2)', // Green
     border: 'rgba(34, 197, 94, 1)',
   },
+  recallFresh: {
+    bg: 'rgba(59, 130, 246, 0.2)', // Blue
+    border: 'rgba(59, 130, 246, 1)',
+  },
+  recallDegraded: {
+    bg: 'rgba(239, 68, 68, 0.2)', // Red (recall collapse)
+    border: 'rgba(239, 68, 68, 1)',
+  },
+  recallCompacted: {
+    bg: 'rgba(34, 197, 94, 0.2)', // Green (recovery)
+    border: 'rgba(34, 197, 94, 1)',
+  },
 }
 
 // ============================================================================
@@ -111,6 +128,9 @@ function createTimeSeriesChart(
       color: { bg: string; border: string }
     }[]
     higherIsBetter?: boolean
+    // 'time' (ms), 'tps', or 'recall' (fraction in [0, 1]). Controls tooltip
+    // formatting and y-axis bounds. Defaults to 'time'.
+    valueMode?: 'time' | 'tps' | 'recall'
   }
 ): void {
   const canvas = document.getElementById(canvasId) as HTMLCanvasElement
@@ -197,7 +217,8 @@ function createTimeSeriesChart(
           },
         },
         y: {
-          beginAtZero: !config.higherIsBetter,
+          beginAtZero: config.valueMode === 'recall' ? true : !config.higherIsBetter,
+          max: config.valueMode === 'recall' ? 1 : undefined,
           title: {
             display: true,
             text: config.yAxisLabel,
@@ -238,7 +259,10 @@ function createTimeSeriesChart(
             label: (context: ChartTooltipItem) => {
               const value = context.parsed.y
               if (value === null) return `${context.dataset.label}: N/A`
-              if (config.higherIsBetter) {
+              if (config.valueMode === 'recall') {
+                return `${context.dataset.label}: ${value.toFixed(4)}`
+              }
+              if (config.valueMode === 'tps' || config.higherIsBetter) {
                 return `${context.dataset.label}: ${value.toFixed(2)} TPS`
               }
               return `${context.dataset.label}: ${value.toFixed(2)} ms`
@@ -279,6 +303,28 @@ function renderTPCCChart(trend: BenchmarkTrend): void {
     yAxisLabel: 'Transactions per Second (TPS)',
     datasets: [{ key: 'tps', label: 'TPS', color: COLORS.tps }],
     higherIsBetter: true,
+    valueMode: 'tps',
+  })
+}
+
+function renderHnswRecallChart(trend: BenchmarkTrend): void {
+  createTimeSeriesChart('hnsw-recall-chart', trend.data, {
+    yAxisLabel: 'Recall@k (higher is better)',
+    datasets: [
+      { key: 'recall_fresh', label: 'Fresh build', color: COLORS.recallFresh },
+      {
+        key: 'recall_degraded',
+        label: 'Degraded (lazy deletes)',
+        color: COLORS.recallDegraded,
+      },
+      {
+        key: 'recall_compacted',
+        label: 'Compacted',
+        color: COLORS.recallCompacted,
+      },
+    ],
+    higherIsBetter: true,
+    valueMode: 'recall',
   })
 }
 
@@ -440,6 +486,12 @@ async function init(): Promise<void> {
     showNoDataMessage('sysbench-chart', 'No Sysbench trend data available.')
   }
 
+  if (data.benchmarks.hnsw_recall && data.benchmarks.hnsw_recall.data.length > 0) {
+    renderHnswRecallChart(data.benchmarks.hnsw_recall)
+  } else {
+    showNoDataMessage('hnsw-recall-chart', 'No HNSW recall trend data available.')
+  }
+
   // Re-render charts on theme change (watch for dark class toggle)
   const observer = new MutationObserver(mutations => {
     for (const mutation of mutations) {
@@ -456,6 +508,9 @@ async function init(): Promise<void> {
         }
         if (data.benchmarks.sysbench && data.benchmarks.sysbench.data.length > 0) {
           renderSysbenchChart(data.benchmarks.sysbench)
+        }
+        if (data.benchmarks.hnsw_recall && data.benchmarks.hnsw_recall.data.length > 0) {
+          renderHnswRecallChart(data.benchmarks.hnsw_recall)
         }
         break
       }
