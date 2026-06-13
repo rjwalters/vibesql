@@ -2684,4 +2684,42 @@ mod tests {
             assert!(validate_statement(&parse(sql)).is_err(), "{sql} must be rejected");
         }
     }
+
+    #[test]
+    fn raise_trigger_body_is_admitted() {
+        // RAISE() is deterministic (no clock / RNG / session state), so a
+        // RAISE-bearing trigger body must pass the replication volatility
+        // validator and replicate verbatim (#5409). The abort is identical on
+        // every replica.
+        for sql in [
+            "CREATE TRIGGER trg BEFORE UPDATE ON t WHEN NEW.v > 100 \
+             BEGIN SELECT raise(ABORT, 'value too big'); END",
+            "CREATE TRIGGER trg BEFORE INSERT ON t WHEN NEW.v < 0 \
+             BEGIN SELECT raise(FAIL, 'no negatives'); END",
+            "CREATE TRIGGER trg BEFORE DELETE ON t WHEN OLD.v = 0 \
+             BEGIN SELECT raise(ROLLBACK, 'protected'); END",
+            "CREATE TRIGGER trg BEFORE UPDATE ON t WHEN NEW.v = 0 \
+             BEGIN SELECT raise(IGNORE); END",
+            // Message built from a non-volatile expression over NEW is still
+            // deterministic.
+            "CREATE TRIGGER trg BEFORE UPDATE ON t \
+             BEGIN SELECT raise(ABORT, 'bad: ' || NEW.v); END",
+        ] {
+            validate_statement(&parse(sql))
+                .unwrap_or_else(|e| panic!("RAISE trigger body must be admitted: {sql}: {e}"));
+        }
+    }
+
+    #[test]
+    fn raise_message_with_volatile_call_is_rejected() {
+        // A volatile call *inside* the RAISE message must still be caught by
+        // the walker (RAISE itself is non-volatile, but its message subtree is
+        // validated like any other expression).
+        let sql = "CREATE TRIGGER trg BEFORE UPDATE ON t \
+                   BEGIN SELECT raise(ABORT, 'r=' || random()); END";
+        assert!(
+            validate_statement(&parse(sql)).is_err(),
+            "RAISE with a volatile message must be rejected"
+        );
+    }
 }

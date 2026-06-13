@@ -970,6 +970,22 @@ impl ExpressionEvaluator<'_> {
             // COLLATE expression - evaluate inner expression (collation affects string comparison)
             // TODO: Full collation support - for now just evaluate the inner expression
             vibesql_ast::Expression::Collate { expr, .. } => self.eval(expr, row),
+
+            // RAISE() trigger-program error/abort expression (SQLite).
+            // RAISE(IGNORE) is a control-flow signal (skip the current row);
+            // RAISE(ABORT|FAIL|ROLLBACK, msg) aborts with the rendered message.
+            vibesql_ast::Expression::Raise { action, error_message } => match action {
+                vibesql_ast::RaiseAction::Ignore => Err(ExecutorError::RaiseIgnore),
+                _ => {
+                    let message = match error_message {
+                        Some(expr) => crate::evaluator::raise::render_raise_message(
+                            self.eval(expr, row)?,
+                        ),
+                        None => String::new(),
+                    };
+                    Err(ExecutorError::Raise { action: *action, message })
+                }
+            },
         }
     }
 

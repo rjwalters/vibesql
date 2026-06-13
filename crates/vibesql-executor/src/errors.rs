@@ -145,6 +145,25 @@ pub enum ExecutorError {
         to: String,
     },
     ConstraintViolation(String),
+    /// A `RAISE(ABORT|FAIL|ROLLBACK, msg)` expression fired inside a trigger
+    /// body (SQLite RAISE). Carries the conflict-resolution action so the
+    /// trigger / DML / transaction layer can apply the correct rollback scope:
+    /// - `Abort` rolls back the current statement (default),
+    /// - `Fail` stops the statement but keeps its already-applied row changes,
+    /// - `Rollback` rolls back the whole enclosing transaction.
+    ///
+    /// `RAISE(IGNORE)` is *not* represented here: it is a control-flow signal
+    /// (abandon the current row, no error) and uses [`ExecutorError::RaiseIgnore`].
+    Raise {
+        action: vibesql_ast::RaiseAction,
+        message: String,
+    },
+    /// A `RAISE(IGNORE)` expression fired inside a trigger body. This is a
+    /// control-flow signal, not a user-visible error: the enclosing trigger /
+    /// row-processing loop catches it, abandons the current row, and continues
+    /// without reporting an error. If it ever escapes to a user (RAISE(IGNORE)
+    /// outside any trigger), it is surfaced as a benign no-op-style message.
+    RaiseIgnore,
     /// FOREIGN KEY references a parent column set that is not covered by a
     /// PRIMARY KEY, UNIQUE constraint, or non-partial UNIQUE INDEX in the
     /// parent table (SQLite-compatible error). Format:
@@ -749,6 +768,16 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::ConstraintViolation(msg) => {
                 write!(f, "{}", vibe_msg!("executor-constraint-violation", message = msg.as_str()))
+            }
+            ExecutorError::Raise { message, .. } => {
+                // SQLite reports the RAISE() message verbatim (error code 19,
+                // SQLITE_CONSTRAINT). e.g. `Runtime error: value too big`.
+                write!(f, "{}", message)
+            }
+            ExecutorError::RaiseIgnore => {
+                // Should normally be intercepted before reaching a user. If it
+                // escapes (RAISE(IGNORE) outside a trigger), describe it plainly.
+                write!(f, "RAISE(IGNORE) used outside of a trigger body")
             }
             ExecutorError::ForeignKeyMismatch { child, parent } => {
                 // SQLite-compatible error format from fkey.c::sqlite3FkLocateIndex.

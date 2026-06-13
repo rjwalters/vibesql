@@ -148,6 +148,12 @@ fn collect_window_functions_from_expression(
         Expression::Collate { expr, .. } => {
             collect_window_functions_from_expression(expr, window_functions);
         }
+
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                collect_window_functions_from_expression(msg, window_functions);
+            }
+        }
     }
 }
 

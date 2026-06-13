@@ -220,6 +220,11 @@ impl ExpressionHasher {
                 Self::is_deterministic_impl(expr, allow_column_refs)
             }
 
+            // RAISE() aborts evaluation by raising an error. It must never be
+            // cached or used as an index expression, so treat it as
+            // non-deterministic.
+            vibesql_ast::Expression::Raise { .. } => false,
+
             // MATCH AGAINST is deterministic if the search term is constant
             vibesql_ast::Expression::MatchAgainst { .. } => {
                 // MATCH AGAINST always operates on columns, which are non-deterministic
@@ -473,6 +478,14 @@ impl ExpressionHasher {
                 "COLLATE".hash(hasher);
                 Self::hash_expression(expr, hasher);
                 collation.hash(hasher);
+            }
+
+            vibesql_ast::Expression::Raise { action, error_message } => {
+                "RAISE".hash(hasher);
+                std::mem::discriminant(action).hash(hasher);
+                if let Some(msg) = error_message {
+                    Self::hash_expression(msg, hasher);
+                }
             }
         }
     }

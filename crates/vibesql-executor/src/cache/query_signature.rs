@@ -616,6 +616,14 @@ impl QuerySignature {
                 Self::hash_expression(expr, hasher);
                 collation.hash(hasher);
             }
+
+            Expression::Raise { action, error_message } => {
+                "RAISE".hash(hasher);
+                std::mem::discriminant(action).hash(hasher);
+                if let Some(msg) = error_message {
+                    Self::hash_expression(msg, hasher);
+                }
+            }
         }
     }
 

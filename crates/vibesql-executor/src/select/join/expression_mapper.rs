@@ -312,6 +312,12 @@ impl ExpressionMapper {
             Expression::Collate { expr, .. } => {
                 self.walk_expression(expr, tables, columns, resolvable);
             }
+
+            Expression::Raise { error_message, .. } => {
+                if let Some(msg) = error_message {
+                    self.walk_expression(msg, tables, columns, resolvable);
+                }
+            }
         }
     }
 }

@@ -114,6 +114,24 @@ impl<'a> TriggerContext<'a> {
     }
 }
 
+/// Outcome of firing a trigger (or set of triggers) for a row.
+///
+/// `RAISE(IGNORE)` inside a trigger body asks SQLite to abandon the current
+/// row's DML operation without raising an error and continue with the rest of
+/// the statement. The trigger firing functions translate the internal
+/// [`ExecutorError::RaiseIgnore`] signal into [`TriggerOutcome::SkipRow`] so the
+/// DML caller can drop that row; every other (real) error still propagates via
+/// `Err`. `RAISE(ABORT|FAIL|ROLLBACK, ..)` are *not* represented here — they are
+/// genuine aborts and propagate as [`ExecutorError::Raise`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerOutcome {
+    /// Triggers completed normally; the DML operation should proceed.
+    Proceed,
+    /// A `RAISE(IGNORE)` fired; the current row should be skipped, and the
+    /// surrounding statement should continue with the next row.
+    SkipRow,
+}
+
 /// Helper struct for trigger firing (execution during DML operations)
 pub struct TriggerFirer;
 
@@ -198,7 +216,7 @@ impl TriggerFirer {
         trigger: &TriggerDefinition,
         old_row: Option<&Row>,
         new_row: Option<&Row>,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // 1. Evaluate WHEN condition (if present)
         if let Some(when_expr) = &trigger.when_condition {
             let condition_result = Self::evaluate_when_condition(
@@ -211,14 +229,12 @@ impl TriggerFirer {
 
             // Skip trigger execution if WHEN condition is false
             if !condition_result {
-                return Ok(());
+                return Ok(TriggerOutcome::Proceed);
             }
         }
 
         // 2. Execute trigger action
-        Self::execute_trigger_action(db, trigger, old_row, new_row)?;
-
-        Ok(())
+        Self::execute_trigger_action(db, trigger, old_row, new_row)
     }
 
     /// Evaluate WHEN condition for a trigger
@@ -286,7 +302,7 @@ impl TriggerFirer {
         trigger: &TriggerDefinition,
         old_row: Option<&Row>,
         new_row: Option<&Row>,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Extract SQL from trigger action
         let sql = match &trigger.triggered_action {
             vibesql_ast::TriggerAction::RawSql(sql) => sql.clone(),
@@ -309,12 +325,19 @@ impl TriggerFirer {
         // Create trigger context for OLD/NEW pseudo-variable resolution
         let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
 
-        // Execute each statement in the trigger body with trigger context
+        // Execute each statement in the trigger body with trigger context.
+        // A RAISE(IGNORE) inside any statement abandons the rest of this
+        // trigger's action for the current row and asks the caller to skip the
+        // row (SQLite semantics), without raising a user-visible error.
         for statement in statements {
-            Self::execute_statement(db, &statement, &trigger_context)?;
+            match Self::execute_statement(db, &statement, &trigger_context) {
+                Ok(()) => {}
+                Err(ExecutorError::RaiseIgnore) => return Ok(TriggerOutcome::SkipRow),
+                Err(e) => return Err(e),
+            }
         }
 
-        Ok(())
+        Ok(TriggerOutcome::Proceed)
     }
 
     /// Build a pseudo TableSchema from a view definition for trigger OLD/NEW column resolution
@@ -463,7 +486,7 @@ impl TriggerFirer {
         event: TriggerEvent,
         old_row: Option<&Row>,
         new_row: Option<&Row>,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
@@ -486,11 +509,16 @@ impl TriggerFirer {
                     }
                 }
 
-                Self::execute_trigger(db, &trigger, old_row, new_row)?;
+                // A RAISE(IGNORE) in any trigger abandons the current row.
+                if Self::execute_trigger(db, &trigger, old_row, new_row)?
+                    == TriggerOutcome::SkipRow
+                {
+                    return Ok(TriggerOutcome::SkipRow);
+                }
             }
         }
 
-        Ok(())
+        Ok(TriggerOutcome::Proceed)
     }
 
     /// Execute all BEFORE STATEMENT-level triggers for an operation
@@ -506,7 +534,7 @@ impl TriggerFirer {
         db: &mut Database,
         table_name: &str,
         event: TriggerEvent,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
@@ -516,11 +544,13 @@ impl TriggerFirer {
             // Only execute STATEMENT-level triggers in this method
             if trigger.granularity == TriggerGranularity::Statement {
                 // Statement-level triggers don't have OLD/NEW row access
-                Self::execute_trigger(db, &trigger, None, None)?;
+                if Self::execute_trigger(db, &trigger, None, None)? == TriggerOutcome::SkipRow {
+                    return Ok(TriggerOutcome::SkipRow);
+                }
             }
         }
 
-        Ok(())
+        Ok(TriggerOutcome::Proceed)
     }
 
     /// Execute all AFTER ROW-level triggers for an operation
@@ -540,7 +570,7 @@ impl TriggerFirer {
         event: TriggerEvent,
         old_row: Option<&Row>,
         new_row: Option<&Row>,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
@@ -563,11 +593,15 @@ impl TriggerFirer {
                     }
                 }
 
-                Self::execute_trigger(db, &trigger, old_row, new_row)?;
+                if Self::execute_trigger(db, &trigger, old_row, new_row)?
+                    == TriggerOutcome::SkipRow
+                {
+                    return Ok(TriggerOutcome::SkipRow);
+                }
             }
         }
 
-        Ok(())
+        Ok(TriggerOutcome::Proceed)
     }
 
     /// Execute all AFTER STATEMENT-level triggers for an operation
@@ -583,7 +617,7 @@ impl TriggerFirer {
         db: &mut Database,
         table_name: &str,
         event: TriggerEvent,
-    ) -> Result<(), ExecutorError> {
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
@@ -593,10 +627,12 @@ impl TriggerFirer {
             // Only execute STATEMENT-level triggers in this method
             if trigger.granularity == TriggerGranularity::Statement {
                 // Statement-level triggers don't have OLD/NEW row access
-                Self::execute_trigger(db, &trigger, None, None)?;
+                if Self::execute_trigger(db, &trigger, None, None)? == TriggerOutcome::SkipRow {
+                    return Ok(TriggerOutcome::SkipRow);
+                }
             }
         }
 
-        Ok(())
+        Ok(TriggerOutcome::Proceed)
     }
 }

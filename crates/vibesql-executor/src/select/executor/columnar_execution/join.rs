@@ -687,6 +687,9 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
             exprs.iter().any(expression_has_rowid)
         }
         vibesql_ast::Expression::Collate { expr, .. } => expression_has_rowid(expr),
+        vibesql_ast::Expression::Raise { error_message, .. } => {
+            error_message.as_ref().is_some_and(|msg| expression_has_rowid(msg))
+        }
         // These variants don't contain column references that could be ROWID
         vibesql_ast::Expression::Literal(_)
         | vibesql_ast::Expression::Placeholder(_)

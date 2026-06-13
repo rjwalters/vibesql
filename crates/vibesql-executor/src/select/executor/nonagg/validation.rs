@@ -694,5 +694,12 @@ fn validate_expression_column_refs(
         Expression::Collate { expr, .. } => {
             validate_expression_column_refs(expr, schema, outer_schema, allowed_aliases)
         }
+
+        Expression::Raise { error_message, .. } => {
+            if let Some(msg) = error_message {
+                validate_expression_column_refs(msg, schema, outer_schema, allowed_aliases)?;
+            }
+            Ok(())
+        }
     }
 }

@@ -136,6 +136,9 @@ fn walk_first<T>(expr: &Expression, f: &impl Fn(&Expression) -> WalkAction<T>) -
         Expression::MatchAgainst { search_modifier, .. } => walk_first(search_modifier, f),
         Expression::RowValueConstructor(children) => children.iter().find_map(|c| walk_first(c, f)),
         Expression::Collate { expr, .. } => walk_first(expr, f),
+        Expression::Raise { error_message, .. } => {
+            error_message.as_deref().and_then(|msg| walk_first(msg, f))
+        }
         // Leaf-like or scope-closing expressions. ScalarSubquery / Exists
         // intentionally terminate the walk — most callers want subqueries
         // treated as their own scope. Callers that need to recurse must

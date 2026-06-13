@@ -1256,8 +1256,39 @@ impl CombinedExpressionEvaluator<'_> {
                 }
             }
 
+            // RAISE() trigger-program error/abort expression (SQLite).
+            vibesql_ast::Expression::Raise { action, error_message } => {
+                self.eval_raise(*action, error_message.as_deref(), row)
+            }
+
             // Unsupported expressions
             _ => Err(ExecutorError::UnsupportedExpression(format!("{:?}", expr))),
+        }
+    }
+
+    /// Evaluate a `RAISE(...)` trigger-program expression.
+    ///
+    /// `RAISE(IGNORE)` yields [`ExecutorError::RaiseIgnore`] (a control-flow
+    /// signal the trigger loop intercepts to skip the current row).
+    /// `RAISE(ABORT|FAIL|ROLLBACK, msg)` evaluates the message expression and
+    /// yields [`ExecutorError::Raise`] carrying the action and rendered message.
+    fn eval_raise(
+        &self,
+        action: vibesql_ast::RaiseAction,
+        error_message: Option<&vibesql_ast::Expression>,
+        row: &vibesql_storage::Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        match action {
+            vibesql_ast::RaiseAction::Ignore => Err(ExecutorError::RaiseIgnore),
+            _ => {
+                let message = match error_message {
+                    Some(expr) => crate::evaluator::raise::render_raise_message(
+                        self.eval(expr, row)?,
+                    ),
+                    None => String::new(),
+                };
+                Err(ExecutorError::Raise { action, message })
+            }
         }
     }
 

@@ -365,6 +365,52 @@ pub enum Expression {
         expr: Box<Expression>,
         collation: String,
     },
+
+    /// RAISE() trigger-program error/abort expression (SQLite).
+    ///
+    /// Only meaningful inside a trigger body, where it aborts the firing
+    /// statement / transaction (or abandons the current row) with the given
+    /// message. SQLite parses it only within a trigger-program and reports
+    /// `RAISE() may only be used within a trigger-program` otherwise.
+    ///
+    /// Syntax:
+    /// - `RAISE(ABORT, error-message)`
+    /// - `RAISE(FAIL, error-message)`
+    /// - `RAISE(ROLLBACK, error-message)`
+    /// - `RAISE(IGNORE)` (no message)
+    ///
+    /// The error message may be any expression (commonly a string literal or
+    /// `'msg: ' || NEW.col`). It is `None` for `RAISE(IGNORE)` and always
+    /// `Some(..)` for the other three actions.
+    Raise {
+        action: RaiseAction,
+        error_message: Option<Box<Expression>>,
+    },
+}
+
+/// The conflict-resolution action of a `RAISE()` expression.
+///
+/// Mirrors SQLite's RAISE behavior:
+/// - `Ignore` abandons just the current row's processing and continues
+///   (no error is reported).
+/// - `Abort` rolls back the changes made by the current statement, but
+///   preserves earlier statements in the transaction.
+/// - `Fail` stops the current statement without undoing changes it already
+///   made to earlier rows in that statement.
+/// - `Rollback` rolls back the entire enclosing transaction.
+///
+/// `Abort`, `Fail`, and `Rollback` report the error message (SQLite error
+/// code 19, `SQLITE_CONSTRAINT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RaiseAction {
+    /// RAISE(IGNORE) — abandon the current row, continue, no error.
+    Ignore,
+    /// RAISE(ABORT, msg) — roll back the current statement.
+    Abort,
+    /// RAISE(FAIL, msg) — stop the statement, keep prior in-statement changes.
+    Fail,
+    /// RAISE(ROLLBACK, msg) — roll back the whole transaction.
+    Rollback,
 }
 
 /// Full-text search mode specification

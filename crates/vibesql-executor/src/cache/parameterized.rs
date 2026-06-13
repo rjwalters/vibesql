@@ -361,6 +361,12 @@ impl LiteralExtractor {
                 Self::extract_from_expression(expr, literals);
             }
 
+            Expression::Raise { error_message, .. } => {
+                if let Some(msg) = error_message {
+                    Self::extract_from_expression(msg, literals);
+                }
+            }
+
             Expression::UnaryOp { expr, .. } => {
                 Self::extract_from_expression(expr, literals);
             }

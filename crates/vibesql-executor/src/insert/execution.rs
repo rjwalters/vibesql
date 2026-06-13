@@ -1129,13 +1129,18 @@ fn execute_insert_internal(
             // Fire BEFORE INSERT triggers only if triggers exist
             let row_to_insert = make_row((full_row_values.clone(), explicit_rowid));
             if has_insert_triggers {
-                crate::TriggerFirer::execute_before_triggers(
+                // RAISE(IGNORE) in a BEFORE INSERT trigger abandons this row:
+                // skip the insert and continue with the next row (SQLite).
+                if crate::TriggerFirer::execute_before_triggers(
                     db,
                     table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&row_to_insert),
-                )?;
+                )? == crate::trigger_execution::TriggerOutcome::SkipRow
+                {
+                    continue;
+                }
             }
 
             // Get physical row count before insert to enable rollback and rowid calculation
