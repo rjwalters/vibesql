@@ -545,15 +545,36 @@ fn execute_insert_internal(
                     }
                 }
                 _ => {
-                    // For complex expressions (CASE, functions, subqueries, etc.),
-                    // evaluate them to get the resulting value
-                    // Create a dummy schema/row for evaluation since rowid expressions
-                    // don't reference columns from a current row
+                    // For complex expressions (CASE, functions, subqueries, trigger
+                    // pseudo-variables, procedural variables, etc.), evaluate them to get
+                    // the resulting value.
+                    //
+                    // When inserting into an INTEGER PRIMARY KEY column, the column's value
+                    // is treated as the rowid and routed through this expression-evaluation
+                    // path. If the INSERT runs inside a trigger body, the expression may
+                    // reference NEW.x / OLD.x pseudo-variables (e.g.
+                    // `INSERT INTO audit(id, ...) VALUES (NEW.id, ...)` where audit.id is an
+                    // INTEGER PRIMARY KEY). We must thread the trigger / procedural context
+                    // into the evaluator so those references resolve, matching the non-IPK
+                    // column path in `evaluate_insert_expression_with_trigger_context`
+                    // (issue #5397).
+                    //
+                    // rowid expressions don't reference columns from a current row, so a
+                    // dummy row is sufficient.
                     let dummy_schema =
                         vibesql_catalog::TableSchema::new("__rowid_expr__".to_string(), vec![]);
                     let dummy_row = vibesql_storage::Row::new(vec![]);
-                    let mut evaluator =
-                        crate::ExpressionEvaluator::with_database(&dummy_schema, db);
+                    let mut evaluator = if let Some(ctx) = trigger_context {
+                        crate::ExpressionEvaluator::with_trigger_context(
+                            ctx.table_schema,
+                            db,
+                            ctx,
+                        )
+                    } else if let Some(ctx) = procedural_context {
+                        crate::ExpressionEvaluator::with_procedural_context(&dummy_schema, db, ctx)
+                    } else {
+                        crate::ExpressionEvaluator::with_database(&dummy_schema, db)
+                    };
                     if let Some(ref ctes) = cte_results {
                         evaluator = evaluator.with_cte_context(ctes);
                     }
