@@ -881,6 +881,194 @@ async fn replicated_txn_savepoint_survivors_replicate_to_followers() {
 }
 
 // ---------------------------------------------------------------------------
+// Session-level: EXECUTE of a prepared statement inside a transaction (#5414)
+// ---------------------------------------------------------------------------
+
+/// A PREPARE'd INSERT EXECUTE'd inside an open replicated transaction buffers
+/// into the batch exactly like a simple-query write: the read-your-own-writes
+/// path sees it mid-transaction, nothing is proposed until COMMIT, and the
+/// whole transaction lands as a **single** consensus entry.
+#[tokio::test]
+async fn replicated_txn_prepared_execute_buffers_into_batch() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE users (id INT, name VARCHAR(100))").await.unwrap();
+    session.execute("PREPARE ins FROM 'INSERT INTO users VALUES (?, ?)'").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
+    session.execute("BEGIN").await.unwrap();
+    // A prepared EXECUTE inside the txn acks optimistically (rows = 0) and
+    // buffers like a plain INSERT — it is not refused.
+    let r = session.execute("EXECUTE ins (1, 'Alice')").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 0 }), "{r:?}");
+    let r = session.execute("EXECUTE ins USING 2, 'Bob'").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 0 }), "{r:?}");
+
+    // Nothing applied yet: the buffer is not proposed until COMMIT.
+    assert_eq!(handles[0].node().last_applied(), applied_before, "buffer must not apply early");
+
+    // Read-your-own-writes: the buffered prepared INSERTs are visible mid-txn,
+    // with the quoted string preserved (no quote-escaping breakage).
+    let rows = select_rows(session.execute("SELECT id, name FROM users ORDER BY id").await.unwrap());
+    assert_eq!(rows.len(), 2, "read-your-own-writes: buffered prepared INSERTs visible");
+    assert_eq!(rows[1].values[1].to_string(), "Bob");
+
+    session.execute("COMMIT").await.unwrap();
+    // The whole transaction — both prepared writes — committed as one entry.
+    assert_eq!(
+        handles[0].node().last_applied(),
+        applied_before + 1,
+        "the transaction must be a single log entry"
+    );
+    let rows = handles[0].node().query("SELECT id, name FROM users ORDER BY id").unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1][1].to_string(), "Bob");
+}
+
+/// ROLLBACK discards a prepared EXECUTE buffered inside the transaction: no
+/// log index is consumed and the prepared write never lands. The named
+/// statement survives (PREPARE is session-local), so a later autocommit
+/// EXECUTE still works.
+#[tokio::test]
+async fn replicated_txn_prepared_execute_rolled_back_discards_write() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT)").await.unwrap();
+    session.execute("PREPARE ins FROM 'INSERT INTO t VALUES (?)'").await.unwrap();
+    let applied_before = handles[0].node().last_applied();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("EXECUTE ins (1)").await.unwrap();
+    assert!(matches!(session.execute("ROLLBACK").await.unwrap(), ExecutionResult::Rollback));
+
+    // No entry consumed, no row landed.
+    assert_eq!(handles[0].node().last_applied(), applied_before, "rollback must not propose");
+    let rows = select_rows(session.execute("SELECT id FROM t").await.unwrap());
+    assert!(rows.is_empty(), "rolled-back prepared write must not be visible");
+
+    // The named statement survived; an autocommit EXECUTE proposes immediately.
+    let r = session.execute("EXECUTE ins (2)").await.unwrap();
+    assert!(matches!(r, ExecutionResult::Insert { rows_affected: 1 }), "{r:?}");
+    assert_eq!(handles[0].node().last_applied(), applied_before + 1);
+}
+
+/// A prepared INSERT of a volatile value (`random()`) EXECUTE'd inside a
+/// transaction freezes once at buffer time: the mid-transaction read and the
+/// committed row carry the same value — same freeze-at-buffer contract as a
+/// simple-query volatile write.
+#[tokio::test]
+async fn replicated_txn_prepared_execute_volatile_value_is_frozen() {
+    let (handles, _dir) = boot_cluster(1).await;
+    wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[0]);
+
+    session.execute("CREATE TABLE t (id INT, r INT)").await.unwrap();
+    // The volatile call lives in the prepared text; only `id` is a parameter.
+    session.execute("PREPARE ins FROM 'INSERT INTO t VALUES (?, abs(random()))'").await.unwrap();
+
+    session.execute("BEGIN").await.unwrap();
+    session.execute("EXECUTE ins (1)").await.unwrap();
+    let rows = select_rows(session.execute("SELECT r FROM t WHERE id = 1").await.unwrap());
+    assert_eq!(rows.len(), 1);
+    let mid_txn_value = rows[0].values[0].clone();
+
+    session.execute("COMMIT").await.unwrap();
+    let rows = select_rows(session.execute("SELECT r FROM t WHERE id = 1").await.unwrap());
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].values[0], mid_txn_value,
+        "a prepared volatile write must freeze once: committed value == mid-txn value"
+    );
+}
+
+/// A prepared EXECUTE buffered inside a transaction replicates atomically with
+/// the rest of the batch: after COMMIT on the leader, every follower converges
+/// to **all** of the transaction's rows (the prepared write is part of the one
+/// all-or-nothing entry).
+#[tokio::test]
+async fn replicated_txn_prepared_execute_replicates_atomically_to_followers() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+    let mut session = replicated_session(&handles[leader]);
+
+    session.execute("CREATE TABLE kv (id INT, v INT)").await.unwrap();
+    session.execute("PREPARE ins FROM 'INSERT INTO kv VALUES (?, ?)'").await.unwrap();
+    session.execute("BEGIN").await.unwrap();
+    // Mix a prepared EXECUTE with a simple-query write in the same batch.
+    session.execute("EXECUTE ins (1, 10)").await.unwrap();
+    session.execute("INSERT INTO kv VALUES (2, 20)").await.unwrap();
+    session.execute("EXECUTE ins (3, 30)").await.unwrap();
+    session.execute("COMMIT").await.unwrap();
+
+    // Every follower converges to all three rows (never a partial 1 or 2).
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    for (i, h) in handles.iter().enumerate() {
+        if i == leader {
+            continue;
+        }
+        loop {
+            let count = h
+                .node()
+                .query("SELECT COUNT(*) FROM kv")
+                .ok()
+                .and_then(|r| r.first().and_then(|row| row.first()).map(ToString::to_string));
+            if count.as_deref() == Some("3") {
+                break;
+            }
+            assert!(
+                matches!(count.as_deref(), None | Some("0") | Some("3")),
+                "follower {i} saw a non-atomic count: {count:?}"
+            );
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "follower {i} did not converge to 3 rows (saw {count:?})"
+            );
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+/// A prepared EXECUTE buffered inside a transaction on a follower fails fast
+/// with SQLSTATE 25006 (the leader-redirect contract): freezing a buffered
+/// write is leader-only, so the prepared path is not a bypass. The
+/// transaction stays open (nothing buffered) and ROLLBACK cleanly closes it.
+#[tokio::test]
+async fn replicated_txn_prepared_execute_on_follower_redirects() {
+    let (handles, _dir) = boot_cluster(3).await;
+    let leader = wait_for_leader(&handles).await;
+
+    replicated_session(&handles[leader]).execute("CREATE TABLE t (id INT)").await.unwrap();
+
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let follower = loop {
+        if let Some(i) = handles
+            .iter()
+            .position(|h| h.role() == Role::Follower && h.node().current_leader().is_some())
+        {
+            break i;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
+        tokio::time::sleep(POLL_INTERVAL).await;
+    };
+
+    let mut session = replicated_session(&handles[follower]);
+    session.execute("PREPARE ins FROM 'INSERT INTO t VALUES (?)'").await.unwrap();
+
+    // BEGIN succeeds (session-local), but the buffered prepared write fails
+    // fast: freezing is leader-only, so the follower surfaces 25006.
+    session.execute("BEGIN").await.unwrap();
+    let err = session.execute("EXECUTE ins (1)").await.unwrap_err();
+    assert_eq!(sql_error(&err).code, "25006", "buffered prepared write must redirect like a write");
+
+    // The transaction is still open (nothing buffered); ROLLBACK closes it.
+    assert!(matches!(session.execute("ROLLBACK").await.unwrap(), ExecutionResult::Rollback));
+}
+
+// ---------------------------------------------------------------------------
 // Wire-level: full server in replicated mode, driven by tokio-postgres
 // ---------------------------------------------------------------------------
 
