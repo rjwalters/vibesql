@@ -350,12 +350,18 @@ impl TriggerFirer {
 
     /// Parse trigger SQL into statements
     ///
+    /// Public so that validation layers (e.g. the Raft replication
+    /// freeze pass in `vibesql-consensus::freeze`, #5381) can inspect a
+    /// trigger body with **exactly** the parsing this executor will use
+    /// when the trigger fires — validating against a different parse
+    /// would silently let nondeterminism through.
+    ///
     /// # Arguments
     /// * `sql` - Raw SQL string from trigger action
     ///
     /// # Returns
     /// Vector of parsed statements
-    fn parse_trigger_sql(sql: &str) -> Result<Vec<vibesql_ast::Statement>, ExecutorError> {
+    pub fn parse_trigger_sql(sql: &str) -> Result<Vec<vibesql_ast::Statement>, ExecutorError> {
         // Strip BEGIN/END wrapper if present
         let sql = sql.trim();
         let sql = if sql.to_uppercase().starts_with("BEGIN") {

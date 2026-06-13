@@ -81,6 +81,11 @@ pub use grant::GrantExecutor;
 pub use index_ddl::{
     AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
 };
+// `evaluate_default_expression` is re-exported so the Raft replication
+// freeze pass (`vibesql-consensus::freeze`, #5381) can evaluate a
+// non-deterministic column DEFAULT at propose time with **exactly** the
+// semantics the apply-time executor would use when the DEFAULT fires.
+pub use insert::defaults::evaluate_default_expression;
 pub use insert::{InsertExecutor, InsertOutcome};
 pub use introspection::IntrospectionExecutor;
 pub use memory::QueryArena;

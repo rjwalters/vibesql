@@ -22,7 +22,6 @@ use vibesql_types::SqlValue;
 
 use crate::{
     backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Snapshot},
-    freeze,
     state_machine::{ApplyOutcome, TxnEntry, VibesqlStateMachine},
 };
 
@@ -95,13 +94,20 @@ where
         statements: &[&str],
     ) -> Result<(LogIndex, ApplyOutcome)> {
         let mut frozen = Vec::with_capacity(statements.len());
+        let mut frozen_defaults = Vec::with_capacity(statements.len());
         for sql in statements {
-            frozen.push(freeze::freeze_statement(sql).map_err(|e| {
+            // Freeze positional volatile sites and — against this
+            // node's applied schema (#5381) — the volatile column
+            // DEFAULTs the statement fires.
+            let (values, defaults) = self.machine.freeze_for_propose(sql).map_err(|e| {
                 ConsensusError::Backend(format!("statement cannot be replicated: {e}"))
-            })?);
+            })?;
+            frozen.push(values);
+            frozen_defaults.push(defaults);
         }
         let entry =
-            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen);
+            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen)
+                .with_frozen_defaults(frozen_defaults);
         let index = self.backend.propose(entry).await?;
         let outcome = self.catch_up_to(index).await?;
         Ok((index, outcome))
@@ -530,5 +536,310 @@ mod tests {
         assert_eq!(rows[1][1].to_string(), "drei");
 
         assert_eq!(db.machine().last_applied(), db.backend().last_index());
+    }
+
+    /// #5381 acceptance: a multi-row INSERT that omits a
+    /// `DEFAULT CURRENT_TIMESTAMP` column freezes one drawn value **per
+    /// row** at propose time (matching the executor's per-row
+    /// `apply_default_values`); the logged entry carries those values,
+    /// the applied rows equal them, and a second machine replaying the
+    /// identical log converges exactly — the determinism proof that
+    /// apply never re-read the clock.
+    #[tokio::test]
+    async fn multi_row_volatile_default_freezes_per_row_and_converges() {
+        let db = replicated();
+        db.execute_replicated(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, \
+             ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+
+        // Three rows, column omitted: the DEFAULT fires for each.
+        let (index, outcome) = db
+            .execute_replicated("INSERT INTO events (id) VALUES (1), (2), (3)")
+            .await
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 3 });
+
+        let entry = db.backend().read_committed(index).await.unwrap();
+        assert_eq!(
+            entry.frozen_defaults.len(),
+            1,
+            "the entry carries one statement's frozen DEFAULT list"
+        );
+        assert_eq!(
+            entry.frozen_defaults[0].len(),
+            3,
+            "one frozen CURRENT_TIMESTAMP value per firing row"
+        );
+
+        // The applied rows equal the proposer-frozen values (apply did
+        // not re-evaluate the clock).
+        let rows = db.query("SELECT ts FROM events ORDER BY id").unwrap();
+        for (got, frozen) in rows.iter().zip(&entry.frozen_defaults[0]) {
+            assert_eq!(got[0], SqlValue::from(frozen.clone()));
+        }
+
+        // A second machine replaying the same committed log converges
+        // exactly — every replica stamps the proposer's clock, not its
+        // own.
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, ts FROM events ORDER BY id").unwrap(),
+            db.query("SELECT id, ts FROM events ORDER BY id").unwrap(),
+            "replicas must converge despite the volatile DEFAULT"
+        );
+    }
+
+    /// #5381: an explicit-column INSERT that supplies `DEFAULT` (or
+    /// `NULL`, which VibeSQL coerces to the DEFAULT) for a volatile
+    /// column freezes the value, while an explicitly supplied literal is
+    /// left untouched (its DEFAULT never fires).
+    #[tokio::test]
+    async fn explicit_default_and_null_freeze_supplied_literal_does_not() {
+        let db = replicated();
+        db.execute_replicated(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, \
+             ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+
+        // row 1: explicit DEFAULT keyword fires; row 2: explicit NULL
+        // fires; row 3: explicit literal does not.
+        let (index, outcome) = db
+            .execute_replicated(
+                "INSERT INTO events (id, ts) VALUES \
+                 (1, DEFAULT), (2, NULL), (3, '2020-01-01 00:00:00')",
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 3 });
+
+        let entry = db.backend().read_committed(index).await.unwrap();
+        assert_eq!(
+            entry.frozen_defaults[0].len(),
+            2,
+            "only the DEFAULT and NULL cells fire; the supplied literal does not"
+        );
+        // The supplied literal is preserved verbatim (not overwritten by
+        // a frozen DEFAULT value).
+        let supplied = db.query("SELECT ts FROM events WHERE id = 3").unwrap();
+        assert_eq!(supplied[0][0].to_string(), "2020-01-01 00:00:00");
+        for frozen in &entry.frozen_defaults[0] {
+            assert_ne!(
+                supplied[0][0],
+                SqlValue::from(frozen.clone()),
+                "the explicitly-supplied literal must not equal a frozen DEFAULT value"
+            );
+        }
+
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, ts FROM events ORDER BY id").unwrap(),
+            db.query("SELECT id, ts FROM events ORDER BY id").unwrap()
+        );
+    }
+
+    /// #5381: `UPDATE … SET col = DEFAULT` for a volatile-DEFAULT column
+    /// freezes one value at propose time and converges on a second
+    /// machine.
+    #[tokio::test]
+    async fn update_set_default_freezes_and_converges() {
+        let db = replicated();
+        db.execute_replicated(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, \
+             ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+        db.execute_replicated("INSERT INTO events VALUES (1, '2000-01-01 00:00:00')")
+            .await
+            .unwrap();
+
+        let (index, outcome) =
+            db.execute_replicated("UPDATE events SET ts = DEFAULT WHERE id = 1").await.unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+
+        let entry = db.backend().read_committed(index).await.unwrap();
+        assert_eq!(entry.frozen_defaults[0].len(), 1, "the SET = DEFAULT site freezes one value");
+        assert_eq!(
+            db.query("SELECT ts FROM events WHERE id = 1").unwrap(),
+            vec![vec![SqlValue::from(entry.frozen_defaults[0][0].clone())]]
+        );
+
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT id, ts FROM events ORDER BY id").unwrap(),
+            db.query("SELECT id, ts FROM events ORDER BY id").unwrap()
+        );
+    }
+
+    /// #5381: `INSERT … SELECT` into a table with a volatile DEFAULT
+    /// cannot be frozen (row count / NULL-ness not statically known) and
+    /// is rejected at propose before consuming a log index.
+    #[tokio::test]
+    async fn insert_select_into_volatile_default_table_is_rejected_at_propose() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE src (id INTEGER PRIMARY KEY)").await.unwrap();
+        db.execute_replicated(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, \
+             ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+        let before = db.backend().last_index();
+        let err = db
+            .execute_replicated("INSERT INTO events (id) SELECT id FROM src")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ConsensusError::Backend(_)), "got: {err:?}");
+        assert_eq!(db.backend().last_index(), before, "no log index may be consumed");
+    }
+
+    /// #5381 defense-in-depth (the #5377 behavior, preserved): an entry
+    /// that fires a volatile DEFAULT but carries **no** frozen values —
+    /// e.g. proposed by pre-#5381 code via `TxnEntry::single`, or around
+    /// the freeze pass — is rejected deterministically at apply on every
+    /// replica.
+    #[tokio::test]
+    async fn old_entry_firing_volatile_default_is_rejected_at_apply() {
+        let a = VibesqlStateMachine::new();
+        let b = VibesqlStateMachine::new();
+        let ddl = TxnEntry::single(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        );
+        a.apply(1, &ddl).unwrap();
+        b.apply(1, &ddl).unwrap();
+
+        // A bare entry (no frozen_defaults) firing the DEFAULT.
+        let entry = TxnEntry::single("INSERT INTO events (id) VALUES (1)");
+        let outcome_a = a.apply(2, &entry).unwrap();
+        let outcome_b = b.apply(2, &entry).unwrap();
+        assert!(
+            matches!(&outcome_a, ApplyOutcome::Rejected { reason } if reason.contains("DEFAULT")),
+            "an unfrozen volatile DEFAULT must be rejected, got: {outcome_a:?}"
+        );
+        assert_eq!(outcome_a, outcome_b, "rejection must be identical on every replica");
+        assert!(a.query("SELECT * FROM events").unwrap().is_empty(), "nothing may have applied");
+    }
+
+    /// #5381: a `CREATE TRIGGER` whose body contains a volatile call is
+    /// rejected at propose — it could never be frozen because the body
+    /// re-executes per firing row at apply time.
+    #[tokio::test]
+    async fn volatile_bodied_create_trigger_is_rejected_at_propose() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER)").await.unwrap();
+        db.execute_replicated("CREATE TABLE log (id INTEGER PRIMARY KEY, r INTEGER)").await.unwrap();
+        let before = db.backend().last_index();
+        let err = db
+            .execute_replicated(
+                "CREATE TRIGGER trg AFTER INSERT ON t \
+                 BEGIN INSERT INTO log VALUES (NEW.id, random()); END",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ConsensusError::Backend(_)), "got: {err:?}");
+        assert_eq!(db.backend().last_index(), before, "rejected trigger consumes no log index");
+    }
+
+    /// #5381: a non-volatile `CREATE TRIGGER` is admitted, and when its
+    /// triggering INSERT replicates, the body fires deterministically —
+    /// the audit row converges on a second machine (insert → trigger →
+    /// audit-row).
+    #[tokio::test]
+    async fn nonvolatile_trigger_fires_identically_on_both_machines() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)").await.unwrap();
+        // The audit columns are non-IPK: inserting `NEW.col` into an
+        // INTEGER PRIMARY KEY column of a trigger body's target table is
+        // a separate, pre-existing executor limitation (see the #5381 PR
+        // follow-on), orthogonal to the replication determinism this
+        // test asserts.
+        db.execute_replicated("CREATE TABLE audit (k INTEGER, v INTEGER)").await.unwrap();
+        db.execute_replicated(
+            "CREATE TRIGGER trg AFTER INSERT ON t \
+             BEGIN INSERT INTO audit (k, v) VALUES (NEW.id, NEW.v); END",
+        )
+        .await
+        .unwrap();
+
+        // The triggering INSERT is what replicates; the body re-executes
+        // at apply on every replica against replicated state only.
+        let (_, outcome) = db.execute_replicated("INSERT INTO t VALUES (1, 42)").await.unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
+        assert_eq!(
+            db.query("SELECT k, v FROM audit ORDER BY k").unwrap(),
+            vec![vec![SqlValue::Integer(1), SqlValue::Integer(42)]],
+            "the trigger body fired and wrote the audit row from NEW"
+        );
+
+        let recovered = ReplicatedDb::new(clone_log(&db).await);
+        recovered.catch_up_to(db.backend().last_index()).await.unwrap();
+        assert_eq!(
+            recovered.query("SELECT k, v FROM audit ORDER BY k").unwrap(),
+            db.query("SELECT k, v FROM audit ORDER BY k").unwrap(),
+            "the audit row produced by the trigger must converge on both machines"
+        );
+    }
+
+    /// #5381: a `CREATE TRIGGER` whose body INSERT would fire a volatile
+    /// DEFAULT of *its* target table is rejected at CREATE time — the
+    /// classic `audit(…, ts DEFAULT CURRENT_TIMESTAMP)` hazard the static
+    /// validator cannot see (it needs the catalog).
+    #[tokio::test]
+    async fn trigger_body_firing_volatile_default_is_rejected() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY)").await.unwrap();
+        db.execute_replicated(
+            "CREATE TABLE audit (id INTEGER PRIMARY KEY, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        )
+        .await
+        .unwrap();
+        // The body is statically volatile-free, so it passes propose and
+        // is rejected at apply by the schema-dependent body audit
+        // (`trigger_body_schema_violation`): an `Ok(Rejected)` outcome.
+        let (_, outcome) = db
+            .execute_replicated(
+                "CREATE TRIGGER trg AFTER INSERT ON t \
+                 BEGIN INSERT INTO audit (id) VALUES (NEW.id); END",
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(&outcome, ApplyOutcome::Rejected { reason }
+                if reason.contains("DEFAULT") && reason.contains("trigger 'trg'")),
+            "the trigger body firing a volatile DEFAULT must be rejected, got: {outcome:?}"
+        );
+        // The trigger was not created.
+        db.execute_replicated("INSERT INTO t VALUES (1)").await.unwrap();
+        assert!(db.query("SELECT * FROM audit").unwrap().is_empty());
+    }
+
+    /// #5381: DROP TRIGGER is admitted on the replicated surface.
+    #[tokio::test]
+    async fn drop_trigger_is_admitted() {
+        let db = replicated();
+        db.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)").await.unwrap();
+        db.execute_replicated("CREATE TABLE audit (id INTEGER PRIMARY KEY, v INTEGER)")
+            .await
+            .unwrap();
+        db.execute_replicated(
+            "CREATE TRIGGER trg AFTER INSERT ON t \
+             BEGIN INSERT INTO audit VALUES (NEW.id, NEW.v); END",
+        )
+        .await
+        .unwrap();
+        let (_, outcome) = db.execute_replicated("DROP TRIGGER trg").await.unwrap();
+        assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 0 });
+
+        // With the trigger gone, an INSERT no longer writes the audit row.
+        db.execute_replicated("INSERT INTO t VALUES (1, 5)").await.unwrap();
+        assert!(db.query("SELECT * FROM audit").unwrap().is_empty());
     }
 }

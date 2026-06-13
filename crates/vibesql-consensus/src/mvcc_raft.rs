@@ -226,7 +226,6 @@ use crate::snapshot::SnapshotHorizonPin as _;
 use crate::backend::{ConsensusError, LogIndex, Result, Role, Snapshot};
 use crate::cluster_config::ClusterConfig;
 use crate::durable::DurableLogStore;
-use crate::freeze;
 use crate::openraft_backend::{
     current_timestamp_ms, initialize_membership, role_from_state, AppResponse, Bootstrap,
     InMemoryLogStore, RaftTuning, RecoveredDurable, TypeConfig,
@@ -876,13 +875,20 @@ impl MvccRaftNode {
             return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
         }
         let mut frozen = Vec::with_capacity(statements.len());
+        let mut frozen_defaults = Vec::with_capacity(statements.len());
         for sql in statements {
-            frozen.push(freeze::freeze_statement(sql).map_err(|e| {
+            // Freeze positional volatile sites and — against the
+            // leader's applied schema (#5381) — the volatile column
+            // DEFAULTs the statement fires.
+            let (values, defaults) = self.sm.machine.freeze_for_propose(sql).map_err(|e| {
                 ConsensusError::Backend(format!("statement cannot be replicated: {e}"))
-            })?);
+            })?;
+            frozen.push(values);
+            frozen_defaults.push(defaults);
         }
         let entry =
-            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen);
+            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen)
+                .with_frozen_defaults(frozen_defaults);
         self.propose_entry(entry).await
     }
 
