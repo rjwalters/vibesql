@@ -394,7 +394,12 @@ impl TriggerFirer {
         // BEGIN/END wrapper and drops empty / comment-only fragments.
         let mut statements = Vec::new();
         for stmt_sql in vibesql_parser::split_trigger_body_statements(sql) {
-            match vibesql_parser::Parser::parse_sql(&stmt_sql) {
+            // Parse each body statement as a trigger-program statement so
+            // `RAISE()` is admitted at fire time. SQLite only permits RAISE()
+            // within a trigger-program, so the general `parse_sql` entry point
+            // rejects it at parse time; a trigger body legitimately contains
+            // it (see `Parser::parse_sql_in_trigger_body`).
+            match vibesql_parser::Parser::parse_sql_in_trigger_body(&stmt_sql) {
                 Ok(stmt) => statements.push(stmt),
                 Err(e) => {
                     return Err(ExecutorError::UnsupportedExpression(format!(

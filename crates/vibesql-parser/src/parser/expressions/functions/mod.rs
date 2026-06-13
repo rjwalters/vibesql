@@ -450,6 +450,17 @@ impl Parser {
     ) -> Result<vibesql_ast::Expression, ParseError> {
         use vibesql_ast::RaiseAction;
 
+        // SQLite only permits RAISE() inside a trigger-program (a
+        // `CREATE TRIGGER` body) and rejects it at prepare/parse time
+        // everywhere else, e.g. `SELECT raise(ABORT, 'x')` ->
+        // `RAISE() may only be used within a trigger-program`. Match that:
+        // reject at parse time unless we are parsing a trigger body.
+        if !self.in_trigger_body {
+            return Err(ParseError {
+                message: "RAISE() may only be used within a trigger-program".to_string(),
+            });
+        }
+
         // First argument: one of the conflict-resolution keywords.
         let action = match self.peek() {
             Token::Keyword { keyword: Keyword::Abort, .. } => RaiseAction::Abort,

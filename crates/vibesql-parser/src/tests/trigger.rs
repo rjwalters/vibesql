@@ -471,10 +471,12 @@ fn test_create_trigger_body_nulls_in_conflict_target_rejected() {
 #[test]
 fn test_create_trigger_body_unparseable_construct_tolerated() {
     // VibeSQL's parser does not yet support every construct valid inside a
-    // SQLite trigger body (e.g. `RAISE(ABORT, …)`), and SQLite accepts those
-    // at CREATE TRIGGER time. Create-time validation must NOT hard-reject a
-    // body it merely cannot parse — the body is preserved as RawSql and
-    // re-parsed at fire time, exactly as before this validation existed.
+    // SQLite trigger body, and SQLite accepts those at CREATE TRIGGER time.
+    // Create-time validation must NOT hard-reject a body it merely cannot
+    // parse — the body is preserved as RawSql and re-parsed at fire time,
+    // exactly as before this validation existed. RAISE() (shown here) is now
+    // parseable in a trigger body (#5409/#5416), so this also guards that the
+    // create-time validation accepts a RAISE-bearing body.
     // (Regression guard for upsert1-1300, whose trigger body uses RAISE.)
     let sql = "CREATE TRIGGER tr2 BEFORE UPDATE ON t1 BEGIN \
                SELECT raise(ABORT, 'boom') WHERE old.y != new.y; \
