@@ -106,6 +106,7 @@ mod quantified_comparison_tests;
 mod query_timeout_tests;
 mod raise_trigger_tests;
 mod recursive_cte_tests;
+mod trigger_case_body_tests;
 mod rowid_tests;
 mod scalar_subquery_basic_tests;
 mod scalar_subquery_caching_tests;

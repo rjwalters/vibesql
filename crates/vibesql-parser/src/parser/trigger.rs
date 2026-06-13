@@ -171,13 +171,25 @@ impl Parser {
         self.expect_keyword(Keyword::Begin)?;
 
         let mut sql_parts = vec!["BEGIN".to_string()];
-        let mut depth = 1; // Track BEGIN/END nesting
+        // Track block nesting. Both `BEGIN ... END` and `CASE ... END` open a
+        // block that `END` closes. The trigger body's terminating `END` is the
+        // one that brings the depth back to 0; a `CASE ... END` *expression*
+        // inside a body statement (e.g.
+        // `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE) END;`) must not be
+        // mistaken for it, or the body is truncated at the CASE's `END`.
+        let mut depth = 1;
 
-        // Collect tokens until matching END
+        // Collect tokens until the matching body-terminator END.
         loop {
             match self.peek() {
                 Token::Keyword { keyword: Keyword::Begin, .. } => {
                     sql_parts.push("BEGIN".to_string());
+                    depth += 1;
+                    self.advance();
+                }
+                Token::Keyword { keyword: Keyword::Case, .. } => {
+                    // A CASE expression opens a block its own END closes.
+                    sql_parts.push("CASE".to_string());
                     depth += 1;
                     self.advance();
                 }
