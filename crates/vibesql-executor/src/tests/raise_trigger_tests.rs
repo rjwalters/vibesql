@@ -423,6 +423,169 @@ fn raise_outside_transaction_leaves_no_open_transaction() {
     }
 }
 
+// ===========================================================================
+// Auto-commit statement atomicity (#5464)
+//
+// SQLite wraps every top-level statement in an implicit transaction, so a
+// single statement that applies rows incrementally and then aborts mid-way
+// rolls back ALL of that statement's changes — even outside an explicit
+// BEGIN...COMMIT. The statement savepoint (#5417) is only armed *inside* an
+// explicit transaction; #5464 adds an implicit per-statement transaction for
+// the auto-commit case. Every expectation below is verified live against
+// sqlite3 3.51.0 with no explicit transaction (pure auto-commit).
+// ===========================================================================
+
+/// AFTER INSERT trigger that RAISE(ABORT)s on a later row of a multi-row
+/// INSERT, in auto-commit: rows applied before the abort must also be undone.
+///
+/// sqlite3 3.51.0:
+///   INSERT INTO t VALUES (2,'okA'),(3,'BAD'),(4,'okB');  -- Error: boom
+///   -- no rows inserted (whole statement rolled back)
+#[test]
+fn autocommit_after_insert_abort_rolls_back_whole_statement() {
+    let mut db = db_with_trigger("AFTER INSERT", "ABORT");
+
+    match exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    // sqlite3: the whole statement is rolled back — no rows survive.
+    assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        Vec::<Vec<SqlValue>>::new(),
+        "ABORT must undo even the rows applied before the offending row"
+    );
+}
+
+/// RAISE(FAIL) keeps the rows the statement applied before the abort, even in
+/// auto-commit — the implicit transaction commits (rather than rolls back) for
+/// FAIL. This is the FAIL-vs-ABORT distinction made observable in auto-commit by
+/// #5464.
+///
+/// sqlite3 3.51.0 (live read):
+///   INSERT INTO t VALUES (2,'okA'),(3,'BAD'),(4,'okB');  -- Error: boom
+///   SELECT id FROM t;  -- 2, 3  (okA + the BAD row inserted before its AFTER
+///                                trigger raised; okB never reached)
+///
+/// VibeSQL keeps the pre-offending row (okA) — the #5464 deliverable: FAIL does
+/// NOT roll back the whole statement (contrast ABORT, which does). The offending
+/// row (BAD) itself is *not* surfaced through the live SELECT path: VibeSQL's
+/// per-row AFTER-trigger handler unconditionally tombstones the offending row
+/// when its trigger errors (a pre-existing executor quirk independent of #5464 —
+/// see the FAIL section of raise_scope.rs / follow-on issue). What #5464 fixes is
+/// that okA survives at all (previously the distinction was unobservable in
+/// auto-commit, where FAIL behaved like ABORT only by accident of read path).
+#[test]
+fn autocommit_after_insert_fail_keeps_pre_offending_rows() {
+    let mut db = db_with_trigger("AFTER INSERT", "FAIL");
+
+    match exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Fail);
+        }
+        other => panic!("expected RAISE(FAIL), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
+    // FAIL keeps the row applied before the offending row (okA); okB was never
+    // reached. Crucially this is NOT empty — FAIL did not roll back the whole
+    // statement the way ABORT does (see
+    // `autocommit_after_insert_abort_rolls_back_whole_statement`).
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![vec![ipk(2), SqlValue::Varchar("okA".into())]],
+    );
+}
+
+/// BEFORE INSERT trigger that RAISE(ABORT)s on a later row of a multi-row
+/// INSERT, in auto-commit: rows applied before the offending row are undone.
+///
+/// sqlite3 3.51.0:
+///   INSERT INTO t VALUES (2,'okA'),(3,'BAD'),(4,'okB');  -- Error: boom
+///   -- no rows inserted.
+#[test]
+fn autocommit_before_insert_abort_rolls_back_whole_statement() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ABORT");
+
+    match exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction());
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        Vec::<Vec<SqlValue>>::new(),
+        "ABORT undoes okA (applied before the BAD row's BEFORE trigger raised)"
+    );
+}
+
+/// A plain multi-row INSERT (no triggers) whose later row violates UNIQUE rolls
+/// back the whole statement — SQLite statement atomicity for a non-RAISE error.
+///
+/// sqlite3 3.51.0:
+///   INSERT INTO t VALUES (1,10); -- seed
+///   INSERT INTO t VALUES (2,20),(3,30),(1,99),(4,40); -- UNIQUE constraint
+///   SELECT id FROM t; -- 1  (rows 2,3 NOT inserted)
+#[test]
+fn autocommit_multirow_unique_violation_rolls_back_whole_statement() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
+
+    let err = exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2,20),(3,30),(1,99),(4,40)")
+        .unwrap_err();
+    assert!(err.to_string().contains("UNIQUE"), "expected UNIQUE error, got {err}");
+
+    assert!(!db.in_transaction());
+    // Only the pre-existing seed row remains; rows 2 and 3 were rolled back.
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+}
+
+/// INSERT OR IGNORE skips the conflicting row and KEEPS the others — a
+/// conflict-clause that intentionally applies partially is NOT an abort and
+/// must not trigger a statement rollback.
+///
+/// sqlite3 3.51.0:
+///   INSERT INTO t VALUES (1,10); -- seed
+///   INSERT OR IGNORE INTO t VALUES (2,20),(1,99),(3,30);
+///   SELECT id FROM t; -- 1, 2, 3
+#[test]
+fn autocommit_insert_or_ignore_keeps_non_conflicting_rows() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
+
+    let affected = exec_dml(&mut db, "INSERT OR IGNORE INTO t (id, v) VALUES (2,20),(1,99),(3,30)")
+        .expect("OR IGNORE must not error on a conflict");
+    assert_eq!(affected, 2, "two non-conflicting rows inserted");
+
+    assert!(!db.in_transaction());
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        vec![vec![ipk(1)], vec![ipk(2)], vec![ipk(3)]],
+    );
+}
+
+/// Single-row INSERT success in auto-commit with a (non-firing) trigger present
+/// is unaffected — the implicit-transaction wrapper commits cleanly.
+#[test]
+fn autocommit_single_row_success_with_trigger_unaffected() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ABORT");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 'ok')").expect("non-BAD insert succeeds");
+    assert!(!db.in_transaction());
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t"),
+        vec![vec![ipk(1), SqlValue::Varchar("ok".into())]],
+    );
+}
+
 #[test]
 fn raise_abort_in_insert_trigger_aborts() {
     let mut db = vibesql_storage::Database::new();

@@ -170,6 +170,82 @@ fn cascade_delete_child_before_raise_abort_rolls_back_statement() {
     );
 }
 
+/// #5464: the same cascade-fired RAISE(ABORT), but in AUTO-COMMIT (no explicit
+/// BEGIN). SQLite wraps every statement in an implicit transaction, so the
+/// partial cascade deletes are rolled back here too: parent + both children
+/// survive. Before #5464 the statement savepoint was never armed in auto-commit
+/// and the already-cascaded child[10] stayed deleted.
+///
+/// sqlite3 3.51.0 (no explicit txn): `DELETE FROM parent WHERE id=1` -> error
+/// `no delete 11`; SELECT shows parent 1, child 10 and 11 all intact.
+#[test]
+fn cascade_delete_child_before_raise_abort_rolls_back_in_auto_commit() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_guard BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(ABORT, 'no delete 11'); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    // No explicit transaction — pure auto-commit.
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(err.contains("no delete 11"), "unexpected error: {err}");
+    assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
+
+    // Whole statement rolled back: parent and both children survive, including
+    // child[10] that the cascade had already deleted before the abort.
+    assert_eq!(
+        query_col(&db, "SELECT id FROM parent"),
+        vec![SqlValue::Integer(1)]
+    );
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(10), SqlValue::Integer(11)]
+    );
+}
+
+/// #5464: cascade UPDATE child RAISE(ABORT) in auto-commit rolls back the whole
+/// statement — parent key and both child FKs are restored (including child[10]
+/// whose cascade update had already been applied).
+///
+/// sqlite3 3.51.0 (no explicit txn): `UPDATE parent SET id=99 WHERE id=1` ->
+/// error `no update 11`; parent still 1, both child pids still 1.
+#[test]
+fn cascade_update_child_before_raise_abort_rolls_back_in_auto_commit() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON UPDATE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_guard BEFORE UPDATE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(ABORT, 'no update 11'); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    let err = exec(&mut db, "UPDATE parent SET id = 99 WHERE id = 1").unwrap_err();
+    assert!(err.contains("no update 11"), "unexpected error: {err}");
+    assert!(!db.in_transaction());
+
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT pid FROM child ORDER BY id"),
+        vec![SqlValue::Integer(1), SqlValue::Integer(1)]
+    );
+}
+
 /// Parent PK UPDATE with ON UPDATE CASCADE fires the child's BEFORE/AFTER
 /// UPDATE triggers for each cascaded row, with OLD/NEW reflecting the FK
 /// rewrite.
