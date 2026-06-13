@@ -263,11 +263,13 @@ impl TriggerFirer {
         old_row: Option<&Row>,
         new_row: Option<&Row>,
     ) -> Result<bool, ExecutorError> {
-        // Get table schema
-        let schema = db
-            .catalog
-            .get_table(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        // Resolve the schema for OLD/NEW column resolution. For a normal table
+        // trigger this is the base table's schema. For an INSTEAD OF trigger the
+        // target is a VIEW (views are not tables, so `get_table` returns None),
+        // in which case we build a pseudo-schema from the view definition —
+        // mirroring `execute_trigger_action`. Without this fallback, an INSTEAD
+        // OF trigger carrying a WHEN clause always failed with TableNotFound.
+        let schema = Self::resolve_trigger_schema(db, table_name)?;
 
         // Use NEW row as the base row for evaluation (prefer NEW over OLD)
         // The trigger context will handle OLD/NEW pseudo-variable references
@@ -278,11 +280,11 @@ impl TriggerFirer {
         })?;
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
-        let trigger_context = TriggerContext { old_row, new_row, table_schema: schema };
+        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
 
         // Create evaluator with trigger context
         let evaluator =
-            crate::ExpressionEvaluator::with_trigger_context(schema, db, &trigger_context);
+            crate::ExpressionEvaluator::with_trigger_context(&schema, db, &trigger_context);
         let result = evaluator.eval(when_expr, row)?;
 
         // Convert to boolean
@@ -319,16 +321,9 @@ impl TriggerFirer {
         // Parse the trigger action SQL
         let statements = Self::parse_trigger_sql(&sql)?;
 
-        // Get table schema for trigger context (clone to avoid borrow checker issues)
-        // For INSTEAD OF triggers on views, build schema from the view definition
-        let schema = if let Some(table_schema) = db.catalog.get_table(&trigger.table_name) {
-            table_schema.clone()
-        } else if let Some(view_def) = db.catalog.get_view(&trigger.table_name) {
-            // Build a pseudo-schema from the view for OLD/NEW column resolution
-            Self::build_view_schema(db, view_def)?
-        } else {
-            return Err(ExecutorError::TableNotFound(trigger.table_name.clone()));
-        };
+        // Get table schema for trigger context.
+        // For INSTEAD OF triggers on views, build schema from the view definition.
+        let schema = Self::resolve_trigger_schema(db, &trigger.table_name)?;
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
         let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
@@ -346,6 +341,27 @@ impl TriggerFirer {
         }
 
         Ok(TriggerOutcome::Proceed)
+    }
+
+    /// Resolve the schema used for OLD/NEW column resolution when a trigger fires.
+    ///
+    /// For a regular table trigger this is the base table's schema. For an
+    /// INSTEAD OF trigger the target is a VIEW — views are not tables, so
+    /// `catalog.get_table` returns None and we fall back to a pseudo-schema
+    /// built from the view definition. The schema is returned by value (owned)
+    /// because the view path constructs it on the fly; the base-table path
+    /// clones the catalog entry.
+    fn resolve_trigger_schema(
+        db: &Database,
+        table_name: &str,
+    ) -> Result<TableSchema, ExecutorError> {
+        if let Some(table_schema) = db.catalog.get_table(table_name) {
+            Ok(table_schema.clone())
+        } else if let Some(view_def) = db.catalog.get_view(table_name) {
+            Self::build_view_schema(db, view_def)
+        } else {
+            Err(ExecutorError::TableNotFound(table_name.to_string()))
+        }
     }
 
     /// Build a pseudo TableSchema from a view definition for trigger OLD/NEW column resolution

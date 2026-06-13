@@ -592,14 +592,14 @@ fn instead_of_insert_without_ignore_writes_base() {
     assert_eq!(ints(&db, "base", "v"), vec![10]);
 }
 
-// NOTE: the INSTEAD OF UPDATE/DELETE tests below use a single, *unconditional*
-// trigger (no trigger-level WHEN clause). VibeSQL has a pre-existing limitation
-// where an INSTEAD OF trigger's WHEN condition cannot be evaluated on a view —
-// `evaluate_when_condition` resolves the schema via `catalog.get_table`, which
-// returns None for a view, yielding `TableNotFound`. That gap is independent of
-// #5418 (SkipRow plumbing) and is tracked as a separate follow-on. The
-// unconditional form still exercises the INSTEAD OF SkipRow path: a
-// `SELECT raise(IGNORE)` placed before the base write abandons the operation.
+// NOTE: the INSTEAD OF UPDATE/DELETE tests immediately below use a single,
+// *unconditional* trigger (no trigger-level WHEN clause). They exercise the
+// INSTEAD OF SkipRow path: a `SELECT raise(IGNORE)` placed before the base
+// write abandons the operation. INSTEAD OF triggers that *do* carry a WHEN
+// clause are covered separately in the "INSTEAD OF + WHEN clause (#5438)"
+// section further down — previously such triggers failed with TableNotFound
+// because `evaluate_when_condition` resolved the schema via `catalog.get_table`
+// (None for a view); they now fall back to the view pseudo-schema.
 
 /// INSTEAD OF UPDATE: RAISE(IGNORE) before the base UPDATE abandons the view
 /// update, so the base table is not written.
@@ -695,6 +695,126 @@ fn instead_of_delete_without_ignore_deletes_base() {
     exec_dml(&mut db, "DELETE FROM vw").expect("INSTEAD OF DELETE must succeed");
 
     assert!(db.get_table("base").unwrap().scan().is_empty());
+}
+
+// ===========================================================================
+// INSTEAD OF + WHEN clause (#5438)
+//
+// An INSTEAD OF trigger (on a VIEW) that carries a `WHEN` condition previously
+// failed with `TableNotFound`: `evaluate_when_condition` resolved the OLD/NEW
+// schema via `catalog.get_table`, which returns None for a view. The fix
+// mirrors the trigger-body path — when the target is a view, the schema is
+// built from the view definition (`resolve_trigger_schema`). The WHEN clause
+// is evaluated against the NEW/OLD pseudo-rows, and the trigger fires only when
+// the condition is true (skipped otherwise), matching sqlite3 3.51.x.
+//
+// sqlite3 3.51.0, INSTEAD OF UPDATE ON vw WHEN OLD.id = 1 over rows (1,10),(2,20)
+// after `UPDATE vw SET v = 999`: row id=1 -> v=999, row id=2 -> v=20 (skipped).
+// ===========================================================================
+
+/// INSTEAD OF UPDATE with `WHEN OLD.id = 1`: the trigger body fires only for the
+/// row whose OLD.id is 1; the other row is left untouched (WHEN false skips it).
+#[test]
+fn instead_of_update_when_old_fires_selectively() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF UPDATE ON vw WHEN OLD.id = 1 \
+         BEGIN \
+           UPDATE base SET v = NEW.v WHERE id = OLD.id; \
+         END",
+    );
+
+    // Reproduces the original bug report: this used to error with
+    // TableNotFound("vw").
+    exec_dml(&mut db, "UPDATE vw SET v = 999")
+        .expect("INSTEAD OF UPDATE with WHEN must not error on a view");
+
+    // Only the WHEN-true row (id=1) had its body fire; id=2 is unchanged.
+    assert_eq!(ints(&db, "base", "id"), vec![1, 2]);
+    assert_eq!(ints(&db, "base", "v"), vec![999, 20]);
+}
+
+/// INSTEAD OF INSERT with `WHEN NEW.v > 0`: the body fires for the positive row
+/// and is skipped for the non-positive row (matching sqlite3 — a WHEN-false
+/// INSTEAD OF INSERT performs no base write either).
+#[test]
+fn instead_of_insert_when_new_fires_selectively() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF INSERT ON vw WHEN NEW.v > 0 \
+         BEGIN \
+           INSERT INTO base (id, v) VALUES (NEW.id, NEW.v); \
+         END",
+    );
+
+    exec_dml(&mut db, "INSERT INTO vw (id, v) VALUES (1, 10)")
+        .expect("INSTEAD OF INSERT with WHEN must not error on a view");
+    exec_dml(&mut db, "INSERT INTO vw (id, v) VALUES (2, -5)")
+        .expect("WHEN-false INSTEAD OF INSERT must not error");
+
+    // Only the WHEN-true insert (v=10) reached the base table.
+    assert_eq!(ints(&db, "base", "id"), vec![1]);
+    assert_eq!(ints(&db, "base", "v"), vec![10]);
+}
+
+/// INSTEAD OF DELETE with `WHEN OLD.v > 15`: only the row whose OLD.v exceeds 15
+/// is deleted from the base table; the other view row is skipped.
+#[test]
+fn instead_of_delete_when_old_fires_selectively() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE base (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (1, 10)");
+    exec_ok(&mut db, "INSERT INTO base (id, v) VALUES (2, 20)");
+    exec_ok(&mut db, "CREATE VIEW vw AS SELECT id, v FROM base");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg INSTEAD OF DELETE ON vw WHEN OLD.v > 15 \
+         BEGIN \
+           DELETE FROM base WHERE id = OLD.id; \
+         END",
+    );
+
+    exec_dml(&mut db, "DELETE FROM vw")
+        .expect("INSTEAD OF DELETE with WHEN must not error on a view");
+
+    // Only id=2 (v=20 > 15) was deleted; id=1 (v=10) survives. Asserted through
+    // the live SELECT path — `Table::scan()` still surfaces tombstoned rows, so
+    // a deletion check must read via SELECT (matches sqlite3 3.51.0: `1|10`).
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM base ORDER BY id"),
+        vec![vec![SqlValue::Integer(1), SqlValue::Integer(10)]],
+    );
+}
+
+/// Regression guard for the get_table path: a WHEN clause on a *base-table*
+/// trigger must still work (the view fallback must not disturb real tables).
+#[test]
+fn base_table_trigger_when_clause_still_works() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (id INTEGER, v INTEGER)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg AFTER INSERT ON t WHEN NEW.v > 0 \
+         BEGIN \
+           INSERT INTO log (id, v) VALUES (NEW.id, NEW.v); \
+         END",
+    );
+
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)").expect("base insert ok");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, -5)").expect("base insert ok");
+
+    // log only captured the WHEN-true insert.
+    assert_eq!(ints(&db, "log", "id"), vec![1]);
+    assert_eq!(ints(&db, "log", "v"), vec![10]);
 }
 
 // ===========================================================================
