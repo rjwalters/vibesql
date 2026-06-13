@@ -91,11 +91,26 @@ pub(super) fn execute_update_on_view(
         )?
     };
 
-    // Now fire triggers (database can be mutably borrowed)
+    // Now fire triggers (database can be mutably borrowed).
+    //
+    // RAISE(IGNORE) inside an INSTEAD OF UPDATE trigger abandons the view
+    // operation for that row (#5418): the trigger body stops at the RAISE
+    // (`execute_trigger` returns SkipRow) and we move on to the next matched
+    // row without erroring and without affecting other rows. On SkipRow we
+    // `break` out of this row's remaining INSTEAD OF triggers, following the
+    // same first-SkipRow-wins convention the primary DML loops adopted in
+    // #5415. (sqlite3 3.51 would still run a *later* INSTEAD OF trigger on the
+    // same row after an earlier one IGNOREs, but that multi-trigger-per-view
+    // case is rare; the common single-trigger case matches sqlite3 exactly —
+    // the row's operation is skipped.)
     let rows_processed = updates.len();
     for (old_row, new_row) in &updates {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), Some(new_row))?;
+            if crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), Some(new_row))?
+                == crate::TriggerOutcome::SkipRow
+            {
+                break;
+            }
         }
     }
 

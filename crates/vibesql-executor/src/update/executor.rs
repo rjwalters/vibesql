@@ -122,9 +122,14 @@ pub(super) fn execute_internal(
         }
     }
 
-    // Fire BEFORE STATEMENT triggers only if triggers exist
+    // Fire BEFORE STATEMENT triggers only if triggers exist.
+    // Statement-level triggers are a VibeSQL extension with no sqlite3 analog
+    // (SQLite triggers are always FOR EACH ROW), so a RAISE(IGNORE) at
+    // statement granularity has no defined "skip the row" semantics. We keep
+    // the pre-#5418 behavior (proceed) and explicitly drop the must-use
+    // outcome rather than guessing.
     if has_triggers {
-        crate::TriggerFirer::execute_before_statement_triggers(
+        let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
             database,
             table_name,
             vibesql_ast::TriggerEvent::Update(None),
@@ -645,10 +650,13 @@ pub(super) fn execute_internal(
         ));
     }
 
-    // Fire AFTER UPDATE triggers for all updated rows
+    // Fire AFTER UPDATE triggers for all updated rows.
+    // AFTER triggers run once the row is already updated; a RAISE(IGNORE) here
+    // cannot revert it (sqlite3 3.51 keeps the modified row), so SkipRow is a
+    // no-op — explicitly drop the must-use outcome (#5418).
     if has_triggers {
         for (_index, old_row, new_row, _changed_columns) in &index_updates {
-            crate::TriggerFirer::execute_after_triggers(
+            let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
@@ -694,7 +702,9 @@ pub(super) fn execute_internal(
 
     // Fire AFTER STATEMENT triggers only if triggers exist
     if has_triggers {
-        crate::TriggerFirer::execute_after_statement_triggers(
+        // Statement-level RAISE(IGNORE) has no sqlite3 analog (see BEFORE
+        // STATEMENT note above); drop the must-use outcome (#5418).
+        let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
             database,
             table_name,
             vibesql_ast::TriggerEvent::Update(None),
@@ -1262,7 +1272,9 @@ fn execute_update_from(
 
     // Fire BEFORE STATEMENT triggers if needed
     if has_triggers {
-        crate::TriggerFirer::execute_before_statement_triggers(
+        // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+        // must-use outcome (#5418).
+        let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
             database,
             table_name,
             vibesql_ast::TriggerEvent::Update(None),
@@ -1283,7 +1295,9 @@ fn execute_update_from(
     if updates.is_empty() {
         // Fire AFTER STATEMENT triggers even when no rows matched
         if has_triggers {
-            crate::TriggerFirer::execute_after_statement_triggers(
+            // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+            // must-use outcome (#5418).
+            let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
@@ -1560,7 +1574,9 @@ fn execute_update_from(
     if updates.is_empty() {
         // Fire AFTER STATEMENT triggers even when all rows skipped.
         if has_triggers {
-            crate::TriggerFirer::execute_after_statement_triggers(
+            // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+            // must-use outcome (#5418).
+            let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
@@ -1609,17 +1625,26 @@ fn execute_update_from(
         }
     }
 
-    // Fire BEFORE UPDATE triggers
+    // Fire BEFORE UPDATE triggers.
+    // A RAISE(IGNORE) in a BEFORE UPDATE trigger abandons that row (#5418):
+    // drop it from the batch so it is neither updated nor counted, while the
+    // remaining rows proceed — matching the primary UPDATE loop in
+    // `execute_internal` and sqlite3 3.51 semantics.
     if has_triggers {
-        for u in &updates {
-            crate::TriggerFirer::execute_before_triggers(
+        let mut keep = Vec::with_capacity(updates.len());
+        for u in updates {
+            let outcome = crate::TriggerFirer::execute_before_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
                 Some(&u.old_row),
                 Some(&u.new_row),
             )?;
+            if outcome != crate::TriggerOutcome::SkipRow {
+                keep.push(u);
+            }
         }
+        updates = keep;
     }
 
     // Apply all updates
@@ -1653,10 +1678,13 @@ fn execute_update_from(
         ));
     }
 
-    // Fire AFTER UPDATE triggers
+    // Fire AFTER UPDATE triggers.
+    // AFTER triggers run once the row is already updated; a RAISE(IGNORE) here
+    // cannot revert it (sqlite3 3.51 keeps the modified row), so SkipRow is a
+    // no-op — explicitly drop the must-use outcome (#5418).
     if has_triggers {
         for (_index, old_row, new_row, _changed_columns) in &index_updates {
-            crate::TriggerFirer::execute_after_triggers(
+            let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
@@ -1691,7 +1719,9 @@ fn execute_update_from(
 
     // Fire AFTER STATEMENT triggers
     if has_triggers {
-        crate::TriggerFirer::execute_after_statement_triggers(
+        // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+        // must-use outcome (#5418).
+        let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
             database,
             table_name,
             vibesql_ast::TriggerEvent::Update(None),

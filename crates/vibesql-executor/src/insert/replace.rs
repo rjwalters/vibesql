@@ -56,6 +56,8 @@ pub fn handle_replace_conflicts(
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
     let mut rows_to_delete: Vec<(usize, vibesql_storage::Row)> = Vec::new();
+    // (Re-bound below after BEFORE DELETE triggers run; rows whose delete a
+    // RAISE(IGNORE) abandons are dropped from this vector — #5418.)
 
     // Use scan_live() to skip deleted rows and get correct physical indices
     for (row_index, row) in table.scan_live() {
@@ -160,15 +162,36 @@ pub fn handle_replace_conflicts(
     // This must happen BEFORE actual deletion (SQLite semantics)
     // The reserved rowid is active during this phase, so trigger INSERTs that try
     // to allocate the same rowid will fail.
+    //
+    // RAISE(IGNORE) in a BEFORE DELETE trigger abandons the delete of that
+    // conflicting row (#5418). We drop the row from `rows_to_delete` so it is
+    // NOT deleted; the conflicting row then survives. Because the REPLACE
+    // caller re-validates PK/UNIQUE constraints after this function returns,
+    // a surviving conflict surfaces as a UNIQUE/PK error — matching sqlite3
+    // 3.51 with `recursive_triggers=ON`, where a BEFORE DELETE RAISE(IGNORE)
+    // during REPLACE leaves the row in place and the subsequent insert fails
+    // with "UNIQUE constraint failed".
     if has_delete_triggers {
-        for (_, row) in &rows_to_delete {
-            TriggerFirer::execute_before_triggers(
+        let mut kept = Vec::with_capacity(rows_to_delete.len());
+        for (idx, row) in rows_to_delete {
+            let outcome = TriggerFirer::execute_before_triggers(
                 db,
                 table_name,
                 vibesql_ast::TriggerEvent::Delete,
-                Some(row),
+                Some(&row),
                 None,
             )?;
+            if outcome != crate::trigger_execution::TriggerOutcome::SkipRow {
+                kept.push((idx, row));
+            }
+        }
+        rows_to_delete = kept;
+
+        // Every conflicting row's delete was skipped by RAISE(IGNORE); there is
+        // nothing to delete. Return early so the caller's constraint
+        // re-validation runs against the still-conflicting table state.
+        if rows_to_delete.is_empty() {
+            return Ok(());
         }
     }
 
@@ -252,7 +275,10 @@ pub fn handle_replace_conflicts(
     // This must happen AFTER actual deletion (SQLite semantics)
     if has_delete_triggers {
         for (_, row) in &rows_to_delete {
-            TriggerFirer::execute_after_triggers(
+            // AFTER DELETE fires once the row is already gone. A RAISE(IGNORE)
+            // here cannot un-delete it (sqlite3 3.51 leaves the row deleted),
+            // so SkipRow is a no-op — explicitly drop the must-use outcome.
+            let _after_outcome = TriggerFirer::execute_after_triggers(
                 db,
                 table_name,
                 vibesql_ast::TriggerEvent::Delete,

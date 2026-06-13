@@ -817,7 +817,10 @@ fn execute_insert_internal(
     // Fire BEFORE STATEMENT triggers only if triggers exist AND we're not inside a trigger context
     // (Statement-level triggers don't fire for inserts within trigger bodies)
     if has_insert_triggers && trigger_context.is_none() {
-        crate::TriggerFirer::execute_before_statement_triggers(
+        // Statement-level RAISE(IGNORE) has no sqlite3 analog (SQLite triggers
+        // are always FOR EACH ROW); drop the must-use outcome and keep the
+        // pre-#5418 proceed behavior (#5418).
+        let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
             db,
             table_name,
             vibesql_ast::TriggerEvent::Insert,
@@ -1279,7 +1282,9 @@ fn execute_insert_internal(
     // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger context
     // (Statement-level triggers don't fire for inserts within trigger bodies)
     if has_insert_triggers && trigger_context.is_none() {
-        crate::TriggerFirer::execute_after_statement_triggers(
+        // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
+        // must-use outcome (#5418).
+        let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
             db,
             table_name,
             vibesql_ast::TriggerEvent::Insert,
@@ -1677,11 +1682,23 @@ fn execute_insert_on_view(
         None
     };
 
-    // Now fire triggers (database can be mutably borrowed)
+    // Now fire triggers (database can be mutably borrowed).
+    //
+    // RAISE(IGNORE) inside an INSTEAD OF INSERT trigger abandons the view
+    // operation for that row (#5418): the trigger body stops at the RAISE
+    // (`execute_trigger` returns SkipRow) and we move on to the next row. On
+    // SkipRow we `break` out of this row's remaining INSTEAD OF triggers,
+    // following the first-SkipRow-wins convention of the primary DML loops
+    // (#5415). Verified against sqlite3 3.51: a RAISE(IGNORE) before the body's
+    // `INSERT INTO base` skips that base insert while later rows proceed.
     let rows_processed = new_rows.len();
     for row in new_rows {
         for trigger in &triggers {
-            crate::TriggerFirer::execute_trigger(db, trigger, None, Some(&row))?;
+            if crate::TriggerFirer::execute_trigger(db, trigger, None, Some(&row))?
+                == crate::trigger_execution::TriggerOutcome::SkipRow
+            {
+                break;
+            }
         }
     }
 
