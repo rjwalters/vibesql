@@ -1236,43 +1236,38 @@ fn execute_insert_internal(
                 row_count_before,
             );
 
-            // Fire AFTER INSERT triggers only if triggers exist
-            // If AFTER triggers fail, we need to rollback the insert
+            // Fire AFTER INSERT triggers only if triggers exist.
+            //
+            // On a trigger error we simply propagate it: the statement-scope
+            // machinery in `raise_scope::run_top_level_dml` (which wraps every
+            // top-level INSERT) handles undoing the right amount of work, exactly
+            // matching sqlite3 3.51 (#5464, #5474):
+            //   - RAISE(ABORT)/RAISE(ROLLBACK)/any non-RAISE trigger error → the
+            //     statement savepoint (in an explicit txn) or implicit
+            //     transaction (auto-commit) rolls back the *whole* statement,
+            //     removing this offending row AND every earlier row.
+            //   - RAISE(FAIL) → the partial changes the statement already applied
+            //     are KEPT, including this offending row (which was inserted
+            //     before its AFTER trigger fired). SQLite keeps it; so do we.
+            //
+            // Previously this site unconditionally tombstoned the just-inserted
+            // offending row on any trigger error. That was redundant for
+            // ABORT/non-RAISE (rollback already removes it) and *wrong* for FAIL
+            // (it hid a row SQLite keeps — visible only as a bitmap tombstone in
+            // raw `Table::scan()`, missing from any live SELECT). See #5474.
             if has_insert_triggers {
-                let trigger_result = crate::TriggerFirer::execute_after_triggers(
+                // A `TriggerOutcome::SkipRow` (RAISE(IGNORE) in an AFTER trigger)
+                // has no SQLite-observable effect here: the row is already
+                // inserted and RAISE(IGNORE) only abandons the rest of the
+                // trigger program, leaving the row in place. So we only act on
+                // the error (RAISE / non-RAISE) path; drop the Ok outcome.
+                let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                     db,
                     table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&row),
-                );
-
-                if let Err(trigger_error) = trigger_result {
-                    // Rollback: Delete the row we just inserted
-                    // Note: This is a simple rollback mechanism for Phase 3
-                    // Full transaction support will come in a later phase
-                    let table = db
-                        .get_table_mut(&storage_table_name)
-                        .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?;
-
-                    // Delete the last row (the one we just inserted)
-                    // Row was inserted at index row_count_before
-                    use std::cell::Cell;
-                    let current_index = Cell::new(0);
-                    let target_index = row_count_before;
-                    // Ignore delete_result since we unconditionally rebuild indexes below
-                    let _ = table.delete_where(|_row| {
-                        let index = current_index.get();
-                        current_index.set(index + 1);
-                        index == target_index
-                    });
-
-                    // Rebuild indexes since we modified the table (handles compaction)
-                    db.rebuild_indexes(&storage_table_name);
-
-                    // Re-throw the trigger error
-                    return Err(trigger_error);
-                }
+                )?;
             }
 
             rows_inserted += 1;
