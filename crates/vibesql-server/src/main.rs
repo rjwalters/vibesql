@@ -200,6 +200,7 @@ async fn main() -> Result<()> {
 
         let metrics_for_http = observability.metrics().cloned();
         let replication_for_http = replication.clone();
+        let graphql_allow_raw_where = config.server.graphql_allow_raw_where;
         tokio::spawn(async move {
             let app = create_http_router(
                 db_for_http,
@@ -207,6 +208,7 @@ async fn main() -> Result<()> {
                 subscription_manager_for_http,
                 metrics_for_http,
                 replication_for_http,
+                graphql_allow_raw_where,
             );
             let listener = tokio::net::TcpListener::bind(&http_addr)
                 .await

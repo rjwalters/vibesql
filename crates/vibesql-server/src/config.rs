@@ -67,6 +67,28 @@ pub struct ServerConfig {
     pub ssl_cert: Option<PathBuf>,
     /// SSL key file path
     pub ssl_key: Option<PathBuf>,
+    /// Allow the legacy GraphQL `where: "<raw sql>"` escape hatch
+    /// (default: false).
+    ///
+    /// # Security
+    ///
+    /// The GraphQL surface accepts two WHERE forms. The structured form —
+    /// `where: { ... }` — parameterizes every value and escapes every
+    /// identifier, so it is injection-safe. The legacy raw form —
+    /// `where: "<raw sql>"` — interpolates the client-supplied string
+    /// **verbatim** into the generated SQL with no parameterization or
+    /// escaping. That is a SQL-injection surface: any client that can reach
+    /// the GraphQL endpoint can splice arbitrary SQL into the WHERE clause.
+    ///
+    /// This flag is therefore **off by default**. When disabled, a query
+    /// that supplies a raw-string WHERE is rejected with a clear error and
+    /// **no SQL is executed**; clients should migrate to the structured
+    /// form, which covers the common comparison, string, list, null, and
+    /// AND/OR/NOT cases. When explicitly enabled, the raw form works as
+    /// before — an operator turning this on is consciously accepting the
+    /// trusted-input-only risk for that endpoint.
+    #[serde(default)]
+    pub graphql_allow_raw_where: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +219,7 @@ impl Default for Config {
                 ssl_enabled: false,
                 ssl_cert: None,
                 ssl_key: None,
+                graphql_allow_raw_where: false,
             },
             auth: AuthConfig { method: "trust".to_string(), password_file: None },
             logging: LoggingConfig { level: "info".to_string(), file: None },
@@ -260,6 +283,7 @@ impl Config {
     /// | `VIBESQL_SERVER_SSL_ENABLED` | `server.ssl_enabled` |
     /// | `VIBESQL_SERVER_SSL_CERT` | `server.ssl_cert` |
     /// | `VIBESQL_SERVER_SSL_KEY` | `server.ssl_key` |
+    /// | `VIBESQL_SERVER_GRAPHQL_ALLOW_RAW_WHERE` | `server.graphql_allow_raw_where` |
     /// | `VIBESQL_AUTH_METHOD` | `auth.method` |
     /// | `VIBESQL_AUTH_PASSWORD_FILE` | `auth.password_file` |
     /// | `VIBESQL_LOG_LEVEL` | `logging.level` |
@@ -302,6 +326,9 @@ impl Config {
         }
         if let Ok(val) = env::var("VIBESQL_SERVER_SSL_KEY") {
             self.server.ssl_key = Some(PathBuf::from(val));
+        }
+        if let Ok(val) = env::var("VIBESQL_SERVER_GRAPHQL_ALLOW_RAW_WHERE") {
+            self.server.graphql_allow_raw_where = parse_bool(&val);
         }
 
         // Auth configuration
@@ -422,6 +449,65 @@ mod tests {
         assert_eq!(config.server.max_connections, 100);
         assert!(!config.server.ssl_enabled);
         assert_eq!(config.auth.method, "trust");
+    }
+
+    #[test]
+    fn test_graphql_allow_raw_where_defaults_off() {
+        // The legacy raw-WHERE escape hatch must be opt-in (#5448).
+        let config = Config::default();
+        assert!(!config.server.graphql_allow_raw_where);
+    }
+
+    #[test]
+    fn test_graphql_allow_raw_where_from_toml() {
+        let toml_str = r#"
+[server]
+host = "0.0.0.0"
+port = 5432
+max_connections = 100
+ssl_enabled = false
+graphql_allow_raw_where = true
+
+[auth]
+method = "trust"
+
+[logging]
+level = "info"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.server.graphql_allow_raw_where);
+    }
+
+    #[test]
+    fn test_graphql_allow_raw_where_toml_default_when_absent() {
+        // Omitting the field must fall back to the safe default (off).
+        let toml_str = r#"
+[server]
+host = "0.0.0.0"
+port = 5432
+max_connections = 100
+ssl_enabled = false
+
+[auth]
+method = "trust"
+
+[logging]
+level = "info"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(!config.server.graphql_allow_raw_where);
+    }
+
+    #[test]
+    fn test_env_override_graphql_allow_raw_where() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default();
+        assert!(!config.server.graphql_allow_raw_where);
+
+        env::set_var("VIBESQL_SERVER_GRAPHQL_ALLOW_RAW_WHERE", "true");
+        config.apply_env_overrides();
+        assert!(config.server.graphql_allow_raw_where);
+        env::remove_var("VIBESQL_SERVER_GRAPHQL_ALLOW_RAW_WHERE");
     }
 
     #[test]

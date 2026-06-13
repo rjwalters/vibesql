@@ -143,6 +143,7 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
                 subscription_manager_for_http,
                 metrics_for_http,
                 None,
+                false,
             );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
@@ -205,6 +206,7 @@ pub fn test_config() -> Config {
             ssl_enabled: false,
             ssl_cert: None,
             ssl_key: None,
+            graphql_allow_raw_where: false,
         },
         auth: AuthConfig { method: "trust".to_string(), password_file: None },
         logging: LoggingConfig {
@@ -346,6 +348,7 @@ pub async fn start_test_server_with_metrics(mut config: Config) -> TestServerWit
                 subscription_manager_for_http,
                 metrics_for_http,
                 None,
+                false,
             );
             axum::serve(http_listener, app).await.expect("HTTP server error");
         });
