@@ -229,31 +229,19 @@ impl Parser {
     /// Parse-and-validate each statement of a `BEGIN ... END` trigger body,
     /// surfacing the create-time validation errors SQLite enforces.
     ///
-    /// Strips the `BEGIN`/`END` wrapper, splits the body on `;`, and parses
-    /// each non-empty statement with [`Parser::parse_sql`] — mirroring
-    /// `TriggerFirer::parse_trigger_sql` in `vibesql-executor`, the parser
-    /// used when the trigger fires. A parse error is only propagated when it
-    /// is a create-time rejection class SQLite also enforces (see
+    /// Splits the body into statements with
+    /// [`crate::split_trigger_body_statements`] — the same string-literal- and
+    /// comment-aware splitter `TriggerFirer::parse_trigger_sql` in
+    /// `vibesql-executor` uses at fire time, so the two paths cannot drift and
+    /// neither mishandles a `;` inside a string literal — and parses each
+    /// statement with [`Parser::parse_sql`]. A parse error is only propagated
+    /// when it is a create-time rejection class SQLite also enforces (see
     /// [`Parser::is_create_time_rejection`]); other parse failures are
     /// tolerated so that bodies using constructs VibeSQL cannot yet parse
     /// (but SQLite accepts at create time) are preserved as before.
     fn validate_trigger_body(raw_sql: &str) -> Result<(), ParseError> {
-        // Strip the BEGIN/END wrapper (case-insensitive), mirroring the
-        // executor's fire-time stripping.
-        let body = raw_sql.trim();
-        let body = body.strip_prefix("BEGIN").map(str::trim).unwrap_or(body);
-        let body = if body.to_uppercase().ends_with("END") {
-            body[..body.len() - 3].trim()
-        } else {
-            body
-        };
-
-        for stmt_sql in body.split(';') {
-            let stmt_sql = stmt_sql.trim();
-            if stmt_sql.is_empty() || stmt_sql.starts_with("--") {
-                continue;
-            }
-            if let Err(e) = Self::parse_sql(stmt_sql) {
+        for stmt_sql in crate::split_trigger_body_statements(raw_sql) {
+            if let Err(e) = Self::parse_sql(&stmt_sql) {
                 if Self::is_create_time_rejection(&e) {
                     // Propagate verbatim so the message (e.g.
                     // `unsupported use of NULLS FIRST`) matches the

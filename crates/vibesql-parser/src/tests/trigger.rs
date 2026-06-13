@@ -311,6 +311,63 @@ fn test_create_trigger_body_with_string_literal() {
 }
 
 #[test]
+fn test_create_trigger_body_semicolon_inside_string_literal() {
+    // Regression for #5408: a `;` inside a string literal must not split the
+    // body into two malformed statements at create-time validation. SQLite
+    // accepts this body; VibeSQL must parse it successfully and preserve the
+    // full string (including the embedded `;`).
+    use vibesql_ast::TriggerAction;
+
+    let sql = "CREATE TRIGGER t AFTER INSERT ON x BEGIN \
+               INSERT INTO log VALUES ('a;b'); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse body with ';' in string: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.triggered_action {
+            TriggerAction::RawSql(body) => {
+                assert!(
+                    body.contains("'a;b'"),
+                    "Body should preserve the full string literal containing ';'. Got: {}",
+                    body
+                );
+            }
+        },
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_escaped_quote_and_semicolon_in_string() {
+    // #5408: SQLite escapes a single quote inside a string as `''`. A `;`
+    // appearing after an escaped quote is still inside the literal and must
+    // not split the statement.
+    let sql = "CREATE TRIGGER t AFTER INSERT ON x BEGIN \
+               INSERT INTO log VALUES ('o''reilly;jr'); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(
+        result.is_ok(),
+        "Failed to parse body with escaped quote + ';' in string: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_create_trigger_multi_statement_body_with_semicolon_string() {
+    // #5408: a multi-statement body where one statement contains a ';' in a
+    // string must still split into exactly the real statements (the embedded
+    // ';' is not a separator), and each must parse.
+    let sql = "CREATE TRIGGER t AFTER INSERT ON x BEGIN \
+               INSERT INTO log VALUES ('a;b'); \
+               INSERT INTO log VALUES ('c'); \
+               END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse multi-statement body: {:?}", result.err());
+}
+
+#[test]
 fn test_create_temp_trigger_after_insert() {
     let sql = "CREATE TEMP TRIGGER tr2 AFTER INSERT ON t1 BEGIN UPDATE t1 SET b = 1; END;";
     let result = Parser::parse_sql(sql);

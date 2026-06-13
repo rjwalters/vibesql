@@ -362,30 +362,16 @@ impl TriggerFirer {
     /// # Returns
     /// Vector of parsed statements
     pub fn parse_trigger_sql(sql: &str) -> Result<Vec<vibesql_ast::Statement>, ExecutorError> {
-        // Strip BEGIN/END wrapper if present
-        let sql = sql.trim();
-        let sql = if sql.to_uppercase().starts_with("BEGIN") {
-            // Remove BEGIN and END
-            let sql = sql[5..].trim();
-            if sql.to_uppercase().ends_with("END") {
-                &sql[..sql.len() - 3]
-            } else {
-                sql
-            }
-        } else {
-            sql
-        };
-
-        // Split by semicolons and parse each statement
+        // Split the BEGIN ... END body into statements with the shared,
+        // string-literal- and comment-aware splitter. This is the same
+        // splitter `Parser::validate_trigger_body` uses at create time, so the
+        // create-time and fire-time paths cannot drift, and a `;` inside a
+        // string literal (e.g. `INSERT INTO log VALUES('a;b')`) is no longer
+        // mistaken for a statement separator. The splitter strips the
+        // BEGIN/END wrapper and drops empty / comment-only fragments.
         let mut statements = Vec::new();
-        for stmt_sql in sql.split(';') {
-            let stmt_sql = stmt_sql.trim();
-            if stmt_sql.is_empty() || stmt_sql.starts_with("--") {
-                // Skip empty statements or comments
-                continue;
-            }
-
-            match vibesql_parser::Parser::parse_sql(stmt_sql) {
+        for stmt_sql in vibesql_parser::split_trigger_body_statements(sql) {
+            match vibesql_parser::Parser::parse_sql(&stmt_sql) {
                 Ok(stmt) => statements.push(stmt),
                 Err(e) => {
                     return Err(ExecutorError::UnsupportedExpression(format!(

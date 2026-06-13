@@ -30,11 +30,13 @@ mod parser;
 #[cfg(test)]
 mod tests;
 mod token;
+mod trigger_body;
 
 pub use keywords::Keyword;
 pub use lexer::{Lexer, LexerError, Span};
 pub use parser::{ParseError, Parser};
 pub use token::Token;
+pub use trigger_body::split_trigger_body_statements;
 use vibesql_ast::Statement;
 
 /// Parse SQL using arena allocation where supported, falling back to standard parsing.
