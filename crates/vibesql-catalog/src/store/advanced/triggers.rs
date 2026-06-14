@@ -56,7 +56,14 @@ impl super::super::Catalog {
         self.triggers.values().filter(move |trigger| {
             // Case-insensitive table name matching (SQLite-compatible)
             trigger.table_name.eq_ignore_ascii_case(table_name)
-                && event.as_ref().is_none_or(|e| trigger.event == *e)
+                // Match by event *kind* (INSERT / UPDATE / DELETE), not by exact
+                // value. An `UPDATE OF c, d` trigger has event
+                // `Update(Some([c, d]))`, but the executor dispatches the generic
+                // `Update(None)` event for every UPDATE; comparing for equality
+                // would never match column-list triggers, so they would never
+                // fire (issue #5577). The column-list firing restriction is
+                // applied later by `should_fire_update_of`.
+                && event.as_ref().is_none_or(|e| event_kind_matches(&trigger.event, e))
         })
     }
 
@@ -73,6 +80,21 @@ impl super::super::Catalog {
     pub fn has_any_triggers(&self) -> bool {
         !self.triggers.is_empty()
     }
+}
+
+/// Compare two trigger events by *kind* (INSERT / UPDATE / DELETE), ignoring an
+/// UPDATE's optional `OF <columns>` list.
+///
+/// The executor dispatches the generic `Update(None)` event for every UPDATE,
+/// while a column-list trigger is stored as `Update(Some([...]))`. Matching by
+/// kind lets such triggers be discovered; the per-row column-list restriction is
+/// enforced separately by the executor's `should_fire_update_of`.
+fn event_kind_matches(a: &vibesql_ast::TriggerEvent, b: &vibesql_ast::TriggerEvent) -> bool {
+    use vibesql_ast::TriggerEvent::*;
+    matches!(
+        (a, b),
+        (Insert, Insert) | (Update(_), Update(_)) | (Delete, Delete)
+    )
 }
 
 #[cfg(test)]

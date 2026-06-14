@@ -168,7 +168,9 @@ fn test_create_trigger_with_when_condition() {
 
 #[test]
 fn test_create_trigger_update_of_columns() {
-    let sql = "CREATE TRIGGER my_trigger BEFORE UPDATE OF (col1, col2) ON my_table BEGIN END;";
+    // Standard SQLite (3.51.0): UNPARENTHESIZED comma-separated column list,
+    // terminated by ON (trigger2-3.1). This is the canonical form.
+    let sql = "CREATE TRIGGER my_trigger BEFORE UPDATE OF col1, col2 ON my_table BEGIN END;";
     let result = Parser::parse_sql(sql);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
@@ -185,6 +187,65 @@ fn test_create_trigger_update_of_columns() {
                 _ => panic!("Expected UPDATE OF with columns"),
             }
         }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_update_of_single_column() {
+    // Single unparenthesized column (sqlite3 accepts `UPDATE OF c`).
+    let sql = "CREATE TRIGGER tr AFTER UPDATE OF c ON tbl BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.event {
+            TriggerEvent::Update(Some(cols)) => {
+                assert_eq!(cols, &vec!["c".to_string()]);
+            }
+            other => panic!("Expected UPDATE OF with single column, got {other:?}"),
+        },
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_update_of_multi_after() {
+    // Mirrors trigger2-3.1: AFTER UPDATE OF c, d ON tbl.
+    let sql = "CREATE TRIGGER tbl_after_update_cd AFTER UPDATE OF c, d ON tbl BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.timing, TriggerTiming::After);
+            assert_eq!(trigger.table_name, "tbl");
+            match &trigger.event {
+                TriggerEvent::Update(Some(cols)) => {
+                    assert_eq!(cols, &vec!["c".to_string(), "d".to_string()]);
+                }
+                other => panic!("Expected UPDATE OF c, d, got {other:?}"),
+            }
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_update_of_parenthesized_lenient() {
+    // Lenient extension: VibeSQL still accepts the parenthesized form even
+    // though sqlite3 3.51.0 rejects it. Retained for backwards compatibility.
+    let sql = "CREATE TRIGGER my_trigger BEFORE UPDATE OF (col1, col2) ON my_table BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => match &trigger.event {
+            TriggerEvent::Update(Some(cols)) => {
+                assert_eq!(cols, &vec!["col1".to_string(), "col2".to_string()]);
+            }
+            other => panic!("Expected UPDATE OF with columns, got {other:?}"),
+        },
         _ => panic!("Expected CreateTrigger statement"),
     }
 }
