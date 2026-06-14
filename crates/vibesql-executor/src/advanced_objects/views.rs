@@ -77,6 +77,11 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         }
     };
 
+    // Tag temp views with the `temp` schema so they surface via
+    // sqlite_temp_master and are excluded from sqlite_master (#5541), mirroring
+    // the temp-trigger schema tag (#5532) and temp-index tag (#5513).
+    let schema = if stmt.temporary { Some("temp".to_string()) } else { None };
+
     let view = if let Some(ref sql) = stmt.sql_definition {
         ViewDefinition::new_with_sql(
             stmt.view_name.clone(),
@@ -92,7 +97,8 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
             (*stmt.query).clone(),
             stmt.with_check_option,
         )
-    };
+    }
+    .with_schema(schema);
 
     if stmt.or_replace || (stmt.if_not_exists && !view_exists) {
         // For OR REPLACE, drop the view if it exists, then CREATE

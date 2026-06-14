@@ -280,6 +280,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
 
     let view = ViewDefinition {
         name: "active_users".to_string(),
+        schema: None,
         query: select_stmt,
         columns: None,
         with_check_option: false,
@@ -344,6 +345,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
 
     let view = ViewDefinition {
         name: "product_view".to_string(),
+        schema: None,
         query: select_stmt,
         columns: None,
         with_check_option: false,
@@ -410,6 +412,7 @@ fn test_view_case_sensitive_mode() {
 
     let view = ViewDefinition {
         name: "user_view".to_string(),
+        schema: None,
         query: select_stmt,
         columns: None,
         with_check_option: false,
