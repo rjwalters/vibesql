@@ -36,6 +36,20 @@ use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
 
+/// Extract the schema part of a `schema.table` qualified name.
+///
+/// CREATE INDEX builds `qualified_table_name` as `schema.table` after resolving
+/// the target table's owning schema (temp shadows main per SQLite name
+/// resolution). The schema part is what an index must be tagged with so a
+/// temp-table index lands in the temp schema. Falls back to `main` for a bare
+/// (unqualified) name. See issue #5513.
+pub(crate) fn schema_of_qualified(qualified_table_name: &str) -> &str {
+    qualified_table_name
+        .split_once('.')
+        .map(|(schema, _)| schema)
+        .unwrap_or(vibesql_catalog::DEFAULT_SCHEMA)
+}
+
 /// Unified executor for index operations (CREATE, DROP, and REINDEX INDEX)
 ///
 /// This struct provides backward compatibility with the original API,

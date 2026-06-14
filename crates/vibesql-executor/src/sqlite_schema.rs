@@ -29,6 +29,16 @@ pub fn is_sqlite_schema_table(table_name: &str) -> bool {
     matches!(normalized.as_str(), "sqlite_master" | "sqlite_schema")
 }
 
+/// Check if a table reference is sqlite_temp_master or sqlite_temp_schema.
+///
+/// These are the temp-schema introspection views: they list objects that live
+/// in the session temp schema (temp tables, and indexes on temp tables), and
+/// are the temp-schema counterpart to `sqlite_master`. See issue #5513.
+pub fn is_sqlite_temp_schema_table(table_name: &str) -> bool {
+    let normalized = table_name.to_lowercase();
+    matches!(normalized.as_str(), "sqlite_temp_master" | "sqlite_temp_schema")
+}
+
 /// Get the schema for sqlite_master/sqlite_schema
 pub fn get_sqlite_schema_table_schema() -> TableSchema {
     TableSchema::new(
@@ -47,7 +57,23 @@ pub fn get_sqlite_schema_table_schema() -> TableSchema {
     )
 }
 
-/// Execute a sqlite_master/sqlite_schema query
+/// Build a single sqlite_master-format row.
+fn schema_row(obj_type: &str, name: &str, tbl_name: &str, sql: String) -> Row {
+    Row::new(vec![
+        SqlValue::Varchar(arcstr::ArcStr::from(obj_type)),
+        SqlValue::Varchar(arcstr::ArcStr::from(name)),
+        SqlValue::Varchar(arcstr::ArcStr::from(tbl_name)),
+        SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+        SqlValue::Varchar(arcstr::ArcStr::from(sql)),
+    ])
+}
+
+/// Execute a `sqlite_master` / `sqlite_schema` query.
+///
+/// Lists **main-schema** objects only. Temp-schema objects (temp tables and
+/// indexes on temp tables) are reported by `sqlite_temp_master`, matching
+/// SQLite 3.51.0 where a temp-table index appears in `sqlite_temp_master` and
+/// never in `sqlite_master`. See issue #5513.
 pub fn execute_sqlite_schema_query(
     catalog: &vibesql_catalog::Catalog,
 ) -> Result<SelectResult, ExecutorError> {
@@ -55,43 +81,28 @@ pub fn execute_sqlite_schema_query(
     let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
     let mut rows = Vec::new();
 
-    // Add tables
+    // Add tables. `list_tables()` returns the current (main) schema only, so
+    // temp tables are already excluded here.
     for table_name in catalog.list_tables() {
         if let Some(table) = catalog.get_table(&table_name) {
             let sql = generate_create_table_sql(table);
-            rows.push(Row::new(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("table")),
-                SqlValue::Varchar(arcstr::ArcStr::from(table_name.clone())),
-                SqlValue::Varchar(arcstr::ArcStr::from(table_name)),
-                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
-                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
-            ]));
+            rows.push(schema_row("table", &table_name, &table_name, sql));
         }
     }
 
-    // Add indexes
-    for index in catalog.list_all_indexes() {
+    // Add indexes owned by the main schema. Temp-table indexes are tagged with
+    // their temp schema (#5513) and surface only via sqlite_temp_master.
+    for index in catalog.get_schema_indexes(vibesql_catalog::DEFAULT_SCHEMA) {
         let sql = generate_create_index_sql(index);
-        rows.push(Row::new(vec![
-            SqlValue::Varchar(arcstr::ArcStr::from("index")),
-            SqlValue::Varchar(arcstr::ArcStr::from(index.name.clone())),
-            SqlValue::Varchar(arcstr::ArcStr::from(index.table_name.clone())),
-            SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
-            SqlValue::Varchar(arcstr::ArcStr::from(sql)),
-        ]));
+        rows.push(schema_row("index", &index.name, &index.table_name, sql));
     }
 
     // Add views
     for view_name in catalog.list_views() {
         if let Some(view) = catalog.get_view(&view_name) {
             let sql = generate_create_view_sql(view);
-            rows.push(Row::new(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("view")),
-                SqlValue::Varchar(arcstr::ArcStr::from(view.name.clone())),
-                SqlValue::Varchar(arcstr::ArcStr::from(view.name.clone())), // tbl_name is same as name for views
-                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
-                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
-            ]));
+            // tbl_name is same as name for views
+            rows.push(schema_row("view", &view.name, &view.name, sql));
         }
     }
 
@@ -99,14 +110,49 @@ pub fn execute_sqlite_schema_query(
     for trigger_name in catalog.list_triggers() {
         if let Some(trigger) = catalog.get_trigger(&trigger_name) {
             let sql = generate_create_trigger_sql(trigger);
-            rows.push(Row::new(vec![
-                SqlValue::Varchar(arcstr::ArcStr::from("trigger")),
-                SqlValue::Varchar(arcstr::ArcStr::from(trigger.name.clone())),
-                SqlValue::Varchar(arcstr::ArcStr::from(trigger.table_name.clone())),
-                SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
-                SqlValue::Varchar(arcstr::ArcStr::from(sql)),
-            ]));
+            rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
         }
+    }
+
+    Ok(SelectResult { columns: column_names, rows })
+}
+
+/// Execute a `sqlite_temp_master` / `sqlite_temp_schema` query.
+///
+/// Lists the session's **temp-schema** objects: temp tables and indexes on temp
+/// tables. Mirrors SQLite 3.51.0, where:
+///   CREATE TEMP TABLE t(a); CREATE INDEX i ON t(a);
+///   SELECT name,type FROM sqlite_temp_master;  -- lists t and i
+/// while `sqlite_master` lists neither. See issue #5513.
+///
+/// Scope note: VibeSQL does not yet schema-tag temp **views** or temp
+/// **triggers** (tracked separately — see follow-ons), so this view currently
+/// surfaces temp tables and temp-table indexes. That is sufficient for the
+/// index introspection parity this issue targets.
+pub fn execute_sqlite_temp_schema_query(
+    catalog: &vibesql_catalog::Catalog,
+) -> Result<SelectResult, ExecutorError> {
+    let schema = get_sqlite_schema_table_schema();
+    let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
+    let mut rows = Vec::new();
+
+    let temp_schema = catalog.temp_schema_name();
+
+    // Add temp tables (objects living in the session temp schema).
+    for table_name in catalog.list_tables_in_schema(temp_schema) {
+        // Look up via the temp-qualified name so we read the temp copy even when
+        // a same-named main table shadows it for unqualified lookups.
+        let qualified = format!("{}.{}", temp_schema, table_name);
+        if let Some(table) = catalog.get_table(&qualified) {
+            let sql = generate_create_table_sql(table);
+            rows.push(schema_row("table", &table_name, &table_name, sql));
+        }
+    }
+
+    // Add indexes owned by the temp schema.
+    for index in catalog.get_schema_indexes(temp_schema) {
+        let sql = generate_create_index_sql(index);
+        rows.push(schema_row("index", &index.name, &index.table_name, sql));
     }
 
     Ok(SelectResult { columns: column_names, rows })
@@ -386,6 +432,86 @@ mod tests {
         assert!(!is_sqlite_schema_table("users"));
         assert!(!is_sqlite_schema_table("sqlite_stat1"));
         assert!(!is_sqlite_schema_table("information_schema.tables"));
+        // sqlite_temp_master is a distinct view, not sqlite_master.
+        assert!(!is_sqlite_schema_table("sqlite_temp_master"));
+    }
+
+    #[test]
+    fn test_is_sqlite_temp_schema_table() {
+        assert!(is_sqlite_temp_schema_table("sqlite_temp_master"));
+        assert!(is_sqlite_temp_schema_table("sqlite_temp_schema"));
+        assert!(is_sqlite_temp_schema_table("SQLITE_TEMP_MASTER"));
+        assert!(is_sqlite_temp_schema_table("Sqlite_Temp_Schema"));
+        assert!(!is_sqlite_temp_schema_table("sqlite_master"));
+        assert!(!is_sqlite_temp_schema_table("users"));
+    }
+
+    #[test]
+    fn test_temp_index_separated_from_main_in_schema_views() {
+        // #5513: a temp-schema index appears in sqlite_temp_master and is
+        // excluded from sqlite_master; a main index is the reverse.
+        let mut catalog = Catalog::new();
+
+        // main.t with a main index.
+        let main_table = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table(main_table).unwrap();
+        catalog
+            .add_index(IndexMetadata::new(
+                "main_i".to_string(),
+                "t".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
+                false,
+            ))
+            .unwrap();
+
+        // temp.tt with a temp index.
+        let temp_schema = catalog.temp_schema_name().to_string();
+        let temp_table = TableSchema::new(
+            "tt".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table_in_schema(&temp_schema, temp_table).unwrap();
+        catalog
+            .add_index(
+                IndexMetadata::new(
+                    "temp_i".to_string(),
+                    "tt".to_string(),
+                    IndexType::BTree,
+                    vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
+                    false,
+                )
+                .with_schema(temp_schema.clone()),
+            )
+            .unwrap();
+
+        let master = execute_sqlite_schema_query(&catalog).unwrap();
+        let master_names: Vec<String> = master
+            .rows
+            .iter()
+            .map(|r| match &r.values[1] {
+                SqlValue::Varchar(s) => s.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(master_names.contains(&"main_i".to_string()), "master should list main index");
+        assert!(!master_names.contains(&"temp_i".to_string()), "master must exclude temp index");
+
+        let temp_master = execute_sqlite_temp_schema_query(&catalog).unwrap();
+        let temp_names: Vec<String> = temp_master
+            .rows
+            .iter()
+            .map(|r| match &r.values[1] {
+                SqlValue::Varchar(s) => s.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(temp_names.contains(&"temp_i".to_string()), "temp_master should list temp index");
+        assert!(temp_names.contains(&"tt".to_string()), "temp_master should list temp table");
+        assert!(!temp_names.contains(&"main_i".to_string()), "temp_master must exclude main index");
     }
 
     #[test]

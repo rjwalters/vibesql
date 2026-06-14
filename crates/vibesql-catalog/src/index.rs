@@ -8,6 +8,16 @@
 pub struct IndexMetadata {
     /// Name of the index
     pub name: String,
+    /// Name of the schema that owns this index (e.g. `main` or a session temp
+    /// schema like `temp_123`).
+    ///
+    /// SQLite-compatibility: an index lives in the same schema as the table it
+    /// indexes. A temp-table index belongs to the session temp schema, where it
+    /// is listed in `sqlite_temp_master` (not `sqlite_master`) and is dropped
+    /// when the temp table is dropped or the connection closes. Tagging the
+    /// owning schema lets a temp index and a main index share a name without
+    /// colliding. See issue #5513.
+    pub schema: String,
     /// Name of the table this index belongs to
     pub table_name: String,
     /// Type of index
@@ -158,7 +168,12 @@ pub enum SortOrder {
 }
 
 impl IndexMetadata {
-    /// Create a new index metadata entry
+    /// Create a new index metadata entry.
+    ///
+    /// The owning schema defaults to [`crate::DEFAULT_SCHEMA`] (`main`). Use
+    /// [`IndexMetadata::with_schema`] to tag a temp-schema index. Defaulting to
+    /// `main` keeps the dozens of existing call sites (and persisted/recovered
+    /// indexes, which all live in `main`) behaving exactly as before.
     pub fn new(
         name: String,
         table_name: String,
@@ -166,7 +181,29 @@ impl IndexMetadata {
         columns: Vec<IndexedColumn>,
         is_unique: bool,
     ) -> Self {
-        Self { name, table_name, index_type, columns, is_unique, where_clause: None }
+        Self {
+            name,
+            schema: crate::DEFAULT_SCHEMA.to_string(),
+            table_name,
+            index_type,
+            columns,
+            is_unique,
+            where_clause: None,
+        }
+    }
+
+    /// Set the owning schema for this index (builder-style chaining).
+    ///
+    /// Used by CREATE INDEX once the target table's schema has been resolved
+    /// (temp shadows main per SQLite name resolution). See issue #5513.
+    pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
+        self.schema = schema.into();
+        self
+    }
+
+    /// Returns the owning schema name (e.g. `main` or `temp_123`).
+    pub fn schema(&self) -> &str {
+        &self.schema
     }
 
     /// Attach a partial-index predicate (CREATE INDEX ... WHERE expr).
@@ -183,8 +220,20 @@ impl IndexMetadata {
         self.where_clause.is_some()
     }
 
-    /// Get the fully qualified index name (table.index)
+    /// Get the catalog key for this index: `schema.table.index`.
+    ///
+    /// Including the schema lets a temp-table index and a main-table index
+    /// share a name (and even a table name, when a temp table shadows a main
+    /// table) without colliding in the catalog's index registry. See #5513.
     pub fn qualified_name(&self) -> String {
+        format!("{}.{}.{}", self.schema, self.table_name, self.name)
+    }
+
+    /// Get the schema-less `table.index` form (no owning schema prefix).
+    ///
+    /// Useful for display / SHOW output that should not surface the internal
+    /// session temp-schema name.
+    pub fn table_qualified_name(&self) -> String {
         format!("{}.{}", self.table_name, self.name)
     }
 
@@ -239,7 +288,23 @@ mod tests {
             false,
         );
 
-        assert_eq!(index.qualified_name(), "users.idx_name");
+        // Defaults to the `main` schema; key is schema.table.index.
+        assert_eq!(index.qualified_name(), "main.users.idx_name");
+        assert_eq!(index.table_qualified_name(), "users.idx_name");
+        assert_eq!(index.schema(), "main");
+
+        // A temp-schema index keys under its temp schema, so it never collides
+        // with a same-named main index on a same-named table.
+        let temp_index = IndexMetadata::new(
+            "idx_name".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+            false,
+        )
+        .with_schema("temp_7");
+        assert_eq!(temp_index.qualified_name(), "temp_7.users.idx_name");
+        assert_ne!(temp_index.qualified_name(), index.qualified_name());
     }
 
     #[test]
