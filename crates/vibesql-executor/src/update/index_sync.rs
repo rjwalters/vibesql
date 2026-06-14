@@ -679,3 +679,89 @@ pub(super) fn validate_post_statement_uniqueness(
 
     Ok(())
 }
+
+/// Validate `UPDATE ... SET rowid = <expr>` relocations on a rowid table that
+/// has no INTEGER PRIMARY KEY (i.e. the rowid is virtual, stored in
+/// `Row::row_id` rather than aliased to a real column).
+///
+/// SQLite lets `SET rowid=` / `SET _rowid_=` move a row to a new rowid, but the
+/// target rowid must be unique: relocating onto a rowid that another live row
+/// already occupies raises `UNIQUE constraint failed: <table>.rowid`. INTEGER
+/// PRIMARY KEY tables don't reach here — there the assignment writes the IPK
+/// column and the standard PK uniqueness check (`validate_post_statement_uniqueness`)
+/// catches the collision against `<table>.<ipk>`.
+///
+/// The effective rowid of a live row at physical index `i` is
+/// `row.row_id.unwrap_or(i + 1)`, matching the read path. Rows that are
+/// themselves part of this UPDATE are excluded from the "existing" set: only
+/// their post-statement (new) rowid participates, so swaps and self-moves are
+/// not spurious conflicts. This mirrors the deferred two-phase semantics of the
+/// PK/UNIQUE checks above.
+pub(super) fn validate_rowid_relocation(
+    updates: &[PendingUpdate],
+    schema: &TableSchema,
+    table: &Table,
+) -> Result<(), ExecutorError> {
+    // Only relevant for virtual-rowid tables. INTEGER PRIMARY KEY tables store
+    // the rowid in a real column and are validated by the PK path.
+    if schema.rowid_alias_column.is_some() {
+        return Ok(());
+    }
+
+    // Identify the updates that actually move the rowid. value_updater sets
+    // `new_row.row_id` for a `SET rowid=` assignment but leaves changed_columns
+    // empty, so we detect relocations by comparing the new rowid against the
+    // row's original effective rowid (old_row.row_id, falling back to physical
+    // index + 1).
+    let mut relocations: Vec<(usize, u64)> = Vec::new(); // (row_index, new_rowid)
+    for u in updates {
+        let new_rowid = match u.new_row.row_id {
+            Some(id) => id,
+            None => continue,
+        };
+        let old_rowid = u.old_row.row_id.unwrap_or((u.row_index + 1) as u64);
+        if new_rowid != old_rowid {
+            relocations.push((u.row_index, new_rowid));
+        }
+    }
+    if relocations.is_empty() {
+        return Ok(());
+    }
+
+    // Set of rows participating in this UPDATE (their original slots are vacated
+    // — only their new rowid matters).
+    let updated_indices: HashSet<usize> = updates.iter().map(|u| u.row_index).collect();
+
+    for &(row_index, new_rowid) in &relocations {
+        // Collision with an existing live row that is NOT part of this UPDATE.
+        for (idx, row) in table.scan_live() {
+            if updated_indices.contains(&idx) {
+                continue;
+            }
+            let existing_rowid = row.row_id.unwrap_or((idx + 1) as u64);
+            if existing_rowid == new_rowid {
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}.rowid",
+                    schema.name
+                )));
+            }
+        }
+
+        // Collision with another row's post-statement rowid (cross-update),
+        // e.g. two rows both relocated onto the same target.
+        for u in updates {
+            if u.row_index == row_index {
+                continue;
+            }
+            let other_new = u.new_row.row_id.unwrap_or((u.row_index + 1) as u64);
+            if other_new == new_rowid {
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}.rowid",
+                    schema.name
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}

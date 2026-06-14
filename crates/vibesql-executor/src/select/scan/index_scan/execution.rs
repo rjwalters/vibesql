@@ -323,8 +323,14 @@ pub(crate) fn execute_index_scan(
 
                             let t2 = Instant::now();
                             // Issue #4954: Set row_id when cloning for rowid support
+                            // Issue #5517: an explicitly relocated rowid
+                            // (`UPDATE ... SET rowid=`) is stored in row.row_id;
+                            // only synthesize physical-index+1 when absent so an
+                            // index scan reports the relocated rowid, not the slot.
                             let mut cloned = row_ref.clone();
-                            cloned.set_row_id((idx + 1) as u64);
+                            if cloned.row_id.is_none() {
+                                cloned.set_row_id((idx + 1) as u64);
+                            }
                             rows.push(cloned);
                             clone_time += t2.elapsed();
 
@@ -365,8 +371,11 @@ pub(crate) fn execute_index_scan(
                             }
                         })
                         .map(|(idx, row)| {
+                            // Issue #5517: honor an explicitly relocated rowid.
                             let mut cloned = row.clone();
-                            cloned.set_row_id((idx + 1) as u64);
+                            if cloned.row_id.is_none() {
+                                cloned.set_row_id((idx + 1) as u64);
+                            }
                             cloned
                         })
                         .collect()
@@ -662,9 +671,12 @@ pub(crate) fn execute_index_scan(
         .into_iter()
         .map(|row| {
             let mut cloned = row.clone();
-            // Look up the original row index from our mapping and convert to 1-based rowid
-            if let Some(&idx) = row_ptr_to_idx.get(&(row as *const Row as usize)) {
-                cloned.set_row_id((idx + 1) as u64);
+            // Look up the original row index from our mapping and convert to 1-based rowid.
+            // Issue #5517: a stored (relocated) row_id wins over physical-index+1.
+            if cloned.row_id.is_none() {
+                if let Some(&idx) = row_ptr_to_idx.get(&(row as *const Row as usize)) {
+                    cloned.set_row_id((idx + 1) as u64);
+                }
             }
             cloned
         })
