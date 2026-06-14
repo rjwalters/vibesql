@@ -14,6 +14,7 @@
 
 use vibesql_executor::{
     CreateIndexExecutor, CreateTableExecutor, DropIndexExecutor, DropTableExecutor, SelectExecutor,
+    TriggerExecutor, ViewExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
@@ -68,6 +69,41 @@ fn exec_drop_table(db: &mut Database, sql: &str) {
         }
         other => panic!("expected DROP TABLE, got {other:?}"),
     };
+}
+
+fn exec_create_trigger(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse CREATE TRIGGER");
+    match stmt {
+        vibesql_ast::Statement::CreateTrigger(s) => {
+            TriggerExecutor::create_trigger(db, &s).expect("CREATE TRIGGER");
+        }
+        other => panic!("expected CREATE TRIGGER, got {other:?}"),
+    };
+}
+
+fn exec_create_view(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse CREATE VIEW");
+    match stmt {
+        vibesql_ast::Statement::CreateView(s) => {
+            ViewExecutor::execute_create_view(&s, db).expect("CREATE VIEW");
+        }
+        other => panic!("expected CREATE VIEW, got {other:?}"),
+    };
+}
+
+/// Run a SELECT and return whether it errored (used to assert "view errors on
+/// use" parity after its underlying table is dropped).
+fn select_is_err(db: &Database, sql: &str) -> bool {
+    let stmt = match Parser::parse_sql(sql) {
+        Ok(s) => s,
+        Err(_) => return true,
+    };
+    match stmt {
+        vibesql_ast::Statement::Select(s) => {
+            SelectExecutor::new(db).execute_with_columns(&s).is_err()
+        }
+        other => panic!("expected SELECT, got {other:?}"),
+    }
 }
 
 fn select(db: &Database, sql: &str) -> (Vec<String>, Vec<Row>) {
@@ -247,4 +283,129 @@ fn temp_index_dropped_with_temp_table() {
         names(&after_main).contains(&"mi".to_string()),
         "main index must survive dropping the temp table"
     );
+}
+
+/// Issue #5583 — temp lifecycle: a temp trigger defined ON a temp table is
+/// dropped together with that table, while a temp VIEW referencing the table is
+/// NOT auto-dropped (it remains in sqlite_temp_master and errors on use).
+///
+/// Verified against sqlite3 3.51.0:
+///
+/// ```text
+/// CREATE TEMP TABLE t(a);
+/// CREATE TEMP TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;
+/// CREATE TEMP VIEW v AS SELECT * FROM t;
+/// DROP TABLE t;                  -- tr gone, v remains
+/// SELECT type,name FROM sqlite_temp_master;  -- only: view v
+/// SELECT * FROM v;               -- Error: no such table: t
+/// ```
+#[test]
+fn temp_trigger_dropped_with_temp_table_view_remains() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TEMP TABLE t (a)");
+    exec_create_trigger(&mut db, "CREATE TEMP TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END");
+    exec_create_view(&mut db, "CREATE TEMP VIEW v AS SELECT * FROM t");
+
+    // Before the drop: both the trigger and the view are surfaced by temp_master.
+    let (_, before) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='trigger'");
+    assert!(names(&before).contains(&"tr".to_string()), "temp trigger should be listed before drop");
+    let (_, before_v) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='view'");
+    assert!(names(&before_v).contains(&"v".to_string()), "temp view should be listed before drop");
+
+    // Drop the temp table (schema-qualified: unqualified DROP TABLE not resolving
+    // into temp is a separate pre-existing limitation, same as the index test).
+    exec_drop_table(&mut db, "DROP TABLE temp.t");
+
+    // The temp trigger ON the table is gone (matches sqlite3).
+    let (_, after_tr) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='trigger'");
+    assert!(
+        !names(&after_tr).contains(&"tr".to_string()),
+        "temp trigger ON the dropped table must be cascade-dropped"
+    );
+
+    // The view referencing the table is NOT auto-dropped (matches sqlite3).
+    let (_, after_v) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='view'");
+    assert!(
+        names(&after_v).contains(&"v".to_string()),
+        "a view merely referencing the dropped table must NOT be auto-dropped"
+    );
+
+    // ...but the surviving view errors on use, since its base table is gone.
+    assert!(
+        select_is_err(&db, "SELECT * FROM v"),
+        "the surviving view must error on use after its base table is dropped"
+    );
+}
+
+/// Issue #5583 — main-schema parity: `DROP TABLE` drops a trigger defined ON the
+/// table, but NOT a trigger defined ON a *different* table even if it references
+/// the dropped one in its body.
+///
+/// Verified against sqlite3 3.51.0:
+///
+/// ```text
+/// CREATE TABLE t(a);  CREATE TABLE other(b);
+/// CREATE TRIGGER tr  AFTER INSERT ON t     BEGIN SELECT 1; END;
+/// CREATE TRIGGER tr2 AFTER INSERT ON other BEGIN INSERT INTO t VALUES(1); END;
+/// DROP TABLE t;       -- tr gone, tr2 remains (it is ON other)
+/// ```
+#[test]
+fn main_drop_table_drops_only_triggers_on_that_table() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t (a)");
+    exec_create_table(&mut db, "CREATE TABLE other (b)");
+    exec_create_trigger(&mut db, "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END");
+    exec_create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr2 AFTER INSERT ON other BEGIN INSERT INTO t VALUES (1); END",
+    );
+
+    exec_drop_table(&mut db, "DROP TABLE t");
+
+    let (_, after) = select(&db, "SELECT name FROM sqlite_master WHERE type='trigger'");
+    let listed = names(&after);
+    assert!(
+        !listed.contains(&"tr".to_string()),
+        "trigger ON the dropped table must be removed: {listed:?}"
+    );
+    assert!(
+        listed.contains(&"tr2".to_string()),
+        "trigger ON a different table (even if it references the dropped one) must survive: {listed:?}"
+    );
+}
+
+/// Issue #5583 — connection-close / schema isolation: each connection owns its
+/// own `Catalog` (per `Catalog::new()` session), so temp triggers and views are
+/// connection-local by construction and a fresh connection sees none of the
+/// previous connection's temp objects. (Connection close is structural: the
+/// `Catalog` — including the flat view/trigger maps and the session temp schema —
+/// is dropped wholesale.)
+#[test]
+fn temp_trigger_and_view_are_connection_local() {
+    // Connection A creates temp objects.
+    let mut db_a = Database::new();
+    exec_create_table(&mut db_a, "CREATE TEMP TABLE t (a)");
+    exec_create_trigger(&mut db_a, "CREATE TEMP TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END");
+    exec_create_view(&mut db_a, "CREATE TEMP VIEW v AS SELECT * FROM t");
+
+    let (_, a_objs) = select(&db_a, "SELECT name FROM sqlite_temp_master");
+    let a_listed = names(&a_objs);
+    assert!(a_listed.contains(&"tr".to_string()));
+    assert!(a_listed.contains(&"v".to_string()));
+
+    // A separate connection B sees none of A's temp objects.
+    let db_b = Database::new();
+    let (_, b_objs) = select(&db_b, "SELECT name FROM sqlite_temp_master");
+    let b_listed = names(&b_objs);
+    assert!(
+        !b_listed.contains(&"tr".to_string()),
+        "connection B must not see connection A's temp trigger: {b_listed:?}"
+    );
+    assert!(
+        !b_listed.contains(&"v".to_string()),
+        "connection B must not see connection A's temp view: {b_listed:?}"
+    );
+
+    // Closing connection A (drop) releases its temp objects with the Catalog.
+    drop(db_a);
 }
