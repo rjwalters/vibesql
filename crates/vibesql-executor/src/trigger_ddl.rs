@@ -67,6 +67,25 @@ impl TriggerExecutor {
             ));
         }
 
+        // sqlite3 reports a missing CREATE TRIGGER target table in the implicit
+        // `main` schema with the `main.` qualifier
+        // (`no such table: main.no_such_table`, trigger1-1.1.1), but leaves a
+        // TEMP trigger's missing target bare (`no such table: no_such_table`,
+        // trigger1-1.1.2). The trigger's schema is `Some("temp")` for
+        // `CREATE TEMP TRIGGER`; in every other case the target resolves against
+        // the main schema and is qualified.
+        let target_is_temp_schema = stmt
+            .schema
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case("temp"));
+        let qualify_missing_table = |err: ExecutorError| -> ExecutorError {
+            if target_is_temp_schema {
+                err
+            } else {
+                err.with_main_schema_qualifier()
+            }
+        };
+
         // INSTEAD OF triggers can only be created on views;
         // BEFORE and AFTER triggers can only be created on (non-view) tables.
         let target_is_view = db.catalog.get_view(&stmt.table_name).is_some();
@@ -81,7 +100,9 @@ impl TriggerExecutor {
                     )));
                 }
                 // Neither a view nor a table: report the missing target.
-                return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
+                return Err(qualify_missing_table(ExecutorError::TableNotFound(
+                    stmt.table_name.clone(),
+                )));
             }
         } else {
             // BEFORE / AFTER on a view is rejected with SQLite's exact wording
@@ -100,7 +121,9 @@ impl TriggerExecutor {
             }
             // Verify the target table exists.
             if !db.catalog.table_exists(&stmt.table_name) {
-                return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
+                return Err(qualify_missing_table(ExecutorError::TableNotFound(
+                    stmt.table_name.clone(),
+                )));
             }
         }
 
