@@ -218,10 +218,13 @@ pub fn validate_column_ref(
         if let Some(ref qualifier) = col_ref.table {
             let qualifier_lower = qualifier.to_lowercase();
 
-            // Check if the qualified table is a WITHOUT ROWID table
+            // Check if the qualified table is a WITHOUT ROWID table or a VIEW.
+            // Neither exposes the rowid pseudo-column: WITHOUT ROWID tables have
+            // no rowid (#4953), and views have no implicit rowid at all (#5492).
             for (table_id, (_, table_schema)) in &schema.table_schemas {
-                if table_id.canonical() == qualifier_lower && table_schema.without_rowid {
-                    // WITHOUT ROWID tables do not have rowid pseudo-column
+                if table_id.canonical() == qualifier_lower
+                    && (table_schema.without_rowid || table_schema.is_view)
+                {
                     return Err(ExecutorError::ColumnNotFound {
                         column_name: col_ref.column.clone(),
                         table_name: qualifier.clone(),
@@ -245,15 +248,18 @@ pub fn validate_column_ref(
             }
         } else {
             // Unqualified ROWID is valid if there's at least one table in scope
-            // AND none of the tables are WITHOUT ROWID
+            // AND none of the tables are WITHOUT ROWID or a VIEW (neither
+            // exposes a rowid pseudo-column — #4953 / #5492).
             if !schema.table_schemas.is_empty() {
-                // Check if any table in scope is WITHOUT ROWID
+                // Check if any table in scope is WITHOUT ROWID or a VIEW.
                 let has_without_rowid_table =
-                    schema.table_schemas.values().any(|(_, ts)| ts.without_rowid);
+                    schema.table_schemas.values().any(|(_, ts)| ts.without_rowid || ts.is_view);
                 if has_without_rowid_table {
-                    // Get the first WITHOUT ROWID table for error message
-                    if let Some((table_id, (_, table_schema))) =
-                        schema.table_schemas.iter().find(|(_, (_, ts))| ts.without_rowid)
+                    // Get the first WITHOUT ROWID table or VIEW for error message
+                    if let Some((table_id, (_, table_schema))) = schema
+                        .table_schemas
+                        .iter()
+                        .find(|(_, (_, ts))| ts.without_rowid || ts.is_view)
                     {
                         return Err(ExecutorError::ColumnNotFound {
                             column_name: col_ref.column.clone(),
@@ -327,8 +333,8 @@ mod tests {
 
     use super::*;
 
-    fn make_test_schema() -> CombinedSchema {
-        let columns = vec![
+    fn make_columns() -> Vec<ColumnSchema> {
+        vec![
             ColumnSchema {
                 name: "ID".to_string(),
                 data_type: DataType::Integer,
@@ -347,9 +353,75 @@ mod tests {
                 is_exact_integer_type: false,
                 collation: None,
             },
-        ];
-        let table_schema = TableSchema::new("PRODUCTS".to_string(), columns);
+        ]
+    }
+
+    fn make_test_schema() -> CombinedSchema {
+        let table_schema = TableSchema::new("PRODUCTS".to_string(), make_columns());
         CombinedSchema::from_table("PRODUCTS".to_string(), table_schema)
+    }
+
+    fn make_view_schema() -> CombinedSchema {
+        let mut view_schema = TableSchema::new("V1".to_string(), make_columns());
+        view_schema.set_is_view(true);
+        CombinedSchema::from_table("V1".to_string(), view_schema)
+    }
+
+    #[test]
+    fn test_rowid_resolves_on_table() {
+        // Base tables expose the rowid pseudo-column (and its aliases).
+        let schema = make_test_schema();
+        for name in ["rowid", "oid", "_rowid_", "ROWID"] {
+            let col_ref = ColumnReference { table: None, column: name.to_string() };
+            assert!(
+                validate_column_ref(&col_ref, &schema, None).is_ok(),
+                "expected `{name}` to resolve on a base table"
+            );
+            let qualified =
+                ColumnReference { table: Some("PRODUCTS".to_string()), column: name.to_string() };
+            assert!(
+                validate_column_ref(&qualified, &schema, None).is_ok(),
+                "expected `PRODUCTS.{name}` to resolve on a base table"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rowid_errors_on_view() {
+        // Views have no implicit rowid: rowid/oid/_rowid_ must error (#5492).
+        let schema = make_view_schema();
+        for name in ["rowid", "oid", "_rowid_", "ROWID"] {
+            let col_ref = ColumnReference { table: None, column: name.to_string() };
+            assert!(
+                matches!(
+                    validate_column_ref(&col_ref, &schema, None),
+                    Err(ExecutorError::ColumnNotFound { .. })
+                ),
+                "expected unqualified `{name}` to error on a view"
+            );
+            let qualified =
+                ColumnReference { table: Some("V1".to_string()), column: name.to_string() };
+            assert!(
+                matches!(
+                    validate_column_ref(&qualified, &schema, None),
+                    Err(ExecutorError::ColumnNotFound { .. })
+                ),
+                "expected qualified `V1.{name}` to error on a view"
+            );
+        }
+    }
+
+    #[test]
+    fn test_view_column_named_rowid_resolves() {
+        // A view that explicitly exposes a real column named "rowid" resolves to
+        // that column rather than erroring (matches sqlite3 3.51.0).
+        let mut cols = make_columns();
+        cols[0].name = "ROWID".to_string();
+        let mut view_schema = TableSchema::new("V2".to_string(), cols);
+        view_schema.set_is_view(true);
+        let schema = CombinedSchema::from_table("V2".to_string(), view_schema);
+        let col_ref = ColumnReference { table: None, column: "rowid".to_string() };
+        assert!(validate_column_ref(&col_ref, &schema, None).is_ok());
     }
 
     #[test]

@@ -32,6 +32,12 @@ pub struct TableSchema {
     pub rowid_alias_column: Option<usize>,
     /// If true, table was created with WITHOUT ROWID clause (SQLite compatibility).
     pub without_rowid: bool,
+    /// If true, this schema is a pseudo-schema standing in for a VIEW rather than
+    /// a base table. Views have no implicit rowid, so references to the
+    /// `rowid`/`oid`/`_rowid_` pseudo-columns against a view must error with
+    /// `no such column: rowid` (SQLite semantics; `allow_rowid_in_view` is off by
+    /// default). See issue #5492.
+    pub is_view: bool,
 }
 
 impl TableSchema {
@@ -54,6 +60,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -77,6 +84,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -100,6 +108,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -123,6 +132,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -147,6 +157,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -173,6 +184,7 @@ impl TableSchema {
             storage_format: StorageFormat::default(),
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -196,6 +208,7 @@ impl TableSchema {
             storage_format,
             rowid_alias_column: None,
             without_rowid: false,
+            is_view: false,
         }
     }
 
@@ -208,6 +221,11 @@ impl TableSchema {
     /// This column's value IS the rowid in SQLite compatibility mode
     pub fn set_rowid_alias_column(&mut self, column_index: Option<usize>) {
         self.rowid_alias_column = column_index;
+    }
+
+    /// Mark this schema as a VIEW pseudo-schema (no implicit rowid). See #5492.
+    pub fn set_is_view(&mut self, is_view: bool) {
+        self.is_view = is_view;
     }
 
     /// Check if this table uses columnar storage
