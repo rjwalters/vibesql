@@ -339,112 +339,51 @@ impl IndexManager {
         }
     }
 
-    /// Adjust row indices after row deletions for user-defined indexes
+    /// Hook called after rows are tombstone-deleted (without compaction) so
+    /// user-defined indexes can stay in sync with the table's physical row
+    /// positions.
     ///
-    /// For in-memory indexes, this uses lazy adjustment: instead of immediately adjusting
-    /// all row indices (O(n) for table size), we store the deleted indices in a pending
-    /// list and apply the adjustment lazily during lookups. This makes single-row deletes
-    /// O(1) instead of O(n).
+    /// # No-op by design (issue #5524)
     ///
-    /// For disk-backed indexes, we still use the immediate adjustment approach since
-    /// the B+tree has its own row ID adjustment mechanism.
+    /// VibeSQL tables use an **append-only + deletion-bitmap** storage model:
+    /// rows are appended to the end of the row vector and never moved, deletes
+    /// flip a tombstone bit, and physical row positions only ever change during
+    /// an explicit [`Table::compact`] — which always triggers a full
+    /// [`Database::rebuild_indexes`] in every caller. Surviving rows therefore
+    /// keep their physical positions across a non-compacting delete.
     ///
-    /// # Arguments
-    /// * `table_name` - The table whose indexes need adjustment
-    /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
-    pub fn adjust_indexes_after_delete(&mut self, table_name: &str, deleted_indices: &[usize]) {
-        if deleted_indices.is_empty() {
-            return;
-        }
-
-        // Find all indexes for this table
-        let index_names: Vec<String> = self
-            .indexes
-            .iter()
-            .filter(|(_, metadata)| metadata.table_name.eq_ignore_ascii_case(table_name))
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        for index_name in index_names {
-            if let Some(index_data) = self.index_data.get_mut(&index_name) {
-                match index_data {
-                    IndexData::InMemory { pending_deletions, .. } => {
-                        // Lazy adjustment: merge deleted_indices into pending_deletions
-                        // This is O(d) where d = number of deletes, instead of O(n) for table size
-                        //
-                        // Note: deleted_indices are raw indices that haven't been adjusted yet.
-                        // We need to adjust them based on existing pending_deletions before
-                        // merging.
-                        let adjusted_deletions: Vec<usize> = deleted_indices
-                            .iter()
-                            .map(|&idx| {
-                                // The deleted index needs to be adjusted for previously pending
-                                // deletions that are less than it,
-                                // since those deletions affect the raw row indices
-                                let adjustment = pending_deletions.partition_point(|&d| d < idx);
-                                idx - adjustment
-                            })
-                            .collect();
-
-                        // Merge adjusted deletions into pending_deletions (maintaining sorted
-                        // order)
-                        if pending_deletions.is_empty() {
-                            *pending_deletions = adjusted_deletions;
-                        } else {
-                            // Merge two sorted lists
-                            let mut merged = Vec::with_capacity(
-                                pending_deletions.len() + adjusted_deletions.len(),
-                            );
-                            let mut i = 0;
-                            let mut j = 0;
-                            while i < pending_deletions.len() && j < adjusted_deletions.len() {
-                                if pending_deletions[i] <= adjusted_deletions[j] {
-                                    merged.push(pending_deletions[i]);
-                                    i += 1;
-                                } else {
-                                    merged.push(adjusted_deletions[j]);
-                                    j += 1;
-                                }
-                            }
-                            merged.extend_from_slice(&pending_deletions[i..]);
-                            merged.extend_from_slice(&adjusted_deletions[j..]);
-                            *pending_deletions = merged;
-                        }
-
-                        // Compact if needed (apply pending deletions when list gets too large)
-                        if index_data.needs_compaction() {
-                            index_data.compact_pending_deletions();
-                        }
-                    }
-                    IndexData::DiskBacked { btree, .. } => {
-                        // For disk-backed indexes, we still use immediate adjustment
-                        // since the B+tree has its own efficient row ID adjustment
-                        match acquire_btree_lock(btree) {
-                            Ok(mut guard) => {
-                                guard.adjust_row_ids_after_delete(deleted_indices);
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "BTreeIndex lock acquisition failed in adjust_indexes_after_delete: {}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                    IndexData::IVFFlat { .. } | IndexData::Hnsw { .. } => {
-                        // No row-id adjustment is needed for vector indexes here.
-                        //
-                        // Deletes tombstone rows via the table's deletion bitmap
-                        // and do NOT renumber surviving row positions, so the
-                        // absolute row_ids stored in the vector index remain
-                        // valid. The deleted row's vector was already removed in
-                        // `update_indexes_for_delete_with_values`. Row positions
-                        // only change on compaction, which renumbers rows and
-                        // triggers a full vector-index rebuild (#5446) via
-                        // `rebuild_indexes`.
-                    }
-                }
-            }
-        }
+    /// The deleted row's index entry has already been removed by
+    /// [`IndexManager::batch_update_indexes_for_delete`] before this is called.
+    /// That entry removal is the *only* maintenance a tombstone delete needs;
+    /// the remaining entries still point at valid physical positions.
+    ///
+    /// Previously this method "renumbered" the surviving entries by recording
+    /// the deleted positions in a lazy `pending_deletions` list (in-memory) or
+    /// decrementing stored row-ids (disk-backed), on the assumption that a
+    /// delete compacts the table the way `Vec::remove` would. That assumption is
+    /// false for the bitmap model, so the renumbered index positions drifted
+    /// below the true physical positions. An index-ordered scan
+    /// (`SELECT ... ORDER BY <indexed-col>`) then resolved those stale positions
+    /// through [`Table::get_row`], landing on a tombstoned slot (or a different
+    /// live row) and returning wrong / empty results — while the unordered
+    /// sequential scan, which ignores the index, stayed correct. This silently
+    /// surfaced in pure in-memory usage; the CLI/persistence reload masked it by
+    /// rebuilding indexes on load.
+    ///
+    /// The DELETE fast path already relied on entry-removal alone (it never
+    /// called this hook on the non-compacting branch), confirming that no
+    /// renumbering is required. We keep the method (and its callers) so the
+    /// maintenance contract stays explicit, but it intentionally does nothing.
+    ///
+    /// [`Table::compact`]: crate::table::Table
+    /// [`Database::rebuild_indexes`]: crate::Database
+    /// [`Table::get_row`]: crate::table::Table::get_row
+    /// [`IndexManager::batch_update_indexes_for_delete`]: Self::batch_update_indexes_for_delete
+    pub fn adjust_indexes_after_delete(&mut self, _table_name: &str, _deleted_indices: &[usize]) {
+        // Intentionally a no-op — see the doc comment above (issue #5524).
+        //
+        // Physical row positions are stable across a non-compacting delete, so
+        // the index entries (minus the already-removed deleted keys) remain
+        // correct. Any renumbering here would corrupt index-ordered scans.
     }
 }

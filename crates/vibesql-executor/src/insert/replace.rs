@@ -264,8 +264,11 @@ pub fn handle_replace_conflicts(
         // never did so; that is a separate pre-existing gap tracked outside
         // this PR.
     } else {
-        // No compaction - just adjust remaining user-defined index entries
-        // (entries pointing to indices > deleted need to be decremented)
+        // No compaction: the deleted keys' index entries were already removed
+        // by `batch_update_indexes_for_delete`, and the bitmap-delete model
+        // keeps every surviving row's physical position stable, so no row-id
+        // renumbering is needed. `adjust_indexes_after_delete` is a no-op that
+        // documents this maintenance contract (issue #5524).
         db.adjust_indexes_after_delete(table_name, &deleted_indices);
     }
 
