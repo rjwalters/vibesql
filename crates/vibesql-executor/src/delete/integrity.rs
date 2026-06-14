@@ -192,8 +192,19 @@ pub fn check_no_child_references(
                 }
             }
             ReferentialAction::Cascade => {
-                // Delete child rows that reference the parent
-                cascade_delete(db, &child_table_name, &fk, &parent_key_values)?;
+                // Delete child rows that reference the parent. A child
+                // BEFORE DELETE trigger RAISE(IGNORE) skips that row's
+                // cascade, leaving it as an orphan that must still trip the
+                // statement-end FK check (#5465).
+                cascade_delete(
+                    db,
+                    &child_table_name,
+                    &fk,
+                    fk_idx,
+                    &parent_key_values,
+                    in_txn,
+                    session_defer,
+                )?;
             }
             ReferentialAction::SetNull => {
                 // Set child FK columns to NULL
@@ -271,11 +282,15 @@ fn queue_orphaned_children(
 }
 
 /// Delete child rows that reference a deleted parent row (CASCADE action)
+#[allow(clippy::too_many_arguments)]
 fn cascade_delete(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
+    fk_idx: usize,
     parent_key_values: &[SqlValue],
+    in_txn: bool,
+    session_defer: bool,
 ) -> Result<(), ExecutorError> {
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
@@ -341,10 +356,12 @@ fn cascade_delete(
     // Verified against sqlite3 3.51.0.
     for child_row in &rows_to_delete {
         // BEFORE DELETE row triggers on the child. A RAISE(IGNORE)
-        // (SkipRow) abandons this child row's cascade — it is not deleted
-        // (matching sqlite3, where the surviving orphan then typically
-        // trips an FK check at statement end). A RAISE(ABORT|FAIL|
-        // ROLLBACK) propagates as Err and aborts the whole statement.
+        // (SkipRow) abandons this child row's cascade — it is not deleted.
+        // The surviving child row still references the parent key that is
+        // being deleted, so it becomes an orphan and must trip the
+        // statement-end FK check, exactly as sqlite3 3.51 does (#5465).
+        // A RAISE(ABORT|FAIL|ROLLBACK) propagates as Err and aborts the
+        // whole statement.
         if has_child_delete_triggers {
             let outcome = crate::TriggerFirer::execute_before_triggers(
                 db,
@@ -354,6 +371,27 @@ fn cascade_delete(
                 None,
             )?;
             if outcome == crate::TriggerOutcome::SkipRow {
+                // The skipped child still carries the parent's key, which is
+                // about to disappear (the parent DELETE is applied after this
+                // cascade returns). That is an FK violation. Match sqlite3:
+                //   - immediate FK -> raise now; the statement savepoint
+                //     rolls the whole statement back.
+                //   - deferred FK (INITIALLY DEFERRED or session
+                //     defer_foreign_keys=ON inside a txn) -> queue the
+                //     surviving row for the COMMIT-time re-check.
+                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                if should_defer {
+                    db.queue_deferred_fk_violation(DeferredFkViolation {
+                        child_table: child_table_name.to_string(),
+                        fk_index: fk_idx,
+                        child_row: child_row.values.to_vec(),
+                        kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+                    });
+                } else {
+                    return Err(ExecutorError::ConstraintViolation(
+                        "FOREIGN KEY constraint failed".to_string(),
+                    ));
+                }
                 continue;
             }
         }

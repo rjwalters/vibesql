@@ -193,9 +193,14 @@ impl ForeignKeyValidator {
         // checker issues). Each entry carries the row index, the OLD child
         // row, and the NEW child row so the cascade can fire the child
         // table's BEFORE/AFTER UPDATE triggers with both pseudo-rows (#5440).
+        // Each entry also carries the FK constraint + its index so that a
+        // cascade-fired BEFORE UPDATE trigger RAISE(IGNORE) (SkipRow) can run
+        // the statement-end orphan FK check on the surviving row (#5465).
         #[allow(clippy::type_complexity)]
         let mut cascade_updates: Vec<(
             String,
+            vibesql_catalog::ForeignKeyConstraint,
+            usize,
             Vec<(usize, vibesql_storage::Row, vibesql_storage::Row)>,
         )> = Vec::new();
 
@@ -316,7 +321,12 @@ impl ForeignKeyValidator {
                                 })
                                 .collect();
 
-                            cascade_updates.push((table_name.clone(), updated_rows));
+                            cascade_updates.push((
+                                table_name.clone(),
+                                fk.clone(),
+                                fk_idx,
+                                updated_rows,
+                            ));
                         }
                         vibesql_catalog::ReferentialAction::SetNull => {
                             // Set child FK columns to NULL
@@ -337,7 +347,12 @@ impl ForeignKeyValidator {
                                 })
                                 .collect();
 
-                            cascade_updates.push((table_name.clone(), updated_rows));
+                            cascade_updates.push((
+                                table_name.clone(),
+                                fk.clone(),
+                                fk_idx,
+                                updated_rows,
+                            ));
                         }
                         vibesql_catalog::ReferentialAction::SetDefault => {
                             // Set child FK columns to their default values by evaluating
@@ -403,7 +418,12 @@ impl ForeignKeyValidator {
                                 })
                                 .collect();
 
-                            cascade_updates.push((table_name.clone(), updated_rows));
+                            cascade_updates.push((
+                                table_name.clone(),
+                                fk.clone(),
+                                fk_idx,
+                                updated_rows,
+                            ));
                         }
                         vibesql_catalog::ReferentialAction::Restrict => {
                             // RESTRICT is immediate by default, but the
@@ -472,7 +492,7 @@ impl ForeignKeyValidator {
         // RAISE(ABORT|FAIL|ROLLBACK) propagates as Err and aborts the
         // whole statement.
         let txn_id = db.transaction_id();
-        for (table_name, mut updates) in cascade_updates {
+        for (table_name, fk, fk_idx, mut updates) in cascade_updates {
             for (_row_idx, _old_row, new_row) in updates.iter_mut() {
                 vibesql_storage::stamp_xmin_for_write(new_row, txn_id);
                 new_row.xmax = None;
@@ -495,6 +515,28 @@ impl ForeignKeyValidator {
                         Some(&new_row),
                     )?;
                     if outcome == crate::TriggerOutcome::SkipRow {
+                        // RAISE(IGNORE) abandons this cascade update: the
+                        // surviving child keeps its OLD FK value, which
+                        // references the parent key that is about to change
+                        // (the parent UPDATE is applied after this cascade
+                        // returns). That is an orphaned FK reference and must
+                        // trip the statement-end FK check, matching sqlite3
+                        // 3.51 (#5465). Immediate FK -> raise now (statement
+                        // savepoint rolls the statement back); deferred FK ->
+                        // queue the surviving OLD row for the COMMIT re-check.
+                        let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                        if should_defer {
+                            db.queue_deferred_fk_violation(DeferredFkViolation {
+                                child_table: table_name.clone(),
+                                fk_index: fk_idx,
+                                child_row: old_row.values.to_vec(),
+                                kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+                            });
+                        } else {
+                            return Err(ExecutorError::ConstraintViolation(
+                                "FOREIGN KEY constraint failed".to_string(),
+                            ));
+                        }
                         continue;
                     }
                 }
