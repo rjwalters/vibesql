@@ -278,6 +278,218 @@ fn set_rowid_ipk_conflict_errors() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Issue #5575: single-statement IPK (rowid-alias) relocation is checked
+// IMMEDIATELY row-by-row, exactly like the virtual-rowid path above. On an
+// INTEGER PRIMARY KEY table the IPK column IS the rowid, so a `SET <ipk>=` /
+// `SET rowid=` swap / N-cycle / ascending `+1` cascade must error on the
+// intermediate collision (NOT be deferred to the final state), reported against
+// `<table>.<ipk>`. The `-1` descending cascade, move-to-gap, and self no-op
+// still succeed. All verified against sqlite3 3.51.0.
+//
+// This is the IPK counterpart of the virtual-rowid tests above. It must NOT
+// change deferred PK/UNIQUE checking for regular columns — see
+// `regular_unique_column_swap_still_allowed_deferred` below.
+// ---------------------------------------------------------------------------
+
+/// IPK swap via the IPK column: `UPDATE t SET k=CASE...` errors on the
+/// intermediate collision (sqlite3 3.51.0: `UNIQUE constraint failed: t.k`).
+#[test]
+fn set_ipk_swap_errors_intermediate_collision() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+
+    let err = update(&mut db, "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 1 END")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.k"),
+        "expected IPK UNIQUE error for swap, got: {}",
+        err
+    );
+
+    // Table unchanged after the aborted UPDATE.
+    let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
+    let got: Vec<(i64, String)> =
+        rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, "a".to_string()), (2, "b".to_string())]);
+}
+
+/// IPK swap via the `rowid` alias on an IPK table — same immediate check, still
+/// reported against the IPK column name (sqlite3 3.51.0).
+#[test]
+fn set_rowid_alias_ipk_swap_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+
+    let err = update(
+        &mut db,
+        "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.k"),
+        "expected IPK UNIQUE error for rowid-alias swap, got: {}",
+        err
+    );
+}
+
+/// IPK 3-cycle (1->2, 2->3, 3->1) errors: ascending processing, 1->2 collides
+/// with the still-live IPK 2. Matches sqlite3 3.51.0.
+#[test]
+fn set_ipk_three_cycle_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+    ddl(&mut db, "INSERT INTO t VALUES(3, 'c')");
+
+    let err = update(
+        &mut db,
+        "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 3 WHEN 3 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.k"),
+        "expected IPK UNIQUE error for 3-cycle, got: {}",
+        err
+    );
+}
+
+/// `UPDATE t SET k = k + 1` over ascending IPK rows cascade-collides: 1 -> 2
+/// collides with the still-live IPK 2. sqlite3 3.51.0 errors (the IPK is the
+/// rowid; checked immediately, not deferred).
+#[test]
+fn set_ipk_plus_one_cascade_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+    ddl(&mut db, "INSERT INTO t VALUES(3, 'c')");
+
+    let err = update(&mut db, "UPDATE t SET k = k + 1").unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.k"),
+        "expected IPK UNIQUE error for +1 cascade, got: {}",
+        err
+    );
+}
+
+/// `UPDATE t SET k = k - 1` over ascending IPK rows succeeds: processed
+/// ascending, each old IPK slot is vacated before the next row needs it. sqlite3
+/// 3.51.0 accepts this — the asymmetry with `+1` confirms the immediate
+/// row-by-row ascending order (same as virtual rowid).
+#[test]
+fn set_ipk_minus_one_cascade_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(3, 'b')");
+    ddl(&mut db, "INSERT INTO t VALUES(4, 'c')");
+
+    assert_eq!(update(&mut db, "UPDATE t SET k = k - 1").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
+    let got: Vec<(i64, String)> =
+        rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
+    assert_eq!(
+        got,
+        vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]
+    );
+}
+
+/// Relocating an IPK row into a free gap (no collision at any step) succeeds.
+/// Matches sqlite3 3.51.0.
+#[test]
+fn set_ipk_move_to_gap_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+
+    assert_eq!(update(&mut db, "UPDATE t SET k = k + 100 WHERE k = 1").unwrap(), 1);
+
+    let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
+    let got: Vec<(i64, String)> =
+        rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
+    assert_eq!(got, vec![(2, "b".to_string()), (101, "a".to_string())]);
+}
+
+/// `UPDATE t SET k = k` is a no-op for every IPK row and must not error. Matches
+/// sqlite3 3.51.0.
+#[test]
+fn set_ipk_self_noop_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v)");
+    ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
+    ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
+    ddl(&mut db, "INSERT INTO t VALUES(3, 'c')");
+
+    assert_eq!(update(&mut db, "UPDATE t SET k = k").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
+    let got: Vec<(i64, String)> =
+        rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
+    assert_eq!(
+        got,
+        vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]
+    );
+}
+
+/// REGRESSION GUARD (#5575 caution): the immediate IPK-as-rowid check must NOT
+/// leak into regular (non-rowid) UNIQUE columns. VibeSQL defers UNIQUE checks
+/// for regular columns to the final state (issue #5137), which lets a swap on a
+/// non-IPK UNIQUE column be accepted here. `k` below is a plain UNIQUE column
+/// (the rowid is the separate `id` IPK), so the immediate rowid relocation check
+/// must not fire — this swap must STILL be allowed exactly as before this fix.
+///
+/// (sqlite3 3.51.0 actually rejects this regular-column swap too — VibeSQL's
+/// deferred acceptance is a separate, pre-existing parity gap that is explicitly
+/// OUT OF SCOPE for #5575; #5575 must not regress it in either direction.)
+#[test]
+fn regular_unique_column_swap_still_allowed_deferred() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    // Swap the regular UNIQUE column `k` (NOT the IPK). Deferred final-state check
+    // sees no duplicate, so VibeSQL accepts it — the immediate IPK relocation
+    // check (which only inspects the rowid-alias column) must stay clear of it.
+    assert_eq!(
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END").unwrap(),
+        2
+    );
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 20), (2, 10)]);
+}
+
+/// REGRESSION GUARD: a regular UNIQUE-column *shift* (`k = k - 10`) on a table
+/// whose IPK (`id`) is unchanged must still succeed via the deferred path
+/// (issue #5137). The IPK column is untouched, so the immediate rowid check finds
+/// no relocations and does not interfere.
+#[test]
+fn regular_unique_column_shift_still_allowed_deferred() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(3, 30)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = k - 10").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 0), (2, 10), (3, 20)]);
+}
+
 /// An index on another column still finds the row after a rowid relocation.
 #[test]
 fn index_consistent_after_relocate() {

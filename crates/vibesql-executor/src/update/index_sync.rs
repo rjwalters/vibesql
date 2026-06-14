@@ -680,49 +680,81 @@ pub(super) fn validate_post_statement_uniqueness(
     Ok(())
 }
 
-/// Validate `UPDATE ... SET rowid = <expr>` relocations on a rowid table that
-/// has no INTEGER PRIMARY KEY (i.e. the rowid is virtual, stored in
-/// `Row::row_id` rather than aliased to a real column).
+/// Validate `UPDATE ... SET rowid = <expr>` relocations on a rowid table.
 ///
-/// SQLite lets `SET rowid=` / `SET _rowid_=` move a row to a new rowid, but the
-/// target rowid must be unique: relocating onto a rowid that another live row
-/// already occupies raises `UNIQUE constraint failed: <table>.rowid`. INTEGER
-/// PRIMARY KEY tables don't reach here — there the assignment writes the IPK
-/// column and the standard PK uniqueness check (`validate_post_statement_uniqueness`)
-/// catches the collision against `<table>.<ipk>`.
+/// SQLite lets `SET rowid=` / `SET _rowid_=` (and, on an INTEGER PRIMARY KEY
+/// table, `SET <ipk>=`) move a row to a new rowid, but the target rowid must be
+/// unique. sqlite3 3.51.0 does NOT defer this check: it processes the UPDATE one
+/// row at a time in ascending (old) rowid order and, as each row is relocated,
+/// requires the target rowid to be free *at that moment* — so a single-statement
+/// swap / N-cycle / ascending `+1` cascade is rejected even though the final
+/// state would be consistent. This is distinct from the deferred (final-state)
+/// PK/UNIQUE checking that sqlite3 applies elsewhere and that VibeSQL implements
+/// in [`validate_post_statement_uniqueness`].
 ///
-/// The effective rowid of a live row at physical index `i` is
-/// `row.row_id.unwrap_or(i + 1)`, matching the read path. Rows that are
-/// themselves part of this UPDATE are excluded from the "existing" set: only
-/// their post-statement (new) rowid participates, so swaps and self-moves are
-/// not spurious conflicts. This mirrors the deferred two-phase semantics of the
-/// PK/UNIQUE checks above.
+/// Two storage models reach here, both validated row-by-row with the same
+/// immediate semantics:
+///
+/// * **Virtual rowid** (no INTEGER PRIMARY KEY): the rowid lives in
+///   `Row::row_id`; `SET rowid=` writes it. The effective rowid of a live row at
+///   physical index `i` is `row.row_id.unwrap_or(i + 1)`, matching the read
+///   path. A collision reports against `<table>.rowid` (issue #5559).
+///
+/// * **INTEGER PRIMARY KEY** (`schema.rowid_alias_column` is set): the rowid IS
+///   the IPK column, so `SET rowid=` / `SET <ipk>=` writes that column. The
+///   effective rowid is the IPK column value. A collision reports against
+///   `<table>.<ipk>` (issue #5575). The deferred PK check in
+///   `validate_post_statement_uniqueness` runs first and (correctly) allows the
+///   swap on final-state grounds; this immediate check then rejects it on the
+///   intermediate collision, leaving regular-column deferred PK/UNIQUE behavior
+///   untouched.
+///
+/// In both models, rows that are themselves part of this UPDATE vacate their old
+/// rowid before their new rowid is written, so swaps and self-moves are not
+/// spurious conflicts where the target was already freed.
 pub(super) fn validate_rowid_relocation(
     updates: &[PendingUpdate],
     schema: &TableSchema,
     table: &Table,
 ) -> Result<(), ExecutorError> {
-    // Only relevant for virtual-rowid tables. INTEGER PRIMARY KEY tables store
-    // the rowid in a real column and are validated by the PK path.
-    if schema.rowid_alias_column.is_some() {
-        return Ok(());
-    }
+    // Resolve a row's effective rowid under whichever storage model applies:
+    //   - INTEGER PRIMARY KEY: the IPK column value (the rowid alias).
+    //   - virtual rowid:       Row::row_id, falling back to physical index + 1.
+    // Returns None when the IPK value is non-integer/NULL (no integer rowid to
+    // relocate) — such rows simply don't participate in the rowid relocation
+    // check (PK NULL/typing is handled by the standard constraint paths).
+    let ipk_col = schema.rowid_alias_column;
+    let effective_rowid = |row: &Row, physical_index: usize| -> Option<u64> {
+        match ipk_col {
+            Some(idx) => match &row.values[idx] {
+                SqlValue::Integer(i) => Some(*i as u64),
+                SqlValue::Bigint(i) => Some(*i as u64),
+                _ => None,
+            },
+            None => Some(row.row_id.unwrap_or((physical_index + 1) as u64)),
+        }
+    };
 
-    // Identify the updates that actually move the rowid. value_updater sets
-    // `new_row.row_id` for a `SET rowid=` assignment but leaves changed_columns
-    // empty, so we detect relocations by comparing the new rowid against the
-    // row's original effective rowid (old_row.row_id, falling back to physical
-    // index + 1).
+    // Identify the updates that actually move the rowid.
+    //
+    // For a virtual rowid, value_updater sets `new_row.row_id` for a `SET rowid=`
+    // assignment but leaves changed_columns empty, so we detect relocations by
+    // comparing the new effective rowid against the old one. For an IPK table the
+    // assignment writes the IPK column, so the same old-vs-new comparison covers
+    // both `SET rowid=` and `SET <ipk>=`.
     //
     // Each relocation is (old_rowid, new_rowid); old_rowid drives the processing
     // order (see below).
     let mut relocations: Vec<(u64, u64)> = Vec::new(); // (old_rowid, new_rowid)
     for u in updates {
-        let new_rowid = match u.new_row.row_id {
+        let new_rowid = match effective_rowid(&u.new_row, u.row_index) {
             Some(id) => id,
             None => continue,
         };
-        let old_rowid = u.old_row.row_id.unwrap_or((u.row_index + 1) as u64);
+        let old_rowid = match effective_rowid(&u.old_row, u.row_index) {
+            Some(id) => id,
+            None => continue,
+        };
         if new_rowid != old_rowid {
             relocations.push((old_rowid, new_rowid));
         }
@@ -733,15 +765,15 @@ pub(super) fn validate_rowid_relocation(
 
     // Row-by-row intermediate-collision check, matching sqlite3 3.51.0.
     //
-    // sqlite3 does NOT defer rowid uniqueness to the final state: it processes
-    // the UPDATE one row at a time in ascending (old) rowid order and, as each
-    // row is relocated, requires the target rowid to be free *at that moment*.
-    // The live set at that moment includes:
+    // sqlite3 processes the UPDATE one row at a time in ascending (old) rowid
+    // order and, as each row is relocated, requires the target rowid to be free
+    // *at that moment*. The live set at that moment includes:
     //   - rows not yet processed (un-updated rows, and updated rows whose old
     //     rowid sorts later), and
     //   - rows already relocated earlier in this statement.
     // A row that previously occupied the target but has already been relocated
-    // away does NOT collide. Verified against sqlite3 3.51.0:
+    // away does NOT collide. Verified against sqlite3 3.51.0 (both virtual-rowid
+    // and INTEGER PRIMARY KEY tables behave identically):
     //   * swap (1<->2) / N-cycle           -> UNIQUE constraint failed
     //   * `SET rowid=rowid+1` (ascending)  -> error (1 collides with live 2)
     //   * `SET rowid=rowid-1` (ascending)  -> ok (each old slot vacated first)
@@ -749,20 +781,28 @@ pub(super) fn validate_rowid_relocation(
     //   * `SET rowid=rowid` (self no-op)   -> ok
     //
     // This is intentionally narrower than the deferred PK/UNIQUE model used for
-    // regular columns: it is rowid-specific to mirror sqlite3's immediate
-    // (non-deferred) rowid handling without changing constraint checking
-    // elsewhere.
+    // regular columns: it is rowid-specific (including the IPK-as-rowid alias) to
+    // mirror sqlite3's immediate (non-deferred) rowid handling without changing
+    // constraint checking elsewhere.
     //
-    // `occupied` starts as every live row's effective rowid (a row at physical
-    // index `i` has effective rowid `row.row_id.unwrap_or(i + 1)`, matching the
-    // read path). Updated rows that do NOT move keep their slot here untouched.
-    let mut occupied: HashSet<u64> =
-        table.scan_live().map(|(i, row)| row.row_id.unwrap_or((i + 1) as u64)).collect();
+    // `occupied` starts as every live row's effective rowid. Updated rows that do
+    // NOT move keep their slot here untouched.
+    let mut occupied: HashSet<u64> = table
+        .scan_live()
+        .filter_map(|(i, row)| effective_rowid(row, i))
+        .collect();
 
     // Process relocations in ascending OLD-rowid order — sqlite3 visits rows in
     // rowid order, so this reproduces its intermediate states (and the
     // asymmetry between an ascending `+1` shift and a descending `-1` shift).
     relocations.sort_unstable_by_key(|&(old_rowid, _)| old_rowid);
+
+    // Collision is reported against the rowid alias column for an IPK table,
+    // else against the special `rowid` pseudo-column.
+    let conflict_column = match ipk_col {
+        Some(idx) => format!("{}.{}", schema.name, schema.columns[idx].name),
+        None => format!("{}.rowid", schema.name),
+    };
 
     for (old_rowid, new_rowid) in relocations {
         // The row vacates its old slot before its new rowid is written.
@@ -770,8 +810,8 @@ pub(super) fn validate_rowid_relocation(
         if !occupied.insert(new_rowid) {
             // Target rowid is still occupied at this point in the statement.
             return Err(ExecutorError::ConstraintViolation(format!(
-                "UNIQUE constraint failed: {}.rowid",
-                schema.name
+                "UNIQUE constraint failed: {}",
+                conflict_column
             )));
         }
     }
