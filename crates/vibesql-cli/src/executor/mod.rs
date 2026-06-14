@@ -1053,6 +1053,28 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "TRIGGER_DEPTH_LIMIT" => {
+                    // Per-connection trigger recursion-depth limit (#5536).
+                    //
+                    // SQLite has no SQL PRAGMA for this — it is a C-API knob
+                    // (`sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, N)`). The
+                    // TCL conformance shim runs each SQL batch in a fresh CLI
+                    // process, so it carries the runtime limit forward by
+                    // re-emitting this internal PRAGMA in its per-batch prefix
+                    // (see scripts/tester_vibesql.tcl `sqlite3_limit`). The
+                    // executor clamps N into its stack-safe range when firing
+                    // triggers; we just store the raw value here.
+                    if let Some(n) = pragma_value_to_i64(value) {
+                        self.db.set_trigger_depth_limit(n);
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "DEFER_FOREIGN_KEYS" => {
                     // SQLite-compatible PRAGMA defer_foreign_keys.
                     // Phase C1 of #5085: store/read the flag and auto-reset
@@ -1634,6 +1656,21 @@ fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
             let upper = s.to_uppercase();
             matches!(upper.as_str(), "ON" | "TRUE" | "YES" | "1")
         }
+    }
+}
+
+/// Parse a numeric PRAGMA value into an `i64`, if it is integral.
+///
+/// Used by integer-valued internal PRAGMAs such as `trigger_depth_limit`
+/// (#5536). Returns `None` for non-numeric or non-integral values so the caller
+/// can leave the existing setting unchanged.
+fn pragma_value_to_i64(value: &vibesql_ast::PragmaValue) -> Option<i64> {
+    match value {
+        vibesql_ast::PragmaValue::Number(num) | vibesql_ast::PragmaValue::SignedNumber(num) => {
+            num.trim().parse::<i64>().ok()
+        }
+        vibesql_ast::PragmaValue::String(s) => s.trim().parse::<i64>().ok(),
+        vibesql_ast::PragmaValue::Identifier(_) => None,
     }
 }
 

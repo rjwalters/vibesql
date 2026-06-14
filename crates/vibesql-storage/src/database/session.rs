@@ -173,6 +173,38 @@ impl Database {
         );
     }
 
+    /// Get the per-connection trigger recursion-depth limit, if one has been set
+    /// via `sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, N)` (#5536).
+    ///
+    /// Returns `None` when the connection has not lowered the limit, in which
+    /// case the executor falls back to its compile-time
+    /// `MAX_TRIGGER_RECURSION_DEPTH` cap. A returned `Some(n)` is the raw value
+    /// requested by the caller; the executor clamps it into the stack-safe range
+    /// `[1, MAX_TRIGGER_RECURSION_DEPTH]` (the cap that keeps native recursion
+    /// from overflowing the stack lives in `vibesql-executor`, so the clamp is
+    /// applied there to avoid a storage -> executor dependency).
+    ///
+    /// This mirrors SQLite's `db->aLimit[SQLITE_LIMIT_TRIGGER_DEPTH]`, a
+    /// per-connection runtime value layered on top of the compile-time
+    /// `SQLITE_MAX_TRIGGER_DEPTH`.
+    pub fn trigger_depth_limit(&self) -> Option<i64> {
+        match self.get_session_variable("TRIGGER_DEPTH_LIMIT") {
+            Some(vibesql_types::SqlValue::Integer(n)) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Set the per-connection trigger recursion-depth limit (#5536).
+    ///
+    /// Stores the raw requested value; clamping into the stack-safe range is the
+    /// executor's responsibility (see [`Self::trigger_depth_limit`]).
+    pub fn set_trigger_depth_limit(&mut self, value: i64) {
+        self.set_session_variable(
+            "TRIGGER_DEPTH_LIMIT",
+            vibesql_types::SqlValue::Integer(value),
+        );
+    }
+
     // ============================================================================
     // Foreign Key Enforcement (SQLite Compatibility)
     // ============================================================================

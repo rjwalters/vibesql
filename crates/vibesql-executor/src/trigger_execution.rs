@@ -47,6 +47,29 @@ use crate::errors::ExecutorError;
 /// the no-overflow guards.
 const MAX_TRIGGER_RECURSION_DEPTH: usize = 700;
 
+/// Resolve the effective trigger recursion-depth limit for a connection.
+///
+/// SQLite lets a connection lower its trigger-recursion limit at runtime via
+/// `sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, N)` (exercised by
+/// triggerC-3.5.x / 3.6.x). VibeSQL honors that here (#5536):
+///   - no per-connection limit set: the compile-time stack-safe cap
+///     `MAX_TRIGGER_RECURSION_DEPTH`,
+///   - a per-connection limit `N`: `N` clamped into the stack-safe range
+///     `[1, MAX_TRIGGER_RECURSION_DEPTH]`.
+///
+/// Clamping matches SQLite, which never lets a runtime limit exceed the
+/// compile-time `SQLITE_MAX_TRIGGER_DEPTH`, and never lets it drop below 1
+/// (a value <= 0 is treated as "query only" by `sqlite3_limit` and leaves the
+/// existing limit unchanged; here a non-positive stored value falls back to the
+/// cap). Lowering the limit can only make recursion abort *sooner*, so it is
+/// always stack-safe.
+fn effective_trigger_depth_limit(db: &Database) -> usize {
+    match db.trigger_depth_limit() {
+        Some(n) if n >= 1 => (n as usize).min(MAX_TRIGGER_RECURSION_DEPTH),
+        _ => MAX_TRIGGER_RECURSION_DEPTH,
+    }
+}
+
 thread_local! {
     /// Current trigger recursion depth for this thread
     static TRIGGER_RECURSION_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -59,12 +82,18 @@ struct RecursionGuard;
 impl RecursionGuard {
     /// Create a new recursion guard, incrementing the depth
     ///
+    /// The effective limit is the connection's runtime
+    /// `SQLITE_LIMIT_TRIGGER_DEPTH` (when lowered via `sqlite3_limit`), clamped
+    /// to the stack-safe compile-time cap. See [`effective_trigger_depth_limit`]
+    /// and #5536.
+    ///
     /// # Returns
     /// Ok(RecursionGuard) if depth is within limits, Err if limit exceeded
-    fn new() -> Result<Self, ExecutorError> {
+    fn new(db: &Database) -> Result<Self, ExecutorError> {
+        let limit = effective_trigger_depth_limit(db);
         TRIGGER_RECURSION_DEPTH.with(|depth| {
             let current = depth.get();
-            if current >= MAX_TRIGGER_RECURSION_DEPTH {
+            if current >= limit {
                 // SQLite emits exactly "too many levels of trigger recursion"
                 // (sqlite3 3.51.0; see triggerC.test 2.x / 6.x and `sqlite3VdbeError`).
                 // Use `Other` so the message surfaces verbatim (no "Unsupported
@@ -729,7 +758,7 @@ impl TriggerFirer {
         dml_schema: Option<&str>,
     ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
-        let _guard = RecursionGuard::new()?;
+        let _guard = RecursionGuard::new(db)?;
 
         let triggers =
             Self::find_triggers_in_schema(db, table_name, TriggerTiming::Before, event, dml_schema);
@@ -793,7 +822,7 @@ impl TriggerFirer {
         dml_schema: Option<&str>,
     ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
-        let _guard = RecursionGuard::new()?;
+        let _guard = RecursionGuard::new(db)?;
 
         let triggers =
             Self::find_triggers_in_schema(db, table_name, TriggerTiming::Before, event, dml_schema);
@@ -846,7 +875,7 @@ impl TriggerFirer {
         dml_schema: Option<&str>,
     ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
-        let _guard = RecursionGuard::new()?;
+        let _guard = RecursionGuard::new(db)?;
 
         let triggers =
             Self::find_triggers_in_schema(db, table_name, TriggerTiming::After, event, dml_schema);
@@ -909,7 +938,7 @@ impl TriggerFirer {
         dml_schema: Option<&str>,
     ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
-        let _guard = RecursionGuard::new()?;
+        let _guard = RecursionGuard::new(db)?;
 
         let triggers =
             Self::find_triggers_in_schema(db, table_name, TriggerTiming::After, event, dml_schema);
