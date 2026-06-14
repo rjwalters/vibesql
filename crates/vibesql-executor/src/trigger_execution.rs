@@ -9,8 +9,42 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
-/// Maximum trigger recursion depth to prevent infinite loops
-const MAX_TRIGGER_RECURSION_DEPTH: usize = 16;
+/// Maximum trigger recursion depth before VibeSQL aborts with
+/// "too many levels of trigger recursion".
+///
+/// VibeSQL previously used a far stricter cap of 16, which wrongly rejected
+/// legitimate recursive-trigger programs at depth 17..=N that SQLite accepts
+/// (e.g. triggerC-2.2/2.3 drive ~500 levels). SQLite's compile-time default is
+/// `SQLITE_MAX_TRIGGER_DEPTH = 1000` (sqlite3 3.51.0). See #5479.
+///
+/// STACK SAFETY (why 700, not 1000): trigger recursion is implemented as native
+/// Rust call-stack recursion -- each nested DML level adds ~8.7 KiB of stack in
+/// release builds (parse + plan + insert + fire). Empirical boundary on an 8 MiB
+/// thread is a stack overflow at depth ~960. A static cap of 1000 would
+/// therefore CRASH before the cap check ever fired (verified:
+/// `INSERT INTO t2 VALUES(999)` aborts with "stack overflow").
+///
+/// 700 is chosen to: (a) allow the ~500-level recursion SQLite's triggerC-2.x
+/// tests require, while (b) keeping ~24% headroom below the ~960 release-stack
+/// overflow cliff (700 * 8.7 KiB ~= 6.1 MiB of an 8 MiB budget).
+///
+/// IMPORTANT — this cap is only stack-safe on a thread with an >= 8 MiB stack.
+/// All execution paths that fire triggers must run on such a thread:
+///   - CLI: a plain `fn main()` on the 8 MiB main thread (and the SQLite TCL
+///     conformance harness runs here), so triggerC-2.x at depth ~500 is safe.
+///   - Server: query execution (including the openraft replicated-apply path)
+///     runs synchronously on tokio worker threads. tokio's default 2 MiB worker
+///     stack overflows at depth ~240 — i.e. a remote client could crash the
+///     server before this cap fires (a DoS). The server therefore builds its
+///     runtime with `thread_stack_size(8 MiB)` so this cap is safe there too;
+///     see `crates/vibesql-server/src/main.rs::SERVER_WORKER_STACK_SIZE` and
+///     the 8 MiB-pinned regression test in `tests/trigger_recursion_stack.rs`.
+///
+/// Raising this to SQLite's full 1000 requires removing the native-recursion
+/// stack dependency (on-demand stack growth / heap-allocated work stack);
+/// tracked as a follow-on (#5534). See `tests/trigger_recursion_stack.rs` for
+/// the no-overflow guards.
+const MAX_TRIGGER_RECURSION_DEPTH: usize = 700;
 
 thread_local! {
     /// Current trigger recursion depth for this thread
@@ -34,9 +68,9 @@ impl RecursionGuard {
                 // (sqlite3 3.51.0; see triggerC.test 2.x / 6.x and `sqlite3VdbeError`).
                 // Use `Other` so the message surfaces verbatim (no "Unsupported
                 // expression:" wrapper) and the TCL conformance shim passes it
-                // through unchanged. NOTE: the depth *value* (16 vs SQLite's
-                // SQLITE_MAX_TRIGGER_DEPTH = 1000) is tracked separately in #5479;
-                // this change only aligns the message text.
+                // through unchanged. The depth cap itself is raised toward
+                // SQLite's SQLITE_MAX_TRIGGER_DEPTH; see the stack-safety note on
+                // MAX_TRIGGER_RECURSION_DEPTH for why it is 700 rather than 1000.
                 Err(ExecutorError::Other(
                     "too many levels of trigger recursion".to_string(),
                 ))

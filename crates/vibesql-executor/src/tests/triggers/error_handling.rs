@@ -87,50 +87,66 @@ fn test_trigger_failure_causes_rollback() {
 
 #[test]
 fn test_recursion_prevention() {
-    let mut db = Database::new();
-    create_users_table(&mut db);
+    // The cap is `MAX_TRIGGER_RECURSION_DEPTH` (700, matching the order of
+    // SQLite's SQLITE_MAX_TRIGGER_DEPTH; see #5479). An unconditional
+    // self-inserting trigger recurses all the way to the cap before erroring,
+    // and trigger recursion is native call-stack recursion (~50 KiB/level in
+    // debug). 700 levels would overflow a default libtest worker stack, so run
+    // the body on a thread with a generous stack: the cap must surface as a
+    // clean error, not a stack overflow.
+    std::thread::Builder::new()
+        .name("test_recursion_prevention".to_string())
+        .stack_size(96 * 1024 * 1024)
+        .spawn(|| {
+            let mut db = Database::new();
+            create_users_table(&mut db);
 
-    // Create trigger that inserts into the same table (infinite loop)
-    let trigger_stmt = CreateTriggerStmt {
-        if_not_exists: false,
-        schema: None,
-        trigger_name: "recursive_trigger".to_string(),
-        timing: TriggerTiming::After,
-        event: TriggerEvent::Insert,
-        table_name: "users".to_string(),
-        granularity: TriggerGranularity::Row,
-        when_condition: None,
-        triggered_action: TriggerAction::RawSql(
-            "INSERT INTO users (id, username) VALUES (999, 'recursive')".to_string(),
-        ),
-    };
-    crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
-        .expect("Failed to create trigger");
+            // Create trigger that inserts into the same table (infinite loop)
+            let trigger_stmt = CreateTriggerStmt {
+                if_not_exists: false,
+                schema: None,
+                trigger_name: "recursive_trigger".to_string(),
+                timing: TriggerTiming::After,
+                event: TriggerEvent::Insert,
+                table_name: "users".to_string(),
+                granularity: TriggerGranularity::Row,
+                when_condition: None,
+                triggered_action: TriggerAction::RawSql(
+                    "INSERT INTO users (id, username) VALUES (999, 'recursive')".to_string(),
+                ),
+            };
+            crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
+                .expect("Failed to create trigger");
 
-    // Try to insert - should fail with recursion depth error
-    let insert = vibesql_ast::InsertStmt {
-        with_clause: None,
-        schema_name: None,
-        schema_quoted: false,
-        table_quoted: false,
-        table_name: "users".to_string(),
-        columns: vec!["id".to_string(), "username".to_string()],
-        source: vibesql_ast::InsertSource::Values(vec![vec![
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
-            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
-                arcstr::ArcStr::from("alice"),
-            )),
-        ]]),
-        conflict_clause: None,
-        on_conflict: None,
-        on_duplicate_key_update: None,
-        returning: None,
-    };
-    let result = InsertExecutor::execute(&mut db, &insert);
+            // Try to insert - should fail with recursion depth error
+            let insert = vibesql_ast::InsertStmt {
+                with_clause: None,
+                schema_name: None,
+                schema_quoted: false,
+                table_quoted: false,
+                table_name: "users".to_string(),
+                columns: vec!["id".to_string(), "username".to_string()],
+                source: vibesql_ast::InsertSource::Values(vec![vec![
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                        arcstr::ArcStr::from("alice"),
+                    )),
+                ]]),
+                conflict_clause: None,
+                on_conflict: None,
+                on_duplicate_key_update: None,
+                returning: None,
+            };
+            let result = InsertExecutor::execute(&mut db, &insert);
 
-    // Verify insert failed with recursion error using SQLite's exact wording
-    // (sqlite3 3.51.0, triggerC.test): "too many levels of trigger recursion".
-    assert!(result.is_err(), "Insert should have failed due to recursion limit");
-    let err = result.unwrap_err();
-    assert_eq!(err.to_string(), "too many levels of trigger recursion");
+            // Verify insert failed with recursion error using SQLite's exact
+            // wording (sqlite3 3.51.0, triggerC.test):
+            // "too many levels of trigger recursion".
+            assert!(result.is_err(), "Insert should have failed due to recursion limit");
+            let err = result.unwrap_err();
+            assert_eq!(err.to_string(), "too many levels of trigger recursion");
+        })
+        .expect("spawn recursion-test thread")
+        .join()
+        .expect("recursion cap must error, not overflow the stack");
 }

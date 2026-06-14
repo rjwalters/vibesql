@@ -24,8 +24,33 @@ use vibesql_server::{
 };
 use vibesql_storage::Database;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Worker-thread stack size for the server's tokio runtime.
+///
+/// Trigger recursion executes as native Rust call-stack recursion on whatever
+/// thread runs the DML (~8.7 KiB/level in release; see
+/// `vibesql_executor`'s `MAX_TRIGGER_RECURSION_DEPTH`, capped at 700). Query
+/// execution — including trigger-firing INSERT/UPDATE/DELETE and the openraft
+/// replicated-apply path — runs *synchronously* on tokio worker threads
+/// (connection handlers are `tokio::spawn`ed; the consensus state machine
+/// applies on this same runtime). tokio's default worker stack is 2 MiB, which
+/// overflows at depth ~240 — a remote client driving a self-recursive trigger
+/// could crash the process (SIGABRT) before the 700 cap ever fires (a DoS).
+///
+/// We therefore size the worker stack at 8 MiB, matching the CLI's main-thread
+/// stack, so the 700 cap (~6.1 MiB at peak) errors cleanly everywhere instead
+/// of overflowing. The cost is modest: 8 MiB of *address space* reserved per
+/// worker (pages are committed lazily on use). See #5479 and #5533.
+const SERVER_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(SERVER_WORKER_STACK_SIZE)
+        .build()?;
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     // Load configuration first (needed for observability setup)
     let config = Config::load().unwrap_or_else(|e| {
         eprintln!("Warning: Could not load config file: {}", e);
