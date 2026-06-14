@@ -19,7 +19,7 @@ fn test_parse_select_with_backtick_column_names() {
                     match expr {
                         vibesql_ast::Expression::ColumnRef(col_id) => {
                             let column = col_id.column_canonical();
-                            // Backtick identifiers preserve case
+                            // Canonical is case-folded (SQLite); spelling kept in display.
                             assert_eq!(column, "user_id");
                         }
                         _ => panic!("Expected ColumnRef"),
@@ -43,7 +43,6 @@ fn test_parse_select_with_backtick_table_name() {
             assert!(select.from.is_some());
             match &select.from.as_ref().unwrap() {
                 vibesql_ast::FromClause::Table { name, alias, .. } => {
-                    // Backtick identifiers preserve case
                     assert_eq!(name, "user_table");
                     assert!(alias.is_none());
                 }
@@ -132,12 +131,13 @@ fn test_parse_select_mixed_backtick_and_regular() {
                 },
                 _ => panic!("Expected Expression select item"),
             }
-            // Second column (backtick - preserves case)
+            // Second column (backtick) - SQLite case-folds the canonical form
+            // even for quoted identifiers (issue #5553); display preserves case.
             match &select.select_list[1] {
                 vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
                     vibesql_ast::Expression::ColumnRef(col_id) => {
-                        let column = col_id.column_canonical();
-                        assert_eq!(column, "userName");
+                        assert_eq!(col_id.column_canonical(), "username");
+                        assert_eq!(col_id.column_display(), "userName");
                     }
                     _ => panic!("Expected ColumnRef"),
                 },

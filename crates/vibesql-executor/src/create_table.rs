@@ -111,9 +111,9 @@ impl CreateTableExecutor {
         // Check if table already exists in the target schema using SQL:1999 identifier semantics
         // For CREATE TABLE, we only check the target schema (not temp schema)
         // Temp tables can shadow main tables, but we allow creating in main even if temp exists
-        // Use table_exists_by_identifier which respects quoted/unquoted semantics:
-        // - Quoted identifiers: case-sensitive (exact match)
-        // - Unquoted identifiers: case-insensitive (lowercase canonical)
+        // Use table_exists_by_identifier which keys on the canonical (case-folded)
+        // form. SQLite case-folds identifiers regardless of quoting (issue #5553),
+        // so `CREATE TABLE "TBL1"` collides with an existing `tbl1`.
         if database.catalog.table_exists_by_identifier(&identifier) {
             if stmt.if_not_exists {
                 // IF NOT EXISTS - silently return success without creating the table

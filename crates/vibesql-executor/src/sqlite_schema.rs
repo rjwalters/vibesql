@@ -86,7 +86,10 @@ pub fn execute_sqlite_schema_query(
     for table_name in catalog.list_tables() {
         if let Some(table) = catalog.get_table(&table_name) {
             let sql = generate_create_table_sql(table);
-            rows.push(schema_row("table", &table_name, &table_name, sql));
+            // SQLite echoes the *original* declared case in sqlite_master, even
+            // though lookups are case-folded (issue #5553). `table.name` retains
+            // the original spelling; `table_name` is the lowercase catalog key.
+            rows.push(schema_row("table", &table.name, &table.name, sql));
         }
     }
 
@@ -150,7 +153,9 @@ pub fn execute_sqlite_temp_schema_query(
         let qualified = format!("{}.{}", temp_schema, table_name);
         if let Some(table) = catalog.get_table(&qualified) {
             let sql = generate_create_table_sql(table);
-            rows.push(schema_row("table", &table_name, &table_name, sql));
+            // Echo the original declared case (issue #5553); `table_name` is the
+            // lowercase catalog key.
+            rows.push(schema_row("table", &table.name, &table.name, sql));
         }
     }
 
