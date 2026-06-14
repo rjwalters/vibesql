@@ -5,15 +5,73 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
+use vibesql_types::SqlValue;
+
 /// Default capacity for the change event channel
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 1024;
+
+/// Optional primary-key identity attached to a [`ChangeEvent`] (#5472).
+///
+/// The base [`ChangeEvent`] carries only `table_name` + `row_index` for
+/// performance (see the type docs). To let downstream consumers — notably the
+/// server's replicated subscription loop — *prune* re-queries for changes whose
+/// primary key provably cannot satisfy a subscription's `WHERE` predicate, an
+/// emitter may additionally stamp the changed row's **single-column** primary
+/// key value(s) here.
+///
+/// This is strictly optional and additive:
+/// - When absent (`None` on the event), consumers MUST fall back to re-querying
+///   — i.e. pruning is disabled and behavior is identical to before #5472.
+/// - Only **single-column** primary keys are carried; composite keys are left
+///   `None` so the conservative fallback applies.
+///
+/// For an `Update`, both the pre-image (`value`) and post-image (`new_value`)
+/// primary key are recorded, because an `UPDATE` may move a row *into* or *out
+/// of* a subscription's filtered set (and may even change the PK itself). A
+/// consumer must treat the change as possibly-relevant if *either* image could
+/// match the filter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeEventPk {
+    /// Canonical (case-folded) name of the single primary-key column.
+    pub column: String,
+    /// Primary-key value of the changed row.
+    ///
+    /// For `Insert` this is the new row's PK; for `Delete` it is the removed
+    /// row's PK; for `Update` it is the pre-image (`old`) PK and `new_value`
+    /// carries the post-image.
+    pub value: SqlValue,
+    /// For `Update` only: the post-image primary-key value. `None` for
+    /// `Insert`/`Delete`, and also `None` for an `Update` that did not change
+    /// the PK (in which case `value` covers both images).
+    pub new_value: Option<SqlValue>,
+}
+
+impl ChangeEventPk {
+    /// Build a single-value PK identity (Insert/Delete, or an Update whose PK
+    /// did not change).
+    pub fn single(column: impl Into<String>, value: SqlValue) -> Self {
+        Self { column: column.into(), value, new_value: None }
+    }
+
+    /// Build an Update PK identity carrying both the pre- and post-image PK.
+    pub fn updated(column: impl Into<String>, old_value: SqlValue, new_value: SqlValue) -> Self {
+        Self { column: column.into(), value: old_value, new_value: Some(new_value) }
+    }
+}
 
 /// Change event for external subscribers
 ///
 /// Note: Only row_id is included, not full row data. This is intentional for performance -
 /// cloning full rows on every mutation would be expensive. Subscribers that need row data
 /// can re-query using the row_id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The optional `pk` field (#5472) additionally carries the changed row's
+/// single-column primary-key identity when the emitter can supply it cheaply,
+/// enabling consumers to prune provably-irrelevant re-queries. It defaults to
+/// `None` (pruning disabled / unchanged behavior) — use the [`ChangeEvent::insert`],
+/// [`ChangeEvent::update`], [`ChangeEvent::delete`] constructors (no PK) or the
+/// `*_with_pk` constructors to populate it.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ChangeEvent {
     /// A row was inserted
     Insert {
@@ -21,6 +79,8 @@ pub enum ChangeEvent {
         table_name: String,
         /// Index of the inserted row
         row_index: usize,
+        /// Optional primary-key identity of the inserted row (#5472).
+        pk: Option<ChangeEventPk>,
     },
     /// A row was updated
     Update {
@@ -28,6 +88,8 @@ pub enum ChangeEvent {
         table_name: String,
         /// Index of the updated row
         row_index: usize,
+        /// Optional primary-key identity (old + new PK) of the updated row (#5472).
+        pk: Option<ChangeEventPk>,
     },
     /// A row was deleted
     Delete {
@@ -35,10 +97,55 @@ pub enum ChangeEvent {
         table_name: String,
         /// Index of the deleted row (before deletion)
         row_index: usize,
+        /// Optional primary-key identity of the deleted row (#5472).
+        pk: Option<ChangeEventPk>,
     },
 }
 
 impl ChangeEvent {
+    /// Construct an `Insert` event with no PK identity (pruning disabled).
+    pub fn insert(table_name: impl Into<String>, row_index: usize) -> Self {
+        ChangeEvent::Insert { table_name: table_name.into(), row_index, pk: None }
+    }
+
+    /// Construct an `Insert` event carrying the inserted row's PK identity.
+    pub fn insert_with_pk(
+        table_name: impl Into<String>,
+        row_index: usize,
+        pk: ChangeEventPk,
+    ) -> Self {
+        ChangeEvent::Insert { table_name: table_name.into(), row_index, pk: Some(pk) }
+    }
+
+    /// Construct an `Update` event with no PK identity (pruning disabled).
+    pub fn update(table_name: impl Into<String>, row_index: usize) -> Self {
+        ChangeEvent::Update { table_name: table_name.into(), row_index, pk: None }
+    }
+
+    /// Construct an `Update` event carrying the updated row's PK identity
+    /// (pre- and post-image).
+    pub fn update_with_pk(
+        table_name: impl Into<String>,
+        row_index: usize,
+        pk: ChangeEventPk,
+    ) -> Self {
+        ChangeEvent::Update { table_name: table_name.into(), row_index, pk: Some(pk) }
+    }
+
+    /// Construct a `Delete` event with no PK identity (pruning disabled).
+    pub fn delete(table_name: impl Into<String>, row_index: usize) -> Self {
+        ChangeEvent::Delete { table_name: table_name.into(), row_index, pk: None }
+    }
+
+    /// Construct a `Delete` event carrying the deleted row's PK identity.
+    pub fn delete_with_pk(
+        table_name: impl Into<String>,
+        row_index: usize,
+        pk: ChangeEventPk,
+    ) -> Self {
+        ChangeEvent::Delete { table_name: table_name.into(), row_index, pk: Some(pk) }
+    }
+
     /// Get the table name from the event
     pub fn table_name(&self) -> &str {
         match self {
@@ -54,6 +161,19 @@ impl ChangeEvent {
             ChangeEvent::Insert { row_index, .. } => *row_index,
             ChangeEvent::Update { row_index, .. } => *row_index,
             ChangeEvent::Delete { row_index, .. } => *row_index,
+        }
+    }
+
+    /// Get the optional primary-key identity of the changed row (#5472).
+    ///
+    /// Returns `None` when the emitter did not supply a PK (e.g. composite
+    /// primary keys, or emission sites that lack row data); consumers MUST then
+    /// fall back to re-querying.
+    pub fn pk(&self) -> Option<&ChangeEventPk> {
+        match self {
+            ChangeEvent::Insert { pk, .. } => pk.as_ref(),
+            ChangeEvent::Update { pk, .. } => pk.as_ref(),
+            ChangeEvent::Delete { pk, .. } => pk.as_ref(),
         }
     }
 }
@@ -233,11 +353,11 @@ mod tests {
     fn test_send_receive_single_event() {
         let (sender, mut receiver) = channel(16);
 
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
+        sender.send(ChangeEvent::insert("users", 0));
 
         let event = receiver.try_recv().unwrap();
         assert!(
-            matches!(event, ChangeEvent::Insert { table_name, row_index: 0 } if table_name == "users")
+            matches!(event, ChangeEvent::Insert { table_name, row_index: 0, .. } if table_name == "users")
         );
     }
 
@@ -246,7 +366,7 @@ mod tests {
         let (sender, mut rx1) = channel(16);
         let mut rx2 = sender.subscribe();
 
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
+        sender.send(ChangeEvent::insert("users", 0));
 
         // Both receivers should get the event
         assert!(rx1.try_recv().is_ok());
@@ -265,7 +385,7 @@ mod tests {
 
         // Send more events than buffer can hold
         for i in 0..10 {
-            sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: i });
+            sender.send(ChangeEvent::insert("users", i));
         }
 
         // First read should report lag
@@ -288,9 +408,9 @@ mod tests {
     fn test_recv_all() {
         let (sender, mut receiver) = channel(16);
 
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
-        sender.send(ChangeEvent::Update { table_name: "users".to_string(), row_index: 0 });
-        sender.send(ChangeEvent::Delete { table_name: "users".to_string(), row_index: 0 });
+        sender.send(ChangeEvent::insert("users", 0));
+        sender.send(ChangeEvent::update("users", 0));
+        sender.send(ChangeEvent::delete("users", 0));
 
         let events = receiver.recv_all();
         assert_eq!(events.len(), 3);
@@ -301,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_event_accessors() {
-        let event = ChangeEvent::Insert { table_name: "products".to_string(), row_index: 42 };
+        let event = ChangeEvent::insert("products", 42);
         assert_eq!(event.table_name(), "products");
         assert_eq!(event.row_index(), 42);
     }
@@ -311,15 +431,15 @@ mod tests {
         let (sender, _rx1) = channel(16);
 
         // Send some events before second subscriber joins
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 1 });
+        sender.send(ChangeEvent::insert("users", 0));
+        sender.send(ChangeEvent::insert("users", 1));
 
         // New subscriber should not see old events
         let mut rx2 = sender.subscribe();
         assert_eq!(rx2.try_recv(), Err(RecvError::Empty));
 
         // But should see new events
-        sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 2 });
+        sender.send(ChangeEvent::insert("users", 2));
         let event = rx2.try_recv().unwrap();
         assert_eq!(event.row_index(), 2);
     }

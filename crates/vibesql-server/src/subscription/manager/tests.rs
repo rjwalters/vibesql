@@ -115,7 +115,7 @@ async fn test_handle_change_notifies_subscribers() {
     // Simulate a change to users table
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
+            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
             &db,
         )
         .await;
@@ -145,7 +145,7 @@ async fn test_handle_change_ignores_unrelated_tables() {
     // Simulate a change to orders table (not subscribed)
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 0 },
+            vibesql_storage::ChangeEvent::insert("orders".to_string(), 0),
             &db,
         )
         .await;
@@ -208,7 +208,7 @@ async fn test_results_changed_detection() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
+            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
             &db,
         )
         .await;
@@ -246,7 +246,7 @@ async fn test_no_notification_when_unchanged() {
     // Trigger change (but data didn't actually change since we didn't insert)
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
+            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
             &db,
         )
         .await;
@@ -310,7 +310,7 @@ async fn test_delta_update_on_insert() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 1 },
+            vibesql_storage::ChangeEvent::insert("users".to_string(), 1),
             &db,
         )
         .await;
@@ -371,7 +371,7 @@ async fn test_delta_update_on_delete() {
     // Trigger change notification
     manager
         .handle_change(
-            vibesql_storage::ChangeEvent::Delete { table_name: "users".to_string(), row_index: 1 },
+            vibesql_storage::ChangeEvent::delete("users".to_string(), 1),
             &db,
         )
         .await;
@@ -987,9 +987,9 @@ async fn test_coalesced_burst_requeries_once() {
 
     // The apply path would have emitted three Insert events for this write.
     let batch = vec![
-        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 },
-        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 1 },
-        vibesql_storage::ChangeEvent::Insert { table_name: "users".to_string(), row_index: 2 },
+        vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
+        vibesql_storage::ChangeEvent::insert("users".to_string(), 1),
+        vibesql_storage::ChangeEvent::insert("users".to_string(), 2),
     ];
 
     let qf = query_against(&db);
@@ -1025,10 +1025,7 @@ async fn test_coalesced_delivers_insert_update_delete() {
         let qf = query_against(&db);
         manager
             .handle_changes_coalesced(
-                &[vibesql_storage::ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: 1,
-                }],
+                &[vibesql_storage::ChangeEvent::insert("users".to_string(), 1)],
                 &qf,
             )
             .await;
@@ -1051,10 +1048,7 @@ async fn test_coalesced_delivers_insert_update_delete() {
         let qf = query_against(&db);
         manager
             .handle_changes_coalesced(
-                &[vibesql_storage::ChangeEvent::Update {
-                    table_name: "users".to_string(),
-                    row_index: 1,
-                }],
+                &[vibesql_storage::ChangeEvent::update("users".to_string(), 1)],
                 &qf,
             )
             .await;
@@ -1079,10 +1073,7 @@ async fn test_coalesced_delivers_insert_update_delete() {
         let qf = query_against(&db);
         manager
             .handle_changes_coalesced(
-                &[vibesql_storage::ChangeEvent::Delete {
-                    table_name: "users".to_string(),
-                    row_index: 1,
-                }],
+                &[vibesql_storage::ChangeEvent::delete("users".to_string(), 1)],
                 &qf,
             )
             .await;
@@ -1117,10 +1108,7 @@ async fn test_coalesced_respects_where_filter() {
         let qf = query_against(&db);
         manager
             .handle_changes_coalesced(
-                &[vibesql_storage::ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: 0,
-                }],
+                &[vibesql_storage::ChangeEvent::insert("users".to_string(), 0)],
                 &qf,
             )
             .await;
@@ -1133,10 +1121,7 @@ async fn test_coalesced_respects_where_filter() {
         let qf = query_against(&db);
         manager
             .handle_changes_coalesced(
-                &[vibesql_storage::ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: 1,
-                }],
+                &[vibesql_storage::ChangeEvent::insert("users".to_string(), 1)],
                 &qf,
             )
             .await;
@@ -1166,8 +1151,8 @@ async fn test_coalesced_ignores_unrelated_table() {
 
     // A burst of events on a table the subscription does not depend on.
     let batch = vec![
-        vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 0 },
-        vibesql_storage::ChangeEvent::Insert { table_name: "orders".to_string(), row_index: 1 },
+        vibesql_storage::ChangeEvent::insert("orders".to_string(), 0),
+        vibesql_storage::ChangeEvent::insert("orders".to_string(), 1),
     ];
     let qf = query_against(&db);
     manager.handle_changes_coalesced(&batch, &qf).await;
@@ -1196,19 +1181,13 @@ async fn test_coalesce_disabled_requeries_per_event() {
         let qf = query_against(&db);
         manager
             .handle_change_replicated(
-                vibesql_storage::ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: 0,
-                },
+                vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
                 &qf,
             )
             .await;
         manager
             .handle_change_replicated(
-                vibesql_storage::ChangeEvent::Insert {
-                    table_name: "users".to_string(),
-                    row_index: 1,
-                },
+                vibesql_storage::ChangeEvent::insert("users".to_string(), 1),
                 &qf,
             )
             .await;
@@ -1224,4 +1203,448 @@ async fn test_coalesce_disabled_requeries_per_event() {
     assert!(rx.try_recv().is_err());
     // Coalescing was disabled, so nothing was coalesced.
     assert_eq!(manager.replicated_requeries_coalesced(), 0);
+}
+
+// ============================================================================
+// Replicated PK-filter pruning (#5472)
+// ============================================================================
+//
+// When a change event carries the changed row's single-column primary key, the
+// replicated handlers prune the re-query for any subscription whose WHERE filter
+// provably cannot be satisfied by that PK. These tests exercise the manager
+// path end-to-end: a `query_fn` runs the SELECT against a local db, and we
+// assert *both* delivery correctness (no missed notification) and that
+// provably-irrelevant changes are skipped (no re-query, prune metric bumps).
+//
+// Critically, they cover the correctness-sensitive cases the issue calls out:
+//   - change to a non-matching PK is skipped; change to the matching PK is not,
+//   - an UPDATE moving a row OUT of the filter still notifies (old PK matched),
+//   - an UPDATE moving a row INTO the filter still notifies (new PK matches),
+//   - a DELETE of an in-set row still notifies,
+//   - a non-PK / unanalyzable filter always re-queries,
+//   - range filters on the PK prune correctly,
+//   - a regression check that a matching change is never silently dropped.
+
+use vibesql_storage::{ChangeEvent, ChangeEventPk};
+
+/// Insert PK event for the integer-PK `users` table.
+fn pk_insert(row_index: usize, id: i64) -> ChangeEvent {
+    ChangeEvent::insert_with_pk(
+        "users",
+        row_index,
+        ChangeEventPk::single("id", SqlValue::Integer(id)),
+    )
+}
+
+/// Delete PK event (carrying the removed row's PK).
+fn pk_delete(row_index: usize, id: i64) -> ChangeEvent {
+    ChangeEvent::delete_with_pk(
+        "users",
+        row_index,
+        ChangeEventPk::single("id", SqlValue::Integer(id)),
+    )
+}
+
+/// Update PK event carrying both pre-image and post-image PK.
+fn pk_update(row_index: usize, old_id: i64, new_id: i64) -> ChangeEvent {
+    ChangeEvent::update_with_pk(
+        "users",
+        row_index,
+        ChangeEventPk::updated("id", SqlValue::Integer(old_id), SqlValue::Integer(new_id)),
+    )
+}
+
+#[tokio::test]
+async fn test_prune_skips_non_matching_pk_equality() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    // Subscription pinned to a single PK.
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial empty Full
+
+    // A change to a DIFFERENT pk (id=9) provably cannot affect `id = 5`.
+    insert_user(&mut db, 9, "noise", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_insert(0, 9)], &qf).await;
+    }
+
+    // No notification, and the re-query was pruned (not merely a no-op diff).
+    assert!(rx.try_recv().is_err(), "non-matching PK must not notify");
+    assert_eq!(manager.replicated_requeries_pruned(), 1, "the re-query must be pruned");
+}
+
+#[tokio::test]
+async fn test_prune_does_not_skip_matching_pk_equality() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // Insert the matching row (id=5) -> must NOT be pruned; subscriber notified.
+    insert_user(&mut db, 5, "alice", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_insert(0, 5)], &qf).await;
+    }
+
+    let update = rx.recv().await.unwrap();
+    match update {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        other => panic!("expected the matching row, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "matching PK must not be pruned");
+}
+
+#[tokio::test]
+async fn test_update_moving_out_of_filter_still_notifies() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    // Row id=5 is initially in the set (filter is `id = 5`).
+    insert_user(&mut db, 5, "alice", true);
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial Full with id=5
+
+    // Update changes the PK from 5 -> 7, moving the row OUT of the set. The new
+    // PK (7) does not match, but the OLD PK (5) did, so the subscriber MUST be
+    // notified that the row left the set. This must NOT be pruned.
+    if let vibesql_ast::Statement::Update(stmt) =
+        vibesql_parser::Parser::parse_sql("UPDATE users SET id = 7 WHERE id = 5").unwrap()
+    {
+        vibesql_executor::UpdateExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_update(0, 5, 7)], &qf).await;
+    }
+
+    // The set went from {id=5} to {} -> a delete delta (or empty Full).
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { deletes, .. } => {
+            assert!(deletes.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => assert!(rows.is_empty()),
+        other => panic!("expected the row leaving the set, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "row leaving the set must not be pruned");
+}
+
+#[tokio::test]
+async fn test_update_moving_into_filter_still_notifies() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    // Row starts as id=7 (outside `id = 5`).
+    insert_user(&mut db, 7, "alice", true);
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial empty Full
+
+    // Update changes PK 7 -> 5, moving the row INTO the set. The old PK (7)
+    // doesn't match, but the new PK (5) does -> must NOT be pruned.
+    if let vibesql_ast::Statement::Update(stmt) =
+        vibesql_parser::Parser::parse_sql("UPDATE users SET id = 5 WHERE id = 7").unwrap()
+    {
+        vibesql_executor::UpdateExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_update(0, 7, 5)], &qf).await;
+    }
+
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        other => panic!("expected the row entering the set, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "row entering the set must not be pruned");
+}
+
+#[tokio::test]
+async fn test_delete_in_set_still_notifies() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    insert_user(&mut db, 5, "alice", true);
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap(); // initial Full with id=5
+
+    // Delete the in-set row; the old PK (5) matches -> must NOT be pruned.
+    if let vibesql_ast::Statement::Delete(stmt) =
+        vibesql_parser::Parser::parse_sql("DELETE FROM users WHERE id = 5").unwrap()
+    {
+        vibesql_executor::DeleteExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_delete(0, 5)], &qf).await;
+    }
+
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { deletes, .. } => {
+            assert!(deletes.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => assert!(rows.is_empty()),
+        other => panic!("expected the deleted in-set row, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "in-set delete must not be pruned");
+}
+
+#[tokio::test]
+async fn test_delete_out_of_set_is_pruned() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    insert_user(&mut db, 5, "alice", true);
+    insert_user(&mut db, 9, "ghost", true);
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // Delete id=9, which is not in the set -> prunable, no notification.
+    if let vibesql_ast::Statement::Delete(stmt) =
+        vibesql_parser::Parser::parse_sql("DELETE FROM users WHERE id = 9").unwrap()
+    {
+        vibesql_executor::DeleteExecutor::execute(&stmt, &mut db).unwrap();
+    }
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_delete(1, 9)], &qf).await;
+    }
+
+    assert!(rx.try_recv().is_err(), "out-of-set delete must not notify");
+    assert_eq!(manager.replicated_requeries_pruned(), 1);
+}
+
+#[tokio::test]
+async fn test_range_filter_prunes_outside_and_keeps_inside() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id =
+        manager.subscribe("SELECT * FROM users WHERE id >= 100 ORDER BY id".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // id=50 is below the range -> pruned.
+    insert_user(&mut db, 50, "low", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_insert(0, 50)], &qf).await;
+    }
+    assert!(rx.try_recv().is_err(), "below-range insert must not notify");
+    assert_eq!(manager.replicated_requeries_pruned(), 1);
+
+    // id=150 is in range -> not pruned, subscriber notified.
+    insert_user(&mut db, 150, "high", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_insert(1, 150)], &qf).await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(150)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(150)));
+        }
+        other => panic!("expected the in-range row, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 1, "in-range change must not be pruned");
+}
+
+#[tokio::test]
+async fn test_non_pk_filter_always_requeries() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    // Filter is on a NON-PK column -> unanalyzable -> never pruned.
+    let id = manager
+        .subscribe("SELECT * FROM users WHERE active = TRUE ORDER BY id".to_string(), tx)
+        .unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // A matching (active) row arrives; even though we know its PK, the filter is
+    // not PK-only, so we must re-query and deliver it.
+    insert_user(&mut db, 42, "alice", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_changes_coalesced(&[pk_insert(0, 42)], &qf).await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(42)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(42)));
+        }
+        other => panic!("expected the active row, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "non-PK filter must never prune");
+}
+
+#[tokio::test]
+async fn test_event_without_pk_is_never_pruned() {
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    // Insert the matching row but deliver an event WITHOUT a PK (e.g. composite
+    // key path). Even with a PK-only filter, the absence of PK forces re-query,
+    // so the matching row is still delivered (correctness over optimization).
+    insert_user(&mut db, 5, "alice", true);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(&[ChangeEvent::insert("users", 0)], &qf)
+            .await;
+    }
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        other => panic!("expected delivery despite missing PK, got {other:?}"),
+    }
+    assert_eq!(manager.replicated_requeries_pruned(), 0, "events without PK must never prune");
+}
+
+#[tokio::test]
+async fn test_per_event_handler_prunes_non_matching_pk() {
+    // Exercise the non-coalesced replicated path (handle_change_replicated).
+    let config = SubscriptionConfig { replicated_coalesce: false, ..Default::default() };
+    let manager = SubscriptionManager::with_config(config);
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    insert_user(&mut db, 9, "noise", true);
+    {
+        let qf = query_against(&db);
+        manager.handle_change_replicated(pk_insert(0, 9), &qf).await;
+    }
+    assert!(rx.try_recv().is_err(), "per-event handler must prune non-matching PK");
+    assert_eq!(manager.replicated_requeries_pruned(), 1);
+}
+
+#[tokio::test]
+async fn test_mixed_batch_prunes_only_provably_irrelevant() {
+    // A burst touching the same subscription: one matching change, several not.
+    // The matching change forces a single re-query; the prune metric is not
+    // bumped because the subscription IS re-queried (coalesced once).
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 5".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    insert_user(&mut db, 5, "match", true);
+    insert_user(&mut db, 8, "noise1", true);
+    insert_user(&mut db, 9, "noise2", true);
+    {
+        let qf = query_against(&db);
+        manager
+            .handle_changes_coalesced(&[pk_insert(0, 5), pk_insert(1, 8), pk_insert(2, 9)], &qf)
+            .await;
+    }
+
+    // Because one event (id=5) could match, the subscription is re-queried once
+    // and the matching row is delivered. Nothing is pruned (the subscription was
+    // re-queried), proving we never drop a real change hidden in a noisy batch.
+    match rx.recv().await.unwrap() {
+        SubscriptionUpdate::Delta { inserts, .. } => {
+            assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        SubscriptionUpdate::Full { rows, .. } => {
+            assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(5)));
+        }
+        other => panic!("expected the matching row from a noisy batch, got {other:?}"),
+    }
+    assert_eq!(
+        manager.replicated_requeries_pruned(),
+        0,
+        "a batch containing a matching change must re-query, not prune"
+    );
+}
+
+#[tokio::test]
+async fn test_no_missed_notification_regression() {
+    // Regression guard: for every candidate PK in a window, a change to that PK
+    // must be delivered when (and only when) it satisfies the filter, and pruned
+    // otherwise. This is the core no-false-skip invariant of #5472.
+    let manager = SubscriptionManager::new();
+    let (tx, mut rx) = mpsc::channel(64);
+    let mut db = setup_test_db();
+
+    let id = manager.subscribe("SELECT * FROM users WHERE id = 42".to_string(), tx).unwrap();
+    manager.send_initial_results(id, &db).await.unwrap();
+    let _ = rx.recv().await.unwrap();
+
+    let mut expected_pruned = 0usize;
+    let mut row_index = 0usize;
+    for candidate in 40..=44i64 {
+        insert_user(&mut db, candidate, "u", true);
+        {
+            let qf = query_against(&db);
+            manager.handle_changes_coalesced(&[pk_insert(row_index, candidate)], &qf).await;
+        }
+        row_index += 1;
+
+        if candidate == 42 {
+            // The matching insert MUST be delivered.
+            match rx.recv().await.unwrap() {
+                SubscriptionUpdate::Delta { inserts, .. } => {
+                    assert!(inserts.iter().any(|r| r.values[0] == SqlValue::Integer(42)));
+                }
+                SubscriptionUpdate::Full { rows, .. } => {
+                    assert!(rows.iter().any(|r| r.values[0] == SqlValue::Integer(42)));
+                }
+                other => panic!("matching insert was not delivered: {other:?}"),
+            }
+        } else {
+            // Every non-matching insert MUST be pruned (no notification).
+            assert!(rx.try_recv().is_err(), "id={candidate} should not notify a `id = 42` sub");
+            expected_pruned += 1;
+        }
+    }
+
+    assert_eq!(manager.replicated_requeries_pruned(), expected_pruned);
+    // And no stray updates leaked through.
+    assert!(rx.try_recv().is_err());
 }

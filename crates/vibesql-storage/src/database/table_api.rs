@@ -7,10 +7,34 @@
 
 use super::transactions::TransactionChange;
 use super::Database;
-use crate::change_events::ChangeEvent;
+use crate::change_events::{ChangeEvent, ChangeEventPk};
 use crate::wal::WalOp;
 use crate::{Row, StorageError, Table};
-use vibesql_catalog::TableIdentifier;
+use vibesql_catalog::{TableIdentifier, TableSchema};
+
+/// Extract the single-column primary-key identity (column name + value) of `row`
+/// for the given `schema`, for stamping onto a [`ChangeEvent`] (#5472).
+///
+/// Returns `None` — disabling PK pruning, so consumers re-query — when:
+/// - the table has no primary key, or
+/// - the primary key is composite (more than one column), or
+/// - the PK column cannot be resolved / is out of bounds in `row`.
+///
+/// Only single-column PKs are supported by design: the conservative predicate
+/// analyzer in the server can only reason about a single key column, and a
+/// `None` here is always safe (it just falls back to re-querying).
+fn single_pk_identity(schema: &TableSchema, row: &Row) -> Option<ChangeEventPk> {
+    let pk_cols = schema.primary_key.as_ref()?;
+    if pk_cols.len() != 1 {
+        return None;
+    }
+    let col_name = &pk_cols[0];
+    let idx = schema.get_column_index(col_name)?;
+    let value = row.values.get(idx)?.clone();
+    // Carry the canonical (lower-cased) column name so the server can match it
+    // case-insensitively against the subscription's WHERE predicate.
+    Some(ChangeEventPk::single(col_name.to_lowercase(), value))
+}
 
 impl Database {
     // ============================================================================
@@ -365,10 +389,13 @@ impl Database {
             });
         }
 
-        // Broadcast change event to subscribers
+        // Broadcast change event to subscribers, stamping the single-column PK
+        // identity when available so consumers can prune re-queries (#5472).
+        let pk = self.get_table(table_name).and_then(|t| single_pk_identity(&t.schema, &row));
         self.broadcast_change(ChangeEvent::Insert {
             table_name: table_name.to_string(),
             row_index,
+            pk,
         });
 
         // Invalidate columnar cache for this table
@@ -439,6 +466,17 @@ impl Database {
         let table_id = self.table_name_to_id(table_name);
         let is_temp = self.is_temp_table(table_name);
 
+        // Resolve the single-column PK position once (if any) so each broadcast
+        // can stamp the row's PK identity without re-borrowing the table (#5472).
+        let pk_col: Option<(String, usize)> = self.get_table(table_name).and_then(|t| {
+            let pk_cols = t.schema.primary_key.as_ref()?;
+            if pk_cols.len() != 1 {
+                return None;
+            }
+            let name = &pk_cols[0];
+            t.schema.get_column_index(name).map(|idx| (name.to_lowercase(), idx))
+        });
+
         // Record changes for transaction management, emit WAL entries, and broadcast events
         for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
             self.record_change(TransactionChange::Insert {
@@ -455,10 +493,15 @@ impl Database {
                 });
             }
 
-            // Broadcast change event to subscribers
+            // Broadcast change event to subscribers, stamping the PK identity
+            // when the table has a single-column primary key (#5472).
+            let pk = pk_col.as_ref().and_then(|(name, idx)| {
+                row.values.get(*idx).map(|v| ChangeEventPk::single(name.clone(), v.clone()))
+            });
             self.broadcast_change(ChangeEvent::Insert {
                 table_name: table_name.to_string(),
                 row_index,
+                pk,
             });
         }
 
@@ -646,8 +689,24 @@ impl Database {
             });
         }
 
-        // Broadcast change event to subscribers
-        self.broadcast_change(ChangeEvent::Update { table_name: resolved_name.clone(), row_index });
+        // Broadcast change event to subscribers, carrying BOTH the pre-image and
+        // post-image single-column PK so consumers can reason about a row that
+        // moves into or out of a filter (or whose PK itself changed) (#5472).
+        let pk = match (
+            single_pk_identity(&schema, &old_row),
+            single_pk_identity(&schema, &new_row),
+        ) {
+            (Some(old_pk), Some(new_pk)) => {
+                Some(ChangeEventPk::updated(old_pk.column, old_pk.value, new_pk.value))
+            }
+            // If either image's PK is unavailable, fall back to no PK (re-query).
+            _ => None,
+        };
+        self.broadcast_change(ChangeEvent::Update {
+            table_name: resolved_name.clone(),
+            row_index,
+            pk,
+        });
 
         // Invalidate columnar cache
         self.columnar_cache.invalidate(&resolved_name);

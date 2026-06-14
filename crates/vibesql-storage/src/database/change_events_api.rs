@@ -79,10 +79,9 @@ impl Database {
     /// * `table_name` - Name of the table that was modified
     /// * `row_index` - Index of the row that was updated
     pub fn notify_update(&self, table_name: &str, row_index: usize) {
-        self.broadcast_change(ChangeEvent::Update {
-            table_name: table_name.to_string(),
-            row_index,
-        });
+        // No row data available at this entry point, so no PK identity is
+        // attached (#5472): consumers fall back to re-querying.
+        self.broadcast_change(ChangeEvent::update(table_name, row_index));
     }
 
     /// Notify subscribers of a delete event
@@ -95,10 +94,9 @@ impl Database {
     /// * `row_indices` - Indices of rows that were deleted (before deletion)
     pub fn notify_deletes(&self, table_name: &str, row_indices: &[usize]) {
         for &row_index in row_indices {
-            self.broadcast_change(ChangeEvent::Delete {
-                table_name: table_name.to_string(),
-                row_index,
-            });
+            // No row data available at this entry point, so no PK identity is
+            // attached (#5472): consumers fall back to re-querying.
+            self.broadcast_change(ChangeEvent::delete(table_name, row_index));
         }
     }
 }

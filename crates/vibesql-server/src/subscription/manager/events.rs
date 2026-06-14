@@ -1,7 +1,7 @@
 //! Change event handling and notification for subscriptions.
 
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     sync::{atomic::Ordering, Arc},
 };
 
@@ -9,7 +9,7 @@ use tracing::{debug, trace, warn};
 use vibesql_storage::{change_events::RecvError, Database};
 
 use super::SubscriptionManager;
-use crate::subscription::SubscriptionId;
+use crate::subscription::{pk_prune::PkPruner, SubscriptionId};
 
 impl SubscriptionManager {
     /// Find all subscriptions affected by a change to a given table
@@ -27,6 +27,67 @@ impl SubscriptionManager {
     pub fn find_affected_subscriptions(&self, table_name: &str) -> Vec<SubscriptionId> {
         let table = table_name.to_lowercase();
         self.table_index.get(&table).map(|ids| ids.iter().copied().collect()).unwrap_or_default()
+    }
+
+    /// Decide whether `query` (a subscription's SELECT) must be re-queried given
+    /// the changed primary-key identities in `events` (#5472).
+    ///
+    /// This is the conservative pruning predicate. It returns `true` (re-query)
+    /// unless it can *prove* that **every** event's primary key cannot satisfy
+    /// the subscription's `WHERE` filter:
+    ///
+    /// - If any event lacks a PK identity (`pk() == None` — e.g. composite keys
+    ///   or emission sites without row data), we cannot reason and re-query.
+    /// - The filter is analyzed (once) against the PK column name carried by the
+    ///   events; if it is not a pure single-PK-column predicate the analyzer
+    ///   reports `Unanalyzable` and we re-query.
+    /// - For an `Insert`, the new PK must be unable to match; for a `Delete`, the
+    ///   old PK; for an `Update`, **both** the old and new PK (a row moving into
+    ///   or out of the set is a real change). If any of these *could* match, we
+    ///   re-query.
+    ///
+    /// Returns `true` to re-query, `false` to safely skip. The caller increments
+    /// the prune metric on a `false` result.
+    fn subscription_needs_requery(query: &str, events: &[&vibesql_storage::ChangeEvent]) -> bool {
+        use vibesql_storage::ChangeEvent;
+
+        // Analyze the filter lazily, against the PK column name the events
+        // carry. Built on first event that has a PK; reused for the rest.
+        let mut pruner: Option<PkPruner> = None;
+
+        for event in events {
+            // No PK identity attached → cannot reason → must re-query.
+            let pk = match event.pk() {
+                Some(pk) => pk,
+                None => return true,
+            };
+
+            // (Re)build the analyzer for this PK column if needed. All events on
+            // a given table carry the same PK column, so this is built once.
+            let analyzed = pruner.get_or_insert_with(|| PkPruner::analyze(query, &pk.column));
+
+            let could_match = match event {
+                ChangeEvent::Insert { .. } => analyzed.pk_might_match(&pk.value),
+                ChangeEvent::Delete { .. } => analyzed.pk_might_match(&pk.value),
+                ChangeEvent::Update { .. } => {
+                    // Consider BOTH the pre-image (`value`) and the post-image
+                    // (`new_value`, defaulting to `value` when the PK did not
+                    // change). Re-query if EITHER could match.
+                    let old_match = analyzed.pk_might_match(&pk.value);
+                    let new_pk = pk.new_value.as_ref().unwrap_or(&pk.value);
+                    let new_match = analyzed.pk_might_match(new_pk);
+                    old_match || new_match
+                }
+            };
+
+            if could_match {
+                // At least one changed row could affect this subscription.
+                return true;
+            }
+        }
+
+        // Every event's PK provably cannot satisfy the filter → safe to skip.
+        false
     }
 
     /// Handle a change event from the storage layer
@@ -109,6 +170,7 @@ impl SubscriptionManager {
             return;
         }
 
+        let relevant = [&event];
         for id in affected_ids {
             // Clone the query string out before re-querying so the state
             // machine lock (held inside `query_fn`) never overlaps the DashMap
@@ -117,6 +179,17 @@ impl SubscriptionManager {
                 Some(sub) => sub.query.clone(),
                 None => continue,
             };
+
+            // PK pruning (#5472): skip the re-query when the changed PK provably
+            // cannot satisfy this subscription's WHERE filter.
+            if !Self::subscription_needs_requery(&query, &relevant) {
+                self.replicated_requeries_pruned.fetch_add(1, Ordering::Relaxed);
+                trace!(
+                    subscription_id = %id,
+                    "Pruned replicated re-query: changed PK cannot match the subscription filter"
+                );
+                continue;
+            }
 
             match query_fn(&query) {
                 Ok(rows) => {
@@ -164,20 +237,24 @@ impl SubscriptionManager {
             return;
         }
 
-        // Union of affected subscription IDs across every event in the batch.
-        // `seen` dedupes so each subscription is re-queried once; `total_hits`
-        // counts how many event→subscription matches occurred so we can report
-        // how many re-queries coalescing saved.
+        // Union of affected subscription IDs across every event in the batch,
+        // recording for each the slice of events that touched a table it depends
+        // on (needed for PK pruning). `affected` preserves first-seen order;
+        // `total_hits` counts event→subscription matches so we can report how
+        // many re-queries coalescing alone saved.
         let mut affected: Vec<SubscriptionId> = Vec::new();
-        let mut seen: HashSet<SubscriptionId> = HashSet::new();
+        let mut per_sub: HashMap<SubscriptionId, Vec<&vibesql_storage::ChangeEvent>> =
+            HashMap::new();
         let mut total_hits: usize = 0;
 
         for event in events {
             for id in self.find_affected_subscriptions(event.table_name()) {
                 total_hits += 1;
-                if seen.insert(id) {
+                let entry = per_sub.entry(id);
+                if matches!(entry, std::collections::hash_map::Entry::Vacant(_)) {
                     affected.push(id);
                 }
+                entry.or_default().push(event);
             }
         }
 
@@ -185,8 +262,8 @@ impl SubscriptionManager {
             return;
         }
 
-        // Re-queries saved = (matches that would each trigger a re-query) minus
-        // (the unique re-queries we actually run).
+        // Re-queries saved by coalescing = (matches that would each trigger a
+        // re-query) minus (the unique re-queries we would otherwise run).
         let saved = total_hits.saturating_sub(affected.len());
         if saved > 0 {
             self.replicated_requeries_coalesced.fetch_add(saved, Ordering::Relaxed);
@@ -203,6 +280,18 @@ impl SubscriptionManager {
                 Some(sub) => sub.query.clone(),
                 None => continue,
             };
+
+            // PK pruning (#5472): skip the re-query entirely when none of this
+            // subscription's relevant changes could satisfy its WHERE filter.
+            let relevant = per_sub.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            if !Self::subscription_needs_requery(&query, relevant) {
+                self.replicated_requeries_pruned.fetch_add(1, Ordering::Relaxed);
+                trace!(
+                    subscription_id = %id,
+                    "Pruned replicated re-query: changed PK(s) cannot match the subscription filter"
+                );
+                continue;
+            }
 
             match query_fn(&query) {
                 Ok(rows) => {

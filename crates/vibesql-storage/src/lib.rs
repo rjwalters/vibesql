@@ -34,8 +34,8 @@ pub use backend::{StorageBackend, StorageFile};
 pub use blob::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
 pub use buffer::{BufferPool, BufferPoolStats};
 pub use change_events::{
-    channel as change_event_channel, ChangeEvent, ChangeEventReceiver, ChangeEventSender,
-    RecvError as ChangeEventRecvError, DEFAULT_CHANNEL_CAPACITY,
+    channel as change_event_channel, ChangeEvent, ChangeEventPk, ChangeEventReceiver,
+    ChangeEventSender, RecvError as ChangeEventRecvError, DEFAULT_CHANNEL_CAPACITY,
 };
 pub use columnar::{ColumnData, ColumnarTable};
 pub use columnar_cache::{CacheStats, ColumnarCache};

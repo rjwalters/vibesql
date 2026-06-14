@@ -93,6 +93,12 @@ pub struct SubscriptionManager {
     /// strict one-per-event loop would have run but the coalesced loop skipped
     /// because the affected subscription was already re-queried for this batch.
     pub(crate) replicated_requeries_coalesced: AtomicUsize,
+
+    /// Count of subscription re-queries skipped because the changed primary
+    /// key(s) provably could not satisfy the subscription's `WHERE` filter
+    /// (#5472). Each increment is one re-query a (table-indexed) re-query loop
+    /// would otherwise have run, avoided by conservative PK-predicate pruning.
+    pub(crate) replicated_requeries_pruned: AtomicUsize,
 }
 
 impl SubscriptionManager {
@@ -114,6 +120,7 @@ impl SubscriptionManager {
             subscription_count_atomic: AtomicUsize::new(0),
             connection_subscription_counts: DashMap::new(),
             replicated_requeries_coalesced: AtomicUsize::new(0),
+            replicated_requeries_pruned: AtomicUsize::new(0),
         }
     }
 }
