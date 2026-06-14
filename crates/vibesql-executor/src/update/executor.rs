@@ -23,8 +23,9 @@ use super::{
     foreign_keys::ForeignKeyValidator,
     from_clause::{apply_update_from_matches, execute_update_from_join},
     index_sync::{
-        find_conflicting_rows_for_update, resolve_cross_update_conflicts_for_replace,
-        validate_cross_update_uniqueness, validate_post_statement_uniqueness,
+        detect_surviving_replace_conflict, find_conflicting_rows_for_update,
+        resolve_cross_update_conflicts_for_replace, validate_cross_update_uniqueness,
+        validate_post_statement_uniqueness,
     },
     row_selector::RowSelector,
     triggers,
@@ -506,12 +507,13 @@ pub(super) fn execute_internal(
             // Fire BEFORE DELETE triggers for each conflicting row before it is
             // removed. A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that
             // row's deletion (#5418 parity): drop it from the to-delete set so
-            // the conflicting row survives. The subsequent UPDATE then applies
-            // against the still-conflicting state; if a real conflict remains,
-            // `update_row_selective` surfaces a PK/UNIQUE error, matching
-            // sqlite3 3.51 with recursive_triggers=ON.
+            // the conflicting row survives.
             if has_delete_triggers {
                 let mut kept = Vec::with_capacity(rows_for_index.len());
+                // Rows whose deletion was abandoned by a BEFORE DELETE
+                // RAISE(IGNORE) — they stay live and may still collide with the
+                // pending UPDATE's NEW row.
+                let mut abandoned: Vec<(usize, Row)> = Vec::new();
                 for (idx, row) in rows_for_index {
                     let outcome = crate::TriggerFirer::execute_before_triggers(
                         database,
@@ -522,6 +524,8 @@ pub(super) fn execute_internal(
                     )?;
                     if outcome != crate::TriggerOutcome::SkipRow {
                         kept.push((idx, row));
+                    } else {
+                        abandoned.push((idx, row));
                     }
                 }
                 rows_for_index = kept;
@@ -532,6 +536,22 @@ pub(super) fn execute_internal(
                 let surviving: HashSet<usize> =
                     rows_for_index.iter().map(|(idx, _)| *idx).collect();
                 rows_to_delete_for_replace.retain(|idx| surviving.contains(idx));
+
+                // Issue #5490 (doctor): a BEFORE DELETE RAISE(IGNORE) that
+                // abandoned a conflict-row deletion leaves the conflicting row
+                // live. If a pending update's NEW row would land on the same
+                // PK/UNIQUE key, applying it would create a duplicate key
+                // (silent corruption). sqlite3 3.51 (recursive_triggers=ON)
+                // raises `UNIQUE constraint failed: <table>.<col>` and leaves
+                // the table unchanged — so detect the collision here, BEFORE any
+                // storage mutation, and abort.
+                detect_surviving_replace_conflict(
+                    &updates,
+                    schema,
+                    &abandoned,
+                    database,
+                    table_name,
+                )?;
             }
 
             // Update indexes before deletion
@@ -579,15 +599,9 @@ pub(super) fn execute_internal(
                 partial_index_maintenance::rebuild_partial_indexes_after_compaction(
                     database, table_name,
                 );
-                // KNOWN LIMITATION: After compaction, row indices in the `updates` vector
-                // may be stale since compaction can shift row positions. This is safe in
-                // practice because:
-                // 1. Compaction only occurs when deletion count exceeds a high threshold
-                //    (typically when > 50% of rows are deleted)
-                // 2. UPDATE OR REPLACE typically deletes a small number of conflicting rows
-                // 3. The likelihood of triggering compaction during UPDATE OR REPLACE is low
-                // For correctness in edge cases, a future improvement could re-scan the
-                // table to recalculate update indices based on row content matching.
+                // Stale `updates` row indices after compaction are repaired by
+                // `remap_update_indices_after_compaction` below (re-resolves each
+                // pending update's physical slot by matching its OLD row).
             } else {
                 database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
             }
@@ -1662,6 +1676,9 @@ fn execute_update_from(
 
                 if has_delete_triggers {
                     let mut kept = Vec::with_capacity(rows_for_index.len());
+                    // Conflict rows whose deletion was abandoned by a BEFORE
+                    // DELETE RAISE(IGNORE) — they stay live.
+                    let mut abandoned: Vec<(usize, Row)> = Vec::new();
                     for (idx, row) in rows_for_index {
                         let outcome = crate::TriggerFirer::execute_before_triggers(
                             database,
@@ -1672,12 +1689,28 @@ fn execute_update_from(
                         )?;
                         if outcome != crate::TriggerOutcome::SkipRow {
                             kept.push((idx, row));
+                        } else {
+                            abandoned.push((idx, row));
                         }
                     }
                     rows_for_index = kept;
                     let surviving: HashSet<usize> =
                         rows_for_index.iter().map(|(idx, _)| *idx).collect();
                     rows_to_delete_for_replace.retain(|idx| surviving.contains(idx));
+
+                    // Issue #5490 (doctor): same duplicate-PK guard as the
+                    // non-FROM path. A BEFORE DELETE RAISE(IGNORE) that left a
+                    // conflict row live makes the pending update's NEW row a
+                    // duplicate-key violation; match sqlite3 3.51's
+                    // `UNIQUE constraint failed` + table-unchanged behavior by
+                    // aborting before any storage mutation.
+                    detect_surviving_replace_conflict(
+                        &updates,
+                        schema,
+                        &abandoned,
+                        database,
+                        table_name,
+                    )?;
                 }
 
                 // Update indexes before deletion
@@ -1725,11 +1758,8 @@ fn execute_update_from(
                     partial_index_maintenance::rebuild_partial_indexes_after_compaction(
                         database, table_name,
                     );
-                    // KNOWN LIMITATION: same caveat as the default path — after
-                    // compaction, row indices in `updates` may be stale. This is
-                    // safe in practice because UPDATE OR REPLACE typically deletes
-                    // a small number of conflicting rows (well below the
-                    // compaction threshold).
+                    // Stale `updates` row indices after compaction are repaired
+                    // by `remap_update_indices_after_compaction` below.
                 } else {
                     database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
                 }

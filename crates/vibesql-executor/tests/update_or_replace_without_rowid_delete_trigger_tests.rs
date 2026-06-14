@@ -228,6 +228,71 @@ fn text(s: &str) -> SqlValue {
     SqlValue::Varchar(arcstr::ArcStr::from(s))
 }
 
+/// Issue #5490 (doctor blocker): a `BEFORE DELETE` trigger that runs
+/// `RAISE(IGNORE)` abandons the REPLACE-conflict row's deletion, so the
+/// conflicting row stays live. `UPDATE OR REPLACE` would then drive the updated
+/// row onto a PK that another (surviving) row still holds — a duplicate PRIMARY
+/// KEY. sqlite3 3.51.0 (recursive_triggers=ON) instead raises
+/// `UNIQUE constraint failed: t1.a` and leaves the table unchanged. Before this
+/// fix VibeSQL returned Ok and left two rows sharing PK a=3 (silent corruption).
+#[test]
+fn update_or_replace_before_delete_ignore_raises_unique_and_leaves_table_unchanged() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
+    // RAISE(IGNORE) only for the conflicting row (a=3), so the deletion that
+    // UPDATE OR REPLACE wants to perform is abandoned.
+    exec(
+        &mut db,
+        "CREATE TRIGGER trd BEFORE DELETE ON t1 WHEN old.a=3 BEGIN SELECT RAISE(IGNORE); END",
+    );
+    exec(&mut db, "INSERT INTO t1 VALUES(2, 'two')");
+    exec(&mut db, "INSERT INTO t1 VALUES(3, 'three')");
+
+    let err = try_update(&mut db, "UPDATE OR REPLACE t1 SET a=3 WHERE a=2")
+        .expect_err("surviving conflict row must raise a UNIQUE error, not silently dup the PK");
+    // Display localizes a "Constraint violation: " prefix; assert the SQLite
+    // sub-message + the qualified PK column, matching sqlite3 3.51.0's
+    // `UNIQUE constraint failed: t1.a`.
+    let msg = err.to_string();
+    assert!(msg.contains("UNIQUE constraint failed: t1.a"), "got error: {msg}");
+
+    // Table unchanged — verified via a live SELECT (no duplicate PK).
+    let rows = sorted_rows(&db, "SELECT a, b FROM t1");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0], vec![SqlValue::Integer(2), text("two")]);
+    assert_eq!(rows[1], vec![SqlValue::Integer(3), text("three")]);
+}
+
+/// Same blocker via the `UPDATE ... FROM` path: the surviving BEFORE DELETE
+/// RAISE(IGNORE) conflict must raise `UNIQUE constraint failed: t1.a` and leave
+/// the table unchanged, matching sqlite3 3.51.0.
+#[test]
+fn update_or_replace_from_before_delete_ignore_raises_unique_and_leaves_table_unchanged() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
+    exec(
+        &mut db,
+        "CREATE TRIGGER trd BEFORE DELETE ON t1 WHEN old.a=3 BEGIN SELECT RAISE(IGNORE); END",
+    );
+    exec(&mut db, "INSERT INTO t1 VALUES(2, 'two')");
+    exec(&mut db, "INSERT INTO t1 VALUES(3, 'three')");
+    exec(&mut db, "CREATE TABLE src(x, y)");
+    exec(&mut db, "INSERT INTO src VALUES(2, 3)");
+
+    let err = try_update(&mut db, "UPDATE OR REPLACE t1 SET a=src.y FROM src WHERE t1.a=src.x")
+        .expect_err("surviving conflict row must raise a UNIQUE error in the FROM path too");
+    // Display localizes a "Constraint violation: " prefix; assert the SQLite
+    // sub-message + the qualified PK column, matching sqlite3 3.51.0's
+    // `UNIQUE constraint failed: t1.a`.
+    let msg = err.to_string();
+    assert!(msg.contains("UNIQUE constraint failed: t1.a"), "got error: {msg}");
+
+    let rows = sorted_rows(&db, "SELECT a, b FROM t1");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0], vec![SqlValue::Integer(2), text("two")]);
+    assert_eq!(rows[1], vec![SqlValue::Integer(3), text("three")]);
+}
+
 /// In-memory regression for the compaction-induced index drift exposed by the
 /// fast-path bypass (#5490): a prior tombstone (`DELETE FROM t1 WHERE a=1`)
 /// plus the REPLACE-conflict delete can compact the table mid-statement,
