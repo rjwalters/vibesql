@@ -1494,14 +1494,15 @@ impl ExpressionVisitor for TimeCastDetector<'_> {
                 // reach here: they freeze at propose and arrive
                 // substituted to a TIMESTAMP literal.
                 if cast_operand_could_be_time(operand, self.schema) {
-                    self.error = Some(format!(
+                    self.error = Some(
                         "CAST(<expression> AS TIMESTAMP) where the operand may be a TIME value \
                          stamps the apply-time current date per row (SQL:1999) and cannot be \
                          replicated deterministically; freeze the value at propose (use a TIME \
                          literal) or combine it with an explicit date instead. The replicated \
                          path conservatively rejects any TIME→TIMESTAMP cast whose operand is \
                          not provably non-TIME (#5398)"
-                    ));
+                            .to_string(),
+                    );
                     return VisitResult::Stop;
                 }
                 VisitResult::Continue
@@ -1540,7 +1541,7 @@ fn cast_operand_could_be_time(
     operand: &Expression,
     schema: &vibesql_catalog::TableSchema,
 ) -> bool {
-    cast_operand_could_be_time_inner(operand, Some(schema))
+    cast_operand_could_be_time_inner(operand, schema)
 }
 
 /// Is this operand **provably TIME without any schema** — i.e. known to
@@ -1579,7 +1580,7 @@ fn cast_operand_is_provably_time(operand: &Expression) -> bool {
 
 fn cast_operand_could_be_time_inner(
     operand: &Expression,
-    schema: Option<&vibesql_catalog::TableSchema>,
+    schema: &vibesql_catalog::TableSchema,
 ) -> bool {
     match operand {
         // Literals: only a TIME literal is TIME, and those are frozen at
@@ -1590,15 +1591,11 @@ fn cast_operand_could_be_time_inner(
         // The apply-time clock reads that *produce* TIME.
         Expression::CurrentTime { .. } => true,
 
-        // A column reference: provably non-TIME only when a schema is in
-        // scope, it binds to the target table, and that column's type is
-        // known and not TIME. Other-table / unqualified-but-absent
-        // columns (and *all* columns when no schema is available) are
-        // unresolvable → conservatively possibly-TIME.
+        // A column reference: provably non-TIME only when it binds to the
+        // target table and that column's type is known and not TIME.
+        // Other-table / unqualified-but-absent columns are unresolvable →
+        // conservatively possibly-TIME.
         Expression::ColumnRef(col) => {
-            let Some(schema) = schema else {
-                return true;
-            };
             let binds_to_target = col.table_canonical().is_none_or(|t| {
                 t.eq_ignore_ascii_case(&schema.name) || t.eq_ignore_ascii_case("excluded")
             });
