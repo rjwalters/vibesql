@@ -367,6 +367,93 @@ fn test_sql_dump_index_quoted_identifiers_roundtrip() {
     std::fs::remove_file(path).ok();
 }
 
+/// Regression test for #5579: the SQL dump must preserve the *original case* of
+/// an index name, matching sqlite3 3.51.0 (whose `.dump` and `sqlite_master`
+/// retain the spelling the user typed). The IndexManager keys indexes by a
+/// lowercased storage key for case-insensitive lookup, but `metadata.index_name`
+/// retains the original case, which is what the dump must emit. A mixed-case
+/// name with embedded special characters also exercises the quoting path.
+#[test]
+fn test_sql_dump_preserves_index_name_case() {
+    use crate::persistence::load::read_sql_dump;
+
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "t".to_string(),
+        vec![
+            ColumnSchema::new("b".to_string(), DataType::Integer, false),
+            ColumnSchema::new("c".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Simple mixed-case name (no special chars): emitted unquoted, original case.
+    let cols1 = vec![vibesql_ast::IndexColumn::Column {
+        column_name: "b".to_string(),
+        direction: vibesql_ast::OrderDirection::Asc,
+        prefix_length: None,
+    }];
+    db.create_index("MyIdx".to_string(), "t".to_string(), false, cols1).unwrap();
+
+    // Mixed-case name with spaces/parens: emitted quoted, original case preserved
+    // (mirrors the repro in #5579: "x1 (b Asc, c Asc)").
+    let cols2 = vec![
+        vibesql_ast::IndexColumn::Column {
+            column_name: "b".to_string(),
+            direction: vibesql_ast::OrderDirection::Desc,
+            prefix_length: None,
+        },
+        vibesql_ast::IndexColumn::Column {
+            column_name: "c".to_string(),
+            direction: vibesql_ast::OrderDirection::Asc,
+            prefix_length: None,
+        },
+    ];
+    db.create_index("x1 (b Asc, c Asc)".to_string(), "t".to_string(), false, cols2).unwrap();
+
+    let path = "/tmp/test_index_name_case.sql";
+    db.save_sql_dump(path).unwrap();
+
+    let content = read_sql_dump(path).unwrap();
+
+    // Original case retained, not lowercased.
+    assert!(
+        content.contains("CREATE INDEX MyIdx ON"),
+        "Index name case must be preserved (expected `MyIdx`). Got:\n{content}"
+    );
+    assert!(
+        !content.contains("myidx"),
+        "Index name must not be lowercased. Got:\n{content}"
+    );
+    assert!(
+        content.contains("\"x1 (b Asc, c Asc)\""),
+        "Quoted index name must preserve original case. Got:\n{content}"
+    );
+    assert!(
+        !content.contains("x1 (b asc, c asc)"),
+        "Quoted index name must not be lowercased. Got:\n{content}"
+    );
+
+    // Case-insensitive lookup is unaffected: a lowercased probe still finds the
+    // index that was created with mixed case.
+    assert!(db.index_exists("myidx"), "case-insensitive lookup must still work");
+
+    // Both emitted CREATE INDEX statements must re-lex/parse cleanly (the dump
+    // is text-only at this layer; a full execute round-trip lives in the
+    // executor crate, which has the parser+executor wired together).
+    for line in content.lines().filter(|l| l.trim_start().starts_with("CREATE INDEX")) {
+        vibesql_parser::Parser::parse_sql(line)
+            .unwrap_or_else(|e| panic!("Emitted index DDL must re-parse: {e}\nStatement: {line}"));
+    }
+
+    // Case-insensitive DROP removes the mixed-case index.
+    db.drop_index("MYIDX").expect("case-insensitive DROP must drop the mixed-case index");
+    assert!(!db.index_exists("MyIdx"), "index should be gone after case-insensitive drop");
+
+    std::fs::remove_file(path).ok();
+}
+
 #[test]
 fn test_sql_dump_all_data_types() {
     let mut db = Database::new();

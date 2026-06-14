@@ -434,6 +434,14 @@ impl Database {
                 write!(writer, " UNIQUE")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
+            // Emit the index name with its original case (#5579). `index_name`
+            // here is the IndexManager's *storage key*, which is normalized to
+            // lowercase for case-insensitive lookup (see `make_index_key`).
+            // `metadata.index_name` preserves the name exactly as the user wrote
+            // it in `CREATE INDEX`, matching sqlite3 — whose `.dump` and
+            // `sqlite_master.name`/`.sql` retain the original spelling while
+            // still resolving names case-insensitively.
+            //
             // Identifiers (index name, table name, column names) must be quoted so
             // that names with embedded special characters (spaces, quotes, parens)
             // round-trip correctly when the dump is re-lexed on reload. Without
@@ -442,7 +450,7 @@ impl Database {
             write!(
                 writer,
                 " INDEX {} ON {} (",
-                quote_identifier(&index_name),
+                quote_identifier(&metadata.index_name),
                 quote_identifier(&metadata.table_name)
             )
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
