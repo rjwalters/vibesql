@@ -25,6 +25,7 @@ fn test_create_trigger() {
     // Create a trigger
     let stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -63,6 +64,7 @@ fn test_create_trigger_duplicate_error() {
     // Create a trigger
     let stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -97,6 +99,7 @@ fn test_create_trigger_if_not_exists_is_noop_when_present() {
 
     let stmt = CreateTriggerStmt {
         if_not_exists: true,
+        schema: None,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -138,6 +141,7 @@ fn test_create_trigger_on_system_table_wording() {
 
     let stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "tr1".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None),
@@ -160,6 +164,7 @@ fn test_create_instead_of_trigger_on_table_wording() {
 
     let stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "t1t".to_string(),
         timing: TriggerTiming::InsteadOf,
         event: TriggerEvent::Update(None),
@@ -191,6 +196,7 @@ fn test_create_before_after_trigger_on_view_wording() {
     for (timing, label) in [(TriggerTiming::Before, "BEFORE"), (TriggerTiming::After, "AFTER")] {
         let stmt = CreateTriggerStmt {
             if_not_exists: false,
+            schema: None,
             trigger_name: "v1t".to_string(),
             timing,
             event: TriggerEvent::Update(None),
@@ -223,6 +229,7 @@ fn test_drop_trigger() {
     // Create a trigger
     let stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -312,6 +319,7 @@ fn test_create_trigger_all_variations() {
     for (timing, suffix, target) in timings {
         let stmt = CreateTriggerStmt {
             if_not_exists: false,
+            schema: None,
             trigger_name: format!("trigger_{}", suffix),
             timing: timing.clone(),
             event: TriggerEvent::Insert,
@@ -353,6 +361,7 @@ fn make_test_table(db: &mut Database) {
 fn create_trigger_stmt(name: &str) -> CreateTriggerStmt {
     CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: name.to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -520,5 +529,59 @@ fn test_rename_table_rewrites_trigger_body_and_fires() {
         rows[0].values[0],
         vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("fired-2")),
         "trigger did not fire correctly against the renamed table"
+    );
+}
+
+/// `CREATE TEMP TRIGGER` parses, registers with the temp schema recorded on the
+/// catalog definition, and fires on its target table. Regression coverage for
+/// issue #5521 (triggerD TEMP/TEMPORARY support).
+#[test]
+fn test_create_temp_trigger_parses_records_schema_and_fires() {
+    use crate::{InsertExecutor, SelectExecutor};
+
+    let mut db = Database::new();
+
+    for sql in ["CREATE TABLE t1 (x INTEGER);", "CREATE TABLE log (y INTEGER);"] {
+        match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+            vibesql_ast::Statement::CreateTable(stmt) => {
+                CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+            }
+            other => panic!("Expected CreateTable, got {:?}", other),
+        }
+    }
+
+    // CREATE TEMP TRIGGER must parse and create successfully.
+    let trigger_sql =
+        "CREATE TEMP TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO log VALUES(new.x + 100); END";
+    match vibesql_parser::Parser::parse_sql(trigger_sql).unwrap() {
+        vibesql_ast::Statement::CreateTrigger(stmt) => {
+            assert_eq!(stmt.schema.as_deref(), Some("temp"), "TEMP modifier sets schema");
+            crate::TriggerExecutor::create_trigger(&mut db, &stmt).unwrap();
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+
+    // The temp schema is recorded on the stored catalog definition.
+    let def = db.catalog.get_trigger("tr1").expect("temp trigger registered");
+    assert!(def.is_temp(), "stored trigger must record the temp schema");
+
+    // The temp trigger fires on its target table.
+    match vibesql_parser::Parser::parse_sql("INSERT INTO t1 VALUES (5);").unwrap() {
+        vibesql_ast::Statement::Insert(stmt) => {
+            InsertExecutor::execute(&mut db, &stmt).unwrap();
+        }
+        other => panic!("Expected Insert, got {:?}", other),
+    }
+
+    let select = match vibesql_parser::Parser::parse_sql("SELECT y FROM log;").unwrap() {
+        vibesql_ast::Statement::Select(stmt) => stmt,
+        other => panic!("Expected Select, got {:?}", other),
+    };
+    let rows = SelectExecutor::new(&db).execute(&select).expect("select from log");
+    assert_eq!(rows.len(), 1, "temp trigger should have fired once");
+    assert_eq!(
+        rows[0].values[0],
+        vibesql_types::SqlValue::Integer(105),
+        "temp trigger body did not fire with the inserted NEW row"
     );
 }

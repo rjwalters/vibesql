@@ -571,6 +571,7 @@ mod tests {
 
         let trigger = TriggerDefinition {
             name: "audit_insert".to_string(),
+            schema: None,
             table_name: "users".to_string(),
             timing: TriggerTiming::After,
             event: TriggerEvent::Insert,
@@ -597,6 +598,7 @@ mod tests {
 
         let trigger = TriggerDefinition {
             name: "track_status_change".to_string(),
+            schema: None,
             table_name: "orders".to_string(),
             timing: TriggerTiming::Before,
             event: TriggerEvent::Update(Some(vec!["status".to_string(), "updated_at".to_string()])),
@@ -619,6 +621,7 @@ mod tests {
 
         let trigger = TriggerDefinition {
             name: "instead_delete".to_string(),
+            schema: None,
             table_name: "my_view".to_string(),
             timing: TriggerTiming::InsteadOf,
             event: TriggerEvent::Delete,

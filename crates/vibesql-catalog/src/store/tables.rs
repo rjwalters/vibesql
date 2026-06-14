@@ -490,6 +490,7 @@ mod tests {
         // Create trigger with UPPERCASE table reference
         let trigger = TriggerDefinition {
             name: "Tr1".to_string(),
+            schema: None,
             timing: TriggerTiming::After,
             event: TriggerEvent::Update(None), // None = no column list
             table_name: "T1".to_string(),      // Different case than table creation
@@ -564,6 +565,7 @@ mod tests {
         // Create trigger with exact case match
         let trigger = TriggerDefinition {
             name: "Tr1".to_string(),
+            schema: None,
             timing: TriggerTiming::After,
             event: TriggerEvent::Update(None),
             table_name: "t1".to_string(), // Exact match required in case-sensitive mode
@@ -597,6 +599,7 @@ mod tests {
         for i in 1..=3 {
             let trigger = TriggerDefinition {
                 name: format!("tr{}", i),
+                schema: None,
                 timing: TriggerTiming::After,
                 event: TriggerEvent::Update(None),
                 table_name: "t1".to_string(),
@@ -639,6 +642,7 @@ mod tests {
         // Create triggers on both tables
         let trigger1 = TriggerDefinition {
             name: "tr1".to_string(),
+            schema: None,
             timing: TriggerTiming::After,
             event: TriggerEvent::Update(None),
             table_name: "t1".to_string(),
@@ -650,6 +654,7 @@ mod tests {
         };
         let trigger2 = TriggerDefinition {
             name: "tr2".to_string(),
+            schema: None,
             timing: TriggerTiming::After,
             event: TriggerEvent::Update(None),
             table_name: "t2".to_string(),

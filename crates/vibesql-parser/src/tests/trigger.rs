@@ -467,6 +467,8 @@ fn test_create_temp_trigger_after_insert() {
             assert_eq!(trigger.timing, TriggerTiming::After);
             assert_eq!(trigger.event, TriggerEvent::Insert);
             assert_eq!(trigger.table_name, "t1");
+            // The TEMP modifier places the trigger in the temp schema.
+            assert_eq!(trigger.schema.as_deref(), Some("temp"));
         }
         _ => panic!("Expected CreateTrigger statement"),
     }
@@ -485,6 +487,8 @@ fn test_create_temporary_trigger_after_insert() {
             assert_eq!(trigger.timing, TriggerTiming::After);
             assert_eq!(trigger.event, TriggerEvent::Insert);
             assert_eq!(trigger.table_name, "t1");
+            // TEMPORARY behaves identically to TEMP.
+            assert_eq!(trigger.schema.as_deref(), Some("temp"));
         }
         _ => panic!("Expected CreateTrigger statement"),
     }
@@ -506,6 +510,76 @@ fn test_create_temp_trigger_omitted_timing_defaults_to_before() {
         }
         _ => panic!("Expected CreateTrigger statement"),
     }
+}
+
+#[test]
+fn test_create_trigger_schema_defaults_to_none() {
+    // A plain CREATE TRIGGER (no TEMP, no schema prefix) has no schema.
+    let sql = "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "tr1");
+            assert_eq!(trigger.schema, None);
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_with_main_schema_qualifier() {
+    // `CREATE TRIGGER main.r1 ...` (triggerD-3.1) parses with schema "main".
+    let sql = "CREATE TRIGGER main.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "r1");
+            assert_eq!(trigger.schema.as_deref(), Some("main"));
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_with_temp_schema_qualifier() {
+    // `CREATE TRIGGER temp.r1 ...` (triggerD-3.2) parses with the temp schema.
+    // Note `temp` is a keyword, so this also exercises keyword-as-schema.
+    let sql = "CREATE TRIGGER temp.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "r1");
+            assert!(
+                trigger.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("temp")),
+                "expected temp schema, got {:?}",
+                trigger.schema
+            );
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_temp_trigger_if_not_exists_sets_schema() {
+    // TEMP modifier + IF NOT EXISTS: both flags set, schema is temp.
+    let sql =
+        "CREATE TEMP TRIGGER IF NOT EXISTS r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "r1");
+            assert!(trigger.if_not_exists);
+            assert_eq!(trigger.schema.as_deref(), Some("temp"));
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_temp_trigger_with_non_temp_schema_rejected() {
+    // SQLite rejects combining `CREATE TEMP TRIGGER` with an explicit
+    // non-temp schema, e.g. `CREATE TEMP TRIGGER main.r1`.
+    let sql = "CREATE TEMP TRIGGER main.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    assert!(
+        Parser::parse_sql(sql).is_err(),
+        "CREATE TEMP TRIGGER with explicit main schema must be rejected"
+    );
 }
 
 #[test]
