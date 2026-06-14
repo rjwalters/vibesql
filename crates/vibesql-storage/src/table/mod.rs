@@ -1051,6 +1051,59 @@ impl Table {
         }
     }
 
+    /// Bitmap-delete a single row by index, updating internal indexes, WITHOUT
+    /// triggering compaction.
+    ///
+    /// This is used by the interleaved per-row DELETE trigger path (#5486),
+    /// where row triggers fire BEFORE -> delete -> AFTER for each row in turn.
+    /// Per-row deletion must not compact mid-loop, because compaction shifts
+    /// every row index and would invalidate the indices of the not-yet-processed
+    /// rows the caller still holds. The caller is responsible for calling
+    /// [`Table::compact_if_needed`] once after the loop completes.
+    ///
+    /// Returns `true` if the row was newly deleted, `false` if the index was
+    /// out of bounds or the row was already deleted.
+    pub fn mark_deleted_inplace(&mut self, idx: usize) -> bool {
+        if idx >= self.rows.len() || self.deleted[idx] {
+            return false;
+        }
+
+        // Update internal hash indexes for this row BEFORE marking deleted,
+        // mirroring `delete_by_indices`.
+        let row = &self.rows[idx];
+        self.indexes.update_for_delete(&self.schema, row);
+
+        self.deleted[idx] = true;
+        self.deleted_count += 1;
+
+        // For native columnar tables, rebuild columnar data so reads (e.g. a
+        // trigger body's SELECT) observe the deletion immediately.
+        if self.native_columnar.is_some() {
+            let _ = self.rebuild_native_columnar();
+        }
+
+        true
+    }
+
+    /// Compact the table if it has crossed the deletion threshold, returning
+    /// whether compaction actually occurred.
+    ///
+    /// Companion to [`Table::mark_deleted_inplace`]: the interleaved per-row
+    /// DELETE path defers compaction until after all rows are processed, then
+    /// calls this once. When it returns `true` the caller must rebuild
+    /// user-defined / expression / partial indexes since all row indices moved.
+    pub fn compact_if_needed(&mut self) -> bool {
+        if self.should_compact() {
+            self.compact();
+            if self.native_columnar.is_some() {
+                let _ = self.rebuild_native_columnar();
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     /// Delete rows matching a predicate
     ///
     /// Uses O(1) bitmap marking for each deleted row instead of O(n) Vec::remove().

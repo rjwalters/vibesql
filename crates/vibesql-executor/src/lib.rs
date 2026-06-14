@@ -6,6 +6,7 @@ pub mod advanced_objects;
 mod alter;
 pub mod arena;
 pub mod cache;
+mod compaction_guard;
 mod constraint_validator;
 pub mod correlation;
 mod create_table;
