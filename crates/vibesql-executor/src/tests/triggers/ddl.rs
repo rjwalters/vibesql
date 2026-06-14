@@ -232,6 +232,52 @@ fn test_create_instead_of_trigger_on_table_wording() {
 }
 
 #[test]
+fn test_create_trigger_missing_table_is_main_qualified() {
+    // sqlite3 (3.51.0, trigger1-1.1.1) reports a CREATE TRIGGER target table
+    // that does not exist in the implicit `main` schema with the `main.`
+    // qualifier:
+    //   CREATE TRIGGER trig UPDATE ON no_such_table ...
+    //   -> "no such table: main.no_such_table"
+    // This holds for BEFORE/AFTER (table-target) and INSTEAD OF (view-target)
+    // triggers, and regardless of `IF NOT EXISTS`.
+    //
+    // VibeSQL surfaces TableNotFound via the localized `Table '<name>' not found`
+    // wording; the TCL conformance shim rewrites it to SQLite's
+    // `no such table: <name>` form. The load-bearing part is the `main.`-qualified
+    // name carried in the error, so we assert the raw VibeSQL message here.
+    let cases = [
+        "CREATE TRIGGER trig UPDATE ON no_such_table BEGIN SELECT 1; END;",
+        "CREATE TRIGGER IF NOT EXISTS trig UPDATE ON no_such_table BEGIN SELECT 1; END;",
+        "CREATE TRIGGER trig INSTEAD OF UPDATE ON no_such_table BEGIN SELECT 1; END;",
+    ];
+
+    for sql in cases {
+        let mut db = Database::new();
+        let stmt = parse_create_trigger(sql);
+        let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+            .expect_err("CREATE TRIGGER on a missing table must be rejected");
+        assert_eq!(err.to_string(), "Table 'main.no_such_table' not found", "for SQL: {sql}");
+    }
+}
+
+#[test]
+fn test_create_temp_trigger_missing_table_is_not_qualified() {
+    // sqlite3 (3.51.0, trigger1-1.1.2) leaves a TEMP trigger's missing target
+    // table BARE (not `main.`-qualified): the target is resolved against the
+    // temp schema, not main.
+    //   CREATE TEMP TRIGGER trig UPDATE ON no_such_table ...
+    //   -> "no such table: no_such_table"
+    // Asserted against VibeSQL's raw `Table '<name>' not found` wording (see the
+    // sibling test above for why).
+    let mut db = Database::new();
+    let stmt =
+        parse_create_trigger("CREATE TEMP TRIGGER trig UPDATE ON no_such_table BEGIN SELECT 1; END;");
+    let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+        .expect_err("CREATE TEMP TRIGGER on a missing table must be rejected");
+    assert_eq!(err.to_string(), "Table 'no_such_table' not found");
+}
+
+#[test]
 fn test_create_before_after_trigger_on_view_wording() {
     // SQLite (3.51.0, trigger1-1.13/1.14):
     //   "cannot create BEFORE trigger on view: v1"
