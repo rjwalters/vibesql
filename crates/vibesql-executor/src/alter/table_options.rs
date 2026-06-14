@@ -10,9 +10,14 @@ pub(super) fn execute_rename_table(
     stmt: &RenameTableStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
-    // Check if new table name already exists
-    if database.get_table(&stmt.new_table_name).is_some() {
-        return Err(ExecutorError::TableAlreadyExists(stmt.new_table_name.clone()));
+    // Check if the new name already names a table or an index. SQLite shares a
+    // single object namespace for tables and indexes, so a RENAME TO collision
+    // against either reports the same SQLite-compatible message
+    // (`there is already another table or index with this name: <name>`).
+    if database.get_table(&stmt.new_table_name).is_some()
+        || database.index_exists(&stmt.new_table_name)
+    {
+        return Err(ExecutorError::RenameTargetExists(stmt.new_table_name.clone()));
     }
 
     // Get the old table to ensure it exists
