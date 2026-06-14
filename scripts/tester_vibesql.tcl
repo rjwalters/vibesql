@@ -55,11 +55,16 @@ set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/
 # This emulates SQLite's deprecated DQS_DML mode (SQLITE_DBCONFIG_DQS_DML)
 set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
 
-# TEMP TABLE emulation
-# Since VibeSQL stores temp tables in the main schema, we rename them to avoid conflicts.
-# Maps: original_name -> unique_name (e.g., "t1" -> "_temp_t1_12345")
-set ::temp_table_map [dict create]
-set ::temp_table_session_id [pid]  ;# Use PID for uniqueness
+# TEMP TABLE emulation — see strip_temp_table_keyword (below) for the rationale.
+# SQLite keeps a single connection open for the whole test file, so a TEMP table
+# created in one statement is visible to every later statement. This shim, by
+# contrast, spawns a fresh VibeSQL CLI process per SQL batch against a shared
+# file-backed database. VibeSQL (correctly) treats TEMP tables as connection-
+# scoped and drops them on process exit (#5505/#5511), so a real CREATE TEMP
+# TABLE would vanish before the next batch — and any index DDL created on it
+# would leak into the persistent schema and fail to reload ("Table 'main.<t>'
+# not found", #5512). To match SQLite's whole-test temp-visibility under this
+# multi-process model we demote TEMP tables to ordinary (persistent) tables.
 
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
@@ -472,88 +477,76 @@ proc translate_error_to_sqlite {vibesql_error} {
 #-----------------------------------------------------------------------------
 # TEMP TABLE Emulation
 #-----------------------------------------------------------------------------
-# VibeSQL stores temp tables in the main schema, but SQLite uses a separate
-# temp schema. Tests may create temp tables with the same names as regular
-# tables, or reuse temp table names across test cases expecting isolation.
+# Demote `CREATE TEMP[ORARY] TABLE` to `CREATE TABLE`, keeping the original
+# name unchanged.
 #
-# Solution: Rename temp tables to unique names (_temp_<name>_<session>_<counter>)
-# and rewrite all SQL to use the unique names.
+# Why: SQLite's TCL interface holds one connection open for the entire test
+# file, so a TEMP table is visible to every subsequent statement in that file.
+# This shim instead runs each SQL batch in its own short-lived VibeSQL CLI
+# process against a shared file-backed database. VibeSQL correctly scopes TEMP
+# tables to the connection and drops them when the process exits (#5505/#5511),
+# so a genuine TEMP table created in one batch is gone by the next — and worse,
+# `CREATE INDEX` on it leaks into the persistent schema and then fails to reload
+# the next time the file is opened, surfacing as the spurious harness log line
+# `Table 'main.<t>' not found` (#5512).
+#
+# The earlier emulation also renamed temp tables to unique `_temp_<n>_<pid>_<c>`
+# identifiers and rewrote every reference via a `::temp_table_map` dict. That was
+# fragile (the word-boundary rewrite mangled column names, so it was disabled at
+# the call site) AND the in-memory map did not survive the between-batch process
+# reload — the root cause of #5512. Demotion needs no rename and no persistent
+# state: the table keeps its real name, lives in the main schema, persists across
+# batches like an ordinary table, and references resolve naturally. The map is
+# eliminated entirely.
+#
+# Shadowing: in SQLite a TEMP table shadows a same-named main table for the rest
+# of the connection. Some tests rely on this — e.g. where-15.1 does
+# `CREATE TEMP TABLE t1 (...)` while a main `t1` from the file's setup is still
+# live. A bare demotion would then hit `table "t1" already exists`. To emulate
+# the shadow we inject `DROP TABLE IF EXISTS <name>;` ahead of each demoted
+# `CREATE TEMP TABLE` (unless it carries IF NOT EXISTS, which has its own
+# create-if-absent semantics). This is lossy for the rare test that later
+# re-reads the shadowed main table after dropping the temp, but it matches the
+# observable result for the common create-then-use pattern and is strictly
+# better than the previous abort.
+#
+# Scope: only `CREATE TEMP TABLE` is demoted. TEMP VIEW/TRIGGER are left alone —
+# some tests deliberately exercise their session-isolation semantics (see the
+# skip list), and they are not implicated in #5512.
 
-proc get_temp_table_name {original_name} {
-    # Get or create a unique name for a temp table
-    global temp_table_map temp_table_session_id
-    variable temp_counter
-    if {![info exists temp_counter]} {
-        set temp_counter 0
-    }
-
-    set key [string tolower $original_name]
-    if {[dict exists $::temp_table_map $key]} {
-        return [dict get $::temp_table_map $key]
-    }
-
-    incr temp_counter
-    set unique_name "_temp_${original_name}_${::temp_table_session_id}_${temp_counter}"
-    dict set ::temp_table_map $key $unique_name
-    return $unique_name
-}
-
-proc clear_temp_table {original_name} {
-    # Remove a temp table mapping (called on DROP)
-    set key [string tolower $original_name]
-    if {[dict exists $::temp_table_map $key]} {
-        dict unset ::temp_table_map $key
-    }
-}
-
-proc reset_temp_tables {} {
-    # Reset all temp table mappings (called at test cleanup)
-    set ::temp_table_map [dict create]
-}
-
-proc rewrite_temp_table_sql {sql} {
-    # Rewrite SQL to handle temp table creation and references
-    # Returns modified SQL with temp tables renamed
-
-    set result $sql
-
-    # Handle CREATE TEMP TABLE / CREATE TEMPORARY TABLE
-    # Pattern: CREATE TEMP[ORARY] TABLE [IF NOT EXISTS] name
-    if {[regexp -nocase {CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $sql match table_name]} {
-        # Strip brackets if present
-        set clean_name [string trim $table_name {[]}]
-        set unique_name [get_temp_table_name $clean_name]
-
-        # Replace CREATE TEMP TABLE with CREATE TABLE using unique name
-        # Remove TEMP/TEMPORARY keyword and replace table name
-        set result [regsub -nocase {CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $result "CREATE TABLE \\1$unique_name"]
-    }
-
-    # Handle DROP TABLE for temp tables
-    # Check if this is dropping a known temp table
-    if {[regexp -nocase {DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)} $sql match table_name]} {
-        set clean_name [string trim $table_name {[]}]
-        set key [string tolower $clean_name]
-        if {[dict exists $::temp_table_map $key]} {
-            set unique_name [dict get $::temp_table_map $key]
-            set result [regsub -nocase "DROP\\s+TABLE\\s+(IF\\s+EXISTS\\s+)?\\[?${clean_name}\\]?" $result "DROP TABLE \\1$unique_name"]
-            clear_temp_table $clean_name
+proc strip_temp_table_keyword {sql} {
+    # Demote every `CREATE TEMP[ORARY] TABLE <name>` to a plain `CREATE TABLE`,
+    # keeping <name> unchanged, and prepend `DROP TABLE IF EXISTS <name>;` to
+    # emulate the temp-over-main shadow (skipped when IF NOT EXISTS is present).
+    #
+    # Implemented as a manual left-to-right scan (regsub -command needs Tcl 8.7;
+    # the runner is on 8.5). \y word boundaries keep the keyword match out of
+    # identifiers/string literals; the captured name handles optional []/""/``
+    # quoting. Submatches: c1 = optional "IF NOT EXISTS ", c2 = the table name.
+    set pat {\yCREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    set out ""
+    set pos 0
+    while {1} {
+        set rest [string range $sql $pos end]
+        if {![regexp -indices -nocase $pat $rest m c1 c2]} {
+            append out $rest
+            break
         }
+        lassign $m ms me
+        # Copy the text before the match unchanged.
+        append out [string range $rest 0 [expr {$ms - 1}]]
+        set name [string range $rest [lindex $c2 0] [lindex $c2 1]]
+        if {[lindex $c1 0] >= 0} {
+            # IF NOT EXISTS present: preserve it, do not pre-drop (create-if-absent).
+            append out "CREATE TABLE IF NOT EXISTS ${name}"
+        } else {
+            # Pre-drop to emulate the temp-over-main shadow.
+            append out "DROP TABLE IF EXISTS ${name}; CREATE TABLE ${name}"
+        }
+        set pos [expr {$pos + $me + 1}]
+        if {$pos > [string length $sql]} break
     }
-
-    # Replace references to known temp tables in the SQL
-    # This handles SELECT, INSERT, UPDATE, DELETE, etc.
-    dict for {original_key unique_name} $::temp_table_map {
-        # Simple word-boundary replacement using \y (TCL word boundary)
-        # This is safer than complex nested loops with regex metacharacters
-
-        # Replace table name with word boundaries
-        # Pattern: word boundary + table name + word boundary (case insensitive)
-        set pattern "(?i)\\y${original_key}\\y"
-        set result [regsub -all $pattern $result $unique_name]
-    }
-
-    return $result
+    return $out
 }
 
 #-----------------------------------------------------------------------------
@@ -1271,11 +1264,9 @@ proc execsql {sql {db ""}} {
         set sql [convert_dqs_to_single_quotes $sql]
     }
 
-    # TEMP TABLE emulation is disabled - simple word-boundary replacement
-    # breaks column names and other identifiers. Proper solution requires
-    # either SQL parsing or actual TEMP TABLE support in VibeSQL.
-    # TODO: Implement proper TEMP TABLE support in VibeSQL core
-    # set sql [rewrite_temp_table_sql $sql]
+    # Demote CREATE TEMP TABLE -> CREATE TABLE so temp tables persist across the
+    # shim's per-batch process model (see strip_temp_table_keyword, #5512).
+    set sql [strip_temp_table_keyword $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -1773,6 +1764,9 @@ proc execsql_with_headers {sql {db ""}} {
         set sql [convert_dqs_to_single_quotes $sql]
     }
 
+    # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
+    set sql [strip_temp_table_keyword $sql]
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -1812,6 +1806,9 @@ proc execsql2 {sql {db ""}} {
     if {$::dqs_dml_mode} {
         set sql [convert_dqs_to_single_quotes $sql]
     }
+
+    # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
+    set sql [strip_temp_table_keyword $sql]
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -5327,10 +5324,6 @@ proc run_test_file {filename} {
     # Clear the opened_dbs tracking so all databases are treated as "first time" opens
     # This ensures sqlite3 proc will delete stale database files from previous test runs
     set ::opened_dbs {}
-
-    # Reset temp table mappings for fresh session
-    # This ensures temp table names don't conflict across test files
-    reset_temp_tables
 
     puts "Running: $filename"
     puts ""
