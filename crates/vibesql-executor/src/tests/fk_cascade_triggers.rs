@@ -375,6 +375,168 @@ fn multi_level_cascade_delete_fires_triggers_at_each_level() {
     assert_eq!(query_col(&db, "SELECT id FROM c"), Vec::<SqlValue>::new());
 }
 
+/// #5465: a cascade-fired RAISE(IGNORE) skips the child row's CASCADE delete,
+/// but the surviving child is now an orphan (its parent is being deleted). For
+/// an immediate FK this trips the statement-end FK check, rolling the whole
+/// statement back — exactly as sqlite3 3.51.0:
+///
+/// ```text
+/// DELETE FROM parent WHERE id=1;  -- Error: FOREIGN KEY constraint failed
+/// -- parent 1, child 10 and child 11 all survive (statement rolled back)
+/// ```
+///
+/// Before #5465 VibeSQL honored the skip but never re-ran the orphan check, so
+/// it deleted the parent + child 10 and left child 11 orphaned silently.
+#[test]
+fn cascade_delete_raise_ignore_orphan_trips_statement_end_fk_check() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    // Auto-commit: the implicit statement savepoint rolls the whole statement
+    // back on the FK violation.
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(
+        err.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation, got: {err}"
+    );
+    assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
+
+    // sqlite3 3.51.0: statement rolls back — parent 1 and BOTH children
+    // survive (including child 10, which the cascade had already deleted).
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(10), SqlValue::Integer(11)]
+    );
+}
+
+/// #5465: the same orphan check fires for ON UPDATE CASCADE. A cascade-fired
+/// BEFORE UPDATE RAISE(IGNORE) leaves the child pointing at the OLD parent key,
+/// which the parent UPDATE is about to rewrite — an orphan.
+///
+/// sqlite3 3.51.0: `UPDATE parent SET id=2 WHERE id=1` -> error
+/// `FOREIGN KEY constraint failed`; parent stays 1, both child pids stay 1.
+#[test]
+fn cascade_update_raise_ignore_orphan_trips_statement_end_fk_check() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON UPDATE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE UPDATE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    let err = exec(&mut db, "UPDATE parent SET id = 2 WHERE id = 1").unwrap_err();
+    assert!(
+        err.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation, got: {err}"
+    );
+    assert!(!db.in_transaction());
+
+    // Statement rolled back: parent key unchanged, both child FKs unchanged.
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT pid FROM child ORDER BY id"),
+        vec![SqlValue::Integer(1), SqlValue::Integer(1)]
+    );
+}
+
+/// #5465 control: RAISE(IGNORE) inside a cascade that leaves a *consistent*
+/// state must NOT raise a false FK violation. Here the trigger's WHEN clause
+/// never matches, so every child cascade-deletes normally and the parent is
+/// removed — no orphan, no error. Locks in that the new orphan check only
+/// fires when a row is actually skipped.
+#[test]
+fn cascade_delete_raise_ignore_not_fired_leaves_consistent_state() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    // WHEN OLD.id = 999 never matches the rows we delete, so RAISE(IGNORE)
+    // never fires and no orphan is created.
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 999 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    // sqlite3 3.51.0: no error; parent + all children removed.
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), Vec::<SqlValue>::new());
+    assert_eq!(query_col(&db, "SELECT id FROM child ORDER BY id"), Vec::<SqlValue>::new());
+}
+
+/// #5465 control: a DEFERRABLE INITIALLY DEFERRED FK does NOT raise the orphan
+/// at statement end — the surviving child is queued and the violation only
+/// surfaces at COMMIT, matching sqlite3 3.51.0:
+///
+/// ```text
+/// BEGIN;
+/// DELETE FROM parent WHERE id=1;  -- no error yet; child 11 orphaned, visible
+/// COMMIT;                         -- Error: FOREIGN KEY constraint failed
+/// ```
+#[test]
+fn cascade_delete_raise_ignore_deferred_fk_defers_orphan_to_commit() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+    // Deferred: the DELETE itself succeeds mid-transaction (no immediate error).
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+    // Mid-txn state: parent + child 10 gone, child 11 survives orphaned.
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), Vec::<SqlValue>::new());
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(11)]
+    );
+
+    // COMMIT catches the deferred orphan. Use the executor's CommitExecutor
+    // (not the raw storage commit) so the deferred FK re-check runs.
+    let commit = crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db);
+    assert!(commit.is_err(), "COMMIT must fail on the deferred orphan");
+    let msg = format!("{:?}", commit.unwrap_err());
+    assert!(
+        msg.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation at COMMIT, got: {msg}"
+    );
+}
+
 /// Sanity: cascade delete still works (and deletes the right rows) when the
 /// child table has no triggers — no behavioral regression.
 #[test]
