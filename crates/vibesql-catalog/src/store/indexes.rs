@@ -18,25 +18,20 @@ impl Catalog {
             });
         }
 
-        // Verify table exists
-        let case_sensitive = self.case_sensitive_identifiers;
-        let table_exists = self
-            .schemas
-            .get(&self.current_schema)
-            .and_then(|schema| schema.get_table(&index.table_name, case_sensitive))
-            .is_some();
-
-        if !table_exists {
-            return Err(CatalogError::TableNotFound { table_name: index.table_name.clone() });
-        }
+        // Verify table exists. Use the temp-shadow-aware resolver so an index
+        // on an unqualified TEMP table (which lives in the session temp schema,
+        // not `main`) is accepted. Previously this only checked the current
+        // (main) schema, causing CREATE INDEX on a temp table to fail with
+        // `TableNotFound`. See issue #5505.
+        let table = match self.get_table(&index.table_name) {
+            Some(table) => table,
+            None => {
+                return Err(CatalogError::TableNotFound { table_name: index.table_name.clone() });
+            }
+        };
 
         // Verify all column-based index columns exist in the table
         // Expression indexes skip this validation (they reference expressions, not specific columns)
-        let table = self
-            .schemas
-            .get(&self.current_schema)
-            .and_then(|schema| schema.get_table(&index.table_name, case_sensitive))
-            .unwrap(); // Safe because we checked above
 
         for col in &index.columns {
             // Only validate column existence for non-expression index columns

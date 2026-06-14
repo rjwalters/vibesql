@@ -363,6 +363,52 @@ impl super::Catalog {
         self.get_table(name).is_some()
     }
 
+    /// Resolve the internal schema name that an unqualified table resolves to.
+    ///
+    /// Follows SQLite name-resolution order for unqualified identifiers: the
+    /// session's temp schema shadows the current (main) schema. If a qualified
+    /// `schema.table` name is supplied, the supplied schema is resolved
+    /// (mapping the literal `temp` alias to the session temp schema) without
+    /// shadowing.
+    ///
+    /// Returns the internal schema name (e.g. `main` or `temp_123`) where the
+    /// table actually lives, or `None` if no such table exists.
+    ///
+    /// This is the canonical way for DDL that must pre-qualify an unqualified
+    /// table name (e.g. CREATE INDEX) to discover the correct schema instead
+    /// of assuming `main`. See issue #5505.
+    pub fn resolve_table_schema_name(&self, name: &str) -> Option<String> {
+        if let Some((schema_part, table_part)) = name.split_once('.') {
+            // Qualified: resolve the supplied schema (temp alias -> session temp),
+            // and confirm the table exists there.
+            let resolved_schema = self.resolve_schema_name(schema_part);
+            let normalized_table = self.normalize_identifier(table_part);
+            return self.get_schema_case_insensitive(resolved_schema).and_then(|schema| {
+                schema
+                    .get_table(&normalized_table, self.case_sensitive_identifiers)
+                    .map(|_| resolved_schema.to_string())
+            });
+        }
+
+        let normalized_table = self.normalize_identifier(name);
+
+        // Temp schema shadows main for unqualified names (SQLite semantics).
+        if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+            if temp_schema
+                .get_table(&normalized_table, self.case_sensitive_identifiers)
+                .is_some()
+            {
+                return Some(self.temp_schema_name.clone());
+            }
+        }
+
+        self.schemas.get(&self.current_schema).and_then(|schema| {
+            schema
+                .get_table(&normalized_table, self.case_sensitive_identifiers)
+                .map(|_| self.current_schema.clone())
+        })
+    }
+
     /// Check if table exists using SQL:1999 identifier semantics.
     ///
     /// Uses the `quoted` flag in the identifier to determine case-sensitivity:
@@ -467,6 +513,39 @@ mod tests {
             "Trigger should be automatically deleted when table is dropped, \
                  regardless of case used in CREATE TRIGGER vs DROP TABLE"
         );
+    }
+
+    #[test]
+    fn test_resolve_table_schema_name_temp_shadows_main() {
+        // #5505: an unqualified name resolves to the temp schema when a temp
+        // table of that name exists, even if a main table also exists.
+        let mut catalog = crate::Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        let col = ColumnSchema::new("a".to_string(), DataType::Integer, true);
+
+        // Only main.t exists -> resolves to main.
+        catalog.create_table(TableSchema::new("t".to_string(), vec![col.clone()])).unwrap();
+        assert_eq!(
+            catalog.resolve_table_schema_name("t").as_deref(),
+            Some(catalog.current_schema.as_str())
+        );
+
+        // Add a shadowing temp.t -> unqualified now resolves to the temp schema.
+        let temp_schema = catalog.temp_schema_name().to_string();
+        catalog
+            .create_table_in_schema(&temp_schema, TableSchema::new("t".to_string(), vec![col]))
+            .unwrap();
+        assert_eq!(catalog.resolve_table_schema_name("t").as_deref(), Some(temp_schema.as_str()));
+
+        // A qualified `main.t` still resolves to main (no shadowing for qualified).
+        assert_eq!(
+            catalog.resolve_table_schema_name(&format!("{}.t", catalog.current_schema)).as_deref(),
+            Some(catalog.current_schema.as_str())
+        );
+
+        // An unknown table resolves to None.
+        assert_eq!(catalog.resolve_table_schema_name("missing"), None);
     }
 
     #[test]

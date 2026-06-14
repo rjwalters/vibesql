@@ -467,16 +467,28 @@ impl Operations {
             table_name.to_lowercase()
         };
 
-        // Try to find the table with normalized name or qualified name
+        // Try to find the table with normalized name or qualified name.
+        //
+        // For an unqualified name, follow SQLite name resolution: the session
+        // temp schema shadows `main`. A TEMP table is stored under the
+        // `temp_<id>.<table>` physical key, so an unqualified index target that
+        // names a temp table must be looked up there before falling back to the
+        // current (main) schema. Previously only the current schema was tried,
+        // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
         } else if !table_name.contains('.') {
-            // Try with schema prefix
-            let current_schema = catalog.get_current_schema();
-            let qualified_name = format!("{}.{}", current_schema, normalized_name);
-            tables
-                .get(&qualified_name)
-                .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            // Temp schema first (temp tables shadow main).
+            let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
+            if let Some(tbl) = tables.get(&temp_qualified) {
+                tbl
+            } else {
+                let current_schema = catalog.get_current_schema();
+                let qualified_name = format!("{}.{}", current_schema, normalized_name);
+                tables
+                    .get(&qualified_name)
+                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));
         };
@@ -1008,16 +1020,28 @@ impl Operations {
             table_name.to_lowercase()
         };
 
-        // Try to find the table with normalized name or qualified name
+        // Try to find the table with normalized name or qualified name.
+        //
+        // For an unqualified name, follow SQLite name resolution: the session
+        // temp schema shadows `main`. A TEMP table is stored under the
+        // `temp_<id>.<table>` physical key, so an unqualified index target that
+        // names a temp table must be looked up there before falling back to the
+        // current (main) schema. Previously only the current schema was tried,
+        // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
         } else if !table_name.contains('.') {
-            // Try with schema prefix
-            let current_schema = catalog.get_current_schema();
-            let qualified_name = format!("{}.{}", current_schema, normalized_name);
-            tables
-                .get(&qualified_name)
-                .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            // Temp schema first (temp tables shadow main).
+            let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
+            if let Some(tbl) = tables.get(&temp_qualified) {
+                tbl
+            } else {
+                let current_schema = catalog.get_current_schema();
+                let qualified_name = format!("{}.{}", current_schema, normalized_name);
+                tables
+                    .get(&qualified_name)
+                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));
         };
@@ -1120,16 +1144,28 @@ impl Operations {
             table_name.to_lowercase()
         };
 
-        // Try to find the table with normalized name or qualified name
+        // Try to find the table with normalized name or qualified name.
+        //
+        // For an unqualified name, follow SQLite name resolution: the session
+        // temp schema shadows `main`. A TEMP table is stored under the
+        // `temp_<id>.<table>` physical key, so an unqualified index target that
+        // names a temp table must be looked up there before falling back to the
+        // current (main) schema. Previously only the current schema was tried,
+        // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
         } else if !table_name.contains('.') {
-            // Try with schema prefix
-            let current_schema = catalog.get_current_schema();
-            let qualified_name = format!("{}.{}", current_schema, normalized_name);
-            tables
-                .get(&qualified_name)
-                .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            // Temp schema first (temp tables shadow main).
+            let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
+            if let Some(tbl) = tables.get(&temp_qualified) {
+                tbl
+            } else {
+                let current_schema = catalog.get_current_schema();
+                let qualified_name = format!("{}.{}", current_schema, normalized_name);
+                tables
+                    .get(&qualified_name)
+                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+            }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));
         };
