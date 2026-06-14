@@ -290,6 +290,61 @@ fn from_less_select_expression_over_new_and_old() {
 }
 
 #[test]
+fn insert_select_from_less_resolves_old_in_trigger_body() {
+    // #5470 (trigger5.test 1.1): a trigger body of the form
+    //   `INSERT INTO log SELECT <expr referencing OLD>;`
+    // (an INSERT whose source is a *from-less* SELECT) must resolve the firing
+    // row's OLD context. Before the fix the INSERT...SELECT source executor was
+    // built with `SelectExecutor::new` (no trigger context), so the OLD column
+    // references failed at fire time with "Column reference requires FROM
+    // clause" and the AFTER DELETE trigger never logged anything.
+    //
+    // sqlite3 3.51.0: deleting the single row logs the rendered string built
+    // from OLD.a / OLD.b / OLD.c.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE item (a INTEGER, b INTEGER, c INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE undo (msg VARCHAR(64))");
+    exec_ok(&mut db, "INSERT INTO item (a, b, c) VALUES (1, 2, 3)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER DELETE ON item FOR EACH ROW BEGIN \
+         INSERT INTO undo SELECT 'a=' || OLD.a || ',b=' || OLD.b || ',c=' || OLD.c; \
+         END",
+    );
+
+    exec_ok(&mut db, "DELETE FROM item WHERE a = 1");
+
+    assert_eq!(strings(&db, "undo", "msg"), vec!["a=1,b=2,c=3".to_string()]);
+    assert!(column_values(&db, "item", "a").is_empty(), "row should be deleted");
+}
+
+#[test]
+fn insert_select_from_less_resolves_new_in_trigger_body() {
+    // #5470 (triggerG.test 100 class): an AFTER INSERT trigger whose body uses
+    //   `INSERT INTO log SELECT <expr referencing NEW>;`
+    // (from-less SELECT) must resolve the firing row's NEW context in the
+    // INSERT...SELECT source. Same root cause as the OLD case above.
+    //
+    // sqlite3 3.51.0: inserting c = 2 then c = 7 logs NEW.c * 100 = 200, 700.
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (c INTEGER)");
+    exec_ok(&mut db, "CREATE TABLE log (val INTEGER)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t FOR EACH ROW BEGIN \
+         INSERT INTO log SELECT NEW.c * 100; \
+         END",
+    );
+
+    exec_ok(&mut db, "INSERT INTO t (c) VALUES (2)");
+    exec_ok(&mut db, "INSERT INTO t (c) VALUES (7)");
+
+    let mut logged = ints(&db, "log", "val");
+    logged.sort_unstable();
+    assert_eq!(logged, vec![200, 700]);
+}
+
+#[test]
 fn instead_of_insert_case_then_base_write_fires_both() {
     // End-to-end INSTEAD OF variant that avoids the from-less `NEW` resolution
     // limitation: the CASE...END lives in the INSERT's VALUES (which carries the

@@ -1864,6 +1864,7 @@ array set vibesql_skip_files {
     where8 "Tests OR optimization via execsql_status2 internal statistics - query results correct"
     update2 "Uses repeat() function which is a SQLite test extension"
     func5 "Uses counter1/counter2 custom TCL functions - SQLite test extension"
+    trigger6 "Entire file is built around a custom counter() TCL function (db function counter ...) used to verify INSERT/UPDATE expressions are evaluated exactly once; the tables and triggers are created in 6-1.1 alongside the function registration, so once 6-1.1 is auto-skipped (custom function) every later test cascade-fails with 'no such table: log/t1' (#5470)"
     delete_db "Uses sqlite3_delete_database - SQLite internal function"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
     incrblob "Uses incrblob - SQLite incremental blob I/O API"
@@ -3337,6 +3338,18 @@ array set vibesql_skip_tests {
     fkey8-5.2 "UPDATE/DELETE PK affinity is fixed (#5145), but schema-reload drops DEFERRABLE INITIALLY DEFERRED so the deferred-INSERT on child fires immediately across CLI invocations — tracked separately in #5172"
 
     triggerupfrom-2.3 "Cascades from auto-skipped test 2.2. CREATE TEMP TRIGGER now parses (#5218), but 2.2 references aux.t3 and is auto-skipped by the ATTACH/aux regex (VibeSQL has no ATTACH/multi-database support), so the rows 2.2 inserts (10 y {}, 20 y {}) never exist and 2.3's expected output cannot match. The UPDATE…FROM trigger logic in 2.3 itself works correctly when run in isolation (verified during #5192 builder pass)."
+
+    trigger9-1.2.1 "Cascades from auto-skipped trigger9-1.1, which uses the SQLite test function randstr(10000,10000) to populate t1; without it t1 is never created and every 1.x test fails with 'no such table: t1' (#5470)."
+    trigger9-1.3.1 "Cascades from auto-skipped trigger9-1.1 (randstr() builds t1); 'no such table: t1' (#5470)."
+    trigger9-1.4.1 "Cascades from auto-skipped trigger9-1.1 (randstr() builds t1); 'no such table: t1' (#5470)."
+    trigger9-1.5.1 "Cascades from auto-skipped trigger9-1.1 (randstr() builds t1); 'no such table: t1' (#5470)."
+    trigger9-1.6.1 "Cascades from auto-skipped trigger9-1.1 (randstr() builds t1); 'no such table: t1' (#5470)."
+    trigger9-1.7.1 "Cascades from auto-skipped trigger9-1.1 (randstr() builds t1); 'no such table: t1' (#5470)."
+    trigger9-3.2 "Cascades from auto-skipped trigger9-1.1, which creates t2 alongside the randstr()-populated t1; without t2 these INSTEAD OF view tests fail with 'no such table: t2' (#5470)."
+    trigger9-3.3 "Cascades from auto-skipped trigger9-1.1 (creates t2); 'no such table: t2' (#5470)."
+    trigger9-3.4 "Cascades from auto-skipped trigger9-1.1 (creates t2); 'no such table: t2' (#5470)."
+    trigger9-3.5 "Cascades from auto-skipped trigger9-1.1 (creates t2); 'no such table: t2' (#5470)."
+    trigger9-3.6 "Cascades from auto-skipped trigger9-1.1 (creates t2); 'no such table: t2' (#5470)."
 
     date-2.40 "needs the sqlite_current_time fake-clock hook the harness cannot honor ('now' uses real clock; zero-argument datetime() itself is supported as of #5317)"
     date-4.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"

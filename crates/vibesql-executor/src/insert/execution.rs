@@ -239,10 +239,21 @@ fn execute_insert_internal(
             }
 
             // Fall back to normal path: execute SELECT and convert to expressions
-            // If we have a with_clause (CTEs), reuse the results materialized above
+            // If we have a with_clause (CTEs), reuse the results materialized above.
+            //
+            // When this INSERT runs inside a trigger body and the source is a
+            // from-less SELECT that references OLD/NEW (e.g.
+            // `INSERT INTO log SELECT OLD.a || ',' || OLD.b;`, trigger5-1.1),
+            // the SELECT needs the firing row's pseudo-variable context — the
+            // same context the WHEN clause and body DML statements already get.
+            // Without it the evaluator rejects the OLD/NEW column references
+            // with "Column reference requires FROM clause" (#5470).
             let select_result = if let Some(ref ctes) = cte_results {
                 // Create executor with CTE results
                 let select_executor = crate::SelectExecutor::new_with_cte(db, ctes);
+                select_executor.execute_with_columns(select_stmt)?
+            } else if let Some(ctx) = trigger_context {
+                let select_executor = crate::SelectExecutor::new_with_trigger_context(db, ctx);
                 select_executor.execute_with_columns(select_stmt)?
             } else {
                 let select_executor = crate::SelectExecutor::new(db);
