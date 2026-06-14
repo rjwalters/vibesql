@@ -50,6 +50,7 @@ set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
 set ::pragma_recursive_triggers 1        ;# Default: ON (VibeSQL default; #5535)
+set ::pragma_trigger_depth_limit 0       ;# 0 = default cap; >0 = per-connection SQLITE_LIMIT_TRIGGER_DEPTH (#5536)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -1005,6 +1006,14 @@ proc build_pragma_prefix {} {
     # (#5535).
     if {$::pragma_recursive_triggers != 1} {
         append prefix "PRAGMA recursive_triggers=$::pragma_recursive_triggers;\n"
+    }
+    # Carry the per-connection trigger-depth limit forward (#5536). SQLite sets
+    # this via the C API `sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, N)`, which
+    # has no SQL PRAGMA; VibeSQL exposes an internal `PRAGMA trigger_depth_limit`
+    # so the shim's per-batch CLI processes inherit the value the test set. 0
+    # means "unset" (use VibeSQL's default cap), so only re-apply a positive N.
+    if {$::pragma_trigger_depth_limit > 0} {
+        append prefix "PRAGMA trigger_depth_limit=$::pragma_trigger_depth_limit;\n"
     }
     # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
     # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
@@ -5184,10 +5193,34 @@ proc sqlite3_exec {db sql} {
 }
 
 proc sqlite3_limit {db limit_name args} {
-    # SQLite limit configuration
-    # Returns the current limit value; if args provided, sets new limit
-    # We return sensible defaults based on the limit type
+    # SQLite limit configuration. Mirrors the C API `sqlite3_limit`: returns the
+    # PRIOR limit value and, when a (non-negative) new value is supplied, lowers
+    # the limit. Most categories are stubbed with sensible SQLite defaults; only
+    # SQLITE_LIMIT_TRIGGER_DEPTH is actually honored end-to-end (#5536).
     switch -glob $limit_name {
+        SQLITE_LIMIT_TRIGGER_DEPTH {
+            # Prior value: the connection limit if one is set, else the
+            # compile-time default ($::SQLITE_MAX_TRIGGER_DEPTH).
+            if {$::pragma_trigger_depth_limit > 0} {
+                set prev $::pragma_trigger_depth_limit
+            } else {
+                set prev $::SQLITE_MAX_TRIGGER_DEPTH
+            }
+            if {[llength $args] > 0} {
+                set newval [lindex $args 0]
+                # sqlite3_limit ignores negative values (query-only); a value at
+                # or above the compile-time max means "use the default cap", so
+                # store 0 (unset) to drop any prior per-connection limit.
+                if {$newval >= 0} {
+                    if {$newval >= $::SQLITE_MAX_TRIGGER_DEPTH} {
+                        set ::pragma_trigger_depth_limit 0
+                    } else {
+                        set ::pragma_trigger_depth_limit $newval
+                    }
+                }
+            }
+            return $prev
+        }
         SQLITE_LIMIT_FUNCTION_ARG { return 127 }
         SQLITE_LIMIT_LENGTH { return 1000000000 }
         SQLITE_LIMIT_COLUMN { return 2000 }
@@ -5198,7 +5231,6 @@ proc sqlite3_limit {db limit_name args} {
         SQLITE_LIMIT_ATTACHED { return 10 }
         SQLITE_LIMIT_LIKE_PATTERN_LENGTH { return 50000 }
         SQLITE_LIMIT_VARIABLE_NUMBER { return 999 }
-        SQLITE_LIMIT_TRIGGER_DEPTH { return 1000 }
         default { return 1000000 }
     }
 }
