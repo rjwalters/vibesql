@@ -643,6 +643,35 @@ impl VibesqlStateMachine {
         Ok(QueryResult::from(result))
     }
 
+    /// Resolve the output column names of a SELECT against the applied
+    /// state **without executing it** — the names-only counterpart of
+    /// [`query`](Self::query) for the extended-protocol `Describe` (#5484).
+    ///
+    /// `Describe` reports the `RowDescription` before any `Execute`, so it
+    /// needs only the resolved column names, never the rows. This resolves
+    /// them via [`SelectExecutor::resolve_column_names`] against the applied
+    /// replicated catalog — the *same* resolver standalone `Describe` uses —
+    /// so the names match the standalone path label-for-label (real names,
+    /// aliases, derived expression names, `SELECT *` / `t.*` / join-wildcard
+    /// expanded against the schema). Unlike [`query`](Self::query) (which
+    /// runs `execute_with_columns` and materializes rows the caller then
+    /// discards), this does no row materialization: it is a pure metadata
+    /// read of the applied catalog. A replica resolves against its own
+    /// applied state, so a `Describe` on a follower sees the right schema.
+    pub fn resolve_column_names(&self, sql: &str) -> Result<Vec<String>> {
+        let inner = self.lock();
+        let statement = vibesql_parser::parse_with_arena_fallback(sql)
+            .map_err(|e| ConsensusError::Backend(format!("parse error: {e}")))?;
+        let Statement::Select(select) = statement else {
+            return Err(ConsensusError::Backend(format!(
+                "resolve_column_names() only accepts SELECT statements, got: {sql}"
+            )));
+        };
+        vibesql_executor::SelectExecutor::new(&inner.db)
+            .resolve_column_names(&select)
+            .map_err(|e| ConsensusError::Backend(format!("column resolution failed: {e}")))
+    }
+
     /// Resolve the (single-column) primary-key column of `table_name`
     /// against the **applied replicated catalog** (#5420). This is the
     /// replicated-mode counterpart of reading the local registry schema:
@@ -1258,6 +1287,59 @@ mod tests {
             .apply(3, &TxnEntry::single("CREATE TABLE composite (a INT, b INT, PRIMARY KEY (a, b))"))
             .unwrap();
         assert_eq!(machine.primary_key_column("composite"), None);
+    }
+
+    #[test]
+    fn resolve_column_names_matches_query_columns_without_executing() {
+        let shapes = [
+            "SELECT id, name FROM users",       // explicit columns
+            "SELECT id AS k, name AS v FROM users", // aliases
+            "SELECT id + 1 FROM users",         // derived expression
+            "SELECT * FROM users",              // wildcard expansion
+            "SELECT users.* FROM users",        // table wildcard
+        ];
+
+        // Names are resolved from the applied catalog, not from data: an
+        // empty table resolves the SAME labels a populated one does, which
+        // is the observable signal that resolution does not read rows
+        // (#5484). We resolve against an empty `users`, then insert rows and
+        // re-resolve — the labels are byte-identical.
+        let machine = VibesqlStateMachine::new();
+        create_users(&machine, 1);
+
+        let mut empty_names = Vec::new();
+        for sql in shapes {
+            // Empty table: `query` returns zero rows but the executed
+            // `.columns` still carries the schema-derived labels (#5428).
+            let executed = machine.query(sql).unwrap();
+            assert!(executed.rows.is_empty(), "{sql}: fixture must start empty");
+            let resolved = machine.resolve_column_names(sql).unwrap();
+            assert_eq!(
+                resolved, executed.columns,
+                "{sql}: names-only must match the executed read path's columns",
+            );
+            assert!(
+                !resolved.iter().any(|n| n.starts_with("col")),
+                "{sql}: must not regress to col0/col1 placeholders, got {resolved:?}",
+            );
+            empty_names.push(resolved);
+        }
+
+        // Now populate and re-resolve: identical labels prove the resolver
+        // is driven by the catalog, never the rows.
+        machine.apply(2, &TxnEntry::single("INSERT INTO users VALUES (1, 'a')")).unwrap();
+        machine.apply(3, &TxnEntry::single("INSERT INTO users VALUES (2, 'b')")).unwrap();
+        for (sql, before) in shapes.iter().zip(empty_names.iter()) {
+            let after = machine.resolve_column_names(sql).unwrap();
+            assert_eq!(
+                &after, before,
+                "{sql}: column labels must not change once rows exist (schema-driven)",
+            );
+        }
+
+        // Non-SELECT is a hard error (the server layer maps SELECT-vs-not
+        // to Some/None before ever calling this).
+        assert!(machine.resolve_column_names("INSERT INTO users VALUES (3, 'c')").is_err());
     }
 
     #[test]

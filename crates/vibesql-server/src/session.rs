@@ -428,9 +428,11 @@ impl Session {
     ///   `derive_column_names` used by `execute_with_columns`).
     /// - `Ok(None)` for a non-SELECT (the protocol sends `NoData`).
     ///
-    /// Standalone resolves directly against the local database; replicated
-    /// resolves via a local read through consensus (the state machine already
-    /// resolves names the same way, #5428), so both modes agree.
+    /// Both modes resolve names via the same
+    /// `SelectExecutor::resolve_column_names` without executing the query:
+    /// standalone against the local database, replicated against the applied
+    /// consensus catalog (#5484). Neither materializes rows, and both agree
+    /// label-for-label.
     pub async fn describe_columns(&self, sql: &str) -> Result<Option<Vec<String>>> {
         let prepared = self.stmt_cache.get_or_prepare(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
         let statement = prepared.statement();
@@ -442,10 +444,14 @@ impl Session {
 
         if let Some(state) = self.replication.as_ref() {
             // Replicated: the database lives in the consensus state machine.
-            // A local read resolves the same column names the simple-query
-            // path uses (#5428); we keep only the names, discarding rows.
-            let result = state.handle.query_local(sql)?;
-            return Ok(Some(result.columns));
+            // Resolve names against the applied catalog via the SAME
+            // `SelectExecutor::resolve_column_names` standalone uses (#5484),
+            // so the labels match the standalone path label-for-label — but
+            // WITHOUT executing the query. Previously this ran a full
+            // `query_local` read and kept only `.columns`, materializing rows
+            // a metadata-only Describe immediately discarded.
+            let columns = state.handle.resolve_column_names(sql)?;
+            return Ok(Some(columns));
         }
 
         let db = self.db.read().await;

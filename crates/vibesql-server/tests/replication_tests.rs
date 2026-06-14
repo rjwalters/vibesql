@@ -259,11 +259,13 @@ async fn replicated_select_column_names_match_standalone() {
 /// Extended-protocol `Describe` (#5429) must report the same column names in
 /// replicated mode as it does standalone, with `SELECT *` / `table.*` expanded
 /// against the schema. `Session::describe_columns` resolves names WITHOUT
-/// executing — for a replicated session it routes through a local consensus
-/// read (`query_local`), which resolves names the same way the executed read
-/// path does (#5428). Standalone (the local executor's `resolve_column_names`)
-/// is the oracle: the two must agree label-for-label, and neither may regress
-/// to `col0`/`col1` placeholders.
+/// executing — for a replicated session it routes through a names-only
+/// consensus read (`Replication::resolve_column_names`, #5484), which calls
+/// the SAME `SelectExecutor::resolve_column_names` standalone uses against the
+/// applied catalog and materializes no rows (previously it ran a full
+/// `query_local` read and kept only `.columns`). Standalone (the local
+/// executor's `resolve_column_names`) is the oracle: the two must agree
+/// label-for-label, and neither may regress to `col0`/`col1` placeholders.
 #[tokio::test]
 async fn replicated_describe_columns_match_standalone() {
     let setup = [

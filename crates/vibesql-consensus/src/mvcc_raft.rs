@@ -1012,6 +1012,21 @@ impl MvccRaftNode {
         self.sm.machine.query(sql)
     }
 
+    /// Resolve a SELECT's output column names against the locally applied
+    /// state **without executing it** — the names-only counterpart of
+    /// [`query`](Self::query) for the extended-protocol `Describe` (#5484).
+    ///
+    /// Like [`query`](Self::query) this is a local, stale-allowed read with
+    /// no leadership check or network round, available on every node. It
+    /// resolves names via the same [`SelectExecutor::resolve_column_names`]
+    /// the standalone `Describe` uses, so the column labels match the
+    /// standalone path exactly — but, unlike `query`, it materializes no
+    /// rows (a metadata-only catalog read). See
+    /// [`VibesqlStateMachine::resolve_column_names`].
+    pub fn resolve_column_names(&self, sql: &str) -> Result<Vec<String>> {
+        self.sm.machine.resolve_column_names(sql)
+    }
+
     /// Subscribe to this node's apply-path change feed (#5422): a
     /// [`ChangeEventReceiver`](vibesql_storage::ChangeEventReceiver) yielding a
     /// [`ChangeEvent`](vibesql_storage::ChangeEvent) per row mutated by the
