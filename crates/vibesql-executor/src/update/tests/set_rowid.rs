@@ -121,6 +121,132 @@ fn set_rowid_conflict_errors() {
     assert_eq!(got, vec![(1, 1), (2, 2), (3, 3)]);
 }
 
+/// Single-statement rowid SWAP must error with `UNIQUE constraint failed:
+/// t.rowid` (issue #5559). sqlite3 3.51.0 processes the UPDATE row-by-row in
+/// ascending rowid order: relocating rowid 1 -> 2 collides with rowid 2, which
+/// is still live at that moment. The final state would be consistent, but
+/// sqlite3 checks the intermediate state, so this must be rejected.
+#[test]
+fn set_rowid_swap_errors_intermediate_collision() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)"); // rowid 1
+    ddl(&mut db, "INSERT INTO t VALUES(20)"); // rowid 2
+
+    let err = update(
+        &mut db,
+        "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.rowid"),
+        "expected rowid UNIQUE error for swap, got: {}",
+        err
+    );
+
+    // Table unchanged after the aborted UPDATE.
+    let rows = select(&mut db, "SELECT rowid, a FROM t ORDER BY rowid");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 10), (2, 20)]);
+}
+
+/// A 3-cycle rotation (1->2, 2->3, 3->1) also errors: processed ascending,
+/// 1->2 collides with the still-live rowid 2. Matches sqlite3 3.51.0.
+#[test]
+fn set_rowid_three_cycle_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)");
+    ddl(&mut db, "INSERT INTO t VALUES(20)");
+    ddl(&mut db, "INSERT INTO t VALUES(30)");
+
+    let err = update(
+        &mut db,
+        "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 3 WHEN 3 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.rowid"),
+        "expected rowid UNIQUE error for 3-cycle, got: {}",
+        err
+    );
+}
+
+/// `SET rowid = rowid + 1` over ascending rows cascade-collides: processed
+/// ascending, rowid 1 -> 2 collides with the still-live rowid 2. sqlite3 3.51.0
+/// errors (processing order matters; see the `-1` counterpart below).
+#[test]
+fn set_rowid_plus_one_cascade_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)");
+    ddl(&mut db, "INSERT INTO t VALUES(20)");
+    ddl(&mut db, "INSERT INTO t VALUES(30)");
+
+    let err = update(&mut db, "UPDATE t SET rowid = rowid + 1").unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: t.rowid"),
+        "expected rowid UNIQUE error for +1 cascade, got: {}",
+        err
+    );
+}
+
+/// `SET rowid = rowid - 1` over ascending rows succeeds: processed ascending,
+/// each row's old slot is vacated before the next row needs it (1->0, then
+/// 2->1 onto the now-free slot 1, ...). sqlite3 3.51.0 accepts this — the
+/// asymmetry with `+1` confirms the row-by-row ascending processing order.
+#[test]
+fn set_rowid_minus_one_cascade_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)");
+    ddl(&mut db, "INSERT INTO t VALUES(20)");
+    ddl(&mut db, "INSERT INTO t VALUES(30)");
+
+    assert_eq!(update(&mut db, "UPDATE t SET rowid = rowid - 1").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT rowid, a FROM t ORDER BY rowid");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(0, 10), (1, 20), (2, 30)]);
+}
+
+/// Relocating into a free gap (no collision at any intermediate step) succeeds.
+/// Matches sqlite3 3.51.0.
+#[test]
+fn set_rowid_move_to_gap_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)");
+    ddl(&mut db, "INSERT INTO t VALUES(20)");
+
+    assert_eq!(update(&mut db, "UPDATE t SET rowid = rowid + 100 WHERE rowid = 1").unwrap(), 1);
+
+    let rows = select(&mut db, "SELECT rowid, a FROM t ORDER BY rowid");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(2, 20), (101, 10)]);
+}
+
+/// `SET rowid = rowid` is a no-op for every row and must not error. Matches
+/// sqlite3 3.51.0.
+#[test]
+fn set_rowid_self_noop_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE t(a)");
+    ddl(&mut db, "INSERT INTO t VALUES(10)");
+    ddl(&mut db, "INSERT INTO t VALUES(20)");
+    ddl(&mut db, "INSERT INTO t VALUES(30)");
+
+    assert_eq!(update(&mut db, "UPDATE t SET rowid = rowid").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT rowid, a FROM t ORDER BY rowid");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 10), (2, 20), (3, 30)]);
+}
+
 /// On an INTEGER PRIMARY KEY table, `SET rowid=` writes the IPK column.
 #[test]
 fn set_rowid_aliases_ipk() {
