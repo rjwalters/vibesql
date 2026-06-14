@@ -66,6 +66,21 @@ set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
 # would leak into the persistent schema and fail to reload ("Table 'main.<t>'
 # not found", #5512). To match SQLite's whole-test temp-visibility under this
 # multi-process model we demote TEMP tables to ordinary (persistent) tables.
+#
+# Coexisting main + temp tables (#5591): same-name demotion collapses a TEMP
+# table into the persistent main schema, which is correct UNLESS a main table of
+# the same name also exists and the test distinguishes them via `main.<name>` vs
+# `temp.<name>` (e.g. triggerD-3.1 fires a `main.` trigger only for the main
+# insert). Demotion cannot represent two same-named tables. For that case we keep
+# the TEMP table REAL (no demotion) so VibeSQL's schema-aware resolver (#5592)
+# handles main/temp/unqualified references natively, and we REPLAY its
+# `CREATE TEMP TABLE` DDL as a per-batch prelude (cf. the PRAGMA replay, #5535)
+# so the connection-scoped temp table is reconstructed in every short-lived CLI
+# process. Replay reconstructs the temp *schema*, not prior temp *data*; that is
+# sufficient for the triggerD cases (and any test that does not read temp rows
+# carried across a batch boundary).
+set ::temp_replay_ddl [dict create]      ;# lowercase name -> CREATE TEMP TABLE DDL (replayed)
+set ::temp_created_this_batch [dict create]  ;# names whose CREATE TEMP TABLE is in the current batch
 
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
@@ -526,15 +541,96 @@ proc translate_error_to_sqlite {vibesql_error} {
 # some tests deliberately exercise their session-isolation semantics (see the
 # skip list), and they are not implicated in #5512.
 
+proc extract_create_table_body {after} {
+    # Given the text immediately following the table name in a CREATE TABLE
+    # statement, return the table body verbatim from index 0 of $after (including
+    # any leading whitespace, so "${name}${body}" reproduces the original text):
+    #   "(col, col, ...)"  for a column-def list (balanced parens), or
+    #   " AS <select>"     for CREATE TABLE ... AS SELECT (up to the terminating
+    #                       ';' at paren depth 0, or end of string).
+    set i 0
+    set n [string length $after]
+    # Skip (but keep) leading whitespace to find the first significant char.
+    while {$i < $n && [string is space [string index $after $i]]} { incr i }
+    if {$i >= $n} { return "" }
+    set ch [string index $after $i]
+    set inq ""
+    if {$ch eq "("} {
+        # Balanced-paren column-def list (ignoring parens inside string/quoted ids).
+        set depth 0
+        for {set j $i} {$j < $n} {incr j} {
+            set c [string index $after $j]
+            if {$inq ne ""} {
+                if {$c eq $inq} { set inq "" }
+                continue
+            }
+            switch -- $c {
+                "'"  { set inq "'" }
+                "\"" { set inq "\"" }
+                "`"  { set inq "`" }
+                "("  { incr depth }
+                ")"  {
+                    incr depth -1
+                    if {$depth == 0} {
+                        return [string range $after 0 $j]
+                    }
+                }
+            }
+        }
+        # Unbalanced (shouldn't happen for valid SQL) - take the rest.
+        return [string range $after 0 end]
+    } else {
+        # CREATE TABLE ... AS SELECT (or other tail): copy up to the ';' that
+        # ends the statement at paren depth 0.
+        set depth 0
+        for {set j $i} {$j < $n} {incr j} {
+            set c [string index $after $j]
+            if {$inq ne ""} {
+                if {$c eq $inq} { set inq "" }
+                continue
+            }
+            switch -- $c {
+                "'"  { set inq "'" }
+                "\"" { set inq "\"" }
+                "`"  { set inq "`" }
+                "("  { incr depth }
+                ")"  { incr depth -1 }
+                ";"  { if {$depth == 0} { return [string range $after 0 [expr {$j - 1}]] } }
+            }
+        }
+        return [string range $after 0 end]
+    }
+}
+
 proc strip_temp_table_keyword {sql} {
     # Demote every `CREATE TEMP[ORARY] TABLE <name>` to a plain `CREATE TABLE`,
     # keeping <name> unchanged, and prepend `DROP TABLE IF EXISTS <name>;` to
     # emulate the temp-over-main shadow (skipped when IF NOT EXISTS is present).
     #
+    # Exception (#5591): when the TEMP table coexists with a same-named MAIN
+    # table — detected by a plain `CREATE TABLE <name>` earlier in this same
+    # batch, or by a `<name>` already registered for replay in an earlier batch —
+    # demotion would collapse the two. Such a TEMP table is kept REAL (the TEMP
+    # keyword is preserved) and its DDL is recorded in ::temp_replay_ddl so
+    # build_pragma_prefix can reconstruct it in every later per-batch CLI process.
+    #
     # Implemented as a manual left-to-right scan (regsub -command needs Tcl 8.7;
     # the runner is on 8.5). \y word boundaries keep the keyword match out of
     # identifiers/string literals; the captured name handles optional []/""/``
     # quoting. Submatches: c1 = optional "IF NOT EXISTS ", c2 = the table name.
+
+    # Reset per-batch tracking of TEMP tables created in THIS batch (so the
+    # prelude does not redundantly re-create what the batch itself creates).
+    set ::temp_created_this_batch [dict create]
+
+    # Names with a plain (non-TEMP) `CREATE TABLE <name>` in this batch — a
+    # coexisting main table that must not be clobbered by demotion.
+    set main_creates [dict create]
+    foreach {- mname} [regexp -all -inline -nocase \
+            {\yCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $sql] {
+        dict set main_creates [string tolower [string trim $mname {[]"`}]] 1
+    }
+
     set pat {\yCREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
     set out ""
     set pos 0
@@ -548,14 +644,30 @@ proc strip_temp_table_keyword {sql} {
         # Copy the text before the match unchanged.
         append out [string range $rest 0 [expr {$ms - 1}]]
         set name [string range $rest [lindex $c2 0] [lindex $c2 1]]
-        if {[lindex $c1 0] >= 0} {
+        set key [string tolower [string trim $name {[]"`}]]
+        set coexists [expr {[dict exists $main_creates $key] \
+                || [dict exists $::temp_replay_ddl $key]}]
+        if {$coexists} {
+            # Keep the TEMP table real so VibeSQL resolves main/temp/unqualified
+            # references natively (#5592). Record its full DDL for per-batch
+            # replay and emit it verbatim here. Capture the column-def / AS body
+            # that follows the name so the replayed DDL is complete.
+            set after [string range $rest [expr {[lindex $c2 1] + 1}] end]
+            set body [extract_create_table_body $after]
+            set ddl "CREATE TEMP TABLE IF NOT EXISTS ${name}${body}"
+            dict set ::temp_replay_ddl $key $ddl
+            dict set ::temp_created_this_batch $key 1
+            append out "CREATE TEMP TABLE IF NOT EXISTS ${name}${body}"
+            set pos [expr {$pos + ([lindex $c2 1] + 1) + [string length $body]}]
+        } elseif {[lindex $c1 0] >= 0} {
             # IF NOT EXISTS present: preserve it, do not pre-drop (create-if-absent).
             append out "CREATE TABLE IF NOT EXISTS ${name}"
+            set pos [expr {$pos + $me + 1}]
         } else {
             # Pre-drop to emulate the temp-over-main shadow.
             append out "DROP TABLE IF EXISTS ${name}; CREATE TABLE ${name}"
+            set pos [expr {$pos + $me + 1}]
         }
-        set pos [expr {$pos + $me + 1}]
         if {$pos > [string length $sql]} break
     }
     return $out
@@ -893,6 +1005,15 @@ proc build_pragma_prefix {} {
     # (#5535).
     if {$::pragma_recursive_triggers != 1} {
         append prefix "PRAGMA recursive_triggers=$::pragma_recursive_triggers;\n"
+    }
+    # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
+    # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
+    # current batch (avoids a redundant create). IF NOT EXISTS keeps replay safe.
+    if {[dict size $::temp_replay_ddl] > 0} {
+        dict for {name ddl} $::temp_replay_ddl {
+            if {[dict exists $::temp_created_this_batch $name]} { continue }
+            append prefix "${ddl};\n"
+        }
     }
     return $prefix
 }
