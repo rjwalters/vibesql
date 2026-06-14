@@ -84,8 +84,11 @@ impl DropTableExecutor {
             let qualified = format!("{}.{}", index.schema(), index.name);
             // Try to drop from B-tree storage (ignore errors if not found)
             let _ = database.drop_index(&qualified);
-            // Try to drop from spatial storage (ignore errors if not found)
-            let _ = database.drop_spatial_index(&index.name);
+            // Try to drop from spatial storage (ignore errors if not found).
+            // Spatial indexes are schema-aware (#5558), so use the
+            // schema-qualified name to drop exactly this index and leave a
+            // same-named index in another schema intact.
+            let _ = database.drop_spatial_index(&qualified);
         }
 
         // Drop the table from storage (this also removes from catalog)

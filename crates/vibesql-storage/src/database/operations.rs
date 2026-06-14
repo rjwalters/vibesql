@@ -19,7 +19,31 @@ pub struct SpatialIndexMetadata {
     pub index_name: String,
     pub table_name: String,
     pub column_name: String,
+    /// Owning schema of this index (e.g. `main` or a session temp schema like
+    /// `temp_42`). Stored so a temp-table spatial index and a main-table spatial
+    /// index can share a bare name without colliding in the `spatial_indexes`
+    /// map — mirroring the B-tree change in #5540 (storage) / #5513 (catalog).
+    /// See issue #5558.
+    pub schema: String,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Build the storage key used to key spatial indexes in the `spatial_indexes`
+/// map.
+///
+/// Mirrors the B-tree `make_index_key` introduced in #5540: a `main`-schema
+/// spatial index keeps a *bare* (normalized) key so the common case is
+/// byte-for-byte backward compatible, while a non-`main` (e.g. session temp)
+/// schema gets a `schema.name` prefix. This lets `main.ix` and `temp.ix`
+/// coexist as distinct spatial indexes — matching SQLite and the B-tree
+/// behavior. See issue #5558.
+fn make_spatial_index_key(schema: &str, index_name: &str) -> String {
+    let normalized_name = index_name.to_lowercase();
+    if schema.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA) {
+        normalized_name
+    } else {
+        format!("{}.{}", schema.to_lowercase(), normalized_name)
+    }
 }
 
 /// Manages table and index operations
@@ -28,7 +52,8 @@ pub struct Operations {
     /// User-defined index manager (B-tree indexes)
     index_manager: IndexManager,
     /// Spatial indexes (R-tree) - stored separately from B-tree indexes
-    /// Key: normalized index name (uppercase)
+    /// Key: schema-aware index key (bare normalized name for the `main` schema,
+    ///   `schema.name` for non-`main` schemas — see [`make_spatial_index_key`])
     /// Value: (metadata, spatial index)
     spatial_indexes: HashMap<String, (SpatialIndexMetadata, SpatialIndex)>,
 }
@@ -981,22 +1006,65 @@ impl Operations {
         name.to_lowercase()
     }
 
+    /// Resolve a (possibly bare) spatial-index name to the map key it is stored
+    /// under, following SQLite name resolution.
+    ///
+    /// Mirrors the B-tree `IndexManager::resolve_index_key` from #5540: an
+    /// explicit `schema.index` form targets exactly that schema's index; an
+    /// unqualified lookup prefers a non-`main` (temp) schema index over a
+    /// same-named `main` index (temp shadows main), so `DROP INDEX ix` resolves
+    /// to `temp.ix` when both exist. See issue #5558.
+    fn resolve_spatial_index_key(&self, index_name: &str) -> Option<String> {
+        // Explicit schema-qualified form: target exactly that schema's index.
+        if let Some((schema_part, name_part)) = index_name.split_once('.') {
+            let key = make_spatial_index_key(schema_part, name_part);
+            if self.spatial_indexes.contains_key(&key) {
+                return Some(key);
+            }
+            // Fall through: maybe the caller passed a dotted *index name* (rare)
+            // rather than a schema qualifier; try the whole thing as a bare name.
+        }
+
+        let normalized = Self::normalize_index_name(index_name);
+
+        // Temp schema shadows main: prefer a non-main-schema index with this name.
+        if let Some((key, _)) = self.spatial_indexes.iter().find(|(_, (meta, _))| {
+            !meta.schema.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA)
+                && Self::normalize_index_name(&meta.index_name) == normalized
+        }) {
+            return Some(key.clone());
+        }
+
+        // Otherwise the main-schema (bare) key.
+        if self.spatial_indexes.contains_key(&normalized) {
+            return Some(normalized);
+        }
+
+        None
+    }
+
     /// Create a spatial index
     pub fn create_spatial_index(
         &mut self,
         metadata: SpatialIndexMetadata,
         spatial_index: SpatialIndex,
     ) -> Result<(), StorageError> {
-        let normalized_name = Self::normalize_index_name(&metadata.index_name);
+        // Schema-aware storage key (#5558): bare for `main`, `schema.name`
+        // otherwise — so a temp-table spatial index and a same-named main-table
+        // spatial index coexist as distinct entries.
+        let key = make_spatial_index_key(&metadata.schema, &metadata.index_name);
 
-        if self.index_manager.index_exists(&metadata.index_name) {
+        // Collision check is scoped to the owning schema: an existing B-tree or
+        // spatial index *in the same schema* blocks creation, but a same-named
+        // index in another schema does not.
+        if self.index_manager.index_exists(&key) {
             return Err(StorageError::IndexAlreadyExists(metadata.index_name.clone()));
         }
-        if self.spatial_indexes.contains_key(&normalized_name) {
+        if self.spatial_indexes.contains_key(&key) {
             return Err(StorageError::IndexAlreadyExists(metadata.index_name.clone()));
         }
 
-        self.spatial_indexes.insert(normalized_name, (metadata, spatial_index));
+        self.spatial_indexes.insert(key, (metadata, spatial_index));
         Ok(())
     }
 
@@ -1244,26 +1312,25 @@ impl Operations {
 
     /// Check if a spatial index exists
     pub fn spatial_index_exists(&self, index_name: &str) -> bool {
-        let normalized = Self::normalize_index_name(index_name);
-        self.spatial_indexes.contains_key(&normalized)
+        self.resolve_spatial_index_key(index_name).is_some()
     }
 
     /// Get spatial index metadata
     pub fn get_spatial_index_metadata(&self, index_name: &str) -> Option<&SpatialIndexMetadata> {
-        let normalized = Self::normalize_index_name(index_name);
-        self.spatial_indexes.get(&normalized).map(|(metadata, _)| metadata)
+        let key = self.resolve_spatial_index_key(index_name)?;
+        self.spatial_indexes.get(&key).map(|(metadata, _)| metadata)
     }
 
     /// Get spatial index (immutable)
     pub fn get_spatial_index(&self, index_name: &str) -> Option<&SpatialIndex> {
-        let normalized = Self::normalize_index_name(index_name);
-        self.spatial_indexes.get(&normalized).map(|(_, index)| index)
+        let key = self.resolve_spatial_index_key(index_name)?;
+        self.spatial_indexes.get(&key).map(|(_, index)| index)
     }
 
     /// Get spatial index (mutable)
     pub fn get_spatial_index_mut(&mut self, index_name: &str) -> Option<&mut SpatialIndex> {
-        let normalized = Self::normalize_index_name(index_name);
-        self.spatial_indexes.get_mut(&normalized).map(|(_, index)| index)
+        let key = self.resolve_spatial_index_key(index_name)?;
+        self.spatial_indexes.get_mut(&key).map(|(_, index)| index)
     }
 
     /// Get all spatial indexes for a specific table
@@ -1292,9 +1359,13 @@ impl Operations {
 
     /// Drop a spatial index
     pub fn drop_spatial_index(&mut self, index_name: &str) -> Result<(), StorageError> {
-        let normalized = Self::normalize_index_name(index_name);
+        // Resolve schema-aware (#5558): an unqualified name drops the temp index
+        // first (temp shadows main); an explicit `schema.index` targets exactly.
+        let Some(key) = self.resolve_spatial_index_key(index_name) else {
+            return Err(StorageError::IndexNotFound(index_name.to_string()));
+        };
 
-        if self.spatial_indexes.remove(&normalized).is_none() {
+        if self.spatial_indexes.remove(&key).is_none() {
             return Err(StorageError::IndexNotFound(index_name.to_string()));
         }
 
@@ -1610,5 +1681,85 @@ impl Operations {
 impl Default for Operations {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod spatial_schema_tests {
+    use super::*;
+    use crate::index::SpatialIndex;
+
+    fn meta(index: &str, table: &str, schema: &str) -> SpatialIndexMetadata {
+        SpatialIndexMetadata {
+            index_name: index.to_string(),
+            table_name: table.to_string(),
+            column_name: "g".to_string(),
+            schema: schema.to_string(),
+            created_at: None,
+        }
+    }
+
+    /// #5558: a same-named spatial index in `main` and in a temp schema coexist
+    /// as distinct storage entries, mirroring the B-tree behavior from #5540.
+    #[test]
+    fn same_named_spatial_index_across_schemas_coexist() {
+        let mut ops = Operations::new();
+
+        ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
+            .expect("create main.ix");
+        // Same bare name on a temp-schema table must NOT collide with main.ix.
+        ops.create_spatial_index(
+            meta("ix", "t", "temp_42"),
+            SpatialIndex::new("g".to_string()),
+        )
+        .expect("create temp_42.ix should not collide with main.ix");
+
+        // Both keys are present: bare `ix` (main) and `temp_42.ix` (temp).
+        let keys = ops.list_spatial_indexes();
+        assert!(keys.contains(&"ix".to_string()), "main.ix keyed bare: {keys:?}");
+        assert!(keys.contains(&"temp_42.ix".to_string()), "temp.ix keyed qualified: {keys:?}");
+
+        // Explicit schema-qualified lookups target each one precisely.
+        assert_eq!(ops.get_spatial_index_metadata("main.ix").unwrap().schema, "main");
+        assert_eq!(ops.get_spatial_index_metadata("temp_42.ix").unwrap().schema, "temp_42");
+    }
+
+    /// An unqualified lookup/drop resolves temp-shadows-main (#5558), matching
+    /// the B-tree `resolve_index_key` semantics.
+    #[test]
+    fn unqualified_spatial_lookup_and_drop_resolves_temp_first() {
+        let mut ops = Operations::new();
+        ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
+            .unwrap();
+        ops.create_spatial_index(
+            meta("ix", "t", "temp_42"),
+            SpatialIndex::new("g".to_string()),
+        )
+        .unwrap();
+
+        // Bare name resolves to the temp index (temp shadows main).
+        assert_eq!(ops.get_spatial_index_metadata("ix").unwrap().schema, "temp_42");
+
+        // Unqualified DROP removes the temp index first; main.ix survives.
+        ops.drop_spatial_index("ix").expect("drop resolves temp.ix");
+        assert!(!ops.spatial_index_exists("temp_42.ix"), "temp.ix dropped");
+        assert!(ops.spatial_index_exists("main.ix"), "main.ix survives");
+        assert_eq!(ops.get_spatial_index_metadata("ix").unwrap().schema, "main");
+
+        // A second unqualified DROP now removes main.ix.
+        ops.drop_spatial_index("ix").expect("drop resolves main.ix");
+        assert!(!ops.spatial_index_exists("ix"));
+        assert!(ops.list_spatial_indexes().is_empty());
+    }
+
+    /// Main-schema spatial indexes keep their bare key (backward compatible).
+    #[test]
+    fn main_schema_spatial_index_uses_bare_key() {
+        let mut ops = Operations::new();
+        ops.create_spatial_index(meta("loc", "places", "main"), SpatialIndex::new("g".to_string()))
+            .unwrap();
+        assert_eq!(ops.list_spatial_indexes(), vec!["loc".to_string()]);
+        assert!(ops.spatial_index_exists("loc"));
+        assert!(ops.spatial_index_exists("main.loc"));
     }
 }

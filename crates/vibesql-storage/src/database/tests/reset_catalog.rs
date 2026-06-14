@@ -150,6 +150,7 @@ fn test_reset_clears_spatial_indexes() {
         index_name: "idx_locations_point".to_string(),
         table_name: "locations".to_string(),
         column_name: "point".to_string(),
+        schema: "main".to_string(),
         created_at: None,
     };
     let spatial_index = SpatialIndex::new("point".to_string());
@@ -186,6 +187,7 @@ fn test_reset_clears_spatial_indexes() {
         index_name: "idx_locations_point".to_string(),
         table_name: "locations".to_string(),
         column_name: "point".to_string(),
+        schema: "main".to_string(),
         created_at: None,
     };
     let spatial_index2 = SpatialIndex::new("point".to_string());
