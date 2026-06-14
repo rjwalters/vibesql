@@ -135,6 +135,17 @@ pub fn execute_drop_view(stmt: &DropViewStmt, db: &mut Database) -> Result<(), E
         ViewDropBehavior::Silent // SQLite-compatible: allow dropping even with dependents
     };
 
+    // Resolve the view's temp/main schema tag *before* the catalog removes it so
+    // the INSTEAD OF trigger cascade can apply the temp-shadows-main filter.
+    let view_is_temp = db.catalog.get_view(&stmt.view_name).is_some_and(|v| v.is_temp());
+
     db.catalog.drop_view_with_behavior(&stmt.view_name, drop_behavior)?;
+
+    // Cascade-drop the INSTEAD OF triggers defined ON this view, matching sqlite3
+    // 3.51.0: an INSTEAD OF trigger cannot outlive the view it is attached to, so
+    // `DROP VIEW v` removes every trigger whose `ON v` target is the dropped view
+    // (leaving triggers on a *different* view alone). See
+    // `Catalog::drop_view_triggers` (view analogue of the table path in #5597).
+    db.catalog.drop_view_triggers(&stmt.view_name, view_is_temp);
     Ok(())
 }
