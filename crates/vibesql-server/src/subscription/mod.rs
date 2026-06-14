@@ -53,6 +53,7 @@ pub mod filter;
 mod hash;
 mod manager;
 pub mod pk_detector;
+pub mod pk_prune;
 mod router;
 mod selective;
 pub mod session;
@@ -78,6 +79,8 @@ pub use manager::SubscriptionManager;
 pub use pk_detector::{
     detect_pk_columns, detect_pk_columns_from_stmt, PkDetectionFailureReason, PkDetectionResult,
 };
+// PK predicate pruning (#5472)
+pub use pk_prune::PkPruner;
 // Router
 pub use router::{ChangeRouter, SubscriptionUpdate as RouterUpdate};
 // Selective column updates

@@ -252,7 +252,7 @@ mod tests {
         router.register_session("session1".to_string(), tx);
 
         // Send a change event
-        let event = ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 };
+        let event = ChangeEvent::insert("users", 0);
         sender.send(event);
 
         // Process the change

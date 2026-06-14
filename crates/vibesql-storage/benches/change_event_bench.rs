@@ -61,10 +61,7 @@ fn bench_change_event_send(c: &mut Criterion) {
         let (sender, _receiver) = change_events::channel(1024);
         // Drop the receiver so there are no active receivers
         b.iter(|| {
-            sender.send(ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: black_box(0),
-            })
+            sender.send(ChangeEvent::insert("users".to_string(), black_box(0)))
         });
     });
 
@@ -72,10 +69,7 @@ fn bench_change_event_send(c: &mut Criterion) {
     group.bench_function("one_receiver", |b| {
         let (sender, _receiver) = change_events::channel(1024);
         b.iter(|| {
-            sender.send(ChangeEvent::Insert {
-                table_name: "users".to_string(),
-                row_index: black_box(0),
-            })
+            sender.send(ChangeEvent::insert("users".to_string(), black_box(0)))
         });
     });
 
@@ -84,10 +78,7 @@ fn bench_change_event_send(c: &mut Criterion) {
         let (sender, _receiver) = change_events::channel(1024);
         let table_name = "users".to_string();
         b.iter(|| {
-            sender.send(ChangeEvent::Insert {
-                table_name: table_name.clone(),
-                row_index: black_box(0),
-            })
+            sender.send(ChangeEvent::insert(table_name.clone(), black_box(0)))
         });
     });
 
@@ -242,10 +233,7 @@ fn bench_change_event_fanout(c: &mut Criterion) {
 
                 b.iter(|| {
                     // Send a single event that fans out to all receivers
-                    let num_receivers = sender.send(ChangeEvent::Insert {
-                        table_name: "users".to_string(),
-                        row_index: black_box(0),
-                    });
+                    let num_receivers = sender.send(ChangeEvent::insert("users".to_string(), black_box(0)));
                     black_box(num_receivers)
                 });
             },
@@ -275,10 +263,7 @@ fn bench_change_event_fanout_and_receive(c: &mut Criterion) {
 
                 b.iter(|| {
                     // Send event
-                    sender.send(ChangeEvent::Insert {
-                        table_name: "users".to_string(),
-                        row_index: 0,
-                    });
+                    sender.send(ChangeEvent::insert("users".to_string(), 0));
 
                     // All receivers consume the event
                     let mut total = 0;
@@ -310,7 +295,7 @@ fn bench_change_event_receive(c: &mut Criterion) {
 
         b.iter(|| {
             // Send an event
-            sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: 0 });
+            sender.send(ChangeEvent::insert("users".to_string(), 0));
 
             // Receive it
             let event = receiver.try_recv();
@@ -335,7 +320,7 @@ fn bench_change_event_receive(c: &mut Criterion) {
         b.iter(|| {
             // Send 10 events
             for i in 0..10 {
-                sender.send(ChangeEvent::Insert { table_name: "users".to_string(), row_index: i });
+                sender.send(ChangeEvent::insert("users".to_string(), i));
             }
 
             // Receive all

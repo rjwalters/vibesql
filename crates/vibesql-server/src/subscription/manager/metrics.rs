@@ -38,6 +38,13 @@ impl SubscriptionManager {
         self.replicated_requeries_coalesced.load(Ordering::Relaxed)
     }
 
+    /// Get the number of replicated subscription re-queries skipped by PK-filter
+    /// pruning (#5472). A larger value means more changes whose primary key
+    /// provably could not match a subscription's `WHERE` were never re-queried.
+    pub fn replicated_requeries_pruned(&self) -> usize {
+        self.replicated_requeries_pruned.load(Ordering::Relaxed)
+    }
+
     /// Get metrics for a specific subscription
     ///
     /// Returns metrics including updates sent, dropped, and channel health.

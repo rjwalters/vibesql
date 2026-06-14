@@ -164,7 +164,7 @@ fn test_insert_emits_change_event() {
     let events = rx.recv_all();
     assert_eq!(events.len(), 1);
     match &events[0] {
-        ChangeEvent::Insert { table_name, row_index } => {
+        ChangeEvent::Insert { table_name, row_index, .. } => {
             assert_eq!(*row_index, 0);
             // Table name will be "users" as passed to insert_row
             assert_eq!(table_name, "users");
@@ -323,13 +323,13 @@ fn test_notify_deletes() {
     let events = rx.recv_all();
     assert_eq!(events.len(), 3);
     assert!(
-        matches!(&events[0], ChangeEvent::Delete { table_name, row_index: 0 } if table_name == "users")
+        matches!(&events[0], ChangeEvent::Delete { table_name, row_index: 0, .. } if table_name == "users")
     );
     assert!(
-        matches!(&events[1], ChangeEvent::Delete { table_name, row_index: 2 } if table_name == "users")
+        matches!(&events[1], ChangeEvent::Delete { table_name, row_index: 2, .. } if table_name == "users")
     );
     assert!(
-        matches!(&events[2], ChangeEvent::Delete { table_name, row_index: 5 } if table_name == "users")
+        matches!(&events[2], ChangeEvent::Delete { table_name, row_index: 5, .. } if table_name == "users")
     );
 }
 
@@ -344,7 +344,7 @@ fn test_notify_update() {
     let events = rx.recv_all();
     assert_eq!(events.len(), 1);
     assert!(
-        matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42 } if table_name == "products")
+        matches!(&events[0], ChangeEvent::Update { table_name, row_index: 42, .. } if table_name == "products")
     );
 }
 
