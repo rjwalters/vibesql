@@ -713,7 +713,10 @@ pub(super) fn validate_rowid_relocation(
     // empty, so we detect relocations by comparing the new rowid against the
     // row's original effective rowid (old_row.row_id, falling back to physical
     // index + 1).
-    let mut relocations: Vec<(usize, u64)> = Vec::new(); // (row_index, new_rowid)
+    //
+    // Each relocation is (old_rowid, new_rowid); old_rowid drives the processing
+    // order (see below).
+    let mut relocations: Vec<(u64, u64)> = Vec::new(); // (old_rowid, new_rowid)
     for u in updates {
         let new_rowid = match u.new_row.row_id {
             Some(id) => id,
@@ -721,45 +724,55 @@ pub(super) fn validate_rowid_relocation(
         };
         let old_rowid = u.old_row.row_id.unwrap_or((u.row_index + 1) as u64);
         if new_rowid != old_rowid {
-            relocations.push((u.row_index, new_rowid));
+            relocations.push((old_rowid, new_rowid));
         }
     }
     if relocations.is_empty() {
         return Ok(());
     }
 
-    // Set of rows participating in this UPDATE (their original slots are vacated
-    // — only their new rowid matters).
-    let updated_indices: HashSet<usize> = updates.iter().map(|u| u.row_index).collect();
+    // Row-by-row intermediate-collision check, matching sqlite3 3.51.0.
+    //
+    // sqlite3 does NOT defer rowid uniqueness to the final state: it processes
+    // the UPDATE one row at a time in ascending (old) rowid order and, as each
+    // row is relocated, requires the target rowid to be free *at that moment*.
+    // The live set at that moment includes:
+    //   - rows not yet processed (un-updated rows, and updated rows whose old
+    //     rowid sorts later), and
+    //   - rows already relocated earlier in this statement.
+    // A row that previously occupied the target but has already been relocated
+    // away does NOT collide. Verified against sqlite3 3.51.0:
+    //   * swap (1<->2) / N-cycle           -> UNIQUE constraint failed
+    //   * `SET rowid=rowid+1` (ascending)  -> error (1 collides with live 2)
+    //   * `SET rowid=rowid-1` (ascending)  -> ok (each old slot vacated first)
+    //   * relocate into a free gap         -> ok
+    //   * `SET rowid=rowid` (self no-op)   -> ok
+    //
+    // This is intentionally narrower than the deferred PK/UNIQUE model used for
+    // regular columns: it is rowid-specific to mirror sqlite3's immediate
+    // (non-deferred) rowid handling without changing constraint checking
+    // elsewhere.
+    //
+    // `occupied` starts as every live row's effective rowid (a row at physical
+    // index `i` has effective rowid `row.row_id.unwrap_or(i + 1)`, matching the
+    // read path). Updated rows that do NOT move keep their slot here untouched.
+    let mut occupied: HashSet<u64> =
+        table.scan_live().map(|(i, row)| row.row_id.unwrap_or((i + 1) as u64)).collect();
 
-    for &(row_index, new_rowid) in &relocations {
-        // Collision with an existing live row that is NOT part of this UPDATE.
-        for (idx, row) in table.scan_live() {
-            if updated_indices.contains(&idx) {
-                continue;
-            }
-            let existing_rowid = row.row_id.unwrap_or((idx + 1) as u64);
-            if existing_rowid == new_rowid {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "UNIQUE constraint failed: {}.rowid",
-                    schema.name
-                )));
-            }
-        }
+    // Process relocations in ascending OLD-rowid order — sqlite3 visits rows in
+    // rowid order, so this reproduces its intermediate states (and the
+    // asymmetry between an ascending `+1` shift and a descending `-1` shift).
+    relocations.sort_unstable_by_key(|&(old_rowid, _)| old_rowid);
 
-        // Collision with another row's post-statement rowid (cross-update),
-        // e.g. two rows both relocated onto the same target.
-        for u in updates {
-            if u.row_index == row_index {
-                continue;
-            }
-            let other_new = u.new_row.row_id.unwrap_or((u.row_index + 1) as u64);
-            if other_new == new_rowid {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "UNIQUE constraint failed: {}.rowid",
-                    schema.name
-                )));
-            }
+    for (old_rowid, new_rowid) in relocations {
+        // The row vacates its old slot before its new rowid is written.
+        occupied.remove(&old_rowid);
+        if !occupied.insert(new_rowid) {
+            // Target rowid is still occupied at this point in the statement.
+            return Err(ExecutorError::ConstraintViolation(format!(
+                "UNIQUE constraint failed: {}.rowid",
+                schema.name
+            )));
         }
     }
 
