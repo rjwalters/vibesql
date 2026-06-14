@@ -25,7 +25,7 @@ use super::{
     index_sync::{
         detect_surviving_replace_conflict, find_conflicting_rows_for_update,
         resolve_cross_update_conflicts_for_replace, validate_cross_update_uniqueness,
-        validate_post_statement_uniqueness,
+        validate_post_statement_uniqueness, validate_rowid_relocation,
     },
     row_selector::RowSelector,
     triggers,
@@ -465,6 +465,13 @@ pub(super) fn execute_internal(
             database,
             table_name,
         )?;
+
+        // Explicit `UPDATE ... SET rowid = <expr>` on a virtual-rowid table
+        // (no INTEGER PRIMARY KEY): relocating onto a rowid another live row
+        // already occupies is `UNIQUE constraint failed: <table>.rowid` in
+        // sqlite3 (triggerC-7.x). IPK tables write the real PK column and are
+        // covered by the PK check above.
+        validate_rowid_relocation(&updates, schema, table_for_check)?;
     }
 
     // For REPLACE: handle cross-update conflicts by keeping only the last update
@@ -1888,6 +1895,9 @@ fn execute_update_from(
             database,
             table_name,
         )?;
+
+        // Virtual-rowid relocation collision check (see default-path call).
+        validate_rowid_relocation(&updates, schema, table_for_check)?;
     }
 
     // Handle CASCADE updates for primary key changes

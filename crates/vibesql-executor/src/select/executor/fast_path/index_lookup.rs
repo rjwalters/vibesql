@@ -208,8 +208,12 @@ impl SelectExecutor<'_> {
                 .iter()
                 .filter_map(|&idx| {
                     table.get_row(idx).map(|row| {
+                        // Issue #5517: a relocated rowid (`UPDATE ... SET rowid=`)
+                        // is stored in row.row_id; only synthesize index+1 when absent.
                         let mut cloned = row.clone();
-                        cloned.set_row_id((idx + 1) as u64);
+                        if cloned.row_id.is_none() {
+                            cloned.set_row_id((idx + 1) as u64);
+                        }
                         cloned
                     })
                 })
@@ -394,8 +398,12 @@ impl SelectExecutor<'_> {
                 .iter()
                 .filter_map(|&idx| {
                     table.get_row(idx).map(|row| {
+                        // Issue #5517: a relocated rowid (`UPDATE ... SET rowid=`)
+                        // is stored in row.row_id; only synthesize index+1 when absent.
                         let mut cloned = row.clone();
-                        cloned.set_row_id((idx + 1) as u64);
+                        if cloned.row_id.is_none() {
+                            cloned.set_row_id((idx + 1) as u64);
+                        }
                         cloned
                     })
                 })
