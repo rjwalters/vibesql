@@ -765,6 +765,24 @@ pub(super) fn execute_internal(
                     .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
             }
 
+            // Invalidate the database-level columnar cache NOW, between the
+            // per-row apply and the AFTER trigger (#5543, the UPDATE analogue
+            // of the #5523/#5542 DELETE fix). `update_row_selective` above only
+            // invalidates the *table-level* columnar cache; the columnar
+            // aggregate path that serves a trigger body's
+            // `SELECT sum(col)/max(col)/col FROM t` reads from the *database*-
+            // level LRU snapshot (`Database::get_columnar`). Left un-invalidated
+            // until the loop end (~the post-loop `invalidate_columnar_cache`
+            // below), an AFTER UPDATE trigger — and the next row's BEFORE
+            // trigger — would observe the *pre-update* column values for this
+            // and prior rows. Dropping the stale snapshot here makes every
+            // mid-statement read see the applied updates, matching sqlite3
+            // 3.51. This is gated on `has_triggers`, so the common no-trigger
+            // bulk UPDATE (the `else` branch below) pays no per-row cost.
+            // Native columnar tables short-circuit this call (they maintain
+            // columnar data incrementally).
+            database.invalidate_columnar_cache(table_name);
+
             // AFTER(R): the row is already updated; drop the must-use outcome
             // since SkipRow cannot un-apply it (#5418).
             let _after_outcome = crate::TriggerFirer::execute_after_triggers(
@@ -1925,6 +1943,16 @@ fn execute_update_from(
                     .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
                     .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
             }
+
+            // Drop the stale database-level columnar snapshot between apply(R)
+            // and AFTER(R) (#5543) — same rationale as `execute_internal`: a
+            // trigger body's `SELECT sum(col)/max(col)/col FROM t` is served
+            // from `Database::get_columnar`'s LRU, which `update_row_selective`
+            // does not invalidate, so without this an AFTER/next-BEFORE UPDATE
+            // trigger would read pre-update values. Gated on `has_triggers`, so
+            // the no-trigger `else` branch is untouched; native columnar tables
+            // short-circuit the call.
+            database.invalidate_columnar_cache(table_name);
 
             let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                 database,
