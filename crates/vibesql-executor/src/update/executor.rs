@@ -112,6 +112,11 @@ pub(super) fn execute_internal(
         && !has_expression_indexes
         // RETURNING needs the two-phase path so NEW rows can be captured
         && stmt.returning.is_none()
+        // OR REPLACE / OR IGNORE need the two-phase path to resolve conflicts:
+        // REPLACE deletes the conflicting row (firing its DELETE triggers) and
+        // IGNORE skips the row. The fast path has no conflict-resolution logic,
+        // so it would wrongly raise a PK/UNIQUE violation (issue #5490).
+        && stmt.conflict_clause.is_none()
     {
         if let Some(result) = fast_path::try_fast_path_update(stmt, database, schema)? {
             // Invalidate columnar cache after fast path update
@@ -481,10 +486,53 @@ pub(super) fn execute_internal(
 
         if !rows_to_delete_for_replace.is_empty() {
             // Get rows for index cleanup
-            let rows_for_index: Vec<(usize, Row)> = rows_to_delete_for_replace
+            let mut rows_for_index: Vec<(usize, Row)> = rows_to_delete_for_replace
                 .iter()
                 .filter_map(|&idx| table.scan().get(idx).map(|r| (idx, r.clone())))
                 .collect();
+
+            // Issue #5490: UPDATE OR REPLACE removes the conflicting row(s), and
+            // SQLite fires that row's DELETE triggers (BEFORE before removal,
+            // AFTER once it is gone) — matching the INSERT OR REPLACE path
+            // (`insert/replace.rs`). Without this, a WITHOUT ROWID `UPDATE OR
+            // REPLACE` that resolves a PRIMARY KEY conflict silently dropped the
+            // replaced row's DELETE trigger (triggerF.test 1.2/1.3/1.4).
+            let has_delete_triggers = database
+                .catalog
+                .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
+                .next()
+                .is_some();
+
+            // Fire BEFORE DELETE triggers for each conflicting row before it is
+            // removed. A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that
+            // row's deletion (#5418 parity): drop it from the to-delete set so
+            // the conflicting row survives. The subsequent UPDATE then applies
+            // against the still-conflicting state; if a real conflict remains,
+            // `update_row_selective` surfaces a PK/UNIQUE error, matching
+            // sqlite3 3.51 with recursive_triggers=ON.
+            if has_delete_triggers {
+                let mut kept = Vec::with_capacity(rows_for_index.len());
+                for (idx, row) in rows_for_index {
+                    let outcome = crate::TriggerFirer::execute_before_triggers(
+                        database,
+                        table_name,
+                        vibesql_ast::TriggerEvent::Delete,
+                        Some(&row),
+                        None,
+                    )?;
+                    if outcome != crate::TriggerOutcome::SkipRow {
+                        kept.push((idx, row));
+                    }
+                }
+                rows_for_index = kept;
+
+                // Keep `rows_to_delete_for_replace` in sync with the rows that
+                // survived BEFORE-trigger RAISE(IGNORE) so the deletion below
+                // only tombstones the rows we actually removed.
+                let surviving: HashSet<usize> =
+                    rows_for_index.iter().map(|(idx, _)| *idx).collect();
+                rows_to_delete_for_replace.retain(|idx| surviving.contains(idx));
+            }
 
             // Update indexes before deletion
             let rows_refs: Vec<(usize, &Row)> =
@@ -544,10 +592,48 @@ pub(super) fn execute_internal(
                 database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
             }
 
+            // Invalidate the database-level columnar cache since rows were
+            // removed (the table-level cache is handled by delete_by_indices).
+            if delete_result.deleted_count > 0 {
+                database.invalidate_columnar_cache(table_name);
+            }
+
+            // Fire AFTER DELETE triggers for each removed conflicting row, now
+            // that it is gone (issue #5490). The trigger body observes the
+            // post-delete table state — e.g. triggerF.test's
+            // `(SELECT count(*) FROM t1)` — matching sqlite3. A RAISE(IGNORE)
+            // here cannot un-delete the row (sqlite3 3.51 keeps it deleted), so
+            // the outcome is a no-op.
+            if has_delete_triggers {
+                for (_, row) in &rows_for_index {
+                    let _after_outcome = crate::TriggerFirer::execute_after_triggers(
+                        database,
+                        table_name,
+                        vibesql_ast::TriggerEvent::Delete,
+                        Some(row),
+                        None,
+                    )?;
+                }
+            }
+
             // Re-fetch table for the remaining operations
             let _table = database
                 .get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+            // Issue #5490: deleting the conflicting row(s) above may have
+            // COMPACTED the table (the storage layer compacts once the
+            // tombstone ratio crosses its threshold — and a prior tombstone
+            // from an earlier statement makes that easy to reach even when this
+            // statement only removes one row). Compaction shifts every live
+            // row's physical index, leaving the `PendingUpdate::row_index`
+            // values captured before the delete stale — the apply phase would
+            // then write to the wrong slot or a freed slot ("Column index out
+            // of bounds"). Re-resolve each update's physical index from the
+            // current table state by matching its OLD row (unique by PK).
+            // Previously this drift was masked only by the CLI/persistence
+            // reload between statements; pure in-memory sessions hit it.
+            remap_update_indices_after_compaction(database, table_name, &mut updates)?;
         }
     }
 
@@ -787,6 +873,46 @@ pub(super) fn execute_internal(
     };
 
     Ok((update_count, returning))
+}
+
+/// Re-resolve each pending update's physical `row_index` against the current
+/// table state after a REPLACE-conflict delete (issue #5490).
+///
+/// Deleting the conflicting row(s) can compact the table, which shifts every
+/// live row's physical index and invalidates the `row_index` captured when the
+/// updates were collected. We locate each update's row by its OLD row value
+/// (unique by primary key for the REPLACE path) among the live rows. Updates
+/// whose old row can no longer be found — e.g. it was itself the conflicting
+/// row removed by a sibling update — are dropped.
+fn remap_update_indices_after_compaction(
+    database: &Database,
+    table_name: &str,
+    updates: &mut Vec<PendingUpdate>,
+) -> Result<(), ExecutorError> {
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    // Build a value -> physical index map over the live rows. Keyed on the full
+    // row values so it works for both WITHOUT ROWID (PK-keyed) and ROWID tables.
+    let mut live_index: std::collections::HashMap<&[SqlValue], usize> =
+        std::collections::HashMap::new();
+    for (idx, row) in table.scan_live() {
+        live_index.entry(row.values.as_ref()).or_insert(idx);
+    }
+
+    updates.retain_mut(|u| {
+        if let Some(&idx) = live_index.get(u.old_row.values.as_ref()) {
+            u.row_index = idx;
+            true
+        } else {
+            // The old row is gone (already removed as a conflicting row). Drop
+            // this update; there is nothing left to modify.
+            false
+        }
+    });
+
+    Ok(())
 }
 
 /// Validate only NOT NULL and CHECK constraints (for REPLACE conflict resolution)
@@ -1514,7 +1640,7 @@ fn execute_update_from(
 
             if !rows_to_delete_for_replace.is_empty() {
                 // Get rows for index cleanup (immutable borrow scope).
-                let rows_for_index: Vec<(usize, Row)> = {
+                let mut rows_for_index: Vec<(usize, Row)> = {
                     let table = database
                         .get_table(table_name)
                         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
@@ -1523,6 +1649,36 @@ fn execute_update_from(
                         .filter_map(|&idx| table.scan().get(idx).map(|r| (idx, r.clone())))
                         .collect()
                 };
+
+                // Issue #5490: UPDATE OR REPLACE ... FROM removes the conflicting
+                // row(s) too, so fire the replaced row's DELETE triggers (BEFORE
+                // before removal, AFTER once gone) — matching the non-FROM path
+                // above and INSERT OR REPLACE.
+                let has_delete_triggers = database
+                    .catalog
+                    .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
+                    .next()
+                    .is_some();
+
+                if has_delete_triggers {
+                    let mut kept = Vec::with_capacity(rows_for_index.len());
+                    for (idx, row) in rows_for_index {
+                        let outcome = crate::TriggerFirer::execute_before_triggers(
+                            database,
+                            table_name,
+                            vibesql_ast::TriggerEvent::Delete,
+                            Some(&row),
+                            None,
+                        )?;
+                        if outcome != crate::TriggerOutcome::SkipRow {
+                            kept.push((idx, row));
+                        }
+                    }
+                    rows_for_index = kept;
+                    let surviving: HashSet<usize> =
+                        rows_for_index.iter().map(|(idx, _)| *idx).collect();
+                    rows_to_delete_for_replace.retain(|idx| surviving.contains(idx));
+                }
 
                 // Update indexes before deletion
                 let rows_refs: Vec<(usize, &Row)> =
@@ -1577,6 +1733,28 @@ fn execute_update_from(
                 } else {
                     database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
                 }
+
+                if delete_result.deleted_count > 0 {
+                    database.invalidate_columnar_cache(table_name);
+                }
+
+                // Fire AFTER DELETE triggers now that the conflicting rows are
+                // gone (issue #5490).
+                if has_delete_triggers {
+                    for (_, row) in &rows_for_index {
+                        let _after_outcome = crate::TriggerFirer::execute_after_triggers(
+                            database,
+                            table_name,
+                            vibesql_ast::TriggerEvent::Delete,
+                            Some(row),
+                            None,
+                        )?;
+                    }
+                }
+
+                // Re-resolve stale update indices after a possibly-compacting
+                // REPLACE-conflict delete (issue #5490 — see the non-FROM path).
+                remap_update_indices_after_compaction(database, table_name, &mut updates)?;
             }
         }
     } else {

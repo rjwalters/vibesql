@@ -3909,8 +3909,24 @@ proc do_test {name script expected} {
     # Do this BEFORE incrementing test count or printing test name
     set internal_check [uses_sqlite_internals $script]
     if {[lindex $internal_check 0]} {
-        omit_test $name [lindex $internal_check 1]
-        return
+        # Setup-only blocks (no expected result to assert) that merely use an
+        # OR REPLACE / OR IGNORE conflict clause must still RUN: VibeSQL now
+        # resolves those conflicts (including on WITHOUT ROWID tables, firing
+        # the replaced row's DELETE triggers — issue #5490). Skipping such a
+        # setup block leaves dependent assertions reading an empty/unmodified
+        # table and cascades into spurious failures (e.g. triggerF 1.x.1 sets
+        # up state with INSERT/UPDATE OR REPLACE that triggerF 1.x.2 asserts).
+        # Genuine conflict-resolution ASSERTIONS (non-empty expected) stay
+        # skipped exactly as before, and OR ABORT/ROLLBACK/FAIL are unaffected.
+        set reason [lindex $internal_check 1]
+        set is_conflict_setup [expr {
+            [string match "*conflict resolution clause*" $reason]
+            && [string trim $expected] eq ""
+        }]
+        if {!$is_conflict_setup} {
+            omit_test $name $reason
+            return
+        }
     }
 
     incr ::nTest
