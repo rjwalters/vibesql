@@ -115,9 +115,23 @@ impl Parser {
             vibesql_ast::TriggerEvent::Insert
         } else if self.try_consume_keyword(Keyword::Update) {
             // Check for optional OF column_list
+            //
+            // Standard SQLite (3.51.0) uses an UNPARENTHESIZED comma-separated
+            // column list terminated by ON:
+            //   CREATE TRIGGER tr AFTER UPDATE OF c, d ON tbl ...
+            // SQLite itself rejects the parenthesized form `UPDATE OF (c, d)`.
+            // VibeSQL accepts BOTH: the standard unparenthesized form for
+            // conformance (trigger2-3.x), and the parenthesized form as a
+            // lenient extension (it was previously the only accepted form).
             let columns = if self.try_consume_keyword(Keyword::Of) {
                 let mut cols = Vec::new();
-                self.expect_token(Token::LParen)?;
+                // Optional opening paren (lenient extension; not valid SQLite).
+                let has_paren = if matches!(self.peek(), Token::LParen) {
+                    self.advance();
+                    true
+                } else {
+                    false
+                };
                 loop {
                     let col = self.parse_identifier()?;
                     cols.push(col);
@@ -128,7 +142,11 @@ impl Parser {
                         break;
                     }
                 }
-                self.expect_token(Token::RParen)?;
+                if has_paren {
+                    self.expect_token(Token::RParen)?;
+                }
+                // For the unparenthesized form the column list runs until ON,
+                // which is consumed by `expect_keyword(On)` further below.
                 Some(cols)
             } else {
                 None

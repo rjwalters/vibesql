@@ -168,6 +168,93 @@ fn test_before_update_trigger_fires() {
     assert_eq!(count_audit_rows(&db), 1);
 }
 
+/// Issue #5577: `UPDATE OF <col>` firing-restriction semantics.
+///
+/// An `AFTER UPDATE OF username` trigger must fire only when the listed column
+/// actually changes value. Updating an unlisted column (`id`) — or writing the
+/// same value back to `username` — must NOT fire it. This exercises the parse
+/// fix (unparenthesized column list) end-to-end together with the executor's
+/// `should_fire_update_of` restriction.
+#[test]
+fn test_update_of_fires_only_for_listed_column() {
+    let mut db = Database::new();
+    create_users_table(&mut db);
+    create_audit_table(&mut db);
+
+    // Seed one user.
+    let insert = vibesql_ast::InsertStmt {
+        with_clause: None,
+        schema_name: None,
+        schema_quoted: false,
+        table_quoted: false,
+        table_name: "USERS".to_string(),
+        columns: vec!["id".to_string(), "username".to_string()],
+        source: vibesql_ast::InsertSource::Values(vec![vec![
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+            vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("alice"),
+            )),
+        ]]),
+        conflict_clause: None,
+        on_conflict: None,
+        on_duplicate_key_update: None,
+        returning: None,
+    };
+    InsertExecutor::execute(&mut db, &insert).expect("Failed to insert");
+
+    // Parse the trigger with the standard unparenthesized column list to make
+    // sure the parse fix and executor agree on the column.
+    let trigger_stmt = match Parser::parse_sql(
+        "CREATE TRIGGER log_username AFTER UPDATE OF username ON USERS \
+         BEGIN INSERT INTO audit_log (event) VALUES ('username changed'); END;",
+    )
+    .expect("Failed to parse UPDATE OF trigger")
+    {
+        Statement::CreateTrigger(t) => t,
+        other => panic!("Expected CreateTrigger, got {other:?}"),
+    };
+    assert_eq!(trigger_stmt.event, TriggerEvent::Update(Some(vec!["username".to_string()])));
+    crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
+        .expect("Failed to create trigger");
+
+    // Helper: UPDATE one column of user id=1 to `value`.
+    let update_col = |db: &mut Database, column: &str, value: vibesql_types::SqlValue| {
+        let update = vibesql_ast::UpdateStmt {
+            with_clause: None,
+            quoted: false,
+            alias: None,
+            table_name: "USERS".to_string(),
+            assignments: vec![vibesql_ast::Assignment {
+                column: column.to_string(),
+                value: vibesql_ast::Expression::Literal(value),
+            }],
+            from_clause: None,
+            where_clause: Some(vibesql_ast::WhereClause::Condition(
+                vibesql_ast::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Equal,
+                    left: Box::new(vibesql_ast::Expression::ColumnRef(
+                        vibesql_ast::ColumnIdentifier::simple("id", false),
+                    )),
+                    right: Box::new(vibesql_ast::Expression::Literal(
+                        vibesql_types::SqlValue::Integer(1),
+                    )),
+                },
+            )),
+            conflict_clause: None,
+            returning: None,
+        };
+        UpdateExecutor::execute(&update, db).expect("Failed to update");
+    };
+
+    // Updating an unlisted column (id) must NOT fire the trigger.
+    update_col(&mut db, "id", SqlValue::Integer(1));
+    assert_eq!(count_audit_rows(&db), 0, "UPDATE OF must not fire for unlisted column");
+
+    // Updating the listed column to a new value MUST fire the trigger.
+    update_col(&mut db, "username", SqlValue::Varchar(arcstr::ArcStr::from("bob")));
+    assert_eq!(count_audit_rows(&db), 1, "UPDATE OF must fire when listed column changes");
+}
+
 /// Issue #5192 (triggerupfrom-4.3 regression):
 ///
 /// UPDATE...FROM that targets a VIEW with an INSTEAD OF UPDATE trigger must
