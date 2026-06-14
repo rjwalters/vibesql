@@ -207,12 +207,33 @@ pub fn check_no_child_references(
                 )?;
             }
             ReferentialAction::SetNull => {
-                // Set child FK columns to NULL
-                set_null(db, &child_table_name, &fk, &parent_key_values)?;
+                // Set child FK columns to NULL. Fires the child's
+                // BEFORE/AFTER UPDATE row triggers; a BEFORE UPDATE
+                // RAISE(IGNORE) skips that child's rewrite, leaving an
+                // orphan that the statement-end FK check must trip (#5465).
+                set_null(
+                    db,
+                    &child_table_name,
+                    &fk,
+                    fk_idx,
+                    &parent_key_values,
+                    in_txn,
+                    session_defer,
+                )?;
             }
             ReferentialAction::SetDefault => {
-                // Set child FK columns to their default values
-                set_default(db, &child_table_name, &fk, &parent_key_values)?;
+                // Set child FK columns to their default values. Fires the
+                // child's BEFORE/AFTER UPDATE row triggers; same
+                // RAISE(IGNORE) -> orphan-check semantics as SET NULL.
+                set_default(
+                    db,
+                    &child_table_name,
+                    &fk,
+                    fk_idx,
+                    &parent_key_values,
+                    in_txn,
+                    session_defer,
+                )?;
             }
         }
     }
@@ -425,11 +446,15 @@ fn cascade_delete(
 }
 
 /// Set child FK columns to NULL (SET NULL action)
+#[allow(clippy::too_many_arguments)]
 fn set_null(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
+    fk_idx: usize,
     parent_key_values: &[SqlValue],
+    in_txn: bool,
+    session_defer: bool,
 ) -> Result<(), ExecutorError> {
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
@@ -439,9 +464,13 @@ fn set_null(
     // SET NULL targets. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
 
-    // Collect indices of rows to update.
+    // Collect (row index, OLD row, NEW row) triples to rewrite. The OLD
+    // row is the current child row; the NEW row carries the FK columns set
+    // to NULL. We keep OLD so the child's UPDATE triggers see the correct
+    // OLD.* values, matching sqlite3 3.51 (the SET NULL action is an UPDATE
+    // on the child).
     let child_table = db.get_table(child_table_name).unwrap();
-    let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
+    let mut rows_to_update: Vec<(usize, vibesql_storage::Row, vibesql_storage::Row)> = Vec::new();
 
     for (idx, child_row) in child_table.scan_visible(&snapshot) {
         let child_fk_values: Vec<SqlValue> =
@@ -462,43 +491,37 @@ fn set_null(
             },
         );
         if matches {
+            let old_row = child_row.clone();
             // Create updated row with FK columns set to NULL
-            let mut updated_row = child_row.clone();
+            let mut updated_row = old_row.clone();
             for &fk_col_idx in &fk.column_indices {
                 updated_row.values[fk_col_idx] = SqlValue::Null;
             }
-            rows_to_update.push((idx, updated_row));
+            rows_to_update.push((idx, old_row, updated_row));
         }
     }
 
-    // Phase 1c (Issue #5150 / #5136): stamp xmin on every FK-cascaded
-    // SET NULL new row version. Off-state is a no-op.
-    let txn_id = db.transaction_id();
-    for (_, updated_row) in rows_to_update.iter_mut() {
-        vibesql_storage::stamp_xmin_for_write(updated_row, txn_id);
-        updated_row.xmax = None;
-    }
-
-    // Now update the rows
-    let child_table_mut = db.get_table_mut(child_table_name).unwrap();
-    for (idx, updated_row) in rows_to_update {
-        child_table_mut
-            .update_row(idx, updated_row)
-            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
-    }
-
-    // Rebuild indexes after update
-    db.rebuild_indexes(child_table_name);
-
-    Ok(())
+    apply_cascade_child_updates(
+        db,
+        child_table_name,
+        fk,
+        fk_idx,
+        rows_to_update,
+        in_txn,
+        session_defer,
+    )
 }
 
 /// Set child FK columns to their default values (SET DEFAULT action)
+#[allow(clippy::too_many_arguments)]
 fn set_default(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
+    fk_idx: usize,
     parent_key_values: &[SqlValue],
+    in_txn: bool,
+    session_defer: bool,
 ) -> Result<(), ExecutorError> {
     // Get child schema to access column defaults
     let child_schema = db.catalog.get_table(child_table_name).unwrap().clone();
@@ -537,9 +560,13 @@ fn set_default(
     // SET DEFAULT targets. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
 
-    // Collect indices of rows to update.
+    // Collect (row index, OLD row, NEW row) triples to rewrite. The OLD
+    // row is the current child row; the NEW row carries the FK columns set
+    // to their defaults. We keep OLD so the child's UPDATE triggers see the
+    // correct OLD.* values, matching sqlite3 3.51 (the SET DEFAULT action
+    // is an UPDATE on the child).
     let child_table = db.get_table(child_table_name).unwrap();
-    let mut rows_to_update: Vec<(usize, vibesql_storage::Row)> = Vec::new();
+    let mut rows_to_update: Vec<(usize, vibesql_storage::Row, vibesql_storage::Row)> = Vec::new();
 
     for (idx, child_row) in child_table.scan_visible(&snapshot) {
         let child_fk_values: Vec<SqlValue> =
@@ -560,32 +587,124 @@ fn set_default(
             },
         );
         if matches {
+            let old_row = child_row.clone();
             // Create updated row with FK columns set to default values
-            let mut updated_row = child_row.clone();
+            let mut updated_row = old_row.clone();
             for (i, &fk_col_idx) in fk.column_indices.iter().enumerate() {
                 updated_row.values[fk_col_idx] = default_values[i].clone();
             }
-            rows_to_update.push((idx, updated_row));
+            rows_to_update.push((idx, old_row, updated_row));
         }
     }
 
-    // Phase 1c (Issue #5150 / #5136): stamp xmin on every FK-cascaded
-    // SET DEFAULT new row version. Off-state is a no-op.
+    apply_cascade_child_updates(
+        db,
+        child_table_name,
+        fk,
+        fk_idx,
+        rows_to_update,
+        in_txn,
+        session_defer,
+    )
+}
+
+/// Apply a set of cascade-driven child-row rewrites (SET NULL / SET
+/// DEFAULT), firing the child table's BEFORE/AFTER UPDATE row triggers per
+/// row exactly as sqlite3 3.51 does. This mirrors the UPDATE-side cascade
+/// apply loop in `update/foreign_keys.rs` (#5440 / #5498) so the DELETE-side
+/// SET NULL / SET DEFAULT actions get identical trigger semantics.
+///
+/// For each affected child row:
+///   1. Fire BEFORE UPDATE triggers (OLD = current row, NEW = rewritten row).
+///   2. On `RAISE(IGNORE)` (SkipRow) the child's rewrite is abandoned: the
+///      surviving child keeps its OLD FK value, which references the parent
+///      key that is about to disappear (the parent DELETE is applied after
+///      this cascade returns). That is an orphaned FK reference and must
+///      trip the statement-end FK check (#5465) — immediate FK raises now;
+///      deferred FK queues the surviving OLD row for the COMMIT re-check.
+///   3. Otherwise apply the rewrite via `update_row`, then fire AFTER UPDATE
+///      triggers.
+///
+/// `RAISE(ABORT|FAIL|ROLLBACK)` propagates as `Err` and aborts the statement.
+#[allow(clippy::too_many_arguments)]
+fn apply_cascade_child_updates(
+    db: &mut vibesql_storage::Database,
+    child_table_name: &str,
+    fk: &vibesql_catalog::ForeignKeyConstraint,
+    fk_idx: usize,
+    mut rows_to_update: Vec<(usize, vibesql_storage::Row, vibesql_storage::Row)>,
+    in_txn: bool,
+    session_defer: bool,
+) -> Result<(), ExecutorError> {
+    // Phase 1c (Issue #5150 / #5136): stamp xmin on every FK-cascaded new
+    // row version. Off-state is a no-op.
     let txn_id = db.transaction_id();
-    for (_, updated_row) in rows_to_update.iter_mut() {
-        vibesql_storage::stamp_xmin_for_write(updated_row, txn_id);
-        updated_row.xmax = None;
+    for (_, _old_row, new_row) in rows_to_update.iter_mut() {
+        vibesql_storage::stamp_xmin_for_write(new_row, txn_id);
+        new_row.xmax = None;
     }
 
-    // Now update the rows
-    let child_table_mut = db.get_table_mut(child_table_name).unwrap();
-    for (idx, updated_row) in rows_to_update {
+    // FK cascade fires the child table's BEFORE/AFTER UPDATE row triggers
+    // for every cascaded row, matching sqlite3 3.51 (#5440). sqlite3 fires
+    // these regardless of the `recursive_triggers` pragma; the depth-16
+    // RecursionGuard inside the firing helpers bounds multi-level FK chains.
+    let has_child_update_triggers = db
+        .catalog
+        .get_triggers_for_table(child_table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
+        .next()
+        .is_some();
+
+    for (idx, old_row, new_row) in rows_to_update {
+        // BEFORE UPDATE row triggers on the child (OLD = current row, NEW =
+        // rewritten row).
+        if has_child_update_triggers {
+            let outcome = crate::TriggerFirer::execute_before_triggers(
+                db,
+                child_table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(&old_row),
+                Some(&new_row),
+            )?;
+            if outcome == crate::TriggerOutcome::SkipRow {
+                // RAISE(IGNORE) abandons this cascade rewrite; the surviving
+                // child still references the parent key being deleted, so it
+                // becomes an orphan that must trip the statement-end FK
+                // check, exactly as sqlite3 3.51 does (#5465).
+                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                if should_defer {
+                    db.queue_deferred_fk_violation(DeferredFkViolation {
+                        child_table: child_table_name.to_string(),
+                        fk_index: fk_idx,
+                        child_row: old_row.values.to_vec(),
+                        kind: DeferredFkViolationKind::ChildInsertOrUpdate,
+                    });
+                } else {
+                    return Err(ExecutorError::ConstraintViolation(
+                        "FOREIGN KEY constraint failed".to_string(),
+                    ));
+                }
+                continue;
+            }
+        }
+
+        let child_table_mut = db.get_table_mut(child_table_name).unwrap();
         child_table_mut
-            .update_row(idx, updated_row)
+            .update_row(idx, new_row.clone())
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+        // AFTER UPDATE row triggers fire once this child row is rewritten.
+        if has_child_update_triggers {
+            let _after = crate::TriggerFirer::execute_after_triggers(
+                db,
+                child_table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(&old_row),
+                Some(&new_row),
+            )?;
+        }
     }
 
-    // Rebuild indexes after update
+    // Rebuild indexes after updates.
     db.rebuild_indexes(child_table_name);
 
     Ok(())
