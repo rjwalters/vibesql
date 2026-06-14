@@ -58,6 +58,7 @@ impl SelectIntoExecutor {
             table_constraints: vec![],
             table_options: vec![],
             quoted: false, // Synthesized from SELECT INTO, treat as unquoted
+            name_source: None,
             as_query: None,
             without_rowid: false,
         };

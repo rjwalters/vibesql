@@ -161,6 +161,14 @@ pub struct CreateTableStmt {
     pub table_options: Vec<TableOption>,
     /// Whether the table name was quoted (delimited) in the original SQL.
     pub quoted: bool,
+    /// The table name exactly as it appeared in the source, including any
+    /// quoting delimiters (`"tbl1"`, `[tbl1]`, `` `tbl1` ``) and original
+    /// casing. `table_name` holds the normalized identifier used for catalog
+    /// lookups, but SQLite echoes the *original* spelling in the "table ...
+    /// already exists" error. `None` when the source spelling is not available
+    /// (e.g. AST built programmatically), in which case callers fall back to
+    /// `table_name`.
+    pub name_source: Option<String>,
     /// Optional AS SELECT query for CREATE TABLE ... AS SELECT syntax
     /// When present, columns are derived from the query result
     pub as_query: Option<Box<crate::SelectStmt>>,

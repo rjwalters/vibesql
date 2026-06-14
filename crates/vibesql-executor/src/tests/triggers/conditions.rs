@@ -42,6 +42,7 @@ fn test_when_clause_filters_firing() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

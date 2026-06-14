@@ -244,3 +244,47 @@ fn test_parse_generated_column_short_form() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+/// The parser captures the *verbatim* source spelling of the table-name token
+/// (including quotes/brackets/backticks and casing) in `name_source`, so the
+/// executor can echo it in the "table ... already exists" error to match
+/// sqlite3 3.51.0. Mirrors the CREATE TRIGGER mechanism from #5538 (issue #5544).
+#[test]
+fn test_parse_create_table_captures_name_source() {
+    let cases = [
+        ("CREATE TABLE tbl1 (a)", "tbl1", "tbl1"),
+        ("CREATE TABLE \"tbl1\" (a)", "tbl1", "\"tbl1\""),
+        ("CREATE TABLE [tbl1] (a)", "tbl1", "[tbl1]"),
+        ("CREATE TABLE `tbl1` (a)", "tbl1", "`tbl1`"),
+        ("CREATE TABLE \"TBL1\" (a)", "TBL1", "\"TBL1\""),
+        // schema-qualified: name_source is the table-name token (no schema prefix).
+        ("CREATE TABLE main.\"tbl1\" (a)", "main.tbl1", "\"tbl1\""),
+    ];
+
+    for (sql, expected_name, expected_source) in cases {
+        match Parser::parse_sql(sql).expect("parse failed") {
+            vibesql_ast::Statement::CreateTable(create) => {
+                assert_eq!(create.table_name, expected_name, "table_name for: {sql}");
+                assert_eq!(
+                    create.name_source.as_deref(),
+                    Some(expected_source),
+                    "name_source for: {sql}"
+                );
+            }
+            _ => panic!("Expected CREATE TABLE statement for: {sql}"),
+        }
+    }
+}
+
+/// CREATE TABLE ... AS SELECT also captures the table-name source spelling.
+#[test]
+fn test_parse_create_table_as_select_captures_name_source() {
+    match Parser::parse_sql("CREATE TABLE \"tbl1\" AS SELECT 1").expect("parse failed") {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_name, "tbl1");
+            assert_eq!(create.name_source.as_deref(), Some("\"tbl1\""));
+            assert!(create.as_query.is_some());
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}

@@ -42,6 +42,7 @@ fn test_create_table_with_column_primary_key() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -103,6 +104,7 @@ fn test_create_table_with_table_primary_key() {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -149,6 +151,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -192,6 +195,7 @@ fn test_create_table_with_column_unique_constraint() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -253,6 +257,7 @@ fn test_create_table_with_table_unique_constraint() {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -299,6 +304,7 @@ fn test_create_table_with_check_constraint() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -341,6 +347,7 @@ fn test_auto_index_for_single_column_primary_key() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -389,6 +396,7 @@ fn test_integer_primary_key_no_autoindex() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -457,6 +465,7 @@ fn test_auto_index_for_composite_primary_key() {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -512,6 +521,7 @@ fn test_auto_index_for_single_unique_constraint() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -581,6 +591,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -648,6 +659,7 @@ fn test_auto_index_for_composite_unique_constraint() {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -708,6 +720,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -767,6 +780,7 @@ fn test_auto_index_visible_in_catalog() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

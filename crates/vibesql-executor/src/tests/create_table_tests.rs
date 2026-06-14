@@ -50,6 +50,7 @@ fn test_create_simple_table() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -135,6 +136,7 @@ fn test_create_table_with_multiple_types() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -172,6 +174,7 @@ fn test_create_table_already_exists() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -184,6 +187,93 @@ fn test_create_table_already_exists() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
     assert!(matches!(result, Err(crate::errors::ExecutorError::TableAlreadyExists(_))));
+}
+
+/// Helper: parse a CREATE TABLE statement string and return the typed AST.
+fn parse_create_table(sql: &str) -> CreateTableStmt {
+    match vibesql_parser::Parser::parse_sql(sql).expect("parse failed") {
+        vibesql_ast::Statement::CreateTable(stmt) => stmt,
+        other => panic!("Expected CreateTable, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_duplicate_table_already_exists_echoes_source_quoting() {
+    // SQLite (3.51.0) echoes the table name *exactly as written* in the
+    // "already exists" error, preserving its quoting form and casing:
+    //   CREATE TABLE  tbl1  -> table tbl1 already exists
+    //   CREATE TABLE "tbl1" -> table "tbl1" already exists
+    //   CREATE TABLE [tbl1] -> table [tbl1] already exists
+    //   CREATE TABLE `tbl1` -> table `tbl1` already exists
+    //   CREATE TABLE "TBL1" -> table "TBL1" already exists
+    //
+    // VibeSQL surfaces this via `Table '<echoed>' already exists`; the TCL
+    // conformance shim rewrites it to SQLite's lowercase-wrapper form while
+    // preserving `<echoed>`. We assert the raw VibeSQL message here. The error
+    // echoes the *failing* (second) statement's source spelling, regardless of
+    // how the first (existing) table was spelled.
+    // (first_sql, dup_sql, expected_message). The dup statement collides with
+    // the first under VibeSQL's identifier-equality rules, and the error echoes
+    // the *dup* statement's verbatim spelling.
+    let cases = [
+        ("CREATE TABLE tbl1 (a)", "CREATE TABLE tbl1 (a)", "Table 'tbl1' already exists"),
+        ("CREATE TABLE tbl1 (a)", "CREATE TABLE \"tbl1\" (a)", "Table '\"tbl1\"' already exists"),
+        ("CREATE TABLE tbl1 (a)", "CREATE TABLE [tbl1] (a)", "Table '[tbl1]' already exists"),
+        ("CREATE TABLE tbl1 (a)", "CREATE TABLE `tbl1` (a)", "Table '`tbl1`' already exists"),
+        // Casing is preserved verbatim in the echoed name.
+        (
+            "CREATE TABLE \"TBL1\" (a)",
+            "CREATE TABLE \"TBL1\" (a)",
+            "Table '\"TBL1\"' already exists",
+        ),
+    ];
+
+    for (first_sql, dup_sql, expected) in cases {
+        let mut db = Database::new();
+
+        // First create succeeds and registers the table.
+        let first = parse_create_table(first_sql);
+        CreateTableExecutor::execute(&first, &mut db).expect("first create should succeed");
+
+        // Re-creating with the (possibly quoted) duplicate name errors, echoing
+        // the source quoting form of the failing statement.
+        let dup = parse_create_table(dup_sql);
+        let err = CreateTableExecutor::execute(&dup, &mut db)
+            .expect_err("duplicate table must be rejected");
+        assert_eq!(err.to_string(), expected, "for SQL: {dup_sql}");
+    }
+}
+
+#[test]
+fn test_duplicate_table_as_select_echoes_source_quoting() {
+    // CREATE TABLE ... AS SELECT over an existing name also preserves the
+    // source quoting form (sqlite3 3.51.0).
+    let mut db = Database::new();
+    let first = parse_create_table("CREATE TABLE tbl1 (a)");
+    CreateTableExecutor::execute(&first, &mut db).expect("first create should succeed");
+
+    let dup = parse_create_table("CREATE TABLE \"tbl1\" AS SELECT 1");
+    let err =
+        CreateTableExecutor::execute(&dup, &mut db).expect_err("duplicate CTAS must be rejected");
+    assert_eq!(err.to_string(), "Table '\"tbl1\"' already exists");
+}
+
+#[test]
+fn test_duplicate_table_programmatic_ast_falls_back_to_normalized_name() {
+    // An AST built without source spelling (name_source == None) falls back to
+    // the schema-qualified normalized name in the error, preserving the legacy
+    // behavior the TCL shim's schema-prefix-strip handles.
+    let mut db = Database::new();
+    let mut stmt = parse_create_table("CREATE TABLE tbl1 (a)");
+    stmt.name_source = None;
+    CreateTableExecutor::execute(&stmt, &mut db).expect("first create should succeed");
+
+    let err =
+        CreateTableExecutor::execute(&stmt, &mut db).expect_err("duplicate must be rejected");
+    // schema-qualified fallback (e.g. "public.tbl1" / "main.tbl1").
+    let msg = err.to_string();
+    assert!(msg.ends_with("tbl1' already exists"), "unexpected fallback message: {msg}");
+    assert!(msg.contains('.'), "expected schema-qualified fallback: {msg}");
 }
 
 #[test]
@@ -229,6 +319,7 @@ fn test_create_table_with_nullable_columns() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -255,6 +346,7 @@ fn test_create_table_empty_columns_list() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -289,6 +381,7 @@ fn test_create_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -312,6 +405,7 @@ fn test_create_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -345,6 +439,7 @@ fn test_create_table_with_special_characters_in_name() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -375,6 +470,7 @@ fn test_create_table_case_sensitivity() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -398,6 +494,7 @@ fn test_create_table_case_sensitivity() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -463,6 +560,7 @@ fn test_create_table_with_spatial_types() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -516,6 +614,7 @@ fn test_create_table_multipolygon_sqllogictest() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

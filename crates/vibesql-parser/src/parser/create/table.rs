@@ -34,8 +34,20 @@ impl Parser {
             false
         };
 
-        // Parse table name with quoted flag (supports schema.table)
+        // Parse table name with quoted flag (supports schema.table).
+        // Capture the verbatim source spelling of the table-name token before
+        // `parse_table_ref` normalizes (de-quotes) it. SQLite echoes the table
+        // name exactly as written — including its quoting form and casing — in
+        // the "table ... already exists" error, whereas `table_name` below holds
+        // the normalized identifier used for catalog lookups. For a
+        // `schema.name` qualified reference the table-name token is the one
+        // following the `.` separator, so we record the cursor position of the
+        // *final* identifier token consumed by the table ref. (Mirrors the
+        // CREATE TRIGGER mechanism from #5538.)
+        let name_start_pos = self.current_position();
         let table = self.parse_table_ref()?;
+        let name_token_pos = self.current_position().saturating_sub(1).max(name_start_pos);
+        let name_source = self.token_source_at(name_token_pos).map(str::to_string);
 
         // Check for CREATE TABLE ... AS SELECT syntax
         if self.peek_keyword(Keyword::As) {
@@ -56,6 +68,7 @@ impl Parser {
                 table_constraints: Vec::new(),
                 table_options: Vec::new(),
                 quoted: table.is_any_quoted(),
+                name_source,
                 as_query: Some(Box::new(select_stmt)),
                 without_rowid: false, // CREATE TABLE AS SELECT cannot be WITHOUT ROWID
             });
@@ -256,6 +269,7 @@ impl Parser {
             table_constraints,
             table_options,
             quoted: table.is_any_quoted(),
+            name_source,
             as_query: None,
             without_rowid,
         })
