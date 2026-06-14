@@ -604,7 +604,9 @@ impl CombinedExpressionEvaluator<'_> {
                         if let Some(ref table_id) = table_id {
                             if let Some((_, table_schema)) = self.schema.table_schemas.get(table_id)
                             {
-                                if table_schema.without_rowid {
+                                // WITHOUT ROWID tables (#4953) and VIEWs (#5492)
+                                // both lack the rowid pseudo-column.
+                                if table_schema.without_rowid || table_schema.is_view {
                                     return Err(ExecutorError::ColumnNotFound {
                                         column_name: column.to_string(),
                                         table_name: table_id.display().to_string(),
@@ -618,9 +620,10 @@ impl CombinedExpressionEvaluator<'_> {
                                 }
                             }
                         } else {
-                            // Unqualified rowid - check if any table in scope is WITHOUT ROWID
+                            // Unqualified rowid - check if any table in scope is
+                            // WITHOUT ROWID or a VIEW (neither has a rowid).
                             for (tid, (_, table_schema)) in &self.schema.table_schemas {
-                                if table_schema.without_rowid {
+                                if table_schema.without_rowid || table_schema.is_view {
                                     return Err(ExecutorError::ColumnNotFound {
                                         column_name: column.to_string(),
                                         table_name: tid.display().to_string(),

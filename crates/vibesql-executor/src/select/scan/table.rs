@@ -355,7 +355,11 @@ pub(crate) fn execute_table_scan(
                 .collect()
         };
 
-        let view_schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
+        let mut view_schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
+        // Views have no implicit rowid: a `rowid`/`oid`/`_rowid_` reference
+        // against a view in a SELECT must error (`no such column: rowid`),
+        // matching sqlite3 with the default `allow_rowid_in_view` off (#5492).
+        view_schema.set_is_view(true);
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         // SQL:1999 E051-09: Apply column aliases if provided
         let view_schema = apply_column_aliases(view_schema, column_aliases)?;

@@ -443,5 +443,10 @@ pub(super) fn build_view_schema(
         .map(|name| ColumnSchema::new(name, DataType::Null, true))
         .collect();
 
-    Ok(TableSchema::new(view_def.name.clone(), columns))
+    // Mark this as a VIEW pseudo-schema: views have no implicit rowid, so
+    // `rowid`/`oid`/`_rowid_` references against the view must error rather than
+    // silently resolve (#5492).
+    let mut schema = TableSchema::new(view_def.name.clone(), columns);
+    schema.set_is_view(true);
+    Ok(schema)
 }

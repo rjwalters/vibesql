@@ -225,7 +225,12 @@ impl CombinedSchema {
             })
             .collect();
 
-        let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
+        // A derived table (FROM subquery) has no implicit rowid, just like a
+        // view: `SELECT rowid FROM (SELECT ...)` must error with
+        // `no such column: rowid` (sqlite3 parity, #5492). Mark the synthetic
+        // schema as a view so the rowid pseudo-column is not exposed.
+        let mut schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
+        schema.set_is_view(true);
         let mut table_schemas = HashMap::new();
         let table_id = TableIdentifier::unquoted(&alias);
         table_schemas.insert(table_id, (0, schema));

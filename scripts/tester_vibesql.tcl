@@ -4267,7 +4267,13 @@ proc check_single_capability {cap} {
     # every trigger*.test file to `finish_test; return` at its capability
     # guard, extracting 0 tests. Removing it lets SQLite's canonical trigger
     # conformance actually execute against VibeSQL.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress}
+    # `allow_rowid_in_view` is the SQLITE_ALLOW_ROWID_IN_VIEW compile-time
+    # option, which is OFF by default in SQLite. VibeSQL matches the default:
+    # a view has no implicit rowid, so `rowid`/`oid`/`_rowid_` against a view
+    # errors with `no such column: rowid` (#5492). Marking it unsupported makes
+    # `ifcapable !allow_rowid_in_view` blocks (e.g. trigger9-4.2/4.3) take their
+    # error-expecting branch, matching real sqlite3 with the option off.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress allow_rowid_in_view}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

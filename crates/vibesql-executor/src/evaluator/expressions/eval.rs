@@ -1069,6 +1069,25 @@ impl ExpressionEvaluator<'_> {
         if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
             // First check if schema has a real column with this name
             if self.schema.get_column_index(column).is_none() {
+                // VIEWs have no implicit rowid. Unless a real column named
+                // rowid/oid/_rowid_ is exposed by the view (handled above by the
+                // get_column_index check), referencing the pseudo-column against
+                // a view must error with `no such column: rowid` — matching
+                // sqlite3 with the default `allow_rowid_in_view` off (#5492).
+                if self.schema.is_view {
+                    return Err(ExecutorError::ColumnNotFound {
+                        column_name: column.to_string(),
+                        table_name: self.schema.name.clone(),
+                        searched_tables: vec![self.schema.name.clone()],
+                        available_columns: self
+                            .schema
+                            .columns
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .collect(),
+                    });
+                }
+
                 // WITHOUT ROWID tables do not have the rowid pseudo-column
                 if self.schema.without_rowid {
                     return Err(ExecutorError::ColumnNotFound {
