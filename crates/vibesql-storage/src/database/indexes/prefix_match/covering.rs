@@ -69,7 +69,7 @@ impl IndexData {
         let normalized_bound = normalize_for_comparison(upper_bound);
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Start bound: [prefix] (inclusive)
                 let start_key = normalized_prefix.clone();
                 let start_bound: Bound<Vec<SqlValue>> = Bound::Included(start_key);
@@ -101,20 +101,7 @@ impl IndexData {
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
-                        // Apply pending deletions adjustment to row indices
-                        let adjusted_indices = if pending_deletions.is_empty() {
-                            row_indices.clone()
-                        } else {
-                            row_indices
-                                .iter()
-                                .map(|&row_idx| {
-                                    let decrement =
-                                        pending_deletions.partition_point(|&d| d < row_idx);
-                                    row_idx - decrement
-                                })
-                                .collect()
-                        };
-                        results.push((key_values.clone(), adjusted_indices));
+                        results.push((key_values.clone(), row_indices.clone()));
                     }
                 }
 
@@ -176,7 +163,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Build start key: [prefix, lower_bound?]
                 let start_bound: Bound<Vec<SqlValue>> = if let Some(lb) = lower_bound {
                     let normalized_lb = normalize_for_comparison(lb);
@@ -222,19 +209,7 @@ impl IndexData {
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
-                        let adjusted_indices = if pending_deletions.is_empty() {
-                            row_indices.clone()
-                        } else {
-                            row_indices
-                                .iter()
-                                .map(|&row_idx| {
-                                    let decrement =
-                                        pending_deletions.partition_point(|&d| d < row_idx);
-                                    row_idx - decrement
-                                })
-                                .collect()
-                        };
-                        results.push((key_values.clone(), adjusted_indices));
+                        results.push((key_values.clone(), row_indices.clone()));
                     }
                 }
 
@@ -266,7 +241,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 let end_key = compute_prefix_upper_bound(&normalized_prefix);
 
                 let start_bound: Bound<&[SqlValue]> = Bound::Included(normalized_prefix.as_slice());
@@ -283,19 +258,7 @@ impl IndexData {
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
-                        let adjusted_indices = if pending_deletions.is_empty() {
-                            row_indices.clone()
-                        } else {
-                            row_indices
-                                .iter()
-                                .map(|&row_idx| {
-                                    let decrement =
-                                        pending_deletions.partition_point(|&d| d < row_idx);
-                                    row_idx - decrement
-                                })
-                                .collect()
-                        };
-                        results.push((key_values.clone(), adjusted_indices));
+                        results.push((key_values.clone(), row_indices.clone()));
                     }
                 }
 
@@ -310,22 +273,9 @@ impl IndexData {
     /// Returns all keys and their row indices (for covering scans on empty prefix)
     pub(super) fn keys_and_values(&self) -> Vec<(Vec<SqlValue>, Vec<usize>)> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => data
-                .iter()
-                .map(|(k, v)| {
-                    let adjusted = if pending_deletions.is_empty() {
-                        v.clone()
-                    } else {
-                        v.iter()
-                            .map(|&row_idx| {
-                                let decrement = pending_deletions.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            })
-                            .collect()
-                    };
-                    (k.clone(), adjusted)
-                })
-                .collect(),
+            IndexData::InMemory { data } => {
+                data.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            }
             _ => Vec::new(),
         }
     }

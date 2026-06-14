@@ -27,23 +27,10 @@ impl IndexData {
         let normalized_key = normalize_cow(key);
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Create a temporary slice for lookup without Vec allocation
                 let key_slice: &[SqlValue] = std::slice::from_ref(normalized_key.as_ref());
-                data.get(key_slice).map(|row_indices| {
-                    // Apply lazy adjustment for pending deletions
-                    if pending_deletions.is_empty() {
-                        row_indices.clone()
-                    } else {
-                        row_indices
-                            .iter()
-                            .map(|&row_idx| {
-                                let decrement = pending_deletions.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            })
-                            .collect()
-                    }
-                })
+                data.get(key_slice).cloned()
             }
             IndexData::DiskBacked { btree, .. } => {
                 // For disk-backed, we still need a Vec for the API, but this is less common
@@ -134,21 +121,8 @@ impl IndexData {
         let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
-                data.get(&normalized_key).map(|row_indices| {
-                    // Apply lazy adjustment for pending deletions
-                    if pending_deletions.is_empty() {
-                        row_indices.clone()
-                    } else {
-                        row_indices
-                            .iter()
-                            .map(|&row_idx| {
-                                let decrement = pending_deletions.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            })
-                            .collect()
-                    }
-                })
+            IndexData::InMemory { data } => {
+                data.get(&normalized_key).cloned()
             }
             IndexData::DiskBacked { btree, .. } => {
                 // Safely acquire lock and perform lookup
@@ -245,7 +219,7 @@ impl IndexData {
     /// to avoid Vec allocation per key lookup.
     pub fn multi_lookup(&self, values: &[SqlValue]) -> Vec<usize> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Deduplicate values to avoid returning duplicate rows
                 // For example, WHERE a IN (10, 10, 20) should only look up 10 once
                 let mut unique_values: Vec<&SqlValue> = values.iter().collect();
@@ -261,14 +235,6 @@ impl IndexData {
                     let search_key: &[SqlValue] = std::slice::from_ref(normalized_value.as_ref());
                     if let Some(row_indices) = data.get(search_key) {
                         matching_row_indices.extend(row_indices);
-                    }
-                }
-
-                // Apply lazy adjustment for pending deletions
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -325,21 +291,8 @@ impl IndexData {
     /// Most use cases should use `values()` for full scans or `multi_lookup()` for specific keys.
     pub fn iter(&self) -> Box<dyn Iterator<Item = (Vec<SqlValue>, Vec<usize>)> + '_> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
-                let pending = pending_deletions.clone();
-                Box::new(data.iter().map(move |(k, v)| {
-                    let adjusted_v = if pending.is_empty() {
-                        v.clone()
-                    } else {
-                        v.iter()
-                            .map(|&row_idx| {
-                                let decrement = pending.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            })
-                            .collect()
-                    };
-                    (k.clone(), adjusted_v)
-                }))
+            IndexData::InMemory { data } => {
+                Box::new(data.iter().map(move |(k, v)| (k.clone(), v.clone())))
             }
             IndexData::DiskBacked { .. } => {
                 // BTreeIndex doesn't currently expose an API for iterating over (key, row_ids)
@@ -372,21 +325,7 @@ impl IndexData {
     /// (cloned) and disk-backed (loaded from disk) indexes.
     pub fn values(&self) -> Box<dyn Iterator<Item = Vec<usize>> + '_> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
-                let pending = pending_deletions.clone();
-                Box::new(data.values().map(move |v| {
-                    if pending.is_empty() {
-                        v.clone()
-                    } else {
-                        v.iter()
-                            .map(|&row_idx| {
-                                let decrement = pending.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            })
-                            .collect()
-                    }
-                }))
-            }
+            IndexData::InMemory { data } => Box::new(data.values().cloned()),
             IndexData::DiskBacked { btree, .. } => {
                 // Perform a full range scan to get all values
                 // Use range_scan with no bounds to scan entire index

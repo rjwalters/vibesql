@@ -683,7 +683,7 @@ mod tests {
         );
         manager.index_data.insert(
             index_name.to_string(),
-            IndexData::InMemory { data, pending_deletions: vec![] },
+            IndexData::InMemory { data },
         );
 
         manager.spill_index_to_disk(index_name).unwrap();
@@ -743,7 +743,7 @@ mod tests {
             );
             manager.index_data.insert(
                 index_name.to_string(),
-                IndexData::InMemory { data, pending_deletions: vec![] },
+                IndexData::InMemory { data },
             );
 
             manager.spill_index_to_disk(index_name).unwrap();
@@ -816,7 +816,7 @@ mod tests {
         );
         manager.index_data.insert(
             index_name.to_string(),
-            IndexData::InMemory { data, pending_deletions: vec![] },
+            IndexData::InMemory { data },
         );
 
         manager.spill_index_to_disk(index_name).unwrap();
@@ -948,7 +948,7 @@ mod tests {
         manager.indexes.insert("idx_mem".to_string(), mk_meta("idx_mem"));
         manager.index_data.insert(
             "idx_mem".to_string(),
-            IndexData::InMemory { data: mem_data, pending_deletions: vec![] },
+            IndexData::InMemory { data: mem_data },
         );
 
         // Disk-backed (spilled) index.
@@ -957,7 +957,7 @@ mod tests {
         manager.indexes.insert("idx_disk".to_string(), mk_meta("idx_disk"));
         manager.index_data.insert(
             "idx_disk".to_string(),
-            IndexData::InMemory { data: disk_data, pending_deletions: vec![] },
+            IndexData::InMemory { data: disk_data },
         );
         manager.spill_index_to_disk("idx_disk").unwrap();
 

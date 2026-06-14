@@ -56,7 +56,7 @@ impl IndexData {
         let normalized_filter = normalize_for_comparison(filter_value);
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 let mut matching_rows = Vec::new();
 
                 // Group keys by their prefix and find those matching the filter
@@ -67,14 +67,6 @@ impl IndexData {
                         if *key_filter_val == normalized_filter {
                             matching_rows.extend(row_indices);
                         }
-                    }
-                }
-
-                // Apply pending deletions adjustment
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_rows {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -127,7 +119,7 @@ impl IndexData {
         let normalized_upper = upper_bound.map(normalize_for_comparison);
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 let mut matching_rows = Vec::new();
 
                 for (key, row_indices) in data.iter() {
@@ -160,14 +152,6 @@ impl IndexData {
                         if passes_lower && passes_upper {
                             matching_rows.extend(row_indices);
                         }
-                    }
-                }
-
-                // Apply pending deletions adjustment
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_rows {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 

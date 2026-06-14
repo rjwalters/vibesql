@@ -589,7 +589,12 @@ pub(super) fn execute_internal(
 
             let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
 
-            // Handle index maintenance based on compaction
+            // Handle index maintenance based on compaction.
+            //
+            // No compaction: the deleted keys' index entries were already
+            // removed by `batch_update_indexes_for_delete`, and the
+            // bitmap-delete model keeps every surviving row's physical position
+            // stable, so no row-id renumbering is needed (issue #5524 / #5537).
             if delete_result.compacted {
                 database.rebuild_indexes(table_name);
                 // Partial indexes need WHERE-predicate evaluation per row;
@@ -602,8 +607,6 @@ pub(super) fn execute_internal(
                 // Stale `updates` row indices after compaction are repaired by
                 // `remap_update_indices_after_compaction` below (re-resolves each
                 // pending update's physical slot by matching its OLD row).
-            } else {
-                database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
             }
 
             // Invalidate the database-level columnar cache since rows were
@@ -1767,6 +1770,12 @@ fn execute_update_from(
                 let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
 
                 // Handle index maintenance based on compaction.
+                //
+                // No compaction: the deleted keys' index entries were already
+                // removed by `batch_update_indexes_for_delete`, and the
+                // bitmap-delete model keeps every surviving row's physical
+                // position stable, so no row-id renumbering is needed (issue
+                // #5524 / #5537).
                 if delete_result.compacted {
                     database.rebuild_indexes(table_name);
                     // Partial indexes need WHERE-predicate evaluation per row;
@@ -1778,8 +1787,6 @@ fn execute_update_from(
                     );
                     // Stale `updates` row indices after compaction are repaired
                     // by `remap_update_indices_after_compaction` below.
-                } else {
-                    database.adjust_indexes_after_delete(table_name, &rows_to_delete_for_replace);
                 }
 
                 if delete_result.deleted_count > 0 {

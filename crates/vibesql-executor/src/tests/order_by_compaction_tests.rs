@@ -2,10 +2,11 @@
 //!
 //! An in-memory `ORDER BY <pk>` index-ordered scan returned the wrong rows
 //! after a DML statement compacted (or tombstoned) rows mid-statement, because
-//! the user-defined B-tree index's lazy `pending_deletions` adjustment got out
-//! of sync with the table's physical row positions. The unordered scan and
-//! `count(*)` returned correct results, but the index-ordered `ORDER BY` scan
-//! consulted stale physical positions and produced empty / wrong output.
+//! the user-defined B-tree index's row-position adjustment got out of sync with
+//! the table's physical row positions. The unordered scan and `count(*)`
+//! returned correct results, but the index-ordered `ORDER BY` scan consulted
+//! stale physical positions and produced empty / wrong output. The dead
+//! adjustment machinery was later removed in issue #5537.
 //!
 //! These tests drive pure in-memory `Database` usage (no persistence reload,
 //! which would otherwise mask the bug by rebuilding indices) and assert that

@@ -263,14 +263,11 @@ pub fn handle_replace_conflicts(
         // is intentionally not invoked here because the existing code path
         // never did so; that is a separate pre-existing gap tracked outside
         // this PR.
-    } else {
-        // No compaction: the deleted keys' index entries were already removed
-        // by `batch_update_indexes_for_delete`, and the bitmap-delete model
-        // keeps every surviving row's physical position stable, so no row-id
-        // renumbering is needed. `adjust_indexes_after_delete` is a no-op that
-        // documents this maintenance contract (issue #5524).
-        db.adjust_indexes_after_delete(table_name, &deleted_indices);
     }
+    // No compaction: the deleted keys' index entries were already removed by
+    // `batch_update_indexes_for_delete`, and the bitmap-delete model keeps every
+    // surviving row's physical position stable, so no row-id renumbering is
+    // needed (issue #5524 / #5537).
 
     // Invalidate the database-level columnar cache since table data changed.
     // Note: The table-level cache is already invalidated by delete_by_indices().

@@ -112,7 +112,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Calculate upper bound by incrementing the last element of the prefix
                 // For prefix [1, 2], upper bound is [1, 3)
                 let end_key = compute_prefix_upper_bound(&normalized_prefix);
@@ -133,14 +133,6 @@ impl IndexData {
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
                         matching_row_indices.extend(row_indices);
-                    }
-                }
-
-                // Apply pending deletions adjustment
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -209,7 +201,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Calculate upper bound by incrementing the last element of the prefix
                 let end_key = compute_prefix_upper_bound(&normalized_prefix);
 
@@ -227,15 +219,8 @@ impl IndexData {
                     if key_values.len() >= normalized_prefix.len()
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
-                        // Return the first row index from this key, adjusted for pending deletions
-                        return row_indices.first().copied().map(|row_idx| {
-                            if pending_deletions.is_empty() {
-                                row_idx
-                            } else {
-                                let decrement = pending_deletions.partition_point(|&d| d < row_idx);
-                                row_idx - decrement
-                            }
-                        });
+                        // Return the first row index from this key
+                        return row_indices.first().copied();
                     }
                 }
 
@@ -319,7 +304,7 @@ impl IndexData {
         let normalized_bound = normalize_for_comparison(upper_bound);
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 use std::ops::Bound;
 
                 // Start bound: [prefix] (inclusive)
@@ -355,14 +340,6 @@ impl IndexData {
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
                         matching_row_indices.extend(row_indices);
-                    }
-                }
-
-                // Apply pending deletions adjustment
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -466,7 +443,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 use std::ops::Bound;
 
                 // Build start key: [prefix, lower_bound?]
@@ -524,14 +501,6 @@ impl IndexData {
                         && key_values[..normalized_prefix.len()] == normalized_prefix[..]
                     {
                         matching_row_indices.extend(row_indices);
-                    }
-                }
-
-                // Apply pending deletions adjustment
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -640,7 +609,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Calculate upper bound by incrementing the last element of the prefix
                 let end_key = compute_prefix_upper_bound(&normalized_prefix);
 
@@ -652,16 +621,6 @@ impl IndexData {
 
                 let mut matching_row_indices = Vec::new();
                 let max_rows = limit.unwrap_or(usize::MAX);
-
-                // Closure to apply pending deletions adjustment
-                let apply_adjustment = |result: &mut Vec<usize>| {
-                    if !pending_deletions.is_empty() {
-                        for row_idx in result.iter_mut() {
-                            let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                            *row_idx -= decrement;
-                        }
-                    }
-                };
 
                 if reverse {
                     // Reverse iteration: collect all matching keys first, then iterate in reverse
@@ -682,7 +641,6 @@ impl IndexData {
                         for &row_idx in row_indices.iter().rev() {
                             matching_row_indices.push(row_idx);
                             if matching_row_indices.len() >= max_rows {
-                                apply_adjustment(&mut matching_row_indices);
                                 return matching_row_indices;
                             }
                         }
@@ -699,7 +657,6 @@ impl IndexData {
                             for &row_idx in row_indices {
                                 matching_row_indices.push(row_idx);
                                 if matching_row_indices.len() >= max_rows {
-                                    apply_adjustment(&mut matching_row_indices);
                                     return matching_row_indices;
                                 }
                             }
@@ -707,7 +664,6 @@ impl IndexData {
                     }
                 }
 
-                apply_adjustment(&mut matching_row_indices);
                 matching_row_indices
             }
             IndexData::DiskBacked { btree, .. } => {

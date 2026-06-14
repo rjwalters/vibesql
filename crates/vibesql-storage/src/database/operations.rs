@@ -878,18 +878,6 @@ impl Operations {
         self.index_manager.rebuild_indexes(table_name, table_schema, &table_rows);
     }
 
-    /// Adjust user-defined indexes after row deletions
-    ///
-    /// This is more efficient than rebuild_indexes when only a few rows are deleted,
-    /// as it adjusts row indices in place rather than rebuilding from scratch.
-    ///
-    /// # Arguments
-    /// * `table_name` - Name of the table whose indexes need adjustment
-    /// * `deleted_indices` - Sorted list of deleted row indices (ascending order)
-    pub fn adjust_indexes_after_delete(&mut self, table_name: &str, deleted_indices: &[usize]) {
-        self.index_manager.adjust_indexes_after_delete(table_name, deleted_indices);
-    }
-
     /// Drop an index
     pub fn drop_index(&mut self, index_name: &str) -> Result<(), StorageError> {
         self.index_manager.drop_index(index_name)
