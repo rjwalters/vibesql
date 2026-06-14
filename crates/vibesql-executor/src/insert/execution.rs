@@ -71,6 +71,72 @@ pub fn execute_insert_with_trigger_context(
         .map(|outcome| outcome.affected_rows)
 }
 
+/// Result of applying SQLite rowid (INTEGER) affinity to a value supplied for
+/// the rowid / INTEGER PRIMARY KEY position on INSERT.
+enum RowidAffinity {
+    /// The value coerced to a concrete integer rowid.
+    Value(i64),
+    /// The value was NULL (or DEFAULT) — auto-assign the next rowid.
+    Auto,
+}
+
+/// Apply SQLite's rowid (INTEGER) affinity to an already-evaluated value.
+///
+/// SQLite coerces the value supplied for a rowid / INTEGER PRIMARY KEY into an
+/// integer before storing it (and before triggers observe `NEW.rowid`):
+/// - integers pass through;
+/// - a TEXT value that is losslessly an integer (e.g. `'45'`) is coerced;
+/// - a REAL value that is losslessly an integer (e.g. `45.0`, `-42.0`) is
+///   coerced; a value with a fractional part (e.g. `42.4`) cannot be a rowid
+///   and raises `datatype mismatch`;
+/// - NULL means auto-assign;
+/// - anything else (non-numeric TEXT, BLOB, fractional REAL) raises
+///   `datatype mismatch`, matching sqlite3 3.51.
+///
+/// sqlite3 3.51.0 accepts any integer rowid, including zero and negatives
+/// (`INSERT INTO t(rowid) VALUES(-42.0)` stores rowid -42; triggerC-4.1.4), so
+/// no positivity restriction is applied — only the affinity coercion and the
+/// lossless-integer check.
+fn coerce_rowid_affinity(
+    value: &vibesql_types::SqlValue,
+) -> Result<RowidAffinity, ExecutorError> {
+    use vibesql_types::SqlValue;
+
+    let datatype_mismatch =
+        || ExecutorError::UnsupportedExpression("datatype mismatch".to_string());
+
+    // Coerce a lossless-integer f64 to i64, else datatype mismatch.
+    let from_float = |f: f64| -> Result<i64, ExecutorError> {
+        if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+            Ok(f as i64)
+        } else {
+            Err(datatype_mismatch())
+        }
+    };
+
+    let i = match value {
+        SqlValue::Null => return Ok(RowidAffinity::Auto),
+        SqlValue::Integer(i) => *i,
+        SqlValue::Bigint(i) => *i,
+        SqlValue::Smallint(i) => *i as i64,
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                i
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                from_float(f)?
+            } else {
+                return Err(datatype_mismatch());
+            }
+        }
+        SqlValue::Float(f) => from_float(*f as f64)?,
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => from_float(*f)?,
+        _ => return Err(datatype_mismatch()),
+    };
+
+    Ok(RowidAffinity::Value(i))
+}
+
 /// Internal implementation of INSERT execution
 fn execute_insert_internal(
     db: &mut vibesql_storage::Database,
@@ -407,153 +473,63 @@ fn execute_insert_internal(
             // Get the rowid expression
             let rowid_expr = &value_exprs[rowid_pos];
 
-            // Extract literal value from expression
-            // For INTEGER PRIMARY KEY columns (rowid_is_pseudo_column=false), allow any integer
-            // For pseudo-columns (rowid, _rowid_, oid), only allow positive integers
-            match rowid_expr {
-                vibesql_ast::Expression::Literal(val) => {
-                    match val {
-                        vibesql_types::SqlValue::Integer(i) => {
-                            // For pseudo-columns, require positive; for IPK columns, allow any value
-                            if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            let rowid = *i as u64;
-                            // Update batch_max_rowid for subsequent NULL auto-assignments
-                            if *i > 0 {
-                                batch_max_rowid = batch_max_rowid.max(rowid);
-                            }
-                            Some(rowid)
+            // Apply a coerced rowid affinity result, updating batch_max_rowid
+            // for subsequent NULL/DEFAULT auto-assignments. SQLite's INTEGER
+            // affinity is applied to the rowid value before storage (and before
+            // triggers observe NEW.rowid): a TEXT/REAL value that is losslessly
+            // an integer is coerced (e.g. '45' -> 45, -42.0 -> -42), a value
+            // with a fractional part (e.g. 42.4) or a non-numeric TEXT/BLOB
+            // raises "datatype mismatch" (triggerC-4.1.x).
+            let mut apply_affinity = |affinity: RowidAffinity| -> u64 {
+                match affinity {
+                    RowidAffinity::Value(i) => {
+                        let rowid = i as u64;
+                        if i > 0 {
+                            batch_max_rowid = batch_max_rowid.max(rowid);
                         }
-                        vibesql_types::SqlValue::Bigint(i) => {
-                            if resolved_columns.rowid_is_pseudo_column && *i <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            let rowid = *i as u64;
-                            if *i > 0 {
-                                batch_max_rowid = batch_max_rowid.max(rowid);
-                            }
-                            Some(rowid)
-                        }
-                        vibesql_types::SqlValue::Null => {
-                            // NULL rowid means auto-assign: max_seen + 1
-                            batch_max_rowid += 1;
-                            Some(batch_max_rowid)
-                        }
-                        // SQLite type affinity: try to convert numeric strings to integers
-                        vibesql_types::SqlValue::Varchar(s)
-                        | vibesql_types::SqlValue::Character(s) => {
-                            let trimmed = s.trim();
-                            if let Ok(i) = trimmed.parse::<i64>() {
-                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
-                                    return Err(ExecutorError::UnsupportedExpression(
-                                        "datatype mismatch".to_string(),
-                                    ));
-                                }
-                                let rowid = i as u64;
-                                if i > 0 {
-                                    batch_max_rowid = batch_max_rowid.max(rowid);
-                                }
-                                Some(rowid)
-                            } else {
-                                // Non-numeric string cannot be used as rowid
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                        }
-                        // SQLite type affinity: convert float literals to integers if whole numbers
-                        vibesql_types::SqlValue::Float(f) => {
-                            let f64_val = *f as f64;
-                            if f64_val.fract() == 0.0
-                                && f64_val >= i64::MIN as f64
-                                && f64_val <= i64::MAX as f64
-                            {
-                                let i = f64_val as i64;
-                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
-                                    return Err(ExecutorError::UnsupportedExpression(
-                                        "datatype mismatch".to_string(),
-                                    ));
-                                }
-                                let rowid = i as u64;
-                                if i > 0 {
-                                    batch_max_rowid = batch_max_rowid.max(rowid);
-                                }
-                                Some(rowid)
-                            } else {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                        }
-                        vibesql_types::SqlValue::Real(f)
-                        | vibesql_types::SqlValue::Double(f)
-                        | vibesql_types::SqlValue::Numeric(f) => {
-                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
-                                let i = *f as i64;
-                                if resolved_columns.rowid_is_pseudo_column && i <= 0 {
-                                    return Err(ExecutorError::UnsupportedExpression(
-                                        "datatype mismatch".to_string(),
-                                    ));
-                                }
-                                let rowid = i as u64;
-                                if i > 0 {
-                                    batch_max_rowid = batch_max_rowid.max(rowid);
-                                }
-                                Some(rowid)
-                            } else {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                        }
-                        _ => {
-                            return Err(ExecutorError::UnsupportedExpression(
-                                "datatype mismatch".to_string(),
-                            ));
-                        }
+                        rowid
+                    }
+                    RowidAffinity::Auto => {
+                        batch_max_rowid += 1;
+                        batch_max_rowid
                     }
                 }
-                vibesql_ast::Expression::Default => {
-                    // DEFAULT means auto-assign, like NULL
-                    batch_max_rowid += 1;
-                    Some(batch_max_rowid)
+            };
+
+            match rowid_expr {
+                // Literal value: apply rowid (INTEGER) affinity directly.
+                vibesql_ast::Expression::Literal(val) => {
+                    Some(apply_affinity(coerce_rowid_affinity(val)?))
                 }
+                // DEFAULT means auto-assign, like NULL.
+                vibesql_ast::Expression::Default => Some(apply_affinity(RowidAffinity::Auto)),
+                // Negative numeric literal (parsed as unary minus over a literal):
+                // negate, then apply rowid affinity. This handles -42 (integer)
+                // AND -42.0 (real) uniformly (triggerC-4.1.4).
                 vibesql_ast::Expression::UnaryOp {
                     op: vibesql_ast::UnaryOperator::Minus,
                     expr,
-                } => {
-                    // Handle negative integers (parsed as unary minus)
-                    match expr.as_ref() {
-                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(i)) => {
-                            let neg_val = -(*i);
-                            if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            // Note: negative rowid as u64 wraps, but SQLite allows this for IPK
-                            Some(neg_val as u64)
+                } if matches!(expr.as_ref(), vibesql_ast::Expression::Literal(_)) => {
+                    let vibesql_ast::Expression::Literal(inner) = expr.as_ref() else {
+                        unreachable!("guarded by matches! above")
+                    };
+                    let negated = match inner {
+                        vibesql_types::SqlValue::Integer(i) => vibesql_types::SqlValue::Integer(-*i),
+                        vibesql_types::SqlValue::Bigint(i) => vibesql_types::SqlValue::Bigint(-*i),
+                        vibesql_types::SqlValue::Smallint(i) => {
+                            vibesql_types::SqlValue::Smallint(-*i)
                         }
-                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Bigint(i)) => {
-                            let neg_val = -(*i);
-                            if resolved_columns.rowid_is_pseudo_column && neg_val <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            Some(neg_val as u64)
-                        }
+                        vibesql_types::SqlValue::Float(f) => vibesql_types::SqlValue::Float(-*f),
+                        vibesql_types::SqlValue::Real(f) => vibesql_types::SqlValue::Real(-*f),
+                        vibesql_types::SqlValue::Double(f) => vibesql_types::SqlValue::Double(-*f),
+                        vibesql_types::SqlValue::Numeric(f) => vibesql_types::SqlValue::Numeric(-*f),
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
                                 "datatype mismatch".to_string(),
                             ));
                         }
-                    }
+                    };
+                    Some(apply_affinity(coerce_rowid_affinity(&negated)?))
                 }
                 _ => {
                     // For complex expressions (CASE, functions, subqueries, trigger
@@ -591,42 +567,9 @@ fn execute_insert_internal(
                     }
                     let val = evaluator.eval(rowid_expr, &dummy_row)?;
 
-                    match val {
-                        vibesql_types::SqlValue::Integer(i) => {
-                            if resolved_columns.rowid_is_pseudo_column && i <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            let rowid = i as u64;
-                            if i > 0 {
-                                batch_max_rowid = batch_max_rowid.max(rowid);
-                            }
-                            Some(rowid)
-                        }
-                        vibesql_types::SqlValue::Bigint(i) => {
-                            if resolved_columns.rowid_is_pseudo_column && i <= 0 {
-                                return Err(ExecutorError::UnsupportedExpression(
-                                    "datatype mismatch".to_string(),
-                                ));
-                            }
-                            let rowid = i as u64;
-                            if i > 0 {
-                                batch_max_rowid = batch_max_rowid.max(rowid);
-                            }
-                            Some(rowid)
-                        }
-                        vibesql_types::SqlValue::Null => {
-                            // NULL rowid means auto-assign: max_seen + 1
-                            batch_max_rowid += 1;
-                            Some(batch_max_rowid)
-                        }
-                        _ => {
-                            return Err(ExecutorError::UnsupportedExpression(
-                                "datatype mismatch".to_string(),
-                            ));
-                        }
-                    }
+                    // Apply rowid (INTEGER) affinity to the evaluated value,
+                    // matching the literal path (triggerC-4.1.x).
+                    Some(apply_affinity(coerce_rowid_affinity(&val)?))
                 }
             }
         } else {
