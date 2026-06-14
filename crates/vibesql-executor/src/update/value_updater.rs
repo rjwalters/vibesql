@@ -43,7 +43,19 @@ impl<'a> ValueUpdater<'a> {
             let is_rowid =
                 col_name_lower == "rowid" || col_name_lower == "_rowid_" || col_name_lower == "oid";
 
-            if is_rowid {
+            // A *real* column literally named `rowid`/`oid`/`_rowid_` shadows the
+            // system rowid alias (triggerD-1.3/1.4, ticket
+            // [34d2ae1c6d08b5271ba5e5592936d4a1d913ffe3]). `UPDATE t SET rowid=..`
+            // on `t(rowid, ...)` must write that ordinary column, not relocate the
+            // row's internal rowid. Only treat the assignment as a system-rowid
+            // update when no ordinary column shadows the name — this preserves the
+            // virtual-rowid relocation behavior (#5517) for tables that have *no*
+            // such column. The INTEGER PRIMARY KEY alias is itself a real column
+            // (`rowid_alias_column`), so it also flows through the normal
+            // column-update path below and writes the PK column as before.
+            let shadowing_column = self.schema.get_column_index(&assignment.column);
+
+            if is_rowid && shadowing_column.is_none() {
                 // Handle rowid update
                 // If the table has an INTEGER PRIMARY KEY (rowid alias), update that column
                 // Otherwise, update the row's internal row_id field
