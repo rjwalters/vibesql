@@ -297,9 +297,11 @@ fn set_rowid_ipk_conflict_errors() {
 // `<table>.<ipk>`. The `-1` descending cascade, move-to-gap, and self no-op
 // still succeed. All verified against sqlite3 3.51.0.
 //
-// This is the IPK counterpart of the virtual-rowid tests above. It must NOT
-// change deferred PK/UNIQUE checking for regular columns — see
-// `regular_unique_column_swap_still_allowed_deferred` below.
+// This is the IPK counterpart of the virtual-rowid tests above. The deferred
+// final-state PK/UNIQUE check for regular columns is unchanged; the additive
+// immediate check for those columns is covered by the #5588 tests near the end
+// of this file, and the legitimate deferred *shift* cases (#5137) still pass —
+// see `regular_unique_column_shift_still_allowed_deferred` below.
 // ---------------------------------------------------------------------------
 
 /// IPK swap via the IPK column: `UPDATE t SET k=CASE...` errors on the
@@ -449,35 +451,38 @@ fn set_ipk_self_noop_ok() {
     );
 }
 
-/// REGRESSION GUARD (#5575 caution): the immediate IPK-as-rowid check must NOT
-/// leak into regular (non-rowid) UNIQUE columns. VibeSQL defers UNIQUE checks
-/// for regular columns to the final state (issue #5137), which lets a swap on a
-/// non-IPK UNIQUE column be accepted here. `k` below is a plain UNIQUE column
-/// (the rowid is the separate `id` IPK), so the immediate rowid relocation check
-/// must not fire — this swap must STILL be allowed exactly as before this fix.
+/// Issue #5588: a single-statement swap on a regular (non-rowid) UNIQUE column
+/// errors IMMEDIATELY in sqlite3 3.51.0, exactly like the IPK swap above. `k`
+/// here is a plain UNIQUE column (the rowid is the separate `id` IPK). Processing
+/// in ascending rowid order, `id=1`'s `k` 10 -> 20 collides with `id=2`'s
+/// still-live `k=20`, so sqlite3 reports `UNIQUE constraint failed: u.k`.
 ///
-/// (sqlite3 3.51.0 actually rejects this regular-column swap too — VibeSQL's
-/// deferred acceptance is a separate, pre-existing parity gap that is explicitly
-/// OUT OF SCOPE for #5575; #5575 must not regress it in either direction.)
+/// NOTE: this test previously asserted that the swap was ACCEPTED (VibeSQL's old
+/// deferred-only behavior). #5588 closes that parity gap by adding an immediate
+/// intermediate-collision check (`validate_unique_relocation`) for regular UNIQUE
+/// columns, mirroring the rowid/IPK path. The deferred final-state validator is
+/// unchanged; the legitimate deferred *shift* cases (#5137) still pass — see
+/// `regular_unique_column_shift_still_allowed_deferred` below.
 #[test]
-fn regular_unique_column_swap_still_allowed_deferred() {
+fn regular_unique_column_swap_errors_intermediate_collision() {
     let mut db = vibesql_storage::Database::new();
     ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
     ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
     ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
 
-    // Swap the regular UNIQUE column `k` (NOT the IPK). Deferred final-state check
-    // sees no duplicate, so VibeSQL accepts it — the immediate IPK relocation
-    // check (which only inspects the rowid-alias column) must stay clear of it.
-    assert_eq!(
-        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END").unwrap(),
-        2
+    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected regular-UNIQUE swap to error immediately, got: {}",
+        err
     );
 
+    // Table unchanged after the aborted UPDATE.
     let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
     let got: Vec<(i64, i64)> =
         rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
-    assert_eq!(got, vec![(1, 20), (2, 10)]);
+    assert_eq!(got, vec![(1, 10), (2, 20)]);
 }
 
 /// REGRESSION GUARD: a regular UNIQUE-column *shift* (`k = k - 10`) on a table
@@ -690,4 +695,304 @@ fn shadow_column_named_rowid_reflected_in_triggers() {
     assert_eq!(int(&after_delete[0].values[2]), 200);
     assert_eq!(int(&after_delete[0].values[3]), 300);
     assert_eq!(int(&after_delete[0].values[4]), 400);
+}
+
+// ===========================================================================
+// Issue #5588: regular (non-rowid) UNIQUE / PRIMARY KEY columns also get the
+// IMMEDIATE row-by-row intermediate-collision check, mirroring the rowid/IPK
+// path (#5559/#5575). sqlite3 3.51.0 processes the UPDATE in ascending rowid
+// order with vacate-before-occupy. Every case below was verified against
+// /usr/bin/sqlite3 3.51.0. The genuine deferred-shift cases that sqlite3 still
+// accepts (issue #5137) are covered both here (the `*_ok` cases) and in
+// tests/update_deferred_uniqueness_tests.rs — those must keep passing.
+// ===========================================================================
+
+/// `UPDATE u SET k = k + 10` (ascending shift) on a regular UNIQUE column errors:
+/// processing `id=1` first, `k` 10 -> 20 collides with `id=2`'s still-live 20.
+/// sqlite3 3.51.0: `UNIQUE constraint failed: u.k`.
+#[test]
+fn regular_unique_plus_ten_cascade_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(3, 30)");
+
+    let err = update(&mut db, "UPDATE u SET k = k + 10").unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected ascending-shift UNIQUE error, got: {}",
+        err
+    );
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 10), (2, 20), (3, 30)]);
+}
+
+/// `UPDATE u SET k = k - 10` (descending shift) on a regular UNIQUE column
+/// SUCCEEDS — each old slot is vacated before the next row reuses it (issue
+/// #5137). sqlite3 3.51.0 accepts this; the immediate check must not regress it.
+#[test]
+fn regular_unique_minus_ten_cascade_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(3, 30)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = k - 10").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 0), (2, 10), (3, 20)]);
+}
+
+/// Regular UNIQUE 3-cycle (10->20->30->10) errors on the first intermediate
+/// collision. sqlite3 3.51.0: `UNIQUE constraint failed: u.k`.
+#[test]
+fn regular_unique_three_cycle_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(3, 30)");
+
+    let err = update(
+        &mut db,
+        "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 30 WHEN 30 THEN 10 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected 3-cycle UNIQUE error, got: {}",
+        err
+    );
+}
+
+/// Shifting one regular-UNIQUE row onto an existing live value errors. sqlite3
+/// 3.51.0: `UNIQUE constraint failed: u.k`.
+#[test]
+fn regular_unique_shift_into_occupied_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    let err = update(&mut db, "UPDATE u SET k = 20 WHERE k = 10").unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected shift-into-occupied UNIQUE error, got: {}",
+        err
+    );
+}
+
+/// Moving one regular-UNIQUE row to a free value SUCCEEDS (no collision).
+#[test]
+fn regular_unique_move_to_gap_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = 99 WHERE k = 10").unwrap(), 1);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 99), (2, 20)]);
+}
+
+/// `UPDATE u SET k = -k` (negation, no key reuse) SUCCEEDS. New values (-10,-20)
+/// collide with no live key. sqlite3 3.51.0 accepts.
+#[test]
+fn regular_unique_negation_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = -k").unwrap(), 2);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, -10), (2, -20)]);
+}
+
+/// free-before-reuse SUCCEEDS: `id=1` (k=10) vacates 10 to a gap (99), then
+/// `id=2` (k=20) takes the freed 10. Processed ascending, the slot is free in
+/// time. sqlite3 3.51.0 accepts.
+#[test]
+fn regular_unique_free_before_reuse_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    assert_eq!(
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 99 WHEN 20 THEN 10 END").unwrap(),
+        2
+    );
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 99), (2, 10)]);
+}
+
+/// reuse-before-free ERRORS: rowid order is decisive. `id=1` holds k=20 and wants
+/// k=10, but `id=2` still holds k=10 when `id=1` is processed first. sqlite3
+/// 3.51.0: `UNIQUE constraint failed: u.k` (contrast with free-before-reuse).
+#[test]
+fn regular_unique_reuse_before_free_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 10)");
+
+    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 20 THEN 10 WHEN 10 THEN 99 END")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected reuse-before-free UNIQUE error, got: {}",
+        err
+    );
+}
+
+/// Swapping a regular UNIQUE column to NULL for all rows SUCCEEDS — multiple
+/// NULLs are allowed in a UNIQUE column. sqlite3 3.51.0 accepts.
+#[test]
+fn regular_unique_to_null_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = NULL").unwrap(), 2);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    assert_eq!(rows.len(), 2);
+    assert!(matches!(rows[0].values[1], SqlValue::Null));
+    assert!(matches!(rows[1].values[1], SqlValue::Null));
+}
+
+/// Composite table-level `UNIQUE(a,b)` swap errors immediately, reported against
+/// both columns. sqlite3 3.51.0: `UNIQUE constraint failed: c.a, c.b`.
+#[test]
+fn regular_composite_unique_swap_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE c(id INTEGER PRIMARY KEY, a INT, b INT, UNIQUE(a, b))");
+    ddl(&mut db, "INSERT INTO c VALUES(1, 1, 1)");
+    ddl(&mut db, "INSERT INTO c VALUES(2, 2, 2)");
+
+    let err = update(
+        &mut db,
+        "UPDATE c SET a = CASE a WHEN 1 THEN 2 WHEN 2 THEN 1 END, \
+         b = CASE b WHEN 1 THEN 2 WHEN 2 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: c.a, c.b"),
+        "expected composite-UNIQUE swap error, got: {}",
+        err
+    );
+}
+
+/// Composite PRIMARY KEY swap on a virtual-rowid table errors immediately,
+/// reported against the PK columns. sqlite3 3.51.0: `UNIQUE constraint failed: c.a, c.b`.
+#[test]
+fn composite_pk_swap_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE c(a INT, b INT, v TEXT, PRIMARY KEY(a, b))");
+    ddl(&mut db, "INSERT INTO c VALUES(1, 1, 'r1')");
+    ddl(&mut db, "INSERT INTO c VALUES(2, 2, 'r2')");
+
+    let err = update(
+        &mut db,
+        "UPDATE c SET a = CASE a WHEN 1 THEN 2 WHEN 2 THEN 1 END, \
+         b = CASE b WHEN 1 THEN 2 WHEN 2 THEN 1 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: c.a, c.b"),
+        "expected composite-PK swap error, got: {}",
+        err
+    );
+}
+
+/// Composite PRIMARY KEY descending shift (`b = b - 1`) SUCCEEDS — the #5137
+/// deferred case. Must keep passing alongside the swap-errors case above.
+#[test]
+fn composite_pk_descending_shift_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE c(a INT, b INT, v TEXT, PRIMARY KEY(a, b))");
+    ddl(&mut db, "INSERT INTO c VALUES(1, 0, 'r1')");
+    ddl(&mut db, "INSERT INTO c VALUES(1, 1, 'r2')");
+    ddl(&mut db, "INSERT INTO c VALUES(1, 2, 'r3')");
+
+    assert_eq!(update(&mut db, "UPDATE c SET b = b - 1").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT a, b FROM c ORDER BY b");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, -1), (1, 0), (1, 1)]);
+}
+
+/// User-defined `CREATE UNIQUE INDEX` swap errors immediately, reported against
+/// the indexed column. sqlite3 3.51.0: `UNIQUE constraint failed: u.k`.
+#[test]
+fn user_unique_index_swap_errors() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT)");
+    ddl(&mut db, "CREATE UNIQUE INDEX u_k ON u(k)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+
+    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected user-UNIQUE-index swap error, got: {}",
+        err
+    );
+}
+
+/// User-defined UNIQUE index descending shift (`k = k - 10`) SUCCEEDS — the
+/// #5137 deferred case via the user-index path. Must keep passing.
+#[test]
+fn user_unique_index_descending_shift_ok() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(id INTEGER PRIMARY KEY, k INT)");
+    ddl(&mut db, "CREATE UNIQUE INDEX u_k ON u(k)");
+    ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
+    ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
+    ddl(&mut db, "INSERT INTO u VALUES(3, 30)");
+
+    assert_eq!(update(&mut db, "UPDATE u SET k = k - 10").unwrap(), 3);
+
+    let rows = select(&mut db, "SELECT id, k FROM u ORDER BY id");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 0), (2, 10), (3, 20)]);
+}
+
+/// Regular UNIQUE column on a VIRTUAL-rowid table (no IPK): swap still errors via
+/// the storage rowid order. sqlite3 3.51.0: `UNIQUE constraint failed: u.k`.
+#[test]
+fn regular_unique_swap_errors_virtual_rowid_table() {
+    let mut db = vibesql_storage::Database::new();
+    ddl(&mut db, "CREATE TABLE u(x TEXT, k INT UNIQUE)");
+    ddl(&mut db, "INSERT INTO u VALUES('a', 10)");
+    ddl(&mut db, "INSERT INTO u VALUES('b', 20)");
+
+    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: u.k"),
+        "expected virtual-rowid table UNIQUE swap error, got: {}",
+        err
+    );
 }

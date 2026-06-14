@@ -26,6 +26,7 @@ use super::{
         detect_surviving_replace_conflict, find_conflicting_rows_for_update,
         resolve_cross_update_conflicts_for_replace, validate_cross_update_uniqueness,
         validate_post_statement_uniqueness, validate_rowid_relocation,
+        validate_unique_relocation,
     },
     row_selector::RowSelector,
     triggers,
@@ -489,6 +490,20 @@ pub(super) fn execute_internal(
         // sqlite3 (triggerC-7.x). IPK tables write the real PK column and are
         // covered by the PK check above.
         validate_rowid_relocation(&updates, schema, table_for_check)?;
+
+        // Regular (non-rowid) UNIQUE / PRIMARY KEY columns also get sqlite3's
+        // IMMEDIATE row-by-row intermediate-collision check (issue #5588): a
+        // single-statement swap / ascending-shift on a UNIQUE column errors even
+        // though its FINAL state is duplicate-free. The deferred validator above
+        // still permits #5137 descending-shift / negation cases that sqlite3
+        // accepts; this additive check only rejects what sqlite3 rejects.
+        validate_unique_relocation(
+            &updates,
+            schema,
+            table_for_check,
+            database,
+            table_name,
+        )?;
     }
 
     // For REPLACE: handle cross-update conflicts by keeping only the last update
@@ -1920,6 +1935,16 @@ fn execute_update_from(
 
         // Virtual-rowid relocation collision check (see default-path call).
         validate_rowid_relocation(&updates, schema, table_for_check)?;
+
+        // Regular (non-rowid) UNIQUE / PRIMARY KEY immediate intermediate-collision
+        // check (issue #5588) — see default-path call for rationale.
+        validate_unique_relocation(
+            &updates,
+            schema,
+            table_for_check,
+            database,
+            table_name,
+        )?;
     }
 
     // Handle CASCADE updates for primary key changes

@@ -818,3 +818,207 @@ pub(super) fn validate_rowid_relocation(
 
     Ok(())
 }
+
+/// Validate relocations on **regular (non-rowid) UNIQUE / PRIMARY KEY** keys with
+/// sqlite3's IMMEDIATE row-by-row semantics (issue #5588).
+///
+/// [`validate_rowid_relocation`] applies the immediate intermediate-collision
+/// check to the rowid / INTEGER-PRIMARY-KEY column. This function does the same
+/// for the other unique key spaces — composite/regular PRIMARY KEYs (on
+/// virtual-rowid tables), table-level `UNIQUE(...)` constraints, and
+/// `CREATE UNIQUE INDEX` indexes — because sqlite3 3.51.0 checks those keys
+/// IMMEDIATELY too, not deferred to the final statement state.
+///
+/// ## sqlite3 3.51.0 behavior (verified against `/usr/bin/sqlite3` 3.51.0)
+///
+/// sqlite3 processes an UPDATE one row at a time in ascending rowid order. As it
+/// rewrites each row it removes the row's OLD index entry and then inserts its
+/// NEW entry, requiring the new key to be free *at that moment*. The live set at
+/// that moment is the union of (a) rows not yet processed and (b) rows already
+/// relocated earlier in this statement. A key that was vacated earlier in the
+/// statement is reusable; a key still held by an un-processed row is a conflict.
+///
+/// On a `id INTEGER PRIMARY KEY, k INT UNIQUE` table (so `k`'s rowids are
+/// `id` 1,2,3 in ascending order):
+///
+/// | statement                                   | sqlite3 3.51.0                       |
+/// |---------------------------------------------|--------------------------------------|
+/// | `SET k = CASE k WHEN 10 THEN 20 ...` (swap) | `UNIQUE constraint failed: u.k`      |
+/// | `SET k = k + 10` (ascending cascade)        | `UNIQUE constraint failed: u.k`      |
+/// | `SET k = k - 10` (descending cascade)       | ok — each old slot vacated first     |
+/// | 3-cycle 10->20->30->10                       | `UNIQUE constraint failed: u.k`      |
+/// | shift one row onto an existing value         | `UNIQUE constraint failed: u.k`      |
+/// | move one row to a free value                 | ok                                   |
+/// | `SET k = -k` (negation, no key reuse)        | ok                                   |
+/// | reuse-before-free (rowid order decides)      | `UNIQUE constraint failed: u.k`      |
+/// | free-before-reuse (rowid order decides)      | ok                                   |
+/// | composite `UNIQUE(a,b)` swap                  | `UNIQUE constraint failed: u.a, u.b` |
+/// | `SET k = NULL` (NULLs are distinct)          | ok                                   |
+///
+/// The `+1`/`-1` asymmetry and the rowid-order dependence are identical to the
+/// rowid path — they fall out of processing in ascending rowid order with
+/// vacate-before-occupy.
+///
+/// ## Relationship to the deferred check ([`validate_post_statement_uniqueness`])
+///
+/// This is an ADDITIVE immediate check that runs alongside the deferred
+/// final-state validator, mirroring how the rowid path was added in #5575/#5587.
+/// The deferred validator still runs (and still permits transient-duplicate
+/// shifts whose FINAL state is unique — issue #5137); this function then rejects
+/// the cases sqlite3 rejects on an intermediate collision. Because the algorithm
+/// is vacate-before-occupy in ascending rowid order, every #5137 descending-shift
+/// / negation / composite-shift case that sqlite3 accepts is also accepted here,
+/// so the deferred behavior those tests lock in is preserved unchanged.
+///
+/// The IPK column is intentionally skipped here (it is the rowid alias, already
+/// covered by [`validate_rowid_relocation`]); a composite PRIMARY KEY containing
+/// the IPK is still a multi-column key and is checked as a whole.
+pub(super) fn validate_unique_relocation(
+    updates: &[PendingUpdate],
+    schema: &TableSchema,
+    table: &Table,
+    database: &Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    // A row's effective rowid drives the processing order so we reproduce
+    // sqlite3's ascending-rowid intermediate states. Matches the read path /
+    // `validate_rowid_relocation` (Row::row_id, fallback physical index + 1).
+    let order_rowid = |row: &Row, physical_index: usize| -> u64 {
+        row.row_id.unwrap_or((physical_index + 1) as u64)
+    };
+
+    // Run the shared immediate intermediate-collision algorithm for one key
+    // space (a set of column indices forming a UNIQUE/PK key). `conflict_label`
+    // is the already-qualified `table.col[, table.col...]` string sqlite3 emits.
+    let check_key_space =
+        |col_idxs: &[usize], conflict_label: &str| -> Result<(), ExecutorError> {
+            if col_idxs.is_empty() {
+                return Ok(());
+            }
+
+            let key_of = |row: &Row| -> Vec<SqlValue> {
+                col_idxs.iter().map(|&i| row.values[i].clone()).collect()
+            };
+
+            // Relocations that actually change this key, ordered by old rowid.
+            // (order_rowid, old_key, new_key). NULL handling is applied during
+            // the scan below, not here, so a move to/from NULL still vacates.
+            let mut relocations: Vec<(u64, Vec<SqlValue>, Vec<SqlValue>)> = Vec::new();
+            for u in updates {
+                let old_key = key_of(&u.old_row);
+                let new_key = key_of(&u.new_row);
+                if old_key == new_key {
+                    continue; // no-op for this key space
+                }
+                relocations.push((order_rowid(&u.old_row, u.row_index), old_key, new_key));
+            }
+            if relocations.is_empty() {
+                return Ok(());
+            }
+
+            // `occupied` is every live row's current (non-NULL) key. A key that
+            // contains NULL is never inserted because NULL != NULL in SQL — such
+            // rows neither occupy nor conflict.
+            let mut occupied: HashSet<Vec<SqlValue>> = table
+                .scan_live()
+                .map(|(_, row)| key_of(row))
+                .filter(|k| !k.contains(&SqlValue::Null))
+                .collect();
+
+            // Ascending old-rowid order reproduces sqlite3's intermediate states
+            // and the +1/-1 (and rowid-order) asymmetry.
+            relocations.sort_by_key(|&(order, _, _)| order);
+
+            for (_order, old_key, new_key) in relocations {
+                // Vacate the old key first (no-op if it held a NULL and so was
+                // never in `occupied`).
+                if !old_key.contains(&SqlValue::Null) {
+                    occupied.remove(&old_key);
+                }
+                // Occupying a NULL-containing key never conflicts.
+                if new_key.contains(&SqlValue::Null) {
+                    continue;
+                }
+                if !occupied.insert(new_key) {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "UNIQUE constraint failed: {}",
+                        conflict_label
+                    )));
+                }
+            }
+
+            Ok(())
+        };
+
+    // 1. PRIMARY KEY — but skip the rowid-alias (IPK) column, which
+    //    `validate_rowid_relocation` already handles immediately. A composite PK
+    //    that merely *contains* the IPK is still a multi-column key checked here.
+    if schema.rowid_alias_column.is_none() {
+        if let (Some(pk_indices), Some(pk_cols)) =
+            (schema.get_primary_key_indices(), schema.primary_key.as_ref())
+        {
+            let label = pk_cols
+                .iter()
+                .map(|c| format!("{}.{}", schema.name, c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            check_key_space(&pk_indices, &label)?;
+        }
+    }
+
+    // 2. Table-level UNIQUE(...) constraints.
+    let unique_constraint_indices = schema.get_unique_constraint_indices();
+    for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+        let label = schema.unique_constraints[constraint_idx]
+            .iter()
+            .map(|c| format!("{}.{}", schema.name, c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        check_key_space(unique_indices, &label)?;
+    }
+
+    // 3. User-defined UNIQUE indexes (CREATE UNIQUE INDEX). Expression indexes
+    //    are skipped (handled elsewhere), matching the deferred validator.
+    for index_name in database.list_indexes_for_table(table_name) {
+        let index_metadata = match database.get_index(&index_name) {
+            Some(m) => m,
+            None => continue,
+        };
+        if !index_metadata.unique {
+            continue;
+        }
+
+        let mut col_idxs: Vec<usize> = Vec::with_capacity(index_metadata.columns.len());
+        let mut is_expression_index = false;
+        for ic in &index_metadata.columns {
+            if ic.get_expression().is_some() {
+                is_expression_index = true;
+                break;
+            }
+            match ic.column_name().and_then(|cn| schema.get_column_index(cn)) {
+                Some(ci) => col_idxs.push(ci),
+                None => {
+                    is_expression_index = true;
+                    break;
+                }
+            }
+        }
+        if is_expression_index {
+            continue;
+        }
+
+        let label = index_metadata
+            .columns
+            .iter()
+            .map(|col| format!("{}.{}", table_name, col.column_name().unwrap_or("?")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        check_key_space(&col_idxs, &label)?;
+    }
+
+    Ok(())
+}
