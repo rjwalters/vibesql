@@ -215,7 +215,7 @@ impl IndexManager {
             let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
             let memory_bytes = self.estimate_index_memory(table_rows.len(), key_size);
 
-            let data = IndexData::InMemory { data: index_data_map, pending_deletions: Vec::new() };
+            let data = IndexData::InMemory { data: index_data_map };
 
             (data, memory_bytes, 0, crate::database::IndexBackend::InMemory)
         };
@@ -302,7 +302,7 @@ impl IndexManager {
         let memory_bytes = self.estimate_index_memory(index_data_map.len(), key_size);
 
         let index_data =
-            IndexData::InMemory { data: index_data_map, pending_deletions: Vec::new() };
+            IndexData::InMemory { data: index_data_map };
 
         // Register the index with resource tracker
         self.resource_tracker.register_index(

@@ -357,7 +357,7 @@ mod tests {
         for (i, key) in keys.into_iter().enumerate() {
             data.insert(vec![key], vec![i]);
         }
-        IndexData::InMemory { data, pending_deletions: vec![] }
+        IndexData::InMemory { data }
     }
 
     fn range(

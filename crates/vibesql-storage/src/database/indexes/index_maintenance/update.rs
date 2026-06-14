@@ -348,10 +348,9 @@ impl IndexManager {
             if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 if let Some(metadata) = self.indexes.get(&index_name) {
                     match index_data {
-                        IndexData::InMemory { data, pending_deletions } => {
-                            // Clear existing data and pending deletions
+                        IndexData::InMemory { data } => {
+                            // Clear existing data
                             data.clear();
-                            pending_deletions.clear();
 
                             // Rebuild from current table rows
                             for (row_index, row) in table_rows.iter().enumerate() {
@@ -667,9 +666,8 @@ impl IndexManager {
         for index_name in indexes_to_clear {
             if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 match index_data {
-                    IndexData::InMemory { data, pending_deletions } => {
+                    IndexData::InMemory { data } => {
                         data.clear();
-                        pending_deletions.clear();
                     }
                     IndexData::DiskBacked { .. } => {
                         // Expression indexes currently use InMemory storage

@@ -27,8 +27,6 @@ pub struct OwnedStreamingRangeScan<'a> {
     data: &'a std::collections::BTreeMap<Vec<SqlValue>, Vec<usize>>,
     /// Current position within the current key's row indices
     current_indices: Option<std::slice::Iter<'a, usize>>,
-    /// Reference to pending deletions for adjustment
-    pending_deletions: &'a [usize],
     /// Normalized start bound key (owned)
     start_key: Option<Vec<SqlValue>>,
     /// Normalized end bound key (owned)
@@ -49,7 +47,6 @@ impl<'a> OwnedStreamingRangeScan<'a> {
     /// Returns None if the range is empty or invalid.
     pub fn new(
         data: &'a std::collections::BTreeMap<Vec<SqlValue>, Vec<usize>>,
-        pending_deletions: &'a [usize],
         start: Option<SqlValue>,
         end: Option<SqlValue>,
         inclusive_start: bool,
@@ -72,7 +69,6 @@ impl<'a> OwnedStreamingRangeScan<'a> {
         Some(Self {
             data,
             current_indices: None,
-            pending_deletions,
             start_key,
             end_key,
             inclusive_start,
@@ -80,17 +76,6 @@ impl<'a> OwnedStreamingRangeScan<'a> {
             range_iter: None,
             initialized: false,
         })
-    }
-
-    /// Adjust a row index by accounting for pending deletions.
-    #[inline]
-    fn adjust_row_index(&self, row_idx: usize) -> usize {
-        if self.pending_deletions.is_empty() {
-            row_idx
-        } else {
-            let decrement = self.pending_deletions.partition_point(|&d| d < row_idx);
-            row_idx - decrement
-        }
     }
 
     /// Initialize the range iterator if not already done.
@@ -144,7 +129,7 @@ impl Iterator for OwnedStreamingRangeScan<'_> {
             // Try to get the next index from the current key's indices
             if let Some(ref mut indices) = self.current_indices {
                 if let Some(&row_idx) = indices.next() {
-                    return Some(self.adjust_row_index(row_idx));
+                    return Some(row_idx);
                 }
             }
 
@@ -180,12 +165,9 @@ mod tests {
         data.insert(vec![SqlValue::Integer(4)], vec![4, 5, 6]);
         data.insert(vec![SqlValue::Integer(5)], vec![7]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Range scan for values 2..=4
         let iter = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             Some(SqlValue::Integer(2)),
             Some(SqlValue::Integer(4)),
             true,
@@ -198,44 +180,14 @@ mod tests {
     }
 
     #[test]
-    fn test_owned_streaming_range_scan_with_pending_deletions() {
-        let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
-        data.insert(vec![SqlValue::Integer(1)], vec![0]);
-        data.insert(vec![SqlValue::Integer(2)], vec![1]);
-        data.insert(vec![SqlValue::Integer(3)], vec![2]);
-        data.insert(vec![SqlValue::Integer(4)], vec![3]);
-        data.insert(vec![SqlValue::Integer(5)], vec![4]);
-
-        // Row at index 1 was deleted
-        let pending_deletions: Vec<usize> = vec![1];
-
-        // Full scan
-        let iter = OwnedStreamingRangeScan::new(&data, &pending_deletions, None, None, true, true)
-            .unwrap();
-
-        let results: Vec<usize> = iter.collect();
-        // Original: [0, 1, 2, 3, 4]
-        // After adjusting for deletion at 1:
-        // - 0 stays 0 (no deletions before it)
-        // - 1 stays 1 (deletion at 1 is not < 1)
-        // - 2 becomes 1 (1 deletion before it)
-        // - 3 becomes 2 (1 deletion before it)
-        // - 4 becomes 3 (1 deletion before it)
-        assert_eq!(results, vec![0, 1, 1, 2, 3]);
-    }
-
-    #[test]
     fn test_owned_streaming_range_scan_empty_range() {
         let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         data.insert(vec![SqlValue::Integer(1)], vec![0]);
         data.insert(vec![SqlValue::Integer(5)], vec![4]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Range 3..=4 has no matching keys
         let iter = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             Some(SqlValue::Integer(3)),
             Some(SqlValue::Integer(4)),
             true,
@@ -253,12 +205,9 @@ mod tests {
         let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         data.insert(vec![SqlValue::Integer(1)], vec![0]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Inverted range: 5..=1
         let result = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             Some(SqlValue::Integer(5)),
             Some(SqlValue::Integer(1)),
             true,
@@ -276,12 +225,9 @@ mod tests {
         data.insert(vec![SqlValue::Integer(4)], vec![3]);
         data.insert(vec![SqlValue::Integer(5)], vec![4]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Range 2 < x < 4 (exclusive both ends)
         let iter = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             Some(SqlValue::Integer(2)),
             Some(SqlValue::Integer(4)),
             false,
@@ -300,12 +246,9 @@ mod tests {
         data.insert(vec![SqlValue::Integer(2)], vec![1]);
         data.insert(vec![SqlValue::Integer(3)], vec![2]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Range ..=2
         let iter = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             None,
             Some(SqlValue::Integer(2)),
             true,
@@ -324,12 +267,9 @@ mod tests {
         data.insert(vec![SqlValue::Integer(2)], vec![1]);
         data.insert(vec![SqlValue::Integer(3)], vec![2]);
 
-        let pending_deletions: Vec<usize> = vec![];
-
         // Range 2..
         let iter = OwnedStreamingRangeScan::new(
             &data,
-            &pending_deletions,
             Some(SqlValue::Integer(2)),
             None,
             true,

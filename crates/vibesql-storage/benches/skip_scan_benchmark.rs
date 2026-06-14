@@ -53,7 +53,7 @@ fn create_composite_index_data(row_count: usize, prefix_cardinality: usize) -> I
         data.insert(key, vec![i]);
     }
 
-    IndexData::InMemory { data, pending_deletions: Vec::new() }
+    IndexData::InMemory { data }
 }
 
 /// Create table statistics for cost estimation
@@ -154,7 +154,7 @@ fn bench_skip_scan_selectivity(c: &mut Criterion) {
         // Multiple rows can have same key - use row index as value
         data.entry(key).or_insert_with(Vec::new).push(i);
     }
-    let index = IndexData::InMemory { data, pending_deletions: Vec::new() };
+    let index = IndexData::InMemory { data };
 
     group.throughput(Throughput::Elements(row_count as u64));
 

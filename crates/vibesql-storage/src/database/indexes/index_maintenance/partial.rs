@@ -376,9 +376,8 @@ impl IndexManager {
         for index_name in indexes_to_clear {
             if let Some(index_data) = self.index_data.get_mut(&index_name) {
                 match index_data {
-                    IndexData::InMemory { data, pending_deletions } => {
+                    IndexData::InMemory { data } => {
                         data.clear();
-                        pending_deletions.clear();
                     }
                     IndexData::DiskBacked { .. } => {
                         // Disk-backed partial-index clearing is not yet supported.

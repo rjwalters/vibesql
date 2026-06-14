@@ -68,19 +68,12 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Handle empty prefix - return all rows in reverse order
                 if normalized_prefix.is_empty() {
                     let mut all_rows: Vec<usize> = Vec::new();
                     for row_indices in data.values().rev() {
                         all_rows.extend(row_indices.iter().rev());
-                    }
-                    // Apply lazy adjustment for pending deletions
-                    if !pending_deletions.is_empty() {
-                        for row_idx in &mut all_rows {
-                            let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                            *row_idx -= decrement;
-                        }
                     }
                     return all_rows;
                 }
@@ -106,14 +99,6 @@ impl IndexData {
                     {
                         // Also reverse the row_indices within each key for full DESC order
                         matching_row_indices.extend(row_indices.iter().rev());
-                    }
-                }
-
-                // Apply lazy adjustment for pending deletions
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -197,17 +182,7 @@ impl IndexData {
             prefix.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
-                // Helper closure to apply pending deletions adjustment
-                let apply_adjustment = |result: &mut Vec<usize>| {
-                    if !pending_deletions.is_empty() {
-                        for row_idx in result.iter_mut() {
-                            let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                            *row_idx -= decrement;
-                        }
-                    }
-                };
-
+            IndexData::InMemory { data } => {
                 // Handle empty prefix - take last `limit` rows from entire index
                 if normalized_prefix.is_empty() {
                     let mut result = Vec::with_capacity(limit);
@@ -215,12 +190,10 @@ impl IndexData {
                         for &row_idx in row_indices.iter().rev() {
                             result.push(row_idx);
                             if result.len() >= limit {
-                                apply_adjustment(&mut result);
                                 return result;
                             }
                         }
                     }
-                    apply_adjustment(&mut result);
                     return result;
                 }
 
@@ -245,14 +218,12 @@ impl IndexData {
                         for &row_idx in row_indices.iter().rev() {
                             matching_row_indices.push(row_idx);
                             if matching_row_indices.len() >= limit {
-                                apply_adjustment(&mut matching_row_indices);
                                 return matching_row_indices;
                             }
                         }
                     }
                 }
 
-                apply_adjustment(&mut matching_row_indices);
                 matching_row_indices
             }
             IndexData::DiskBacked { btree, .. } => {
@@ -314,7 +285,7 @@ mod tests {
             let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
             data.insert(normalized_key, row_indices);
         }
-        IndexData::InMemory { data, pending_deletions: Vec::new() }
+        IndexData::InMemory { data }
     }
 
     // ========================================================================

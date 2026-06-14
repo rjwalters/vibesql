@@ -19,7 +19,7 @@ fn create_test_index_data(entries: Vec<(Vec<SqlValue>, Vec<usize>)>) -> IndexDat
         let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
         data.insert(normalized_key, row_indices);
     }
-    IndexData::InMemory { data, pending_deletions: Vec::new() }
+    IndexData::InMemory { data }
 }
 
 // ========================================================================

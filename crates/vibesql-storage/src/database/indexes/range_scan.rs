@@ -35,7 +35,7 @@ impl IndexData {
         inclusive_end: bool,
     ) -> Vec<usize> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 use std::ops::Bound;
 
                 let mut matching_row_indices = Vec::new();
@@ -79,14 +79,6 @@ impl IndexData {
                                 break; // Stop iteration when prefix no longer matches
                             }
                             matching_row_indices.extend(row_indices);
-                        }
-                        // Apply lazy adjustment for pending deletions
-                        if !pending_deletions.is_empty() {
-                            for row_idx in &mut matching_row_indices {
-                                let decrement =
-                                    pending_deletions.partition_point(|&d| d < *row_idx);
-                                *row_idx -= decrement;
-                            }
                         }
                         return matching_row_indices;
                     }
@@ -239,14 +231,6 @@ impl IndexData {
 
                             matching_row_indices.extend(row_indices);
                         }
-                        // Apply lazy adjustment for pending deletions
-                        if !pending_deletions.is_empty() {
-                            for row_idx in &mut matching_row_indices {
-                                let decrement =
-                                    pending_deletions.partition_point(|&d| d < *row_idx);
-                                *row_idx -= decrement;
-                            }
-                        }
                         return matching_row_indices;
                     }
                 }
@@ -290,14 +274,6 @@ impl IndexData {
                     data.range::<[SqlValue], _>((start_bound, end_bound))
                 {
                     matching_row_indices.extend(row_indices);
-                }
-
-                // Apply lazy adjustment for pending deletions
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
-                    }
                 }
 
                 // Return row indices in the order established by BTreeMap iteration
@@ -448,7 +424,7 @@ impl IndexData {
         }
 
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 use std::ops::Bound;
 
                 let mut matching_row_indices = Vec::with_capacity(limit);
@@ -499,24 +475,8 @@ impl IndexData {
                     for &row_idx in row_indices {
                         matching_row_indices.push(row_idx);
                         if matching_row_indices.len() >= limit {
-                            // Apply lazy adjustment for pending deletions before returning
-                            if !pending_deletions.is_empty() {
-                                for idx in &mut matching_row_indices {
-                                    let decrement =
-                                        pending_deletions.partition_point(|&d| d < *idx);
-                                    *idx -= decrement;
-                                }
-                            }
                             return matching_row_indices;
                         }
-                    }
-                }
-
-                // Apply lazy adjustment for pending deletions
-                if !pending_deletions.is_empty() {
-                    for row_idx in &mut matching_row_indices {
-                        let decrement = pending_deletions.partition_point(|&d| d < *row_idx);
-                        *row_idx -= decrement;
                     }
                 }
 
@@ -589,7 +549,7 @@ impl IndexData {
         inclusive_end: bool,
     ) -> Option<OwnedStreamingRangeScan<'a>> {
         match self {
-            IndexData::InMemory { data, pending_deletions } => {
+            IndexData::InMemory { data } => {
                 // Check if this is a multi-column index (streaming not optimized for these)
                 let is_multi_column = data.keys().next().is_some_and(|k| k.len() > 1);
                 if is_multi_column {
@@ -605,7 +565,6 @@ impl IndexData {
                 // Use OwnedStreamingRangeScan which handles bounds and uses BTreeMap::range()
                 OwnedStreamingRangeScan::new(
                     data,
-                    pending_deletions,
                     normalized_start,
                     normalized_end,
                     inclusive_start,
