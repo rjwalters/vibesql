@@ -18,34 +18,74 @@ use crate::errors::ExecutorError;
 /// (e.g. triggerC-2.2/2.3 drive ~500 levels). SQLite's compile-time default is
 /// `SQLITE_MAX_TRIGGER_DEPTH = 1000` (sqlite3 3.51.0). See #5479.
 ///
-/// STACK SAFETY (why 700, not 1000): trigger recursion is implemented as native
-/// Rust call-stack recursion -- each nested DML level adds ~8.7 KiB of stack in
-/// release builds (parse + plan + insert + fire). Empirical boundary on an 8 MiB
-/// thread is a stack overflow at depth ~960. A static cap of 1000 would
-/// therefore CRASH before the cap check ever fired (verified:
-/// `INSERT INTO t2 VALUES(999)` aborts with "stack overflow").
+/// On native targets this now matches SQLite exactly: **1000** (#5534). It used
+/// to be 700, capped for stack safety because trigger recursion is implemented
+/// as native Rust call-stack recursion (~8.7 KiB/level in release) and an 8 MiB
+/// thread overflows at depth ~960 — so a static 1000 would CRASH before the cap
+/// check fired. We removed that stack dependency by growing the native stack
+/// on demand at the trigger-recursion entry point (`stacker::maybe_grow` in
+/// [`grow_stack_for_trigger`]): each nested level ensures a large red-zone of
+/// free stack before re-entering DML, allocating a fresh heap-backed stack
+/// segment when the current thread's stack runs low. Reaching the 1000 cap is
+/// therefore a clean "too many levels of trigger recursion" error, never an
+/// overflow, regardless of the thread's fixed stack size.
 ///
-/// 700 is chosen to: (a) allow the ~500-level recursion SQLite's triggerC-2.x
-/// tests require, while (b) keeping ~24% headroom below the ~960 release-stack
-/// overflow cliff (700 * 8.7 KiB ~= 6.1 MiB of an 8 MiB budget).
+/// WASM has no `stacker` backend, so trigger recursion there stays on the fixed
+/// native stack and must keep the lower stack-safe cap; see
+/// [`MAX_TRIGGER_RECURSION_DEPTH`]'s wasm definition below.
 ///
-/// IMPORTANT — this cap is only stack-safe on a thread with an >= 8 MiB stack.
-/// All execution paths that fire triggers must run on such a thread:
-///   - CLI: a plain `fn main()` on the 8 MiB main thread (and the SQLite TCL
-///     conformance harness runs here), so triggerC-2.x at depth ~500 is safe.
-///   - Server: query execution (including the openraft replicated-apply path)
-///     runs synchronously on tokio worker threads. tokio's default 2 MiB worker
-///     stack overflows at depth ~240 — i.e. a remote client could crash the
-///     server before this cap fires (a DoS). The server therefore builds its
-///     runtime with `thread_stack_size(8 MiB)` so this cap is safe there too;
-///     see `crates/vibesql-server/src/main.rs::SERVER_WORKER_STACK_SIZE` and
-///     the 8 MiB-pinned regression test in `tests/trigger_recursion_stack.rs`.
+/// The runtime `sqlite3_limit(SQLITE_LIMIT_TRIGGER_DEPTH)` clamp
+/// ([`effective_trigger_depth_limit`]) clamps a connection's limit into
+/// `[1, MAX_TRIGGER_RECURSION_DEPTH]`, so raising this cap automatically raises
+/// the runtime ceiling too while preserving the downward-clamp safety (#5536).
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_TRIGGER_RECURSION_DEPTH: usize = 1000;
+
+/// WASM trigger recursion cap.
 ///
-/// Raising this to SQLite's full 1000 requires removing the native-recursion
-/// stack dependency (on-demand stack growth / heap-allocated work stack);
-/// tracked as a follow-on (#5534). See `tests/trigger_recursion_stack.rs` for
-/// the no-overflow guards.
+/// `stacker` has no wasm backend, so on wasm trigger recursion stays on the
+/// fixed native stack and we keep the previously-proven stack-safe value of 700
+/// (the analysis in the native variant above applies: native call-stack
+/// recursion at ~8.7 KiB/level, 700 keeps headroom below an 8 MiB overflow
+/// cliff). Reaching SQLite's full 1000 on wasm would require an explicit
+/// heap-allocated work stack instead of native recursion (Option B in #5534).
+#[cfg(target_arch = "wasm32")]
 const MAX_TRIGGER_RECURSION_DEPTH: usize = 700;
+
+/// Free-stack red zone required before entering one more trigger-recursion
+/// level, and the size of each fresh stack segment `stacker` allocates when the
+/// red zone is not met. A single trigger level (parse + plan + DML + fire) costs
+/// ~8.7 KiB in release and ~50 KiB in debug; 1 MiB of red zone is comfortably
+/// more than one level needs, and a 8 MiB new-segment keeps allocations rare
+/// (one segment covers ~900 release / ~160 debug further levels) so the 1000-cap
+/// recursion grows at most a couple of heap segments. Native targets only.
+#[cfg(not(target_arch = "wasm32"))]
+const TRIGGER_STACK_RED_ZONE: usize = 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const TRIGGER_STACK_GROW_SIZE: usize = 8 * 1024 * 1024;
+
+/// Ensure there is enough native stack to descend one more trigger-recursion
+/// level, growing the stack on demand, then run `f`.
+///
+/// This is the load-bearing stack-safety primitive for #5534: it lets nested
+/// trigger firing reach SQLite's full `SQLITE_MAX_TRIGGER_DEPTH = 1000` without
+/// depending on the (fixed) worker-thread stack being large enough for 1000
+/// native frames. `stacker::maybe_grow` is a no-op when ample stack remains, so
+/// the common shallow case has negligible overhead.
+///
+/// On wasm (`stacker` unavailable) this is a transparent pass-through; the lower
+/// wasm cap keeps native recursion within the fixed wasm stack.
+#[cfg(not(target_arch = "wasm32"))]
+#[inline]
+fn grow_stack_for_trigger<R>(f: impl FnOnce() -> R) -> R {
+    stacker::maybe_grow(TRIGGER_STACK_RED_ZONE, TRIGGER_STACK_GROW_SIZE, f)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn grow_stack_for_trigger<R>(f: impl FnOnce() -> R) -> R {
+    f()
+}
 
 /// Resolve the effective trigger recursion-depth limit for a connection.
 ///
@@ -98,9 +138,10 @@ impl RecursionGuard {
                 // (sqlite3 3.51.0; see triggerC.test 2.x / 6.x and `sqlite3VdbeError`).
                 // Use `Other` so the message surfaces verbatim (no "Unsupported
                 // expression:" wrapper) and the TCL conformance shim passes it
-                // through unchanged. The depth cap itself is raised toward
-                // SQLite's SQLITE_MAX_TRIGGER_DEPTH; see the stack-safety note on
-                // MAX_TRIGGER_RECURSION_DEPTH for why it is 700 rather than 1000.
+                // through unchanged. The depth cap now matches SQLite's full
+                // SQLITE_MAX_TRIGGER_DEPTH (1000) on native targets via on-demand
+                // stack growth; see the stack-safety note on
+                // MAX_TRIGGER_RECURSION_DEPTH.
                 Err(ExecutorError::Other(
                     "too many levels of trigger recursion".to_string(),
                 ))
@@ -406,6 +447,25 @@ impl TriggerFirer {
     /// - For STATEMENT-level triggers, this is called once per statement
     /// - WHEN conditions are evaluated here
     pub fn execute_trigger(
+        db: &mut Database,
+        trigger: &TriggerDefinition,
+        old_row: Option<&Row>,
+        new_row: Option<&Row>,
+    ) -> Result<TriggerOutcome, ExecutorError> {
+        // Grow the native stack on demand before descending one more trigger
+        // level (#5534). Firing a trigger re-enters the full DML path (parse +
+        // plan + execute + fire), which is deep native recursion; without this
+        // the 1000-deep recursion SQLite allows would overflow a fixed
+        // worker-thread stack. `maybe_grow` is ~free when stack is plentiful, so
+        // the non-recursive common case is unaffected. The depth *limit* is
+        // still enforced by `RecursionGuard` in the per-timing entry points; this
+        // only guarantees we have stack to reach that limit cleanly.
+        grow_stack_for_trigger(|| Self::execute_trigger_inner(db, trigger, old_row, new_row))
+    }
+
+    /// Inner body of [`Self::execute_trigger`], run on a guaranteed-sufficient
+    /// native stack (see `grow_stack_for_trigger`).
+    fn execute_trigger_inner(
         db: &mut Database,
         trigger: &TriggerDefinition,
         old_row: Option<&Row>,

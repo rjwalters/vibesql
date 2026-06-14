@@ -127,7 +127,7 @@ fn runtime_limit_above_cap_does_not_raise_the_stack_safe_cap() {
     // Recursion still aborts at the compile-time cap, not at 100_000 — proven by
     // an unconditional self-insert hitting the canonical error well before the
     // huge requested limit. Run on a generous stack: the native recursion goes
-    // to the cap (~700) before erroring (debug stack frames are large).
+    // to the cap (1000) before erroring (debug stack frames are large).
     std::thread::Builder::new()
         .name("runtime_limit_above_cap".to_string())
         .stack_size(96 * 1024 * 1024)
