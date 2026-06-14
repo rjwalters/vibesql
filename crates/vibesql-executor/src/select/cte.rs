@@ -122,7 +122,7 @@ pub(super) fn derive_cte_schema(
                 })
                 .collect();
 
-            Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
+            Ok(cte_pseudo_schema(cte.name.clone(), columns))
         } else {
             // Empty result set - create schema with VARCHAR columns
             let columns = column_names
@@ -136,7 +136,7 @@ pub(super) fn derive_cte_schema(
                 })
                 .collect();
 
-            Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
+            Ok(cte_pseudo_schema(cte.name.clone(), columns))
         }
     } else {
         // No explicit column names - infer from query SELECT list.
@@ -196,8 +196,26 @@ pub(super) fn derive_cte_schema(
             }
         }
 
-        Ok(vibesql_catalog::TableSchema::new(cte.name.clone(), columns))
+        Ok(cte_pseudo_schema(cte.name.clone(), columns))
     }
+}
+
+/// Build a CTE pseudo-schema.
+///
+/// CTEs, like views and derived tables, have no implicit `rowid`: SQLite errors
+/// with `no such column: rowid` when `rowid`/`oid`/`_rowid_` is referenced
+/// against a CTE that does not explicitly declare such a column. We mark the
+/// schema with `is_view = true` so the shared rowid-resolution paths (added in
+/// #5492) reject the pseudo-column. A CTE column genuinely named `rowid` still
+/// resolves, because real columns take precedence over the pseudo-column in
+/// those paths. See issue #5516.
+fn cte_pseudo_schema(
+    name: String,
+    columns: Vec<vibesql_catalog::ColumnSchema>,
+) -> vibesql_catalog::TableSchema {
+    let mut schema = vibesql_catalog::TableSchema::new(name, columns);
+    schema.set_is_view(true);
+    schema
 }
 
 /// Legacy schema derivation: one column per SELECT item, wildcards named
@@ -240,7 +258,7 @@ fn legacy_cte_schema(
         })
         .collect();
 
-    vibesql_catalog::TableSchema::new(cte.name.clone(), columns)
+    cte_pseudo_schema(cte.name.clone(), columns)
 }
 
 /// A column of a FROM-clause source resolved for wildcard expansion.
