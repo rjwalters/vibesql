@@ -149,6 +149,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
     let result = index_manager.create_index(
         "idx_id".to_string(),
         "test_table".to_string(),
+        "main",
         &table_schema,
         &table_rows,
         false, // non-unique
@@ -192,6 +193,7 @@ fn test_in_memory_index_for_small_tables() {
     let result = index_manager.create_index(
         "idx_value".to_string(),
         "small_table".to_string(),
+        "main",
         &table_schema,
         &table_rows,
         false,
@@ -262,6 +264,7 @@ fn test_budget_enforcement_with_spill_policy() {
     let result1 = index_manager.create_index(
         "idx_1".to_string(),
         "test_table".to_string(),
+        "main",
         &table_schema,
         &table_rows,
         false,
@@ -279,6 +282,7 @@ fn test_budget_enforcement_with_spill_policy() {
     let result2 = index_manager.create_index(
         "idx_2".to_string(),
         "test_table".to_string(),
+        "main",
         &table_schema,
         &table_rows,
         false,
@@ -336,6 +340,7 @@ fn test_lru_eviction_order() {
         .create_index(
             "idx_1".to_string(),
             "test_table".to_string(),
+            "main",
             &table_schema,
             &table_rows,
             false,
@@ -356,6 +361,7 @@ fn test_lru_eviction_order() {
         .create_index(
             "idx_2".to_string(),
             "test_table".to_string(),
+            "main",
             &table_schema,
             &table_rows,
             false,
@@ -381,6 +387,7 @@ fn test_lru_eviction_order() {
         .create_index(
             "idx_3".to_string(),
             "test_table".to_string(),
+            "main",
             &table_schema,
             &table_rows,
             false,
@@ -430,6 +437,7 @@ fn test_access_tracking() {
         .create_index(
             "idx_test".to_string(),
             "test_table".to_string(),
+            "main",
             &table_schema,
             &table_rows,
             false,
@@ -488,6 +496,7 @@ fn test_resource_cleanup_on_drop() {
         .create_index(
             "idx_test".to_string(),
             "test_table".to_string(),
+            "main",
             &table_schema,
             &table_rows,
             false,

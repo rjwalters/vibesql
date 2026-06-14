@@ -500,11 +500,21 @@ impl Operations {
         // Validate prefix lengths against column types and widths
         Self::validate_prefix_lengths(table_schema, &columns)?;
 
+        // Resolve the owning schema for the storage-side index key (#5540).
+        // `resolve_table_schema_name` follows SQLite name resolution (temp shadows
+        // main for unqualified names; explicit `schema.table` honored), matching
+        // the schema the catalog tags the index with in #5513. Falls back to the
+        // default (main) schema when the table can't be resolved.
+        let index_schema = catalog
+            .resolve_table_schema_name(&table_name)
+            .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+
         // Pass table rows directly by reference - avoid cloning all rows
         // This is critical for performance at scale (O(n) clone was causing major slowdown)
         self.index_manager.create_index(
             index_name,
             table_name,
+            &index_schema,
             table_schema,
             table.scan(),
             unique,
@@ -533,9 +543,15 @@ impl Operations {
             .get_table(&table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
 
+        // Resolve the owning schema for the storage-side index key (#5540).
+        let index_schema = catalog
+            .resolve_table_schema_name(&table_name)
+            .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+
         self.index_manager.create_index_with_keys(
             index_name,
             table_name,
+            &index_schema,
             table_schema,
             unique,
             columns,

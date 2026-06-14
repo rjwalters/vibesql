@@ -22,30 +22,45 @@ impl DropIndexExecutor {
     pub fn execute(stmt: &DropIndexStmt, database: &mut Database) -> Result<String, ExecutorError> {
         let index_name = &stmt.index_name;
 
-        // First check catalog metadata to find which table this index belongs to
+        // Find which table/schema this index belongs to. With schema-aware
+        // indexes (#5540 storage / #5513 catalog) a temp index and a main index
+        // can share a name; an unqualified `DROP INDEX` resolves temp-shadows-
+        // main, so prefer a temp-schema index over a same-named main index —
+        // matching sqlite3.
         let all_indexes = database.catalog.list_all_indexes();
-        let index_metadata = all_indexes.iter().find(|idx| idx.name == *index_name);
+        let index_metadata = all_indexes
+            .iter()
+            .find(|idx| {
+                idx.name == *index_name
+                    && vibesql_catalog::Catalog::is_temp_schema(idx.schema())
+            })
+            .or_else(|| all_indexes.iter().find(|idx| idx.name == *index_name));
 
         if let Some(metadata) = index_metadata {
-            let table_name = metadata.table_name.clone();
+            // Target the resolved index exactly via its owning schema so a temp
+            // index and a same-named main index are dropped independently.
+            let schema = metadata.schema().to_string();
+            let qualified_table = format!("{}.{}", schema, metadata.table_name);
+            let qualified_index = format!("{}.{}", schema, index_name);
 
             // Emit WAL entry for persistence BEFORE dropping
             database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
 
-            // Drop from catalog
+            // Drop from catalog (schema-qualified table so the exact index goes)
             database
                 .catalog
-                .drop_index(&table_name, index_name)
+                .drop_index(&qualified_table, index_name)
                 .map_err(|e| ExecutorError::Other(format!("Catalog error: {}", e)))?;
 
-            // Check if it's a spatial index in storage
+            // Check if it's a spatial index in storage (spatial indexes are not
+            // yet schema-aware, so use the bare name)
             if database.spatial_index_exists(index_name) {
                 database.drop_spatial_index(index_name)?;
             }
 
-            // Check if it's a B-tree index in storage
-            if database.index_exists(index_name) {
-                database.drop_index(index_name)?;
+            // Check if it's a B-tree index in storage (schema-qualified)
+            if database.index_exists(&qualified_index) {
+                database.drop_index(&qualified_index)?;
             }
 
             return Ok(format!("Index '{}' dropped successfully", index_name));

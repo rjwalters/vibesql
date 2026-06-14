@@ -74,10 +74,15 @@ impl DropTableExecutor {
         let dropped_indexes = database.catalog.drop_table_indexes(&stmt.table_name);
         let index_count = dropped_indexes.len();
 
-        // Drop physical indexes from storage
+        // Drop physical indexes from storage. Use the schema-qualified name so a
+        // temp-table index and a same-named main-table index are dropped
+        // independently — the storage index manager is schema-aware (#5540), and
+        // a bare name would resolve temp-shadows-main and could drop the wrong
+        // one.
         for index in &dropped_indexes {
+            let qualified = format!("{}.{}", index.schema(), index.name);
             // Try to drop from B-tree storage (ignore errors if not found)
-            let _ = database.drop_index(&index.name);
+            let _ = database.drop_index(&qualified);
             // Try to drop from spatial storage (ignore errors if not found)
             let _ = database.drop_spatial_index(&index.name);
         }

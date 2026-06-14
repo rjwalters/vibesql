@@ -20,6 +20,38 @@ pub(super) fn normalize_index_name(name: &str) -> String {
     name.to_lowercase()
 }
 
+/// Default owning schema for a storage-side index.
+///
+/// Mirrors `vibesql_catalog::DEFAULT_SCHEMA`. Indexes created through paths
+/// that don't (yet) thread a schema fall back to this so behaviour is unchanged
+/// for the common main-schema case.
+pub(super) const DEFAULT_INDEX_SCHEMA: &str = "main";
+
+/// Build the storage key used to key indexes in the [`IndexManager`]'s maps.
+///
+/// Making the key schema-aware (#5540) lets a temp-schema index and a
+/// main-schema index share the same bare name without colliding — matching
+/// SQLite, where `main.i` and `temp.i` are distinct objects. The catalog made
+/// the same change in #5513 (`schema.table.index`); storage keys on
+/// `schema.index` because storage never needs to disambiguate by table.
+///
+/// To keep the overwhelmingly common main-schema path byte-for-byte
+/// backward-compatible (the index file names, the resource-tracker keys, and
+/// the ~50 bare-name read-path callers all key on the index name today), a
+/// `main`-schema index keeps a *bare* key (just the normalized name). Only
+/// non-`main` schemas (session temp schemas like `temp_42`) get a
+/// `schema.index` prefix. A bare name therefore resolves to a main index by
+/// default, and a temp index is reached through the temp-prefixed key — the
+/// resolver in [`super::index_manager`] handles temp-shadows-main lookups.
+pub(super) fn make_index_key(schema: &str, index_name: &str) -> String {
+    let normalized_name = normalize_index_name(index_name);
+    if schema.eq_ignore_ascii_case(DEFAULT_INDEX_SCHEMA) {
+        normalized_name
+    } else {
+        format!("{}.{}", schema.to_lowercase(), normalized_name)
+    }
+}
+
 /// Threshold for choosing disk-backed indexes (number of table rows)
 /// Tables with more rows than this will use disk-backed B+ tree indexes
 /// Set to very high value (100K) to keep Phase 2 conservative - disk-backed
@@ -71,6 +103,11 @@ pub(super) fn acquire_btree_lock(
 pub struct IndexMetadata {
     pub index_name: String,
     pub table_name: String,
+    /// Owning schema of this index (e.g. `main` or a session temp schema like
+    /// `temp_42`). Stored so a temp-table index and a main-table index can
+    /// share a bare name without colliding in the [`IndexManager`] maps. See
+    /// issue #5540 (storage) / #5513 (catalog).
+    pub schema: String,
     pub unique: bool,
     pub columns: Vec<IndexColumn>,
     /// Optional WHERE predicate for partial indexes (CREATE INDEX ... WHERE expr).

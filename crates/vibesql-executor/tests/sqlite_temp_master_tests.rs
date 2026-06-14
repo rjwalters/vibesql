@@ -13,7 +13,7 @@
 //! ```
 
 use vibesql_executor::{
-    CreateIndexExecutor, CreateTableExecutor, DropTableExecutor, SelectExecutor,
+    CreateIndexExecutor, CreateTableExecutor, DropIndexExecutor, DropTableExecutor, SelectExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
@@ -37,6 +37,27 @@ fn exec_create_index(db: &mut Database, sql: &str) {
         }
         other => panic!("expected CREATE INDEX, got {other:?}"),
     };
+}
+
+fn exec_drop_index(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse DROP INDEX");
+    match stmt {
+        vibesql_ast::Statement::DropIndex(s) => {
+            DropIndexExecutor::execute(&s, db).expect("DROP INDEX")
+        }
+        other => panic!("expected DROP INDEX, got {other:?}"),
+    };
+}
+
+/// Execute an INSERT statement.
+fn exec_insert(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse INSERT");
+    match stmt {
+        vibesql_ast::Statement::Insert(s) => {
+            vibesql_executor::InsertExecutor::execute(db, &s).expect("INSERT");
+        }
+        other => panic!("expected INSERT, got {other:?}"),
+    }
 }
 
 fn exec_drop_table(db: &mut Database, sql: &str) {
@@ -111,32 +132,86 @@ fn main_index_in_master_not_temp_master() {
     assert!(!names(&temp).contains(&"mi".to_string()), "main index must NOT be in sqlite_temp_master");
 }
 
-/// Catalog-level `main.i` / `temp.i` coexistence (same name, even same table)
-/// is proven in `vibesql-catalog`'s `test_temp_and_main_index_coexist`.
+/// Count the rows of a single-column COUNT(*) result.
+fn scalar_i64(db: &Database, sql: &str) -> i64 {
+    let (_, rows) = select(db, sql);
+    assert_eq!(rows.len(), 1, "expected one result row for {sql}");
+    match &rows[0].values[0] {
+        SqlValue::Integer(n) => *n,
+        SqlValue::Bigint(n) => *n,
+        other => panic!("expected integer scalar, got {other:?}"),
+    }
+}
+
+/// #5540 (was #5513's documented SQL-level limitation): a temp-schema index and
+/// a main-schema index can share a bare name at the SQL level, because the
+/// storage index manager is now schema-aware. Both must coexist, both must be
+/// usable, and an unqualified DROP INDEX must resolve temp-shadows-main —
+/// matching sqlite3 3.51.0:
 ///
-/// At the SQL layer it is not yet reachable because the **storage** index
-/// manager keys indexes by bare name (a global namespace), so a second
-/// `CREATE INDEX i ...` is rejected before the catalog is consulted. Tracked as
-/// a follow-on (storage index-manager schema-tagging). This test documents the
-/// current SQL-level behaviour so the follow-on has a clear before/after.
+/// ```sql
+/// CREATE TABLE main_t(a); CREATE TEMP TABLE temp_t(a);
+/// CREATE INDEX ix ON main_t(a);  -- main.ix
+/// CREATE INDEX ix ON temp_t(a);  -- temp.ix  (succeeds in sqlite3)
+/// ```
 #[test]
-fn sql_level_same_name_index_across_schemas_currently_rejected() {
+fn sql_level_same_name_index_across_schemas_coexist() {
     let mut db = Database::new();
-    exec_create_table(&mut db, "CREATE TABLE base (a)");
-    exec_create_table(&mut db, "CREATE TEMP TABLE t (a)");
+    exec_create_table(&mut db, "CREATE TABLE main_t (a)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE temp_t (a)");
 
-    exec_create_index(&mut db, "CREATE INDEX i ON base(a)"); // main.i on base
+    // Distinct data so a live SELECT through each index is observable.
+    exec_insert(&mut db, "INSERT INTO main_t VALUES (1)");
+    exec_insert(&mut db, "INSERT INTO main_t VALUES (2)");
+    exec_insert(&mut db, "INSERT INTO temp.temp_t VALUES (10)");
 
-    // Second index of the same name (on the temp table) is rejected today by
-    // the storage-layer name namespace.
-    let stmt = Parser::parse_sql("CREATE INDEX i ON t(a)").unwrap();
-    let result = match stmt {
-        vibesql_ast::Statement::CreateIndex(s) => CreateIndexExecutor::execute(&s, &mut db),
-        other => panic!("expected CREATE INDEX, got {other:?}"),
-    };
+    // main.ix and temp.ix share the bare name `ix` — both CREATE INDEX succeed.
+    exec_create_index(&mut db, "CREATE INDEX ix ON main_t(a)");
+    exec_create_index(&mut db, "CREATE INDEX ix ON temp_t(a)");
+
+    // Both indexes are registered in their respective schemas' master tables.
+    let (_, master) = select(&db, "SELECT name FROM sqlite_master WHERE type='index'");
+    assert!(names(&master).contains(&"ix".to_string()), "main.ix must be in sqlite_master");
+    let (_, temp_master) =
+        select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
     assert!(
-        result.is_err(),
-        "documents current SQL-level limitation; see storage schema-tagging follow-on"
+        names(&temp_master).contains(&"ix".to_string()),
+        "temp.ix must be in sqlite_temp_master"
+    );
+
+    // Both indexes are usable: a live SELECT through each returns the right rows.
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM main_t WHERE a = 1"), 1);
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM main_t WHERE a = 2"), 1);
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM temp.temp_t WHERE a = 10"), 1);
+    // The temp index does not leak the main table's values, and vice versa.
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM temp.temp_t WHERE a = 1"), 0);
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM main_t WHERE a = 10"), 0);
+
+    // Unqualified DROP INDEX resolves temp-shadows-main: it drops temp.ix and
+    // leaves main.ix intact (matching sqlite3's name resolution).
+    exec_drop_index(&mut db, "DROP INDEX ix");
+
+    let (_, temp_after) =
+        select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
+    assert!(
+        !names(&temp_after).contains(&"ix".to_string()),
+        "unqualified DROP INDEX must remove the temp index first"
+    );
+    let (_, master_after) = select(&db, "SELECT name FROM sqlite_master WHERE type='index'");
+    assert!(
+        names(&master_after).contains(&"ix".to_string()),
+        "main.ix must survive an unqualified DROP INDEX that resolved to temp.ix"
+    );
+
+    // The surviving main index still works.
+    assert_eq!(scalar_i64(&db, "SELECT count(*) FROM main_t WHERE a = 2"), 1);
+
+    // A second unqualified DROP INDEX now removes main.ix.
+    exec_drop_index(&mut db, "DROP INDEX ix");
+    let (_, master_final) = select(&db, "SELECT name FROM sqlite_master WHERE type='index'");
+    assert!(
+        !names(&master_final).contains(&"ix".to_string()),
+        "the second DROP INDEX removes the remaining main index"
     );
 }
 

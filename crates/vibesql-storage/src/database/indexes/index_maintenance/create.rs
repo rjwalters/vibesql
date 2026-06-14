@@ -12,7 +12,10 @@ use crate::{
     database::indexes::{
         hnsw::HnswIndex,
         index_manager::IndexManager,
-        index_metadata::{normalize_index_name, IndexData, IndexMetadata, DISK_BACKED_THRESHOLD},
+        index_metadata::{
+            make_index_key, normalize_index_name, IndexData, IndexMetadata, DEFAULT_INDEX_SCHEMA,
+            DISK_BACKED_THRESHOLD,
+        },
         ivfflat::IVFFlatIndex,
     },
     page::PageManager,
@@ -34,6 +37,7 @@ impl IndexManager {
         &mut self,
         index_name: String,
         table_name: String,
+        schema: &str,
         table_schema: &vibesql_catalog::TableSchema,
         table_rows: &[Row],
         unique: bool,
@@ -41,10 +45,12 @@ impl IndexManager {
         where_clause: Option<Box<vibesql_ast::Expression>>,
         included_row_indices: Option<&std::collections::HashSet<usize>>,
     ) -> Result<(), StorageError> {
-        // Normalize index name for case-insensitive comparison
-        let normalized_name = normalize_index_name(&index_name);
+        // Schema-qualified storage key (#5540): a temp index and a main index can
+        // share a bare name; only the owning schema disambiguates them. A
+        // main-schema index keeps a bare key for backward compatibility.
+        let normalized_name = make_index_key(schema, &index_name);
 
-        // Check if index already exists
+        // Check if index already exists (per-schema namespace)
         if self.indexes.contains_key(&normalized_name) {
             return Err(StorageError::IndexAlreadyExists(index_name));
         }
@@ -61,10 +67,11 @@ impl IndexManager {
             column_indices.push(column_idx);
         }
 
-        // Store index metadata (use normalized name as key)
+        // Store index metadata (keyed by the schema-qualified storage key)
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
+            schema: schema.to_string(),
             unique,
             columns: columns.clone(),
             where_clause,
@@ -245,6 +252,7 @@ impl IndexManager {
         &mut self,
         index_name: String,
         table_name: String,
+        schema: &str,
         _table_schema: &vibesql_catalog::TableSchema,
         unique: bool,
         columns: Vec<vibesql_ast::IndexColumn>,
@@ -252,15 +260,15 @@ impl IndexManager {
     ) -> Result<(), StorageError> {
         use std::collections::BTreeMap;
 
-        // Normalize index name for case-insensitive comparison
-        let normalized_name = normalize_index_name(&index_name);
+        // Schema-qualified storage key (#5540).
+        let normalized_name = make_index_key(schema, &index_name);
 
-        // Check if index already exists
+        // Check if index already exists (per-schema namespace)
         if self.indexes.contains_key(&normalized_name) {
             return Err(StorageError::IndexAlreadyExists(index_name));
         }
 
-        // Store index metadata (use normalized name as key)
+        // Store index metadata (keyed by the schema-qualified storage key)
         // Expression indexes do not currently use partial-index semantics; the
         // caller is responsible for filtering rows via `create_index_with_keys`'s
         // `keys` parameter (so passing only matching rows is the equivalent of
@@ -268,6 +276,7 @@ impl IndexManager {
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
+            schema: schema.to_string(),
             unique,
             columns: columns.clone(),
             where_clause: None,
@@ -383,6 +392,7 @@ impl IndexManager {
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
+            schema: DEFAULT_INDEX_SCHEMA.to_string(),
             unique: false, // IVFFlat indexes are never unique
             columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
@@ -454,6 +464,7 @@ impl IndexManager {
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
+            schema: DEFAULT_INDEX_SCHEMA.to_string(),
             unique: false, // IVFFlat indexes are never unique
             columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
@@ -653,6 +664,7 @@ impl IndexManager {
         let metadata = IndexMetadata {
             index_name: index_name.clone(),
             table_name: table_name.clone(),
+            schema: DEFAULT_INDEX_SCHEMA.to_string(),
             unique: false, // HNSW indexes are never unique
             columns: vec![vibesql_ast::IndexColumn::Column {
                 column_name,
@@ -773,10 +785,15 @@ impl IndexManager {
     // Drop Index Operations
     // ============================================================================
 
-    /// Drop an index
+    /// Drop an index.
+    ///
+    /// `index_name` may be a bare name (resolved temp-shadows-main, #5540) or an
+    /// explicit `schema.index` qualifier for exact targeting.
     pub fn drop_index(&mut self, index_name: &str) -> Result<(), StorageError> {
-        // Normalize index name for case-insensitive comparison
-        let normalized = normalize_index_name(index_name);
+        // Resolve the schema-qualified storage key (temp shadows main).
+        let normalized = self
+            .resolve_index_key(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
         if self.indexes.remove(&normalized).is_none() {
             return Err(StorageError::IndexNotFound(index_name.to_string()));
