@@ -43,6 +43,16 @@ fn update(db: &mut vibesql_storage::Database, sql: &str) -> Result<usize, crate:
     }
 }
 
+/// Run a DELETE (fires DELETE triggers).
+fn delete(db: &mut vibesql_storage::Database, sql: &str) {
+    match Parser::parse_sql(sql).expect("parse delete") {
+        Statement::Delete(s) => {
+            DeleteExecutor::execute(&s, db).expect("DELETE");
+        }
+        other => panic!("expected DELETE, got {:?}", other),
+    }
+}
+
 /// Run a SELECT and return rows (each row carries its resolved row_id).
 fn select(db: &mut vibesql_storage::Database, sql: &str) -> Vec<vibesql_storage::Row> {
     match Parser::parse_sql(sql).expect("parse select") {
@@ -599,4 +609,85 @@ fn triggerc_7_5_relocate_in_before_trigger() {
             "after fired 3->3".to_string()
         ]
     );
+}
+
+/// triggerD-1.3/1.4 (issue #5599): an *ordinary* user column literally named
+/// `rowid` (or `oid` / `_rowid_`) shadows the system rowid alias. `UPDATE t1 SET
+/// rowid=rowid+1` must write that ordinary column, and the table's BEFORE/AFTER
+/// UPDATE triggers (and a later DELETE trigger) must see the *updated* ordinary
+/// value via `new.rowid` — not the row's internal system rowid.
+///
+/// Distinct from #5517 (which relocates the *system* rowid on a table that has
+/// no such ordinary column); the `set_rowid_relocates_row` test above covers
+/// that path and must keep passing alongside this one. Verified against
+/// sqlite3 3.51.0.
+#[test]
+fn shadow_column_named_rowid_reflected_in_triggers() {
+    let mut db = vibesql_storage::Database::new();
+    // t1 has ordinary columns named rowid/oid/_rowid_ that shadow the aliases.
+    ddl(&mut db, "CREATE TABLE t1(rowid, oid, _rowid_, x)");
+    ddl(&mut db, "CREATE TABLE log(a, b, c, d, e)");
+    ddl(
+        &mut db,
+        "CREATE TRIGGER r3 BEFORE UPDATE ON t1 BEGIN \
+         INSERT INTO log VALUES('r3.old', old.rowid, old.oid, old._rowid_, old.x); \
+         INSERT INTO log VALUES('r3.new', new.rowid, new.oid, new._rowid_, new.x); END",
+    );
+    ddl(
+        &mut db,
+        "CREATE TRIGGER r4 AFTER UPDATE ON t1 BEGIN \
+         INSERT INTO log VALUES('r4.old', old.rowid, old.oid, old._rowid_, old.x); \
+         INSERT INTO log VALUES('r4.new', new.rowid, new.oid, new._rowid_, new.x); END",
+    );
+    ddl(
+        &mut db,
+        "CREATE TRIGGER r6 AFTER DELETE ON t1 BEGIN \
+         INSERT INTO log VALUES('r6', old.rowid, old.oid, old._rowid_, old.x); END",
+    );
+    ddl(&mut db, "INSERT INTO t1 VALUES(100, 200, 300, 400)");
+
+    // SET rowid=rowid+1 updates the ORDINARY column rowid: 100 -> 101.
+    assert_eq!(update(&mut db, "UPDATE t1 SET rowid=rowid+1").unwrap(), 1);
+
+    // The stored ordinary column reflects the update.
+    let t1 = select(&mut db, "SELECT rowid, oid, _rowid_, x FROM t1");
+    assert_eq!(int(&t1[0].values[0]), 101);
+    assert_eq!(int(&t1[0].values[1]), 200);
+    assert_eq!(int(&t1[0].values[2]), 300);
+    assert_eq!(int(&t1[0].values[3]), 400);
+
+    // BEFORE sees old=100/new=101; AFTER sees old=100/new=101 (sqlite3 3.51.0).
+    let rows = select(&mut db, "SELECT a, b, c, d, e FROM log ORDER BY _rowid_");
+    let log: Vec<(String, i64, i64, i64, i64)> = rows
+        .iter()
+        .map(|r| {
+            (
+                text(&r.values[0]),
+                int(&r.values[1]),
+                int(&r.values[2]),
+                int(&r.values[3]),
+                int(&r.values[4]),
+            )
+        })
+        .collect();
+    assert_eq!(
+        log,
+        vec![
+            ("r3.old".to_string(), 100, 200, 300, 400),
+            ("r3.new".to_string(), 101, 200, 300, 400),
+            ("r4.old".to_string(), 100, 200, 300, 400),
+            ("r4.new".to_string(), 101, 200, 300, 400),
+        ]
+    );
+
+    // A later DELETE trigger sees the updated ordinary value (triggerD-1.4).
+    delete(&mut db, "DELETE FROM log");
+    delete(&mut db, "DELETE FROM t1");
+    let after_delete = select(&mut db, "SELECT a, b, c, d, e FROM log");
+    assert_eq!(after_delete.len(), 1);
+    assert_eq!(text(&after_delete[0].values[0]), "r6");
+    assert_eq!(int(&after_delete[0].values[1]), 101);
+    assert_eq!(int(&after_delete[0].values[2]), 200);
+    assert_eq!(int(&after_delete[0].values[3]), 300);
+    assert_eq!(int(&after_delete[0].values[4]), 400);
 }
