@@ -163,8 +163,14 @@ fn try_detect_spatial_predicate(
     // Compute MBR from query geometry
     let query_mbr = compute_mbr(&query_geometry, &predicate)?;
 
+    // Build a schema-qualified lookup name so the two-phase lookup targets the
+    // exact spatial index that matched here, even when a same-named index
+    // exists in another schema (spatial indexes are schema-aware — #5558).
+    // `get_spatial_index` resolves an explicit `schema.index` form precisely.
+    let index_name = format!("{}.{}", metadata.schema, metadata.index_name);
+
     Ok(Some(SpatialIndexUsage {
-        index_name: metadata.index_name.clone(),
+        index_name,
         column_name: column_name.clone(),
         predicate,
         query_mbr,

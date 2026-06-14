@@ -52,10 +52,12 @@ impl DropIndexExecutor {
                 .drop_index(&qualified_table, index_name)
                 .map_err(|e| ExecutorError::Other(format!("Catalog error: {}", e)))?;
 
-            // Check if it's a spatial index in storage (spatial indexes are not
-            // yet schema-aware, so use the bare name)
-            if database.spatial_index_exists(index_name) {
-                database.drop_spatial_index(index_name)?;
+            // Check if it's a spatial index in storage. Spatial indexes are
+            // schema-aware too (#5558), so target the exact index via its
+            // owning schema — a temp index and a same-named main index drop
+            // independently, matching the B-tree path below.
+            if database.spatial_index_exists(&qualified_index) {
+                database.drop_spatial_index(&qualified_index)?;
             }
 
             // Check if it's a B-tree index in storage (schema-qualified)

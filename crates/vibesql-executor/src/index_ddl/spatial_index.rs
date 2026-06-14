@@ -80,11 +80,16 @@ pub fn create_spatial_index(
     .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
-    // Store in database (use unqualified table name for storage metadata)
+    // Store in database (use unqualified table name for storage metadata).
+    // Tag the owning schema so a temp-table spatial index and a same-named
+    // main-table spatial index coexist as distinct storage entries (#5558),
+    // mirroring the B-tree schema-tagging in #5540. The schema is the same one
+    // the catalog records above.
     let metadata = SpatialIndexMetadata {
         index_name: index_name.clone(),
         table_name: table_name.to_string(),
         column_name: column_name.to_string(),
+        schema: super::schema_of_qualified(qualified_table_name).to_string(),
         created_at: Some(chrono::Utc::now()),
     };
 

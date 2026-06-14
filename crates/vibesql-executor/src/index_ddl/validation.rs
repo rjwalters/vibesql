@@ -236,10 +236,9 @@ fn validate_prefix_lengths(
 
 /// Check if an index with the same name already exists in the target schema.
 ///
-/// Schema-aware (#5540): existence is scoped to `schema_name` (the resolved
-/// owning schema of the target table) so a `temp.i` index can be created while a
-/// `main.i` index already exists, matching SQLite. Spatial indexes remain a
-/// global namespace (they are not yet schema-aware in storage).
+/// Schema-aware (#5540 B-tree, #5558 spatial): existence is scoped to
+/// `schema_name` (the resolved owning schema of the target table) so a `temp.i`
+/// index can be created while a `main.i` index already exists, matching SQLite.
 fn check_index_exists(
     stmt: &CreateIndexStmt,
     database: &Database,
@@ -248,10 +247,11 @@ fn check_index_exists(
     let index_name = &stmt.index_name;
     // Probe the exact schema's index via a schema-qualified lookup. A
     // main-schema index keeps a bare storage key, which the storage resolver
-    // also reaches through the `main.i` qualifier.
+    // also reaches through the `main.i` qualifier. Spatial indexes are
+    // schema-aware too (#5558), so scope their check to the same qualifier.
     let qualified = format!("{}.{}", schema_name, index_name);
     let index_exists =
-        database.get_index(&qualified).is_some() || database.spatial_index_exists(index_name);
+        database.get_index(&qualified).is_some() || database.spatial_index_exists(&qualified);
 
     if index_exists {
         if stmt.if_not_exists {
@@ -300,7 +300,7 @@ pub fn index_already_exists(stmt: &CreateIndexStmt, database: &Database) -> bool
     };
 
     let qualified = format!("{}.{}", schema_name, index_name);
-    database.get_index(&qualified).is_some() || database.spatial_index_exists(index_name)
+    database.get_index(&qualified).is_some() || database.spatial_index_exists(&qualified)
 }
 
 /// Validate that all column references in an expression exist in the table schema.
