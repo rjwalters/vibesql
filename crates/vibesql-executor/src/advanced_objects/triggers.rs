@@ -5,33 +5,18 @@ use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
 
-/// Execute CREATE TRIGGER statement
+/// Execute CREATE TRIGGER statement.
+///
+/// Delegates to [`crate::TriggerExecutor::create_trigger`] so that every
+/// CREATE TRIGGER entry point (CLI, consensus, WASM) shares one validation path
+/// — IF NOT EXISTS handling, system-table rejection, and the
+/// view/table/INSTEAD-OF target checks (with SQLite-exact error wording). The
+/// success message is discarded here since this entry point returns `()`.
 pub fn execute_create_trigger(
     stmt: &CreateTriggerStmt,
     db: &mut Database,
 ) -> Result<(), ExecutorError> {
-    use vibesql_catalog::TriggerDefinition;
-
-    // `CREATE TRIGGER IF NOT EXISTS <name>` is a no-op success when a trigger
-    // with that name already exists (SQLite semantics, trigger1-1.2.0). Mirrors
-    // the guard in `TriggerExecutor::create_trigger_with_sql` so every CREATE
-    // TRIGGER path honors the clause.
-    if stmt.if_not_exists && db.catalog.get_trigger(&stmt.trigger_name).is_some() {
-        return Ok(());
-    }
-
-    let trigger = TriggerDefinition::new(
-        stmt.trigger_name.clone(),
-        stmt.timing.clone(),
-        stmt.event.clone(),
-        stmt.table_name.clone(),
-        stmt.granularity.clone(),
-        stmt.when_condition.clone(),
-        stmt.triggered_action.clone(),
-    );
-
-    db.catalog.create_trigger(trigger)?;
-    Ok(())
+    crate::TriggerExecutor::create_trigger(db, stmt).map(|_| ())
 }
 
 /// Execute ALTER TRIGGER statement
