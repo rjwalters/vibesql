@@ -483,122 +483,112 @@ impl DeleteExecutor {
             )?;
         }
 
-        // Step 3: Fire BEFORE DELETE ROW triggers only if triggers exist.
-        // A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that row: drop it
-        // from the batch so it is neither deleted nor counted (SQLite).
+        // Steps 3-6: Fire BEFORE/AFTER DELETE ROW triggers and physically
+        // delete the rows.
+        //
+        // Issue #5486: SQLite fires row triggers INTERLEAVED per row — for each
+        // affected row R it runs the BEFORE trigger(s) on R, deletes R, then
+        // runs the AFTER trigger(s) on R, *before* moving to R+1. A trigger body
+        // that reads the table mid-statement (e.g. `SELECT sum(a) FROM tbl`)
+        // must therefore see exactly the rows deleted so far. The previous
+        // implementation fired all BEFOREs, then deleted every row, then all
+        // AFTERs, which made such triggers observe the wrong running state.
+        //
+        // When no DELETE triggers exist we keep the batched fast path (no
+        // observable difference, lower overhead). When triggers exist we
+        // interleave per row and defer compaction until the whole loop finishes
+        // (compacting mid-loop would shift the indices of the rows we have not
+        // yet processed).
+        //
+        // Compaction must additionally be deferred whenever an *ancestor*
+        // statement is currently iterating over this same table's physical row
+        // indices via an interleaved per-row DML loop (fkey2-4.3: a recursive
+        // AFTER DELETE trigger cascading through a tree). Compacting here would
+        // shift the ancestor's not-yet-processed indices. The ancestor's loop
+        // (which registered the table via `IterationGuard`) performs the single
+        // compaction once it finishes. A nested DELETE on a *different* table
+        // than any ancestor is iterating compacts normally.
+        let defer_compaction = crate::compaction_guard::is_iterating(table_name);
+        let deleted_count: usize;
         if has_delete_triggers {
-            let mut keep = Vec::with_capacity(rows_and_indices_to_delete.len());
-            for (idx, row) in rows_and_indices_to_delete {
-                let outcome = crate::TriggerFirer::execute_before_triggers(
+            #[cfg(feature = "mvcc_enabled")]
+            let mvcc_delete_txn_id = database.transaction_id();
+
+            // Register this table as under interleaved iteration so nested
+            // DELETEs on it (fired by the row triggers below) defer their
+            // compaction to the `compact_if_needed` call after this loop.
+            let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+
+            let mut deleted = 0usize;
+            let mut applied_rows: Vec<(usize, vibesql_storage::Row)> = Vec::new();
+            let mut compacted = false;
+
+            for (idx, row) in rows_and_indices_to_delete.iter() {
+                // A trigger fired for an earlier row may have already deleted
+                // this row mid-statement (cascade / recursive delete, e.g.
+                // trigger1-1.10's `DELETE FROM t WHERE a = old.a + 2`). SQLite
+                // processes such a row only once, so skip it here — its BEFORE/
+                // AFTER triggers do not fire a second time.
+                if database
+                    .get_table(table_name)
+                    .map(|t| t.is_row_deleted(*idx))
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+
+                // BEFORE(R): a RAISE(IGNORE) drops this row entirely (skip it,
+                // continue with the remaining rows).
+                let before_outcome = crate::TriggerFirer::execute_before_triggers(
                     database,
                     table_name,
                     vibesql_ast::TriggerEvent::Delete,
-                    Some(&row),
+                    Some(row),
                     None,
                 )?;
-                if outcome != crate::TriggerOutcome::SkipRow {
-                    keep.push((idx, row));
+                if before_outcome == crate::TriggerOutcome::SkipRow {
+                    continue;
                 }
-            }
-            rows_and_indices_to_delete = keep;
-        }
 
-        // Step 4: Handle referential integrity for each row to be deleted
-        // This may CASCADE deletes, SET NULL, or SET DEFAULT in child tables
-        for (_, row) in &rows_and_indices_to_delete {
-            check_no_child_references(database, table_name, row)?;
-        }
+                // Referential integrity for this row (CASCADE / SET NULL /
+                // SET DEFAULT / restrict) — runs as part of processing R, after
+                // its BEFORE trigger and before its physical deletion.
+                check_no_child_references(database, table_name, row)?;
 
-        // Extract indices for deletion
-        let mut deleted_indices: Vec<usize> =
-            rows_and_indices_to_delete.iter().map(|(idx, _)| *idx).collect();
-        deleted_indices.sort_unstable();
+                // WAL + index maintenance for this single row (indices are still
+                // valid: we defer compaction to the end of the loop).
+                database.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
+                let rows_refs: Vec<(usize, &vibesql_storage::Row)> = vec![(*idx, row)];
+                database.batch_update_indexes_for_delete(table_name, &rows_refs);
+                expression_index_maintenance::maintain_expression_indexes_for_delete(
+                    database, table_name, row, *idx,
+                );
+                partial_index_maintenance::maintain_partial_indexes_for_delete(
+                    database, table_name, row, *idx,
+                );
 
-        // Step 5a: Emit WAL entries and remove entries from user-defined indexes
-        // BEFORE deleting rows (while row indices are still valid and we have old values)
-        // First emit WAL entries for each row (needed for recovery replay)
-        for (idx, row) in &rows_and_indices_to_delete {
-            database.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
-        }
+                // delete(R): flip the deletion bitmap for just this row so the
+                // AFTER trigger (and the BEFORE trigger of the next row) observes
+                // R as gone. Compaction is deferred (see compact_if_needed below).
+                {
+                    let table_mut = database
+                        .get_table_mut(table_name)
+                        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-        // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)
-        // where d=deletes, m=indexes
-        let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
-            rows_and_indices_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
-        database.batch_update_indexes_for_delete(table_name, &rows_refs);
+                    #[cfg(feature = "mvcc_enabled")]
+                    if let Some(id) = mvcc_delete_txn_id {
+                        table_mut.stamp_row_xmax_inplace(*idx, id);
+                    }
 
-        // Maintain expression indexes for each deleted row
-        for (row_index, row) in &rows_and_indices_to_delete {
-            expression_index_maintenance::maintain_expression_indexes_for_delete(
-                database, table_name, row, *row_index,
-            );
-            partial_index_maintenance::maintain_partial_indexes_for_delete(
-                database, table_name, row, *row_index,
-            );
-        }
+                    if table_mut.mark_deleted_inplace(*idx) {
+                        deleted += 1;
+                        applied_rows.push((*idx, row.clone()));
+                    }
+                }
 
-        // Phase 1c (Issue #5150 / #5136): stamp xmax on every row about
-        // to be bitmap-deleted with the active txn id when the
-        // `mvcc_enabled` feature is on. Fetched BEFORE the mutable borrow
-        // of `table_mut`. We keep the physical bitmap delete in place;
-        // Phase 1d's visibility filter will eventually treat the xmax
-        // stamp as the canonical deletion record. Off-state: no stamp,
-        // bit-for-bit pre-MVCC behavior.
-        #[cfg(feature = "mvcc_enabled")]
-        let mvcc_delete_txn_id = database.transaction_id();
-
-        // Step 5b: Actually delete the rows using fast path (no table scan needed)
-        let table_mut = database
-            .get_table_mut(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
-
-        // Stamp xmax in-place on each row BEFORE bitmap-deleting. The
-        // bitmap delete leaves the row in `self.rows`, so the xmax field
-        // is observable via `Table::scan()` (which returns the raw rows
-        // slice including bitmap-deleted entries).
-        #[cfg(feature = "mvcc_enabled")]
-        if let Some(id) = mvcc_delete_txn_id {
-            for &idx in &deleted_indices {
-                table_mut.stamp_row_xmax_inplace(idx, id);
-            }
-        }
-
-        // Use delete_by_indices_batch for O(d) instead of O(n) where d = deletes
-        // The batch version pre-computes schema lookups for internal hash indexes,
-        // reducing overhead by ~30-40% for multi-row deletes.
-        // User-defined index entries have already been removed by batch_update_indexes_for_delete
-        // above. Note: If >50% of rows are deleted, compaction triggers and row indices
-        // change. When compaction occurs, we must rebuild user-defined indexes.
-        let delete_result = table_mut.delete_by_indices_batch(&deleted_indices);
-
-        // If compaction occurred, rebuild user-defined indexes since all row indices changed
-        if delete_result.compacted {
-            database.rebuild_indexes(table_name);
-            // Expression indexes need special handling (expression evaluation)
-            expression_index_maintenance::rebuild_expression_indexes_after_compaction(
-                database, table_name,
-            );
-            // Partial indexes need WHERE-predicate evaluation per row
-            partial_index_maintenance::rebuild_partial_indexes_after_compaction(
-                database, table_name,
-            );
-        }
-
-        // Invalidate the database-level columnar cache since table data changed.
-        // Note: The table-level cache is already invalidated by delete_by_indices().
-        // Both invalidations are necessary because they manage separate caches:
-        // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
-        // - Database-level cache: used by Database::get_columnar() for cached access
-        if delete_result.deleted_count > 0 {
-            database.invalidate_columnar_cache(table_name);
-        }
-
-        // Step 6: Fire AFTER DELETE ROW triggers only if triggers exist.
-        // AFTER triggers run once the row is already deleted; a RAISE(IGNORE)
-        // here cannot un-delete it (sqlite3 3.51 keeps the row deleted), so
-        // SkipRow is a no-op — drop the must-use outcome (#5418).
-        if has_delete_triggers {
-            for (_, row) in &rows_and_indices_to_delete {
+                // AFTER(R): the row is already deleted; a RAISE(IGNORE) cannot
+                // un-delete it, so SkipRow is a no-op — drop the must-use
+                // outcome (#5418).
                 let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                     database,
                     table_name,
@@ -607,6 +597,123 @@ impl DeleteExecutor {
                     None,
                 )?;
             }
+
+            // Compact once, after all rows are processed (unless deferred to an
+            // ancestor statement). If it compacts, every row index changed and
+            // the user-defined / expression / partial indexes must be rebuilt.
+            if deleted > 0 {
+                if !defer_compaction {
+                    if let Some(table_mut) = database.get_table_mut(table_name) {
+                        compacted = table_mut.compact_if_needed();
+                    }
+                    if compacted {
+                        database.rebuild_indexes(table_name);
+                        expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                            database, table_name,
+                        );
+                        partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                            database, table_name,
+                        );
+                    }
+                }
+                database.invalidate_columnar_cache(table_name);
+            }
+
+            // Restrict the row set to those actually deleted so RETURNING and
+            // the deleted-count reflect SQLite semantics (BEFORE-IGNORE'd rows
+            // are excluded).
+            rows_and_indices_to_delete = applied_rows;
+            deleted_count = deleted;
+        } else {
+            // Fast path: no DELETE triggers — batch delete as before.
+
+            // Extract indices for deletion
+            let mut deleted_indices: Vec<usize> =
+                rows_and_indices_to_delete.iter().map(|(idx, _)| *idx).collect();
+            deleted_indices.sort_unstable();
+
+            // Step 4: Handle referential integrity for each row to be deleted
+            // This may CASCADE deletes, SET NULL, or SET DEFAULT in child tables
+            for (_, row) in &rows_and_indices_to_delete {
+                check_no_child_references(database, table_name, row)?;
+            }
+
+            // Step 5a: Emit WAL entries and remove entries from user-defined indexes
+            // BEFORE deleting rows (while row indices are still valid and we have old values)
+            // First emit WAL entries for each row (needed for recovery replay)
+            for (idx, row) in &rows_and_indices_to_delete {
+                database.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
+            }
+
+            // Then use batch method for index updates: O(d + m*log n) vs O(d*m*log n)
+            // where d=deletes, m=indexes
+            let rows_refs: Vec<(usize, &vibesql_storage::Row)> =
+                rows_and_indices_to_delete.iter().map(|(idx, row)| (*idx, row)).collect();
+            database.batch_update_indexes_for_delete(table_name, &rows_refs);
+
+            // Maintain expression indexes for each deleted row
+            for (row_index, row) in &rows_and_indices_to_delete {
+                expression_index_maintenance::maintain_expression_indexes_for_delete(
+                    database, table_name, row, *row_index,
+                );
+                partial_index_maintenance::maintain_partial_indexes_for_delete(
+                    database, table_name, row, *row_index,
+                );
+            }
+
+            // Phase 1c (Issue #5150 / #5136): stamp xmax on every row about
+            // to be bitmap-deleted with the active txn id when the
+            // `mvcc_enabled` feature is on. Fetched BEFORE the mutable borrow
+            // of `table_mut`.
+            #[cfg(feature = "mvcc_enabled")]
+            let mvcc_delete_txn_id = database.transaction_id();
+
+            // Step 5b: Actually delete the rows using fast path (no table scan needed)
+            let table_mut = database
+                .get_table_mut(table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+            // Stamp xmax in-place on each row BEFORE bitmap-deleting.
+            #[cfg(feature = "mvcc_enabled")]
+            if let Some(id) = mvcc_delete_txn_id {
+                for &idx in &deleted_indices {
+                    table_mut.stamp_row_xmax_inplace(idx, id);
+                }
+            }
+
+            let delete_result = if defer_compaction {
+                // Nested inside a trigger body: bitmap-delete without compaction
+                // so the ancestor statement's physical row indices stay valid
+                // (the outermost DELETE compacts once at the end).
+                let mut deleted = 0usize;
+                for &idx in &deleted_indices {
+                    if table_mut.mark_deleted_inplace(idx) {
+                        deleted += 1;
+                    }
+                }
+                vibesql_storage::DeleteResult::new(deleted, false)
+            } else {
+                table_mut.delete_by_indices_batch(&deleted_indices)
+            };
+
+            // If compaction occurred, rebuild user-defined indexes since all row indices changed
+            if delete_result.compacted {
+                database.rebuild_indexes(table_name);
+                // Expression indexes need special handling (expression evaluation)
+                expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                    database, table_name,
+                );
+                // Partial indexes need WHERE-predicate evaluation per row
+                partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                    database, table_name,
+                );
+            }
+
+            if delete_result.deleted_count > 0 {
+                database.invalidate_columnar_cache(table_name);
+            }
+
+            deleted_count = delete_result.deleted_count;
         }
 
         // Fire AFTER STATEMENT triggers only if triggers exist AND we're not inside a trigger
@@ -644,7 +751,7 @@ impl DeleteExecutor {
             None
         };
 
-        Ok((delete_result.deleted_count, returning))
+        Ok((deleted_count, returning))
     }
 
     /// Extract primary key value from WHERE expression if it's a simple equality

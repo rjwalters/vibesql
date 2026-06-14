@@ -593,29 +593,6 @@ pub(super) fn execute_internal(
         }
     }
 
-    // Fire BEFORE UPDATE triggers for all rows (before database mutation).
-    // A RAISE(IGNORE) in a BEFORE UPDATE trigger abandons that row: drop it
-    // from the batch so it is neither updated nor counted (SQLite semantics).
-    if has_triggers {
-        let mut keep = Vec::with_capacity(updates.len());
-        for u in updates {
-            let outcome = crate::TriggerFirer::execute_before_triggers(
-                database,
-                table_name,
-                vibesql_ast::TriggerEvent::Update(None),
-                Some(&u.old_row),
-                Some(&u.new_row),
-            )?;
-            if outcome != crate::TriggerOutcome::SkipRow {
-                keep.push(u);
-            }
-        }
-        updates = keep;
-    }
-
-    // Step 8: Apply all updates (after evaluation phase completes)
-    let update_count = updates.len();
-
     // Phase 1c (Issue #5150 / #5136): stamp xmin on every new row with
     // the active txn id when the `mvcc_enabled` feature is on. We must
     // fetch the txn id here, *before* taking the mutable borrow on
@@ -630,41 +607,105 @@ pub(super) fn execute_internal(
         u.new_row.xmax = None;
     }
 
-    // Get mutable table reference
-    let table_mut = database
-        .get_table_mut(table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
-
-    // Collect the updates first
+    // Step 8: Apply the updates and fire BEFORE/AFTER ROW triggers.
+    //
+    // Issue #5486: SQLite fires row triggers INTERLEAVED per row — for each
+    // affected row R it runs the BEFORE trigger(s) on R, applies R's change,
+    // then runs the AFTER trigger(s) on R, *before* moving to R+1. A trigger
+    // body that reads the table mid-statement (e.g. `SELECT sum(a) FROM tbl`)
+    // must therefore see exactly the rows processed so far. The previous
+    // implementation fired all BEFOREs, then applied all rows, then all
+    // AFTERs, which made such triggers observe the wrong running state.
+    //
+    // A RAISE(IGNORE) in a BEFORE UPDATE trigger abandons that row: it is
+    // neither updated nor counted. AFTER triggers run after the row is already
+    // updated; a RAISE(IGNORE) there cannot revert it (sqlite3 3.51 keeps the
+    // modified row), so SkipRow is a no-op for AFTER.
     let mut index_updates = Vec::new();
-    for u in &updates {
-        table_mut
-            .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
-            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
-
-        index_updates.push((
-            u.row_index,
-            u.old_row.clone(),
-            u.new_row.clone(),
-            u.changed_columns.clone(),
-        ));
-    }
-
-    // Fire AFTER UPDATE triggers for all updated rows.
-    // AFTER triggers run once the row is already updated; a RAISE(IGNORE) here
-    // cannot revert it (sqlite3 3.51 keeps the modified row), so SkipRow is a
-    // no-op — explicitly drop the must-use outcome (#5418).
     if has_triggers {
-        for (_index, old_row, new_row, _changed_columns) in &index_updates {
+        // Register this table as under interleaved iteration so a nested DELETE
+        // on it (fired by a row trigger below) defers compaction — compacting
+        // would shift our not-yet-processed physical row indices (#5486).
+        let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+        for u in &updates {
+            // BEFORE(R): a RAISE(IGNORE) drops this row entirely.
+            let before_outcome = crate::TriggerFirer::execute_before_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(&u.old_row),
+                Some(&u.new_row),
+            )?;
+            if before_outcome == crate::TriggerOutcome::SkipRow {
+                continue;
+            }
+
+            // A trigger fired for an earlier row (or this row's own BEFORE
+            // trigger) may have deleted this row mid-statement — e.g.
+            // trigger1-1.11, where an AFTER UPDATE trigger runs
+            // `DELETE FROM t WHERE a = old.a + 2`. SQLite does not update a row
+            // that no longer exists, so skip it rather than erroring on the
+            // now-vacant storage slot.
+            if database
+                .get_table(table_name)
+                .map(|t| t.is_row_deleted(u.row_index))
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            // apply(R): mutate just this row so the AFTER trigger (and the
+            // BEFORE trigger of the next row) observes R's change.
+            {
+                let table_mut = database
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                table_mut
+                    .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            }
+
+            // AFTER(R): the row is already updated; drop the must-use outcome
+            // since SkipRow cannot un-apply it (#5418).
             let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
+                Some(&u.old_row),
+                Some(&u.new_row),
             )?;
+
+            index_updates.push((
+                u.row_index,
+                u.old_row.clone(),
+                u.new_row.clone(),
+                u.changed_columns.clone(),
+            ));
+        }
+        // Keep only the rows that actually applied (BEFORE-IGNORE'd rows are
+        // dropped) so RETURNING / change-count reflect SQLite semantics.
+        let applied: HashSet<usize> = index_updates.iter().map(|(idx, ..)| *idx).collect();
+        updates.retain(|u| applied.contains(&u.row_index));
+    } else {
+        // No triggers: apply all updates in one batch borrow.
+        let table_mut = database
+            .get_table_mut(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+        for u in &updates {
+            table_mut
+                .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
+                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+            index_updates.push((
+                u.row_index,
+                u.old_row.clone(),
+                u.new_row.clone(),
+                u.changed_columns.clone(),
+            ));
         }
     }
+
+    let update_count = index_updates.len();
 
     // Now update user-defined indexes after releasing table borrow
     // Pass changed_columns to skip indexes that don't involve any modified columns
@@ -1625,31 +1666,6 @@ fn execute_update_from(
         }
     }
 
-    // Fire BEFORE UPDATE triggers.
-    // A RAISE(IGNORE) in a BEFORE UPDATE trigger abandons that row (#5418):
-    // drop it from the batch so it is neither updated nor counted, while the
-    // remaining rows proceed — matching the primary UPDATE loop in
-    // `execute_internal` and sqlite3 3.51 semantics.
-    if has_triggers {
-        let mut keep = Vec::with_capacity(updates.len());
-        for u in updates {
-            let outcome = crate::TriggerFirer::execute_before_triggers(
-                database,
-                table_name,
-                vibesql_ast::TriggerEvent::Update(None),
-                Some(&u.old_row),
-                Some(&u.new_row),
-            )?;
-            if outcome != crate::TriggerOutcome::SkipRow {
-                keep.push(u);
-            }
-        }
-        updates = keep;
-    }
-
-    // Apply all updates
-    let update_count = updates.len();
-
     // Phase 1c (Issue #5150 / #5136): stamp xmin on every new row with
     // the active txn id when the `mvcc_enabled` feature is on. Fetch the
     // txn id before taking the mutable borrow on `table_mut`. Off-state
@@ -1660,39 +1676,84 @@ fn execute_update_from(
         u.new_row.xmax = None;
     }
 
-    let table_mut = database
-        .get_table_mut(table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
-
+    // Apply the updates and fire BEFORE/AFTER ROW triggers interleaved per
+    // row (issue #5486): BEFORE(R) -> apply(R) -> AFTER(R) before moving to
+    // R+1, so a trigger body reading the table mid-statement sees exactly the
+    // rows processed so far. See the matching note in `execute_internal`. A
+    // RAISE(IGNORE) in a BEFORE trigger drops that row; SkipRow in an AFTER
+    // trigger is a no-op (the row is already applied).
     let mut index_updates = Vec::new();
-    for u in &updates {
-        table_mut
-            .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
-            .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
-
-        index_updates.push((
-            u.row_index,
-            u.old_row.clone(),
-            u.new_row.clone(),
-            u.changed_columns.clone(),
-        ));
-    }
-
-    // Fire AFTER UPDATE triggers.
-    // AFTER triggers run once the row is already updated; a RAISE(IGNORE) here
-    // cannot revert it (sqlite3 3.51 keeps the modified row), so SkipRow is a
-    // no-op — explicitly drop the must-use outcome (#5418).
     if has_triggers {
-        for (_index, old_row, new_row, _changed_columns) in &index_updates {
+        // See the matching note in `execute_internal` — defer nested-DELETE
+        // compaction of this table while we iterate its physical indices.
+        let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+        for u in &updates {
+            let before_outcome = crate::TriggerFirer::execute_before_triggers(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Update(None),
+                Some(&u.old_row),
+                Some(&u.new_row),
+            )?;
+            if before_outcome == crate::TriggerOutcome::SkipRow {
+                continue;
+            }
+
+            // Skip rows an interleaved trigger deleted mid-statement (see the
+            // matching note in `execute_internal`).
+            if database
+                .get_table(table_name)
+                .map(|t| t.is_row_deleted(u.row_index))
+                .unwrap_or(true)
+            {
+                continue;
+            }
+
+            {
+                let table_mut = database
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+                table_mut
+                    .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            }
+
             let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                 database,
                 table_name,
                 vibesql_ast::TriggerEvent::Update(None),
-                Some(old_row),
-                Some(new_row),
+                Some(&u.old_row),
+                Some(&u.new_row),
             )?;
+
+            index_updates.push((
+                u.row_index,
+                u.old_row.clone(),
+                u.new_row.clone(),
+                u.changed_columns.clone(),
+            ));
+        }
+        let applied: HashSet<usize> = index_updates.iter().map(|(idx, ..)| *idx).collect();
+        updates.retain(|u| applied.contains(&u.row_index));
+    } else {
+        let table_mut = database
+            .get_table_mut(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        for u in &updates {
+            table_mut
+                .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
+                .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+            index_updates.push((
+                u.row_index,
+                u.old_row.clone(),
+                u.new_row.clone(),
+                u.changed_columns.clone(),
+            ));
         }
     }
+
+    let update_count = index_updates.len();
 
     // Update indexes
     for (index, old_row, new_row, changed_columns) in index_updates {
