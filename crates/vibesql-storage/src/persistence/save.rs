@@ -434,8 +434,18 @@ impl Database {
                 write!(writer, " UNIQUE")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             }
-            write!(writer, " INDEX {} ON {} (", index_name, metadata.table_name)
-                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            // Identifiers (index name, table name, column names) must be quoted so
+            // that names with embedded special characters (spaces, quotes, parens)
+            // round-trip correctly when the dump is re-lexed on reload. Without
+            // quoting, a table named `t1'x1` produces an unterminated string
+            // literal (`... ON t1'x1 (...`) and the reload aborts.
+            write!(
+                writer,
+                " INDEX {} ON {} (",
+                quote_identifier(&index_name),
+                quote_identifier(&metadata.table_name)
+            )
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
             for (i, col) in metadata.columns.iter().enumerate() {
                 if i > 0 {
@@ -446,7 +456,7 @@ impl Database {
                 use vibesql_ast::IndexColumn;
                 match col {
                     IndexColumn::Column { column_name, .. } => {
-                        write!(writer, "{}", column_name).map_err(|e| {
+                        write!(writer, "{}", quote_identifier(column_name)).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
                     }
@@ -457,8 +467,14 @@ impl Database {
                         })?;
                     }
                 }
-                write!(writer, " {:?}", col.direction())
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                // Emit a valid SQL sort keyword. Only DESC needs to be written;
+                // ASC is the default. The `{:?}` Debug form (`Asc`/`Desc`) is not
+                // valid SQL and would fail to re-lex.
+                use vibesql_ast::OrderDirection;
+                if col.direction() == OrderDirection::Desc {
+                    write!(writer, " DESC")
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
             }
 
             write!(writer, ")")
