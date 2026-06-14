@@ -27,11 +27,11 @@ impl Parser {
         // Expect CREATE keyword
         self.expect_keyword(Keyword::Create)?;
 
-        // Optional TEMP/TEMPORARY modifier, accepted for SQLite compatibility and
-        // ignored: SQLite places TEMP triggers in a session-scoped `temp` schema,
-        // but VibeSQL has no multi-session or ATTACH support, so the trigger is
-        // created as a regular trigger.
-        let _ =
+        // Optional TEMP/TEMPORARY modifier (SQLite places such a trigger in the
+        // session `temp` schema). We record that as `schema = Some("temp")` so
+        // the trigger is registered against the temp schema, mirroring how a
+        // temp table/index shadows its main-schema namesake (triggerD-3.x).
+        let is_temp =
             self.try_consume_keyword(Keyword::Temp) || self.try_consume_keyword(Keyword::Temporary);
 
         // Expect TRIGGER keyword
@@ -48,8 +48,31 @@ impl Parser {
             false
         };
 
-        // Parse trigger name
-        let trigger_name = self.parse_identifier()?;
+        // Parse trigger name, allowing an optional schema qualifier
+        // (`CREATE TRIGGER main.r1 ...` / `CREATE TRIGGER temp.r1 ...`). The
+        // table-ref helper also accepts a keyword schema (`temp`, `main`).
+        let name_ref = self.parse_table_ref()?;
+        let trigger_name = name_ref.name;
+
+        // Resolve the trigger's schema. An explicit `schema.` prefix wins; if
+        // absent, the `TEMP`/`TEMPORARY` modifier implies the `temp` schema.
+        // SQLite forbids combining `CREATE TEMP TRIGGER` with an explicit
+        // non-temp schema (e.g. `CREATE TEMP TRIGGER main.r1`); reject that.
+        let schema = match (is_temp, name_ref.schema_name) {
+            (_, Some(schema_name)) => {
+                if is_temp && !schema_name.eq_ignore_ascii_case("temp") {
+                    return Err(ParseError {
+                        message: format!(
+                            "temporary trigger may not have qualified name: \"{}.{}\"",
+                            schema_name, trigger_name
+                        ),
+                    });
+                }
+                Some(schema_name)
+            }
+            (true, None) => Some("temp".to_string()),
+            (false, None) => None,
+        };
 
         // Parse timing: BEFORE | AFTER | INSTEAD OF (optional, defaults to BEFORE per SQLite)
         let timing = if self.try_consume_keyword(Keyword::Before) {
@@ -181,6 +204,7 @@ impl Parser {
 
         Ok(vibesql_ast::CreateTriggerStmt {
             if_not_exists,
+            schema,
             trigger_name,
             timing,
             event,

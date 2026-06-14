@@ -38,6 +38,7 @@ fn test_after_delete_trigger_fires() {
     // Create AFTER DELETE trigger
     let trigger_stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "log_delete".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Delete,
@@ -109,6 +110,7 @@ fn test_before_delete_trigger_fires() {
     // Create BEFORE DELETE trigger
     let trigger_stmt = CreateTriggerStmt {
         if_not_exists: false,
+        schema: None,
         trigger_name: "log_before_delete".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Delete,

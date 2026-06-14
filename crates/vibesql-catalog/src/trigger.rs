@@ -7,6 +7,12 @@ use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming
 pub struct TriggerDefinition {
     /// Name of the trigger
     pub name: String,
+    /// Schema the trigger belongs to. `None` means the default (main) schema.
+    /// SQLite places a trigger in the same schema as its target table; a
+    /// `temp` schema is used for `CREATE TEMP TRIGGER` / `CREATE TRIGGER temp.x`
+    /// so it binds to the temp-table namesake rather than the main table when
+    /// both exist (triggerD-3.1/3.2).
+    pub schema: Option<String>,
     /// Trigger timing (BEFORE, AFTER, INSTEAD OF)
     pub timing: TriggerTiming,
     /// Trigger event (INSERT, UPDATE, DELETE)
@@ -41,6 +47,7 @@ impl TriggerDefinition {
     ) -> Self {
         TriggerDefinition {
             name,
+            schema: None,
             timing,
             event,
             table_name,
@@ -69,6 +76,7 @@ impl TriggerDefinition {
     ) -> Self {
         TriggerDefinition {
             name,
+            schema: None,
             timing,
             event,
             table_name,
@@ -78,6 +86,24 @@ impl TriggerDefinition {
             enabled: true,
             sql_definition: Some(sql_definition),
         }
+    }
+
+    /// Set the schema this trigger belongs to (builder-style).
+    ///
+    /// `None` keeps the trigger in the default (main) schema. A `Some("temp")`
+    /// value places it in the session temp schema so it binds to a temp-table
+    /// namesake. The schema name is stored verbatim; lookups compare it
+    /// case-insensitively.
+    pub fn with_schema(mut self, schema: Option<String>) -> Self {
+        self.schema = schema;
+        self
+    }
+
+    /// Returns true if this trigger lives in the temp schema.
+    pub fn is_temp(&self) -> bool {
+        self.schema
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case("temp"))
     }
 
     /// Check if the trigger is enabled

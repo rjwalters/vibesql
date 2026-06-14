@@ -94,7 +94,10 @@ impl TriggerExecutor {
             }
         }
 
-        // Create trigger definition from statement, preserving original SQL when available
+        // Create trigger definition from statement, preserving original SQL when available.
+        // The trigger's schema (from `CREATE TEMP TRIGGER` or an explicit
+        // `schema.` prefix) is threaded through so it binds to the correct
+        // table when a temp table shadows a main table of the same name.
         let trigger = match original_sql {
             Some(sql) => TriggerDefinition::new_with_sql(
                 stmt.trigger_name.clone(),
@@ -115,7 +118,8 @@ impl TriggerExecutor {
                 stmt.when_condition.clone(),
                 stmt.triggered_action.clone(),
             ),
-        };
+        }
+        .with_schema(stmt.schema.clone());
 
         // Store in catalog
         db.catalog.create_trigger(trigger)?;

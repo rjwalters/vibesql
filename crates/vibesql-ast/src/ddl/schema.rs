@@ -130,6 +130,14 @@ pub struct CreateTriggerStmt {
     /// name already exists is a no-op success rather than a "trigger already
     /// exists" error (SQLite semantics).
     pub if_not_exists: bool,
+    /// Optional schema qualifier for the trigger, taken from either the
+    /// `TEMP`/`TEMPORARY` modifier (`CREATE TEMP TRIGGER ...` → `Some("temp")`)
+    /// or an explicit schema prefix on the name (`CREATE TRIGGER main.r1 ...`
+    /// → `Some("main")`). `None` means the trigger lives in the default
+    /// (main) schema. SQLite places a trigger in the same schema as its target
+    /// table and uses this to disambiguate when a temp table shadows a main
+    /// table of the same name (triggerD-3.1/3.2).
+    pub schema: Option<String>,
     pub trigger_name: String,
     pub timing: TriggerTiming,
     pub event: TriggerEvent,
