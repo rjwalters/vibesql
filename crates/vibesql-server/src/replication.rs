@@ -290,6 +290,17 @@ impl ReplicationHandle {
         self.node.query(sql).map_err(|e| self.sql_error("the query", e))
     }
 
+    /// Resolve a SELECT's output column names against the applied state
+    /// **without executing it** — the names-only path for the
+    /// extended-protocol `Describe` (#5484). Resolves via the same
+    /// `SelectExecutor::resolve_column_names` the standalone `Describe`
+    /// uses (so the labels match label-for-label), but materializes no
+    /// rows, unlike [`query_local`](Self::query_local) which ran a full
+    /// read just to keep its `.columns`.
+    pub fn resolve_column_names(&self, sql: &str) -> Result<Vec<String>, SqlError> {
+        self.node.resolve_column_names(sql).map_err(|e| self.sql_error("the query", e))
+    }
+
     /// Subscribe to the apply-path change feed (#5422): a
     /// [`ChangeEventReceiver`](vibesql_storage::ChangeEventReceiver) yielding a
     /// [`ChangeEvent`](vibesql_storage::ChangeEvent) per row the consensus state
