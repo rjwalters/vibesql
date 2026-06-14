@@ -996,3 +996,53 @@ fn test_create_trigger_accepts_raise() {
          SELECT RAISE(IGNORE); END;",
     );
 }
+
+// --- name_source: preserve the verbatim trigger-name spelling (issue #5527) ---
+//
+// SQLite echoes the trigger name *exactly as written* (including its quoting
+// form) in the "trigger ... already exists" error (trigger1-1.2.2/1.2.3). The
+// parser records that verbatim spelling in `CreateTriggerStmt::name_source`,
+// while `trigger_name` holds the normalized (de-quoted) identifier.
+
+fn parse_trigger_name_source(sql: &str) -> (String, Option<String>) {
+    match Parser::parse_sql(sql).expect("parse failed") {
+        Statement::CreateTrigger(t) => (t.trigger_name, t.name_source),
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_name_source_unquoted() {
+    let (name, source) = parse_trigger_name_source(
+        "CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT 1; END;",
+    );
+    assert_eq!(name, "tr1");
+    assert_eq!(source.as_deref(), Some("tr1"));
+}
+
+#[test]
+fn test_name_source_double_quoted() {
+    let (name, source) = parse_trigger_name_source(
+        "CREATE TRIGGER \"tr1\" DELETE ON t1 BEGIN SELECT 1; END;",
+    );
+    assert_eq!(name, "tr1");
+    assert_eq!(source.as_deref(), Some("\"tr1\""));
+}
+
+#[test]
+fn test_name_source_bracket_quoted() {
+    let (name, source) = parse_trigger_name_source(
+        "CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;",
+    );
+    assert_eq!(name, "tr1");
+    assert_eq!(source.as_deref(), Some("[tr1]"));
+}
+
+#[test]
+fn test_name_source_backtick_quoted() {
+    let (name, source) = parse_trigger_name_source(
+        "CREATE TRIGGER `tr1` DELETE ON t1 BEGIN SELECT 1; END;",
+    );
+    assert_eq!(name, "tr1");
+    assert_eq!(source.as_deref(), Some("`tr1`"));
+}

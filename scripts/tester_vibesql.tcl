@@ -352,9 +352,11 @@ proc translate_error_to_sqlite {vibesql_error} {
     # Trigger already exists: "Trigger 'X' already exists" -> "trigger X already exists"
     # SQLite reports `trigger <name> already exists` (lowercase, unquoted) for a
     # duplicate CREATE TRIGGER without IF NOT EXISTS (sqlite3 3.51.0, trigger1-1.2.1).
-    # SQLite echoes the name's original quoting in trigger1-1.2.2/1.2.3
-    # (e.g. {"tr1"} / {[tr1]}); VibeSQL's parser does not preserve the source
-    # token, so those two sub-cases remain a known gap (see issue follow-on).
+    # SQLite echoes the trigger name's *original quoting* in trigger1-1.2.2/1.2.3
+    # (e.g. {"tr1"} / {[tr1]}). VibeSQL's parser now preserves that verbatim
+    # source spelling (CreateTriggerStmt::name_source) and embeds it in the
+    # error, so `X` already carries the original delimiters — we just lowercase
+    # the wrapper and pass the name through unchanged (issue #5527).
     if {[regexp -nocase {^Trigger '([^']+)' already exists} $error_msg -> trig_name]} {
         return "trigger $trig_name already exists"
     }

@@ -1,6 +1,10 @@
 use std::fmt;
 
-use crate::{keywords::Keyword, lexer::Lexer, token::Token};
+use crate::{
+    keywords::Keyword,
+    lexer::{Lexer, Span},
+    token::Token,
+};
 
 /// Maximum number of terms allowed in an ORDER BY clause.
 /// This matches SQLite's SQLITE_MAX_COLUMN default of 2000.
@@ -48,6 +52,15 @@ impl fmt::Display for ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    /// Original SQL source, retained so that selected constructs can recover the
+    /// *verbatim* source spelling of a token (e.g. a delimited identifier with
+    /// its original quoting). Empty when the parser was built directly from a
+    /// token vector via [`Parser::new`] (in which case source recovery is
+    /// unavailable and callers fall back to the normalized token text).
+    source: String,
+    /// Byte spans into `source`, one per entry in `tokens`. Empty (and ignored)
+    /// when `source` is empty.
+    spans: Vec<Span>,
     /// Counter for placeholder parameters (?)
     /// Incremented each time a placeholder is parsed, providing 0-indexed parameter positions
     placeholder_count: usize,
@@ -61,9 +74,53 @@ pub struct Parser {
 }
 
 impl Parser {
-    /// Create a new parser from tokens
+    /// Create a new parser from tokens.
+    ///
+    /// Source recovery (verbatim token text via [`Parser::current_token_source`])
+    /// is unavailable on parsers built this way; use [`Parser::new_with_source`]
+    /// when the original SQL must be recoverable.
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, position: 0, placeholder_count: 0, in_trigger_body: false }
+        Parser {
+            tokens,
+            position: 0,
+            placeholder_count: 0,
+            in_trigger_body: false,
+            source: String::new(),
+            spans: Vec::new(),
+        }
+    }
+
+    /// Create a new parser from tokens together with their byte spans and the
+    /// original SQL source. This enables [`Parser::current_token_source`] to
+    /// return the verbatim source text of a token (e.g. a delimited identifier
+    /// with its original quoting), which SQLite preserves in some error
+    /// messages.
+    pub fn new_with_source(tokens: Vec<Token>, spans: Vec<Span>, source: String) -> Self {
+        Parser {
+            tokens,
+            position: 0,
+            placeholder_count: 0,
+            in_trigger_body: false,
+            source,
+            spans,
+        }
+    }
+
+    /// Current token index (cursor position within the token stream).
+    pub(crate) fn current_position(&self) -> usize {
+        self.position
+    }
+
+    /// Return the verbatim source text of the token at index `pos`, including
+    /// any surrounding delimiters. Returns `None` when span/source information
+    /// is not available (parsers built via [`Parser::new`]) or `pos` is out of
+    /// range.
+    pub(crate) fn token_source_at(&self, pos: usize) -> Option<&str> {
+        if self.source.is_empty() {
+            return None;
+        }
+        let span = self.spans.get(pos)?;
+        self.source.get(span.start..span.end)
     }
 
     /// Parse a comma-separated list of items using a provided parser function
@@ -108,10 +165,12 @@ impl Parser {
     /// Parse SQL input string into a Statement
     pub fn parse_sql(input: &str) -> Result<vibesql_ast::Statement, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens =
-            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
 
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
         parser.parse_statement()
     }
 
@@ -130,10 +189,12 @@ impl Parser {
         input: &str,
     ) -> Result<vibesql_ast::Statement, ParseError> {
         let mut lexer = Lexer::new(input);
-        let tokens =
-            lexer.tokenize().map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
 
-        let mut parser = Parser::new(tokens);
+        let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
         parser.in_trigger_body = true;
         parser.parse_statement()
     }

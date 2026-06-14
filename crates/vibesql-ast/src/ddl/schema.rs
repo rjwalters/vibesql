@@ -139,6 +139,14 @@ pub struct CreateTriggerStmt {
     /// table of the same name (triggerD-3.1/3.2).
     pub schema: Option<String>,
     pub trigger_name: String,
+    /// The trigger name exactly as it appeared in the source, including any
+    /// quoting delimiters (`"tr1"`, `[tr1]`, `` `tr1` ``). `trigger_name` holds
+    /// the normalized (de-quoted) identifier used for catalog lookups, but
+    /// SQLite echoes the *original* spelling in the "trigger ... already exists"
+    /// error (trigger1-1.2.2/1.2.3). `None` when the source spelling is not
+    /// available (e.g. AST built programmatically), in which case callers fall
+    /// back to `trigger_name`.
+    pub name_source: Option<String>,
     pub timing: TriggerTiming,
     pub event: TriggerEvent,
     pub table_name: String,
