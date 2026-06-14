@@ -782,3 +782,128 @@ fn set_null_without_child_triggers_unaffected() {
         vec![SqlValue::Integer(-1), SqlValue::Integer(-1), SqlValue::Integer(2)]
     );
 }
+
+// ---------------------------------------------------------------------------
+// #5502: immediate-FK ConstraintViolation inside an EXPLICIT transaction must
+// roll the offending STATEMENT back (undoing every partial change it applied,
+// including an already-cascaded child DELETE) while leaving the enclosing
+// transaction OPEN. Before #5502 the non-RAISE `Err` arm of
+// `run_inside_transaction` *released* the statement savepoint instead of
+// rolling it back, leaving inconsistent partial state (#5498 found
+// `parent={1}, child={11}` — the parent DELETE reverted but child[10]'s
+// already-cascaded delete persisted).
+//
+// Scope note vs sqlite3 3.51.0: in an explicit txn sqlite3 leaves the partial
+// state `parent={}, child={11}` for *this* cascade-orphan case (it does not
+// undo the already-cascaded child[10] delete). VibeSQL's statement-savepoint
+// rolls the whole statement back atomically — `parent={1}, child={10,11}` —
+// which the savepoint mechanism cannot make selective. This is the resolution
+// the issue explicitly accepts: "internally consistent and recoverable
+// without manual ROLLBACK", matching the same statement-rollback scope as
+// RAISE(ABORT) and the auto-commit path. For *plain* constraint violations
+// (UNIQUE/CHECK/NOT NULL/plain FK) this is exact sqlite3 parity — see
+// raise_trigger_tests.rs.
+// ---------------------------------------------------------------------------
+
+/// #5502: cascade RAISE(IGNORE) orphan immediate-FK error inside an explicit
+/// transaction rolls the whole DELETE statement back (statement savepoint),
+/// leaving the transaction OPEN so the application can COMMIT or ROLLBACK.
+#[test]
+fn cascade_delete_raise_ignore_orphan_in_explicit_txn_rolls_back_statement_keeps_txn_open() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+
+    // The cascade fires, child 11's BEFORE DELETE RAISE(IGNORE) leaves it as an
+    // orphan, the immediate FK check raises. The statement savepoint must roll
+    // the WHOLE statement back (including child 10's already-cascaded delete).
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(
+        err.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation, got: {err}"
+    );
+
+    // The transaction stays OPEN (a constraint violation is statement-scoped,
+    // not transaction-scoped — SQLite's default).
+    assert!(db.in_transaction(), "constraint violation must keep the transaction open");
+
+    // Statement fully rolled back: parent 1 and BOTH children survive, with NO
+    // inconsistent partial state (the #5502 bug left parent gone OR child 10
+    // lost). Verified via a LIVE SELECT against the in-transaction state.
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(10), SqlValue::Integer(11)]
+    );
+
+    // The transaction is recoverable: a clean COMMIT now succeeds because the
+    // state is consistent (no orphan was left behind).
+    crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db)
+        .expect("COMMIT should succeed — no orphan persisted after statement rollback");
+    assert!(!db.in_transaction());
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(10), SqlValue::Integer(11)]
+    );
+}
+
+/// #5502: an EARLIER statement in the same explicit transaction must survive
+/// when a later statement trips the cascade-orphan immediate FK. Only the
+/// offending statement is rolled back; the transaction stays open.
+#[test]
+fn cascade_orphan_in_explicit_txn_preserves_earlier_statements() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE log (id INTEGER PRIMARY KEY)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+
+    // Earlier statement: a plain insert into an unrelated table.
+    exec(&mut db, "INSERT INTO log VALUES (100)").unwrap();
+
+    // Offending statement: cascade orphan immediate FK.
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(err.contains("FOREIGN KEY constraint failed"), "got: {err}");
+    assert!(db.in_transaction(), "txn must stay open");
+
+    // Earlier statement survives; offending statement fully undone.
+    assert_eq!(query_col(&db, "SELECT id FROM log"), vec![SqlValue::Integer(100)]);
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(
+        query_col(&db, "SELECT id FROM child ORDER BY id"),
+        vec![SqlValue::Integer(10), SqlValue::Integer(11)]
+    );
+
+    crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db).expect("COMMIT ok");
+    assert_eq!(query_col(&db, "SELECT id FROM log"), vec![SqlValue::Integer(100)]);
+}
