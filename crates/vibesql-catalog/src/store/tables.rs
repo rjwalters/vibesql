@@ -271,12 +271,25 @@ impl super::Catalog {
     ///
     /// Note: Triggers are automatically dropped when the associated table is dropped.
     pub fn drop_table(&mut self, name: &str) -> Result<(), CatalogError> {
-        // Parse qualified name: schema.table or just table
+        // Parse qualified name: schema.table or just table.
+        //
+        // For an *unqualified* name, follow SQLite name-resolution order: the
+        // session's temp schema shadows the current (main) schema. Without this,
+        // `DROP TABLE t` for a temp table `t` would only look in `main` and fail
+        // with "no such table" even though the temp table exists (it is the
+        // schema that `get_table`/`table_exists` resolve to). This also matches
+        // sqlite3 3.51.0, where an unqualified DROP removes the temp table first,
+        // leaving a same-named main table intact. See #5596.
+        let unqualified_schema: Option<String> =
+            if name.contains('.') { None } else { self.resolve_table_schema_name(name) };
         let (schema_name_for_lookup, table_name, original_table_name) =
             if let Some((schema_part, table_part)) = name.split_once('.') {
                 (schema_part, table_part, table_part)
             } else {
-                (self.current_schema.as_str(), name, name)
+                // Use the temp-shadows-main resolved schema when the table exists;
+                // otherwise fall back to the current schema so the lookup below
+                // still produces a "table not found" error against `main`.
+                (unqualified_schema.as_deref().unwrap_or(self.current_schema.as_str()), name, name)
             };
 
         let normalized_table = self.normalize_identifier(table_name);

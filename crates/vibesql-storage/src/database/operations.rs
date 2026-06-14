@@ -203,12 +203,21 @@ impl Operations {
             normalized_name.clone()
         };
 
-        // Get qualified table name for index cleanup
+        // Get qualified table name for index cleanup and storage removal.
+        //
+        // For a bare (unqualified) name, resolve the owning schema with SQLite's
+        // temp-shadows-main order so a temp table is removed from its temp schema
+        // key (`temp_<n>.<table>`) rather than wrongly assuming `main`. Without
+        // this, dropping a temp table would leak its storage entry (and miss its
+        // temp-schema indexes). Resolution must run while the catalog entry still
+        // exists, i.e. before `catalog.drop_table` below. See #5596.
         let qualified_name = if resolved_name.contains('.') {
             resolved_name.clone()
         } else {
-            let current_schema = catalog.get_current_schema();
-            format!("{}.{}", current_schema, resolved_name)
+            let owning_schema = catalog
+                .resolve_table_schema_name(&resolved_name)
+                .unwrap_or_else(|| catalog.get_current_schema().to_string());
+            format!("{}.{}", owning_schema, resolved_name)
         };
 
         // Drop associated indexes BEFORE dropping table (CASCADE behavior)
