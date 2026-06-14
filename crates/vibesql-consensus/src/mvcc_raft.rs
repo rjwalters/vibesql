@@ -806,13 +806,62 @@ impl MvccRaftNode {
                 "failed to bind consensus listener on {listen_addr}: {e}"
             ))
         })?;
+        Self::join_tcp_on_listener(node_id, config, listener, log_store, sm, bootstrap, tuning).await
+    }
 
+    /// The shared tail of every TCP join, given an **already-bound**
+    /// listener.
+    async fn join_tcp_on_listener<LS>(
+        node_id: u64,
+        config: &ClusterConfig,
+        listener: tokio::net::TcpListener,
+        log_store: LS,
+        sm: MvccStateMachine,
+        bootstrap: Bootstrap,
+        tuning: RaftTuning,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
         let network = crate::tcp::TcpNetworkFactory::new(config);
         let mut node = Self::boot(node_id, network, log_store, sm, tuning).await?;
         node.listener_task = Some(crate::tcp::spawn_listener(node.raft.clone(), listener));
 
         initialize_membership(&node.raft, config.membership(), bootstrap).await?;
         Ok(node)
+    }
+
+    /// Boot a TCP MVCC cluster voter on a **caller-supplied, already-bound**
+    /// listener instead of binding `config.addr(node_id)` here.
+    ///
+    /// The no-gap path for ephemeral-port test clusters — see
+    /// [`OpenraftBackend::join_tcp_cluster_with_listener`] for the rationale:
+    /// the harness binds every node's `127.0.0.1:0` listener up front, reads
+    /// back the OS-assigned ports, wires peers to them, and hands the same
+    /// sockets back here, so no freed port is ever rebound (no
+    /// "Address already in use" race under parallel CI).
+    ///
+    /// Intended for tests/harnesses; `#[doc(hidden)]`.
+    #[doc(hidden)]
+    pub async fn join_tcp_cluster_with_listener(
+        node_id: u64,
+        config: &ClusterConfig,
+        listener: std::net::TcpListener,
+        tuning: RaftTuning,
+    ) -> Result<Self> {
+        let listener = crate::tcp::adopt_listener(listener).map_err(|e| {
+            ConsensusError::Backend(format!("failed to adopt consensus listener: {e}"))
+        })?;
+        Self::join_tcp_on_listener(
+            node_id,
+            config,
+            listener,
+            InMemoryLogStore::default(),
+            MvccStateMachine::volatile(),
+            Bootstrap::Initialize,
+            tuning,
+        )
+        .await
     }
 
     /// Spawn the Raft core over `sm`: storage + state machine + network,

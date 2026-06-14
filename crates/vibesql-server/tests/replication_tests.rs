@@ -20,9 +20,9 @@ use tokio::{
     sync::{broadcast, oneshot},
 };
 use tokio_postgres::{error::SqlState, NoTls};
-use vibesql_consensus::Role;
+use vibesql_consensus::{ClusterConfig, MvccRaftNode, RaftTuning, Role};
 use vibesql_server::{
-    config::{Config, ReplicationConfig},
+    config::Config,
     connection::{ConnectionHandler, TableMutationNotification},
     observability::ObservabilityProvider,
     registry::DatabaseRegistry,
@@ -42,50 +42,41 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // Cluster helpers
 // ---------------------------------------------------------------------------
 
-/// Reserve `n` distinct localhost addresses with OS-assigned ephemeral
-/// ports (same strategy as the consensus crate's TCP tests: all
-/// reservations held at once, released just before the nodes bind them).
-fn free_localhost_addrs(n: u64) -> Vec<(u64, String)> {
-    let listeners: Vec<(u64, StdTcpListener)> = (1..=n)
-        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("reserve ephemeral port")))
-        .collect();
-    listeners
-        .iter()
-        .map(|(id, listener)| {
-            (*id, listener.local_addr().expect("reserved port address").to_string())
-        })
+/// Bind `n` distinct localhost listeners on OS-assigned ephemeral ports,
+/// keyed by node id `1..=n`. Returned **still bound** so each node boots
+/// directly onto its own socket — no port is freed and rebound, closing the
+/// reserve-then-rebind window that races parallel CI for "Address already
+/// in use" (#5507).
+fn bound_localhost_listeners(n: u64) -> Vec<(u64, StdTcpListener)> {
+    (1..=n)
+        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("bind ephemeral port")))
         .collect()
 }
 
-/// Write a `cluster.toml` for the given members and return its path
-/// (inside `dir`).
-fn write_cluster_toml(dir: &std::path::Path, members: &[(u64, String)]) -> std::path::PathBuf {
-    let mut toml = String::new();
-    for (id, addr) in members {
-        toml.push_str(&format!("[[node]]\nid = {id}\naddr = \"{addr}\"\n\n"));
-    }
-    let path = dir.join("cluster.toml");
-    std::fs::write(&path, toml).expect("write cluster.toml");
-    path
-}
-
-/// Boot an `n`-node replicated cluster on ephemeral ports, returning the
-/// handles (keyed 1..=n in order) and the tempdir holding the config.
+/// Boot an `n`-node replicated cluster on pre-bound ephemeral ports,
+/// returning the handles (keyed 1..=n in order) and a tempdir kept alive
+/// for the caller's lifetime (no longer holds a `cluster.toml` — the no-gap
+/// boot path wires peers straight from the bound listeners — but the return
+/// shape is preserved so call sites are unchanged).
 async fn boot_cluster(n: u64) -> (Vec<Arc<ReplicationHandle>>, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let members = free_localhost_addrs(n);
-    let path = write_cluster_toml(dir.path(), &members);
+
+    // Bind every node's consensus listener up front and keep the sockets;
+    // each node boots directly onto its own bound listener.
+    let listeners = bound_localhost_listeners(n);
+    let members: Vec<(u64, String)> = listeners
+        .iter()
+        .map(|(id, l)| (*id, l.local_addr().expect("bound port address").to_string()))
+        .collect();
+    let cluster = ClusterConfig::new(members.iter().cloned()).expect("valid cluster config");
+    let tuning = RaftTuning { staleness_beacon_ms: 0, ..RaftTuning::default() };
 
     let mut handles = Vec::new();
-    for (id, _) in &members {
-        let config = ReplicationConfig {
-            enabled: true,
-            cluster_config: Some(path.clone()),
-            node_id: Some(*id),
-            data_dir: None,
-            staleness_beacon_ms: 0,
-        };
-        handles.push(ReplicationHandle::start(&config).await.expect("boot consensus node"));
+    for (id, listener) in listeners {
+        let node = MvccRaftNode::join_tcp_cluster_with_listener(id, &cluster, listener, tuning)
+            .await
+            .expect("boot consensus node");
+        handles.push(ReplicationHandle::from_node(node, cluster.clone(), id));
     }
     (handles, dir)
 }

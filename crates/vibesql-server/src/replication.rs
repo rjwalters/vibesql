@@ -185,6 +185,22 @@ impl ReplicationHandle {
         Ok(Arc::new(Self { node, cluster, node_id }))
     }
 
+    /// Wrap an already-booted consensus node as a [`ReplicationHandle`],
+    /// bypassing the `cluster.toml` load + address-bind that
+    /// [`start`](Self::start) performs.
+    ///
+    /// This exists for test harnesses that boot consensus voters on
+    /// **pre-bound ephemeral listeners**
+    /// ([`MvccRaftNode::join_tcp_cluster_with_listener`]) to avoid the
+    /// reserve-then-rebind port-collision race under parallel CI (#5507).
+    /// Production servers always go through [`start`](Self::start).
+    ///
+    /// `#[doc(hidden)]` to keep it off the public surface.
+    #[doc(hidden)]
+    pub fn from_node(node: MvccRaftNode, cluster: ClusterConfig, node_id: u64) -> Arc<Self> {
+        Arc::new(Self { node, cluster, node_id })
+    }
+
     /// The underlying consensus node.
     pub fn node(&self) -> &MvccRaftNode {
         &self.node

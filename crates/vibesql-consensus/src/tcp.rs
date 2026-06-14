@@ -206,6 +206,21 @@ pub(crate) async fn bind_listener(addr: &str) -> io::Result<TcpListener> {
     socket.listen(1024)
 }
 
+/// Adopt an already-bound [`std::net::TcpListener`] as the consensus
+/// listener, switching it to non-blocking for the tokio reactor.
+///
+/// This is the no-gap counterpart to [`bind_listener`]: a caller can bind a
+/// port (e.g. `127.0.0.1:0` to let the OS pick), read back the real bound
+/// address, wire peers to it, and only *then* hand the very same socket here
+/// — so nothing ever rebinds a freed port. Tests use it (via the
+/// `join_tcp_cluster_with_listener` constructors) to spin up clusters on
+/// ephemeral ports without the reserve-then-rebind window that otherwise
+/// races parallel runs for "Address already in use".
+pub(crate) fn adopt_listener(listener: std::net::TcpListener) -> io::Result<TcpListener> {
+    listener.set_nonblocking(true)?;
+    TcpListener::from_std(listener)
+}
+
 /// Spawn the accept loop feeding inbound RPCs into the local `Raft`.
 ///
 /// Aborting the returned handle ends the loop **and** every accepted

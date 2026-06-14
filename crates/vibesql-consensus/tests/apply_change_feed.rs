@@ -22,15 +22,13 @@ use vibesql_types::SqlValue;
 const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-fn free_localhost_addrs(n: u64) -> BTreeMap<u64, String> {
-    let listeners: Vec<(u64, StdTcpListener)> = (1..=n)
-        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("reserve ephemeral port")))
-        .collect();
-    listeners
-        .iter()
-        .map(|(id, listener)| {
-            (*id, listener.local_addr().expect("reserved port address").to_string())
-        })
+/// Bind `n` distinct localhost listeners on OS-assigned ephemeral ports,
+/// returned **still bound** so each node boots directly onto its own socket
+/// — no port is freed and rebound (no "Address already in use" race under
+/// parallel CI, #5507).
+fn bound_localhost_listeners(n: u64) -> BTreeMap<u64, StdTcpListener> {
+    (1..=n)
+        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("bind ephemeral port")))
         .collect()
 }
 
@@ -41,14 +39,24 @@ struct Cluster {
 
 impl Cluster {
     async fn boot(n: u64) -> Self {
-        let addrs = free_localhost_addrs(n);
+        let mut listeners = bound_localhost_listeners(n);
+        let addrs: BTreeMap<u64, String> = listeners
+            .iter()
+            .map(|(id, l)| (*id, l.local_addr().expect("bound port address").to_string()))
+            .collect();
         let mut nodes = BTreeMap::new();
         for id in 1..=n {
             let view = (1..=n).map(|peer| (peer, addrs[&peer].clone()));
             let config = ClusterConfig::new(view).expect("valid cluster config");
-            let node = MvccRaftNode::join_tcp_cluster_tuned(id, &config, RaftTuning::default())
-                .await
-                .expect("boot mvcc tcp node");
+            let listener = listeners.remove(&id).expect("a bound listener per node");
+            let node = MvccRaftNode::join_tcp_cluster_with_listener(
+                id,
+                &config,
+                listener,
+                RaftTuning::default(),
+            )
+            .await
+            .expect("boot mvcc tcp node");
             nodes.insert(id, node);
         }
         Self { nodes }

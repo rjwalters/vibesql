@@ -46,17 +46,15 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Poll interval inside bounded waits.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-/// Reserve `n` distinct localhost addresses with OS-assigned ephemeral
-/// ports, keyed by node id `1..=n` (same strategy as tcp_cluster.rs).
-fn free_localhost_addrs(n: u64) -> BTreeMap<u64, String> {
-    let listeners: Vec<(u64, StdTcpListener)> = (1..=n)
-        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("reserve ephemeral port")))
-        .collect();
-    listeners
-        .iter()
-        .map(|(id, listener)| {
-            (*id, listener.local_addr().expect("reserved port address").to_string())
-        })
+/// Bind `n` distinct localhost listeners on OS-assigned ephemeral ports,
+/// keyed by node id `1..=n`. The listeners are returned **still bound** so
+/// the cluster boots each node directly onto its own socket
+/// ([`MvccRaftNode::join_tcp_cluster_with_listener`]) — no port is ever
+/// released and rebound, closing the reserve-then-rebind window that races
+/// parallel CI for "Address already in use" (#5507).
+fn bound_localhost_listeners(n: u64) -> BTreeMap<u64, StdTcpListener> {
+    (1..=n)
+        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("bind ephemeral port")))
         .collect()
 }
 
@@ -162,7 +160,14 @@ impl MvccTcpCluster {
     }
 
     async fn build(n: u64, with_proxies: bool, tuning: RaftTuning) -> Self {
-        let addrs = free_localhost_addrs(n);
+        // Bind every node's listener up front and keep the sockets; each
+        // node boots directly onto its own bound listener, so no port is
+        // freed and rebound (no port-collision race under parallel CI).
+        let mut listeners = bound_localhost_listeners(n);
+        let addrs: BTreeMap<u64, String> = listeners
+            .iter()
+            .map(|(id, l)| (*id, l.local_addr().expect("bound port address").to_string()))
+            .collect();
 
         let mut proxies = BTreeMap::new();
         if with_proxies {
@@ -177,8 +182,8 @@ impl MvccTcpCluster {
 
         let mut nodes = BTreeMap::new();
         for id in 1..=n {
-            // Node `id`'s view: its own real address (it binds it), every
-            // peer behind this node's outgoing proxy when partitionable.
+            // Node `id`'s view: its own real bound address, every peer
+            // behind this node's outgoing proxy when partitionable.
             let view = (1..=n).map(|peer| {
                 let addr = if peer == id || !with_proxies {
                     addrs[&peer].clone()
@@ -188,7 +193,8 @@ impl MvccTcpCluster {
                 (peer, addr)
             });
             let config = ClusterConfig::new(view).expect("valid cluster config");
-            let node = MvccRaftNode::join_tcp_cluster_tuned(id, &config, tuning)
+            let listener = listeners.remove(&id).expect("a bound listener per node");
+            let node = MvccRaftNode::join_tcp_cluster_with_listener(id, &config, listener, tuning)
                 .await
                 .expect("boot mvcc tcp node");
             nodes.insert(id, node);
