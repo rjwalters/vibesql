@@ -126,6 +126,14 @@ impl TriggerExecutor {
     ) -> Result<String, ExecutorError> {
         // Check if trigger exists
         if db.catalog.get_trigger(&stmt.trigger_name).is_none() {
+            // `DROP TRIGGER IF EXISTS` on a missing trigger is a no-op
+            // (SQLite / SQL:2008 semantics); a bare DROP TRIGGER still errors.
+            if stmt.if_exists {
+                return Ok(format!(
+                    "Trigger '{}' does not exist, skipping",
+                    stmt.trigger_name
+                ));
+            }
             return Err(ExecutorError::TriggerNotFound(stmt.trigger_name.clone()));
         }
 

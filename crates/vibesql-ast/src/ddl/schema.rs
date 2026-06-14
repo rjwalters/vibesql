@@ -176,6 +176,9 @@ pub enum TriggerAction {
 pub struct DropTriggerStmt {
     pub trigger_name: String,
     pub cascade: bool,
+    /// `DROP TRIGGER IF EXISTS` — when true, dropping a non-existent trigger
+    /// is a no-op instead of an error (SQLite / SQL:2008 semantics).
+    pub if_exists: bool,
 }
 
 /// ALTER TRIGGER statement

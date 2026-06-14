@@ -206,6 +206,34 @@ fn test_drop_trigger_basic() {
 }
 
 #[test]
+fn test_drop_trigger_if_exists() {
+    // `DROP TRIGGER IF EXISTS name` must parse (trigger1-1.4 / 1.6.1, #5497).
+    let sql = "DROP TRIGGER IF EXISTS my_trigger;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::DropTrigger(drop_trigger) => {
+            assert_eq!(drop_trigger.trigger_name, "my_trigger");
+            assert!(drop_trigger.if_exists, "IF EXISTS flag should be set");
+            assert!(!drop_trigger.cascade);
+        }
+        _ => panic!("Expected DropTrigger statement"),
+    }
+}
+
+#[test]
+fn test_drop_trigger_basic_no_if_exists() {
+    // Bare DROP TRIGGER leaves if_exists false.
+    match Parser::parse_sql("DROP TRIGGER my_trigger;").unwrap() {
+        Statement::DropTrigger(drop_trigger) => {
+            assert!(!drop_trigger.if_exists);
+        }
+        _ => panic!("Expected DropTrigger statement"),
+    }
+}
+
+#[test]
 fn test_drop_trigger_cascade() {
     let sql = "DROP TRIGGER my_trigger CASCADE;";
     let result = Parser::parse_sql(sql);

@@ -152,7 +152,8 @@ fn test_drop_trigger() {
     assert!(db.catalog.get_trigger("my_trigger").is_some());
 
     // Drop the trigger
-    let drop_stmt = DropTriggerStmt { trigger_name: "my_trigger".to_string(), cascade: false };
+    let drop_stmt =
+        DropTriggerStmt { trigger_name: "my_trigger".to_string(), cascade: false, if_exists: false };
 
     let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
     assert!(result.is_ok(), "Failed to drop trigger: {:?}", result.err());
@@ -165,11 +166,28 @@ fn test_drop_trigger() {
 fn test_drop_trigger_not_found() {
     let mut db = Database::new();
 
-    let drop_stmt =
-        DropTriggerStmt { trigger_name: "nonexistent_trigger".to_string(), cascade: false };
+    let drop_stmt = DropTriggerStmt {
+        trigger_name: "nonexistent_trigger".to_string(),
+        cascade: false,
+        if_exists: false,
+    };
 
     let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
     assert!(result.is_err(), "Should fail when dropping non-existent trigger");
+}
+
+#[test]
+fn test_drop_trigger_if_exists_missing_is_noop() {
+    let mut db = Database::new();
+
+    let drop_stmt = DropTriggerStmt {
+        trigger_name: "nonexistent_trigger".to_string(),
+        cascade: false,
+        if_exists: true,
+    };
+
+    let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
+    assert!(result.is_ok(), "DROP TRIGGER IF EXISTS on missing trigger should be a no-op");
 }
 
 #[test]
@@ -211,4 +229,104 @@ fn test_create_trigger_all_variations() {
         let trigger = db.catalog.get_trigger(&format!("trigger_{}", suffix)).unwrap();
         assert_eq!(trigger.timing, timing);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Transactional DDL: CREATE TRIGGER participates in the surrounding
+// transaction (#5497 / trigger1-1.3).
+//
+// SQLite (3.51.0) treats trigger DDL as transactional: a `BEGIN; CREATE
+// TRIGGER ...; ROLLBACK;` leaves no trigger behind and raises no error,
+// while a matching COMMIT keeps it. These tests assert that via live
+// catalog introspection through the same `TriggerExecutor` /
+// `Database` transaction path the CLI uses.
+// ---------------------------------------------------------------------------
+
+fn make_test_table(db: &mut Database) {
+    let sql = "CREATE TABLE t1 (a INT, b INT, c INT);";
+    match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+        vibesql_ast::Statement::CreateTable(stmt) => {
+            CreateTableExecutor::execute(&stmt, db).unwrap();
+        }
+        _ => panic!("Expected CreateTable"),
+    }
+}
+
+fn create_trigger_stmt(name: &str) -> CreateTriggerStmt {
+    CreateTriggerStmt {
+        if_not_exists: false,
+        trigger_name: name.to_string(),
+        timing: TriggerTiming::After,
+        event: TriggerEvent::Insert,
+        table_name: "t1".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql("SELECT 1;".to_string()),
+    }
+}
+
+#[test]
+fn test_create_trigger_rolled_back_with_transaction() {
+    // BEGIN; CREATE TRIGGER tr2 ...; ROLLBACK; => no error, no trigger left.
+    let mut db = Database::new();
+    make_test_table(&mut db);
+
+    db.begin_transaction().expect("BEGIN");
+    crate::TriggerExecutor::create_trigger(&mut db, &create_trigger_stmt("tr2"))
+        .expect("CREATE TRIGGER inside txn");
+    // Visible to its own transaction before rollback.
+    assert!(db.catalog.get_trigger("tr2").is_some(), "trigger visible inside txn");
+
+    // ROLLBACK must succeed (no "No active transaction to rollback") and undo
+    // the catalog mutation.
+    db.rollback_transaction().expect("ROLLBACK after CREATE TRIGGER");
+    assert!(
+        db.catalog.get_trigger("tr2").is_none(),
+        "trigger must be gone after ROLLBACK (transactional DDL, #5497)"
+    );
+
+    // And re-creating it now succeeds (mirrors trigger1-1.3's second CREATE).
+    crate::TriggerExecutor::create_trigger(&mut db, &create_trigger_stmt("tr2"))
+        .expect("re-CREATE TRIGGER after rollback");
+    assert!(db.catalog.get_trigger("tr2").is_some());
+}
+
+#[test]
+fn test_create_trigger_kept_after_commit() {
+    // BEGIN; CREATE TRIGGER tr2 ...; COMMIT; => trigger persists.
+    let mut db = Database::new();
+    make_test_table(&mut db);
+
+    db.begin_transaction().expect("BEGIN");
+    crate::TriggerExecutor::create_trigger(&mut db, &create_trigger_stmt("tr2"))
+        .expect("CREATE TRIGGER inside txn");
+    db.commit_transaction().expect("COMMIT after CREATE TRIGGER");
+
+    assert!(
+        db.catalog.get_trigger("tr2").is_some(),
+        "trigger must survive COMMIT (transactional DDL, #5497)"
+    );
+}
+
+#[test]
+fn test_drop_trigger_rolled_back_with_transaction() {
+    // Committed trigger, then BEGIN; DROP TRIGGER; ROLLBACK; => trigger restored.
+    let mut db = Database::new();
+    make_test_table(&mut db);
+    crate::TriggerExecutor::create_trigger(&mut db, &create_trigger_stmt("tr2"))
+        .expect("CREATE TRIGGER");
+
+    db.begin_transaction().expect("BEGIN");
+    crate::TriggerExecutor::drop_trigger(
+        &mut db,
+        &DropTriggerStmt { trigger_name: "tr2".to_string(), cascade: false, if_exists: false },
+    )
+    .expect("DROP TRIGGER inside txn");
+    assert!(db.catalog.get_trigger("tr2").is_none(), "trigger dropped inside txn");
+
+    db.rollback_transaction().expect("ROLLBACK after DROP TRIGGER");
+    assert!(
+        db.catalog.get_trigger("tr2").is_some(),
+        "dropped trigger must be restored after ROLLBACK (#5497)"
+    );
 }
