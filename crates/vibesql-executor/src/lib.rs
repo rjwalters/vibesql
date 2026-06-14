@@ -51,6 +51,7 @@ pub mod timeout;
 mod transaction;
 mod trigger_ddl;
 mod trigger_execution;
+mod trigger_rename;
 pub mod truncate;
 mod truncate_table;
 mod truncate_validation;
