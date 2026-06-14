@@ -15,6 +15,7 @@ fn test_trigger_failure_causes_rollback() {
 
     // Create trigger that always fails (inserts into non-existent table)
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "failing_trigger".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -90,6 +91,7 @@ fn test_recursion_prevention() {
 
     // Create trigger that inserts into the same table (infinite loop)
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "recursive_trigger".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,

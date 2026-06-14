@@ -38,6 +38,14 @@ impl TriggerExecutor {
         stmt: &CreateTriggerStmt,
         original_sql: Option<&str>,
     ) -> Result<String, ExecutorError> {
+        // `CREATE TRIGGER IF NOT EXISTS <name>` is a no-op success when a
+        // trigger with that name already exists (SQLite semantics, trigger1-1.2.0).
+        // SQLite resolves the existing-trigger check before validating the target
+        // object, so an already-present trigger short-circuits here.
+        if stmt.if_not_exists && db.catalog.get_trigger(&stmt.trigger_name).is_some() {
+            return Ok(format!("Trigger '{}' already exists", stmt.trigger_name));
+        }
+
         // INSTEAD OF triggers can only be created on views
         // BEFORE and AFTER triggers can only be created on tables
         if stmt.timing == TriggerTiming::InsteadOf {

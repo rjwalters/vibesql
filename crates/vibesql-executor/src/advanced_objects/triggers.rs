@@ -12,6 +12,14 @@ pub fn execute_create_trigger(
 ) -> Result<(), ExecutorError> {
     use vibesql_catalog::TriggerDefinition;
 
+    // `CREATE TRIGGER IF NOT EXISTS <name>` is a no-op success when a trigger
+    // with that name already exists (SQLite semantics, trigger1-1.2.0). Mirrors
+    // the guard in `TriggerExecutor::create_trigger_with_sql` so every CREATE
+    // TRIGGER path honors the clause.
+    if stmt.if_not_exists && db.catalog.get_trigger(&stmt.trigger_name).is_some() {
+        return Ok(());
+    }
+
     let trigger = TriggerDefinition::new(
         stmt.trigger_name.clone(),
         stmt.timing.clone(),
