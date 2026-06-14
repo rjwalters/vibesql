@@ -30,6 +30,11 @@ impl ViewExecutor {
             })?;
         }
 
+        // Tag temp views with the `temp` schema so they surface via
+        // sqlite_temp_master and are excluded from sqlite_master (#5541),
+        // mirroring the temp-trigger (#5532) and temp-index (#5513) tags.
+        let schema = if stmt.temporary { Some("temp".to_string()) } else { None };
+
         // Create the view definition
         let view_def = if let Some(ref sql) = stmt.sql_definition {
             ViewDefinition::new_with_sql(
@@ -46,7 +51,8 @@ impl ViewExecutor {
                 *stmt.query.clone(),
                 stmt.with_check_option,
             )
-        };
+        }
+        .with_schema(schema);
 
         // Add to catalog
         database

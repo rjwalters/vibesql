@@ -97,18 +97,26 @@ pub fn execute_sqlite_schema_query(
         rows.push(schema_row("index", &index.name, &index.table_name, sql));
     }
 
-    // Add views
+    // Add views. Temp views are tagged with the `temp` schema (#5541) and
+    // surface only via sqlite_temp_master, so skip them here.
     for view_name in catalog.list_views() {
         if let Some(view) = catalog.get_view(&view_name) {
+            if view.is_temp() {
+                continue;
+            }
             let sql = generate_create_view_sql(view);
             // tbl_name is same as name for views
             rows.push(schema_row("view", &view.name, &view.name, sql));
         }
     }
 
-    // Add triggers
+    // Add triggers. Temp triggers are tagged with the `temp` schema (#5532)
+    // and surface only via sqlite_temp_master, so skip them here.
     for trigger_name in catalog.list_triggers() {
         if let Some(trigger) = catalog.get_trigger(&trigger_name) {
+            if trigger.is_temp() {
+                continue;
+            }
             let sql = generate_create_trigger_sql(trigger);
             rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
         }
@@ -119,16 +127,13 @@ pub fn execute_sqlite_schema_query(
 
 /// Execute a `sqlite_temp_master` / `sqlite_temp_schema` query.
 ///
-/// Lists the session's **temp-schema** objects: temp tables and indexes on temp
-/// tables. Mirrors SQLite 3.51.0, where:
+/// Lists the session's **temp-schema** objects: temp tables, indexes on temp
+/// tables, temp views, and temp triggers. Mirrors SQLite 3.51.0, where:
 ///   CREATE TEMP TABLE t(a); CREATE INDEX i ON t(a);
-///   SELECT name,type FROM sqlite_temp_master;  -- lists t and i
-/// while `sqlite_master` lists neither. See issue #5513.
-///
-/// Scope note: VibeSQL does not yet schema-tag temp **views** or temp
-/// **triggers** (tracked separately — see follow-ons), so this view currently
-/// surfaces temp tables and temp-table indexes. That is sufficient for the
-/// index introspection parity this issue targets.
+///   CREATE TEMP VIEW v AS SELECT 1; CREATE TEMP TRIGGER tr AFTER INSERT ON t ...;
+///   SELECT name,type FROM sqlite_temp_master;  -- lists t, i, v and tr
+/// while `sqlite_master` lists none of them. Temp tables/indexes were added in
+/// #5513 (PR #5539); temp views/triggers in #5541.
 pub fn execute_sqlite_temp_schema_query(
     catalog: &vibesql_catalog::Catalog,
 ) -> Result<SelectResult, ExecutorError> {
@@ -153,6 +158,31 @@ pub fn execute_sqlite_temp_schema_query(
     for index in catalog.get_schema_indexes(temp_schema) {
         let sql = generate_create_index_sql(index);
         rows.push(schema_row("index", &index.name, &index.table_name, sql));
+    }
+
+    // Add temp views. Views are stored flat in the catalog (not partitioned by
+    // schema), so filter on the per-view `temp` tag set at CREATE TEMP VIEW
+    // time (#5541).
+    for view_name in catalog.list_views() {
+        if let Some(view) = catalog.get_view(&view_name) {
+            if !view.is_temp() {
+                continue;
+            }
+            let sql = generate_create_view_sql(view);
+            rows.push(schema_row("view", &view.name, &view.name, sql));
+        }
+    }
+
+    // Add temp triggers. Triggers are also stored flat; filter on the `temp`
+    // schema tag from CREATE TEMP TRIGGER (#5532).
+    for trigger_name in catalog.list_triggers() {
+        if let Some(trigger) = catalog.get_trigger(&trigger_name) {
+            if !trigger.is_temp() {
+                continue;
+            }
+            let sql = generate_create_trigger_sql(trigger);
+            rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
+        }
     }
 
     Ok(SelectResult { columns: column_names, rows })
@@ -512,6 +542,90 @@ mod tests {
         assert!(temp_names.contains(&"temp_i".to_string()), "temp_master should list temp index");
         assert!(temp_names.contains(&"tt".to_string()), "temp_master should list temp table");
         assert!(!temp_names.contains(&"main_i".to_string()), "temp_master must exclude main index");
+    }
+
+    #[test]
+    fn test_temp_view_and_trigger_separated_from_main_in_schema_views() {
+        // #5541: temp views/triggers appear in sqlite_temp_master and are
+        // excluded from sqlite_master; main views/triggers are the reverse.
+        use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+        use vibesql_catalog::{TriggerDefinition, ViewDefinition};
+
+        let mut catalog = Catalog::new();
+
+        // A base table for the triggers to target.
+        let base = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table(base).unwrap();
+
+        // main view + temp view.
+        catalog
+            .create_view(ViewDefinition::new(
+                "main_v".to_string(),
+                None,
+                create_minimal_select_stmt(),
+                false,
+            ))
+            .unwrap();
+        catalog
+            .create_view(
+                ViewDefinition::new("temp_v".to_string(), None, create_minimal_select_stmt(), false)
+                    .with_schema(Some("temp".to_string())),
+            )
+            .unwrap();
+
+        // main trigger + temp trigger.
+        let mk_trigger = |name: &str| {
+            TriggerDefinition::new(
+                name.to_string(),
+                TriggerTiming::After,
+                TriggerEvent::Insert,
+                "t".to_string(),
+                TriggerGranularity::Row,
+                None,
+                TriggerAction::RawSql("SELECT 1".to_string()),
+            )
+        };
+        catalog.create_trigger(mk_trigger("main_tr")).unwrap();
+        catalog
+            .create_trigger(mk_trigger("temp_tr").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        let names = |result: &SelectResult| -> Vec<String> {
+            result
+                .rows
+                .iter()
+                .map(|r| match &r.values[1] {
+                    SqlValue::Varchar(s) => s.to_string(),
+                    _ => String::new(),
+                })
+                .collect()
+        };
+
+        let master = execute_sqlite_schema_query(&catalog).unwrap();
+        let master_names = names(&master);
+        assert!(master_names.contains(&"main_v".to_string()), "master should list main view");
+        assert!(master_names.contains(&"main_tr".to_string()), "master should list main trigger");
+        assert!(!master_names.contains(&"temp_v".to_string()), "master must exclude temp view");
+        assert!(
+            !master_names.contains(&"temp_tr".to_string()),
+            "master must exclude temp trigger"
+        );
+
+        let temp_master = execute_sqlite_temp_schema_query(&catalog).unwrap();
+        let temp_names = names(&temp_master);
+        assert!(temp_names.contains(&"temp_v".to_string()), "temp_master should list temp view");
+        assert!(
+            temp_names.contains(&"temp_tr".to_string()),
+            "temp_master should list temp trigger"
+        );
+        assert!(!temp_names.contains(&"main_v".to_string()), "temp_master must exclude main view");
+        assert!(
+            !temp_names.contains(&"main_tr".to_string()),
+            "temp_master must exclude main trigger"
+        );
     }
 
     #[test]
