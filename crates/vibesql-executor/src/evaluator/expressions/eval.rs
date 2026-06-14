@@ -905,25 +905,48 @@ impl ExpressionEvaluator<'_> {
                 }
             }
 
-            // Placeholder (?) - must be bound before evaluation
+            // Placeholder (?) - must be bound before evaluation, EXCEPT inside a
+            // firing trigger program. A trigger whose definition was loaded from
+            // the schema (e.g. via writable_schema) may legally contain a bound
+            // parameter: a trigger program is compiled once with no bind context,
+            // so SQLite evaluates such a reference to NULL rather than raising
+            // (triggerE.test section 2). The create-time path still rejects
+            // variables in `CREATE TRIGGER` (handled in the parser); this only
+            // affects bodies that reach the firing path with a variable token.
             vibesql_ast::Expression::Placeholder(idx) => {
-                Err(ExecutorError::UnsupportedExpression(
-                    format!("Unbound placeholder ?{} - placeholders must be bound to values before execution", idx)
-                ))
+                if self.trigger_context.is_some() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Err(ExecutorError::UnsupportedExpression(
+                        format!("Unbound placeholder ?{} - placeholders must be bound to values before execution", idx)
+                    ))
+                }
             }
 
-            // Numbered placeholder ($1, $2, etc.) - must be bound before evaluation
+            // Numbered placeholder ($1, $2, etc.) - must be bound before
+            // evaluation, except inside a firing trigger program where an
+            // unbound variable evaluates to NULL (see Placeholder above).
             vibesql_ast::Expression::NumberedPlaceholder(idx) => {
-                Err(ExecutorError::UnsupportedExpression(
-                    format!("Unbound numbered placeholder ${} - placeholders must be bound to values before execution", idx)
-                ))
+                if self.trigger_context.is_some() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Err(ExecutorError::UnsupportedExpression(
+                        format!("Unbound numbered placeholder ${} - placeholders must be bound to values before execution", idx)
+                    ))
+                }
             }
 
-            // Named placeholder (:name) - must be bound before evaluation
+            // Named placeholder (:name) - must be bound before evaluation,
+            // except inside a firing trigger program where an unbound variable
+            // evaluates to NULL (see Placeholder above).
             vibesql_ast::Expression::NamedPlaceholder(name) => {
-                Err(ExecutorError::UnsupportedExpression(
-                    format!("Unbound named placeholder :{} - placeholders must be bound to values before execution", name)
-                ))
+                if self.trigger_context.is_some() {
+                    Ok(SqlValue::Null)
+                } else {
+                    Err(ExecutorError::UnsupportedExpression(
+                        format!("Unbound named placeholder :{} - placeholders must be bound to values before execution", name)
+                    ))
+                }
             }
 
             // Conjunction (AND) - evaluate all children with short-circuit

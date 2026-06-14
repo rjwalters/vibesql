@@ -20,6 +20,7 @@ mod delete;
 mod error_handling;
 mod insert;
 mod pseudo_vars;
+mod schema_loaded_variables;
 mod update;
 
 // ============================================================================
