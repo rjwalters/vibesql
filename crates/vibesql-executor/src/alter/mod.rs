@@ -32,6 +32,7 @@ impl AlterTableExecutor {
             AlterTableStmt::AddConstraint(s) => &s.table_name,
             AlterTableStmt::DropConstraint(s) => &s.table_name,
             AlterTableStmt::RenameTable(s) => &s.table_name,
+            AlterTableStmt::RenameColumn(s) => &s.table_name,
             AlterTableStmt::ModifyColumn(s) => &s.table_name,
             AlterTableStmt::ChangeColumn(s) => &s.table_name,
         };
@@ -65,6 +66,9 @@ impl AlterTableExecutor {
                     database.invalidate_columnar_cache(new_name);
                 }
                 return result;
+            }
+            AlterTableStmt::RenameColumn(rename_column) => {
+                columns::execute_rename_column(rename_column, database)
             }
             AlterTableStmt::ModifyColumn(modify_column) => {
                 columns::execute_modify_column(modify_column, database)

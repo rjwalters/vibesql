@@ -355,6 +355,57 @@ impl TableSchema {
         Ok(())
     }
 
+    /// Rename a column at `index`, keeping the column-index cache and any
+    /// constraint references (primary key, unique, foreign keys) consistent.
+    ///
+    /// Mutating `columns[i].name` directly leaves the `column_index_cache` stale,
+    /// so callers that rename a column must go through this method.
+    pub fn rename_column(
+        &mut self,
+        index: usize,
+        new_name: &str,
+    ) -> Result<(), crate::CatalogError> {
+        if index >= self.columns.len() {
+            return Err(crate::CatalogError::ColumnNotFound {
+                column_name: "index out of bounds".to_string(),
+                table_name: self.name.clone(),
+            });
+        }
+        let old_name = self.columns[index].name.clone();
+        self.columns[index].name = new_name.to_string();
+
+        // Rebuild the column index cache to reflect the new name.
+        self.column_index_cache.clear();
+        for (idx, col) in self.columns.iter().enumerate() {
+            self.column_index_cache.insert(col.name.clone(), idx);
+        }
+
+        // Update constraint references that named the old column.
+        if let Some(ref mut pk) = self.primary_key {
+            for col in pk.iter_mut() {
+                if *col == old_name {
+                    *col = new_name.to_string();
+                }
+            }
+        }
+        for constraint in self.unique_constraints.iter_mut() {
+            for col in constraint.iter_mut() {
+                if *col == old_name {
+                    *col = new_name.to_string();
+                }
+            }
+        }
+        for fk in self.foreign_keys.iter_mut() {
+            for col in fk.column_names.iter_mut() {
+                if *col == old_name {
+                    *col = new_name.to_string();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check if a column exists
     pub fn has_column(&self, name: &str) -> bool {
         self.get_column(name).is_some()

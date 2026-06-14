@@ -327,6 +327,7 @@ pub enum AlterTableStmt {
     AddConstraint(AddConstraintStmt),
     DropConstraint(DropConstraintStmt),
     RenameTable(RenameTableStmt),
+    RenameColumn(RenameColumnStmt),
     ModifyColumn(ModifyColumnStmt),
     ChangeColumn(ChangeColumnStmt),
 }
@@ -374,6 +375,14 @@ pub struct DropConstraintStmt {
 pub struct RenameTableStmt {
     pub table_name: String,
     pub new_table_name: String,
+}
+
+/// RENAME COLUMN operation (`ALTER TABLE t RENAME [COLUMN] old TO new`)
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenameColumnStmt {
+    pub table_name: String,
+    pub old_column_name: String,
+    pub new_column_name: String,
 }
 
 /// MODIFY COLUMN operation (MySQL-style)
