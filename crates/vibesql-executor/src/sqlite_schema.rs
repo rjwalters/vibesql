@@ -804,6 +804,50 @@ mod tests {
         assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users(email(50))");
     }
 
+    /// Regression test for #5579: `sqlite_master` must report the index name and
+    /// SQL with their original case (the case the user typed in `CREATE INDEX`),
+    /// matching sqlite3 3.51.0. The catalog stores the original-case name, so
+    /// both the `name` column and the generated `sql` column preserve it.
+    #[test]
+    fn test_sqlite_schema_index_preserves_name_case() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        let columns = vec![ColumnSchema::new("a".to_string(), DataType::Integer, false)];
+        let table = TableSchema::new("t".to_string(), columns);
+        catalog.create_table(table).unwrap();
+
+        let index = IndexMetadata::new(
+            "MyIdx".to_string(),
+            "t".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
+            false,
+        );
+        catalog.add_index(index).unwrap();
+
+        let result = execute_sqlite_schema_query(&catalog).unwrap();
+        let index_row = result
+            .rows
+            .iter()
+            .find(|r| matches!(&r.values[0], SqlValue::Varchar(s) if s.as_str() == "index"))
+            .expect("Should have an index row");
+
+        // `name` column preserves original case (not "myidx").
+        assert_eq!(index_row.values[1], SqlValue::Varchar(arcstr::ArcStr::from("MyIdx")));
+
+        // `sql` column preserves original case.
+        if let SqlValue::Varchar(sql) = &index_row.values[4] {
+            assert!(
+                sql.contains("CREATE INDEX MyIdx ON t"),
+                "sqlite_master.sql must preserve original index-name case, got: {sql}"
+            );
+            assert!(!sql.contains("myidx"), "index name must not be lowercased, got: {sql}");
+        } else {
+            panic!("Expected VARCHAR for sql column");
+        }
+    }
+
     #[test]
     fn test_generate_create_trigger_sql_basic() {
         use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
