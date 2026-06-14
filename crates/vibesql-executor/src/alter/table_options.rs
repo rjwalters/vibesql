@@ -124,12 +124,19 @@ fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name
 /// bodies that resolve to the renamed column are rewritten (unquoted), while the
 /// rest of the `CREATE TRIGGER` text is preserved verbatim. The renamed table's
 /// own `ON`-target name does not change. See `crate::trigger_rename`.
+///
+/// If an unqualified reference to the renamed column is *ambiguous* in a trigger
+/// body (the renamed table and another in-scope table both own a column of that
+/// name), SQLite aborts the whole ALTER and leaves the schema unchanged. This
+/// returns `Err(ExecutorError::AmbiguousColumnName { .. })` (wrapped to mirror
+/// SQLite's `error in trigger <name>: ambiguous column name: <col>` message) so
+/// the caller can abort before committing the rename.
 pub(super) fn rewrite_triggers_for_column_rename(
     database: &mut Database,
     table: &str,
     old_column: &str,
     new_column: &str,
-) {
+) -> Result<(), ExecutorError> {
     // Snapshot table -> column-name set so the rewrite resolver can attribute
     // unqualified columns to their owning table without borrowing the database
     // while we mutate the catalog. The snapshot reflects the *post-rename* schema
@@ -160,7 +167,12 @@ pub(super) fn rewrite_triggers_for_column_rename(
         schema.get(&t_lc).is_some_and(|cols| cols.iter().any(|col| col.eq_ignore_ascii_case(c)))
     };
 
+    // Two-phase: compute every trigger update first so that an ambiguity error
+    // in any trigger aborts the whole ALTER *before* any catalog mutation. This
+    // mirrors SQLite, which leaves the schema entirely unchanged on a genuine
+    // ambiguity rather than partially rewriting earlier triggers.
     let trigger_names = database.catalog.list_triggers();
+    let mut pending_updates = Vec::new();
     for name in trigger_names {
         let Some(existing) = database.catalog.get_trigger(&name) else {
             continue;
@@ -169,22 +181,38 @@ pub(super) fn rewrite_triggers_for_column_rename(
         let body_text = match &existing.triggered_action {
             TriggerAction::RawSql(sql) => sql.clone(),
         };
+        // An ambiguous unqualified reference to the renamed column aborts the
+        // ALTER (SQLite: "error in trigger <name>: ambiguous column name: <col>").
+        // Map the resolver error to that message, using `Other` so the verbatim
+        // SQLite wording is preserved.
+        let ambiguity_error = |col: String| {
+            ExecutorError::Other(format!(
+                "error in trigger {}: ambiguous column name: {}",
+                name, col
+            ))
+        };
         let new_body = rewrite_column_refs_in_trigger_sql(
             &body_text,
             table,
             old_column,
             new_column,
             &table_has_column,
-        );
-        let new_sql_definition = existing.sql_definition.as_ref().map(|sql| {
-            rewrite_column_refs_in_trigger_sql(
-                sql,
-                table,
-                old_column,
-                new_column,
-                &table_has_column,
-            )
-        });
+        )
+        .map_err(ambiguity_error)?;
+        let new_sql_definition = existing
+            .sql_definition
+            .as_ref()
+            .map(|sql| {
+                rewrite_column_refs_in_trigger_sql(
+                    sql,
+                    table,
+                    old_column,
+                    new_column,
+                    &table_has_column,
+                )
+            })
+            .transpose()
+            .map_err(ambiguity_error)?;
 
         let body_changed = new_body != body_text;
         let sql_def_changed = new_sql_definition.as_deref() != existing.sql_definition.as_deref();
@@ -200,7 +228,11 @@ pub(super) fn rewrite_triggers_for_column_rename(
         if sql_def_changed {
             updated.sql_definition = new_sql_definition;
         }
+        pending_updates.push(updated);
+    }
 
+    for updated in pending_updates {
         let _ = database.catalog.update_trigger(updated);
     }
+    Ok(())
 }

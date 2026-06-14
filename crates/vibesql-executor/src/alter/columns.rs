@@ -260,13 +260,27 @@ pub(super) fn execute_rename_column(
     // Invalidate the database-level columnar cache since the schema changed.
     database.invalidate_columnar_cache(&stmt.table_name);
 
-    // Propagate the rename into trigger bodies that reference this column.
-    super::table_options::rewrite_triggers_for_column_rename(
+    // Propagate the rename into trigger bodies that reference this column. If an
+    // unqualified reference to the renamed column is ambiguous in a trigger
+    // body, SQLite (legacy_alter_table=OFF) aborts the whole ALTER and leaves
+    // the schema unchanged. Roll back the schema rename on that error so the
+    // ALTER is atomic, matching SQLite.
+    if let Err(err) = super::table_options::rewrite_triggers_for_column_rename(
         database,
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
-    );
+    ) {
+        if let Some(table) = database.get_table_mut(&stmt.table_name) {
+            if let Some(idx) = table.schema.get_column_index(&stmt.new_column_name) {
+                // Best-effort rollback; the column was just renamed so this
+                // restores the original name.
+                let _ = table.schema_mut().rename_column(idx, &stmt.old_column_name);
+            }
+        }
+        database.invalidate_columnar_cache(&stmt.table_name);
+        return Err(err);
+    }
 
     Ok(format!(
         "Column '{}' renamed to '{}' in table '{}'",

@@ -167,3 +167,60 @@ fn rename_column_onto_existing_errors() {
     let err = exec(&mut db, "ALTER TABLE t2 RENAME c TO d").unwrap_err();
     assert!(matches!(err, ExecutorError::ColumnAlreadyExists(_)), "got: {err:?}");
 }
+
+#[test]
+fn rename_column_ambiguous_in_trigger_aborts_and_leaves_schema_unchanged() {
+    // sqlite3 3.51.0 (legacy_alter_table=OFF): an unqualified reference to the
+    // renamed column that is ambiguous across multiple in-scope tables aborts
+    // the entire ALTER ("SQL logic error" at the shell; "error in trigger r1:
+    // ambiguous column name: e" via the C API) and leaves the schema unchanged.
+    let mut db = Database::new();
+    setup(&mut db);
+    // Both t3 and t4 own column `e`; the trigger's WHERE `e` is ambiguous.
+    exec(
+        &mut db,
+        "CREATE TRIGGER r1 INSERT ON t3 BEGIN \
+         UPDATE t3 SET e=1 FROM t4 WHERE e=2; END",
+    )
+    .unwrap();
+
+    let body_before = trigger_body(&db, "r1");
+    let sql_before = trigger_sql(&db, "r1");
+
+    let err = exec(&mut db, "ALTER TABLE t3 RENAME e TO abc").unwrap_err();
+    match &err {
+        ExecutorError::Other(msg) => {
+            assert_eq!(msg, "error in trigger r1: ambiguous column name: e", "got: {msg}");
+        }
+        other => panic!("expected ambiguity Other error, got: {other:?}"),
+    }
+
+    // Schema unchanged: t3.e still exists, t3.abc does not.
+    let t3 = db.get_table("t3").expect("t3 exists");
+    assert!(t3.schema.has_column("e"), "t3.e should be unchanged after aborted ALTER");
+    assert!(!t3.schema.has_column("abc"), "t3.abc must not exist after aborted ALTER");
+
+    // Trigger untouched.
+    assert_eq!(trigger_body(&db, "r1"), body_before, "trigger body must be unchanged");
+    assert_eq!(trigger_sql(&db, "r1"), sql_before, "trigger sql must be unchanged");
+}
+
+#[test]
+fn rename_column_unambiguous_still_succeeds_with_other_table_sharing_name() {
+    // Guard against over-eager aborting: a qualified `t3.e` is unambiguous even
+    // though t4 also owns `e`, so the ALTER must still succeed.
+    let mut db = Database::new();
+    setup(&mut db);
+    exec(
+        &mut db,
+        "CREATE TRIGGER r1 INSERT ON t3 BEGIN \
+         UPDATE t3 SET a=1 FROM t4 WHERE t3.e=2; END",
+    )
+    .unwrap();
+
+    exec(&mut db, "ALTER TABLE t3 RENAME e TO abc").unwrap();
+
+    let t3 = db.get_table("t3").expect("t3 exists");
+    assert!(t3.schema.has_column("abc"));
+    assert!(trigger_sql(&db, "r1").contains("t3.abc=2"), "{}", trigger_sql(&db, "r1"));
+}

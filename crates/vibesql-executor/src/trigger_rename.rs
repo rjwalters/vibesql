@@ -206,18 +206,25 @@ fn is_table_position(
 ///
 /// This is a *targeted* resolver covering the cases exercised by
 /// `altertrig.test` (qualified `table.col` / `alias.col` references and
-/// unqualified columns whose only in-scope owner is the renamed table). It does
-/// not reproduce SQLite's full ambiguity diagnostics.
+/// unqualified columns whose only in-scope owner is the renamed table).
+///
+/// When an unqualified reference to the renamed column would be genuinely
+/// *ambiguous* (the renamed table and another in-scope table both own a column
+/// of that name), this returns `Err(column_name)`. SQLite
+/// (`legacy_alter_table=OFF`) aborts the entire `ALTER TABLE ... RENAME COLUMN`
+/// in that case with `error in trigger <name>: ambiguous column name: <col>`
+/// and leaves the schema unchanged; the caller is responsible for surfacing
+/// that error and not committing the rename.
 pub fn rewrite_column_refs_in_trigger_sql(
     sql: &str,
     renamed_table: &str,
     old_column: &str,
     new_column: &str,
     table_has_column: &dyn Fn(&str, &str) -> bool,
-) -> String {
+) -> Result<String, String> {
     let tokens = match Lexer::new(sql).tokenize_with_spans() {
         Ok(t) => t,
-        Err(_) => return sql.to_string(),
+        Err(_) => return Ok(sql.to_string()),
     };
 
     let significant: Vec<usize> =
@@ -266,22 +273,38 @@ pub fn rewrite_column_refs_in_trigger_sql(
         // owner of this column.
         if name.eq_ignore_ascii_case(old_column) && is_column_position(&tokens, &significant, pos) {
             let scope_key = paren_scope_at(&tokens, &significant, pos);
-            if unqualified_resolves_to_renamed_table(
+            match resolve_unqualified_column(
                 renamed_table,
                 old_column,
                 scope_key,
                 &scopes,
                 table_has_column,
             ) {
-                edits.push(tokens[idx].1);
+                Resolution::Rewrite => edits.push(tokens[idx].1),
+                Resolution::Ambiguous => return Err(name.clone()),
+                Resolution::Skip => {}
             }
         }
     }
 
     if edits.is_empty() {
-        return sql.to_string();
+        return Ok(sql.to_string());
     }
-    apply_column_edits(sql, &edits, new_column)
+    Ok(apply_column_edits(sql, &edits, new_column))
+}
+
+/// Outcome of resolving an unqualified column reference against the renamed
+/// table within a trigger body scope.
+enum Resolution {
+    /// The reference resolves unambiguously to the renamed table's renamed
+    /// column; rewrite it.
+    Rewrite,
+    /// The reference does not resolve to the renamed table (the renamed table is
+    /// not in scope, or does not own the column); leave it untouched.
+    Skip,
+    /// The reference is ambiguous: the renamed table and another in-scope table
+    /// both own a column of this name. SQLite aborts the ALTER here.
+    Ambiguous,
 }
 
 /// A table reference appearing in a FROM/UPDATE/INTO clause: its real table name
@@ -448,20 +471,22 @@ fn qualifier_is_renamed_table(
     false
 }
 
-/// For an unqualified column, decide whether it resolves to the renamed table:
-/// the renamed table must be in scope, the renamed table must own the old
-/// column, and no *other* in-scope table must also own a column of that name
-/// (which would make the reference ambiguous — SQLite errors there, so we
-/// conservatively decline to rewrite).
-fn unqualified_resolves_to_renamed_table(
+/// For an unqualified column, decide how it resolves against the renamed table:
+/// - `Rewrite` when the renamed table is in scope, owns the old column, and no *other* in-scope
+///   table also owns a column of that name;
+/// - `Ambiguous` when the renamed table is in scope and owns the column but at least one other
+///   in-scope table also owns a column of that name (SQLite aborts the ALTER here);
+/// - `Skip` otherwise (the renamed table is not in scope or does not own the column, so the
+///   reference is unrelated to the rename).
+fn resolve_unqualified_column(
     renamed_table: &str,
     old_column: &str,
     scope_key: Option<usize>,
     scopes: &std::collections::HashMap<Option<usize>, Vec<TableRef>>,
     table_has_column: &dyn Fn(&str, &str) -> bool,
-) -> bool {
+) -> Resolution {
     if !table_has_column(renamed_table, old_column) {
-        return false;
+        return Resolution::Skip;
     }
 
     let mut renamed_in_scope = false;
@@ -483,7 +508,11 @@ fn unqualified_resolves_to_renamed_table(
         }
     }
 
-    renamed_in_scope && !other_owner
+    match (renamed_in_scope, other_owner) {
+        (true, false) => Resolution::Rewrite,
+        (true, true) => Resolution::Ambiguous,
+        (false, _) => Resolution::Skip,
+    }
 }
 
 /// Decide whether the identifier at `significant[pos]` is in a position where it
@@ -530,6 +559,11 @@ mod tests {
     }
 
     fn rewrite_col(sql: &str, table: &str, old: &str, new: &str) -> String {
+        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema)
+            .expect("rewrite should not be ambiguous in this fixture")
+    }
+
+    fn rewrite_col_result(sql: &str, table: &str, old: &str, new: &str) -> Result<String, String> {
         rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema)
     }
 
@@ -613,6 +647,41 @@ mod tests {
     fn col_unqualified_other_table_not_in_scope_unchanged() {
         let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM t3 WHERE e=1; END";
         assert_eq!(rewrite_col(sql, "t2", "c", "abc"), sql);
+    }
+
+    #[test]
+    fn col_ambiguous_unqualified_errors() {
+        // Both t3 and t4 own column `e`, both in scope (UPDATE t3 ... FROM t4),
+        // and the unqualified `e` in WHERE is ambiguous. sqlite3 3.51.0
+        // (legacy_alter_table=OFF) aborts the ALTER with "ambiguous column
+        // name: e", so the rewriter must surface an error rather than silently
+        // skip. Renaming either table's `e` is ambiguous.
+        let sql = "CREATE TRIGGER r1 INSERT ON t3 BEGIN UPDATE t3 SET e=1 FROM t4 WHERE e=2; END";
+        let err = rewrite_col_result(sql, "t3", "e", "abc").expect_err("should be ambiguous");
+        assert_eq!(err, "e");
+        // Symmetric: renaming t4.e is ambiguous in the same trigger body.
+        let err = rewrite_col_result(sql, "t4", "e", "abc").expect_err("should be ambiguous");
+        assert_eq!(err, "e");
+    }
+
+    #[test]
+    fn col_ambiguity_only_when_renamed_table_in_scope() {
+        // The renamed table (t2) is not in scope, so the unqualified `e` is not
+        // ambiguous with respect to this rename: skip (no error, no change).
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t3 SET e=1 FROM t4 WHERE e=2; END";
+        assert_eq!(rewrite_col_result(sql, "t2", "c", "abc").unwrap(), sql);
+    }
+
+    #[test]
+    fn col_qualified_ref_not_ambiguous() {
+        // A qualified `t3.e` is unambiguous even though t4 also owns `e`; it
+        // must rewrite (not error).
+        let sql =
+            "CREATE TRIGGER r1 INSERT ON t3 BEGIN UPDATE t3 SET a=1 FROM t4 WHERE t3.e=2; END";
+        assert_eq!(
+            rewrite_col_result(sql, "t3", "e", "abc").unwrap(),
+            "CREATE TRIGGER r1 INSERT ON t3 BEGIN UPDATE t3 SET a=1 FROM t4 WHERE t3.abc=2; END"
+        );
     }
 
     #[test]
