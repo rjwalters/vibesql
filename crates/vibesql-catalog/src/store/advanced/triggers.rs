@@ -214,6 +214,64 @@ impl super::super::Catalog {
             .collect()
     }
 
+    /// Drop all INSTEAD OF triggers defined *on* a view (called when dropping the
+    /// view).
+    ///
+    /// SQLite drops every trigger whose `ON <view>` target is the dropped view —
+    /// an INSTEAD OF trigger cannot outlive the view it is attached to (verified
+    /// against sqlite3 3.51.0):
+    ///
+    /// ```sql
+    /// CREATE VIEW v AS SELECT a FROM base;
+    /// CREATE TRIGGER v_ins INSTEAD OF INSERT ON v BEGIN INSERT INTO base VALUES(NEW.a); END;
+    /// DROP VIEW v;   -- v_ins is gone; recreating v + v_ins succeeds
+    /// ```
+    ///
+    /// This is the view analogue of [`Catalog::drop_table_triggers`] (#5597). It
+    /// is kept separate because views live in a single flat map (not the
+    /// per-schema table maps), so the table-based [`trigger_bound_schema`]
+    /// resolution does not apply to a view target. Instead, schema-awareness is
+    /// derived directly from the `temp`/`main` tag both the view and the trigger
+    /// carry: a temp trigger on a temp view, and a main trigger on a main view.
+    /// This keeps a `main` INSTEAD OF trigger on a `main` view from being dropped
+    /// when a same-named `temp` view is dropped, and vice versa (temp shadows
+    /// main).
+    ///
+    /// Must be called *before* the view is removed from the catalog. `view_name`
+    /// is the bare (unqualified) view name; `view_is_temp` indicates whether the
+    /// dropped view lives in the temp schema (`ViewDefinition::is_temp`).
+    ///
+    /// Returns the names of the dropped triggers.
+    pub fn drop_view_triggers(&mut self, view_name: &str, view_is_temp: bool) -> Vec<String> {
+        // A bare/qualified view name: only the last component is the view name
+        // (qualified DROP VIEW resolves to the supplied schema, but the catalog
+        // stores views by bare name).
+        let bare_view_name = view_name.rsplit_once('.').map_or(view_name, |(_, n)| n);
+
+        let triggers_to_remove: Vec<String> = self
+            .triggers
+            .values()
+            .filter(|trigger| {
+                // Only INSTEAD OF triggers defined ON the dropped view
+                // (case-insensitive, SQLite-compatible). INSTEAD OF is the only
+                // timing valid on a view, but checking it keeps this strictly
+                // view-scoped and never disturbs table triggers.
+                trigger.timing == vibesql_ast::TriggerTiming::InsteadOf
+                    && trigger.table_name.eq_ignore_ascii_case(bare_view_name)
+                    // Temp-shadows-main: drop only triggers whose schema matches
+                    // the dropped view's schema (temp trigger <-> temp view,
+                    // main trigger <-> main view).
+                    && trigger.is_temp() == view_is_temp
+            })
+            .map(|trigger| trigger.name.clone())
+            .collect();
+
+        triggers_to_remove
+            .into_iter()
+            .filter_map(|name| self.triggers.remove(&name).map(|_| name))
+            .collect()
+    }
+
     /// List all trigger names
     pub fn list_triggers(&self) -> Vec<String> {
         self.triggers.keys().cloned().collect()
@@ -259,6 +317,19 @@ mod tests {
             TriggerTiming::Before,
             TriggerEvent::Insert,
             table.to_string(),
+            TriggerGranularity::Row,
+            None,
+            TriggerAction::RawSql("SELECT 1".to_string()),
+        )
+    }
+
+    /// An INSTEAD OF INSERT trigger on `view` (the only timing valid on a view).
+    fn instead_of_trigger(name: &str, view: &str) -> TriggerDefinition {
+        TriggerDefinition::new(
+            name.to_string(),
+            TriggerTiming::InsteadOf,
+            TriggerEvent::Insert,
+            view.to_string(),
             TriggerGranularity::Row,
             None,
             TriggerAction::RawSql("SELECT 1".to_string()),
@@ -392,6 +463,68 @@ mod tests {
         let dropped_main = catalog.drop_table_triggers("main.t");
         assert_eq!(dropped_main, vec!["rmain".to_string()]);
         assert!(catalog.get_trigger("rmain").is_none());
+    }
+
+    /// `drop_view_triggers` removes the INSTEAD OF triggers defined ON the
+    /// dropped view and leaves triggers on a *different* view untouched —
+    /// matching sqlite3 3.51.0 (DROP VIEW cascade-drops its INSTEAD OF triggers).
+    #[test]
+    fn drop_view_triggers_removes_only_triggers_on_the_view() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        // v_ins is ON v (should be dropped); v2_ins is ON v2 (should survive).
+        catalog.create_trigger(instead_of_trigger("v_ins", "v")).unwrap();
+        catalog.create_trigger(instead_of_trigger("v2_ins", "v2")).unwrap();
+
+        let dropped = catalog.drop_view_triggers("v", false);
+        assert_eq!(dropped, vec!["v_ins".to_string()]);
+        assert!(catalog.get_trigger("v_ins").is_none());
+        assert!(catalog.get_trigger("v2_ins").is_some());
+    }
+
+    /// A table trigger (non-INSTEAD OF) sharing a view's name is never disturbed
+    /// by `drop_view_triggers` — only INSTEAD OF triggers ON the view are dropped.
+    #[test]
+    fn drop_view_triggers_ignores_table_triggers() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        // A BEFORE INSERT (table) trigger that happens to share the dropped view's
+        // name must be left alone; only INSTEAD OF triggers belong to views.
+        catalog.create_trigger(sample_trigger("tbl_tr", "v")).unwrap();
+        catalog.create_trigger(instead_of_trigger("v_ins", "v")).unwrap();
+
+        let dropped = catalog.drop_view_triggers("v", false);
+        assert_eq!(dropped, vec!["v_ins".to_string()]);
+        assert!(catalog.get_trigger("v_ins").is_none());
+        assert!(catalog.get_trigger("tbl_tr").is_some());
+    }
+
+    /// Dropping a `temp` view removes its temp INSTEAD OF trigger but leaves a
+    /// same-named `main` view's trigger intact (temp shadows main), and vice
+    /// versa — mirroring the table-trigger schema isolation.
+    #[test]
+    fn drop_view_triggers_is_schema_aware() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        // main trigger on main view v; temp trigger on temp view v.
+        catalog.create_trigger(instead_of_trigger("vmain", "v")).unwrap();
+        catalog
+            .create_trigger(instead_of_trigger("vtemp", "v").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        // Dropping the temp view removes only the temp-bound trigger.
+        let dropped = catalog.drop_view_triggers("v", true);
+        assert_eq!(dropped, vec!["vtemp".to_string()]);
+        assert!(catalog.get_trigger("vtemp").is_none());
+        assert!(catalog.get_trigger("vmain").is_some());
+
+        // Dropping the main view now removes the main-bound trigger.
+        let dropped_main = catalog.drop_view_triggers("v", false);
+        assert_eq!(dropped_main, vec!["vmain".to_string()]);
+        assert!(catalog.get_trigger("vmain").is_none());
     }
 
     /// A temp trigger on a table that exists only in main binds to (and fires

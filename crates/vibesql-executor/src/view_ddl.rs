@@ -84,11 +84,35 @@ impl ViewExecutor {
             ViewDropBehavior::Silent // SQLite-compatible: allow dropping even with dependents
         };
 
+        // Cascade-drop the INSTEAD OF triggers defined ON this view, matching
+        // sqlite3 3.51.0: an INSTEAD OF trigger cannot outlive the view it is
+        // attached to, so `DROP VIEW v` removes every trigger whose `ON v`
+        // target is the dropped view. Resolve the view's temp/main schema tag
+        // *before* the catalog removes it so the temp-shadows-main filter can be
+        // applied (a main trigger on a main view must not be dropped when a
+        // same-named temp view is dropped, and vice versa). A trigger on a
+        // *different* view is left alone. See `Catalog::drop_view_triggers`
+        // (view analogue of the table path in #5597).
+        let view_is_temp =
+            database.catalog.get_view(&stmt.view_name).is_some_and(|v| v.is_temp());
+
         // Drop the view
         let result = database.catalog.drop_view_with_behavior(&stmt.view_name, drop_behavior);
 
         match result {
-            Ok(()) => Ok(format!("View '{}' dropped", stmt.view_name)),
+            Ok(()) => {
+                let dropped_triggers =
+                    database.catalog.drop_view_triggers(&stmt.view_name, view_is_temp);
+                if dropped_triggers.is_empty() {
+                    Ok(format!("View '{}' dropped", stmt.view_name))
+                } else {
+                    Ok(format!(
+                        "View '{}' and {} associated trigger(s) dropped",
+                        stmt.view_name,
+                        dropped_triggers.len()
+                    ))
+                }
+            }
             Err(e) => {
                 // If IF EXISTS and view doesn't exist, that's OK
                 if stmt.if_exists
