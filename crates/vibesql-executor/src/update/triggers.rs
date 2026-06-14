@@ -424,13 +424,20 @@ pub(super) fn build_view_schema(
     view_def: &ViewDefinition,
 ) -> Result<TableSchema, ExecutorError> {
     // Execute the view's SELECT query to get column names. A table referenced by
-    // the view body that has since been dropped surfaces here; sqlite3 reports it
-    // schema-qualified (`no such table: main.test2`, trigger4-3.3) because the
-    // view body resolves against the database schema, so qualify the bare name.
+    // the view body that has since been dropped surfaces here; for a main-schema
+    // view sqlite3 reports it schema-qualified (`no such table: main.test2`,
+    // trigger4-3.3) because the view body resolves against the database schema,
+    // so qualify the bare name. A temp view's body resolves against the temp
+    // schema, which sqlite3 reports unqualified, so skip the qualifier there.
+    // This mirrors the read-path guard in select/scan/table.rs (#5584) for
+    // read/write parity.
     let select_executor = crate::SelectExecutor::new(database);
-    let result = select_executor
-        .execute_with_columns(&view_def.query)
-        .map_err(ExecutorError::with_main_schema_qualifier)?;
+    let select_result = select_executor.execute_with_columns(&view_def.query);
+    let result = if view_def.is_temp() {
+        select_result?
+    } else {
+        select_result.map_err(ExecutorError::with_main_schema_qualifier)?
+    };
 
     // Use explicit column names if provided, otherwise derive from SELECT
     let column_names: Vec<String> =
