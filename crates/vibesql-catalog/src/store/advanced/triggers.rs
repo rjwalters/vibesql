@@ -143,6 +143,77 @@ impl super::super::Catalog {
         }
     }
 
+    /// Drop all triggers defined *on* a table (called when dropping the table).
+    ///
+    /// SQLite drops every trigger whose `ON <table>` target is the dropped table
+    /// (verified against sqlite3 3.51.0):
+    ///
+    /// ```sql
+    /// CREATE TEMP TABLE t(a);
+    /// CREATE TEMP TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;
+    /// DROP TABLE t;   -- tr is gone
+    /// ```
+    ///
+    /// A trigger merely *referencing* the table from its body (but defined ON a
+    /// different table) is NOT dropped, and a view referencing the table is NOT
+    /// dropped either — those are out of scope here and handled by their own
+    /// lifecycle rules.
+    ///
+    /// Schema-aware (mirrors [`Catalog::drop_table_indexes`], #5513): the dropped
+    /// table's owning schema is resolved with the same temp-shadows-main order as
+    /// table lookup, and a trigger is removed only when it is *bound* to that same
+    /// schema. This keeps a `main` trigger on `main.t` from being dropped when a
+    /// same-named `temp.t` is dropped, and vice versa (triggerD-3.1/3.2 binding).
+    ///
+    /// Must be called *before* the table is removed from the catalog so trigger
+    /// binding can still resolve the target table's schema. `table_name` may be
+    /// schema-qualified (e.g. `temp.t`) to target a specific schema.
+    ///
+    /// Returns the names of the dropped triggers.
+    pub fn drop_table_triggers(&mut self, table_name: &str) -> Vec<String> {
+        // Resolve which schema the table being dropped lives in, mirroring
+        // `drop_table_indexes`. If the table is already gone, fall back to a
+        // name-only match across schemas.
+        let resolved_schema = self.resolve_table_schema_name(table_name);
+
+        let (bare_table_name, schema_filter) =
+            if let Some((schema_part, table_part)) = table_name.split_once('.') {
+                (table_part.to_string(), Some(self.resolve_schema_name(schema_part).to_string()))
+            } else {
+                (table_name.to_string(), resolved_schema)
+            };
+
+        let triggers_to_remove: Vec<String> = self
+            .triggers
+            .values()
+            .filter(|trigger| {
+                // Only triggers defined ON the dropped table (case-insensitive,
+                // SQLite-compatible).
+                if !trigger.table_name.eq_ignore_ascii_case(&bare_table_name) {
+                    return false;
+                }
+                match &schema_filter {
+                    // Drop only triggers bound to the same internal schema as the
+                    // dropped table. When the trigger's binding cannot be resolved
+                    // (e.g. its target was already gone), drop it — its only
+                    // anchor was the table now being removed.
+                    Some(schema) => self
+                        .trigger_bound_schema(trigger)
+                        .is_none_or(|bound| bound.eq_ignore_ascii_case(schema)),
+                    // No resolvable owning schema for the dropped table: match by
+                    // table name only (mirrors the index-drop fallback).
+                    None => true,
+                }
+            })
+            .map(|trigger| trigger.name.clone())
+            .collect();
+
+        triggers_to_remove
+            .into_iter()
+            .filter_map(|name| self.triggers.remove(&name).map(|_| name))
+            .collect()
+    }
+
     /// List all trigger names
     pub fn list_triggers(&self) -> Vec<String> {
         self.triggers.keys().cloned().collect()
@@ -262,6 +333,65 @@ mod tests {
         let mut both = names_in_schema(&catalog, "t300", None);
         both.sort();
         assert_eq!(both, vec!["r300".to_string(), "r301".to_string()]);
+    }
+
+    /// `drop_table_triggers` removes triggers defined ON the dropped table and
+    /// leaves triggers that are on a different table (even if they reference the
+    /// dropped one in their body) untouched — matching sqlite3 3.51.0.
+    #[test]
+    fn drop_table_triggers_removes_only_triggers_on_the_table() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        let col = || ColumnSchema::new("x".to_string(), DataType::Integer, true);
+        catalog.create_table(TableSchema::new("t".to_string(), vec![col()])).unwrap();
+        catalog.create_table(TableSchema::new("other".to_string(), vec![col()])).unwrap();
+
+        // tr is ON t (should be dropped); tr2 is ON other (should survive even
+        // though sqlite3 would also let it reference t in its body).
+        catalog.create_trigger(sample_trigger("tr", "t")).unwrap();
+        catalog.create_trigger(sample_trigger("tr2", "other")).unwrap();
+
+        let dropped = catalog.drop_table_triggers("t");
+        assert_eq!(dropped, vec!["tr".to_string()]);
+        assert!(catalog.get_trigger("tr").is_none());
+        assert!(catalog.get_trigger("tr2").is_some());
+    }
+
+    /// Dropping a `temp` table removes its temp trigger but leaves a same-named
+    /// `main` table's trigger intact (schema-aware binding, mirrors the
+    /// index-drop schema isolation).
+    #[test]
+    fn drop_table_triggers_is_schema_aware() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        let col = || ColumnSchema::new("x".to_string(), DataType::Integer, true);
+        // t exists in BOTH main and temp.
+        catalog.create_table(TableSchema::new("t".to_string(), vec![col()])).unwrap();
+        let temp_schema = catalog.temp_schema_name().to_string();
+        catalog
+            .create_table_in_schema(&temp_schema, TableSchema::new("t".to_string(), vec![col()]))
+            .unwrap();
+
+        // main trigger bound to main.t; temp trigger bound to temp.t.
+        catalog
+            .create_trigger(sample_trigger("rmain", "t").with_schema(Some("main".to_string())))
+            .unwrap();
+        catalog
+            .create_trigger(sample_trigger("rtemp", "t").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        // Dropping the temp table removes only the temp-bound trigger.
+        let dropped = catalog.drop_table_triggers("temp.t");
+        assert_eq!(dropped, vec!["rtemp".to_string()]);
+        assert!(catalog.get_trigger("rtemp").is_none());
+        assert!(catalog.get_trigger("rmain").is_some());
+
+        // Dropping the main table now removes the main-bound trigger.
+        let dropped_main = catalog.drop_table_triggers("main.t");
+        assert_eq!(dropped_main, vec!["rmain".to_string()]);
+        assert!(catalog.get_trigger("rmain").is_none());
     }
 
     /// A temp trigger on a table that exists only in main binds to (and fires

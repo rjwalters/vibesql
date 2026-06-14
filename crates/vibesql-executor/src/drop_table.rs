@@ -91,19 +91,36 @@ impl DropTableExecutor {
             let _ = database.drop_spatial_index(&qualified);
         }
 
+        // Cascade-drop triggers defined ON this table, matching sqlite3 3.51.0:
+        // `DROP TABLE t` removes every trigger whose `ON t` target is the dropped
+        // table (temp or main). Must run while the table still exists in the
+        // catalog so the trigger's schema binding can resolve. A trigger that only
+        // *references* the table from its body, and a view referencing the table,
+        // are intentionally left alone (sqlite3 leaves those — the view errors on
+        // use). See `Catalog::drop_table_triggers`.
+        let dropped_triggers = database.catalog.drop_table_triggers(&stmt.table_name);
+        let trigger_count = dropped_triggers.len();
+
         // Drop the table from storage (this also removes from catalog)
         database
             .drop_table(&stmt.table_name)
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
         // Return success message
-        if index_count > 0 {
-            Ok(format!(
+        match (index_count, trigger_count) {
+            (0, 0) => Ok(format!("Table '{}' dropped successfully", stmt.table_name)),
+            (i, 0) => Ok(format!(
                 "Table '{}' and {} associated index(es) dropped successfully",
-                stmt.table_name, index_count
-            ))
-        } else {
-            Ok(format!("Table '{}' dropped successfully", stmt.table_name))
+                stmt.table_name, i
+            )),
+            (0, t) => Ok(format!(
+                "Table '{}' and {} associated trigger(s) dropped successfully",
+                stmt.table_name, t
+            )),
+            (i, t) => Ok(format!(
+                "Table '{}', {} associated index(es), and {} associated trigger(s) dropped successfully",
+                stmt.table_name, i, t
+            )),
         }
     }
 }
