@@ -1,7 +1,13 @@
 //! CREATE TRIGGER and DROP TRIGGER statement parsers
 
 use super::{ParseError, Parser};
-use crate::{keywords::Keyword, token::Token};
+use crate::{keywords::Keyword, lexer::Lexer, token::Token};
+
+/// SQLite's verbatim error when a `CREATE TRIGGER` body (or its WHEN clause)
+/// references a bound parameter / variable. A trigger program is compiled once
+/// when the trigger is created and has no bind context at fire time, so SQLite
+/// rejects any variable reference at create time (see triggerE.test).
+const TRIGGER_CANNOT_USE_VARIABLES: &str = "trigger cannot use variables";
 
 impl Parser {
     /// Parse CREATE TRIGGER statement
@@ -150,6 +156,14 @@ impl Parser {
             if has_paren {
                 self.expect_token(Token::RParen)?;
             }
+            // SQLite rejects a bound parameter / variable in the WHEN clause at
+            // create time (triggerE-1.1.1: `WHEN new.a = ?`). NEW/OLD column
+            // references are *not* variables and must still be allowed.
+            if Self::expression_references_variable(&expr) {
+                return Err(ParseError {
+                    message: TRIGGER_CANNOT_USE_VARIABLES.to_string(),
+                });
+            }
             Some(Box::new(expr))
         } else {
             None
@@ -275,6 +289,23 @@ impl Parser {
     /// tolerated so that bodies using constructs VibeSQL cannot yet parse
     /// (but SQLite accepts at create time) are preserved as before.
     fn validate_trigger_body(raw_sql: &str) -> Result<(), ParseError> {
+        // Reject any bound parameter / variable anywhere in the body. SQLite
+        // rejects `CREATE TRIGGER` at create time when a body statement
+        // references a bound parameter (`?`, `?NNN`, `:name`, `@name`, `$name`,
+        // `$NNN`) — in INSERT VALUES, UPDATE SET, WHERE, SELECT, GROUP BY,
+        // ORDER BY, LIMIT, function args, window ORDER BY, etc. — because a
+        // trigger program is compiled once and has no bind context (triggerE.test
+        // 1.1.x / 1.2.x). We scan tokens rather than the parsed AST so the check
+        // is independent of whether VibeSQL can fully parse the body statement
+        // (some valid SQLite body constructs are tolerated as `RawSql`), and so
+        // every position is covered uniformly. NEW/OLD references tokenize as
+        // ordinary identifiers, never as variable tokens, so they are not caught.
+        if Self::trigger_body_text_references_variable(raw_sql) {
+            return Err(ParseError {
+                message: TRIGGER_CANNOT_USE_VARIABLES.to_string(),
+            });
+        }
+
         for stmt_sql in crate::split_trigger_body_statements(raw_sql) {
             // Re-append the statement terminator the splitter stripped. SQLite
             // parses the whole body in one pass, so a statement that ends
@@ -328,6 +359,52 @@ impl Parser {
     fn is_create_time_rejection(error: &ParseError) -> bool {
         error.message.starts_with("unsupported use of NULLS ")
             || (error.message.starts_with("near \"") && error.message.ends_with("\": syntax error"))
+    }
+
+    /// Does the trigger-body SQL text contain a bound-parameter / variable token?
+    ///
+    /// Lexes the raw body (the `BEGIN ... END` block as a string) and returns
+    /// `true` if any token is a placeholder or variable: `?` ([`Token::Placeholder`]),
+    /// `?NNN` / `$NNN` ([`Token::NumberedPlaceholder`]), `:name` / `$name`
+    /// ([`Token::NamedPlaceholder`]), `@name` ([`Token::UserVariable`]) or
+    /// `@@name` ([`Token::SessionVariable`]).
+    ///
+    /// A lexer error is treated as "no variable found": we are only adding a
+    /// create-time rejection for the variable class here, and an unlexable body
+    /// is handled (and reported, if appropriate) by the per-statement parse pass
+    /// below — we must not turn a lex failure into the variable-specific error.
+    fn trigger_body_text_references_variable(raw_sql: &str) -> bool {
+        let mut lexer = Lexer::new(raw_sql);
+        match lexer.tokenize() {
+            Ok(tokens) => tokens.iter().any(Self::token_is_variable),
+            Err(_) => false,
+        }
+    }
+
+    /// Is this token a bound parameter / variable reference (not a NEW/OLD
+    /// pseudo-column or any other identifier)?
+    fn token_is_variable(token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Placeholder
+                | Token::NumberedPlaceholder(_)
+                | Token::NamedPlaceholder(_)
+                | Token::UserVariable(_)
+                | Token::SessionVariable(_)
+        )
+    }
+
+    /// Does this (already-parsed) expression reference a bound parameter /
+    /// variable anywhere in its tree? Used for the WHEN clause, which is parsed
+    /// into an AST before the body is collected as raw SQL. NEW/OLD references
+    /// are [`vibesql_ast::Expression::PseudoVariable`] and deliberately ignored.
+    fn expression_references_variable(expr: &vibesql_ast::Expression) -> bool {
+        let mut found = false;
+        vibesql_ast::visitor::walk_expression(
+            &mut VariableExpressionFinder { found: &mut found },
+            expr,
+        );
+        found
     }
 
     /// Parse ALTER TRIGGER statement
@@ -397,5 +474,32 @@ impl Parser {
         }
 
         Ok(vibesql_ast::DropTriggerStmt { trigger_name, cascade })
+    }
+}
+
+/// Expression visitor that records whether any bound-parameter / variable node
+/// is present. Used to validate the WHEN clause of a `CREATE TRIGGER`. NEW/OLD
+/// references are `Expression::PseudoVariable` and are intentionally not matched.
+struct VariableExpressionFinder<'a> {
+    found: &'a mut bool,
+}
+
+impl vibesql_ast::visitor::ExpressionVisitor for VariableExpressionFinder<'_> {
+    fn pre_visit_expression(
+        &mut self,
+        expr: &vibesql_ast::Expression,
+    ) -> vibesql_ast::visitor::VisitResult {
+        use vibesql_ast::Expression;
+        if matches!(
+            expr,
+            Expression::Placeholder(_)
+                | Expression::NumberedPlaceholder(_)
+                | Expression::NamedPlaceholder(_)
+                | Expression::SessionVariable { .. }
+        ) {
+            *self.found = true;
+            return vibesql_ast::visitor::VisitResult::Stop;
+        }
+        vibesql_ast::visitor::VisitResult::Continue
     }
 }

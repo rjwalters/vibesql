@@ -714,3 +714,183 @@ fn test_create_trigger_body_case_as_last_statement_no_trailing_semicolon() {
         result.err()
     );
 }
+
+// ---------------------------------------------------------------------------
+// CREATE TRIGGER with a bound parameter / variable must be rejected at create
+// time with SQLite's verbatim message `trigger cannot use variables`
+// (triggerE.test 1.1.x / 1.2.x). A trigger program is compiled once and has no
+// bind context, so SQLite rejects any `?`, `?NNN`, `:name`, `@name`, `$name`,
+// `$NNN` reference in the WHEN clause or any body statement. NEW/OLD references
+// are NOT variables and must still create fine.
+// ---------------------------------------------------------------------------
+
+/// SQLite 3.51.0 verbatim wording (see triggerE.test `set errmsg`).
+const TRIGGER_VAR_ERR: &str = "trigger cannot use variables";
+
+fn assert_rejected_as_variable(sql: &str) {
+    let result = Parser::parse_sql(sql);
+    let err = result.expect_err(&format!("expected rejection for: {sql}"));
+    assert_eq!(
+        err.message, TRIGGER_VAR_ERR,
+        "wrong message for: {sql}\n  got: {}",
+        err.message
+    );
+}
+
+fn assert_trigger_accepted(sql: &str) {
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "trigger must be accepted: {sql}\n  err: {:?}", result.err());
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_when_clause() {
+    // triggerE-1.1.1: WHEN new.a = ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 WHEN new.a = ? BEGIN SELECT 1; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_select_body() {
+    // triggerE-1.1.2: SELECT ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_nested_subquery() {
+    // triggerE-1.1.3: SELECT in nested subqueries
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN \
+         SELECT * FROM (SELECT * FROM (SELECT ?)); END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_group_by() {
+    // triggerE-1.1.5: GROUP BY ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT * FROM t2 GROUP BY ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_limit() {
+    // triggerE-1.1.6: LIMIT ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT * FROM t2 LIMIT ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_order_by() {
+    // triggerE-1.1.7: ORDER BY ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT * FROM t2 ORDER BY ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_update_set() {
+    // triggerE-1.1.8: UPDATE ... SET c = ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE UPDATE ON t1 BEGIN UPDATE t2 SET c = ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_update_where() {
+    // triggerE-1.1.9: UPDATE ... WHERE d = ?
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE UPDATE ON t1 BEGIN UPDATE t2 SET c = 1 WHERE d = ?; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_function_arg() {
+    // triggerE-1.1.10: function argument
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT abs(?); END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_numbered_param_dollar() {
+    // triggerE-1.1.11 uses `$1` (multi-line window ORDER BY); cover the `$1`
+    // form directly in an INSERT...SELECT body.
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE INSERT ON t1 BEGIN \
+         INSERT INTO t1 SELECT max(b) OVER(ORDER BY $1) FROM t1; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_numbered_question_param() {
+    // `?NNN` form.
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(?1, ?2); END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_named_colon_param() {
+    // `:name` form, in INSERT VALUES.
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(:x, :y); END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_named_dollar_param() {
+    // `$name` form, in WHERE.
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN UPDATE t2 SET c = 1 WHERE d = $name; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_param_in_when_named() {
+    // `:name` in the WHEN clause.
+    assert_rejected_as_variable(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 WHEN new.a = :v BEGIN SELECT 1; END;",
+    );
+}
+
+#[test]
+fn test_create_temp_trigger_rejects_param() {
+    // triggerE-1.2.x: same rejection for CREATE TEMP TRIGGER.
+    assert_rejected_as_variable(
+        "CREATE TEMP TRIGGER tr1 AFTER INSERT ON t1 WHEN new.a = ? BEGIN SELECT 1; END;",
+    );
+}
+
+// --- Negative controls: normal triggers must still be accepted. ---
+
+#[test]
+fn test_create_trigger_accepts_new_old_refs() {
+    // NEW/OLD column references are NOT variables.
+    assert_trigger_accepted(
+        "CREATE TRIGGER tr1 AFTER UPDATE ON t1 WHEN NEW.a <> OLD.a BEGIN \
+         INSERT INTO log VALUES(OLD.a, NEW.a); END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_accepts_literals_and_columns() {
+    // Literals, columns, functions, CASE — no variables.
+    assert_trigger_accepted(
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 WHEN NEW.a = 1 BEGIN \
+         UPDATE t2 SET c = NEW.a + 1 WHERE d = 'x'; \
+         SELECT count(*) FROM t2 GROUP BY c ORDER BY c LIMIT 10; END;",
+    );
+}
+
+#[test]
+fn test_create_trigger_accepts_raise() {
+    // RAISE() in the body is permitted and contains no variable.
+    assert_trigger_accepted(
+        "CREATE TRIGGER tr1 BEFORE INSERT ON t1 WHEN NEW.a < 0 BEGIN \
+         SELECT RAISE(IGNORE); END;",
+    );
+}
