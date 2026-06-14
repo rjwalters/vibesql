@@ -330,3 +330,97 @@ fn test_drop_trigger_rolled_back_with_transaction() {
         "dropped trigger must be restored after ROLLBACK (#5497)"
     );
 }
+
+/// ALTER TABLE RENAME must rewrite references to the renamed table inside an
+/// existing trigger body, keep `sqlite_master.sql` consistent (verbatim, with
+/// only the renamed identifier double-quoted), and the trigger must still fire
+/// correctly against the new table name. Mirrors SQLite (legacy_alter_table=OFF)
+/// behavior exercised by `altertrig.test`. Regression coverage for issue #5489.
+#[test]
+fn test_rename_table_rewrites_trigger_body_and_fires() {
+    use crate::{AlterTableExecutor, InsertExecutor, SelectExecutor};
+
+    let mut db = Database::new();
+
+    // Set up: t1 fires a trigger that reads from t3; log captures the count.
+    for sql in [
+        "CREATE TABLE t1 (x INTEGER, d VARCHAR(50));",
+        "CREATE TABLE t2 (y INTEGER);",
+        "CREATE TABLE t3 (z INTEGER);",
+        "CREATE TABLE log (msg VARCHAR(50));",
+    ] {
+        match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+            vibesql_ast::Statement::CreateTable(stmt) => {
+                CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+            }
+            other => panic!("Expected CreateTable, got {:?}", other),
+        }
+    }
+
+    // Create the trigger preserving the original SQL text (the path the CLI /
+    // bindings use) so `sqlite_master.sql` round-trips verbatim.
+    let trigger_sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+        INSERT INTO log VALUES('fired-' || (SELECT count(*) FROM t3));\nEND";
+    match vibesql_parser::Parser::parse_sql(trigger_sql).unwrap() {
+        vibesql_ast::Statement::CreateTrigger(stmt) => {
+            crate::TriggerExecutor::create_trigger_with_sql(&mut db, &stmt, Some(trigger_sql))
+                .unwrap();
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+
+    // Seed t3 so the trigger has something to count.
+    for sql in ["INSERT INTO t3 VALUES (1);", "INSERT INTO t3 VALUES (2);"] {
+        match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+            vibesql_ast::Statement::Insert(stmt) => {
+                InsertExecutor::execute(&mut db, &stmt).unwrap();
+            }
+            other => panic!("Expected Insert, got {:?}", other),
+        }
+    }
+
+    // Rename t3 -> t5.
+    match vibesql_parser::Parser::parse_sql("ALTER TABLE t3 RENAME TO t5;").unwrap() {
+        vibesql_ast::Statement::AlterTable(stmt) => {
+            AlterTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        other => panic!("Expected AlterTable, got {:?}", other),
+    }
+
+    // sqlite_master.sql must show the rewritten reference, double-quoted, with
+    // the rest preserved verbatim (no injected BEFORE / FOR EACH ROW).
+    let schema = crate::sqlite_schema::execute_sqlite_schema_query(&db.catalog).unwrap();
+    let trigger_row = schema
+        .rows
+        .iter()
+        .find(|r| matches!(&r.values[0], vibesql_types::SqlValue::Varchar(s) if s.as_str() == "trigger"))
+        .expect("trigger row in sqlite_master");
+    let sql_text = match &trigger_row.values[4] {
+        vibesql_types::SqlValue::Varchar(s) => s.to_string(),
+        other => panic!("expected sql text, got {:?}", other),
+    };
+    let expected = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+        INSERT INTO log VALUES('fired-' || (SELECT count(*) FROM \"t5\"));\nEND";
+    assert_eq!(sql_text, expected, "sqlite_master.sql not rewritten to match SQLite");
+
+    // The trigger must still fire against the renamed table. Inserting into t1
+    // counts rows in t5 (the former t3), so the logged message is "fired-2".
+    match vibesql_parser::Parser::parse_sql("INSERT INTO t1 VALUES (10, 'a');").unwrap() {
+        vibesql_ast::Statement::Insert(stmt) => {
+            InsertExecutor::execute(&mut db, &stmt).unwrap();
+        }
+        other => panic!("Expected Insert, got {:?}", other),
+    }
+
+    let select = match vibesql_parser::Parser::parse_sql("SELECT msg FROM log;").unwrap() {
+        vibesql_ast::Statement::Select(stmt) => stmt,
+        other => panic!("Expected Select, got {:?}", other),
+    };
+    let rows = SelectExecutor::new(&db).execute(&select).expect("select from log");
+    assert_eq!(rows.len(), 1, "trigger should have inserted exactly one log row");
+    assert_eq!(
+        rows[0].values[0],
+        vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("fired-2")),
+        "trigger did not fire correctly against the renamed table"
+    );
+}

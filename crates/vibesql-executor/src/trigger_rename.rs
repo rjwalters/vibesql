@@ -1,0 +1,274 @@
+//! Rewrite table references inside trigger definitions when a table is renamed
+//! via `ALTER TABLE ... RENAME TO ...`.
+//!
+//! SQLite (with `legacy_alter_table=OFF`, the default) rewrites references to a
+//! renamed table inside existing trigger bodies and updates the `sql` text stored
+//! in `sqlite_master`/`sqlite_schema` accordingly, while otherwise preserving the
+//! original `CREATE TRIGGER` text verbatim (only the renamed identifiers change,
+//! and they are emitted double-quoted). See `altertrig.test`.
+//!
+//! This module implements a *targeted, token-level* rewrite that handles the
+//! table-name-in-body cases covered by `altertrig.test`. It deliberately does
+//! **not** attempt the full SQLite name-resolver: column renames inside trigger
+//! bodies (which require schema-aware resolution of unqualified columns) are out
+//! of scope here and tracked as a follow-on.
+//!
+//! Rewrite scope (what counts as a reference to the renamed *table*):
+//! - an identifier in a FROM/JOIN/INTO/UPDATE table position,
+//! - an identifier that immediately follows a comma inside a FROM list,
+//! - an identifier used as a qualifier (e.g. `t4.col` -> `"abc".col`),
+//! - the trigger's own `ON <table>` target (the header table).
+//!
+//! Matched identifiers are replaced in place with the double-quoted new name,
+//! preserving all surrounding whitespace and punctuation verbatim.
+
+use vibesql_parser::{Keyword, Lexer, Span, Token};
+
+/// Rewrite occurrences of `old_table` (case-insensitively) that are *table
+/// references* inside the given `CREATE TRIGGER` SQL text, replacing them with
+/// the double-quoted `new_table`.
+///
+/// Returns the rewritten SQL. If the text cannot be tokenized (it should always
+/// be tokenizable since it round-tripped through the parser already) the input
+/// is returned unchanged.
+pub fn rewrite_table_refs_in_trigger_sql(sql: &str, old_table: &str, new_table: &str) -> String {
+    let tokens = match Lexer::new(sql).tokenize_with_spans() {
+        Ok(t) => t,
+        Err(_) => return sql.to_string(),
+    };
+
+    // Collect the spans of identifier tokens that should be rewritten.
+    let edits = collect_table_ref_spans(&tokens, old_table);
+    if edits.is_empty() {
+        return sql.to_string();
+    }
+
+    apply_edits(sql, &edits, new_table)
+}
+
+/// Apply replacement edits (sorted, non-overlapping spans) to `sql`, replacing
+/// each span's text with the double-quoted `new_table`.
+fn apply_edits(sql: &str, edits: &[Span], new_table: &str) -> String {
+    let replacement = format!("\"{}\"", new_table);
+    let mut out = String::with_capacity(sql.len() + edits.len() * (replacement.len() + 2));
+    let mut cursor = 0usize;
+    for span in edits {
+        if span.start < cursor {
+            // Overlapping/out-of-order span; skip defensively.
+            continue;
+        }
+        out.push_str(&sql[cursor..span.start]);
+        out.push_str(&replacement);
+        cursor = span.end;
+    }
+    out.push_str(&sql[cursor..]);
+    out
+}
+
+/// Walk the token stream and return the spans of identifier tokens that are
+/// references to `old_table` and should be rewritten.
+fn collect_table_ref_spans(tokens: &[(Token, Span)], old_table: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+
+    // Per-paren-depth flag: are we currently inside a FROM list (so a comma
+    // separates table references)? Index 0 is the top level.
+    let mut from_list_stack: Vec<bool> = vec![false];
+
+    // Track whether we have already consumed the trigger header's `ON <table>`
+    // target. The header `ON` introduces the trigger's table; any later `ON`
+    // belongs to a JOIN condition (where the following identifier is a column,
+    // handled instead by qualifier detection).
+    let mut seen_header_on = false;
+    let mut expect_header_table = false;
+
+    let significant: Vec<usize> =
+        (0..tokens.len()).filter(|&i| !matches!(tokens[i].0, Token::Eof)).collect();
+
+    for (pos, &idx) in significant.iter().enumerate() {
+        let (tok, span) = &tokens[idx];
+
+        match tok {
+            Token::LParen => {
+                // A new scope: subqueries reset FROM-list tracking. Inherit
+                // `false` so commas inside e.g. function args are not treated
+                // as table separators until a FROM keyword appears.
+                from_list_stack.push(false);
+            }
+            Token::RParen => {
+                if from_list_stack.len() > 1 {
+                    from_list_stack.pop();
+                }
+            }
+            Token::Keyword { keyword, .. } => {
+                update_from_list_for_keyword(*keyword, &mut from_list_stack);
+                if *keyword == Keyword::On && !seen_header_on {
+                    seen_header_on = true;
+                    expect_header_table = true;
+                    continue;
+                }
+            }
+            Token::Identifier(name) => {
+                let is_match = name.eq_ignore_ascii_case(old_table);
+
+                // Header `ON <table>` target.
+                if expect_header_table {
+                    expect_header_table = false;
+                    if is_match {
+                        spans.push(*span);
+                    }
+                    continue;
+                }
+
+                if is_match && is_table_position(tokens, &significant, pos, &from_list_stack) {
+                    spans.push(*span);
+                }
+            }
+            _ => {
+                // Any non-identifier token following the header `ON` means the
+                // target was already a (quoted) identifier or something else.
+                expect_header_table = false;
+            }
+        }
+    }
+
+    spans
+}
+
+/// Update the FROM-list flag for the current paren scope based on a keyword.
+fn update_from_list_for_keyword(keyword: Keyword, from_list_stack: &mut [bool]) {
+    let top = from_list_stack.last_mut().expect("stack always has top level");
+    match keyword {
+        // Keywords that (re)open a table list at the current scope.
+        Keyword::From | Keyword::Join | Keyword::Into | Keyword::Update => {
+            *top = true;
+        }
+        // Keywords that end the FROM/table list.
+        Keyword::Set
+        | Keyword::Where
+        | Keyword::Select
+        | Keyword::Group
+        | Keyword::Order
+        | Keyword::Having
+        | Keyword::On
+        | Keyword::Using
+        | Keyword::Values
+        | Keyword::Limit => {
+            *top = false;
+        }
+        _ => {}
+    }
+}
+
+/// Decide whether the identifier at `significant[pos]` occupies a table-name
+/// position (and therefore, when it matches the renamed table, is a reference
+/// that should be rewritten).
+fn is_table_position(
+    tokens: &[(Token, Span)],
+    significant: &[usize],
+    pos: usize,
+    from_list_stack: &[bool],
+) -> bool {
+    // Qualifier position: `<ident>.` — the identifier names a table/alias.
+    if let Some(&next_idx) = significant.get(pos + 1) {
+        if matches!(tokens[next_idx].0, Token::Symbol('.')) {
+            return true;
+        }
+    }
+
+    // Position based on the preceding significant token.
+    if pos == 0 {
+        return false;
+    }
+    let prev_idx = significant[pos - 1];
+    match &tokens[prev_idx].0 {
+        Token::Keyword { keyword, .. } => matches!(
+            keyword,
+            Keyword::From | Keyword::Join | Keyword::Into | Keyword::Update | Keyword::Table
+        ),
+        // A comma inside a FROM list separates table references.
+        Token::Comma => *from_list_stack.last().unwrap_or(&false),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rewrite(sql: &str, old: &str, new: &str) -> String {
+        rewrite_table_refs_in_trigger_sql(sql, old, new)
+    }
+
+    #[test]
+    fn rewrites_table_after_comma_in_from_list() {
+        // altertrig.test 1.1
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, t3; \nEND";
+        let got = rewrite(sql, "t3", "t5");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, \"t5\"; \nEND"
+        );
+    }
+
+    #[test]
+    fn rewrites_table_in_subquery_from() {
+        // altertrig.test 1.3
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, (SELECT * FROM t5); \nEND";
+        let got = rewrite(sql, "t5", "t3");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, (SELECT * FROM \"t3\"); \nEND"
+        );
+    }
+
+    #[test]
+    fn rewrites_multiple_table_refs_nested() {
+        // altertrig.test 2.2: both t3 refs rewritten, column `e` untouched.
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET a='xyz' FROM t3, (SELECT * FROM (SELECT e FROM t3)); \nEND";
+        let got = rewrite(sql, "t3", "t10");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET a='xyz' FROM \"t10\", (SELECT * FROM (SELECT e FROM \"t10\")); \nEND"
+        );
+    }
+
+    #[test]
+    fn rewrites_qualifier_and_join_target() {
+        // altertrig.test 2.8: t4 after NATURAL JOIN and as qualifier t4.e.
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET a=1 FROM t3 NATURAL JOIN t4 WHERE t4.e=a; \nEND";
+        let got = rewrite(sql, "t4", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET a=1 FROM t3 NATURAL JOIN \"abc\" WHERE \"abc\".e=a; \nEND"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_unrelated_column_of_same_name() {
+        // A bare column reference named like the renamed table must not change.
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET a=1 WHERE z=1; \nEND";
+        let got = rewrite(sql, "z", "zz");
+        assert_eq!(got, sql);
+    }
+
+    #[test]
+    fn rewrites_header_on_table() {
+        // If the trigger's own ON-table is renamed, the header is rewritten.
+        let sql = "CREATE TRIGGER r1 INSERT ON t3 BEGIN \n  UPDATE t1 SET a=1; \nEND";
+        let got = rewrite(sql, "t3", "t5");
+        assert_eq!(got, "CREATE TRIGGER r1 INSERT ON \"t5\" BEGIN \n  UPDATE t1 SET a=1; \nEND");
+    }
+
+    #[test]
+    fn no_match_returns_input_unchanged() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1; END";
+        assert_eq!(rewrite(sql, "nosuch", "x"), sql);
+    }
+
+    #[test]
+    fn case_insensitive_match() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM T3; END";
+        let got = rewrite(sql, "t3", "t5");
+        assert_eq!(got, "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM \"t5\"; END");
+    }
+}

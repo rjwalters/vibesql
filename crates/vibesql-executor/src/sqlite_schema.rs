@@ -246,6 +246,18 @@ fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
 fn generate_create_trigger_sql(trigger: &vibesql_catalog::TriggerDefinition) -> String {
     use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
 
+    // Prefer the original SQL text when available so `sqlite_master.sql` matches
+    // SQLite's verbatim form (no injected BEFORE/FOR EACH ROW, original spacing
+    // and quoting preserved). This mirrors `generate_create_view_sql` and is the
+    // form kept consistent by `crate::trigger_rename` across ALTER TABLE RENAME.
+    // SQLite stores the statement text without the trailing `;`, so strip one if
+    // present.
+    if let Some(ref sql) = trigger.sql_definition {
+        let trimmed = sql.trim_end();
+        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed);
+        return trimmed.trim_end().to_string();
+    }
+
     let timing = match trigger.timing {
         TriggerTiming::Before => "BEFORE",
         TriggerTiming::After => "AFTER",
