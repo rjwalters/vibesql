@@ -240,6 +240,14 @@ fn execute_insert_internal(
     // Use the schema's table name for catalog operations (matches how table was created)
     let table_name = &schema.name;
 
+    // Schema-aware trigger firing (triggerD-3.1/3.2): resolve which schema this
+    // INSERT's target table actually lives in (temp shadows main for unqualified
+    // names; an explicit `main.`/`temp.` qualifier pins the schema). Only triggers
+    // bound to this schema will fire, so a `main` trigger does not fire on a
+    // same-named `temp` table and vice versa. `None` => could not resolve, in
+    // which case firing falls back to the legacy schema-unaware match.
+    let dml_schema: Option<String> = db.catalog.resolve_table_schema_name(&full_table_name);
+
     // Validate an explicit ON CONFLICT (cols) target up front. SQLite does
     // this at prepare time, even when no row actually conflicts: unknown
     // columns raise "no such column" and known columns without a matching
@@ -764,7 +772,11 @@ fn execute_insert_internal(
     // Check once if any INSERT triggers exist for this table (used for batch optimization)
     let has_insert_triggers = db
         .catalog
-        .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Insert))
+        .get_triggers_for_table_in_schema(
+            table_name,
+            Some(vibesql_ast::TriggerEvent::Insert),
+            dml_schema.as_deref(),
+        )
         .next()
         .is_some();
 
@@ -774,10 +786,11 @@ fn execute_insert_internal(
         // Statement-level RAISE(IGNORE) has no sqlite3 analog (SQLite triggers
         // are always FOR EACH ROW); drop the must-use outcome and keep the
         // pre-#5418 proceed behavior (#5418).
-        let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
+        let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers_in_schema(
             db,
             table_name,
             vibesql_ast::TriggerEvent::Insert,
+            dml_schema.as_deref(),
         )?;
     }
 
@@ -1088,12 +1101,13 @@ fn execute_insert_internal(
             if has_insert_triggers {
                 // RAISE(IGNORE) in a BEFORE INSERT trigger abandons this row:
                 // skip the insert and continue with the next row (SQLite).
-                if crate::TriggerFirer::execute_before_triggers(
+                if crate::TriggerFirer::execute_before_triggers_in_schema(
                     db,
                     table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&row_to_insert),
+                    dml_schema.as_deref(),
                 )? == crate::trigger_execution::TriggerOutcome::SkipRow
                 {
                     continue;
@@ -1228,12 +1242,13 @@ fn execute_insert_internal(
                 // inserted and RAISE(IGNORE) only abandons the rest of the
                 // trigger program, leaving the row in place. So we only act on
                 // the error (RAISE / non-RAISE) path; drop the Ok outcome.
-                let _after_outcome = crate::TriggerFirer::execute_after_triggers(
+                let _after_outcome = crate::TriggerFirer::execute_after_triggers_in_schema(
                     db,
                     table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
                     Some(&after_row),
+                    dml_schema.as_deref(),
                 )?;
             }
 
@@ -1246,10 +1261,11 @@ fn execute_insert_internal(
     if has_insert_triggers && trigger_context.is_none() {
         // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
         // must-use outcome (#5418).
-        let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
+        let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers_in_schema(
             db,
             table_name,
             vibesql_ast::TriggerEvent::Insert,
+            dml_schema.as_deref(),
         )?;
     }
 

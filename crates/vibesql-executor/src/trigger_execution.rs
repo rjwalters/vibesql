@@ -298,8 +298,27 @@ impl TriggerFirer {
         timing: TriggerTiming,
         event: TriggerEvent,
     ) -> Vec<TriggerDefinition> {
+        Self::find_triggers_in_schema(db, table_name, timing, event, None)
+    }
+
+    /// Find triggers for a table and event, restricted to the schema the DML
+    /// target table resolved to.
+    ///
+    /// `dml_schema` is the internal schema name (`main` or `temp_<id>`) the target
+    /// table resolved to for the current statement (see
+    /// [`Catalog::resolve_table_schema_name`]). When `None`, no schema filtering
+    /// is applied (legacy schema-unaware behavior). Schema-aware firing keeps a
+    /// `main` trigger from firing on a same-named `temp` table and vice versa
+    /// (triggerD-3.1/3.2).
+    pub fn find_triggers_in_schema(
+        db: &Database,
+        table_name: &str,
+        timing: TriggerTiming,
+        event: TriggerEvent,
+        dml_schema: Option<&str>,
+    ) -> Vec<TriggerDefinition> {
         db.catalog
-            .get_triggers_for_table(table_name, Some(event.clone()))
+            .get_triggers_for_table_in_schema(table_name, Some(event.clone()), dml_schema)
             .filter(|trigger| trigger.timing == timing && trigger.enabled) // Skip disabled triggers
             .cloned()
             .collect()
@@ -693,10 +712,27 @@ impl TriggerFirer {
         old_row: Option<&Row>,
         new_row: Option<&Row>,
     ) -> Result<TriggerOutcome, ExecutorError> {
+        Self::execute_before_triggers_in_schema(db, table_name, event, old_row, new_row, None)
+    }
+
+    /// Schema-aware variant of [`Self::execute_before_triggers`].
+    ///
+    /// `dml_schema` is the internal schema name the DML target resolved to; only
+    /// triggers bound to that schema fire (triggerD-3.1/3.2). `None` preserves the
+    /// legacy schema-unaware behavior.
+    pub fn execute_before_triggers_in_schema(
+        db: &mut Database,
+        table_name: &str,
+        event: TriggerEvent,
+        old_row: Option<&Row>,
+        new_row: Option<&Row>,
+        dml_schema: Option<&str>,
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
-        let triggers = Self::find_triggers(db, table_name, TriggerTiming::Before, event);
+        let triggers =
+            Self::find_triggers_in_schema(db, table_name, TriggerTiming::Before, event, dml_schema);
 
         // Get table schema for UPDATE OF checking
         let table_schema = db
@@ -746,10 +782,21 @@ impl TriggerFirer {
         table_name: &str,
         event: TriggerEvent,
     ) -> Result<TriggerOutcome, ExecutorError> {
+        Self::execute_before_statement_triggers_in_schema(db, table_name, event, None)
+    }
+
+    /// Schema-aware variant of [`Self::execute_before_statement_triggers`].
+    pub fn execute_before_statement_triggers_in_schema(
+        db: &mut Database,
+        table_name: &str,
+        event: TriggerEvent,
+        dml_schema: Option<&str>,
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
-        let triggers = Self::find_triggers(db, table_name, TriggerTiming::Before, event);
+        let triggers =
+            Self::find_triggers_in_schema(db, table_name, TriggerTiming::Before, event, dml_schema);
 
         for trigger in triggers {
             // Only execute STATEMENT-level triggers in this method
@@ -786,10 +833,23 @@ impl TriggerFirer {
         old_row: Option<&Row>,
         new_row: Option<&Row>,
     ) -> Result<TriggerOutcome, ExecutorError> {
+        Self::execute_after_triggers_in_schema(db, table_name, event, old_row, new_row, None)
+    }
+
+    /// Schema-aware variant of [`Self::execute_after_triggers`].
+    pub fn execute_after_triggers_in_schema(
+        db: &mut Database,
+        table_name: &str,
+        event: TriggerEvent,
+        old_row: Option<&Row>,
+        new_row: Option<&Row>,
+        dml_schema: Option<&str>,
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
-        let triggers = Self::find_triggers(db, table_name, TriggerTiming::After, event);
+        let triggers =
+            Self::find_triggers_in_schema(db, table_name, TriggerTiming::After, event, dml_schema);
 
         // Get table schema for UPDATE OF checking
         let table_schema = db
@@ -838,10 +898,21 @@ impl TriggerFirer {
         table_name: &str,
         event: TriggerEvent,
     ) -> Result<TriggerOutcome, ExecutorError> {
+        Self::execute_after_statement_triggers_in_schema(db, table_name, event, None)
+    }
+
+    /// Schema-aware variant of [`Self::execute_after_statement_triggers`].
+    pub fn execute_after_statement_triggers_in_schema(
+        db: &mut Database,
+        table_name: &str,
+        event: TriggerEvent,
+        dml_schema: Option<&str>,
+    ) -> Result<TriggerOutcome, ExecutorError> {
         // Check recursion depth before executing any triggers
         let _guard = RecursionGuard::new()?;
 
-        let triggers = Self::find_triggers(db, table_name, TriggerTiming::After, event);
+        let triggers =
+            Self::find_triggers_in_schema(db, table_name, TriggerTiming::After, event, dml_schema);
 
         for trigger in triggers {
             // Only execute STATEMENT-level triggers in this method
