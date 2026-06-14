@@ -40,6 +40,19 @@ set ::total_changes 0
 set ::sql_batch {}
 set ::in_transaction 0
 
+# When an aborting RAISE (RAISE(ABORT) / RAISE(FAIL)) or an ordinary constraint
+# violation fires *inside* an open transaction, SQLite rolls back only the
+# offending statement and leaves the enclosing transaction OPEN (#5478). The
+# trial-execute path surfaces that error at the submitting test, but the real
+# batch must still be replayed at the eventual COMMIT/ROLLBACK — including the
+# statement that aborted (FAIL keeps its earlier-row changes; ABORT keeps the
+# transaction's prior statements). This flag records that the currently open
+# batched transaction already produced an error that was attributed at its
+# submitting test, so the eventual flush must TOLERATE that re-occurring
+# "Error executing statement" line instead of re-raising it. It is cleared on
+# every flush and whenever a fresh transaction opens.
+set ::txn_had_tolerated_error 0
+
 # PRAGMA state tracking - persists across process invocations
 # These are prepended to every SQL execution to maintain consistent state
 set ::pragma_full_column_names 0   ;# Default: OFF
@@ -1189,13 +1202,30 @@ proc trial_check_in_transaction {new_sql} {
     # vibesql reports errors via lines starting with "Error executing statement"
     # or "Error:". Detect either pattern (matches exec_preserve_newlines).
     if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
+        # Did the appended ROLLBACK actually find a transaction to roll back?
+        # If so, the RAISE that errored was a RAISE(ABORT)/RAISE(FAIL) (or an
+        # ordinary constraint violation) that rolled back only its statement and
+        # left the enclosing transaction OPEN — SQLite keeps such a transaction
+        # alive (#5478). If "Transaction rolled back" is absent, the error was a
+        # RAISE(ROLLBACK) (or an explicit ROLLBACK in the user SQL) that already
+        # closed the transaction. The caller uses this to decide whether to keep
+        # the batched transaction open and replay the offending statement.
+        set ::txn_survived_trial_error \
+            [regexp {(?m)^Transaction rolled back} $result]
         error [translate_error_to_sqlite $result]
     }
 }
 
-proc flush_batch {} {
+proc flush_batch {{tolerate_attributed_error 0}} {
     # Execute accumulated SQL statements
     # Uses a temp file to avoid "argument list too long" errors for large batches
+    #
+    # When $tolerate_attributed_error is true, the batch is the replay of a
+    # transaction whose aborting RAISE(ABORT)/RAISE(FAIL)/constraint error was
+    # already surfaced at the submitting test (#5478). The CLI will exit non-zero
+    # because that statement re-fails, but the transaction completed normally
+    # (e.g. the trailing SELECT + ROLLBACK ran). Do not treat the non-zero exit
+    # as a flush failure; the caller's tolerant parse extracts the real results.
     if {[llength $::sql_batch] == 0} return
 
     # Strip trailing semicolons from each statement to avoid double semicolons
@@ -1241,7 +1271,7 @@ proc flush_batch {} {
         puts stderr "DEBUG: Temp file saved at: $tmpfile"
     }
 
-    if {$exec_code != 0} {
+    if {$exec_code != 0 && !$tolerate_attributed_error} {
         error $result
     }
     return $result
@@ -1572,8 +1602,25 @@ proc execsql {sql {db ""}} {
         # (at the test boundary that submitted this SQL) instead of being
         # silently deferred until the next COMMIT. See trial_check_in_transaction
         # for the full rationale (fixes fkey6 3.2.1 / 3.3.2 misattribution).
-        trial_check_in_transaction $sql
+        #
+        # If the trial errors but the transaction *survived* it (RAISE(ABORT) /
+        # RAISE(FAIL) / a plain constraint violation roll back only the offending
+        # statement and keep the transaction open — #5478), we still open the
+        # batched transaction and record the SQL so the offending statement is
+        # replayed at the eventual COMMIT/ROLLBACK; the flush then tolerates the
+        # re-raised, already-attributed error. A RAISE(ROLLBACK) (txn did NOT
+        # survive) falls through to discard the transaction, as before.
+        set ::txn_survived_trial_error 0
+        if {[catch {trial_check_in_transaction $sql} trial_err]} {
+            if {$::txn_survived_trial_error} {
+                set ::in_transaction 1
+                set ::txn_had_tolerated_error 1
+                lappend ::sql_batch $sql
+            }
+            error $trial_err
+        }
         set ::in_transaction 1
+        set ::txn_had_tolerated_error 0
         lappend ::sql_batch $sql
         return {}
     } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0)} {
@@ -1596,11 +1643,19 @@ proc execsql {sql {db ""}} {
         }
         lappend ::sql_batch $sql
         set ::in_transaction 0
-        if {[catch {flush_batch} result]} {
+        # Did this transaction already surface an aborting error (RAISE(ABORT) /
+        # RAISE(FAIL) / constraint) at its submitting test that left the txn
+        # open (#5478)? If so the replayed batch will re-emit that same "Error
+        # executing statement" line; tolerate it here (it was already attributed)
+        # and parse the SELECT results that follow it. Reset the flag — the
+        # transaction ends with this flush.
+        set tolerate_err $::txn_had_tolerated_error
+        set ::txn_had_tolerated_error 0
+        if {[catch {flush_batch $tolerate_err} result]} {
             # Translate error to SQLite format before re-raising
             error [translate_error_to_sqlite $result]
         }
-        set parsed [parse_result $result]
+        set parsed [parse_result $result $tolerate_err]
         update_sqlite_counters $sql $parsed
         return $parsed
     } elseif {$begin_count > 0 && $end_count > 0 && $begin_count == $end_count} {
@@ -1610,7 +1665,26 @@ proc execsql {sql {db ""}} {
     } elseif {$::in_transaction} {
         # Inside a transaction - trial-execute first so per-statement errors
         # surface at the submitting test, then add to batch.
-        trial_check_in_transaction $sql
+        #
+        # As in the BEGIN branch above, an aborting RAISE(ABORT)/RAISE(FAIL) or
+        # a plain constraint violation leaves the transaction open (#5478): keep
+        # the statement in the batch (its effect — none for ABORT, partial for
+        # FAIL — replays at flush) and mark the transaction so the eventual
+        # flush tolerates the re-raised, already-attributed error. A
+        # RAISE(ROLLBACK) closes the transaction, so we drop the statement and
+        # end the batched transaction (its prior statements were undone too).
+        set ::txn_survived_trial_error 0
+        if {[catch {trial_check_in_transaction $sql} trial_err]} {
+            if {$::txn_survived_trial_error} {
+                set ::txn_had_tolerated_error 1
+                lappend ::sql_batch $sql
+            } else {
+                set ::in_transaction 0
+                set ::sql_batch {}
+                set ::txn_had_tolerated_error 0
+            }
+            error $trial_err
+        }
         lappend ::sql_batch $sql
         return {}
     }
@@ -1733,8 +1807,14 @@ proc parse_raw_result {output} {
     return $data
 }
 
-proc parse_result {output} {
+proc parse_result {output {tolerate_attributed_error 0}} {
     # Parse VibeSQL tabular output into TCL list
+    #
+    # $tolerate_attributed_error (#5478): when true, an "Error executing
+    # statement" / "Error:" line in the output is the re-occurrence of an
+    # aborting RAISE/constraint error that was already surfaced at the
+    # submitting test for an open transaction. Skip that line instead of
+    # raising, so the SELECT results emitted after it are still parsed.
     # NOTE: This function is kept for backwards compatibility but parse_raw_result
     # should be preferred as it correctly handles NULL vs 'NULL' string distinction
     # Errors in output are translated to SQLite-compatible format
@@ -1768,7 +1848,17 @@ proc parse_result {output} {
             continue
         }
         if {[regexp {^=+$} $line]} continue
+        # Skip the CLI's per-script "Successful/Failed/Total statements"
+        # summary trailer (only emitted on multi-statement scripts that had a
+        # failure); it is not result data and its "Failed:" line must not be
+        # mistaken for an error to raise.
+        if {[regexp {^(Total statements:|Successful:|Failed:)} $line]} continue
         if {[regexp {^Error} $line]} {
+            if {$tolerate_attributed_error} {
+                # Already-attributed aborting error replayed in this batch
+                # (#5478) — skip it; the real results follow.
+                continue
+            }
             # Translate error to SQLite format before raising
             error [translate_error_to_sqlite $line]
         }
