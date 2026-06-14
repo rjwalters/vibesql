@@ -30,6 +30,8 @@ mod foreign_keys;
 mod from_clause;
 mod index_sync;
 mod row_selector;
+#[cfg(test)]
+mod tests;
 mod triggers;
 mod value_updater;
 
