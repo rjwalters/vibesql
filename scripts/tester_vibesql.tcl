@@ -425,6 +425,11 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (unsupported use of NULLS (?:FIRST|LAST))$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Bound parameter / variable in a CREATE TRIGGER body or WHEN clause
+    # (triggerE.test 1.1.* / 1.2.*) — SQLite returns this verbatim, not wrapped.
+    if {[regexp -nocase {^Parse error: (trigger cannot use variables)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"
