@@ -207,19 +207,19 @@ fn triggers_see_old_and_new_rowid() {
 ///   T7 = (2,3,4) (3,5,7) (8,1,2)
 ///   T8 = "after fired 1->8", "after fired 3->3"
 ///
-/// This issue's SET-rowid relocation makes the *table* state (T7) match sqlite3
+/// The SET-rowid relocation (#5517) makes the *table* state (T7) match sqlite3
 /// exactly: the nested `UPDATE t7 SET rowid=8` fired inside the BEFORE trigger
 /// relocates rowid 1 -> 8.
 ///
-/// The T8 AFTER-trigger log is only PARTIALLY correct: the outer UPDATE's AFTER
-/// trigger fires ("after fired 3->3"), but the nested UPDATE (run inside the
-/// BEFORE trigger, i.e. with a trigger context) does NOT fire its own AFTER
-/// trigger, so "after fired 1->8" is missing. That gap is in the trigger
-/// execution path — `execute_internal` forces `has_triggers=false` whenever a
-/// `trigger_context` is present, suppressing all nested-DML triggers — which is
-/// separate from rowid relocation and tracked as a follow-on (see PR body,
-/// "Part of #5517"). This test pins the relocation behavior we DO fix and
-/// documents the residual triggerC-7.5/7.6 delta.
+/// The T8 AFTER-trigger log now ALSO matches sqlite3 exactly. The nested
+/// `UPDATE t7 SET rowid=8` fired inside the BEFORE trigger body fires its own
+/// AFTER trigger ("after fired 1->8") and logs FIRST (it completes before the
+/// outer UPDATE's AFTER trigger runs), then the outer UPDATE's AFTER trigger
+/// logs "after fired 3->3". This is the post-#5550 behavior: #5550 made nested
+/// DML fired from a trigger body fire its own row triggers, which fully resolved
+/// the gap previously tracked by #5557 for this scenario. (PR #5556 was written
+/// against a base predating #5550 and pinned the THEN-missing "after fired 1->8"
+/// as a documented follow-on; that delta no longer exists.)
 #[test]
 fn triggerc_7_5_relocate_in_before_trigger() {
     let mut db = vibesql_storage::Database::new();
@@ -249,9 +249,16 @@ fn triggerc_7_5_relocate_in_before_trigger() {
         .collect();
     assert_eq!(got, vec![(2, 3, 4), (3, 5, 7), (8, 1, 2)]);
 
-    // Outer UPDATE's AFTER trigger fires; the nested UPDATE's AFTER trigger does
-    // not (documented follow-on). sqlite3 also logs "after fired 1->8" first.
+    // Both AFTER triggers fire, in sqlite3 3.51.0 order: the nested UPDATE's
+    // AFTER trigger logs "after fired 1->8" first (it completes inside the BEFORE
+    // trigger body), then the outer UPDATE's AFTER trigger logs "after fired 3->3".
     let t8 = select(&mut db, "SELECT x FROM t8 ORDER BY rowid");
     let log: Vec<String> = t8.iter().map(|r| text(&r.values[0])).collect();
-    assert_eq!(log, vec!["after fired 3->3".to_string()]);
+    assert_eq!(
+        log,
+        vec![
+            "after fired 1->8".to_string(),
+            "after fired 3->3".to_string()
+        ]
+    );
 }
