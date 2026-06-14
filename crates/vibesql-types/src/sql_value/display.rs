@@ -71,8 +71,11 @@ fn format_with_significant_digits(n: f64, sig_digits: usize) -> String {
 /// Format scientific notation like SQLite: 1.0e+15, 1.0e-05
 /// - Lowercase 'e'
 /// - Explicit + or - sign for exponent
-/// - Two-digit exponent (padded with leading zero if needed)
-/// - Strip trailing zeros from mantissa (but keep at least one decimal place)
+/// - Minimum two-digit exponent (padded with leading zero if needed; wider for
+///   large magnitudes, e.g. e+100, e+308)
+/// - Strip trailing zeros from the mantissa but ALWAYS keep at least one
+///   fractional digit, so a whole mantissa renders "1.0e+20" (not "1e+20"),
+///   matching sqlite3's %!.15g output.
 fn format_scientific_sqlite(s: &str) -> String {
     // Input format from Rust: "1.50000000000000e10" or "1.5e-5"
     // Output format for SQLite: "1.5e+10" or "1.5e-05"
@@ -80,8 +83,21 @@ fn format_scientific_sqlite(s: &str) -> String {
         let (mantissa, exp_part) = s.split_at(e_pos);
         let exp_str = &exp_part[1..]; // Skip the 'e'
 
-        // Strip trailing zeros from mantissa and trailing decimal point
-        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        // Strip trailing zeros from the mantissa, but keep at least one
+        // fractional digit so a whole mantissa renders as "1.0", matching
+        // sqlite3's %!.15g (e.g. "1.0e+20", not "1e+20"). Fractional mantissas
+        // are preserved as-is ("1.5e+20", "9.99e+30").
+        let mantissa: std::borrow::Cow<'_, str> = if mantissa.contains('.') {
+            let trimmed = mantissa.trim_end_matches('0');
+            if trimmed.ends_with('.') {
+                std::borrow::Cow::Owned(format!("{}0", trimmed))
+            } else {
+                std::borrow::Cow::Borrowed(trimmed)
+            }
+        } else {
+            // No decimal point at all (e.g. "1e10"): add ".0".
+            std::borrow::Cow::Owned(format!("{}.0", mantissa))
+        };
 
         let (sign, exp_digits) = if let Some(stripped) = exp_str.strip_prefix('-') {
             ("-", stripped)
@@ -217,22 +233,53 @@ mod tests {
 
     #[test]
     fn test_format_f64_scientific() {
-        // Very large numbers use scientific notation (SQLite format: e+XX or e-XX)
-        assert_eq!(format_f64(1e15), "1e+15");
-        assert_eq!(format_f64(1e16), "1e+16");
+        // Whole mantissas keep ".0" to match sqlite3 3.51.0 (%!.15g):
+        //   SELECT 1e15  -> 1.0e+15
+        //   SELECT 1e16  -> 1.0e+16
+        //   SELECT 1e-5  -> 1.0e-05
+        //   SELECT 1e-10 -> 1.0e-10
+        assert_eq!(format_f64(1e15), "1.0e+15");
+        assert_eq!(format_f64(1e16), "1.0e+16");
         // Very small numbers use scientific notation
-        assert_eq!(format_f64(0.00001), "1e-05");
-        assert_eq!(format_f64(1e-10), "1e-10");
+        assert_eq!(format_f64(0.00001), "1.0e-05");
+        assert_eq!(format_f64(1e-10), "1.0e-10");
+
+        // Verified directly against sqlite3 3.51.0 (one query per value):
+        assert_eq!(format_f64(1e20), "1.0e+20"); // whole mantissa, +exp
+        assert_eq!(format_f64(1e-20), "1.0e-20"); // whole mantissa, -exp
+        assert_eq!(format_f64(1.5e20), "1.5e+20"); // fractional mantissa preserved
+        assert_eq!(format_f64(9.99e30), "9.99e+30"); // multi-digit fractional mantissa
+        assert_eq!(format_f64(1e100), "1.0e+100"); // 3-digit exponent
+        assert_eq!(format_f64(1e308), "1.0e+308"); // largest 3-digit exponent
+        assert_eq!(format_f64(-1e20), "-1.0e+20"); // negative
+        assert_eq!(format_f64(1.23456789012346e15), "1.23456789012346e+15"); // 15 sig figs
+    }
+
+    #[test]
+    fn test_format_f64_scientific_boundary() {
+        // Fixed vs scientific threshold matches sqlite3 3.51.0:
+        // scientific when |x| >= 1e15 or (0 < |x| < 1e-4).
+        assert_eq!(format_f64(1e14), "100000000000000.0"); // fixed
+        assert_eq!(format_f64(1e15), "1.0e+15"); // scientific
+        assert_eq!(format_f64(0.0001), "0.0001"); // fixed
+        assert_eq!(format_f64(0.00001), "1.0e-05"); // scientific
+        // Zero is never scientific.
+        assert_eq!(format_f64(0.0), "0.0");
     }
 
     #[test]
     fn test_format_scientific_sqlite() {
-        // Test the SQLite-compatible scientific notation formatter
-        assert_eq!(format_scientific_sqlite("1e15"), "1e+15");
-        assert_eq!(format_scientific_sqlite("1e5"), "1e+05");
+        // Whole mantissas keep ".0" (matches sqlite3 %!.15g)
+        assert_eq!(format_scientific_sqlite("1e15"), "1.0e+15");
+        assert_eq!(format_scientific_sqlite("1e5"), "1.0e+05");
+        assert_eq!(format_scientific_sqlite("1.00000000000000e20"), "1.0e+20");
+        // Fractional mantissas are preserved (and not given a spurious ".0")
         assert_eq!(format_scientific_sqlite("1.5e-5"), "1.5e-05");
         assert_eq!(format_scientific_sqlite("1.5e-15"), "1.5e-15");
+        assert_eq!(format_scientific_sqlite("9.99000000000000e30"), "9.99e+30");
         assert_eq!(format_scientific_sqlite("9.22337203685478e18"), "9.22337203685478e+18");
+        // Exponent widening beyond two digits is preserved.
+        assert_eq!(format_scientific_sqlite("1.00000000000000e100"), "1.0e+100");
     }
 
     #[test]
