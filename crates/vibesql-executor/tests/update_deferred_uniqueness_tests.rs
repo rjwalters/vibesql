@@ -104,9 +104,22 @@ fn pk_shift_decrement_succeeds() {
 }
 
 #[test]
-fn pk_shift_increment_succeeds() {
-    // Mirror of the decrement case — `UPDATE p SET a = a + 1` shifts upward, transiently
-    // collides between rows, must still succeed.
+fn ipk_shift_increment_errors_intermediate_collision() {
+    // `UPDATE p SET a = a + 1` on an INTEGER PRIMARY KEY table is NOT deferred in
+    // sqlite3 3.51.0: the IPK IS the rowid, which sqlite3 checks IMMEDIATELY
+    // row-by-row in ascending rowid order, not at statement end. Processing rowid
+    // 1 -> 2 collides with the still-live rowid 2, so sqlite3 errors:
+    //   Error: UNIQUE constraint failed: p.a
+    // (verified against sqlite3 3.51.0; issue #5575). This is the ASCENDING-cascade
+    // half of the same +1/-1 asymmetry exercised by the rowid relocation tests in
+    // src/update/tests/set_rowid.rs — the `-1` descending counterpart
+    // (`pk_shift_decrement_succeeds` above) still succeeds because each old slot
+    // is vacated before the next row needs it.
+    //
+    // NOTE: this previously asserted SUCCESS (final state 2,3,4 has no duplicate),
+    // modeling the IPK like a deferred regular UNIQUE column. That diverged from
+    // sqlite3, which #5575 corrects. Regular (non-rowid) UNIQUE columns remain
+    // deferred — see `composite_pk_shift_succeeds` / `unique_index_shift_succeeds`.
     let mut db = Database::new();
     run_sql(
         &mut db,
@@ -116,18 +129,25 @@ fn pk_shift_increment_succeeds() {
          INSERT INTO p VALUES (3, 'three');",
     );
 
-    let count = run_update(&mut db, "UPDATE p SET a = a + 1").expect("PK increment should succeed");
-    assert_eq!(count, 3);
+    let result = run_update(&mut db, "UPDATE p SET a = a + 1");
+    let err = result.expect_err(
+        "IPK ascending +1 cascade must error on intermediate collision (sqlite3 3.51.0)",
+    );
+    assert!(
+        err.to_string().contains("UNIQUE constraint failed: p.a"),
+        "expected `UNIQUE constraint failed: p.a`, got: {}",
+        err
+    );
 
-    let rows = get_rows(&db, "p");
-    let pks: Vec<i64> = rows
+    // Table unchanged after the aborted UPDATE.
+    let pks: Vec<i64> = get_rows(&db, "p")
         .iter()
         .map(|r| match r[0] {
             SqlValue::Integer(n) => n,
             _ => panic!("expected integer pk"),
         })
         .collect();
-    assert_eq!(pks, vec![2, 3, 4]);
+    assert_eq!(pks, vec![1, 2, 3]);
 }
 
 #[test]
