@@ -37,6 +37,7 @@ fn test_new_in_insert_trigger() {
         if_not_exists: false,
         schema: None,
         trigger_name: "log_new_employee".to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
         table_name: "employees".to_string(), // Use lowercase to match parser normalization
@@ -115,6 +116,7 @@ fn test_old_and_new_in_update_trigger() {
         if_not_exists: false,
         schema: None,
         trigger_name: "log_salary_change".to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None), // No specific column list
         table_name: "employees".to_string(), // Use lowercase to match parser normalization
@@ -193,6 +195,7 @@ fn test_old_in_delete_trigger() {
         if_not_exists: false,
         schema: None,
         trigger_name: "log_deletion".to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Delete,
         table_name: "employees".to_string(), // Use lowercase to match parser normalization

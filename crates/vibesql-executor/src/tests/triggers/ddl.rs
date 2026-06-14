@@ -27,6 +27,7 @@ fn test_create_trigger() {
         if_not_exists: false,
         schema: None,
         trigger_name: "my_trigger".to_string(),
+        name_source: None,
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
         table_name: "test_table".to_string(),
@@ -66,6 +67,7 @@ fn test_create_trigger_duplicate_error() {
         if_not_exists: false,
         schema: None,
         trigger_name: "my_trigger".to_string(),
+        name_source: None,
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
         table_name: "test_table".to_string(),
@@ -101,6 +103,7 @@ fn test_create_trigger_if_not_exists_is_noop_when_present() {
         if_not_exists: true,
         schema: None,
         trigger_name: "my_trigger".to_string(),
+        name_source: None,
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
         table_name: "test_table".to_string(),
@@ -133,6 +136,53 @@ fn create_t1(db: &mut Database) {
     }
 }
 
+/// Helper: parse a CREATE TRIGGER statement string and return the typed AST.
+fn parse_create_trigger(sql: &str) -> CreateTriggerStmt {
+    match vibesql_parser::Parser::parse_sql(sql).expect("parse failed") {
+        vibesql_ast::Statement::CreateTrigger(stmt) => stmt,
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_duplicate_trigger_already_exists_echoes_source_quoting() {
+    // SQLite (3.51.0) echoes the trigger name *exactly as written* in the
+    // "already exists" error, preserving its quoting form
+    // (trigger1-1.2.1/1.2.2/1.2.3):
+    //   CREATE TRIGGER  tr1  -> trigger tr1 already exists
+    //   CREATE TRIGGER "tr1" -> trigger "tr1" already exists
+    //   CREATE TRIGGER [tr1] -> trigger [tr1] already exists
+    //
+    // VibeSQL surfaces this via `Trigger '<echoed>' already exists`; the TCL
+    // conformance shim rewrites it to SQLite's lowercase/unquoted-wrapper form
+    // while preserving `<echoed>`. We assert the raw VibeSQL message here.
+    let cases = [
+        ("CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT 1; END;", "Trigger 'tr1' already exists"),
+        (
+            "CREATE TRIGGER \"tr1\" DELETE ON t1 BEGIN SELECT 1; END;",
+            "Trigger '\"tr1\"' already exists",
+        ),
+        ("CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;", "Trigger '[tr1]' already exists"),
+    ];
+
+    for (dup_sql, expected) in cases {
+        let mut db = Database::new();
+        create_t1(&mut db);
+
+        // First create (bare, unquoted) succeeds and registers `tr1`.
+        let first = parse_create_trigger("CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT 1; END;");
+        crate::advanced_objects::execute_create_trigger(&first, &mut db)
+            .expect("first create should succeed");
+
+        // Re-creating with the (possibly quoted) duplicate name errors, echoing
+        // the source quoting form.
+        let dup = parse_create_trigger(dup_sql);
+        let err = crate::advanced_objects::execute_create_trigger(&dup, &mut db)
+            .expect_err("duplicate trigger must be rejected");
+        assert_eq!(err.to_string(), expected, "for SQL: {dup_sql}");
+    }
+}
+
 #[test]
 fn test_create_trigger_on_system_table_wording() {
     // SQLite (3.51.0, trigger1-1.9) rejects CREATE TRIGGER on a system table with
@@ -143,6 +193,7 @@ fn test_create_trigger_on_system_table_wording() {
         if_not_exists: false,
         schema: None,
         trigger_name: "tr1".to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None),
         table_name: "sqlite_master".to_string(),
@@ -166,6 +217,7 @@ fn test_create_instead_of_trigger_on_table_wording() {
         if_not_exists: false,
         schema: None,
         trigger_name: "t1t".to_string(),
+        name_source: None,
         timing: TriggerTiming::InsteadOf,
         event: TriggerEvent::Update(None),
         table_name: "t1".to_string(),
@@ -198,6 +250,7 @@ fn test_create_before_after_trigger_on_view_wording() {
             if_not_exists: false,
             schema: None,
             trigger_name: "v1t".to_string(),
+            name_source: None,
             timing,
             event: TriggerEvent::Update(None),
             table_name: "v1".to_string(),
@@ -231,6 +284,7 @@ fn test_drop_trigger() {
         if_not_exists: false,
         schema: None,
         trigger_name: "my_trigger".to_string(),
+        name_source: None,
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
         table_name: "test_table".to_string(),
@@ -321,6 +375,7 @@ fn test_create_trigger_all_variations() {
             if_not_exists: false,
             schema: None,
             trigger_name: format!("trigger_{}", suffix),
+            name_source: None,
             timing: timing.clone(),
             event: TriggerEvent::Insert,
             table_name: target.to_string(),
@@ -363,6 +418,7 @@ fn create_trigger_stmt(name: &str) -> CreateTriggerStmt {
         if_not_exists: false,
         schema: None,
         trigger_name: name.to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
         table_name: "t1".to_string(),

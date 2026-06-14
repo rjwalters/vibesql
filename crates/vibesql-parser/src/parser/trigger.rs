@@ -51,8 +51,21 @@ impl Parser {
         // Parse trigger name, allowing an optional schema qualifier
         // (`CREATE TRIGGER main.r1 ...` / `CREATE TRIGGER temp.r1 ...`). The
         // table-ref helper also accepts a keyword schema (`temp`, `main`).
+        // Capture the verbatim source spelling of the trigger-name token before
+        // `parse_table_ref` normalizes (de-quotes) it. SQLite echoes the trigger
+        // name exactly as written — including its quoting form — in the
+        // "trigger ... already exists" error (trigger1-1.2.2/1.2.3), whereas
+        // `trigger_name` below holds the de-quoted identifier used for catalog
+        // lookups. For a `schema.name` qualified reference, the trigger-name
+        // token is the one following the `.` separator, so we record the cursor
+        // position of the *final* identifier token consumed by the table ref.
+        let name_start_pos = self.current_position();
         let name_ref = self.parse_table_ref()?;
         let trigger_name = name_ref.name;
+        // The trigger-name identifier is the last token before the cursor now.
+        // (`schema . name` consumes three tokens; `name` consumes one.)
+        let name_token_pos = self.current_position().saturating_sub(1).max(name_start_pos);
+        let name_source = self.token_source_at(name_token_pos).map(str::to_string);
 
         // Resolve the trigger's schema. An explicit `schema.` prefix wins; if
         // absent, the `TEMP`/`TEMPORARY` modifier implies the `temp` schema.
@@ -206,6 +219,7 @@ impl Parser {
             if_not_exists,
             schema,
             trigger_name,
+            name_source,
             timing,
             event,
             table_name,

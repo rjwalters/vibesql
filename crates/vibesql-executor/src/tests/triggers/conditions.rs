@@ -54,6 +54,7 @@ fn test_when_clause_filters_firing() {
         if_not_exists: false,
         schema: None,
         trigger_name: "log_high_amount".to_string(),
+        name_source: None,
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
         table_name: "TRANSACTIONS".to_string(),

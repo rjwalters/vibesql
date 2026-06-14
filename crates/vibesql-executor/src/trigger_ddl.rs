@@ -42,8 +42,18 @@ impl TriggerExecutor {
         // trigger with that name already exists (SQLite semantics, trigger1-1.2.0).
         // SQLite resolves the existing-trigger check before validating the target
         // object, so an already-present trigger short-circuits here.
-        if stmt.if_not_exists && db.catalog.get_trigger(&stmt.trigger_name).is_some() {
-            return Ok(format!("Trigger '{}' already exists", stmt.trigger_name));
+        if db.catalog.get_trigger(&stmt.trigger_name).is_some() {
+            if stmt.if_not_exists {
+                return Ok(format!("Trigger '{}' already exists", stmt.trigger_name));
+            }
+            // A bare `CREATE TRIGGER` over an existing name is an error. SQLite
+            // echoes the trigger name *exactly as written in the source*,
+            // preserving its quoting form — `trigger "tr1" already exists` /
+            // `trigger [tr1] already exists` (trigger1-1.2.2/1.2.3). The parser
+            // captures that verbatim spelling in `name_source`; fall back to the
+            // normalized name when it is unavailable (e.g. programmatic AST).
+            let echoed = stmt.name_source.clone().unwrap_or_else(|| stmt.trigger_name.clone());
+            return Err(ExecutorError::TriggerAlreadyExists(echoed));
         }
 
         // Reject triggers on SQLite system tables (any "sqlite_" prefixed name,
