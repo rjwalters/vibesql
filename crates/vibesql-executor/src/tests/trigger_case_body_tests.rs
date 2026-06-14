@@ -149,6 +149,14 @@ fn nested_case_end_does_not_truncate_body() {
 #[test]
 fn case_in_where_clause_does_not_truncate_body() {
     let mut db = vibesql_storage::Database::new();
+    // This test's subject is CASE-body parsing, not recursion. The trigger body
+    // performs an `UPDATE t` while firing on `t`, which — now that nested UPDATEs
+    // correctly fire the target's UPDATE triggers (#5535) — would recurse under
+    // the default `recursive_triggers = on` (sqlite3 3.51.0 errors here with
+    // "too many levels of trigger recursion"). Set the pragma OFF to assert the
+    // single-fire shape this test cares about (matching sqlite3's CLI default and
+    // this test's original intent), keeping the recursion suppressed.
+    db.set_recursive_triggers(false);
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER, v INTEGER)");
     exec_ok(&mut db, "CREATE TABLE log (msg VARCHAR(16))");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 0)");
@@ -160,8 +168,8 @@ fn case_in_where_clause_does_not_truncate_body() {
          END",
     );
 
-    // Fire the AFTER UPDATE trigger. Recursion is prevented by SQLite/VibeSQL so
-    // the inner UPDATE does not re-fire infinitely.
+    // Fire the AFTER UPDATE trigger. With recursive_triggers off the inner
+    // UPDATE does not re-fire `tr`, so the body runs exactly once.
     exec_ok(&mut db, "UPDATE t SET v = 1 WHERE id = 1");
 
     assert_eq!(strings(&db, "log", "msg"), vec!["w".to_string()]);
