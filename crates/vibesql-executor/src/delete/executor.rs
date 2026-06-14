@@ -114,7 +114,15 @@ impl DeleteExecutor {
         stmt: &DeleteStmt,
         database: &mut Database,
     ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
-        Self::execute_internal(stmt, database, None, None)
+        // Per-variant RAISE scope for RETURNING DML (#5432, follow-on to #5417):
+        // a RAISE fired from a trigger during a RETURNING DELETE gets the same
+        // statement-savepoint scope as the bare `execute` path; when it aborts
+        // the statement the error propagates (no rows returned). Minimal
+        // entry-point wrap only — no change to `execute_internal` / loop bodies.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
+            Self::execute_internal(stmt, database, None, None)
+        })
     }
 
     /// Execute a DELETE statement with procedural context
@@ -124,8 +132,15 @@ impl DeleteExecutor {
         database: &mut Database,
         procedural_context: &crate::procedural::ExecutionContext,
     ) -> Result<usize, ExecutorError> {
-        Self::execute_internal(stmt, database, Some(procedural_context), None)
-            .map(|(count, _)| count)
+        // Per-variant RAISE scope for procedural-context DML (#5432): a RAISE
+        // fired from a trigger inside a procedure/script gets the same
+        // statement-savepoint scope as the bare `execute` path. Minimal
+        // entry-point wrap only — no change to `execute_internal` / loop bodies.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
+            Self::execute_internal(stmt, database, Some(procedural_context), None)
+                .map(|(count, _)| count)
+        })
     }
 
     /// Execute a DELETE statement with trigger context

@@ -46,7 +46,15 @@ impl InsertExecutor {
         db: &mut vibesql_storage::Database,
         stmt: &vibesql_ast::InsertStmt,
     ) -> Result<InsertOutcome, ExecutorError> {
-        execution::execute_insert_returning(db, stmt)
+        // Per-variant RAISE scope for RETURNING DML (#5432, follow-on to #5417):
+        // a RAISE fired from a trigger during a RETURNING INSERT gets the same
+        // statement-savepoint scope as the bare `execute` path. When the RAISE
+        // aborts the statement the error propagates (no rows returned) and the
+        // chosen variant's scope is applied.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
+            execution::execute_insert_returning(db, stmt)
+        })
     }
 
     /// Execute an INSERT statement with procedural context
@@ -57,7 +65,13 @@ impl InsertExecutor {
         stmt: &vibesql_ast::InsertStmt,
         procedural_context: &crate::procedural::ExecutionContext,
     ) -> Result<usize, ExecutorError> {
-        execution::execute_insert_with_procedural_context(db, stmt, procedural_context)
+        // Per-variant RAISE scope for procedural-context DML (#5432): a RAISE
+        // fired from a trigger inside a procedure/script gets the same
+        // statement-savepoint scope as the bare `execute` path.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
+            execution::execute_insert_with_procedural_context(db, stmt, procedural_context)
+        })
     }
 }
 
