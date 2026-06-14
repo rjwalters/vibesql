@@ -292,9 +292,78 @@ fn test_sql_dump_with_indexes() {
         "Should contain CREATE UNIQUE INDEX idx_email_unique"
     );
     assert!(content.contains("ON test_indexes"), "Should reference test_indexes table");
-    assert!(content.contains("Asc"), "Index direction should be included");
+    // ASC is the default sort order and is omitted from the emitted DDL; the
+    // Debug form ("Asc") must never appear because it is not valid SQL.
+    assert!(
+        !content.contains("Asc"),
+        "Debug-formatted sort direction must not leak into the SQL dump"
+    );
 
     // Cleanup
+    std::fs::remove_file(path).ok();
+}
+
+/// Regression test for #5561: indexes whose name, table name, or columns contain
+/// special characters (spaces, single quotes, parens) must be emitted with quoted
+/// identifiers so that the dump re-lexes correctly when the database is reloaded.
+/// Previously the index DDL was emitted with raw identifiers, so a table named
+/// `t1'x1` produced `CREATE INDEX i3 ON t1'x1 (b Asc, c Asc);`, which aborted the
+/// reload with an unterminated-string-literal lexer error.
+#[test]
+fn test_sql_dump_index_quoted_identifiers_roundtrip() {
+    use crate::persistence::load::read_sql_dump;
+
+    let mut db = Database::new();
+    // (parser is used below to prove the emitted DDL re-lexes)
+
+    // Table name with an embedded single quote.
+    let schema = TableSchema::new(
+        "t1'x1".to_string(),
+        vec![
+            ColumnSchema::new("b".to_string(), DataType::Integer, false),
+            ColumnSchema::new("c".to_string(), DataType::Integer, false),
+        ],
+    );
+    db.create_table(schema).unwrap();
+
+    // Index with a DESC column on the oddly-named table.
+    let cols = vec![
+        vibesql_ast::IndexColumn::Column {
+            column_name: "b".to_string(),
+            direction: vibesql_ast::OrderDirection::Desc,
+            prefix_length: None,
+        },
+        vibesql_ast::IndexColumn::Column {
+            column_name: "c".to_string(),
+            direction: vibesql_ast::OrderDirection::Asc,
+            prefix_length: None,
+        },
+    ];
+    db.create_index("i3".to_string(), "t1'x1".to_string(), false, cols).unwrap();
+
+    let path = "/tmp/test_index_quoted_roundtrip.sql";
+    db.save_sql_dump(path).unwrap();
+
+    let content = read_sql_dump(path).unwrap();
+    // Table name must be double-quoted so the single quote does not start a string.
+    assert!(
+        content.contains("ON \"t1'x1\""),
+        "Index DDL must quote the table name. Got:\n{content}"
+    );
+    // The Debug-formatted direction ("Asc") must not appear; DESC is explicit.
+    assert!(!content.contains("Asc"), "Debug sort direction leaked:\n{content}");
+    assert!(content.contains("DESC"), "DESC direction should be emitted:\n{content}");
+
+    // The emitted CREATE INDEX statement must re-lex/parse cleanly. Before the
+    // fix it produced a lexer error on the unquoted `t1'x1` table name.
+    let create_index_stmt = content
+        .lines()
+        .find(|l| l.trim_start().starts_with("CREATE INDEX"))
+        .unwrap_or_else(|| panic!("No CREATE INDEX line in dump:\n{content}"));
+    vibesql_parser::Parser::parse_sql(create_index_stmt).unwrap_or_else(|e| {
+        panic!("Emitted index DDL must re-parse: {e}\nStatement: {create_index_stmt}")
+    });
+
     std::fs::remove_file(path).ok();
 }
 
