@@ -215,11 +215,23 @@ where
             Err(apply_raise_scope(db, action, message))
         }
         Err(other) => {
-            // Non-RAISE errors keep their pre-existing behavior. The DML
-            // executors already perform their own targeted rollback for these
-            // (e.g. constraint failures), so we just drop the snapshot.
+            // Non-RAISE errors (constraint violations — FK/UNIQUE/CHECK/NOT
+            // NULL, including the cascade-orphan immediate-FK check from #5465)
+            // get SQLite's statement-atomicity scope: roll the statement
+            // savepoint *back*, undoing every partial change this statement
+            // applied (e.g. an already-cascaded child DELETE), while leaving
+            // the enclosing transaction open for the application to COMMIT or
+            // ROLLBACK. This mirrors the auto-commit path (`run_auto_commit`),
+            // which rolls back its whole implicit transaction on any `Err`, and
+            // `RAISE(ABORT)`, which also rolls the statement back.
+            //
+            // Releasing instead of rolling back (the pre-#5502 behavior) relied
+            // on the DML executors performing their own targeted rollback, but
+            // for cascade/multi-row paths there is no such rollback — leaving
+            // inconsistent partial state (#5502). RAISE-variant scopes are
+            // unaffected: they are handled in the arm above.
             if armed {
-                db.release_statement_savepoint();
+                db.rollback_statement_savepoint();
             }
             Err(other)
         }

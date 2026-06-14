@@ -1686,3 +1686,81 @@ fn procedural_delete_raise_rollback_aborts_whole_txn() {
         ],
     );
 }
+
+// ===========================================================================
+// #5502: plain constraint violations (UNIQUE / CHECK) inside an explicit
+// transaction roll the offending STATEMENT back and keep the transaction open
+// — SQLite's default conflict resolution (ABORT scope). This is the same
+// `run_inside_transaction` `Err(other)` path the cascade-orphan immediate FK
+// flows through; before #5502 it *released* the statement savepoint (leaving
+// partial multi-row changes) instead of rolling it back.
+//
+// These exercise the *trigger-armed* statement-savepoint path: a trigger on
+// the table makes `table_may_fire_trigger` true so the statement is wrapped in
+// a savepoint. (A constraint violation on a trigger-free table never arms a
+// savepoint — it takes the fast pass-through — so it is out of scope here.)
+//
+// End state verified live against sqlite3 3.51.0: the earlier statement's row
+// survives, the violating multi-row statement is fully undone, the txn stays
+// open, and a subsequent COMMIT succeeds. This is EXACT sqlite3 parity for the
+// plain-constraint case (unlike the cascade-orphan case, where the savepoint's
+// whole-statement rollback is a coarser-but-consistent superset of sqlite3's
+// partial state).
+// ===========================================================================
+
+/// #5502: a multi-row INSERT whose later row violates UNIQUE, on a table that
+/// carries a trigger (so the statement savepoint is armed), inside an explicit
+/// transaction rolls the whole statement back and keeps the txn open.
+#[test]
+fn unique_violation_in_explicit_txn_rolls_back_statement_keeps_txn_open() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER UNIQUE)");
+    // A trigger anywhere on the table arms the statement savepoint for its DML.
+    exec_ok(&mut db, "CREATE TRIGGER trg AFTER INSERT ON t BEGIN SELECT 1; END");
+
+    db.begin_transaction().expect("BEGIN");
+
+    // Earlier statement: survives the later violation.
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 100)").expect("stmt 1 ok");
+
+    // Offending statement: row (3,100) duplicates v=100 -> UNIQUE violation.
+    let err = exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 200), (3, 100)")
+        .expect_err("expected UNIQUE violation");
+    assert!(err.to_string().contains("UNIQUE"), "expected UNIQUE error, got: {err}");
+
+    // Constraint violation is statement-scoped: txn stays open.
+    assert!(db.in_transaction(), "UNIQUE violation must keep the transaction open");
+
+    // Whole offending statement undone (row 2 NOT left behind); earlier row 1
+    // survives. Matches sqlite3 3.51.0.
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+
+    // Recoverable: COMMIT succeeds and persists exactly the earlier statement.
+    crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db).expect("COMMIT ok");
+    assert!(!db.in_transaction());
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+}
+
+/// #5502: same statement-rollback scope for a CHECK constraint violation on a
+/// later row of a multi-row INSERT inside an explicit transaction.
+#[test]
+fn check_violation_in_explicit_txn_rolls_back_statement_keeps_txn_open() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER CHECK (v < 50))");
+    exec_ok(&mut db, "CREATE TRIGGER trg AFTER INSERT ON t BEGIN SELECT 1; END");
+
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)").expect("stmt 1 ok");
+
+    // Row (3,99) violates CHECK (v < 50).
+    let err = exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2, 20), (3, 99)")
+        .expect_err("expected CHECK violation");
+    assert!(err.to_string().contains("CHECK"), "expected CHECK error, got: {err}");
+
+    assert!(db.in_transaction(), "CHECK violation must keep the transaction open");
+    // Whole statement undone (row 2 NOT kept); earlier row 1 survives.
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+
+    crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db).expect("COMMIT ok");
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+}
