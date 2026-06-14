@@ -68,6 +68,11 @@ pub fn execute_drop_trigger(
     stmt: &DropTriggerStmt,
     db: &mut Database,
 ) -> Result<(), ExecutorError> {
+    // `DROP TRIGGER IF EXISTS` on a missing trigger is a no-op (SQLite /
+    // SQL:2008); a bare DROP TRIGGER errors with TriggerNotFound.
+    if stmt.if_exists && db.catalog.get_trigger(&stmt.trigger_name).is_none() {
+        return Ok(());
+    }
     db.catalog.drop_trigger(&stmt.trigger_name)?;
     Ok(())
 }

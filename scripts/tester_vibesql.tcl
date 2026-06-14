@@ -1179,15 +1179,35 @@ proc mask_trigger_bodies {sql} {
     set out $sql
     set search_from 0
     while {1} {
-        # Locate the BEGIN that opens a CREATE TRIGGER body, at/after search_from.
+        # Locate the `CREATE [TEMP] TRIGGER` keyword, at/after search_from.
+        #
+        # Do NOT try to match through to the opening BEGIN with `.*?BEGIN` in a
+        # single regex: TCL's ARE prefers the longest overall match, so the
+        # non-greedy `.*?` is overridden and the match runs to the *last* BEGIN
+        # in the string. When two CREATE TRIGGER statements share one batch
+        # (e.g. `BEGIN; CREATE TRIGGER ...; ROLLBACK; CREATE TRIGGER ...;`)
+        # that over-match swallows the intervening ROLLBACK, mis-routing the
+        # batch into the transaction-trial path and producing a spurious
+        # "No active transaction to rollback" (#5497). Instead, anchor on the
+        # CREATE TRIGGER keyword and find the *first* BEGIN word token after it.
         set rest [string range $out $search_from end]
         if {![regexp -indices -nocase \
-                {CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TRIGGER\y.*?\yBEGIN\y} \
+                {CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TRIGGER\y} \
                 $rest m]} {
             break
         }
         set abs_create_start [expr {$search_from + [lindex $m 0]}]
-        set abs_begin_end [expr {$search_from + [lindex $m 1]}]
+        set hdr_end [expr {$search_from + [lindex $m 1]}]
+
+        # Find the first BEGIN word token after the TRIGGER keyword — this is
+        # the trigger body's opening BEGIN. (The trigger header between the
+        # keyword and BEGIN cannot contain a BEGIN/CASE/END word.)
+        set hdr_tail [string range $out [expr {$hdr_end + 1}] end]
+        if {![regexp -indices -nocase {\mBEGIN\M} $hdr_tail bm]} {
+            # No body BEGIN found — not a maskable trigger body; stop scanning.
+            break
+        }
+        set abs_begin_end [expr {$hdr_end + 1 + [lindex $bm 1]}]
         set body_start [expr {$abs_begin_end + 1}]
 
         # Walk word tokens after the trigger's BEGIN, tracking nesting depth.

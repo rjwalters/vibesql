@@ -445,7 +445,7 @@ impl Parser {
     /// Parse DROP TRIGGER statement
     ///
     /// Syntax:
-    ///   DROP TRIGGER trigger_name [CASCADE | RESTRICT]
+    ///   DROP TRIGGER [IF EXISTS] trigger_name [CASCADE | RESTRICT]
     pub(super) fn parse_drop_trigger_statement(
         &mut self,
     ) -> Result<vibesql_ast::DropTriggerStmt, ParseError> {
@@ -454,6 +454,16 @@ impl Parser {
 
         // Expect TRIGGER keyword
         self.expect_keyword(Keyword::Trigger)?;
+
+        // Optional IF EXISTS (SQLite / SQL:2008): dropping a missing trigger
+        // becomes a no-op instead of an error.
+        let if_exists = if self.peek_keyword(Keyword::If) {
+            self.advance(); // consume IF
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
 
         // Parse trigger name
         let trigger_name = self.parse_identifier()?;
@@ -473,7 +483,7 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::DropTriggerStmt { trigger_name, cascade })
+        Ok(vibesql_ast::DropTriggerStmt { trigger_name, cascade, if_exists })
     }
 }
 
