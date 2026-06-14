@@ -177,8 +177,13 @@ fn execute_bulk_transfer(
             .get_table(source_table)
             .ok_or_else(|| ExecutorError::TableNotFound(source_table.to_string()))?;
 
-        // Collect all rows (need to clone to avoid borrow issues)
-        src_table.scan().iter().map(|row| row.values.clone()).collect::<Vec<_>>()
+        // Use scan_live() to skip rows that have been deleted but not yet
+        // compacted. `scan()` returns raw storage including deleted rows; an
+        // AFTER DELETE trigger body running `INSERT INTO log SELECT * FROM tbl`
+        // must not observe the row that was just deleted mid-statement
+        // (trigger2-2.14-after). The non-bulk SELECT path already filters
+        // deleted rows, so this keeps the fast path consistent.
+        src_table.scan_live().map(|(_, row)| row.values.clone()).collect::<Vec<_>>()
     };
 
     let mut pk_values_seen = Vec::new();
