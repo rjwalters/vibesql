@@ -486,17 +486,15 @@ pub fn coerce_value(
                         SqlValue::Smallint(i) => {
                             Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
                         }
-                        SqlValue::Numeric(f) => {
-                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-                        }
-                        SqlValue::Double(f) => {
-                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-                        }
-                        SqlValue::Real(f) => {
-                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-                        }
-                        SqlValue::Float(f) => {
-                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
+                        // REAL -> TEXT affinity: use SQLite's %!.15g-style real->text
+                        // formatting (via SqlValue's Display impl), which preserves the
+                        // trailing ".0" for whole reals (e.g. -42.0 -> "-42.0", not "-42").
+                        // f64::to_string() would drop it and break triggerC-4.1.4/4.1.5.
+                        SqlValue::Numeric(_)
+                        | SqlValue::Double(_)
+                        | SqlValue::Real(_)
+                        | SqlValue::Float(_) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string())))
                         }
                         _ => Ok(value), // Other types pass through
                     }
@@ -625,18 +623,16 @@ pub fn coerce_value(
         (SqlValue::Bigint(i), DataType::Varchar { .. }) => {
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(i.to_string())))
         }
-        (SqlValue::Numeric(f), DataType::Varchar { .. }) => {
-            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-        }
-        (SqlValue::Float(f), DataType::Varchar { .. }) => {
-            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-        }
-        (SqlValue::Real(f), DataType::Varchar { .. }) => {
-            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-        }
-        (SqlValue::Double(f), DataType::Varchar { .. }) => {
-            Ok(SqlValue::Varchar(arcstr::ArcStr::from(f.to_string())))
-        }
+        // REAL -> TEXT affinity: use SQLite's %!.15g-style real->text formatting
+        // (via SqlValue's Display impl) so whole reals keep their trailing ".0"
+        // (e.g. -42.0 -> "-42.0"). f64::to_string() would drop it.
+        (
+            SqlValue::Numeric(_)
+            | SqlValue::Float(_)
+            | SqlValue::Real(_)
+            | SqlValue::Double(_),
+            DataType::Varchar { .. },
+        ) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
         (SqlValue::Boolean(b), DataType::Varchar { .. }) => {
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
         }
@@ -650,5 +646,59 @@ pub fn coerce_value(
             "Type mismatch: expected {:?}, got {:?}",
             expected_type, value
         ))),
+    }
+}
+
+#[cfg(test)]
+mod text_affinity_tests {
+    use vibesql_types::{DataType, SqlValue};
+
+    use super::coerce_value;
+
+    fn coerce_to_text(value: SqlValue) -> String {
+        let coerced = coerce_value(value, &DataType::Varchar { max_length: None })
+            .expect("coercion to TEXT affinity should succeed");
+        match coerced {
+            SqlValue::Varchar(s) => s.to_string(),
+            other => panic!("expected Varchar, got {:?}", other),
+        }
+    }
+
+    /// REAL -> TEXT affinity must use SQLite's %!.15g-style formatting, which
+    /// PRESERVES the trailing ".0" for whole reals (triggerC-4.1.4/4.1.5).
+    /// A naive f64::to_string() would render -42.0 as "-42" and break those tests.
+    #[test]
+    fn whole_real_keeps_trailing_dot_zero() {
+        assert_eq!(coerce_to_text(SqlValue::Real(-42.0)), "-42.0");
+        assert_eq!(coerce_to_text(SqlValue::Real(8.0)), "8.0");
+        assert_eq!(coerce_to_text(SqlValue::Real(45.0)), "45.0");
+        assert_eq!(coerce_to_text(SqlValue::Real(0.0)), "0.0");
+        assert_eq!(coerce_to_text(SqlValue::Real(-0.0)), "0.0");
+        assert_eq!(coerce_to_text(SqlValue::Real(1000000.0)), "1000000.0");
+    }
+
+    #[test]
+    fn whole_real_keeps_dot_zero_for_all_float_variants() {
+        assert_eq!(coerce_to_text(SqlValue::Numeric(-42.0)), "-42.0");
+        assert_eq!(coerce_to_text(SqlValue::Double(-42.0)), "-42.0");
+        assert_eq!(coerce_to_text(SqlValue::Float(-42.0)), "-42.0");
+    }
+
+    /// Fractional reals must NOT be altered (no naive ".0" stripping).
+    #[test]
+    fn fractional_real_unchanged() {
+        assert_eq!(coerce_to_text(SqlValue::Real(1.5)), "1.5");
+        assert_eq!(coerce_to_text(SqlValue::Real(-42.4)), "-42.4");
+        assert_eq!(coerce_to_text(SqlValue::Real(0.1)), "0.1");
+        assert_eq!(coerce_to_text(SqlValue::Real(-0.5)), "-0.5");
+        assert_eq!(coerce_to_text(SqlValue::Real(2.5)), "2.5");
+    }
+
+    /// Integers keep their plain integer text (no ".0").
+    #[test]
+    fn integers_have_no_dot_zero() {
+        assert_eq!(coerce_to_text(SqlValue::Integer(45)), "45");
+        assert_eq!(coerce_to_text(SqlValue::Bigint(-42)), "-42");
+        assert_eq!(coerce_to_text(SqlValue::Smallint(7)), "7");
     }
 }
