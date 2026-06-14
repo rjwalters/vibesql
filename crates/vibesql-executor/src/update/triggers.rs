@@ -423,9 +423,14 @@ pub(super) fn build_view_schema(
     database: &Database,
     view_def: &ViewDefinition,
 ) -> Result<TableSchema, ExecutorError> {
-    // Execute the view's SELECT query to get column names
+    // Execute the view's SELECT query to get column names. A table referenced by
+    // the view body that has since been dropped surfaces here; sqlite3 reports it
+    // schema-qualified (`no such table: main.test2`, trigger4-3.3) because the
+    // view body resolves against the database schema, so qualify the bare name.
     let select_executor = crate::SelectExecutor::new(database);
-    let result = select_executor.execute_with_columns(&view_def.query)?;
+    let result = select_executor
+        .execute_with_columns(&view_def.query)
+        .map_err(ExecutorError::with_main_schema_qualifier)?;
 
     // Use explicit column names if provided, otherwise derive from SELECT
     let column_names: Vec<String> =

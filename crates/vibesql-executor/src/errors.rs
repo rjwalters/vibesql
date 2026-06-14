@@ -1354,6 +1354,24 @@ impl ExecutorError {
             ExecutorError::SqliteCompatError(msg) if msg.starts_with("non-deterministic use of ")
         )
     }
+
+    /// Qualify a `TableNotFound` for an unqualified table name with the implicit
+    /// `main.` schema prefix, matching sqlite3's reporting when a table is
+    /// resolved against the database schema (e.g. a table referenced in a view
+    /// definition body that has since been dropped: `no such table: main.test2`,
+    /// trigger4-3.1/3.2/3.3).
+    ///
+    /// Only bare names are rewritten — names that already carry a schema
+    /// qualifier (contain a `.`) and every other error variant are returned
+    /// unchanged.
+    pub fn with_main_schema_qualifier(self) -> ExecutorError {
+        match self {
+            ExecutorError::TableNotFound(name) if !name.contains('.') => {
+                ExecutorError::TableNotFound(format!("main.{}", name))
+            }
+            other => other,
+        }
+    }
 }
 
 impl std::error::Error for ExecutorError {}
@@ -1594,5 +1612,39 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecutorError;
+
+    #[test]
+    fn with_main_schema_qualifier_prefixes_bare_table_name() {
+        let err = ExecutorError::TableNotFound("test2".to_string());
+        assert_eq!(
+            err.with_main_schema_qualifier(),
+            ExecutorError::TableNotFound("main.test2".to_string())
+        );
+    }
+
+    #[test]
+    fn with_main_schema_qualifier_leaves_already_qualified_name() {
+        let err = ExecutorError::TableNotFound("other.test2".to_string());
+        assert_eq!(
+            err.with_main_schema_qualifier(),
+            ExecutorError::TableNotFound("other.test2".to_string())
+        );
+    }
+
+    #[test]
+    fn with_main_schema_qualifier_ignores_other_variants() {
+        let err = ExecutorError::ColumnNotFound {
+            column_name: "x".to_string(),
+            table_name: "t".to_string(),
+            searched_tables: vec!["t".to_string()],
+            available_columns: vec![],
+        };
+        assert_eq!(err.clone().with_main_schema_qualifier(), err);
     }
 }
