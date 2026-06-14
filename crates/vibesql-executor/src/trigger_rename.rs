@@ -191,6 +191,324 @@ fn is_table_position(
     }
 }
 
+/// Rewrite references to a renamed *column* inside a `CREATE TRIGGER` SQL text.
+///
+/// When `ALTER TABLE <renamed_table> RENAME <old_column> TO <new_column>` runs,
+/// SQLite (with `legacy_alter_table=OFF`) rewrites every reference inside trigger
+/// bodies that resolves to `<renamed_table>.<old_column>`, while preserving the
+/// rest of the `CREATE TRIGGER` text verbatim. Unlike table renames, the new
+/// column name is emitted *unquoted* (e.g. `t2.c` -> `t2.abc`, `e` -> `abc`).
+///
+/// `table_has_column(table, column)` is used to resolve which FROM-clause table
+/// an unqualified column belongs to (and to confirm the renamed table actually
+/// has the old column). It should match SQLite identifier semantics
+/// (case-insensitive ASCII).
+///
+/// This is a *targeted* resolver covering the cases exercised by
+/// `altertrig.test` (qualified `table.col` / `alias.col` references and
+/// unqualified columns whose only in-scope owner is the renamed table). It does
+/// not reproduce SQLite's full ambiguity diagnostics.
+pub fn rewrite_column_refs_in_trigger_sql(
+    sql: &str,
+    renamed_table: &str,
+    old_column: &str,
+    new_column: &str,
+    table_has_column: &dyn Fn(&str, &str) -> bool,
+) -> String {
+    let tokens = match Lexer::new(sql).tokenize_with_spans() {
+        Ok(t) => t,
+        Err(_) => return sql.to_string(),
+    };
+
+    let significant: Vec<usize> =
+        (0..tokens.len()).filter(|&i| !matches!(tokens[i].0, Token::Eof)).collect();
+
+    // Compute, for each FROM/UPDATE/INTO scope, the table references in scope so
+    // an unqualified column can be resolved to its owning table.
+    let scopes = collect_scope_tables(&tokens, &significant);
+
+    // Collect the spans of the *column identifier* tokens that should be renamed.
+    let mut edits: Vec<Span> = Vec::new();
+
+    for (pos, &idx) in significant.iter().enumerate() {
+        let Token::Identifier(name) = &tokens[idx].0 else { continue };
+
+        // Qualified reference: `<qualifier> . <name>`.
+        if pos >= 2 {
+            let dot_idx = significant[pos - 1];
+            let qual_idx = significant[pos - 2];
+            if matches!(tokens[dot_idx].0, Token::Symbol('.')) {
+                if let Token::Identifier(qualifier) = &tokens[qual_idx].0 {
+                    if name.eq_ignore_ascii_case(old_column)
+                        && qualifier_is_renamed_table(
+                            qualifier,
+                            renamed_table,
+                            paren_scope_at(&tokens, &significant, pos),
+                            &scopes,
+                        )
+                    {
+                        edits.push(tokens[idx].1);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // A name used as a qualifier itself (the token before the dot) is never a
+        // column reference; skip it so we don't accidentally rename it.
+        if let Some(&next_idx) = significant.get(pos + 1) {
+            if matches!(tokens[next_idx].0, Token::Symbol('.')) {
+                continue;
+            }
+        }
+
+        // Unqualified reference: rename only if the renamed table is the in-scope
+        // owner of this column.
+        if name.eq_ignore_ascii_case(old_column) && is_column_position(&tokens, &significant, pos) {
+            let scope_key = paren_scope_at(&tokens, &significant, pos);
+            if unqualified_resolves_to_renamed_table(
+                renamed_table,
+                old_column,
+                scope_key,
+                &scopes,
+                table_has_column,
+            ) {
+                edits.push(tokens[idx].1);
+            }
+        }
+    }
+
+    if edits.is_empty() {
+        return sql.to_string();
+    }
+    apply_column_edits(sql, &edits, new_column)
+}
+
+/// A table reference appearing in a FROM/UPDATE/INTO clause: its real table name
+/// and an optional alias.
+#[derive(Clone)]
+struct TableRef {
+    table: String,
+    alias: Option<String>,
+}
+
+/// Apply replacement edits, replacing each span with the (unquoted) new column
+/// name. Spans are sorted defensively before application.
+fn apply_column_edits(sql: &str, edits: &[Span], new_column: &str) -> String {
+    let mut sorted = edits.to_vec();
+    sorted.sort_by_key(|s| s.start);
+    let mut out = String::with_capacity(sql.len() + sorted.len() * new_column.len());
+    let mut cursor = 0usize;
+    for span in sorted {
+        if span.start < cursor {
+            continue;
+        }
+        out.push_str(&sql[cursor..span.start]);
+        out.push_str(new_column);
+        cursor = span.end;
+    }
+    out.push_str(&sql[cursor..]);
+    out
+}
+
+/// The scope key for a token is the index of the innermost still-open `(` (or
+/// `None` for the top level). Two references share a scope iff they are at the
+/// same paren nesting opened by the same `(`.
+fn paren_scope_at(tokens: &[(Token, Span)], significant: &[usize], pos: usize) -> Option<usize> {
+    let target = significant[pos];
+    let mut idx_stack: Vec<usize> = Vec::new();
+    for (i, (tok, _)) in tokens.iter().enumerate().take(target) {
+        match tok {
+            Token::LParen => idx_stack.push(i),
+            Token::RParen => {
+                idx_stack.pop();
+            }
+            _ => {}
+        }
+    }
+    idx_stack.last().copied()
+}
+
+/// Build a map from scope key (enclosing `(` index, or `None` for top level) to
+/// the list of table references in that scope's FROM/UPDATE/INTO clause.
+fn collect_scope_tables(
+    tokens: &[(Token, Span)],
+    significant: &[usize],
+) -> std::collections::HashMap<Option<usize>, Vec<TableRef>> {
+    use std::collections::HashMap;
+    let mut scopes: HashMap<Option<usize>, Vec<TableRef>> = HashMap::new();
+
+    // Track the open-paren index stack so we can attribute table refs to scopes.
+    let mut paren_stack: Vec<usize> = Vec::new();
+    // Per-scope "are we currently inside a table list?" flag.
+    let mut in_table_list: Vec<bool> = vec![false];
+
+    let mut pos = 0usize;
+    while pos < significant.len() {
+        let idx = significant[pos];
+        match &tokens[idx].0 {
+            Token::LParen => {
+                paren_stack.push(idx);
+                in_table_list.push(false);
+            }
+            Token::RParen => {
+                if paren_stack.pop().is_some() {
+                    in_table_list.pop();
+                }
+            }
+            Token::Keyword { keyword, .. } => {
+                let top = in_table_list.last_mut().expect("stack has top");
+                match keyword {
+                    Keyword::From | Keyword::Into | Keyword::Update | Keyword::Join => {
+                        *top = true;
+                    }
+                    Keyword::Set
+                    | Keyword::Where
+                    | Keyword::Select
+                    | Keyword::Group
+                    | Keyword::Order
+                    | Keyword::Having
+                    | Keyword::On
+                    | Keyword::Using
+                    | Keyword::Values
+                    | Keyword::Limit => {
+                        *top = false;
+                    }
+                    _ => {}
+                }
+            }
+            Token::Identifier(name) if *in_table_list.last().unwrap_or(&false) => {
+                // This identifier is a table name in the current scope's table
+                // list (it is not a qualifier and not preceded by a `.`).
+                let preceded_by_dot =
+                    pos > 0 && matches!(tokens[significant[pos - 1]].0, Token::Symbol('.'));
+                let followed_by_dot = significant
+                    .get(pos + 1)
+                    .is_some_and(|&n| matches!(tokens[n].0, Token::Symbol('.')));
+                if !preceded_by_dot && !followed_by_dot {
+                    let table = name.clone();
+                    // Look ahead for an optional alias: `AS x` or bare `x`.
+                    let alias = parse_alias(tokens, significant, pos);
+                    let scope_key = paren_stack.last().copied();
+                    scopes.entry(scope_key).or_default().push(TableRef { table, alias });
+                }
+            }
+            _ => {}
+        }
+        pos += 1;
+    }
+
+    scopes
+}
+
+/// Detect an alias following a table reference at `significant[pos]`:
+/// `t AS x` or the bare form `t x`. Returns None if the next token is a keyword
+/// (e.g. JOIN, WHERE) or punctuation.
+fn parse_alias(tokens: &[(Token, Span)], significant: &[usize], pos: usize) -> Option<String> {
+    let mut next = pos + 1;
+    if let Some(&nidx) = significant.get(next) {
+        if matches!(tokens[nidx].0, Token::Keyword { keyword: Keyword::As, .. }) {
+            next += 1;
+        }
+    }
+    if let Some(&nidx) = significant.get(next) {
+        if let Token::Identifier(alias) = &tokens[nidx].0 {
+            if next == pos + 1 || next == pos + 2 {
+                return Some(alias.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Does `qualifier` (a `table.col` prefix) refer to the renamed table, either by
+/// its real name or via an alias bound in the reference's scope (or top level)?
+fn qualifier_is_renamed_table(
+    qualifier: &str,
+    renamed_table: &str,
+    scope_key: Option<usize>,
+    scopes: &std::collections::HashMap<Option<usize>, Vec<TableRef>>,
+) -> bool {
+    if qualifier.eq_ignore_ascii_case(renamed_table) {
+        return true;
+    }
+    for key in [scope_key, None] {
+        if let Some(refs) = scopes.get(&key) {
+            for r in refs {
+                if let Some(alias) = &r.alias {
+                    if alias.eq_ignore_ascii_case(qualifier)
+                        && r.table.eq_ignore_ascii_case(renamed_table)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// For an unqualified column, decide whether it resolves to the renamed table:
+/// the renamed table must be in scope, the renamed table must own the old
+/// column, and no *other* in-scope table must also own a column of that name
+/// (which would make the reference ambiguous — SQLite errors there, so we
+/// conservatively decline to rewrite).
+fn unqualified_resolves_to_renamed_table(
+    renamed_table: &str,
+    old_column: &str,
+    scope_key: Option<usize>,
+    scopes: &std::collections::HashMap<Option<usize>, Vec<TableRef>>,
+    table_has_column: &dyn Fn(&str, &str) -> bool,
+) -> bool {
+    if !table_has_column(renamed_table, old_column) {
+        return false;
+    }
+
+    let mut renamed_in_scope = false;
+    let mut other_owner = false;
+    for key in [scope_key, None] {
+        if let Some(refs) = scopes.get(&key) {
+            for r in refs {
+                if r.table.eq_ignore_ascii_case(renamed_table) {
+                    renamed_in_scope = true;
+                } else if table_has_column(&r.table, old_column) {
+                    other_owner = true;
+                }
+            }
+        }
+        // Only consult the top-level scope if the inner scope didn't bring the
+        // renamed table into view; this mirrors innermost-first resolution.
+        if renamed_in_scope {
+            break;
+        }
+    }
+
+    renamed_in_scope && !other_owner
+}
+
+/// Decide whether the identifier at `significant[pos]` is in a position where it
+/// could be a column reference (i.e. not itself a table reference in a FROM
+/// list). We treat it as a column unless it immediately follows
+/// FROM/JOIN/INTO/UPDATE/TABLE/AS.
+fn is_column_position(tokens: &[(Token, Span)], significant: &[usize], pos: usize) -> bool {
+    if pos == 0 {
+        return true;
+    }
+    let prev_idx = significant[pos - 1];
+    match &tokens[prev_idx].0 {
+        Token::Keyword { keyword, .. } => !matches!(
+            keyword,
+            Keyword::From
+                | Keyword::Join
+                | Keyword::Into
+                | Keyword::Update
+                | Keyword::Table
+                | Keyword::As
+        ),
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,10 +517,109 @@ mod tests {
         rewrite_table_refs_in_trigger_sql(sql, old, new)
     }
 
+    /// Test helper schema matching altertrig.test fixtures: t1(a,b), t2(c,d),
+    /// t3(e,f), t4(e,f).
+    fn altertrig_schema(table: &str, column: &str) -> bool {
+        let cols: &[&str] = match table.to_ascii_lowercase().as_str() {
+            "t1" => &["a", "b"],
+            "t2" => &["c", "d"],
+            "t3" | "t4" => &["e", "f"],
+            _ => &[],
+        };
+        cols.iter().any(|c| c.eq_ignore_ascii_case(column))
+    }
+
+    fn rewrite_col(sql: &str, table: &str, old: &str, new: &str) -> String {
+        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema)
+    }
+
+    #[test]
+    fn col_2_3_unqualified_in_nested_subquery() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a='xyz' FROM t3, (SELECT * FROM (SELECT e FROM t3));\n    END";
+        let got = rewrite_col(sql, "t3", "e", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a='xyz' FROM t3, (SELECT * FROM (SELECT abc FROM t3));\n    END"
+        );
+    }
+
+    #[test]
+    fn col_2_4_unqualified_in_where() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a='xyz' FROM t3, (SELECT 1 FROM t2 WHERE c);\n    END";
+        let got = rewrite_col(sql, "t2", "c", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a='xyz' FROM t3, (SELECT 1 FROM t2 WHERE abc);\n    END"
+        );
+    }
+
+    #[test]
+    fn col_2_5_qualified_before_from() {
+        let sql =
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=t2.c FROM t2;\n    END";
+        let got = rewrite_col(sql, "t2", "c", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=t2.abc FROM t2;\n    END"
+        );
+    }
+
+    #[test]
+    fn col_2_6_qualified_multi_from() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=t2.c FROM t2, t3;\n    END";
+        let got = rewrite_col(sql, "t2", "c", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=t2.abc FROM t2, t3;\n    END"
+        );
+    }
+
+    #[test]
+    fn col_2_7_qualified_natural_join() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=1 FROM t3 NATURAL JOIN t4 WHERE t4.e=a;\n    END";
+        let got = rewrite_col(sql, "t4", "e", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a=1 FROM t3 NATURAL JOIN t4 WHERE t4.abc=a;\n    END"
+        );
+    }
+
+    #[test]
+    fn col_does_not_touch_qualifier_table_name() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=t2.c FROM t2; END";
+        let got = rewrite_col(sql, "t2", "c", "abc");
+        assert!(got.contains("t2.abc"));
+        assert!(got.contains("FROM t2;"));
+    }
+
+    #[test]
+    fn col_alias_qualifier_resolves() {
+        let sql =
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM t3 AS x WHERE x.e=1; END";
+        let got = rewrite_col(sql, "t3", "e", "abc");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM t3 AS x WHERE x.abc=1; END"
+        );
+    }
+
+    #[test]
+    fn col_no_match_returns_unchanged() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 WHERE b=1; END";
+        assert_eq!(rewrite_col(sql, "t2", "c", "abc"), sql);
+    }
+
+    #[test]
+    fn col_unqualified_other_table_not_in_scope_unchanged() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM t3 WHERE e=1; END";
+        assert_eq!(rewrite_col(sql, "t2", "c", "abc"), sql);
+    }
+
     #[test]
     fn rewrites_table_after_comma_in_from_list() {
         // altertrig.test 1.1
-        let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, t3; \nEND";
+        let sql =
+            "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n  UPDATE t1 SET d='xyz' FROM t2, t3; \nEND";
         let got = rewrite(sql, "t3", "t5");
         assert_eq!(
             got,

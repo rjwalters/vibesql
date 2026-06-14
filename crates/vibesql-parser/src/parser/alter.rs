@@ -63,7 +63,7 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
         }
         Token::Keyword { keyword: Keyword::Rename, .. } => {
             parser.advance();
-            parse_rename_table(parser, table_name)
+            parse_rename(parser, table_name)
         }
         Token::Keyword { keyword: Keyword::Modify, .. } => {
             parser.advance();
@@ -258,15 +258,46 @@ fn parse_drop_constraint(
     Ok(AlterTableStmt::DropConstraint(DropConstraintStmt { table_name, constraint_name }))
 }
 
-/// Parse RENAME TO
-fn parse_rename_table(
+/// Parse the part of an `ALTER TABLE <t> RENAME ...` statement that follows the
+/// `RENAME` keyword. Distinguishes three forms:
+/// - `RENAME TO <new_table>`            -> RenameTable
+/// - `RENAME COLUMN <old> TO <new>`     -> RenameColumn
+/// - `RENAME <old> TO <new>`            -> RenameColumn (bare column form)
+fn parse_rename(
     parser: &mut crate::Parser,
     table_name: String,
 ) -> Result<AlterTableStmt, ParseError> {
-    parser.expect_keyword(Keyword::To)?;
-    let new_table_name = parser.parse_identifier()?;
+    match parser.peek() {
+        // RENAME TO <new_table>
+        Token::Keyword { keyword: Keyword::To, .. } => {
+            parser.advance();
+            let new_table_name = parser.parse_identifier()?;
+            Ok(AlterTableStmt::RenameTable(RenameTableStmt { table_name, new_table_name }))
+        }
+        // RENAME COLUMN <old> TO <new>
+        Token::Keyword { keyword: Keyword::Column, .. } => {
+            parser.advance();
+            parse_rename_column(parser, table_name)
+        }
+        // RENAME <old> TO <new> (bare column form)
+        _ => parse_rename_column(parser, table_name),
+    }
+}
 
-    Ok(AlterTableStmt::RenameTable(RenameTableStmt { table_name, new_table_name }))
+/// Parse the `<old> TO <new>` tail of a RENAME COLUMN statement.
+fn parse_rename_column(
+    parser: &mut crate::Parser,
+    table_name: String,
+) -> Result<AlterTableStmt, ParseError> {
+    let old_column_name = parser.parse_identifier()?;
+    parser.expect_keyword(Keyword::To)?;
+    let new_column_name = parser.parse_identifier()?;
+
+    Ok(AlterTableStmt::RenameColumn(RenameColumnStmt {
+        table_name,
+        old_column_name,
+        new_column_name,
+    }))
 }
 
 /// Parse MODIFY COLUMN

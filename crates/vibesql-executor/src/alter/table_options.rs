@@ -3,7 +3,10 @@
 use vibesql_ast::{RenameTableStmt, TriggerAction};
 use vibesql_storage::Database;
 
-use crate::{errors::ExecutorError, trigger_rename::rewrite_table_refs_in_trigger_sql};
+use crate::{
+    errors::ExecutorError,
+    trigger_rename::{rewrite_column_refs_in_trigger_sql, rewrite_table_refs_in_trigger_sql},
+};
 
 /// Execute RENAME TABLE
 pub(super) fn execute_rename_table(
@@ -110,6 +113,94 @@ fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name
 
         // The trigger is known to exist (we just read it), so update_trigger
         // cannot fail; ignore the result defensively.
+        let _ = database.catalog.update_trigger(updated);
+    }
+}
+
+/// Rewrite trigger bodies that reference `<table>.<old_column>` after an
+/// `ALTER TABLE <table> RENAME <old_column> TO <new_column>`.
+///
+/// Mirrors SQLite's `legacy_alter_table=OFF` behavior: references inside trigger
+/// bodies that resolve to the renamed column are rewritten (unquoted), while the
+/// rest of the `CREATE TRIGGER` text is preserved verbatim. The renamed table's
+/// own `ON`-target name does not change. See `crate::trigger_rename`.
+pub(super) fn rewrite_triggers_for_column_rename(
+    database: &mut Database,
+    table: &str,
+    old_column: &str,
+    new_column: &str,
+) {
+    // Snapshot table -> column-name set so the rewrite resolver can attribute
+    // unqualified columns to their owning table without borrowing the database
+    // while we mutate the catalog. The snapshot reflects the *post-rename* schema
+    // (the column has already been renamed), so the renamed table's pre-rename
+    // column name is handled explicitly in the closure below.
+    let schema: std::collections::HashMap<String, Vec<String>> = database
+        .list_tables()
+        .into_iter()
+        .filter_map(|name| {
+            database.get_table(&name).map(|tbl| {
+                (
+                    name.to_ascii_lowercase(),
+                    tbl.schema.columns.iter().map(|c| c.name.clone()).collect(),
+                )
+            })
+        })
+        .collect();
+
+    let renamed_table_lc = table.to_ascii_lowercase();
+    let old_column_owned = old_column.to_string();
+    let table_has_column = move |t: &str, c: &str| -> bool {
+        let t_lc = t.to_ascii_lowercase();
+        // The renamed table still owns `old_column` for resolution purposes even
+        // though the live schema now stores it under `new_column`.
+        if t_lc == renamed_table_lc && c.eq_ignore_ascii_case(&old_column_owned) {
+            return true;
+        }
+        schema.get(&t_lc).is_some_and(|cols| cols.iter().any(|col| col.eq_ignore_ascii_case(c)))
+    };
+
+    let trigger_names = database.catalog.list_triggers();
+    for name in trigger_names {
+        let Some(existing) = database.catalog.get_trigger(&name) else {
+            continue;
+        };
+
+        let body_text = match &existing.triggered_action {
+            TriggerAction::RawSql(sql) => sql.clone(),
+        };
+        let new_body = rewrite_column_refs_in_trigger_sql(
+            &body_text,
+            table,
+            old_column,
+            new_column,
+            &table_has_column,
+        );
+        let new_sql_definition = existing.sql_definition.as_ref().map(|sql| {
+            rewrite_column_refs_in_trigger_sql(
+                sql,
+                table,
+                old_column,
+                new_column,
+                &table_has_column,
+            )
+        });
+
+        let body_changed = new_body != body_text;
+        let sql_def_changed = new_sql_definition.as_deref() != existing.sql_definition.as_deref();
+
+        if !body_changed && !sql_def_changed {
+            continue;
+        }
+
+        let mut updated = existing.clone();
+        if body_changed {
+            updated.triggered_action = TriggerAction::RawSql(new_body);
+        }
+        if sql_def_changed {
+            updated.sql_definition = new_sql_definition;
+        }
+
         let _ = database.catalog.update_trigger(updated);
     }
 }

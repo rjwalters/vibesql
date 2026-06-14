@@ -223,6 +223,57 @@ pub(super) fn execute_alter_column(
     }
 }
 
+/// Execute RENAME COLUMN (`ALTER TABLE t RENAME [COLUMN] old TO new`).
+///
+/// Renames the column in the table schema and propagates the rename into any
+/// trigger bodies that reference `<table>.<old_column>`, matching SQLite's
+/// `legacy_alter_table=OFF` behavior (see `crate::trigger_rename`).
+pub(super) fn execute_rename_column(
+    stmt: &RenameColumnStmt,
+    database: &mut Database,
+) -> Result<String, ExecutorError> {
+    let table = database
+        .get_table_mut(&stmt.table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+    // The old column must exist.
+    let col_index = table.schema.get_column_index(&stmt.old_column_name).ok_or_else(|| {
+        ExecutorError::ColumnNotFound {
+            column_name: stmt.old_column_name.clone(),
+            table_name: stmt.table_name.clone(),
+            searched_tables: vec![stmt.table_name.clone()],
+            available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
+        }
+    })?;
+
+    // Renaming to an existing (different) column name is a conflict. Allow a
+    // case-only rename of the same column.
+    if !stmt.new_column_name.eq_ignore_ascii_case(&stmt.old_column_name)
+        && table.schema.has_column(&stmt.new_column_name)
+    {
+        return Err(ExecutorError::ColumnAlreadyExists(stmt.new_column_name.clone()));
+    }
+
+    // Rename in the schema (keeps the column-index cache consistent).
+    table.schema_mut().rename_column(col_index, &stmt.new_column_name)?;
+
+    // Invalidate the database-level columnar cache since the schema changed.
+    database.invalidate_columnar_cache(&stmt.table_name);
+
+    // Propagate the rename into trigger bodies that reference this column.
+    super::table_options::rewrite_triggers_for_column_rename(
+        database,
+        &stmt.table_name,
+        &stmt.old_column_name,
+        &stmt.new_column_name,
+    );
+
+    Ok(format!(
+        "Column '{}' renamed to '{}' in table '{}'",
+        stmt.old_column_name, stmt.new_column_name, stmt.table_name
+    ))
+}
+
 /// Execute MODIFY COLUMN
 pub(super) fn execute_modify_column(
     stmt: &ModifyColumnStmt,
@@ -318,8 +369,9 @@ pub(super) fn execute_change_column(
         }
     }
 
-    // Update schema - rename and modify
-    table.schema_mut().columns[col_index].name = stmt.new_column_def.name.clone();
+    // Update schema - rename and modify. Use `rename_column` so the
+    // column-index cache stays consistent with the new name.
+    table.schema_mut().rename_column(col_index, &stmt.new_column_def.name)?;
     table.schema_mut().columns[col_index].data_type = new_type.clone();
     table.schema_mut().columns[col_index].nullable = stmt.new_column_def.nullable;
 
