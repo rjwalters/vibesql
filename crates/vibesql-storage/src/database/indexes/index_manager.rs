@@ -6,7 +6,9 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use vibesql_types::{DataType, SqlValue};
 
-use super::index_metadata::{acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata};
+use super::index_metadata::{
+    acquire_btree_lock, normalize_index_name, IndexData, IndexMetadata, DEFAULT_INDEX_SCHEMA,
+};
 #[cfg(target_arch = "wasm32")]
 use crate::backend::MemoryStorage;
 #[cfg(not(target_arch = "wasm32"))]
@@ -259,10 +261,50 @@ impl IndexManager {
         }
     }
 
+    /// Resolve a (possibly bare) index name to the actual map key it is stored
+    /// under, following SQLite name resolution.
+    ///
+    /// Schema-awareness (#5540): a `main`-schema index is keyed by its bare
+    /// normalized name; a temp-schema index is keyed `temp_<id>.<name>`. For an
+    /// unqualified lookup the session temp schema shadows `main`, so we prefer a
+    /// matching temp-schema index over a same-named main index — matching
+    /// `DROP INDEX i` resolving to `temp.i` when both exist.
+    ///
+    /// Accepts an explicit `schema.index` form too (used by DROP TABLE / DROP
+    /// INDEX paths that already know the owning schema) for exact targeting.
+    /// Returns the storage key if a matching index exists.
+    pub(super) fn resolve_index_key(&self, index_name: &str) -> Option<String> {
+        // Explicit schema-qualified form: target exactly that schema's index.
+        if let Some((schema_part, name_part)) = index_name.split_once('.') {
+            let key = super::index_metadata::make_index_key(schema_part, name_part);
+            if self.indexes.contains_key(&key) {
+                return Some(key);
+            }
+            // Fall through: maybe the caller passed a dotted *index name* (rare)
+            // rather than a schema qualifier; try the whole thing as a bare name.
+        }
+
+        let normalized = normalize_index_name(index_name);
+
+        // Temp schema shadows main: prefer a non-main-schema index with this name.
+        if let Some((key, _)) = self.indexes.iter().find(|(_, meta)| {
+            !meta.schema.eq_ignore_ascii_case(DEFAULT_INDEX_SCHEMA)
+                && normalize_index_name(&meta.index_name) == normalized
+        }) {
+            return Some(key.clone());
+        }
+
+        // Otherwise the main-schema (bare) key.
+        if self.indexes.contains_key(&normalized) {
+            return Some(normalized);
+        }
+
+        None
+    }
+
     /// Check if an index exists
     pub fn index_exists(&self, index_name: &str) -> bool {
-        let normalized = normalize_index_name(index_name);
-        self.indexes.contains_key(&normalized)
+        self.resolve_index_key(index_name).is_some()
     }
 
     /// Check if any indexes exist for a specific table
@@ -283,18 +325,18 @@ impl IndexManager {
 
     /// Get index metadata
     pub fn get_index(&self, index_name: &str) -> Option<&IndexMetadata> {
-        let normalized = normalize_index_name(index_name);
-        self.indexes.get(&normalized)
+        let key = self.resolve_index_key(index_name)?;
+        self.indexes.get(&key)
     }
 
     /// Get index data
     pub fn get_index_data(&self, index_name: &str) -> Option<&IndexData> {
-        let normalized = normalize_index_name(index_name);
+        let key = self.resolve_index_key(index_name)?;
 
         // Record access for LRU tracking (uses interior mutability)
-        self.resource_tracker.record_access(&normalized);
+        self.resource_tracker.record_access(&key);
 
-        self.index_data.get(&normalized)
+        self.index_data.get(&key)
     }
 
     /// Check unique constraints for user-defined indexes before insert
@@ -413,8 +455,10 @@ impl IndexManager {
         index_name: &str,
         where_clause: Option<Box<vibesql_ast::Expression>>,
     ) -> bool {
-        let normalized = super::index_metadata::normalize_index_name(index_name);
-        if let Some(meta) = self.indexes.get_mut(&normalized) {
+        let Some(key) = self.resolve_index_key(index_name) else {
+            return false;
+        };
+        if let Some(meta) = self.indexes.get_mut(&key) {
             meta.where_clause = where_clause;
             true
         } else {
@@ -673,6 +717,7 @@ mod tests {
             IndexMetadata {
                 index_name: index_name.to_string(),
                 table_name: "events".to_string(),
+                schema: "main".to_string(),
                 unique: false,
                 columns: vec![vibesql_ast::IndexColumn::new_column(
                     "created_at".to_string(),
@@ -733,6 +778,7 @@ mod tests {
                 IndexMetadata {
                     index_name: index_name.to_string(),
                     table_name: "events".to_string(),
+                    schema: "main".to_string(),
                     unique: false,
                     columns: vec![vibesql_ast::IndexColumn::new_column(
                         "c".to_string(),
@@ -806,6 +852,7 @@ mod tests {
             IndexMetadata {
                 index_name: index_name.to_string(),
                 table_name: "t".to_string(),
+                schema: "main".to_string(),
                 unique: false,
                 columns: vec![vibesql_ast::IndexColumn::new_column(
                     "id".to_string(),
@@ -934,6 +981,7 @@ mod tests {
         let mk_meta = |name: &str| IndexMetadata {
             index_name: name.to_string(),
             table_name: "t".to_string(),
+            schema: "main".to_string(),
             unique: false,
             columns: vec![vibesql_ast::IndexColumn::new_column(
                 "id".to_string(),
