@@ -3,7 +3,8 @@
 // ============================================================================
 //
 // Tests for binary format serialization/deserialization, including:
-// - TableIdentifier quoted flag persistence (SQL:1999 case-sensitivity)
+// - TableIdentifier quoted flag persistence (preserved for display/echo;
+//   canonical names are ASCII case-folded per SQLite — issue #5553)
 // - Backward compatibility with older format versions
 // - MVCC version field round-trip and v6 → v7 read compatibility (#5136 Phase 1a)
 
@@ -26,10 +27,11 @@ fn test_quoted_table_identifier_roundtrip() {
     let identifier = TableIdentifier::quoted("MyTable");
     db.create_table_with_identifier(schema, identifier).unwrap();
 
-    // Verify the identifier is marked as quoted
-    let original_identifier = db.catalog.get_table_identifier("MyTable").unwrap();
+    // The quoted flag is preserved, but SQLite case-folds the canonical key,
+    // so the table is keyed/looked-up by its lowercase canonical form.
+    let original_identifier = db.catalog.get_table_identifier("mytable").unwrap();
     assert!(original_identifier.is_quoted(), "Original table should be quoted");
-    assert_eq!(original_identifier.canonical(), "MyTable");
+    assert_eq!(original_identifier.canonical(), "mytable");
 
     // Save and load using binary format
     let path = "/tmp/test_quoted_identifier.vbsql";
@@ -38,9 +40,9 @@ fn test_quoted_table_identifier_roundtrip() {
     let loaded_db = Database::load_binary(path).unwrap();
 
     // Verify the quoted flag was preserved
-    let loaded_identifier = loaded_db.catalog.get_table_identifier("MyTable").unwrap();
+    let loaded_identifier = loaded_db.catalog.get_table_identifier("mytable").unwrap();
     assert!(loaded_identifier.is_quoted(), "Loaded table should still be quoted after roundtrip");
-    assert_eq!(loaded_identifier.canonical(), "MyTable");
+    assert_eq!(loaded_identifier.canonical(), "mytable");
 
     // Cleanup
     std::fs::remove_file(path).ok();
@@ -107,11 +109,11 @@ fn test_mixed_quoted_unquoted_tables_roundtrip() {
 
     let loaded_db = Database::load_binary(path).unwrap();
 
-    // Verify both tables preserved their quoted flags
+    // Verify both tables preserved their quoted flags (looked up by case-folded key)
     let users_id = loaded_db.catalog.get_table_identifier("users").unwrap();
     assert!(!users_id.is_quoted(), "users should remain unquoted");
 
-    let profiles_id = loaded_db.catalog.get_table_identifier("UserProfiles").unwrap();
+    let profiles_id = loaded_db.catalog.get_table_identifier("userprofiles").unwrap();
     assert!(profiles_id.is_quoted(), "UserProfiles should remain quoted");
 
     // Cleanup
@@ -158,8 +160,8 @@ fn test_quoted_table_with_data_roundtrip() {
 
     let loaded_db = Database::load_binary(path).unwrap();
 
-    // Verify quoted flag preserved
-    let identifier = loaded_db.catalog.get_table_identifier("CaseSensitiveTable").unwrap();
+    // Verify quoted flag preserved (looked up by case-folded canonical key)
+    let identifier = loaded_db.catalog.get_table_identifier("casesensitivetable").unwrap();
     assert!(identifier.is_quoted());
 
     // Verify data preserved

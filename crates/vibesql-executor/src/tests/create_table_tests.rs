@@ -449,60 +449,71 @@ fn test_create_table_with_special_characters_in_name() {
     assert!(db.catalog.table_exists("user_profiles"));
 }
 
+/// Helper: build a single-`id`-column CREATE TABLE statement.
+fn create_table_stmt(name: &str, quoted: bool) -> CreateTableStmt {
+    CreateTableStmt {
+        temporary: false,
+        if_not_exists: false,
+        table_name: name.to_string(),
+        columns: vec![ColumnDef {
+            name: "id".to_string(),
+            data_type: DataType::Integer,
+            nullable: false,
+            constraints: vec![],
+            default_value: None,
+            comment: None,
+            generated_expr: None,
+            is_exact_integer_type: false,
+        }],
+        table_constraints: vec![],
+        table_options: vec![],
+        quoted,
+        name_source: None,
+        as_query: None,
+        without_rowid: false,
+    }
+}
+
 #[test]
 fn test_create_table_case_sensitivity() {
+    // SQLite case-folds identifiers regardless of quoting (issue #5553):
+    // `CREATE TABLE "Users"` then `CREATE TABLE users` must collide.
     let mut db = Database::new();
 
-    let stmt1 = CreateTableStmt {
-        temporary: false,
-        if_not_exists: false,
-        table_name: "Users".to_string(),
-        columns: vec![ColumnDef {
-            name: "id".to_string(),
-            data_type: DataType::Integer,
-            nullable: false,
-            constraints: vec![],
-            default_value: None,
-            comment: None,
-            generated_expr: None,
-            is_exact_integer_type: false,
-        }],
-        table_constraints: vec![],
-        table_options: vec![],
-        quoted: false,
-        name_source: None,
-        as_query: None,
-        without_rowid: false,
-    };
-    CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
+    // Create "Users" as a quoted (mixed-case) identifier.
+    CreateTableExecutor::execute(&create_table_stmt("Users", true), &mut db).unwrap();
 
-    // Try to create "users" (different case)
-    let stmt2 = CreateTableStmt {
-        temporary: false,
-        if_not_exists: false,
-        table_name: "users".to_string(),
-        columns: vec![ColumnDef {
-            name: "id".to_string(),
-            data_type: DataType::Integer,
-            nullable: false,
-            constraints: vec![],
-            default_value: None,
-            comment: None,
-            generated_expr: None,
-            is_exact_integer_type: false,
-        }],
-        table_constraints: vec![],
-        table_options: vec![],
-        quoted: false,
-        name_source: None,
-        as_query: None,
-        without_rowid: false,
-    };
+    // A differing-case unquoted create must be rejected (already exists).
+    let result = CreateTableExecutor::execute(&create_table_stmt("users", false), &mut db);
+    assert!(result.is_err(), "differing-case unquoted CREATE should collide with quoted table");
 
-    // Behavior depends on catalog's case sensitivity
-    // Just verify it either succeeds or fails gracefully
-    let result = CreateTableExecutor::execute(&stmt2, &mut db);
-    assert!(result.is_ok() || result.is_err());
+    // A differing-case quoted create must also be rejected.
+    let result = CreateTableExecutor::execute(&create_table_stmt("USERS", true), &mut db);
+    assert!(result.is_err(), "differing-case quoted CREATE should collide too");
+
+    // Exactly one table exists, resolvable by every case/quoting variant.
+    assert!(db.catalog.table_exists("users"));
+    assert!(db.catalog.table_exists("USERS"));
+    assert!(db.catalog.table_exists("Users"));
+    assert_eq!(db.catalog.list_tables().len(), 1);
+}
+
+#[test]
+fn test_create_table_quoted_mixed_case_resolves_and_preserves_spelling() {
+    // Mixed-case quoted create resolves via any case AND echoes original case
+    // in the catalog (sqlite_master-style original-case preservation).
+    let mut db = Database::new();
+
+    CreateTableExecutor::execute(&create_table_stmt("MixedCase", true), &mut db).unwrap();
+
+    // Resolvable by differing case and quoting form.
+    assert!(db.catalog.table_exists("mixedcase"));
+    assert!(db.catalog.table_exists("MIXEDCASE"));
+    assert!(db.catalog.get_table("MixedCase").is_some());
+
+    // Original spelling preserved on the stored table schema.
+    let table = db.catalog.get_table("mixedcase").expect("table resolvable lowercase");
+    assert_eq!(table.name, "MixedCase", "original declared case must be preserved");
 }
 
 #[test]

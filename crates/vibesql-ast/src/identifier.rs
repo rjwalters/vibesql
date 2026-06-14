@@ -1,10 +1,13 @@
-//! SQL Identifier types with proper case handling per SQL:1999.
+//! SQL Identifier types with SQLite-compatible case handling.
 //!
-//! This module provides identifier types that correctly handle case sensitivity
-//! according to SQL:1999 standard:
+//! This module provides identifier types that case-fold identifiers the way
+//! SQLite does. Unlike the SQL:1999 standard (where double-quoted "delimited"
+//! identifiers are case-sensitive), SQLite ASCII case-folds *all* identifiers
+//! for equality and lookup, **even when quoted** (issue #5553):
 //!
-//! - **Unquoted identifiers**: Case-insensitive, folded to lowercase for canonical form
-//! - **Quoted (delimited) identifiers**: Case-sensitive, preserve exact case
+//! - Canonical form is always lowercase, regardless of quoting.
+//! - The `quoted` flag is retained only to preserve the original spelling in
+//!   the display form (for error messages, `sqlite_master`, column headers).
 //!
 //! # Example
 //!
@@ -18,43 +21,48 @@
 //! assert_eq!(id1, id2);
 //! assert_eq!(id2, id3);
 //!
-//! // Quoted identifiers are case-sensitive
+//! // SQLite case-folds even quoted identifiers, so "MyTable" == MyTable
 //! let quoted = TableIdentifier::new("MyTable", true);
-//! assert_ne!(id1, quoted); // Different canonical forms
+//! assert_eq!(id1, quoted); // Same (case-folded) canonical form
+//! assert_eq!(quoted.canonical(), "mytable");
+//! assert_eq!(quoted.display(), "MyTable"); // original spelling preserved
 //! ```
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-/// A SQL identifier with proper case handling per SQL:1999.
+/// A SQL identifier with SQLite-compatible case handling.
 ///
 /// This type separates three concerns:
 /// - **Canonical form**: Used for HashMap keys and equality comparison
+///   (always ASCII case-folded, like SQLite — see issue #5553)
 /// - **Display form**: Preserves user's original input for error messages
 /// - **Quoted flag**: Whether the identifier was delimited (quoted)
 ///
-/// ## SQL:1999 Compliance
+/// ## SQLite Case-Folding
 ///
-/// Per SQL:1999, identifier handling depends on whether the identifier was quoted:
+/// SQLite ASCII case-folds identifiers for equality/lookup regardless of
+/// whether they were quoted (issue #5553):
 ///
 /// | Input | Quoted | Canonical | Matches `mytable`? | Matches `"MyTable"`? |
 /// |-------|--------|-----------|--------------------|-----------------------|
-/// | `MyTable` | No | `mytable` | Yes | No |
-/// | `"MyTable"` | Yes | `MyTable` | No | Yes |
-/// | `MYTABLE` | No | `mytable` | Yes | No |
-/// | `"mytable"` | Yes | `mytable` | Yes (same canonical) | No |
+/// | `MyTable` | No | `mytable` | Yes | Yes |
+/// | `"MyTable"` | Yes | `mytable` | Yes | Yes |
+/// | `MYTABLE` | No | `mytable` | Yes | Yes |
+/// | `"mytable"` | Yes | `mytable` | Yes | Yes |
 ///
 /// ## Compound Identifiers
 ///
 /// TableIdentifier supports schema-qualified table names where each component
-/// (schema and table) can be independently quoted or unquoted:
+/// (schema and table) is independently folded to lowercase for the canonical
+/// form, while the original spelling is preserved in the display form:
 ///
-/// | SQL | Schema Part | Table Part | Canonical Form |
-/// |-----|-------------|------------|----------------|
-/// | `myApp.users` | unquoted | unquoted | `myapp.users` |
-/// | `"myApp".users` | quoted | unquoted | `myApp.users` |
-/// | `myapp."Users"` | unquoted | quoted | `myapp.Users` |
-/// | `"myApp"."Users"` | quoted | quoted | `myApp.Users` |
+/// | SQL | Canonical Form | Display Form |
+/// |-----|----------------|--------------|
+/// | `myApp.users` | `myapp.users` | `myApp.users` |
+/// | `"myApp".users` | `myapp.users` | `myApp.users` |
+/// | `myapp."Users"` | `myapp.users` | `myapp.Users` |
+/// | `"myApp"."Users"` | `myapp.users` | `myApp.Users` |
 #[derive(Debug, Clone)]
 pub struct TableIdentifier {
     // Optional schema part
@@ -68,9 +76,8 @@ pub struct TableIdentifier {
     table_quoted: bool,
 
     /// Canonical form for HashMap keys and comparison.
-    /// - If quoted: exact case preserved (case-sensitive)
-    /// - If unquoted: lowercase folded (case-insensitive)
-    /// - For compound identifiers: "schema.table" using canonical forms
+    /// Always ASCII case-folded (lowercase), regardless of quoting, matching
+    /// SQLite (issue #5553). For compound identifiers: "schema.table".
     canonical: String,
 
     /// Display form preserving user's original input.
@@ -91,14 +98,11 @@ impl TableIdentifier {
     /// * `name` - The identifier name as written by the user
     /// * `quoted` - Whether the identifier was quoted (delimited) in SQL
     ///
-    /// # SQL:1999 Behavior
+    /// # SQLite Behavior
     ///
-    /// - If `quoted` is `false`: The canonical form is lowercase-folded for
-    ///   case-insensitive comparison.
-    ///
-    /// - If `quoted` is `true`: The canonical form preserves exact case for
-    ///   case-sensitive comparison. This matches SQL:1999 behavior for
-    ///   delimited identifiers.
+    /// The canonical form is always lowercase-folded for case-insensitive
+    /// comparison, regardless of the `quoted` flag. The `quoted` flag only
+    /// affects the display form (original spelling preserved for echo).
     ///
     /// # Example
     ///
@@ -110,19 +114,18 @@ impl TableIdentifier {
     /// assert_eq!(unquoted.canonical(), "mytable");
     /// assert_eq!(unquoted.display(), "MyTable");
     ///
-    /// // Quoted: case-sensitive
+    /// // Quoted: SQLite still case-folds the canonical form
     /// let quoted = TableIdentifier::new("MyTable", true);
-    /// assert_eq!(quoted.canonical(), "MyTable");
+    /// assert_eq!(quoted.canonical(), "mytable");
     /// assert_eq!(quoted.display(), "MyTable");
     /// ```
     pub fn new(name: &str, quoted: bool) -> Self {
-        let table_canonical = if quoted {
-            // Quoted identifiers preserve exact case (SQL:1999 delimited identifiers)
-            name.to_string()
-        } else {
-            // Unquoted identifiers fold to lowercase for case-insensitive comparison
-            name.to_ascii_lowercase()
-        };
+        // SQLite semantics (issue #5553): identifiers are ASCII case-folded for
+        // equality/lookup *regardless* of quoting. Unlike SQL:1999 delimited
+        // identifiers, a double-quoted `"TBL1"` collides with `tbl1`. The
+        // `quoted` flag is retained only to preserve the original spelling for
+        // display/echo (error messages, sqlite_master, column headers).
+        let table_canonical = name.to_ascii_lowercase();
 
         Self {
             schema_canonical: None,
@@ -142,14 +145,18 @@ impl TableIdentifier {
     /// This is used when loading from persistence where we only have the
     /// canonical form. The display form is set to match canonical.
     pub fn from_canonical(canonical: String, quoted: bool) -> Self {
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        // Fold the stored name to lowercase for the canonical/lookup key while
+        // preserving the persisted spelling as the display form.
+        let folded = canonical.to_ascii_lowercase();
         Self {
             schema_canonical: None,
             schema_display: None,
             schema_quoted: false,
-            table_canonical: canonical.clone(),
+            table_canonical: folded.clone(),
             table_display: canonical.clone(),
             table_quoted: quoted,
-            canonical: canonical.clone(),
+            canonical: folded,
             display: canonical,
             quoted,
         }
@@ -166,24 +173,25 @@ impl TableIdentifier {
     /// * `table_name` - The table name as written by the user
     /// * `table_quoted` - Whether the table was quoted in SQL
     ///
-    /// # SQL:1999 Behavior
+    /// # SQLite Behavior
     ///
-    /// Each identifier component is independent:
-    /// - Unquoted: canonical form is lowercase (case-insensitive)
-    /// - Quoted: canonical form preserves case (case-sensitive)
+    /// Every component is ASCII case-folded for the canonical form regardless
+    /// of quoting; the original spelling is kept in the display form.
     ///
     /// # Example
     ///
     /// ```
     /// use vibesql_ast::TableIdentifier;
     ///
-    /// // "myApp".users → myApp.users (schema case-sensitive, table case-insensitive)
+    /// // "myApp".users → canonical myapp.users (display preserved)
     /// let id = TableIdentifier::qualified("myApp", true, "users", false);
-    /// assert_eq!(id.canonical(), "myApp.users");
+    /// assert_eq!(id.canonical(), "myapp.users");
+    /// assert_eq!(id.display(), "myApp.users");
     ///
-    /// // myapp."Users" → myapp.Users (schema case-insensitive, table case-sensitive)
+    /// // myapp."Users" → canonical myapp.users (display preserved)
     /// let id = TableIdentifier::qualified("myapp", false, "Users", true);
-    /// assert_eq!(id.canonical(), "myapp.Users");
+    /// assert_eq!(id.canonical(), "myapp.users");
+    /// assert_eq!(id.display(), "myapp.Users");
     /// ```
     pub fn qualified(
         schema_name: &str,
@@ -191,11 +199,9 @@ impl TableIdentifier {
         table_name: &str,
         table_quoted: bool,
     ) -> Self {
-        let schema_canonical =
-            if schema_quoted { schema_name.to_string() } else { schema_name.to_ascii_lowercase() };
-
-        let table_canonical =
-            if table_quoted { table_name.to_string() } else { table_name.to_ascii_lowercase() };
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        let schema_canonical = schema_name.to_ascii_lowercase();
+        let table_canonical = table_name.to_ascii_lowercase();
 
         let canonical = format!("{}.{}", schema_canonical, table_canonical);
         let display = format!("{}.{}", schema_name, table_name);
@@ -215,9 +221,9 @@ impl TableIdentifier {
 
     /// Get the canonical form of the identifier.
     ///
-    /// This is used for HashMap keys and equality comparison.
-    /// - Unquoted identifiers: lowercase
-    /// - Quoted identifiers: exact case preserved
+    /// This is used for HashMap keys and equality comparison. SQLite
+    /// case-folds identifiers regardless of quoting, so this is always the
+    /// lowercase form.
     #[inline]
     pub fn canonical(&self) -> &str {
         &self.canonical
@@ -305,10 +311,11 @@ impl TableIdentifier {
         Self::new(name, false)
     }
 
-    /// Create an identifier that matches only the exact case.
+    /// Create a quoted identifier from the given name.
     ///
-    /// This creates a quoted identifier from the given name,
-    /// which will only match the exact same case.
+    /// Note: under SQLite semantics the canonical form is still case-folded,
+    /// so this matches case-insensitively; the `quoted` flag only preserves
+    /// the original spelling for display/echo.
     pub fn quoted(name: &str) -> Self {
         Self::new(name, true)
     }
@@ -351,10 +358,11 @@ impl From<String> for TableIdentifier {
     }
 }
 
-/// A SQL column identifier with proper case handling per SQL:1999.
+/// A SQL column identifier with SQLite-compatible case handling.
 ///
 /// This type handles column references with optional table and schema qualifiers.
-/// Each component (schema, table, column) has independent quoted/unquoted semantics.
+/// Like SQLite, every component is ASCII case-folded for the canonical form
+/// regardless of quoting; the original spelling is kept for display/echo.
 ///
 /// ## Supported Forms
 ///
@@ -364,14 +372,14 @@ impl From<String> for TableIdentifier {
 /// | `users.id` | Table-qualified column reference |
 /// | `myschema.users.id` | Fully-qualified column reference |
 ///
-/// ## SQL:1999 Compliance
+/// ## SQLite Case-Folding
 ///
-/// Per SQL:1999, identifier handling depends on whether each component was quoted:
+/// SQLite case-folds identifiers regardless of quoting (issue #5553):
 ///
 /// | Input | Quoted | Canonical | Matches `mycolumn`? |
 /// |-------|--------|-----------|---------------------|
 /// | `MyColumn` | No | `mycolumn` | Yes |
-/// | `"MyColumn"` | Yes | `MyColumn` | No |
+/// | `"MyColumn"` | Yes | `mycolumn` | Yes |
 /// | `MYCOLUMN` | No | `mycolumn` | Yes |
 ///
 /// ## Example
@@ -384,9 +392,9 @@ impl From<String> for TableIdentifier {
 /// let c2 = ColumnIdentifier::simple("mycolumn", false);
 /// assert_eq!(c1, c2);
 ///
-/// // Quoted identifiers are case-sensitive
+/// // SQLite case-folds even quoted identifiers
 /// let quoted = ColumnIdentifier::simple("MyColumn", true);
-/// assert_ne!(c1, quoted);
+/// assert_eq!(c1, quoted);
 ///
 /// // Table-qualified column
 /// let qualified = ColumnIdentifier::qualified("users", false, "id", false);
@@ -436,8 +444,8 @@ impl ColumnIdentifier {
     /// assert_eq!(c.display(), "MyColumn");
     /// ```
     pub fn simple(column: &str, quoted: bool) -> Self {
-        let column_canonical =
-            if quoted { column.to_string() } else { column.to_ascii_lowercase() };
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        let column_canonical = column.to_ascii_lowercase();
 
         Self {
             schema_canonical: None,
@@ -474,11 +482,9 @@ impl ColumnIdentifier {
     /// assert_eq!(c.column_canonical(), "id");
     /// ```
     pub fn qualified(table: &str, table_quoted: bool, column: &str, column_quoted: bool) -> Self {
-        let table_canonical =
-            if table_quoted { table.to_string() } else { table.to_ascii_lowercase() };
-
-        let column_canonical =
-            if column_quoted { column.to_string() } else { column.to_ascii_lowercase() };
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        let table_canonical = table.to_ascii_lowercase();
+        let column_canonical = column.to_ascii_lowercase();
 
         let canonical = format!("{}.{}", table_canonical, column_canonical);
         let display = format!("{}.{}", table, column);
@@ -519,7 +525,7 @@ impl ColumnIdentifier {
     ///     "users", false,  // unquoted table
     ///     "ID", false      // unquoted column
     /// );
-    /// assert_eq!(c.canonical(), "myApp.users.id");
+    /// assert_eq!(c.canonical(), "myapp.users.id");
     /// ```
     pub fn fully_qualified(
         schema: &str,
@@ -529,14 +535,10 @@ impl ColumnIdentifier {
         column: &str,
         column_quoted: bool,
     ) -> Self {
-        let schema_canonical =
-            if schema_quoted { schema.to_string() } else { schema.to_ascii_lowercase() };
-
-        let table_canonical =
-            if table_quoted { table.to_string() } else { table.to_ascii_lowercase() };
-
-        let column_canonical =
-            if column_quoted { column.to_string() } else { column.to_ascii_lowercase() };
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        let schema_canonical = schema.to_ascii_lowercase();
+        let table_canonical = table.to_ascii_lowercase();
+        let column_canonical = column.to_ascii_lowercase();
 
         let canonical = format!("{}.{}.{}", schema_canonical, table_canonical, column_canonical);
         let display = format!("{}.{}.{}", schema, table, column);
@@ -574,7 +576,7 @@ impl ColumnIdentifier {
 
     /// Create a quoted column identifier (convenience constructor).
     ///
-    /// This creates a simple, case-sensitive column reference.
+    /// Note: under SQLite semantics the canonical form is still case-folded.
     ///
     /// # Example
     ///
@@ -582,7 +584,8 @@ impl ColumnIdentifier {
     /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::quoted("MyColumn");
-    /// assert_eq!(c.canonical(), "MyColumn");
+    /// assert_eq!(c.canonical(), "mycolumn");
+    /// assert_eq!(c.display(), "MyColumn");
     /// ```
     pub fn quoted(column: &str) -> Self {
         Self::simple(column, true)
@@ -607,6 +610,8 @@ impl ColumnIdentifier {
     /// This is used when loading from persistence where we only have the
     /// canonical form. The display form is set to match canonical.
     pub fn from_canonical(canonical: String, quoted: bool) -> Self {
+        // SQLite case-folds identifiers regardless of quoting (issue #5553).
+        let folded = canonical.to_ascii_lowercase();
         Self {
             schema_canonical: None,
             schema_display: None,
@@ -614,10 +619,10 @@ impl ColumnIdentifier {
             table_canonical: None,
             table_display: None,
             table_quoted: false,
-            column_canonical: canonical.clone(),
+            column_canonical: folded.clone(),
             column_display: canonical.clone(),
             column_quoted: quoted,
-            canonical: canonical.clone(),
+            canonical: folded,
             display: canonical,
         }
     }
@@ -1007,38 +1012,42 @@ mod tests {
     }
 
     #[test]
-    fn test_quoted_case_sensitive() {
+    fn test_quoted_case_folds_like_sqlite() {
+        // SQLite case-folds even quoted identifiers (issue #5553).
         let id1 = TableIdentifier::new("MyTable", true);
         let id2 = TableIdentifier::new("mytable", true);
         let id3 = TableIdentifier::new("MYTABLE", true);
 
-        // Quoted identifiers with different cases should NOT be equal
-        assert_ne!(id1, id2);
-        assert_ne!(id2, id3);
-        assert_ne!(id1, id3);
+        // All quoted variations are equal (case-folded canonical)
+        assert_eq!(id1, id2);
+        assert_eq!(id2, id3);
+        assert_eq!(id1, id3);
 
-        // Canonical preserves exact case
-        assert_eq!(id1.canonical(), "MyTable");
+        // Canonical is always lowercase
+        assert_eq!(id1.canonical(), "mytable");
         assert_eq!(id2.canonical(), "mytable");
-        assert_eq!(id3.canonical(), "MYTABLE");
+        assert_eq!(id3.canonical(), "mytable");
+
+        // Display preserves the original spelling for echo
+        assert_eq!(id1.display(), "MyTable");
+        assert_eq!(id3.display(), "MYTABLE");
     }
 
     #[test]
     fn test_quoted_vs_unquoted() {
-        // Unquoted "MyTable" should NOT equal quoted "MyTable"
-        // because they have different canonical forms
+        // Under SQLite semantics, quoted "MyTable" DOES equal unquoted "MyTable"
+        // because both case-fold to the same canonical form.
         let unquoted = TableIdentifier::new("MyTable", false);
         let quoted = TableIdentifier::new("MyTable", true);
 
-        assert_ne!(unquoted, quoted);
+        assert_eq!(unquoted, quoted);
         assert_eq!(unquoted.canonical(), "mytable");
-        assert_eq!(quoted.canonical(), "MyTable");
+        assert_eq!(quoted.canonical(), "mytable");
     }
 
     #[test]
     fn test_quoted_lowercase_matches_unquoted() {
-        // Special case: quoted "mytable" SHOULD equal unquoted "MyTable"
-        // because they have the same canonical form
+        // quoted "mytable" equals unquoted "MyTable" (same case-folded canonical)
         let unquoted = TableIdentifier::new("MyTable", false);
         let quoted_lower = TableIdentifier::new("mytable", true);
 
@@ -1064,32 +1073,30 @@ mod tests {
         assert_eq!(map.get(&lookup2), Some(&42));
         assert_eq!(map.get(&lookup3), Some(&42));
 
-        // Quoted "users" (lowercase) SHOULD find the value because it has the same canonical form
-        // (unquoted "users" → "users", quoted "users" → "users")
+        // SQLite case-folds quoted identifiers too, so BOTH quoted variants find it
         let quoted_lower = TableIdentifier::new("users", true);
         assert_eq!(map.get(&quoted_lower), Some(&42));
 
-        // But quoted "USERS" (uppercase) should NOT find it
         let quoted_upper = TableIdentifier::new("USERS", true);
-        assert_eq!(map.get(&quoted_upper), None);
+        assert_eq!(map.get(&quoted_upper), Some(&42));
     }
 
     #[test]
     fn test_hashmap_quoted_keys() {
         let mut map: HashMap<TableIdentifier, i32> = HashMap::new();
 
-        // Insert with quoted identifier "MyTable" (preserves case)
+        // Insert with quoted identifier "MyTable" (case-folded to "mytable")
         let key = TableIdentifier::new("MyTable", true);
         map.insert(key, 42);
 
-        // Should only find with exact case (quoted)
+        // SQLite case-folds: all case/quoting variants resolve to the same key
         let exact = TableIdentifier::new("MyTable", true);
         let wrong_case = TableIdentifier::new("mytable", true);
-        let unquoted = TableIdentifier::new("MyTable", false); // becomes "mytable"
+        let unquoted = TableIdentifier::new("MyTable", false); // also "mytable"
 
         assert_eq!(map.get(&exact), Some(&42));
-        assert_eq!(map.get(&wrong_case), None); // "mytable" != "MyTable"
-        assert_eq!(map.get(&unquoted), None); // "mytable" != "MyTable"
+        assert_eq!(map.get(&wrong_case), Some(&42));
+        assert_eq!(map.get(&unquoted), Some(&42));
     }
 
     #[test]
@@ -1118,8 +1125,10 @@ mod tests {
         assert!(!unquoted.is_quoted());
         assert!(quoted.is_quoted());
 
+        // SQLite case-folds both; the quoted flag only affects display.
         assert_eq!(unquoted.canonical(), "mytable");
-        assert_eq!(quoted.canonical(), "MyTable");
+        assert_eq!(quoted.canonical(), "mytable");
+        assert_eq!(quoted.display(), "MyTable");
     }
 
     #[test]
@@ -1129,8 +1138,9 @@ mod tests {
         assert_eq!(id.display(), "mytable");
         assert!(!id.is_quoted());
 
+        // from_canonical case-folds for lookup while preserving the spelling.
         let quoted_id = TableIdentifier::from_canonical("MyTable".to_string(), true);
-        assert_eq!(quoted_id.canonical(), "MyTable");
+        assert_eq!(quoted_id.canonical(), "mytable");
         assert_eq!(quoted_id.display(), "MyTable");
         assert!(quoted_id.is_quoted());
     }
@@ -1144,11 +1154,10 @@ mod tests {
 
     #[test]
     fn test_sql_examples_from_issue() {
-        // Examples from the issue description
+        // SQLite case-folding semantics (issue #5553).
 
         // CREATE TABLE MyTable (id INT);
-        // INSERT INTO mytable VALUES (1);  -- Should work
-        // INSERT INTO MYTABLE VALUES (2);  -- Should work
+        // INSERT INTO mytable / MYTABLE both resolve to MyTable.
         let created = TableIdentifier::new("MyTable", false);
         let lookup1 = TableIdentifier::new("mytable", false);
         let lookup2 = TableIdentifier::new("MYTABLE", false);
@@ -1156,37 +1165,36 @@ mod tests {
         assert_eq!(created, lookup1);
         assert_eq!(created, lookup2);
 
-        // CREATE TABLE "MyTable" (id INT);  -- Different table!
+        // CREATE TABLE "MyTable" -- SQLite case-folds, so this COLLIDES with MyTable.
         let quoted_created = TableIdentifier::new("MyTable", true);
-        assert_ne!(created, quoted_created);
+        assert_eq!(created, quoted_created);
 
-        // SELECT * FROM "MyTable";  -- Only finds quoted table
-        let quoted_lookup = TableIdentifier::new("MyTable", true);
+        // SELECT * FROM "MyTable" / "MYTABLE" / MyTable all resolve to the same table.
+        let quoted_lookup = TableIdentifier::new("MYTABLE", true);
         assert_eq!(quoted_created, quoted_lookup);
-        assert_ne!(created, quoted_lookup);
+        assert_eq!(created, quoted_lookup);
 
-        // SELECT * FROM MyTable;  -- Only finds unquoted table
         let unquoted_lookup = TableIdentifier::new("MyTable", false);
         assert_eq!(created, unquoted_lookup);
-        assert_ne!(quoted_created, unquoted_lookup);
+        assert_eq!(quoted_created, unquoted_lookup);
     }
 
     #[test]
     fn test_create_duplicate_detection() {
-        // CREATE TABLE test (id INT);
-        // CREATE TABLE TEST (id INT);  -- Should ERROR: table already exists
+        // CREATE TABLE test; CREATE TABLE TEST -- collide (case-folded).
         let first = TableIdentifier::new("test", false);
         let second = TableIdentifier::new("TEST", false);
-        assert_eq!(first, second); // Same table, should conflict
-        assert_eq!(first.canonical(), "test"); // Both normalize to lowercase
+        assert_eq!(first, second);
+        assert_eq!(first.canonical(), "test");
 
-        // CREATE TABLE "TEST" (id INT);  -- Different table from unquoted!
+        // CREATE TABLE "TEST" -- SQLite case-folds, so this ALSO collides with test.
         let quoted = TableIdentifier::new("TEST", true);
-        assert_ne!(first, quoted); // Different table, no conflict (quoted "TEST" != "test")
+        assert_eq!(first, quoted);
+        assert_eq!(quoted.canonical(), "test");
 
-        // CREATE TABLE "test" (id INT);  -- Same canonical as unquoted test
+        // CREATE TABLE "test" -- same canonical, collides too.
         let quoted_lower = TableIdentifier::new("test", true);
-        assert_eq!(first, quoted_lower); // Same canonical form
+        assert_eq!(first, quoted_lower);
     }
 
     #[test]
@@ -1209,14 +1217,14 @@ mod tests {
 
     #[test]
     fn test_qualified_identifier_quoted_schema() {
-        // "myApp".users → myApp.users
+        // "myApp".users → canonical myapp.users (display preserved)
         let id = TableIdentifier::qualified("myApp", true, "users", false);
 
         assert!(id.is_qualified());
-        assert_eq!(id.canonical(), "myApp.users");
+        assert_eq!(id.canonical(), "myapp.users");
         assert_eq!(id.display(), "myApp.users");
 
-        assert_eq!(id.schema_canonical(), Some("myApp"));
+        assert_eq!(id.schema_canonical(), Some("myapp"));
         assert_eq!(id.schema_display(), Some("myApp"));
         assert!(id.is_schema_quoted());
 
@@ -1227,62 +1235,62 @@ mod tests {
 
     #[test]
     fn test_qualified_identifier_quoted_table() {
-        // myapp."Users" → myapp.Users
+        // myapp."Users" → canonical myapp.users (display preserved)
         let id = TableIdentifier::qualified("myapp", false, "Users", true);
 
         assert!(id.is_qualified());
-        assert_eq!(id.canonical(), "myapp.Users");
+        assert_eq!(id.canonical(), "myapp.users");
         assert_eq!(id.display(), "myapp.Users");
 
         assert_eq!(id.schema_canonical(), Some("myapp"));
         assert_eq!(id.schema_display(), Some("myapp"));
         assert!(!id.is_schema_quoted());
 
-        assert_eq!(id.table_canonical(), "Users");
+        assert_eq!(id.table_canonical(), "users");
         assert_eq!(id.table_display(), "Users");
         assert!(id.is_table_quoted());
     }
 
     #[test]
     fn test_qualified_identifier_quoted_both() {
-        // "myApp"."Users" → myApp.Users
+        // "myApp"."Users" → canonical myapp.users (display preserved)
         let id = TableIdentifier::qualified("myApp", true, "Users", true);
 
         assert!(id.is_qualified());
-        assert_eq!(id.canonical(), "myApp.Users");
+        assert_eq!(id.canonical(), "myapp.users");
         assert_eq!(id.display(), "myApp.Users");
 
-        assert_eq!(id.schema_canonical(), Some("myApp"));
+        assert_eq!(id.schema_canonical(), Some("myapp"));
         assert_eq!(id.schema_display(), Some("myApp"));
         assert!(id.is_schema_quoted());
 
-        assert_eq!(id.table_canonical(), "Users");
+        assert_eq!(id.table_canonical(), "users");
         assert_eq!(id.table_display(), "Users");
         assert!(id.is_table_quoted());
     }
 
     #[test]
     fn test_qualified_identifier_equality() {
-        // Schema case differs, but both unquoted → should match
+        // Schema case differs, both unquoted → match
         let id1 = TableIdentifier::qualified("myApp", false, "users", false);
         let id2 = TableIdentifier::qualified("MYAPP", false, "USERS", false);
         assert_eq!(id1, id2);
         assert_eq!(id1.canonical(), "myapp.users");
         assert_eq!(id2.canonical(), "myapp.users");
 
-        // Schema quoted with different case → should NOT match
+        // SQLite case-folds quoted parts too → these now match.
         let id3 = TableIdentifier::qualified("myApp", true, "users", false);
         let id4 = TableIdentifier::qualified("MYAPP", true, "users", false);
-        assert_ne!(id3, id4);
-        assert_eq!(id3.canonical(), "myApp.users");
-        assert_eq!(id4.canonical(), "MYAPP.users");
+        assert_eq!(id3, id4);
+        assert_eq!(id3.canonical(), "myapp.users");
+        assert_eq!(id4.canonical(), "myapp.users");
 
-        // Table quoted with different case → should NOT match
+        // Quoted table with different case also case-folds → match.
         let id5 = TableIdentifier::qualified("myapp", false, "Users", true);
         let id6 = TableIdentifier::qualified("myapp", false, "USERS", true);
-        assert_ne!(id5, id6);
-        assert_eq!(id5.canonical(), "myapp.Users");
-        assert_eq!(id6.canonical(), "myapp.USERS");
+        assert_eq!(id5, id6);
+        assert_eq!(id5.canonical(), "myapp.users");
+        assert_eq!(id6.canonical(), "myapp.users");
     }
 
     #[test]
@@ -1303,21 +1311,19 @@ mod tests {
     fn test_qualified_identifier_hashmap() {
         let mut map: HashMap<TableIdentifier, i32> = HashMap::new();
 
-        // Insert with quoted schema, unquoted table
+        // Insert with quoted schema, unquoted table (canonical myapp.users)
         let key = TableIdentifier::qualified("myApp", true, "users", false);
         map.insert(key, 42);
 
-        // Should find with exact schema case (case-sensitive), any table case (case-insensitive)
+        // SQLite case-folds everything, so any case/quoting variation finds it.
         let lookup1 = TableIdentifier::qualified("myApp", true, "USERS", false);
         assert_eq!(map.get(&lookup1), Some(&42));
 
-        // Should NOT find with different schema case
         let lookup2 = TableIdentifier::qualified("MYAPP", true, "users", false);
-        assert_eq!(map.get(&lookup2), None);
+        assert_eq!(map.get(&lookup2), Some(&42));
 
-        // Should NOT find with unquoted schema (even if lowercase matches)
         let lookup3 = TableIdentifier::qualified("myApp", false, "users", false);
-        assert_eq!(map.get(&lookup3), None);
+        assert_eq!(map.get(&lookup3), Some(&42));
     }
 
     // ==================== ColumnIdentifier Tests ====================
@@ -1344,20 +1350,21 @@ mod tests {
     }
 
     #[test]
-    fn test_column_quoted_case_sensitive() {
+    fn test_column_quoted_case_folds_like_sqlite() {
+        // SQLite case-folds even quoted column identifiers (issue #5553).
         let c1 = ColumnIdentifier::simple("MyColumn", true);
         let c2 = ColumnIdentifier::simple("mycolumn", true);
         let c3 = ColumnIdentifier::simple("MYCOLUMN", true);
 
-        // Quoted identifiers with different cases should NOT be equal
-        assert_ne!(c1, c2);
-        assert_ne!(c2, c3);
-        assert_ne!(c1, c3);
+        // All quoted variations are equal (case-folded canonical)
+        assert_eq!(c1, c2);
+        assert_eq!(c2, c3);
+        assert_eq!(c1, c3);
 
-        // Canonical preserves exact case
-        assert_eq!(c1.canonical(), "MyColumn");
-        assert_eq!(c2.canonical(), "mycolumn");
-        assert_eq!(c3.canonical(), "MYCOLUMN");
+        // Canonical is always lowercase; display preserves the spelling.
+        assert_eq!(c1.canonical(), "mycolumn");
+        assert_eq!(c3.canonical(), "mycolumn");
+        assert_eq!(c1.display(), "MyColumn");
     }
 
     #[test]
@@ -1378,8 +1385,8 @@ mod tests {
             "users", false, // unquoted table
             "ID", false, // unquoted column
         );
-        assert_eq!(c.canonical(), "myApp.users.id");
-        assert_eq!(c.schema_canonical(), Some("myApp"));
+        assert_eq!(c.canonical(), "myapp.users.id");
+        assert_eq!(c.schema_canonical(), Some("myapp"));
         assert_eq!(c.table_canonical(), Some("users"));
         assert_eq!(c.column_canonical(), "id");
         assert!(c.is_qualified());
@@ -1394,7 +1401,8 @@ mod tests {
         assert!(!unquoted.is_column_quoted());
 
         let quoted = ColumnIdentifier::quoted("MyColumn");
-        assert_eq!(quoted.canonical(), "MyColumn");
+        assert_eq!(quoted.canonical(), "mycolumn");
+        assert_eq!(quoted.display(), "MyColumn");
         assert!(quoted.is_column_quoted());
 
         let table_col = ColumnIdentifier::table_column("users", "id");
@@ -1419,13 +1427,12 @@ mod tests {
         assert_eq!(map.get(&lookup2), Some(&42));
         assert_eq!(map.get(&lookup3), Some(&42));
 
-        // Quoted "userid" (lowercase) SHOULD find the value
+        // SQLite case-folds quoted identifiers too, so both quoted variants find it.
         let quoted_lower = ColumnIdentifier::simple("userid", true);
         assert_eq!(map.get(&quoted_lower), Some(&42));
 
-        // But quoted "USERID" (uppercase) should NOT find it
         let quoted_upper = ColumnIdentifier::simple("USERID", true);
-        assert_eq!(map.get(&quoted_upper), None);
+        assert_eq!(map.get(&quoted_upper), Some(&42));
     }
 
     #[test]
@@ -1494,7 +1501,9 @@ mod tests {
         let unqualified = qualified.unqualify();
 
         assert!(!unqualified.is_qualified());
-        assert_eq!(unqualified.column_canonical(), "ID"); // Quoted preserved
+        // SQLite case-folds even quoted columns; spelling preserved in display.
+        assert_eq!(unqualified.column_canonical(), "id");
+        assert_eq!(unqualified.column_display(), "ID");
         assert!(unqualified.is_column_quoted());
     }
 
@@ -1533,7 +1542,7 @@ mod tests {
         assert!(!c.is_column_quoted());
 
         let quoted = ColumnIdentifier::from_canonical("MyColumn".to_string(), true);
-        assert_eq!(quoted.canonical(), "MyColumn");
+        assert_eq!(quoted.canonical(), "mycolumn");
         assert_eq!(quoted.display(), "MyColumn");
         assert!(quoted.is_column_quoted());
     }
@@ -1553,36 +1562,34 @@ mod tests {
         assert_eq!(c1, c2);
         assert_eq!(c1.canonical(), "users.id");
 
-        // Table quoted with different case → should NOT match
+        // SQLite case-folds quoted table parts too → these now match.
         let c3 = ColumnIdentifier::qualified("Users", true, "id", false);
         let c4 = ColumnIdentifier::qualified("USERS", true, "id", false);
-        assert_ne!(c3, c4);
+        assert_eq!(c3, c4);
 
-        // Column quoted with different case → should NOT match
+        // Quoted column with different case also case-folds → match.
         let c5 = ColumnIdentifier::qualified("users", false, "Id", true);
         let c6 = ColumnIdentifier::qualified("users", false, "ID", true);
-        assert_ne!(c5, c6);
+        assert_eq!(c5, c6);
     }
 
     #[test]
     fn test_column_qualified_hashmap() {
         let mut map: HashMap<ColumnIdentifier, i32> = HashMap::new();
 
-        // Insert with quoted table, unquoted column
+        // Insert with quoted table, unquoted column (canonical users.id)
         let key = ColumnIdentifier::qualified("Users", true, "id", false);
         map.insert(key, 42);
 
-        // Should find with exact table case, any column case
+        // SQLite case-folds everything → any case/quoting variation finds it.
         let lookup1 = ColumnIdentifier::qualified("Users", true, "ID", false);
         assert_eq!(map.get(&lookup1), Some(&42));
 
-        // Should NOT find with different table case
         let lookup2 = ColumnIdentifier::qualified("USERS", true, "id", false);
-        assert_eq!(map.get(&lookup2), None);
+        assert_eq!(map.get(&lookup2), Some(&42));
 
-        // Should NOT find with unquoted table
         let lookup3 = ColumnIdentifier::qualified("Users", false, "id", false);
-        assert_eq!(map.get(&lookup3), None);
+        assert_eq!(map.get(&lookup3), Some(&42));
     }
 
     #[test]
@@ -1597,11 +1604,11 @@ mod tests {
         assert_eq!(c2, c3);
         assert_eq!(c1.canonical(), "mycolumn");
 
-        // Quoted case-sensitive
+        // Quoted identifiers also case-fold (SQLite, issue #5553)
         let q1 = ColumnIdentifier::simple("MyColumn", true);
         let q2 = ColumnIdentifier::simple("mycolumn", true);
-        assert_ne!(q1, q2);
-        assert_eq!(q1.canonical(), "MyColumn");
+        assert_eq!(q1, q2);
+        assert_eq!(q1.canonical(), "mycolumn");
 
         // Qualified column
         let qc = ColumnIdentifier::qualified("Users", false, "ID", false);
@@ -1615,7 +1622,7 @@ mod tests {
             "users", false, // unquoted table
             "ID", false, // unquoted column
         );
-        assert_eq!(fq.canonical(), "myApp.users.id");
+        assert_eq!(fq.canonical(), "myapp.users.id");
     }
 
     #[test]

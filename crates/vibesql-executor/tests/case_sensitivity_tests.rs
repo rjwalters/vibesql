@@ -1,17 +1,14 @@
 //! Comprehensive tests for case sensitivity identifier lookups
 //!
-//! Tests the case_sensitive_identifiers setting in the catalog which controls
-//! whether table and view lookups are case-sensitive or case-insensitive.
+//! VibeSQL follows SQLite semantics (issue #5553): identifiers are ASCII
+//! case-folded for equality/lookup regardless of quoting. "users", "USERS",
+//! "Users" and the quoted "\"USERS\"" all refer to the same table. The
+//! original spelling is preserved only for display/echo (sqlite_master,
+//! column headers, error messages).
 //!
-//! Default behavior (case_sensitive_identifiers = false, SQL:1999 compliant):
-//! - Lookups are case-insensitive
-//! - The parser normalizes unquoted identifiers to lowercase
-//! - Delimited identifiers preserve their exact case
-//! - "users", "USERS", "Users" all refer to the same table
-//!
-//! When case_sensitive_identifiers = true (strict mode):
-//! - Lookups are case-sensitive
-//! - "users" and "USERS" are different tables
+//! Note: the legacy `case_sensitive_identifiers` catalog flag no longer makes
+//! table/column *name resolution* case-sensitive — SQLite has no such mode.
+//! The identifier canonical key is always case-folded.
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_storage::Database;
@@ -141,74 +138,58 @@ fn test_drop_table_mixed_case_when_case_insensitive() {
     assert!(db.catalog.get_table("CustomerOrders").is_none());
 }
 
-/// Test case-sensitive mode behavior
+/// SQLite case-folds identifiers regardless of the legacy flag (issue #5553):
+/// table names always resolve case-insensitively and differing-case creates
+/// collide.
 #[test]
-fn test_case_sensitive_mode() {
+fn test_case_folding_ignores_legacy_flag() {
     let mut db = Database::new();
 
-    // Enable case-sensitive mode
+    // Even with the legacy "case sensitive" flag set, name resolution folds case.
     db.catalog.set_case_sensitive_identifiers(true);
-    assert!(db.catalog.is_case_sensitive_identifiers());
 
-    // Create table with lowercase
     let schema1 = TableSchema::new(
         "users".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     );
     db.create_table(schema1).unwrap();
 
-    // Should find with exact case only
+    // Resolvable by any case (SQLite semantics).
     assert!(db.catalog.get_table("users").is_some());
-    assert!(db.catalog.get_table("USERS").is_none());
-    assert!(db.catalog.get_table("Users").is_none());
+    assert!(db.catalog.get_table("USERS").is_some());
+    assert!(db.catalog.get_table("Users").is_some());
 
-    // Create another table with uppercase (should work since case-sensitive)
+    // Creating a differing-case table collides (already exists).
     let schema2 = TableSchema::new(
         "USERS".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     );
-    db.create_table(schema2).unwrap();
-
-    // Now both should exist separately
-    assert!(db.catalog.get_table("users").is_some());
-    assert!(db.catalog.get_table("USERS").is_some());
+    assert!(db.create_table(schema2).is_err(), "differing-case create should collide");
 }
 
-/// Test toggling case sensitivity setting
+/// Toggling the legacy flag does not change SQLite case-folding behavior.
 #[test]
 fn test_toggle_case_sensitivity() {
     let mut db = Database::new();
 
-    // Default is case-insensitive (SQL:1999 compliant - identifiers normalized to lowercase)
     assert!(!db.catalog.is_case_sensitive_identifiers());
 
-    // Create table in case-insensitive mode with uppercase name
-    // The table name "ORDERS" is normalized to "orders" when stored because
-    // we're in case-insensitive mode
+    // Create an uppercase-named table; it folds to "orders" for lookup.
     let schema = TableSchema::new(
         "ORDERS".to_string(),
         vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
     );
     db.create_table(schema).unwrap();
 
-    // Should find with different cases in case-insensitive mode
     assert!(db.catalog.get_table("ORDERS").is_some());
     assert!(db.catalog.get_table("orders").is_some());
 
-    // Switch to case-sensitive
+    // Flipping the legacy flag has no effect on name resolution (SQLite parity).
     db.catalog.set_case_sensitive_identifiers(true);
-    assert!(db.catalog.is_case_sensitive_identifiers());
-
-    // Now lookups should be case-sensitive
-    // The table was stored as "orders" (lowercase) because it was created in case-insensitive mode
-    // So "orders" finds it but "ORDERS" does not
     assert!(db.catalog.get_table("orders").is_some());
-    assert!(db.catalog.get_table("ORDERS").is_none());
+    assert!(db.catalog.get_table("ORDERS").is_some());
 
-    // Switch back to case-insensitive
     db.catalog.set_case_sensitive_identifiers(false);
-
-    // Should work again (both normalize to "orders")
     assert!(db.catalog.get_table("orders").is_some());
     assert!(db.catalog.get_table("ORDERS").is_some());
 }
