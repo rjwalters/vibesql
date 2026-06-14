@@ -12,11 +12,12 @@
 //! `select/scan/table.rs` (#5584) for full read/write parity. See #5589.
 //!
 //! Reachability note: the issue's motivating sequence (CREATE temp view over a
-//! temp table, then DROP that temp table) is *not* reachable in VibeSQL today —
-//! `DROP TABLE` is blocked by a dependency check while a dependent temp
-//! view/trigger references the table (a separate divergence from sqlite, tracked
-//! independently). These tests instead use the equally valid and fully reachable
-//! scenario of a view whose body references a *never-existing* table: sqlite (and
+//! temp table, then DROP that temp table) is now reachable in VibeSQL — the
+//! unqualified `DROP TABLE` of a temp table succeeds (the dependent temp
+//! view/trigger is left dangling), matching sqlite3 (fixed in #5596; see
+//! `drop_temp_table_with_dependents_tests.rs`). These tests use the equally
+//! valid and fully reachable scenario of a view whose body references a
+//! *never-existing* table: sqlite (and
 //! VibeSQL) allow `CREATE [TEMP] VIEW` over a missing table with deferred
 //! resolution, and the missing-table error surfaces at DML time through the same
 //! `build_view_schema` qualifier path. Verified against sqlite3 3.51.0:
