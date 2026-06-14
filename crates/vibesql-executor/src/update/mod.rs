@@ -155,7 +155,14 @@ impl UpdateExecutor {
         stmt: &UpdateStmt,
         database: &mut Database,
     ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
-        executor::execute_internal(stmt, database, None, None, None)
+        // Per-variant RAISE scope for RETURNING DML (#5432, follow-on to #5417):
+        // a RAISE fired from a trigger during a RETURNING UPDATE gets the same
+        // statement-savepoint scope as the bare `execute` path; when it aborts
+        // the statement the error propagates (no rows returned).
+        let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
+            executor::execute_internal(stmt, database, None, None, None)
+        })
     }
 
     /// Execute an UPDATE statement with procedural context
@@ -165,8 +172,14 @@ impl UpdateExecutor {
         database: &mut Database,
         procedural_context: &crate::procedural::ExecutionContext,
     ) -> Result<usize, ExecutorError> {
-        executor::execute_internal(stmt, database, None, Some(procedural_context), None)
-            .map(|(count, _)| count)
+        // Per-variant RAISE scope for procedural-context DML (#5432): a RAISE
+        // fired from a trigger inside a procedure/script gets the same
+        // statement-savepoint scope as the bare `execute` path.
+        let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
+        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
+            executor::execute_internal(stmt, database, None, Some(procedural_context), None)
+                .map(|(count, _)| count)
+        })
     }
 
     /// Execute an UPDATE statement with trigger context

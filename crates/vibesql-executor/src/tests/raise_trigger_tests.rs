@@ -1242,3 +1242,447 @@ fn replace_with_raise_abort_before_delete_aborts() {
         "table must be unchanged after the aborted REPLACE"
     );
 }
+
+// ===========================================================================
+// Per-variant RAISE scope for the RETURNING and procedural entry points (#5432)
+//
+// #5417 wrapped the bare `execute` DML entry points in `run_top_level_dml`.
+// The RETURNING-clause entry points (`*::execute_returning`) and the
+// procedural-context entry points (`*::execute_with_procedural_context`) were
+// left unwrapped, so a RAISE fired through them did not get the per-variant
+// statement-savepoint scope. #5432 wraps both. Each test below mirrors a
+// scenario verified against sqlite3 3.51.0 and asserts final table state via a
+// LIVE SELECT (not raw `Table::scan()`), exactly as the #5417 tests do.
+//
+// Reference scenario (same as #5417): a transaction already holds row 1; a
+// single offending statement targets the `BAD` row with a trigger that RAISEs.
+//   - ABORT    -> the offending statement is undone; the txn stays open and
+//                 earlier statements survive.
+//   - FAIL     -> the statement's partial changes are kept; the txn stays open.
+//   - ROLLBACK -> the whole transaction is rolled back and closed.
+// For RETURNING, when the RAISE aborts the statement the error propagates and
+// NO rows are returned.
+// ===========================================================================
+
+/// Execute an INSERT ... RETURNING and surface the Result (so a RAISE can be
+/// asserted on). On success returns the projected RETURNING rows.
+fn exec_insert_returning(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<Vec<Vec<SqlValue>>, ExecutorError> {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Insert(s) => InsertExecutor::execute_returning(db, &s).map(|outcome| {
+            outcome
+                .returning
+                .map(|r| r.rows.into_iter().map(|row| row.values.to_vec()).collect())
+                .unwrap_or_default()
+        }),
+        other => panic!("Expected INSERT, got {:?}", other),
+    }
+}
+
+/// Execute an UPDATE ... RETURNING and surface the Result.
+fn exec_update_returning(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<Vec<Vec<SqlValue>>, ExecutorError> {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Update(s) => UpdateExecutor::execute_returning(&s, db).map(|(_, returning)| {
+            returning
+                .map(|r| r.rows.into_iter().map(|row| row.values.to_vec()).collect())
+                .unwrap_or_default()
+        }),
+        other => panic!("Expected UPDATE, got {:?}", other),
+    }
+}
+
+/// Execute a DELETE ... RETURNING and surface the Result.
+fn exec_delete_returning(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<Vec<Vec<SqlValue>>, ExecutorError> {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Delete(s) => DeleteExecutor::execute_returning(&s, db).map(|(_, returning)| {
+            returning
+                .map(|r| r.rows.into_iter().map(|row| row.values.to_vec()).collect())
+                .unwrap_or_default()
+        }),
+        other => panic!("Expected DELETE, got {:?}", other),
+    }
+}
+
+/// Execute a DML statement through the procedural-context entry point (the path
+/// a stored-procedure / script body takes) and surface the Result.
+fn exec_dml_procedural(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<usize, ExecutorError> {
+    let ctx = crate::procedural::ExecutionContext::new();
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Insert(s) => InsertExecutor::execute_with_procedural_context(db, &s, &ctx),
+        Statement::Update(s) => UpdateExecutor::execute_with_procedural_context(&s, db, &ctx),
+        Statement::Delete(s) => DeleteExecutor::execute_with_procedural_context(&s, db, &ctx),
+        other => panic!("Expected DML, got {:?}", other),
+    }
+}
+
+// --- RETURNING path ---------------------------------------------------------
+
+/// RAISE(ABORT) in a RETURNING INSERT: the offending statement is undone, the
+/// txn stays open and earlier statements survive, and NO rows are returned.
+///
+/// sqlite3 3.51.0: row 1 ('before') and row 3 ('after') survive; the RETURNING
+/// INSERT errors with no rows.
+#[test]
+fn returning_insert_raise_abort_undoes_statement_keeps_txn() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ABORT");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_insert_returning(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD') RETURNING id") {
+        Err(ExecutorError::Raise { action, message }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+            assert_eq!(message, "boom");
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT must keep the transaction open");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (3, 'after')").expect("stmt 3 ok");
+    db.commit_transaction().expect("COMMIT");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        vec![vec![ipk(1)], vec![ipk(3)]],
+        "ABORT undoes the offending RETURNING INSERT but keeps the txn's other rows"
+    );
+}
+
+/// RAISE(ROLLBACK) in a RETURNING INSERT: the whole transaction is rolled back
+/// and closed.
+///
+/// sqlite3 3.51.0: no transaction active afterward; even row 1 is gone.
+#[test]
+fn returning_insert_raise_rollback_aborts_whole_txn() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ROLLBACK");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_insert_returning(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD') RETURNING id") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Rollback);
+        }
+        other => panic!("expected RAISE(ROLLBACK), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction(), "ROLLBACK must end the transaction");
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        Vec::<Vec<SqlValue>>::new(),
+        "ROLLBACK discards the entire transaction, including earlier rows"
+    );
+}
+
+/// RAISE(ABORT) vs RAISE(FAIL) in a multi-row RETURNING INSERT with an AFTER
+/// trigger: ABORT undoes the whole statement; FAIL keeps the rows applied
+/// before the trigger fired (including the offending row, inserted before its
+/// AFTER trigger ran). Verified against sqlite3 3.51.0.
+#[test]
+fn returning_insert_raise_abort_undoes_whole_statement_after_trigger() {
+    let mut db = db_with_trigger("AFTER INSERT", "ABORT");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_insert_returning(
+        &mut db,
+        "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB') RETURNING id",
+    ) {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        vec![vec![ipk(1)]],
+        "ABORT undoes the entire offending RETURNING statement"
+    );
+}
+
+#[test]
+fn returning_insert_raise_fail_keeps_partial_statement_after_trigger() {
+    let mut db = db_with_trigger("AFTER INSERT", "FAIL");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_insert_returning(
+        &mut db,
+        "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB') RETURNING id",
+    ) {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Fail);
+        }
+        other => panic!("expected RAISE(FAIL), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "FAIL keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    // FAIL keeps row 1 (earlier stmt), row 2 ('okA') and row 3 ('BAD' — inserted
+    // before its AFTER trigger raised); row 4 ('okB') never reached.
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("before".into())],
+            vec![ipk(2), SqlValue::Varchar("okA".into())],
+            vec![ipk(3), SqlValue::Varchar("BAD".into())],
+        ],
+    );
+}
+
+/// RAISE(ABORT) in a RETURNING UPDATE: the offending statement is undone, the
+/// txn stays open, earlier statements survive.
+///
+/// sqlite3 3.51.0: row 1's update is undone (keeps v='keep'); the prior
+/// statement's change to a different row survives.
+#[test]
+fn returning_update_raise_abort_undoes_statement_keeps_txn() {
+    let mut db = db_with_trigger("BEFORE UPDATE", "ABORT");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 'keep')");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 'other')");
+
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "UPDATE t SET v = 'changed' WHERE id = 2").expect("prior stmt ok");
+
+    match exec_update_returning(&mut db, "UPDATE t SET v = 'BAD' WHERE id = 1 RETURNING id") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("keep".into())],
+            vec![ipk(2), SqlValue::Varchar("changed".into())],
+        ],
+        "ABORT undoes the offending RETURNING UPDATE; the prior statement survives"
+    );
+}
+
+/// RAISE(ROLLBACK) in a RETURNING DELETE: the whole transaction is rolled back.
+///
+/// sqlite3 3.51.0: no transaction active; the prior statement's change is gone
+/// and both rows remain at their pre-transaction values.
+#[test]
+fn returning_delete_raise_rollback_aborts_whole_txn() {
+    // A DELETE trigger must key on OLD.v (NEW is undefined for DELETE), so build
+    // the schema directly rather than via `db_with_trigger` (which uses NEW.v).
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE DELETE ON t WHEN OLD.v = 'BAD' \
+         BEGIN SELECT raise(ROLLBACK, 'boom'); END",
+    );
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 'keep')");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD')");
+
+    db.begin_transaction().expect("BEGIN");
+    exec_dml(&mut db, "UPDATE t SET v = 'changed' WHERE id = 1").expect("prior stmt ok");
+
+    match exec_delete_returning(&mut db, "DELETE FROM t WHERE id = 2 RETURNING id") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Rollback);
+        }
+        other => panic!("expected RAISE(ROLLBACK), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction(), "ROLLBACK must end the transaction");
+    // The prior UPDATE is undone (v back to 'keep'); the BAD row still exists.
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("keep".into())],
+            vec![ipk(2), SqlValue::Varchar("BAD".into())],
+        ],
+        "ROLLBACK discards the whole transaction including the prior UPDATE"
+    );
+}
+
+// --- Procedural-context path ------------------------------------------------
+
+/// RAISE(ABORT) through the procedural-context INSERT entry point: the offending
+/// statement is undone, the txn stays open, earlier statements survive.
+#[test]
+fn procedural_insert_raise_abort_undoes_statement_keeps_txn() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ABORT");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT must keep the transaction open");
+    exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (3, 'after')").expect("stmt 3 ok");
+    db.commit_transaction().expect("COMMIT");
+
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        vec![vec![ipk(1)], vec![ipk(3)]],
+    );
+}
+
+/// RAISE(ROLLBACK) through the procedural-context INSERT entry point: the whole
+/// transaction is rolled back and closed.
+#[test]
+fn procedural_insert_raise_rollback_aborts_whole_txn() {
+    let mut db = db_with_trigger("BEFORE INSERT", "ROLLBACK");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD')") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Rollback);
+        }
+        other => panic!("expected RAISE(ROLLBACK), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction(), "ROLLBACK must end the transaction");
+    assert_eq!(
+        select_rows(&db, "SELECT id FROM t ORDER BY id"),
+        Vec::<Vec<SqlValue>>::new(),
+    );
+}
+
+/// RAISE(ABORT) vs RAISE(FAIL) through the procedural-context INSERT entry point
+/// with an AFTER trigger and a multi-row statement: ABORT undoes the whole
+/// statement; FAIL keeps the rows applied before the trigger fired.
+#[test]
+fn procedural_insert_raise_abort_undoes_whole_statement_after_trigger() {
+    let mut db = db_with_trigger("AFTER INSERT", "ABORT");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_dml_procedural(
+        &mut db,
+        "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')",
+    ) {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)]]);
+}
+
+#[test]
+fn procedural_insert_raise_fail_keeps_partial_statement_after_trigger() {
+    let mut db = db_with_trigger("AFTER INSERT", "FAIL");
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (1, 'before')").expect("stmt 1 ok");
+
+    match exec_dml_procedural(
+        &mut db,
+        "INSERT INTO t (id, v) VALUES (2, 'okA'), (3, 'BAD'), (4, 'okB')",
+    ) {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Fail);
+        }
+        other => panic!("expected RAISE(FAIL), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "FAIL keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("before".into())],
+            vec![ipk(2), SqlValue::Varchar("okA".into())],
+            vec![ipk(3), SqlValue::Varchar("BAD".into())],
+        ],
+    );
+}
+
+/// RAISE(ABORT) through the procedural-context UPDATE entry point: statement
+/// undone, txn stays open, prior statement survives.
+#[test]
+fn procedural_update_raise_abort_undoes_statement_keeps_txn() {
+    let mut db = db_with_trigger("BEFORE UPDATE", "ABORT");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 'keep')");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 'other')");
+
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "UPDATE t SET v = 'changed' WHERE id = 2").expect("prior stmt ok");
+
+    match exec_dml_procedural(&mut db, "UPDATE t SET v = 'BAD' WHERE id = 1") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Abort);
+        }
+        other => panic!("expected RAISE(ABORT), got {:?}", other),
+    }
+
+    assert!(db.in_transaction(), "ABORT keeps the transaction open");
+    db.commit_transaction().expect("COMMIT");
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("keep".into())],
+            vec![ipk(2), SqlValue::Varchar("changed".into())],
+        ],
+    );
+}
+
+/// RAISE(ROLLBACK) through the procedural-context DELETE entry point: the whole
+/// transaction is rolled back.
+#[test]
+fn procedural_delete_raise_rollback_aborts_whole_txn() {
+    let mut db = vibesql_storage::Database::new();
+    exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+    exec_ok(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE DELETE ON t WHEN OLD.v = 'BAD' \
+         BEGIN SELECT raise(ROLLBACK, 'boom'); END",
+    );
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 'keep')");
+    exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 'BAD')");
+
+    db.begin_transaction().expect("BEGIN");
+    exec_dml_procedural(&mut db, "UPDATE t SET v = 'changed' WHERE id = 1").expect("prior stmt ok");
+
+    match exec_dml_procedural(&mut db, "DELETE FROM t WHERE id = 2") {
+        Err(ExecutorError::Raise { action, .. }) => {
+            assert_eq!(action, vibesql_ast::RaiseAction::Rollback);
+        }
+        other => panic!("expected RAISE(ROLLBACK), got {:?}", other),
+    }
+
+    assert!(!db.in_transaction(), "ROLLBACK must end the transaction");
+    assert_eq!(
+        select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
+        vec![
+            vec![ipk(1), SqlValue::Varchar("keep".into())],
+            vec![ipk(2), SqlValue::Varchar("BAD".into())],
+        ],
+    );
+}
