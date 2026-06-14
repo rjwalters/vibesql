@@ -37,6 +37,7 @@ fn test_index_ordering() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

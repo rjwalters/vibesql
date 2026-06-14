@@ -47,6 +47,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
         }],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -117,6 +118,7 @@ fn create_table_with_fk(
         ],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

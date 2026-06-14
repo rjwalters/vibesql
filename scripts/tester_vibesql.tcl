@@ -331,12 +331,21 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "misuse of window function [string tolower $func_name]()"
     }
 
-    # Table already exists: "Table 'public.X' already exists" -> {table "x" already exists}
-    # Strip schema prefix (e.g., "public.t1" -> "t1")
+    # Table already exists: "Table 'X' already exists" -> "table X already exists"
+    # SQLite (sqlite3 3.51.0) echoes the duplicate table name *exactly as written
+    # in the source*, preserving its quoting form and casing — `table "tbl1"
+    # already exists`, `table [tbl1] already exists`, `table tbl1 already exists`.
+    # VibeSQL's parser now captures that verbatim source spelling
+    # (CreateTableStmt::name_source) and embeds it in the error, so `X` already
+    # carries the original delimiters/casing — we emit the lowercase `table`
+    # wrapper and pass the name through unchanged (issue #5544, mirroring #5527
+    # for triggers). Programmatically-built ASTs (no source) fall back to a
+    # `schema.name` form; strip the schema prefix in that case so legacy callers
+    # stay correct. (Note: `name_source` is a single bare token and never
+    # contains a `.`, so the split only ever strips a fallback schema prefix.)
     if {[regexp -nocase {^Table '([^']+)' already exists} $error_msg -> full_name]} {
-        # Remove schema prefix if present
         set table_name [lindex [split $full_name "."] end]
-        return "table \"[string tolower $table_name]\" already exists"
+        return "table $table_name already exists"
     }
 
     # Index already exists: "Index 'X' already exists" -> "index X already exists"

@@ -60,6 +60,7 @@ impl CreateTableExecutor {
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
+    ///     name_source: None,
     ///     as_query: None, without_rowid: false,
     /// };
     ///
@@ -102,6 +103,7 @@ impl CreateTableExecutor {
                 &schema_name,
                 identifier,
                 stmt.if_not_exists,
+                stmt.name_source.as_deref(),
                 query,
             );
         }
@@ -120,11 +122,19 @@ impl CreateTableExecutor {
                     table_name, schema_name
                 ));
             }
-            return Err(ExecutorError::TableAlreadyExists(format!(
-                "{}.{}",
-                schema_name,
-                identifier.display()
-            )));
+            // A bare `CREATE TABLE` over an existing name is an error. SQLite
+            // echoes the table name *exactly as written in the source*,
+            // preserving its quoting form and casing — `table "tbl1" already
+            // exists` / `table [tbl1] already exists` (sqlite3 3.51.0). The
+            // parser captures that verbatim spelling in `name_source`; fall back
+            // to the schema-qualified normalized name when it is unavailable
+            // (e.g. programmatically-built AST). Mirrors the CREATE TRIGGER
+            // mechanism from #5538.
+            let echoed = stmt
+                .name_source
+                .clone()
+                .unwrap_or_else(|| format!("{}.{}", schema_name, identifier.display()));
+            return Err(ExecutorError::TableAlreadyExists(echoed));
         }
 
         // Check for AUTO_INCREMENT constraints
@@ -604,6 +614,7 @@ impl CreateTableExecutor {
         schema_name: &str,
         identifier: TableIdentifier,
         if_not_exists: bool,
+        name_source: Option<&str>,
         query: &vibesql_ast::SelectStmt,
     ) -> Result<String, ExecutorError> {
         // Check if table already exists
@@ -614,11 +625,13 @@ impl CreateTableExecutor {
                     table_name, schema_name
                 ));
             }
-            return Err(ExecutorError::TableAlreadyExists(format!(
-                "{}.{}",
-                schema_name,
-                identifier.display()
-            )));
+            // Echo the source quoting form when available (see the bare CREATE
+            // TABLE path above for rationale); fall back to the schema-qualified
+            // normalized name for programmatically-built ASTs.
+            let echoed = name_source
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{}.{}", schema_name, identifier.display()));
+            return Err(ExecutorError::TableAlreadyExists(echoed));
         }
 
         // Execute the SELECT query to get results

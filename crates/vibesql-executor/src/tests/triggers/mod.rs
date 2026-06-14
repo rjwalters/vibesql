@@ -45,6 +45,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -82,6 +83,7 @@ pub(super) fn create_users_table(db: &mut Database) {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

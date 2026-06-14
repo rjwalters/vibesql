@@ -36,6 +36,7 @@ fn test_select_into_single_row() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -150,6 +151,7 @@ fn test_select_into_no_rows_error() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -220,6 +222,7 @@ fn test_select_into_multiple_rows_error() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -300,6 +303,7 @@ fn test_select_into_with_expressions() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };

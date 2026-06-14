@@ -40,6 +40,7 @@ fn test_truncate_single_table() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -98,6 +99,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -121,6 +123,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -144,6 +147,7 @@ fn test_truncate_multiple_tables() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -233,6 +237,7 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -280,6 +285,7 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -325,6 +331,7 @@ fn test_truncate_empty_table() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -392,6 +399,7 @@ fn test_truncate_resets_auto_increment() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -506,6 +514,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
@@ -604,6 +613,7 @@ fn test_truncate_without_auto_increment() {
         table_constraints: vec![],
         table_options: vec![],
         quoted: false,
+        name_source: None,
         as_query: None,
         without_rowid: false,
     };
