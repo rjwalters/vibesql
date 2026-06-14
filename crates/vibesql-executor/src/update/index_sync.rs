@@ -117,6 +117,168 @@ pub(super) fn find_conflicting_rows_for_update(
     conflicting_indices
 }
 
+/// Issue #5490 (doctor follow-up): detect a REPLACE conflict that survived a
+/// BEFORE DELETE `RAISE(IGNORE)`.
+///
+/// During UPDATE OR REPLACE the conflicting row(s) are normally deleted to make
+/// room for the updated row. When the table has a BEFORE DELETE trigger that
+/// runs `RAISE(IGNORE)`, that conflict-row deletion is abandoned and the
+/// conflicting row stays live. If a pending update's NEW row would land on the
+/// same PRIMARY KEY / UNIQUE value as one of those *surviving* conflict rows,
+/// applying the update would create a duplicate key (silent corruption).
+///
+/// sqlite3 3.51.0 (with `recursive_triggers=ON`, which is how VibeSQL fires the
+/// BEFORE DELETE trigger here) instead raises `UNIQUE constraint failed: <table>.<col>`
+/// and leaves the table unchanged. This helper reproduces that: it returns the
+/// matching error when any update collides with a surviving conflict row, so the
+/// caller can abort *before* mutating storage.
+///
+/// `surviving_conflict_rows` are the rows that were marked for REPLACE deletion
+/// but kept alive by a BEFORE DELETE `RAISE(IGNORE)` (their pre-trigger values).
+pub(super) fn detect_surviving_replace_conflict(
+    updates: &[PendingUpdate],
+    schema: &TableSchema,
+    surviving_conflict_rows: &[(usize, Row)],
+    database: &Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
+    if surviving_conflict_rows.is_empty() || updates.is_empty() {
+        return Ok(());
+    }
+
+    let surviving_indices: HashSet<usize> =
+        surviving_conflict_rows.iter().map(|(idx, _)| *idx).collect();
+
+    // PRIMARY KEY collisions.
+    if let Some(pk_indices) = schema.get_primary_key_indices() {
+        let mut surviving_pks: HashSet<Vec<SqlValue>> = HashSet::new();
+        for (_, row) in surviving_conflict_rows {
+            let pk: Vec<SqlValue> =
+                pk_indices.iter().map(|&i| row.values[i].clone()).collect();
+            if !pk.contains(&SqlValue::Null) {
+                surviving_pks.insert(pk);
+            }
+        }
+        for u in updates {
+            // A surviving conflict row is, by definition, not the row being
+            // updated (own rows are excluded from the delete set), so any match
+            // is a genuine duplicate-key collision.
+            if surviving_indices.contains(&u.row_index) {
+                continue;
+            }
+            let new_pk: Vec<SqlValue> =
+                pk_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            if new_pk.contains(&SqlValue::Null) {
+                continue;
+            }
+            if surviving_pks.contains(&new_pk) {
+                let pk_col_names = schema.primary_key.as_ref().unwrap();
+                let qualified: Vec<String> =
+                    pk_col_names.iter().map(|c| format!("{}.{}", schema.name, c)).collect();
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    qualified.join(", ")
+                )));
+            }
+        }
+    }
+
+    // Table-level UNIQUE constraint collisions.
+    let unique_constraint_indices = schema.get_unique_constraint_indices();
+    for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+        let mut surviving_keys: HashSet<Vec<SqlValue>> = HashSet::new();
+        for (_, row) in surviving_conflict_rows {
+            let key: Vec<SqlValue> =
+                unique_indices.iter().map(|&i| row.values[i].clone()).collect();
+            if !key.contains(&SqlValue::Null) {
+                surviving_keys.insert(key);
+            }
+        }
+        for u in updates {
+            if surviving_indices.contains(&u.row_index) {
+                continue;
+            }
+            let new_key: Vec<SqlValue> =
+                unique_indices.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            if new_key.contains(&SqlValue::Null) {
+                continue;
+            }
+            if surviving_keys.contains(&new_key) {
+                let unique_col_names = &schema.unique_constraints[constraint_idx];
+                let qualified: Vec<String> =
+                    unique_col_names.iter().map(|c| format!("{}.{}", schema.name, c)).collect();
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    qualified.join(", ")
+                )));
+            }
+        }
+    }
+
+    // User-defined UNIQUE indexes (CREATE UNIQUE INDEX).
+    for index_name in database.list_indexes_for_table(table_name) {
+        let index_metadata = match database.get_index(&index_name) {
+            Some(m) => m,
+            None => continue,
+        };
+        if !index_metadata.unique {
+            continue;
+        }
+
+        // Resolve plain (non-expression) column indices for this index.
+        let mut col_idxs: Vec<usize> = Vec::with_capacity(index_metadata.columns.len());
+        let mut is_expression_index = false;
+        for ic in &index_metadata.columns {
+            if ic.get_expression().is_some() {
+                is_expression_index = true;
+                break;
+            }
+            match ic.column_name().and_then(|cn| schema.get_column_index(cn)) {
+                Some(ci) => col_idxs.push(ci),
+                None => {
+                    is_expression_index = true;
+                    break;
+                }
+            }
+        }
+        if is_expression_index {
+            continue;
+        }
+
+        let mut surviving_keys: HashSet<Vec<SqlValue>> = HashSet::new();
+        for (_, row) in surviving_conflict_rows {
+            let key: Vec<SqlValue> = col_idxs.iter().map(|&i| row.values[i].clone()).collect();
+            if !key.contains(&SqlValue::Null) {
+                surviving_keys.insert(key);
+            }
+        }
+        for u in updates {
+            if surviving_indices.contains(&u.row_index) {
+                continue;
+            }
+            let new_key: Vec<SqlValue> =
+                col_idxs.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            if new_key.contains(&SqlValue::Null) {
+                continue;
+            }
+            if surviving_keys.contains(&new_key) {
+                let columns_str = index_metadata
+                    .columns
+                    .iter()
+                    .map(|col| format!("{}.{}", table_name, col.column_name().unwrap_or("?")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    columns_str
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Validate that multiple updates in the same batch don't produce conflicting
 /// PK or UNIQUE constraint values. This ensures SQL's deferred constraint semantics
 /// where all rows must satisfy constraints after the entire UPDATE completes.
