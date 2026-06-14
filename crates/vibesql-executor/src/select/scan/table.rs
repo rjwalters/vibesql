@@ -322,8 +322,24 @@ pub(crate) fn execute_table_scan(
         use crate::select::SelectExecutor;
         let executor = SelectExecutor::new(database);
 
-        // Get both rows and column metadata
-        let select_result = executor.execute_with_columns(&view.query)?;
+        // Get both rows and column metadata.
+        //
+        // A main-schema view body resolves its tables against the database
+        // schema, so when one of those tables has since been dropped sqlite3
+        // names it with the implicit `main.` prefix (`no such table:
+        // main.test2`). Qualify the missing-table error here so the read path
+        // matches sqlite3 3.51.0 and the INSTEAD OF view-DML paths fixed in
+        // #5569. Two cases stay unqualified, also matching sqlite3: a bare
+        // `SELECT * FROM missing_table` (not via a view) never reaches this
+        // view-body resolution, and a temp view's body resolves against the
+        // temp schema, which sqlite3 reports without a schema prefix. See #5570.
+        let select_result = if view.is_temp() {
+            executor.execute_with_columns(&view.query)?
+        } else {
+            executor
+                .execute_with_columns(&view.query)
+                .map_err(ExecutorError::with_main_schema_qualifier)?
+        };
 
         // Build a schema from the column names
         // Apply view's explicit column aliases if provided
