@@ -26,6 +26,15 @@ impl ExpressionEvaluator<'_> {
             "IN with subquery requires database reference".to_string(),
         ))?;
 
+        // Trigger context (#5585): substitute NEW/OLD pseudo-variables with their
+        // literal values so a correlated IN subquery in a trigger WHEN clause
+        // resolves against the firing row. See `substitute_trigger_pseudo_vars`.
+        let substituted_subquery = match self.trigger_context {
+            Some(trigger_ctx) => Some(substitute_trigger_pseudo_vars(subquery, trigger_ctx)?),
+            None => None,
+        };
+        let subquery = substituted_subquery.as_ref().unwrap_or(subquery);
+
         // Handle row value IN subquery: (a, b) IN (SELECT x, y FROM t)
         if let vibesql_ast::Expression::RowValueConstructor(expr_elements) = expr {
             return self.eval_row_value_in_subquery(
@@ -213,51 +222,77 @@ impl ExpressionEvaluator<'_> {
         let outer_combined =
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
-        // Check if this is a non-correlated subquery that can be cached
-        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+        // Trigger context: when this scalar subquery is evaluated from within a
+        // trigger's WHEN clause (or body), its inner SELECT may reference the
+        // firing row's NEW/OLD pseudo-columns, e.g.
+        // `WHEN (SELECT count(*) FROM seen WHERE a = NEW.a) = 0` (#5585).
+        //
+        // We resolve NEW/OLD against the trigger context and substitute the
+        // resulting literal values into a cloned subquery AST *before*
+        // execution. This makes the subquery fully self-contained (no
+        // pseudo-variables, not correlated to NEW/OLD), so every downstream
+        // path — table scan with predicate pushdown, the iterator/materialized
+        // WHERE filter, aggregation, nested subqueries — works unchanged
+        // without threading the trigger context through the whole scan
+        // machinery. The substituted result is row-specific, so it is executed
+        // fresh (not cached). Non-trigger callers (trigger_context == None) fall
+        // through to the unchanged cached/correlated paths below.
+        if let Some(trigger_ctx) = self.trigger_context {
+            let substituted = substitute_trigger_pseudo_vars(subquery, trigger_ctx)?;
+            let select_executor = crate::select::SelectExecutor::new_with_depth(database, self.depth);
+            let rows = select_executor.execute(&substituted)?;
+            return super::super::subqueries_shared::eval_scalar_subquery_core(&rows);
+        }
 
-        // Execute or retrieve from cache
-        let rows = if !is_correlated {
-            // Non-correlated subquery - try cache first
-            let cache_key = compute_subquery_hash(subquery);
+        let rows = {
+            // Check if this is a non-correlated subquery that can be cached
+            let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
 
-            // Check cache (use peek() for readonly access)
-            let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+            // Execute or retrieve from cache
+            if !is_correlated {
+                // Non-correlated subquery - try cache first
+                let cache_key = compute_subquery_hash(subquery);
 
-            if let Some(cached_rows) = cached_result {
-                // Cache hit - use cached result
-                cached_rows
+                // Check cache (use peek() for readonly access)
+                let cached_result = self.subquery_cache.borrow().peek(&cache_key).cloned();
+
+                if let Some(cached_rows) = cached_result {
+                    // Cache hit - use cached result
+                    cached_rows
+                } else {
+                    // Cache miss - execute and cache
+                    // Use CTE context if available for WITH clause support in UPDATE/DELETE
+                    let select_executor = if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_cte_and_depth(
+                            database, cte_ctx, self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                    };
+                    let executed_rows = select_executor.execute(subquery)?;
+
+                    // Cache the result
+                    self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
+                    executed_rows
+                }
             } else {
-                // Cache miss - execute and cache
-                // Use CTE context if available for WITH clause support in UPDATE/DELETE
-                let select_executor = if let Some(cte_ctx) = self.cte_context {
+                // Correlated subquery - execute with outer context (can't cache)
+                let select_executor = if !outer_combined.table_schemas.is_empty() {
+                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                        database,
+                        row,
+                        &outer_combined,
+                        self.depth,
+                    )
+                } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_cte_and_depth(
                         database, cte_ctx, self.depth,
                     )
                 } else {
-                    crate::select::SelectExecutor::new_with_depth(database, self.depth)
+                    crate::select::SelectExecutor::new(database)
                 };
-                let executed_rows = select_executor.execute(subquery)?;
-
-                // Cache the result
-                self.subquery_cache.borrow_mut().put(cache_key, executed_rows.clone());
-                executed_rows
+                select_executor.execute(subquery)?
             }
-        } else {
-            // Correlated subquery - execute with outer context (can't cache)
-            let select_executor = if !outer_combined.table_schemas.is_empty() {
-                crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                    database,
-                    row,
-                    &outer_combined,
-                    self.depth,
-                )
-            } else if let Some(cte_ctx) = self.cte_context {
-                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
-            } else {
-                crate::select::SelectExecutor::new(database)
-            };
-            select_executor.execute(subquery)?
         };
 
         // Delegate to shared logic
@@ -284,6 +319,16 @@ impl ExpressionEvaluator<'_> {
         let database = self.database.ok_or(ExecutorError::UnsupportedFeature(
             "EXISTS requires database reference".to_string(),
         ))?;
+
+        // Trigger context (#5585): substitute NEW/OLD pseudo-variables with their
+        // literal values so a correlated EXISTS subquery in a trigger WHEN clause
+        // (e.g. `WHEN EXISTS (SELECT 1 FROM other WHERE other.id = NEW.id)`)
+        // resolves against the firing row. See `substitute_trigger_pseudo_vars`.
+        let substituted_subquery = match self.trigger_context {
+            Some(trigger_ctx) => Some(substitute_trigger_pseudo_vars(subquery, trigger_ctx)?),
+            None => None,
+        };
+        let subquery = substituted_subquery.as_ref().unwrap_or(subquery);
 
         // Convert TableSchema to CombinedSchema for outer context
         // Use table_alias if set (for UPDATE t1 AS xyz), otherwise use schema name
@@ -365,6 +410,16 @@ impl ExpressionEvaluator<'_> {
         let database = self.database.ok_or(ExecutorError::UnsupportedFeature(
             "Quantified comparison requires database reference".to_string(),
         ))?;
+
+        // Trigger context (#5585): substitute NEW/OLD pseudo-variables with their
+        // literal values so a correlated ALL/ANY/SOME subquery in a trigger WHEN
+        // clause resolves against the firing row. See
+        // `substitute_trigger_pseudo_vars`.
+        let substituted_subquery = match self.trigger_context {
+            Some(trigger_ctx) => Some(substitute_trigger_pseudo_vars(subquery, trigger_ctx)?),
+            None => None,
+        };
+        let subquery = substituted_subquery.as_ref().unwrap_or(subquery);
 
         // Evaluate the left-hand expression
         let left_val = self.eval(expr, row)?;
@@ -597,6 +652,58 @@ impl ExpressionEvaluator<'_> {
             Ok(SqlValue::Boolean(negated))
         }
     }
+}
+
+/// Substitute trigger NEW/OLD pseudo-variables in a subquery with their literal
+/// values resolved from the trigger context (#5585).
+///
+/// A trigger's WHEN clause (or body) may contain a subquery whose inner SELECT
+/// references the firing row, e.g. `(SELECT count(*) FROM seen WHERE a = NEW.a)`.
+/// The subquery is executed by a fresh `SelectExecutor` that does not carry the
+/// trigger context, so a `NEW.a` reference inside it would otherwise fail with
+/// "Pseudo-variable NEW.a is only valid within trigger bodies". By replacing each
+/// `OLD.col` / `NEW.col` with the concrete value from the firing row, the
+/// returned subquery is self-contained and resolves through all the normal
+/// execution paths (scan pushdown, WHERE filter, aggregation, nesting).
+///
+/// Resolution errors (e.g. `NEW` not available for a DELETE trigger, or an
+/// unknown column) are propagated.
+fn substitute_trigger_pseudo_vars(
+    subquery: &vibesql_ast::SelectStmt,
+    trigger_ctx: &crate::trigger_execution::TriggerContext<'_>,
+) -> Result<vibesql_ast::SelectStmt, ExecutorError> {
+    struct PseudoVarSubstitutor<'a, 'b> {
+        trigger_ctx: &'a crate::trigger_execution::TriggerContext<'b>,
+        error: Option<ExecutorError>,
+    }
+
+    impl vibesql_ast::visitor::ExpressionMutVisitor for PseudoVarSubstitutor<'_, '_> {
+        fn post_visit_expression(
+            &mut self,
+            expr: vibesql_ast::Expression,
+        ) -> vibesql_ast::Expression {
+            if self.error.is_some() {
+                return expr;
+            }
+            if let vibesql_ast::Expression::PseudoVariable { pseudo_table, column } = &expr {
+                match self.trigger_ctx.resolve_pseudo_var(*pseudo_table, column) {
+                    Ok(value) => return vibesql_ast::Expression::Literal(value),
+                    Err(e) => {
+                        self.error = Some(e);
+                        return expr;
+                    }
+                }
+            }
+            expr
+        }
+    }
+
+    let mut substitutor = PseudoVarSubstitutor { trigger_ctx, error: None };
+    let rewritten = vibesql_ast::visitor::transform_select(&mut substitutor, subquery.clone());
+    if let Some(e) = substitutor.error {
+        return Err(e);
+    }
+    Ok(rewritten)
 }
 
 /// Apply SQLite affinity coercion rules for IN subquery comparisons
