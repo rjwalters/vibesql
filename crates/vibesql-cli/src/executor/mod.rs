@@ -1039,6 +1039,20 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "RECURSIVE_TRIGGERS" => {
+                    // SQLite-compatible PRAGMA recursive_triggers (#5535).
+                    // When OFF, a trigger already on the execution stack is not
+                    // re-fired by DML within its own body; when ON (default),
+                    // triggers recurse up to MAX_TRIGGER_RECURSION_DEPTH (#5479).
+                    self.db.set_recursive_triggers(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "DEFER_FOREIGN_KEYS" => {
                     // SQLite-compatible PRAGMA defer_foreign_keys.
                     // Phase C1 of #5085: store/read the flag and auto-reset
@@ -1133,6 +1147,18 @@ impl SqlExecutor {
                     let value = if self.db.foreign_keys_enabled() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["foreign_keys".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "RECURSIVE_TRIGGERS" => {
+                    // SQLite-compatible PRAGMA recursive_triggers read (#5535).
+                    // Defaults to 1 (ON), matching triggerC-6.1.
+                    let value = if self.db.recursive_triggers() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["recursive_triggers".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

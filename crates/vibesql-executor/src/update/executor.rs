@@ -92,13 +92,30 @@ pub(super) fn execute_internal(
     // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
     let table_name = &schema_owned.name;
 
-    // Check if table has UPDATE triggers (check once, use multiple times)
-    let has_triggers = trigger_context.is_none()
-        && database
-            .catalog
-            .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
-            .next()
-            .is_some();
+    // Check if table has UPDATE triggers (check once, use multiple times).
+    //
+    // ROW-level triggers fire even when this UPDATE runs inside another
+    // trigger's body (i.e. `trigger_context.is_some()`): SQLite fires a nested
+    // UPDATE's row triggers subject only to `recursive_triggers` and the depth
+    // cap, which `TriggerFirer` now enforces directly (#5535). This mirrors the
+    // INSERT path, which already fires nested-INSERT row triggers. Previously
+    // this was gated on `trigger_context.is_none()`, so a nested UPDATE in a
+    // trigger body silently skipped the target table's UPDATE triggers — e.g.
+    // a BEFORE UPDATE `RAISE(IGNORE)` never ran (trigger3-6).
+    //
+    // STATEMENT-level triggers are a VibeSQL extension with no sqlite3 analog
+    // and are NOT fired inside a trigger body; that gating uses
+    // `fire_statement_triggers` below.
+    let has_triggers = database
+        .catalog
+        .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Update(None)))
+        .next()
+        .is_some();
+
+    // STATEMENT-level triggers only fire at the top level (not within another
+    // trigger's body), matching the INSERT path's `trigger_context.is_none()`
+    // gate on statement triggers.
+    let fire_statement_triggers = has_triggers && trigger_context.is_none();
 
     // Try fast path for simple single-row PK updates without triggers
     // Conditions: no triggers, no procedural context, simple WHERE pk = value, no assertions
@@ -134,7 +151,7 @@ pub(super) fn execute_internal(
     // statement granularity has no defined "skip the row" semantics. We keep
     // the pre-#5418 behavior (proceed) and explicitly drop the must-use
     // outcome rather than guessing.
-    if has_triggers {
+    if fire_statement_triggers {
         let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
             database,
             table_name,
@@ -863,7 +880,7 @@ pub(super) fn execute_internal(
     }
 
     // Fire AFTER STATEMENT triggers only if triggers exist
-    if has_triggers {
+    if fire_statement_triggers {
         // Statement-level RAISE(IGNORE) has no sqlite3 analog (see BEFORE
         // STATEMENT note above); drop the must-use outcome (#5418).
         let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
@@ -1466,6 +1483,11 @@ fn execute_update_from(
     trigger_context: Option<&crate::trigger_execution::TriggerContext<'_>>,
     cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
+    // STATEMENT-level triggers (a VibeSQL extension) only fire at the top level,
+    // never within another trigger's body — matching `execute_internal`. ROW
+    // triggers (`has_triggers`) still fire when nested (#5535).
+    let fire_statement_triggers = has_triggers && trigger_context.is_none();
+
     // Execute the join and get matched rows with computed SET values
     // Issue #5082: pass trigger_context so the synthetic SELECT can resolve
     // OLD/NEW pseudo-variables when this UPDATE runs inside a trigger body.
@@ -1473,7 +1495,7 @@ fn execute_update_from(
         execute_update_from_join(stmt, from_clauses, database, schema, trigger_context)?;
 
     // Fire BEFORE STATEMENT triggers if needed
-    if has_triggers {
+    if fire_statement_triggers {
         // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
         // must-use outcome (#5418).
         let _stmt_outcome = crate::TriggerFirer::execute_before_statement_triggers(
@@ -1496,7 +1518,7 @@ fn execute_update_from(
 
     if updates.is_empty() {
         // Fire AFTER STATEMENT triggers even when no rows matched
-        if has_triggers {
+        if fire_statement_triggers {
             // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
             // must-use outcome (#5418).
             let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
@@ -1847,7 +1869,7 @@ fn execute_update_from(
     // After IGNORE may have filtered to zero rows.
     if updates.is_empty() {
         // Fire AFTER STATEMENT triggers even when all rows skipped.
-        if has_triggers {
+        if fire_statement_triggers {
             // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
             // must-use outcome (#5418).
             let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(
@@ -2022,7 +2044,7 @@ fn execute_update_from(
     }
 
     // Fire AFTER STATEMENT triggers
-    if has_triggers {
+    if fire_statement_triggers {
         // Statement-level RAISE(IGNORE) has no sqlite3 analog; drop the
         // must-use outcome (#5418).
         let _stmt_outcome = crate::TriggerFirer::execute_after_statement_triggers(

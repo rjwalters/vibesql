@@ -49,6 +49,7 @@ set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
+set ::pragma_recursive_triggers 1        ;# Default: ON (VibeSQL default; #5535)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -885,6 +886,14 @@ proc build_pragma_prefix {} {
     if {$::pragma_defer_foreign_keys != 0} {
         append prefix "PRAGMA defer_foreign_keys=$::pragma_defer_foreign_keys;\n"
     }
+    # Include recursive_triggers if it's been set to OFF. VibeSQL (like modern
+    # SQLite) defaults this pragma to ON, and the multi-process shim starts each
+    # CLI process at that default, so we only need to re-apply the non-default
+    # OFF state. Tests such as trigger3.test set it off for the whole file
+    # (#5535).
+    if {$::pragma_recursive_triggers != 1} {
+        append prefix "PRAGMA recursive_triggers=$::pragma_recursive_triggers;\n"
+    }
     return $prefix
 }
 
@@ -988,6 +997,20 @@ proc track_pragma_setting {sql} {
     # across the boundary in subsequent CLI process invocations.
     if {[regexp -nocase {(?:^|;)\s*(?:COMMIT|ROLLBACK)\s*(?:;|$)} $sql]} {
         set ::pragma_defer_foreign_keys 0
+    }
+
+    # Look for recursive_triggers settings (find all occurrences, use last one).
+    # Unlike defer_foreign_keys this does NOT reset at COMMIT/ROLLBACK — it is a
+    # connection-level setting that persists for the whole file (#5535).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?recursive_triggers\s*[=(]\s*(\w+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set upper [string toupper $value]
+        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+            set ::pragma_recursive_triggers 1
+        } else {
+            set ::pragma_recursive_triggers 0
+        }
+        set found 1
     }
 
     return $found

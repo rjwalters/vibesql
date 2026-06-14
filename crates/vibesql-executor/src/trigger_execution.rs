@@ -1,6 +1,7 @@
 //! Trigger execution logic for firing triggers on DML operations
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 use vibesql_ast::{PseudoTable, TriggerEvent, TriggerGranularity, TriggerTiming};
 use vibesql_catalog::{TableSchema, TriggerDefinition};
@@ -88,6 +89,59 @@ impl Drop for RecursionGuard {
             depth.set(depth.get().saturating_sub(1));
         });
     }
+}
+
+thread_local! {
+    /// Names of triggers currently executing on this thread, keyed by the
+    /// lowercased trigger name with a reference count. Used to honor
+    /// `PRAGMA recursive_triggers = off`: when that pragma is off, a trigger is
+    /// not re-fired by DML performed while the same trigger is already running.
+    ///
+    /// A count (rather than a set) is required because with
+    /// `recursive_triggers = on` the *same* trigger can legitimately appear on
+    /// the stack multiple times (recursive firing), and each level must be
+    /// balanced by its own pop. Trigger names are SQLite-unique per schema, so
+    /// the lowercased name is a stable identity key.
+    static ACTIVE_TRIGGERS: RefCell<HashMap<String, usize>> =
+        RefCell::new(HashMap::new());
+}
+
+/// RAII guard that records a trigger as "currently executing" for the duration
+/// of its action, so the `recursive_triggers = off` suppression check can tell
+/// whether re-entering a trigger would be recursive.
+struct ActiveTriggerGuard {
+    key: String,
+}
+
+impl ActiveTriggerGuard {
+    fn new(trigger_name: &str) -> Self {
+        let key = trigger_name.to_lowercase();
+        ACTIVE_TRIGGERS.with(|active| {
+            *active.borrow_mut().entry(key.clone()).or_insert(0) += 1;
+        });
+        ActiveTriggerGuard { key }
+    }
+}
+
+impl Drop for ActiveTriggerGuard {
+    fn drop(&mut self) {
+        ACTIVE_TRIGGERS.with(|active| {
+            let mut map = active.borrow_mut();
+            if let Some(count) = map.get_mut(&self.key) {
+                *count -= 1;
+                if *count == 0 {
+                    map.remove(&self.key);
+                }
+            }
+        });
+    }
+}
+
+/// Returns true if a trigger with this name is already executing on the current
+/// thread (i.e. firing it now would be a recursive re-entry).
+fn is_trigger_active(trigger_name: &str) -> bool {
+    let key = trigger_name.to_lowercase();
+    ACTIVE_TRIGGERS.with(|active| active.borrow().get(&key).is_some_and(|&c| c > 0))
 }
 
 /// Execution context for triggers with OLD/NEW row access
@@ -324,6 +378,12 @@ impl TriggerFirer {
                 return Ok(TriggerOutcome::Proceed);
             }
         }
+
+        // Mark this trigger as executing for the duration of its action so that
+        // `PRAGMA recursive_triggers = off` can suppress re-entry into the same
+        // trigger from nested DML (#5535). The guard is dropped — and the
+        // trigger un-marked — when the action completes or errors out.
+        let _active = ActiveTriggerGuard::new(&trigger.name);
 
         // 2. Execute trigger action
         Self::execute_trigger_action(db, trigger, old_row, new_row)
@@ -599,6 +659,22 @@ impl TriggerFirer {
         }
     }
 
+    /// Whether firing `trigger` right now must be suppressed because
+    /// `PRAGMA recursive_triggers` is off and the same trigger is already
+    /// executing on this thread.
+    ///
+    /// SQLite's `recursive_triggers = off` does not blanket-disable nested
+    /// trigger firing; it only prevents a trigger from being re-entered while it
+    /// is already running. A *different* trigger reached via nested DML still
+    /// fires, and a trigger fired at the top level (e.g. the DELETE trigger run
+    /// for a REPLACE-induced delete) still fires because it is not yet on the
+    /// stack. This per-trigger rule is what `trigger3-6` and `triggerC-5.3.*`
+    /// depend on (#5535). When `recursive_triggers = on` (the default) this
+    /// always returns false and the depth cap (#5479) governs recursion instead.
+    fn suppressed_by_recursive_triggers_off(db: &Database, trigger: &TriggerDefinition) -> bool {
+        !db.recursive_triggers() && is_trigger_active(&trigger.name)
+    }
+
     /// Execute all BEFORE ROW-level triggers for an operation
     ///
     /// # Arguments
@@ -632,6 +708,11 @@ impl TriggerFirer {
         for trigger in triggers {
             // Only execute ROW-level triggers in this method
             if trigger.granularity == TriggerGranularity::Row {
+                // PRAGMA recursive_triggers = off: don't re-enter a running trigger.
+                if Self::suppressed_by_recursive_triggers_off(db, &trigger) {
+                    continue;
+                }
+
                 // For UPDATE OF triggers, check if monitored columns changed
                 if let (Some(old), Some(new)) = (old_row, new_row) {
                     if !Self::should_fire_update_of(&trigger, old, new, &table_schema) {
@@ -673,6 +754,10 @@ impl TriggerFirer {
         for trigger in triggers {
             // Only execute STATEMENT-level triggers in this method
             if trigger.granularity == TriggerGranularity::Statement {
+                // PRAGMA recursive_triggers = off: don't re-enter a running trigger.
+                if Self::suppressed_by_recursive_triggers_off(db, &trigger) {
+                    continue;
+                }
                 // Statement-level triggers don't have OLD/NEW row access
                 if Self::execute_trigger(db, &trigger, None, None)? == TriggerOutcome::SkipRow {
                     return Ok(TriggerOutcome::SkipRow);
@@ -716,6 +801,11 @@ impl TriggerFirer {
         for trigger in triggers {
             // Only execute ROW-level triggers in this method
             if trigger.granularity == TriggerGranularity::Row {
+                // PRAGMA recursive_triggers = off: don't re-enter a running trigger.
+                if Self::suppressed_by_recursive_triggers_off(db, &trigger) {
+                    continue;
+                }
+
                 // For UPDATE OF triggers, check if monitored columns changed
                 if let (Some(old), Some(new)) = (old_row, new_row) {
                     if !Self::should_fire_update_of(&trigger, old, new, &table_schema) {
@@ -756,6 +846,10 @@ impl TriggerFirer {
         for trigger in triggers {
             // Only execute STATEMENT-level triggers in this method
             if trigger.granularity == TriggerGranularity::Statement {
+                // PRAGMA recursive_triggers = off: don't re-enter a running trigger.
+                if Self::suppressed_by_recursive_triggers_off(db, &trigger) {
+                    continue;
+                }
                 // Statement-level triggers don't have OLD/NEW row access
                 if Self::execute_trigger(db, &trigger, None, None)? == TriggerOutcome::SkipRow {
                     return Ok(TriggerOutcome::SkipRow);
