@@ -59,6 +59,12 @@ pub struct TriggerContext<'a> {
     pub new_row: Option<&'a Row>,
     /// Table schema for column lookups
     pub table_schema: &'a TableSchema,
+    /// True when the trigger target is a VIEW (INSTEAD OF trigger). Views have
+    /// no rowid, so `NEW.rowid` / `OLD.rowid` must error there — matching both
+    /// sqlite3 and the view-rowid rejection from #5492. The pseudo-schema built
+    /// from a view definition does not carry `without_rowid`, so we track the
+    /// view-ness explicitly rather than inferring it from the schema.
+    pub is_view: bool,
 }
 
 impl<'a> TriggerContext<'a> {
@@ -93,24 +99,62 @@ impl<'a> TriggerContext<'a> {
             })?,
         };
 
-        // Find column index in schema
-        let col_idx =
-            self.table_schema.columns.iter().position(|c| c.name == column).ok_or_else(|| {
-                ExecutorError::ColumnNotFound {
-                    column_name: column.to_string(),
-                    table_name: self.table_schema.name.clone(),
-                    searched_tables: vec![self.table_schema.name.clone()],
-                    available_columns: self
-                        .table_schema
-                        .columns
-                        .iter()
-                        .map(|c| c.name.clone())
-                        .collect(),
-                }
-            })?;
+        // Find column index in schema. A *real* column always wins over the
+        // rowid pseudo-column — including a real column literally named
+        // `rowid` / `oid` / `_rowid_` (triggerD-1.x). Only when no real column
+        // matches do we fall back to the rowid pseudo-column below.
+        // `get_column_index` matches the case-insensitive resolution the column
+        // evaluator uses (the parser uppercases unquoted identifiers).
+        if let Some(col_idx) = self.table_schema.get_column_index(column) {
+            return Ok(row.values[col_idx].clone());
+        }
 
-        // Return the value
-        Ok(row.values[col_idx].clone())
+        // SQLite compatibility: resolve the ROWID pseudo-column on the firing
+        // OLD/NEW row. `rowid`, `_rowid_`, and `oid` are aliases that yield the
+        // row's unique identifier (#5485). This mirrors the rowid resolution in
+        // the column evaluator (`evaluator/expressions/eval.rs`): real columns
+        // already took precedence above.
+        let column_lower = column.to_lowercase();
+        if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+            // A VIEW has no rowid. An INSTEAD OF trigger fires on a view, so
+            // `NEW.rowid` / `OLD.rowid` there must error — consistent with the
+            // view-rowid rejection in #5492 (no such column: rowid).
+            //
+            // WITHOUT ROWID tables likewise do not expose the rowid
+            // pseudo-column (Issue #4953): error to match sqlite3.
+            if !self.is_view && !self.table_schema.without_rowid {
+                // INTEGER PRIMARY KEY acts as a rowid alias: its column value IS
+                // the rowid, so return that column's value (#4536).
+                if let Some(ipk_col_idx) = self.table_schema.rowid_alias_column {
+                    return row
+                        .values
+                        .get(ipk_col_idx)
+                        .cloned()
+                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: ipk_col_idx });
+                }
+
+                // Otherwise return the firing row's rowid. For a row that already
+                // has a rowid (AFTER INSERT, BEFORE/AFTER UPDATE/DELETE, or an
+                // explicit `INSERT INTO t(rowid,...)`), that's `row.row_id`. For a
+                // BEFORE INSERT on an auto-allocated rowid the row is not yet
+                // written and SQLite reports `new.rowid` as -1 (triggerC-4.1.2):
+                // mirror that sentinel here.
+                return Ok(SqlValue::Bigint(row.row_id.map(|id| id as i64).unwrap_or(-1)));
+            }
+        }
+
+        // Not a real column and not a resolvable rowid pseudo-column.
+        Err(ExecutorError::ColumnNotFound {
+            column_name: column.to_string(),
+            table_name: self.table_schema.name.clone(),
+            searched_tables: vec![self.table_schema.name.clone()],
+            available_columns: self
+                .table_schema
+                .columns
+                .iter()
+                .map(|c| c.name.clone())
+                .collect(),
+        })
     }
 }
 
@@ -270,6 +314,9 @@ impl TriggerFirer {
         // mirroring `execute_trigger_action`. Without this fallback, an INSTEAD
         // OF trigger carrying a WHEN clause always failed with TableNotFound.
         let schema = Self::resolve_trigger_schema(db, table_name)?;
+        // INSTEAD OF triggers fire on a view (not a table); the rowid
+        // pseudo-column is unavailable there (#5485 / #5492).
+        let is_view = db.catalog.get_table(table_name).is_none();
 
         // Use NEW row as the base row for evaluation (prefer NEW over OLD)
         // The trigger context will handle OLD/NEW pseudo-variable references
@@ -280,7 +327,7 @@ impl TriggerFirer {
         })?;
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
-        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
+        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema, is_view };
 
         // Create evaluator with trigger context
         let evaluator =
@@ -324,9 +371,12 @@ impl TriggerFirer {
         // Get table schema for trigger context.
         // For INSTEAD OF triggers on views, build schema from the view definition.
         let schema = Self::resolve_trigger_schema(db, &trigger.table_name)?;
+        // INSTEAD OF triggers fire on a view (not a table); the rowid
+        // pseudo-column is unavailable there (#5485 / #5492).
+        let is_view = db.catalog.get_table(&trigger.table_name).is_none();
 
         // Create trigger context for OLD/NEW pseudo-variable resolution
-        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema };
+        let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema, is_view };
 
         // Execute each statement in the trigger body with trigger context.
         // A RAISE(IGNORE) inside any statement abandons the rest of this

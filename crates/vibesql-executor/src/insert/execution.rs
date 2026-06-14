@@ -1267,6 +1267,19 @@ fn execute_insert_internal(
             // (it hid a row SQLite keeps — visible only as a bitmap tombstone in
             // raw `Table::scan()`, missing from any live SELECT). See #5474.
             if has_insert_triggers {
+                // Stamp the NEW row with its allocated rowid so `NEW.rowid` (and
+                // the `oid` / `_rowid_` aliases) resolve in the AFTER INSERT
+                // trigger body (#5485). For an explicit `INSERT INTO t(rowid,...)`
+                // the row already carries `row_id`; for an auto-allocated rowid
+                // the row was created with `row_id == None`, and the actual rowid
+                // is `rowid_to_use` (physical_row_count_before + 1).
+                let after_row = {
+                    let mut r = row.clone();
+                    if r.row_id.is_none() {
+                        r.row_id = Some(rowid_to_use);
+                    }
+                    r
+                };
                 // A `TriggerOutcome::SkipRow` (RAISE(IGNORE) in an AFTER trigger)
                 // has no SQLite-observable effect here: the row is already
                 // inserted and RAISE(IGNORE) only abandons the rest of the
@@ -1277,7 +1290,7 @@ fn execute_insert_internal(
                     table_name,
                     vibesql_ast::TriggerEvent::Insert,
                     None,
-                    Some(&row),
+                    Some(&after_row),
                 )?;
             }
 

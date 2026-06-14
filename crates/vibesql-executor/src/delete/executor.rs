@@ -537,13 +537,26 @@ impl DeleteExecutor {
                     continue;
                 }
 
+                // Stamp the OLD row with its rowid so `OLD.rowid` (and the
+                // `oid` / `_rowid_` aliases) resolve in the trigger body (#5485).
+                // `scan()` returns the raw stored rows, which may not carry
+                // `row_id`; the physical index is the source of truth (rowid =
+                // idx + 1), and an explicit stored row_id is preserved.
+                let old_row_for_triggers = {
+                    let mut r = row.clone();
+                    if r.row_id.is_none() {
+                        r.row_id = Some((*idx + 1) as u64);
+                    }
+                    r
+                };
+
                 // BEFORE(R): a RAISE(IGNORE) drops this row entirely (skip it,
                 // continue with the remaining rows).
                 let before_outcome = crate::TriggerFirer::execute_before_triggers(
                     database,
                     table_name,
                     vibesql_ast::TriggerEvent::Delete,
-                    Some(row),
+                    Some(&old_row_for_triggers),
                     None,
                 )?;
                 if before_outcome == crate::TriggerOutcome::SkipRow {
@@ -593,7 +606,7 @@ impl DeleteExecutor {
                     database,
                     table_name,
                     vibesql_ast::TriggerEvent::Delete,
-                    Some(row),
+                    Some(&old_row_for_triggers),
                     None,
                 )?;
             }

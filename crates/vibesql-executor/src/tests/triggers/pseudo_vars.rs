@@ -342,3 +342,204 @@ fn test_old_and_new_into_ipk_column_in_update_trigger() {
     // NEW.v (200) becomes the audit IPK/rowid; OLD.v (100) is the value column.
     assert_eq!(audit_rows(&db), vec![(200, 100, 200)]);
 }
+
+// ============================================================================
+// #5485: NEW.rowid / OLD.rowid (and the oid / _rowid_ aliases) in trigger bodies
+//
+// All expected values verified against sqlite3 3.51.0. These triggers log the
+// firing row's rowid into a text `log` table and assert via a LIVE SELECT.
+// ============================================================================
+
+/// Read `SELECT t FROM log ORDER BY rowid` as a Vec<String>.
+fn log_text(db: &Database) -> Vec<String> {
+    let stmt =
+        vibesql_parser::Parser::parse_sql("SELECT t FROM log ORDER BY rowid;").unwrap();
+    let result = match stmt {
+        vibesql_ast::Statement::Select(s) => {
+            SelectExecutor::new(db).execute_with_columns(&s).unwrap()
+        }
+        _ => panic!("Expected Select"),
+    };
+    result
+        .rows
+        .iter()
+        .map(|r| match &r.values[0] {
+            vibesql_types::SqlValue::Varchar(s) => s.to_string(),
+            other => panic!("expected text, got {:?}", other),
+        })
+        .collect()
+}
+
+/// AFTER INSERT NEW.rowid yields the allocated rowid (sqlite3: `1 integer`).
+/// This is the exact repro from issue #5485.
+#[test]
+fn test_new_rowid_in_after_insert_trigger() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ai AFTER INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES (new.rowid || ' ' || typeof(new.rowid)); END;",
+    );
+    exec(&mut db, "INSERT INTO t4 VALUES (8, 8, 8);");
+    assert_eq!(log_text(&db), vec!["1 integer".to_string()]);
+}
+
+/// BEFORE INSERT with an auto-allocated rowid reports new.rowid as -1, then
+/// AFTER INSERT reports the real rowid (sqlite3: `B:-1`, `A:1`). Matches
+/// triggerC-4.1.2 case 2.
+#[test]
+fn test_new_rowid_before_vs_after_insert_auto() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bi BEFORE INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES ('B:' || new.rowid); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ai AFTER INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES ('A:' || new.rowid); END;",
+    );
+    exec(&mut db, "INSERT INTO t4 VALUES ('1', '1', '1');");
+    assert_eq!(log_text(&db), vec!["B:-1".to_string(), "A:1".to_string()]);
+}
+
+/// An explicit `INSERT INTO t4(rowid, ...)` makes new.rowid the explicit value
+/// in BOTH the BEFORE and AFTER INSERT triggers (sqlite3: `B:45`, `A:45`).
+#[test]
+fn test_new_rowid_explicit_before_and_after_insert() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bi BEFORE INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES ('B:' || new.rowid); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ai AFTER INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES ('A:' || new.rowid); END;",
+    );
+    exec(&mut db, "INSERT INTO t4(rowid, a, b, c) VALUES (45, 45, 45, 45);");
+    assert_eq!(log_text(&db), vec!["B:45".to_string(), "A:45".to_string()]);
+}
+
+/// OLD.rowid resolves in BEFORE and AFTER DELETE triggers (sqlite3: `B:1`, `A:1`).
+#[test]
+fn test_old_rowid_in_delete_triggers() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(&mut db, "INSERT INTO t4 VALUES ('a', 'b', 'c');");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bd BEFORE DELETE ON t4 \
+         BEGIN INSERT INTO log VALUES ('B:' || old.rowid); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ad AFTER DELETE ON t4 \
+         BEGIN INSERT INTO log VALUES ('A:' || old.rowid); END;",
+    );
+    exec(&mut db, "DELETE FROM t4;");
+    assert_eq!(log_text(&db), vec!["B:1".to_string(), "A:1".to_string()]);
+}
+
+/// OLD.rowid and NEW.rowid resolve in BEFORE and AFTER UPDATE triggers; with no
+/// rowid change both equal the row's rowid (sqlite3: `B:1/1`, `A:1/1`).
+#[test]
+fn test_old_and_new_rowid_in_update_triggers() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(&mut db, "INSERT INTO t4 VALUES ('a', 1, 1.0);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bu BEFORE UPDATE ON t4 \
+         BEGIN INSERT INTO log VALUES ('B:' || old.rowid || '/' || new.rowid); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4au AFTER UPDATE ON t4 \
+         BEGIN INSERT INTO log VALUES ('A:' || old.rowid || '/' || new.rowid); END;",
+    );
+    exec(&mut db, "UPDATE t4 SET a = 'z';");
+    assert_eq!(log_text(&db), vec!["B:1/1".to_string(), "A:1/1".to_string()]);
+}
+
+/// The `oid` and `_rowid_` aliases behave like `rowid` (sqlite3: `1|1`).
+#[test]
+fn test_rowid_aliases_oid_and_underscore_rowid() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t4 (a TEXT, b INTEGER, c REAL);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ai AFTER INSERT ON t4 \
+         BEGIN INSERT INTO log VALUES (new.oid || '|' || new._rowid_); END;",
+    );
+    exec(&mut db, "INSERT INTO t4 VALUES ('a', 'b', 'c');");
+    assert_eq!(log_text(&db), vec!["1|1".to_string()]);
+}
+
+/// A *real* column literally named `rowid` shadows the pseudo-column: NEW.rowid
+/// resolves to that column's stored value, not the row's rowid (sqlite3: `hello`).
+/// Mirrors triggerD-1.x.
+#[test]
+fn test_real_rowid_column_shadows_pseudo_column() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t (rowid TEXT, b TEXT);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER tai AFTER INSERT ON t \
+         BEGIN INSERT INTO log VALUES (new.rowid); END;",
+    );
+    exec(&mut db, "INSERT INTO t VALUES ('hello', 'y');");
+    assert_eq!(log_text(&db), vec!["hello".to_string()]);
+}
+
+/// NEW.rowid on a WITHOUT ROWID table must error — WITHOUT ROWID tables have no
+/// rowid pseudo-column (sqlite3: `no such column: new.rowid`).
+#[test]
+fn test_new_rowid_on_without_rowid_table_errors() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE w (a TEXT PRIMARY KEY, b TEXT) WITHOUT ROWID;");
+    exec(
+        &mut db,
+        "CREATE TRIGGER wai AFTER INSERT ON w \
+         BEGIN INSERT INTO log VALUES (new.rowid); END;",
+    );
+    let stmt = vibesql_parser::Parser::parse_sql("INSERT INTO w VALUES ('x', 'y');").unwrap();
+    let err = match stmt {
+        vibesql_ast::Statement::Insert(s) => InsertExecutor::execute(&mut db, &s),
+        _ => panic!("Expected Insert"),
+    };
+    assert!(
+        err.is_err(),
+        "NEW.rowid on a WITHOUT ROWID table should error, got {:?}",
+        err
+    );
+}
+
+/// On a table with an INTEGER PRIMARY KEY (rowid alias), NEW.rowid returns the
+/// IPK column value (sqlite3: NEW.rowid == NEW.id).
+#[test]
+fn test_new_rowid_uses_integer_primary_key_alias() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, b TEXT);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER tai AFTER INSERT ON t \
+         BEGIN INSERT INTO log VALUES (new.rowid || '/' || new.id); END;",
+    );
+    exec(&mut db, "INSERT INTO t VALUES (42, 'x');");
+    assert_eq!(log_text(&db), vec!["42/42".to_string()]);
+}
