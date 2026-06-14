@@ -347,6 +347,16 @@ impl super::Catalog {
             .unwrap_or_default()
     }
 
+    /// List all table names in a specific schema.
+    ///
+    /// The `temp` alias is resolved to this session's temp schema, so
+    /// `list_tables_in_schema("temp")` returns the session's temp tables. Used
+    /// by `sqlite_temp_master` introspection. See issue #5513.
+    pub fn list_tables_in_schema(&self, schema_name: &str) -> Vec<String> {
+        let resolved = self.resolve_schema_name(schema_name);
+        self.schemas.get(resolved).map(|schema| schema.list_tables()).unwrap_or_default()
+    }
+
     /// List all table names with qualified names (schema.table).
     pub fn list_all_tables(&self) -> Vec<String> {
         let mut result = Vec::new();

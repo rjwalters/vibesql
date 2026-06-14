@@ -29,7 +29,8 @@ use crate::{
         cte::CteResult,
     },
     sqlite_schema::{
-        execute_sqlite_schema_query, get_sqlite_schema_table_schema, is_sqlite_schema_table,
+        execute_sqlite_schema_query, execute_sqlite_temp_schema_query,
+        get_sqlite_schema_table_schema, is_sqlite_schema_table, is_sqlite_temp_schema_table,
     },
     sqlite_stat::{
         execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table,
@@ -255,6 +256,21 @@ pub(crate) fn execute_table_scan(
         // SQL:1999 E051-09: Apply column aliases if provided
         let table_schema = apply_column_aliases(table_schema, column_aliases)?;
         // Note: Keep schema name as original table name for column name generation
+        let schema = CombinedSchema::from_table(effective_name, table_schema);
+
+        return Ok(super::FromResult::from_rows(schema, result.rows));
+    }
+
+    // Check if it's sqlite_temp_master or sqlite_temp_schema (temp-schema
+    // introspection — temp tables and indexes on temp tables). See #5513.
+    if is_sqlite_temp_schema_table(table_name) {
+        let result = execute_sqlite_temp_schema_query(&database.catalog)?;
+
+        // sqlite_temp_master shares sqlite_master's column shape.
+        let table_schema = get_sqlite_schema_table_schema();
+
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
         let schema = CombinedSchema::from_table(effective_name, table_schema);
 
         return Ok(super::FromResult::from_rows(schema, result.rows));

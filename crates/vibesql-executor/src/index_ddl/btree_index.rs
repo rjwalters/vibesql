@@ -64,6 +64,9 @@ pub fn create_btree_index(
         catalog_columns,
         unique,
     )
+    // Tag the owning schema (e.g. `main` or a session temp schema) so a
+    // temp-table index is separable from a main-table index. See issue #5513.
+    .with_schema(super::schema_of_qualified(qualified_table_name))
     .with_where_clause(stmt.where_clause.as_ref().map(|expr| (**expr).clone()));
     database.catalog.add_index(index_metadata)?;
 
@@ -82,7 +85,10 @@ pub fn create_btree_index(
         has_expression,
     );
     if let Err(e) = build_result {
-        let _ = database.catalog.drop_index(table_name, index_name);
+        // Roll back the catalog entry using the schema-qualified table name so
+        // we drop exactly the index just added (not a same-named main index when
+        // the target was a temp table). See issue #5513.
+        let _ = database.catalog.drop_index(qualified_table_name, index_name);
         return Err(e);
     }
 

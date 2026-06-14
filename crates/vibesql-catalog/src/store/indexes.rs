@@ -55,29 +55,94 @@ impl Catalog {
         Ok(())
     }
 
-    /// Remove an index from the catalog
+    /// Remove an index from the catalog.
+    ///
+    /// `table_name` may carry a schema (`schema.table`) — used by DROP INDEX so
+    /// a temp index and a same-named main index on a same-named table can be
+    /// dropped independently. When unqualified, the index is matched across all
+    /// schemas (index names are unique within a database in practice).
     pub fn drop_index(
         &mut self,
         table_name: &str,
         index_name: &str,
     ) -> Result<IndexMetadata, CatalogError> {
-        let qualified_name = format!("{}.{}", table_name, index_name);
+        let key = self.resolve_index_key(table_name, index_name).ok_or_else(|| {
+            CatalogError::IndexNotFound {
+                index_name: index_name.to_string(),
+                table_name: table_name.to_string(),
+            }
+        })?;
 
-        self.indexes.shift_remove(&qualified_name).ok_or_else(|| CatalogError::IndexNotFound {
+        self.indexes.shift_remove(&key).ok_or_else(|| CatalogError::IndexNotFound {
             index_name: index_name.to_string(),
             table_name: table_name.to_string(),
         })
     }
 
-    /// Get an index by table and index name
+    /// Get an index by table and index name.
+    ///
+    /// `table_name` may be schema-qualified (`schema.table`) to disambiguate a
+    /// temp index from a same-named main index; otherwise the first match
+    /// across schemas is returned.
     pub fn get_index(&self, table_name: &str, index_name: &str) -> Option<&IndexMetadata> {
-        let qualified_name = format!("{}.{}", table_name, index_name);
-        self.indexes.get(&qualified_name)
+        let key = self.resolve_index_key(table_name, index_name)?;
+        self.indexes.get(&key)
     }
 
-    /// Get all indexes for a specific table
+    /// Resolve the catalog key (`schema.table.index`) for the given table/index
+    /// pair. Accepts a schema-qualified `table_name` for exact targeting, or an
+    /// unqualified one, in which case the first matching index (by table + name,
+    /// case-insensitively) is used.
+    fn resolve_index_key(&self, table_name: &str, index_name: &str) -> Option<String> {
+        if let Some((schema_part, table_part)) = table_name.split_once('.') {
+            let resolved_schema = self.resolve_schema_name(schema_part);
+            // Try the exact key first.
+            let exact = format!("{}.{}.{}", resolved_schema, table_part, index_name);
+            if self.indexes.contains_key(&exact) {
+                return Some(exact);
+            }
+            // Fall back to a case-insensitive search constrained to that schema.
+            let resolved_schema_lc = resolved_schema.to_lowercase();
+            let table_lc = table_part.to_lowercase();
+            let index_lc = index_name.to_lowercase();
+            return self
+                .indexes
+                .iter()
+                .find(|(_, idx)| {
+                    idx.schema.to_lowercase() == resolved_schema_lc
+                        && idx.table_name.to_lowercase() == table_lc
+                        && idx.name.to_lowercase() == index_lc
+                })
+                .map(|(k, _)| k.clone());
+        }
+
+        // Unqualified: match by table + index name across all schemas.
+        let table_lc = table_name.to_lowercase();
+        let index_lc = index_name.to_lowercase();
+        self.indexes
+            .iter()
+            .find(|(_, idx)| {
+                idx.table_name.to_lowercase() == table_lc
+                    && idx.name.to_lowercase() == index_lc
+            })
+            .map(|(k, _)| k.clone())
+    }
+
+    /// Get all indexes for a specific table.
+    ///
+    /// Matches by bare table name across all schemas. For schema-scoped views,
+    /// prefer [`Catalog::get_schema_indexes`].
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&IndexMetadata> {
         self.indexes.values().filter(|index| index.table_name == table_name).collect()
+    }
+
+    /// Get all indexes owned by a specific schema (e.g. `main` or `temp_123`).
+    ///
+    /// Drives the per-schema split between `sqlite_master` (main objects) and
+    /// `sqlite_temp_master` (temp objects). See issue #5513.
+    pub fn get_schema_indexes(&self, schema_name: &str) -> Vec<&IndexMetadata> {
+        let resolved = self.resolve_schema_name(schema_name);
+        self.indexes.values().filter(|index| index.schema == resolved).collect()
     }
 
     /// Look up an index by its name alone (across all tables in this catalog).
@@ -120,12 +185,42 @@ impl Catalog {
         self.indexes.values().collect()
     }
 
-    /// Drop all indexes associated with a table (called when dropping table)
+    /// Drop all indexes associated with a table (called when dropping a table).
+    ///
+    /// Schema-aware (#5513): the dropped table's owning schema is resolved using
+    /// the same temp-shadows-main order as table lookup, so dropping a TEMP
+    /// table removes only that temp table's indexes and leaves a same-named main
+    /// table's indexes intact (and vice versa). `table_name` may be
+    /// schema-qualified to target a specific schema.
     pub fn drop_table_indexes(&mut self, table_name: &str) -> Vec<IndexMetadata> {
+        // Resolve which schema the table being dropped lives in. If the table is
+        // already gone from the catalog (callers sometimes drop indexes after
+        // the table), fall back to matching by bare table name across schemas.
+        let resolved_schema = self.resolve_table_schema_name(table_name);
+
+        let (bare_table_name, schema_filter) =
+            if let Some((schema_part, table_part)) = table_name.split_once('.') {
+                (table_part.to_string(), Some(self.resolve_schema_name(schema_part).to_string()))
+            } else {
+                (table_name.to_string(), resolved_schema)
+            };
+
+        let bare_table_lc = bare_table_name.to_lowercase();
+
         let indexes_to_remove: Vec<String> = self
             .indexes
             .iter()
-            .filter(|(_, index)| index.table_name == table_name)
+            .filter(|(_, index)| {
+                if index.table_name.to_lowercase() != bare_table_lc {
+                    return false;
+                }
+                match &schema_filter {
+                    Some(schema) => index.schema.eq_ignore_ascii_case(schema),
+                    // No resolvable owning schema: match by table name only
+                    // (preserves the pre-#5513 fallback behaviour).
+                    None => true,
+                }
+            })
             .map(|(qualified_name, _)| qualified_name.clone())
             .collect();
 
@@ -334,6 +429,109 @@ mod tests {
         // Expression index should be added successfully
         assert!(catalog.add_index(index).is_ok());
         assert!(catalog.get_index("users", "idx_expr").is_some());
+    }
+
+    #[test]
+    fn test_temp_and_main_index_coexist() {
+        // #5513: a temp-schema index and a main-schema index can share a name,
+        // even on a same-named table, without colliding in the catalog.
+        let mut catalog = create_test_catalog();
+
+        // Create a shadowing temp.users table so both schemas hold `users`.
+        let temp_schema = catalog.temp_schema_name().to_string();
+        let temp_table = TableSchema::new(
+            "users".to_string(),
+            vec![ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(50) },
+                true,
+            )],
+        );
+        catalog.create_table_in_schema(&temp_schema, temp_table).unwrap();
+
+        let main_idx = IndexMetadata::new(
+            "idx_name".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+            false,
+        ); // defaults to schema "main"
+        let temp_idx = IndexMetadata::new(
+            "idx_name".to_string(),
+            "users".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+            false,
+        )
+        .with_schema(temp_schema.clone());
+
+        catalog.add_index(main_idx).unwrap();
+        // Same name, same table name, different schema -> must NOT collide.
+        catalog.add_index(temp_idx).expect("temp index should coexist with main index");
+
+        // Both registered, keyed independently by schema.
+        let main_only = catalog.get_schema_indexes("main");
+        let temp_only = catalog.get_schema_indexes(&temp_schema);
+        assert_eq!(main_only.len(), 1);
+        assert_eq!(temp_only.len(), 1);
+        assert_eq!(main_only[0].schema(), "main");
+        assert_eq!(temp_only[0].schema(), temp_schema);
+
+        // get_index can disambiguate via a schema-qualified table name.
+        assert_eq!(catalog.get_index("main.users", "idx_name").unwrap().schema(), "main");
+        assert_eq!(
+            catalog.get_index(&format!("{}.users", temp_schema), "idx_name").unwrap().schema(),
+            temp_schema
+        );
+    }
+
+    #[test]
+    fn test_drop_table_indexes_is_schema_scoped() {
+        // #5513: dropping a temp table removes only the temp-schema index,
+        // leaving the same-named main-schema index intact.
+        let mut catalog = create_test_catalog();
+        let temp_schema = catalog.temp_schema_name().to_string();
+        let temp_table = TableSchema::new(
+            "users".to_string(),
+            vec![ColumnSchema::new(
+                "name".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(50) },
+                true,
+            )],
+        );
+        catalog.create_table_in_schema(&temp_schema, temp_table).unwrap();
+
+        catalog
+            .add_index(IndexMetadata::new(
+                "idx_name".to_string(),
+                "users".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+                false,
+            ))
+            .unwrap();
+        catalog
+            .add_index(
+                IndexMetadata::new(
+                    "idx_name".to_string(),
+                    "users".to_string(),
+                    IndexType::BTree,
+                    vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+                    false,
+                )
+                .with_schema(temp_schema.clone()),
+            )
+            .unwrap();
+
+        // Drop the temp `users` table's indexes (temp shadows main for the bare
+        // name) -> only the temp index goes.
+        let dropped = catalog.drop_table_indexes("users");
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].schema(), temp_schema);
+
+        // Main index survives.
+        assert_eq!(catalog.get_schema_indexes("main").len(), 1);
+        assert!(catalog.get_schema_indexes(&temp_schema).is_empty());
     }
 
     #[test]

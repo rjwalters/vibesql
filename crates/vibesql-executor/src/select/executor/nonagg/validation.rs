@@ -15,7 +15,9 @@ use crate::{
     errors::ExecutorError,
     schema::CombinedSchema,
     select::cte::CteResult,
-    sqlite_schema::{get_sqlite_schema_table_schema, is_sqlite_schema_table},
+    sqlite_schema::{
+        get_sqlite_schema_table_schema, is_sqlite_schema_table, is_sqlite_temp_schema_table,
+    },
 };
 
 /// Validate IN subqueries in WHERE clause before row iteration
@@ -205,8 +207,9 @@ fn compute_single_select_column_count(
                         continue;
                     }
                 }
-                // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables
-                if is_sqlite_schema_table(qualifier) {
+                // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables.
+                // #5513: sqlite_temp_master shares the same column shape.
+                if is_sqlite_schema_table(qualifier) || is_sqlite_temp_schema_table(qualifier) {
                     count += get_sqlite_schema_table_schema().columns.len();
                     continue;
                 }
@@ -248,8 +251,9 @@ fn count_columns_in_from_clause(
                     return Ok(schema.columns.len());
                 }
             }
-            // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables
-            if is_sqlite_schema_table(name) {
+            // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables.
+            // #5513: sqlite_temp_master shares the same column shape.
+            if is_sqlite_schema_table(name) || is_sqlite_temp_schema_table(name) {
                 return Ok(get_sqlite_schema_table_schema().columns.len());
             }
             // Check for views before regular tables

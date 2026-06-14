@@ -71,7 +71,9 @@ pub fn create_ivfflat_index(
             vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
         )],
         false, // IVFFlat indexes are never unique
-    );
+    )
+    // Tag the owning schema so a temp-table index is separable (#5513).
+    .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
     // Create the IVFFlat index in storage
@@ -160,7 +162,9 @@ pub fn create_hnsw_index(
             vibesql_catalog::SortOrder::Ascending, // Not meaningful for vector indexes
         )],
         false, // HNSW indexes are never unique
-    );
+    )
+    // Tag the owning schema so a temp-table index is separable (#5513).
+    .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
     // Create the HNSW index in storage

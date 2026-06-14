@@ -75,7 +75,9 @@ pub fn create_spatial_index(
             vibesql_catalog::SortOrder::Ascending,
         )],
         false,
-    );
+    )
+    // Tag the owning schema so a temp-table index is separable (#5513).
+    .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
     // Store in database (use unqualified table name for storage metadata)
