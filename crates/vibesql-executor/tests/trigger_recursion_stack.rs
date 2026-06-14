@@ -34,6 +34,16 @@ use vibesql_storage::Database;
 /// leaves a wide margin.
 const DEEP_TEST_STACK: usize = 96 * 1024 * 1024;
 
+/// The actual worker-thread stack the SERVER configures for its tokio runtime
+/// (`crates/vibesql-server/src/main.rs::SERVER_WORKER_STACK_SIZE`). Trigger DML
+/// runs synchronously on these threads, so the production stack-safety of the
+/// 700 cap is exactly the stack-safety of recursion on a thread THIS size — not
+/// the 96 MiB used by `DEEP_TEST_STACK`. The server-path regression test below
+/// pins to this value so it would catch a regression (e.g. dropping the
+/// `thread_stack_size` override back to tokio's 2 MiB default) that the
+/// 96 MiB-pinned tests cannot see.
+const SERVER_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
+
 /// Parse and dispatch a single SQL statement (CREATE TABLE / CREATE TRIGGER /
 /// INSERT) against `db`.
 fn exec(db: &mut Database, sql: &str) -> Result<(), vibesql_executor::ExecutorError> {
@@ -80,9 +90,16 @@ fn run_countdown(start: i64) -> (Database, Result<(), vibesql_executor::Executor
 /// Run `f` on a thread with a large stack so deep recursion does not overflow
 /// the (small) default libtest worker stack in debug builds.
 fn on_big_stack<F: FnOnce() + Send + 'static>(name: &str, f: F) {
+    on_stack(name, DEEP_TEST_STACK, f);
+}
+
+/// Run `f` on a freshly spawned thread with an explicit `stack_size`, panicking
+/// if the thread aborts (e.g. a stack overflow). Used both for the wide-margin
+/// `DEEP_TEST_STACK` cases and the server-config-pinned regression test.
+fn on_stack<F: FnOnce() + Send + 'static>(name: &str, stack_size: usize, f: F) {
     std::thread::Builder::new()
         .name(name.to_string())
-        .stack_size(DEEP_TEST_STACK)
+        .stack_size(stack_size)
         .spawn(f)
         .expect("spawn deep-recursion test thread")
         .join()
@@ -126,5 +143,57 @@ fn recursion_at_cap_errors_with_sqlite_wording_not_overflow() {
         );
         // The whole INSERT is rolled back; the failed program leaves no rows.
         assert_eq!(count_rows(&db, "t2"), 0, "failed recursive program leaves no rows");
+    });
+}
+
+/// Server-DoS regression (#5533): drive recursion to the 700 cap on a thread
+/// sized EXACTLY like the server's tokio worker (`SERVER_WORKER_STACK_SIZE`,
+/// 8 MiB) and assert it errors cleanly with SQLite's wording instead of
+/// overflowing the stack (SIGABRT).
+///
+/// This is the test the original PR was missing: the other deep cases pin to a
+/// 96 MiB stack, which proves the *cap logic* is correct but hides the
+/// production failure mode — the server runs trigger DML synchronously on tokio
+/// worker threads, and tokio's default 2 MiB worker stack overflows at depth
+/// ~240, BEFORE the 700 cap fires. A remote client sending a self-recursive
+/// trigger INSERT could thus crash the server. The fix sizes the server's
+/// worker stack at 8 MiB; this test reflects that real config, so if anyone
+/// drops the override (or shrinks the stack below what 700 levels need) it fails
+/// here rather than only crashing in production.
+///
+/// Release-only: per-level frame cost is ~8.7 KiB in release (700 ~= 6.1 MiB,
+/// fits comfortably in 8 MiB) but ~50 KiB in DEBUG (700 ~= 35 MiB, would
+/// overflow an 8 MiB stack — debug is not the shipping configuration, and the
+/// server is run in release). The 96 MiB-pinned `*_at_cap_*` test above still
+/// exercises the cap logic in debug builds.
+#[cfg(not(debug_assertions))]
+#[test]
+fn server_runtime_stack_reaches_cap_cleanly_not_overflow() {
+    on_stack("trigger-server-stack-700", SERVER_WORKER_STACK_SIZE, || {
+        // 5000 drives recursion to the 700 cap. On the server's 8 MiB worker
+        // stack this must produce a clean cap error, NOT a stack overflow.
+        let (db, res) = run_countdown(5000);
+        let err = res.expect_err("recursion reaching the cap must error, not overflow");
+        assert_eq!(
+            err.to_string(),
+            "too many levels of trigger recursion",
+            "over-cap recursion on the server's 8 MiB stack must error cleanly",
+        );
+        assert_eq!(count_rows(&db, "t2"), 0, "failed recursive program leaves no rows");
+    });
+}
+
+/// In DEBUG builds, prove the server's 8 MiB worker stack clears the depth that
+/// overflows tokio's DEFAULT 2 MiB worker (~240 in release; the debug frame is
+/// larger, so we use a conservative 150 that exceeds the ~40-level debug/2 MiB
+/// cliff yet stays well within 8 MiB at ~50 KiB/level). Confirms the
+/// stack-size bump actually buys headroom over the un-fixed default.
+#[cfg(debug_assertions)]
+#[test]
+fn server_runtime_stack_clears_default_2mib_cliff() {
+    on_stack("trigger-server-stack-debug", SERVER_WORKER_STACK_SIZE, || {
+        let (db, res) = run_countdown(150);
+        res.expect("depth-150 must succeed on the server's 8 MiB worker stack");
+        assert_eq!(count_rows(&db, "t2"), 151);
     });
 }
