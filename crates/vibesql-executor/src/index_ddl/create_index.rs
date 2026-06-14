@@ -437,6 +437,115 @@ mod tests {
         assert!(db.index_exists("idx_users_email_qualified"));
     }
 
+    /// Build a `CreateTableStmt` with two unconstrained columns (a, b).
+    /// `temporary` selects between a main table and a TEMP table.
+    fn simple_ab_table(name: &str, temporary: bool) -> CreateTableStmt {
+        CreateTableStmt {
+            temporary,
+            if_not_exists: false,
+            table_name: name.to_string(),
+            columns: vec![
+                ColumnDef {
+                    name: "a".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: true,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
+                },
+                ColumnDef {
+                    name: "b".to_string(),
+                    data_type: DataType::Integer,
+                    nullable: true,
+                    constraints: vec![],
+                    default_value: None,
+                    comment: None,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
+                },
+            ],
+            table_constraints: vec![],
+            table_options: vec![],
+            quoted: false,
+            as_query: None,
+            without_rowid: false,
+        }
+    }
+
+    fn index_on_b(index_name: &str, table_name: &str) -> CreateIndexStmt {
+        CreateIndexStmt {
+            index_name: index_name.to_string(),
+            if_not_exists: false,
+            table_name: table_name.to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::Column {
+                column_name: "b".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+            }],
+            where_clause: None,
+        }
+    }
+
+    /// Regression test for #5505: `CREATE INDEX` on an unqualified TEMP table
+    /// must resolve the table in the session temp schema, not assume `main`.
+    #[test]
+    fn test_create_index_on_temp_table_resolves_temp_schema() {
+        let mut db = Database::new();
+
+        // CREATE TEMP TABLE tbl(a, b)
+        CreateTableExecutor::execute(&simple_ab_table("tbl", true), &mut db).unwrap();
+
+        // CREATE INDEX tbl_idx ON tbl(b) -- unqualified, must find the temp table
+        let result = CreateIndexExecutor::execute(&index_on_b("tbl_idx", "tbl"), &mut db);
+        assert!(
+            result.is_ok(),
+            "CREATE INDEX on a temp table should succeed (got {:?})",
+            result.err()
+        );
+
+        // The index must be reported against the temp schema, matching sqlite3
+        // which records the index in sqlite_temp_master.
+        let msg = result.unwrap();
+        assert!(
+            msg.contains(&format!("{}.tbl", db.catalog.temp_schema_name())),
+            "index should be created in the temp schema, got: {msg}"
+        );
+
+        // Index exists and is honored against live temp-table data.
+        assert!(db.index_exists("tbl_idx"));
+
+        db.insert_row("tbl", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2)])).unwrap();
+        db.insert_row("tbl", Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(4)])).unwrap();
+
+        let rows: Vec<_> = db.get_table("tbl").unwrap().scan_live().collect();
+        assert_eq!(rows.len(), 2, "temp table should hold the inserted rows");
+    }
+
+    /// Regression test for #5505: when a table of the same name exists in both
+    /// `main` and the temp schema, an unqualified `CREATE INDEX` resolves to the
+    /// TEMP table (temp shadows main), matching sqlite3 3.51.0.
+    #[test]
+    fn test_create_index_temp_shadows_main() {
+        let mut db = Database::new();
+
+        // main.t and a shadowing temp.t
+        CreateTableExecutor::execute(&simple_ab_table("t", false), &mut db).unwrap();
+        CreateTableExecutor::execute(&simple_ab_table("t", true), &mut db).unwrap();
+
+        let result = CreateIndexExecutor::execute(&index_on_b("ix", "t"), &mut db);
+        assert!(result.is_ok(), "CREATE INDEX should resolve to temp.t (got {:?})", result.err());
+
+        let msg = result.unwrap();
+        assert!(
+            msg.contains(&format!("{}.t", db.catalog.temp_schema_name())),
+            "unqualified index target must shadow to the temp table, got: {msg}"
+        );
+        assert!(db.index_exists("ix"));
+    }
+
     #[test]
     fn test_create_index_on_nonexistent_schema_qualified_table() {
         let mut db = Database::new();

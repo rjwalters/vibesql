@@ -41,12 +41,22 @@ pub fn validate_create_index(
     stmt: &CreateIndexStmt,
     database: &Database,
 ) -> Result<ValidationResult, ExecutorError> {
-    // Parse qualified table name (schema.table or just table)
+    // Parse qualified table name (schema.table or just table).
+    //
+    // For an UNqualified name we must follow SQLite name resolution: the
+    // session temp schema shadows `main`, so an unqualified table that names a
+    // TEMP table resolves to the temp schema. Previously this hard-coded the
+    // current (main) schema, so `CREATE INDEX ix ON t` where `t` is a TEMP
+    // table failed with `Table 'main.t' not found`. See issue #5505.
     let (schema_name, table_name) =
         if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             (schema_part.to_string(), table_part.to_string())
         } else {
-            (database.catalog.get_current_schema().to_string(), stmt.table_name.clone())
+            let resolved_schema = database
+                .catalog
+                .resolve_table_schema_name(&stmt.table_name)
+                .unwrap_or_else(|| database.catalog.get_current_schema().to_string());
+            (resolved_schema, stmt.table_name.clone())
         };
 
     // Check if target is sqlite_master/sqlite_schema (read-only system table)
