@@ -46,18 +46,49 @@ impl TriggerExecutor {
             return Ok(format!("Trigger '{}' already exists", stmt.trigger_name));
         }
 
-        // INSTEAD OF triggers can only be created on views
-        // BEFORE and AFTER triggers can only be created on tables
+        // Reject triggers on SQLite system tables (any "sqlite_" prefixed name,
+        // e.g. sqlite_master / sqlite_schema / sqlite_stat1). SQLite emits exactly
+        // "cannot create trigger on system table" (sqlite3 3.51.0, trigger1-1.9).
+        // These messages are produced verbatim via `Other` so the TCL conformance
+        // shim passes them through unchanged.
+        if is_system_table_name(&stmt.table_name) {
+            return Err(ExecutorError::Other(
+                "cannot create trigger on system table".to_string(),
+            ));
+        }
+
+        // INSTEAD OF triggers can only be created on views;
+        // BEFORE and AFTER triggers can only be created on (non-view) tables.
+        let target_is_view = db.catalog.get_view(&stmt.table_name).is_some();
         if stmt.timing == TriggerTiming::InsteadOf {
-            // Verify the target view exists
-            if db.catalog.get_view(&stmt.table_name).is_none() {
-                return Err(ExecutorError::Other(format!(
-                    "INSTEAD OF trigger requires a view, but '{}' is not a view",
-                    stmt.table_name
-                )));
+            // INSTEAD OF on a real table is rejected with SQLite's exact wording
+            // "cannot create INSTEAD OF trigger on table: <name>" (trigger1-1.12).
+            if !target_is_view {
+                if db.catalog.table_exists(&stmt.table_name) {
+                    return Err(ExecutorError::Other(format!(
+                        "cannot create INSTEAD OF trigger on table: {}",
+                        stmt.table_name
+                    )));
+                }
+                // Neither a view nor a table: report the missing target.
+                return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
             }
         } else {
-            // Verify the target table exists
+            // BEFORE / AFTER on a view is rejected with SQLite's exact wording
+            // "cannot create BEFORE|AFTER trigger on view: <name>" (trigger1-1.13/1.14).
+            if target_is_view {
+                let timing_label = match stmt.timing {
+                    TriggerTiming::Before => "BEFORE",
+                    TriggerTiming::After => "AFTER",
+                    // InsteadOf handled in the branch above.
+                    TriggerTiming::InsteadOf => unreachable!(),
+                };
+                return Err(ExecutorError::Other(format!(
+                    "cannot create {} trigger on view: {}",
+                    timing_label, stmt.table_name
+                )));
+            }
+            // Verify the target table exists.
             if !db.catalog.table_exists(&stmt.table_name) {
                 return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
             }
@@ -146,4 +177,13 @@ impl TriggerExecutor {
 
         Ok(format!("Trigger '{}' dropped successfully", stmt.trigger_name))
     }
+}
+
+/// Returns true if `name` refers to a SQLite system table. SQLite reserves any
+/// object whose name begins with the case-insensitive prefix `sqlite_` for
+/// internal use (sqlite_master / sqlite_schema / sqlite_stat* / sqlite_sequence,
+/// etc.), and rejects `CREATE TRIGGER` on such tables.
+fn is_system_table_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() >= 7 && bytes[..7].eq_ignore_ascii_case(b"sqlite_")
 }

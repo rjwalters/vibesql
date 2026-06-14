@@ -126,13 +126,9 @@ fn test_recursion_prevention() {
     };
     let result = InsertExecutor::execute(&mut db, &insert);
 
-    // Verify insert failed with recursion error
+    // Verify insert failed with recursion error using SQLite's exact wording
+    // (sqlite3 3.51.0, triggerC.test): "too many levels of trigger recursion".
     assert!(result.is_err(), "Insert should have failed due to recursion limit");
     let err = result.unwrap_err();
-    let err_msg = format!("{:?}", err);
-    assert!(
-        err_msg.contains("recursion") || err_msg.contains("depth"),
-        "Error should mention recursion or depth: {}",
-        err_msg
-    );
+    assert_eq!(err.to_string(), "too many levels of trigger recursion");
 }

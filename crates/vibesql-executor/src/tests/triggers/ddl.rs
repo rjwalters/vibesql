@@ -120,6 +120,92 @@ fn test_create_trigger_if_not_exists_is_noop_when_present() {
     assert!(result.is_err(), "duplicate without IF NOT EXISTS should error");
 }
 
+/// Helper: create an empty test table named `t1` for the wording tests below.
+fn create_t1(db: &mut Database) {
+    match vibesql_parser::Parser::parse_sql("CREATE TABLE t1 (a INT, b INT);").unwrap() {
+        vibesql_ast::Statement::CreateTable(stmt) => {
+            CreateTableExecutor::execute(&stmt, db).unwrap();
+        }
+        other => panic!("Expected CreateTable, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_trigger_on_system_table_wording() {
+    // SQLite (3.51.0, trigger1-1.9) rejects CREATE TRIGGER on a system table with
+    // exactly "cannot create trigger on system table".
+    let mut db = Database::new();
+
+    let stmt = CreateTriggerStmt {
+        if_not_exists: false,
+        trigger_name: "tr1".to_string(),
+        timing: TriggerTiming::After,
+        event: TriggerEvent::Update(None),
+        table_name: "sqlite_master".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql("SELECT 1;".to_string()),
+    };
+
+    let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+        .expect_err("trigger on system table must be rejected");
+    assert_eq!(err.to_string(), "cannot create trigger on system table");
+}
+
+#[test]
+fn test_create_instead_of_trigger_on_table_wording() {
+    // SQLite (3.51.0, trigger1-1.12): "cannot create INSTEAD OF trigger on table: t1".
+    let mut db = Database::new();
+    create_t1(&mut db);
+
+    let stmt = CreateTriggerStmt {
+        if_not_exists: false,
+        trigger_name: "t1t".to_string(),
+        timing: TriggerTiming::InsteadOf,
+        event: TriggerEvent::Update(None),
+        table_name: "t1".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql("SELECT 1;".to_string()),
+    };
+
+    let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+        .expect_err("INSTEAD OF trigger on a table must be rejected");
+    assert_eq!(err.to_string(), "cannot create INSTEAD OF trigger on table: t1");
+}
+
+#[test]
+fn test_create_before_after_trigger_on_view_wording() {
+    // SQLite (3.51.0, trigger1-1.13/1.14):
+    //   "cannot create BEFORE trigger on view: v1"
+    //   "cannot create AFTER trigger on view: v1"
+    let mut db = Database::new();
+    create_t1(&mut db);
+    match vibesql_parser::Parser::parse_sql("CREATE VIEW v1 AS SELECT * FROM t1;").unwrap() {
+        vibesql_ast::Statement::CreateView(stmt) => {
+            crate::advanced_objects::execute_create_view(&stmt, &mut db).unwrap();
+        }
+        other => panic!("Expected CreateView, got {:?}", other),
+    }
+
+    for (timing, label) in [(TriggerTiming::Before, "BEFORE"), (TriggerTiming::After, "AFTER")] {
+        let stmt = CreateTriggerStmt {
+            if_not_exists: false,
+            trigger_name: "v1t".to_string(),
+            timing,
+            event: TriggerEvent::Update(None),
+            table_name: "v1".to_string(),
+            granularity: TriggerGranularity::Row,
+            when_condition: None,
+            triggered_action: TriggerAction::RawSql("SELECT 1;".to_string()),
+        };
+
+        let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+            .expect_err("BEFORE/AFTER trigger on a view must be rejected");
+        assert_eq!(err.to_string(), format!("cannot create {} trigger on view: v1", label));
+    }
+}
+
 #[test]
 fn test_drop_trigger() {
     let mut db = Database::new();
@@ -204,20 +290,32 @@ fn test_create_trigger_all_variations() {
         _ => panic!("Expected CreateTable"),
     }
 
-    // Test different timing values
+    // A view is required for the INSTEAD OF variation: SQLite (and now VibeSQL)
+    // rejects INSTEAD OF on a table and BEFORE/AFTER on a view, so each timing
+    // must target a compatible object.
+    match vibesql_parser::Parser::parse_sql("CREATE VIEW test_view AS SELECT * FROM test_table;")
+        .unwrap()
+    {
+        vibesql_ast::Statement::CreateView(stmt) => {
+            crate::advanced_objects::execute_create_view(&stmt, &mut db).unwrap();
+        }
+        other => panic!("Expected CreateView, got {:?}", other),
+    }
+
+    // Test different timing values, each on a valid target object.
     let timings = vec![
-        (TriggerTiming::Before, "before"),
-        (TriggerTiming::After, "after"),
-        (TriggerTiming::InsteadOf, "insteadof"),
+        (TriggerTiming::Before, "before", "test_table"),
+        (TriggerTiming::After, "after", "test_table"),
+        (TriggerTiming::InsteadOf, "insteadof", "test_view"),
     ];
 
-    for (timing, suffix) in timings {
+    for (timing, suffix, target) in timings {
         let stmt = CreateTriggerStmt {
             if_not_exists: false,
             trigger_name: format!("trigger_{}", suffix),
             timing: timing.clone(),
             event: TriggerEvent::Insert,
-            table_name: "test_table".to_string(),
+            table_name: target.to_string(),
             granularity: TriggerGranularity::Row,
             when_condition: None,
             triggered_action: TriggerAction::RawSql("SELECT 1;".to_string()),

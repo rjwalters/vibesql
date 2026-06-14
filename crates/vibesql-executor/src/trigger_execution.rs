@@ -30,10 +30,16 @@ impl RecursionGuard {
         TRIGGER_RECURSION_DEPTH.with(|depth| {
             let current = depth.get();
             if current >= MAX_TRIGGER_RECURSION_DEPTH {
-                Err(ExecutorError::UnsupportedExpression(format!(
-                    "Trigger recursion depth limit exceeded (max: {}). Possible infinite trigger loop.",
-                    MAX_TRIGGER_RECURSION_DEPTH
-                )))
+                // SQLite emits exactly "too many levels of trigger recursion"
+                // (sqlite3 3.51.0; see triggerC.test 2.x / 6.x and `sqlite3VdbeError`).
+                // Use `Other` so the message surfaces verbatim (no "Unsupported
+                // expression:" wrapper) and the TCL conformance shim passes it
+                // through unchanged. NOTE: the depth *value* (16 vs SQLite's
+                // SQLITE_MAX_TRIGGER_DEPTH = 1000) is tracked separately in #5479;
+                // this change only aligns the message text.
+                Err(ExecutorError::Other(
+                    "too many levels of trigger recursion".to_string(),
+                ))
             } else {
                 depth.set(current + 1);
                 Ok(RecursionGuard)
