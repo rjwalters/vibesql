@@ -1247,13 +1247,111 @@ impl<E> OpenraftBackend<E> {
                 "failed to bind consensus listener on {listen_addr}: {e}"
             ))
         })?;
+        Self::join_tcp_on_listener(
+            node_id,
+            config,
+            listener,
+            log_store,
+            state_machine,
+            bootstrap,
+            tuning,
+        )
+        .await
+    }
 
+    /// The shared tail of every TCP join, given an **already-bound**
+    /// listener: build the network factory from `config`, boot the core,
+    /// spawn the accept loop on `listener`, then establish membership.
+    async fn join_tcp_on_listener<LS>(
+        node_id: u64,
+        config: &ClusterConfig,
+        listener: tokio::net::TcpListener,
+        log_store: LS,
+        state_machine: InMemoryStateMachine,
+        bootstrap: Bootstrap,
+        tuning: RaftTuning,
+    ) -> Result<Self>
+    where
+        LS: RaftLogStorage<TypeConfig>,
+    {
         let network = crate::tcp::TcpNetworkFactory::new(config);
         let mut backend = Self::boot(node_id, network, log_store, state_machine, tuning).await?;
         backend.listener_task = Some(crate::tcp::spawn_listener(backend.raft.clone(), listener));
 
         backend.establish_membership(config.membership(), bootstrap).await?;
         Ok(backend)
+    }
+
+    /// Boot a TCP cluster voter on a **caller-supplied, already-bound**
+    /// listener instead of binding `config.addr(node_id)` here.
+    ///
+    /// This is the no-gap path for ephemeral-port test clusters: the harness
+    /// binds every node's listener at `127.0.0.1:0` up front, reads back the
+    /// OS-assigned ports, wires each node's `config` to those real ports, and
+    /// hands the very same sockets back here — so no port is ever released
+    /// and rebound, closing the reserve-then-rebind window that races
+    /// parallel CI for "Address already in use".
+    ///
+    /// `listener` must already be bound to the address `config` advertises
+    /// for `node_id`; nothing here validates that, since the local config's
+    /// own-address entry is exactly the bound address by construction.
+    ///
+    /// Intended for tests/harnesses; `#[doc(hidden)]` to keep it off the
+    /// public surface.
+    #[doc(hidden)]
+    pub async fn join_tcp_cluster_with_listener(
+        node_id: u64,
+        config: &ClusterConfig,
+        listener: std::net::TcpListener,
+        tuning: RaftTuning,
+    ) -> Result<Self> {
+        let listener = crate::tcp::adopt_listener(listener).map_err(|e| {
+            ConsensusError::Backend(format!("failed to adopt consensus listener: {e}"))
+        })?;
+        Self::join_tcp_on_listener(
+            node_id,
+            config,
+            listener,
+            InMemoryLogStore::default(),
+            InMemoryStateMachine::volatile(),
+            Bootstrap::Initialize,
+            tuning,
+        )
+        .await
+    }
+
+    /// Like [`join_tcp_cluster_with_listener`](Self::join_tcp_cluster_with_listener),
+    /// but the node's Raft log and vote are durable under `dir` (so the
+    /// restart/snapshot scenarios that need a persistent log can still boot
+    /// on a pre-bound ephemeral-port listener).
+    #[doc(hidden)]
+    pub async fn join_tcp_cluster_with_listener_and_data_dir(
+        node_id: u64,
+        config: &ClusterConfig,
+        listener: std::net::TcpListener,
+        dir: impl AsRef<Path>,
+        tuning: RaftTuning,
+    ) -> Result<Self> {
+        let listener = crate::tcp::adopt_listener(listener).map_err(|e| {
+            ConsensusError::Backend(format!("failed to adopt consensus listener: {e}"))
+        })?;
+        let dir = dir.as_ref();
+        let storage = DurableStorage::open(dir)?;
+        let bootstrap = if storage.log_has_state {
+            Bootstrap::Recover { last_log_index: None }
+        } else {
+            Bootstrap::Initialize
+        };
+        Self::join_tcp_on_listener(
+            node_id,
+            config,
+            listener,
+            storage.log_store,
+            storage.state_machine,
+            bootstrap,
+            tuning,
+        )
+        .await
     }
 
     async fn start<LS>(

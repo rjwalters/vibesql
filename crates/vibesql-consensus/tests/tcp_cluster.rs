@@ -13,12 +13,15 @@
 //! ## Port strategy
 //!
 //! Nothing here hardcodes the 5433 port convention: every cluster binds OS-
-//! assigned ephemeral ports (`127.0.0.1:0`, all reservations held
-//! simultaneously, then released just before the nodes rebind them), so
-//! parallel tests and busy CI runners cannot collide. Ephemeral allocation
-//! is cyclic, so a just-released port is not handed out again within a test
-//! run, and the consensus listener binds with `SO_REUSEADDR`, so a
-//! restarted node can rebind its own port immediately.
+//! assigned ephemeral ports (`127.0.0.1:0`) and boots each node **directly
+//! onto its own pre-bound listener**
+//! ([`OpenraftBackend::join_tcp_cluster_with_listener_and_data_dir`]) — the
+//! listeners are held bound from allocation through boot, so no port is ever
+//! released and rebound. That closes the reserve-then-rebind window that
+//! previously let a parallel test or busy CI runner grab a just-freed port
+//! and fail an unrelated PR with "Address already in use" (#5507). The
+//! consensus listener binds with `SO_REUSEADDR`, so a restarted node
+//! (`restore`) can rebind its own fixed port immediately after `kill`.
 //!
 //! ## Partitions
 //!
@@ -61,19 +64,20 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Poll interval inside bounded waits.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-/// Reserve `n` distinct localhost addresses with OS-assigned ephemeral
-/// ports, keyed by node id `1..=n`. All reservations are held at once (so
-/// they are guaranteed distinct) and released on return, just before the
-/// cluster's nodes bind them for real.
-fn free_localhost_addrs(n: u64) -> BTreeMap<u64, String> {
-    let listeners: Vec<(u64, StdTcpListener)> = (1..=n)
-        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("reserve ephemeral port")))
-        .collect();
-    listeners
-        .iter()
-        .map(|(id, listener)| {
-            (*id, listener.local_addr().expect("reserved port address").to_string())
-        })
+/// Bind `n` distinct localhost listeners on OS-assigned ephemeral ports,
+/// keyed by node id `1..=n`. The listeners are returned **still bound** so
+/// the cluster boots each node directly onto its own socket
+/// ([`OpenraftBackend::join_tcp_cluster_with_listener_and_data_dir`]) — no
+/// port is freed and rebound, closing the reserve-then-rebind window that
+/// races parallel CI for "Address already in use" (#5507).
+///
+/// Restart (`restore`) still rebinds a node's fixed address by name via the
+/// transport's `SO_REUSEADDR` path: by then the original port is the node's
+/// own (it just released it on `kill`), so the bounded retry loop in
+/// `restore` reclaims it without contending with unrelated tests.
+fn bound_localhost_listeners(n: u64) -> BTreeMap<u64, StdTcpListener> {
+    (1..=n)
+        .map(|id| (id, StdTcpListener::bind("127.0.0.1:0").expect("bind ephemeral port")))
         .collect()
 }
 
@@ -203,7 +207,14 @@ impl TcpTestCluster {
     }
 
     async fn build(n: u64, with_proxies: bool, tuning: RaftTuning) -> Self {
-        let addrs = free_localhost_addrs(n);
+        // Bind every node's listener up front and keep the sockets; each
+        // node boots directly onto its own bound listener, so no port is
+        // freed and rebound (no port-collision race under parallel CI).
+        let mut listeners = bound_localhost_listeners(n);
+        let addrs: BTreeMap<u64, String> = listeners
+            .iter()
+            .map(|(id, l)| (*id, l.local_addr().expect("bound port address").to_string()))
+            .collect();
 
         let mut proxies = BTreeMap::new();
         if with_proxies {
@@ -218,8 +229,8 @@ impl TcpTestCluster {
 
         let mut nodes = BTreeMap::new();
         for id in 1..=n {
-            // Node `id`'s view: its own real address (it binds it), every
-            // peer behind this node's outgoing proxy when partitionable.
+            // Node `id`'s view: its own real bound address, every peer
+            // behind this node's outgoing proxy when partitionable.
             let view = (1..=n).map(|peer| {
                 let addr = if peer == id || !with_proxies {
                     addrs[&peer].clone()
@@ -230,9 +241,11 @@ impl TcpTestCluster {
             });
             let config = ClusterConfig::new(view).expect("valid cluster config");
             let dir = TempDir::new().expect("create node data directory");
-            let backend = OpenraftBackend::join_tcp_cluster_with_data_dir_tuned(
+            let listener = listeners.remove(&id).expect("a bound listener per node");
+            let backend = OpenraftBackend::join_tcp_cluster_with_listener_and_data_dir(
                 id,
                 &config,
+                listener,
                 dir.path(),
                 tuning,
             )
@@ -867,14 +880,21 @@ async fn execute_on_mvcc_leader(
 /// mount end-to-end over real sockets.)
 #[tokio::test]
 async fn mvcc_three_node_cluster_replicates_over_tcp() {
-    let addrs = free_localhost_addrs(3);
+    let mut listeners = bound_localhost_listeners(3);
+    let addrs: BTreeMap<u64, String> = listeners
+        .iter()
+        .map(|(id, l)| (*id, l.local_addr().expect("bound port address").to_string()))
+        .collect();
     let config = ClusterConfig::new(addrs).expect("valid cluster config");
 
     let mut nodes: BTreeMap<u64, MvccRaftNode> = BTreeMap::new();
     for id in 1..=3 {
+        let listener = listeners.remove(&id).expect("a bound listener per node");
         nodes.insert(
             id,
-            MvccRaftNode::join_tcp_cluster(id, &config).await.expect("boot mvcc tcp node"),
+            MvccRaftNode::join_tcp_cluster_with_listener(id, &config, listener, RaftTuning::default())
+                .await
+                .expect("boot mvcc tcp node"),
         );
     }
 
