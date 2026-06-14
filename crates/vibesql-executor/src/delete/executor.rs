@@ -599,6 +599,19 @@ impl DeleteExecutor {
                     }
                 }
 
+                // Invalidate the database-level columnar cache NOW, between the
+                // bitmap delete and the AFTER trigger (#5523). For row-oriented
+                // tables the columnar aggregate path serves a trigger body's
+                // `SELECT count(*) FROM t` from this LRU-cached snapshot; left
+                // un-invalidated until the loop end, a combined BEFORE+AFTER
+                // DELETE trigger pair would make the AFTER trigger observe the
+                // *pre-delete* count (and the next row's BEFORE trigger a
+                // running count that never decreased). The bitmap/native-columnar
+                // state is already updated by `mark_deleted_inplace`; this drops
+                // the stale row-oriented snapshot so each phase sees the live
+                // count. (Native columnar tables short-circuit this call.)
+                database.invalidate_columnar_cache(table_name);
+
                 // AFTER(R): the row is already deleted; a RAISE(IGNORE) cannot
                 // un-delete it, so SkipRow is a no-op — drop the must-use
                 // outcome (#5418).
