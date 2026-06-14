@@ -64,6 +64,7 @@ mod aggregate_having_tests;
 mod aggregate_min_max_tests;
 mod aggregate_random_patterns;
 mod aggregate_without_from;
+mod alter_rename_collision;
 mod alter_table_constraints;
 mod auto_increment_tests;
 mod between_predicates;

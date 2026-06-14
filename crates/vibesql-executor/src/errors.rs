@@ -2,6 +2,10 @@
 pub enum ExecutorError {
     TableNotFound(String),
     TableAlreadyExists(String),
+    /// ALTER TABLE ... RENAME TO target collides with an existing table or
+    /// index name. SQLite reports this with a distinct message that spans both
+    /// the table and index namespaces.
+    RenameTargetExists(String),
     /// SQLite system table may not be modified (sqlite_master, sqlite_schema)
     SqliteSystemTableReadOnly {
         table_name: String,
@@ -471,6 +475,12 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::TableAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("executor-table-already-exists", name = name.as_str()))
+            }
+            ExecutorError::RenameTargetExists(name) => {
+                // SQLite-compatible error message format. SQLite 3.51.0 emits
+                // this exact string for `ALTER TABLE ... RENAME TO <name>` when
+                // <name> already names a table or an index.
+                write!(f, "there is already another table or index with this name: {}", name)
             }
             ExecutorError::SqliteSystemTableReadOnly { table_name, operation } => {
                 // SQLite-compatible error message format
