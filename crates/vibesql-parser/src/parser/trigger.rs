@@ -31,6 +31,17 @@ impl Parser {
         // Expect TRIGGER keyword
         self.expect_keyword(Keyword::Trigger)?;
 
+        // Optional IF NOT EXISTS: when present, creating a trigger whose name
+        // already exists is a no-op success instead of an error (SQLite).
+        let if_not_exists = if self.peek_keyword(Keyword::If) {
+            self.advance(); // consume IF
+            self.expect_keyword(Keyword::Not)?;
+            self.expect_keyword(Keyword::Exists)?;
+            true
+        } else {
+            false
+        };
+
         // Parse trigger name
         let trigger_name = self.parse_identifier()?;
 
@@ -95,21 +106,24 @@ impl Parser {
         // Parse table name
         let table_name = self.parse_identifier()?;
 
-        // Parse optional FOR EACH ROW/STATEMENT
+        // Parse optional FOR EACH ROW.
+        //
+        // SQLite's grammar only accepts `FOR EACH ROW`; there are no
+        // statement-level triggers. Anything else after `FOR EACH` (most
+        // notably `STATEMENT`) is a syntax error in SQLite — e.g.
+        // `near "STATEMENT": syntax error` (trigger1-1.1.3). We surface the
+        // same `near "<tok>": syntax error` so the rejection matches SQLite
+        // rather than silently accepting an unsupported granularity.
         let granularity = if self.try_consume_keyword(Keyword::For) {
             self.expect_keyword(Keyword::Each)?;
             if self.try_consume_keyword(Keyword::Row) {
                 vibesql_ast::TriggerGranularity::Row
-            } else if self.try_consume_keyword(Keyword::Statement) {
-                vibesql_ast::TriggerGranularity::Statement
             } else {
-                return Err(ParseError {
-                    message: "Expected ROW or STATEMENT after FOR EACH".to_string(),
-                });
+                return Err(ParseError { message: self.peek().syntax_error() });
             }
         } else {
-            // Default to ROW for SQLite compatibility
-            // SQLite doesn't support STATEMENT-level triggers - all triggers are FOR EACH ROW
+            // Default to ROW for SQLite compatibility (all SQLite triggers are
+            // FOR EACH ROW, whether or not the clause is written).
             vibesql_ast::TriggerGranularity::Row
         };
 
@@ -152,6 +166,7 @@ impl Parser {
         }
 
         Ok(vibesql_ast::CreateTriggerStmt {
+            if_not_exists,
             trigger_name,
             timing,
             event,
@@ -261,11 +276,21 @@ impl Parser {
     /// (but SQLite accepts at create time) are preserved as before.
     fn validate_trigger_body(raw_sql: &str) -> Result<(), ParseError> {
         for stmt_sql in crate::split_trigger_body_statements(raw_sql) {
+            // Re-append the statement terminator the splitter stripped. SQLite
+            // parses the whole body in one pass, so a statement that ends
+            // prematurely (e.g. `SELECT * FROM`) reports the *following* `;` as
+            // the offending token (`near ";": syntax error`, trigger1-2.1 /
+            // 2.2). Parsing the split statement alone would instead hit EOF and
+            // report `incomplete input`; restoring the `;` makes the offending
+            // token — and thus the message — match SQLite. A `;` after a valid
+            // statement is harmless (parsing stops at the statement boundary).
+            let stmt_with_terminator = format!("{stmt_sql};");
+
             // Parse each body statement as a trigger-program statement so
             // `RAISE()` is admitted (SQLite only permits RAISE() within a
             // trigger-program; `parse_sql` rejects it at parse time, but a
             // trigger body legitimately contains it).
-            if let Err(e) = Self::parse_sql_in_trigger_body(&stmt_sql) {
+            if let Err(e) = Self::parse_sql_in_trigger_body(&stmt_with_terminator) {
                 if Self::is_create_time_rejection(&e) {
                     // Propagate verbatim so the message (e.g.
                     // `unsupported use of NULLS FIRST`) matches the
@@ -284,12 +309,25 @@ impl Parser {
     /// Is this body-statement parse error one that SQLite also rejects at
     /// `CREATE TRIGGER` time (rather than a VibeSQL parser gap)?
     ///
-    /// Scoped to the `NULLS FIRST/LAST`-in-index-position error class
-    /// (nulls1.test 3.1.12), whose message is emitted verbatim by
-    /// `reject_nulls_in_index_position`. Additional create-time rejection
-    /// classes can be added here as they are identified.
+    /// Two classes are propagated:
+    ///
+    /// 1. The `NULLS FIRST/LAST`-in-index-position error class (nulls1.test
+    ///    3.1.12), whose message is emitted verbatim by
+    ///    `reject_nulls_in_index_position`.
+    /// 2. Token-level syntax errors (`near "X": syntax error`). A genuine
+    ///    syntax error in a body statement — e.g. `SELECT * FROM;`
+    ///    (trigger1-2.1 / 2.2) — is rejected by SQLite at create time, so we
+    ///    surface it too. This is deliberately distinguished from VibeSQL
+    ///    *parser gaps*, which produce descriptive messages (e.g. "Expected
+    ///    ...") rather than the `near "X": syntax error` form; those are still
+    ///    tolerated so we don't reject bodies SQLite accepts but VibeSQL
+    ///    cannot yet parse.
+    ///
+    /// Additional create-time rejection classes can be added here as they are
+    /// identified.
     fn is_create_time_rejection(error: &ParseError) -> bool {
         error.message.starts_with("unsupported use of NULLS ")
+            || (error.message.starts_with("near \"") && error.message.ends_with("\": syntax error"))
     }
 
     /// Parse ALTER TRIGGER statement

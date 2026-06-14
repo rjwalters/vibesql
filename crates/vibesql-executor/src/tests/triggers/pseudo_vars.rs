@@ -34,6 +34,7 @@ fn test_new_in_insert_trigger() {
 
     // Create trigger that uses NEW to log inserted employee
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_new_employee".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -110,6 +111,7 @@ fn test_old_and_new_in_update_trigger() {
 
     // Create trigger that uses both OLD and NEW
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_salary_change".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None), // No specific column list
@@ -186,6 +188,7 @@ fn test_old_in_delete_trigger() {
 
     // Create trigger that uses OLD
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_deletion".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Delete,

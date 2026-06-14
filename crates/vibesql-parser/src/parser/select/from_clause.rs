@@ -428,9 +428,12 @@ impl Parser {
                     index_hint,
                 })
             }
-            _ => Err(ParseError {
-                message: "Expected table name or subquery in FROM clause".to_string(),
-            }),
+            // No table name / subquery where one was required (e.g. `SELECT * FROM;`).
+            // SQLite reports this as a token-level syntax error — `near ";": syntax
+            // error` — rather than a descriptive message, so mirror that. This also
+            // lets CREATE TRIGGER bodies surface the same syntax error at create time
+            // (trigger1-2.1 / 2.2).
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
 

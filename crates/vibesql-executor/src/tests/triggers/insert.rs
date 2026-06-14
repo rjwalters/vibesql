@@ -16,6 +16,7 @@ fn test_after_insert_trigger_fires() {
 
     // Create AFTER INSERT trigger
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_insert".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -62,6 +63,7 @@ fn test_after_insert_trigger_fires_for_each_row() {
 
     // Create AFTER INSERT trigger
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_insert".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -122,6 +124,7 @@ fn test_before_insert_trigger_fires() {
 
     // Create BEFORE INSERT trigger
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_before_insert".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -194,6 +197,7 @@ fn test_insert_trigger_body_semicolon_inside_string_literal_is_not_split() {
     create_audit_table(&mut db);
 
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_semicolon".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -243,6 +247,7 @@ fn test_insert_trigger_body_escaped_quote_with_semicolon_is_intact() {
     create_audit_table(&mut db);
 
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_escaped".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -290,6 +295,7 @@ fn test_insert_trigger_multi_statement_body_with_semicolon_string() {
     create_audit_table(&mut db);
 
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_multi".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,

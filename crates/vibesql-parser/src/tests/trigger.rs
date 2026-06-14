@@ -76,19 +76,78 @@ fn test_create_trigger_for_each_row() {
 }
 
 #[test]
-fn test_create_trigger_for_each_statement() {
+fn test_create_trigger_for_each_statement_rejected() {
+    // SQLite only supports `FOR EACH ROW`; `FOR EACH STATEMENT` is a syntax
+    // error (`near "STATEMENT": syntax error`, trigger1-1.1.3). Verify we
+    // reject it rather than silently accepting an unsupported granularity.
     let sql = "CREATE TRIGGER my_trigger BEFORE INSERT ON my_table FOR EACH STATEMENT BEGIN END;";
+    let result = Parser::parse_sql(sql);
+    let err = result.expect_err("FOR EACH STATEMENT should be rejected");
+    assert_eq!(err.message, "near \"STATEMENT\": syntax error");
+}
+
+#[test]
+fn test_create_trigger_if_not_exists_parsed() {
+    // `CREATE TRIGGER IF NOT EXISTS ...` must parse and set the flag
+    // (trigger1-1.2.0). Previously the `IF` keyword caused
+    // `Expected identifier, found reserved keyword 'IF'`.
+    let sql =
+        "CREATE TRIGGER IF NOT EXISTS my_trigger AFTER INSERT ON my_table BEGIN SELECT 1; END;";
     let result = Parser::parse_sql(sql);
     assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
 
-    let stmt = result.unwrap();
-    match stmt {
+    match result.unwrap() {
         Statement::CreateTrigger(trigger) => {
+            assert!(trigger.if_not_exists, "if_not_exists should be true");
             assert_eq!(trigger.trigger_name, "my_trigger");
-            assert_eq!(trigger.granularity, TriggerGranularity::Statement);
         }
         _ => panic!("Expected CreateTrigger statement"),
     }
+}
+
+#[test]
+fn test_create_trigger_without_if_not_exists_flag_absent() {
+    // Without the clause, if_not_exists must be false.
+    let sql = "CREATE TRIGGER my_trigger AFTER INSERT ON my_table BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("should parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert!(!trigger.if_not_exists, "if_not_exists should be false");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_if_not_exists_works_with_temp() {
+    // The IF NOT EXISTS clause follows the optional TEMP modifier.
+    let sql = "CREATE TEMP TRIGGER IF NOT EXISTS my_trigger AFTER INSERT ON my_table BEGIN SELECT 1; END;";
+    match Parser::parse_sql(sql).expect("should parse") {
+        Statement::CreateTrigger(trigger) => {
+            assert!(trigger.if_not_exists);
+            assert_eq!(trigger.trigger_name, "my_trigger");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_body_syntax_error_rejected_at_create_time() {
+    // A genuine syntax error in a body statement (`SELECT * FROM;`) is
+    // rejected by SQLite at CREATE TRIGGER time with `near ";": syntax error`
+    // (trigger1-2.1). Verify we surface the same token-level syntax error
+    // rather than silently accepting the body.
+    let sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN SELECT * FROM; END;";
+    let err = Parser::parse_sql(sql).expect_err("body syntax error should be rejected");
+    assert_eq!(err.message, "near \";\": syntax error");
+}
+
+#[test]
+fn test_create_trigger_body_syntax_error_after_valid_statement() {
+    // trigger1-2.2: first body statement is valid, second has the syntax
+    // error; the error must still be raised at create time.
+    let sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN SELECT * FROM t1; SELECT * FROM; END;";
+    let err = Parser::parse_sql(sql).expect_err("body syntax error should be rejected");
+    assert_eq!(err.message, "near \";\": syntax error");
 }
 
 #[test]

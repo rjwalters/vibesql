@@ -51,6 +51,7 @@ fn test_when_clause_filters_firing() {
 
     // Create trigger with WHEN (amount > 100) condition
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_high_amount".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,

@@ -24,6 +24,7 @@ fn test_create_trigger() {
 
     // Create a trigger
     let stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -61,6 +62,7 @@ fn test_create_trigger_duplicate_error() {
 
     // Create a trigger
     let stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -79,6 +81,46 @@ fn test_create_trigger_duplicate_error() {
 }
 
 #[test]
+fn test_create_trigger_if_not_exists_is_noop_when_present() {
+    // `CREATE TRIGGER IF NOT EXISTS` for an already-existing trigger is a
+    // no-op success (SQLite trigger1-1.2.0), not a "trigger already exists"
+    // error.
+    let mut db = Database::new();
+
+    let create_table_sql = "CREATE TABLE test_table (id INT, name VARCHAR(255));";
+    match vibesql_parser::Parser::parse_sql(create_table_sql).unwrap() {
+        vibesql_ast::Statement::CreateTable(stmt) => {
+            CreateTableExecutor::execute(&stmt, &mut db).unwrap();
+        }
+        _ => panic!("Expected CreateTable"),
+    }
+
+    let stmt = CreateTriggerStmt {
+        if_not_exists: true,
+        trigger_name: "my_trigger".to_string(),
+        timing: TriggerTiming::Before,
+        event: TriggerEvent::Insert,
+        table_name: "test_table".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql("BEGIN SELECT 1; END".to_string()),
+    };
+
+    // First create succeeds.
+    crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
+        .expect("first create should succeed");
+
+    // Second create with IF NOT EXISTS is a no-op success, not an error.
+    let result = crate::advanced_objects::execute_create_trigger(&stmt, &mut db);
+    assert!(result.is_ok(), "IF NOT EXISTS create should be a no-op: {:?}", result.err());
+
+    // Without IF NOT EXISTS, the same duplicate still errors.
+    let strict = CreateTriggerStmt { if_not_exists: false, ..stmt.clone() };
+    let result = crate::advanced_objects::execute_create_trigger(&strict, &mut db);
+    assert!(result.is_err(), "duplicate without IF NOT EXISTS should error");
+}
+
+#[test]
 fn test_drop_trigger() {
     let mut db = Database::new();
 
@@ -94,6 +136,7 @@ fn test_drop_trigger() {
 
     // Create a trigger
     let stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "my_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
@@ -152,6 +195,7 @@ fn test_create_trigger_all_variations() {
 
     for (timing, suffix) in timings {
         let stmt = CreateTriggerStmt {
+            if_not_exists: false,
             trigger_name: format!("trigger_{}", suffix),
             timing: timing.clone(),
             event: TriggerEvent::Insert,

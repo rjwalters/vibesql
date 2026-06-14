@@ -41,6 +41,7 @@ fn test_after_update_trigger_fires() {
 
     // Create AFTER UPDATE trigger
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_update".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Update(None),
@@ -116,6 +117,7 @@ fn test_before_update_trigger_fires() {
 
     // Create BEFORE UPDATE trigger
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_before_update".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Update(None),
@@ -217,6 +219,7 @@ fn test_update_from_on_view_with_instead_of_trigger() {
     // SQL with old/new references so it must run through the normal
     // trigger-body SQL execution path.
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "tr1".to_string(),
         timing: TriggerTiming::InsteadOf,
         event: TriggerEvent::Update(None),
@@ -304,6 +307,7 @@ fn test_update_from_on_view_zero_matches() {
     }
 
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "tr1".to_string(),
         timing: TriggerTiming::InsteadOf,
         event: TriggerEvent::Update(None),

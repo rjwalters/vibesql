@@ -126,6 +126,10 @@ pub struct DropViewStmt {
 /// CREATE TRIGGER statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTriggerStmt {
+    /// `CREATE TRIGGER IF NOT EXISTS ...`: when true, creating a trigger whose
+    /// name already exists is a no-op success rather than a "trigger already
+    /// exists" error (SQLite semantics).
+    pub if_not_exists: bool,
     pub trigger_name: String,
     pub timing: TriggerTiming,
     pub event: TriggerEvent,

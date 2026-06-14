@@ -16,6 +16,7 @@ fn test_multiple_triggers_fire_in_order() {
 
     // Create first AFTER INSERT trigger
     let trigger1 = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_insert_1".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -31,6 +32,7 @@ fn test_multiple_triggers_fire_in_order() {
 
     // Create second AFTER INSERT trigger
     let trigger2 = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_insert_2".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -77,6 +79,7 @@ fn test_trigger_with_multiple_statements() {
 
     // Create trigger with multiple statements (separated by semicolons)
     let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "log_multiple".to_string(),
         timing: TriggerTiming::After,
         event: TriggerEvent::Insert,
@@ -164,6 +167,7 @@ fn test_before_trigger_executes_first() {
 
     // Create BEFORE INSERT trigger that increments counter
     let before_trigger = CreateTriggerStmt {
+        if_not_exists: false,
         trigger_name: "before_trigger".to_string(),
         timing: TriggerTiming::Before,
         event: TriggerEvent::Insert,
