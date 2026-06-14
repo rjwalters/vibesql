@@ -555,3 +555,230 @@ fn cascade_delete_without_child_triggers_unaffected() {
 
     assert_eq!(query_col(&db, "SELECT id FROM child ORDER BY id"), vec![SqlValue::Integer(20)]);
 }
+
+// ---------------------------------------------------------------------------
+// #5501: ON DELETE SET NULL / SET DEFAULT must fire the child's BEFORE/AFTER
+// UPDATE row triggers (the action is an UPDATE on the child), and a child
+// BEFORE UPDATE RAISE(IGNORE) must skip that child's rewrite — re-using the
+// statement-end orphan FK check from #5465. All expectations verified live
+// against sqlite3 3.51.0.
+// ---------------------------------------------------------------------------
+
+/// Parent DELETE with ON DELETE SET NULL fires the child's BEFORE and AFTER
+/// UPDATE triggers once per rewritten row, with OLD/NEW reflecting the FK
+/// being nulled.
+///
+/// sqlite3 3.51.0 audit for two children referencing parent 1:
+/// ```text
+/// before update 10 old.pid=1 new.pid=NULL
+/// after update 10
+/// before update 11 old.pid=1 new.pid=NULL
+/// after update 11
+/// ```
+#[test]
+fn set_null_fires_child_before_and_after_update_triggers() {
+    let mut db = fresh_db();
+    create_audit(&mut db);
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE SET NULL)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_bu BEFORE UPDATE ON child BEGIN INSERT INTO audit(msg) VALUES('before update ' || OLD.id || ' old.pid=' || IFNULL(OLD.pid,'NULL') || ' new.pid=' || IFNULL(NEW.pid,'NULL')); END",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_au AFTER UPDATE ON child BEGIN INSERT INTO audit(msg) VALUES('after update ' || OLD.id); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
+
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+
+    // Verified against sqlite3 3.51.0.
+    assert_eq!(
+        audit_msgs(&db),
+        vec![
+            "before update 10 old.pid=1 new.pid=NULL",
+            "after update 10",
+            "before update 11 old.pid=1 new.pid=NULL",
+            "after update 11",
+        ]
+    );
+    // Both child FK columns nulled out.
+    assert_eq!(
+        query_col(&db, "SELECT IFNULL(pid, -1) FROM child ORDER BY id"),
+        vec![SqlValue::Integer(-1), SqlValue::Integer(-1)]
+    );
+}
+
+/// Parent DELETE with ON DELETE SET DEFAULT fires the child's BEFORE/AFTER
+/// UPDATE triggers with NEW reflecting the column default.
+///
+/// sqlite3 3.51.0: child pid default 99; audit shows `bu 10 new.pid=99` /
+/// `au 10`; final child pid = 99.
+#[test]
+fn set_default_fires_child_before_and_after_update_triggers() {
+    let mut db = fresh_db();
+    create_audit(&mut db);
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER DEFAULT 99 REFERENCES parent(id) ON DELETE SET DEFAULT)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_bu BEFORE UPDATE ON child BEGIN INSERT INTO audit(msg) VALUES('bu ' || OLD.id || ' new.pid=' || IFNULL(NEW.pid,'NULL')); END",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_au AFTER UPDATE ON child BEGIN INSERT INTO audit(msg) VALUES('au ' || OLD.id); END",
+    )
+    .unwrap();
+    // Parent 99 must exist so the SET DEFAULT rewrite (pid -> 99) is a valid FK.
+    exec(&mut db, "INSERT INTO parent VALUES (1), (99)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
+
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+
+    // Verified against sqlite3 3.51.0.
+    assert_eq!(audit_msgs(&db), vec!["bu 10 new.pid=99", "au 10"]);
+    assert_eq!(query_col(&db, "SELECT pid FROM child"), vec![SqlValue::Integer(99)]);
+}
+
+/// #5501 + #5465: a SET NULL child BEFORE UPDATE RAISE(IGNORE) skips that
+/// child's rewrite, leaving it still pointing at the parent being deleted —
+/// an orphan that trips the immediate statement-end FK check and rolls the
+/// whole statement back.
+///
+/// sqlite3 3.51.0 (auto-commit): `DELETE FROM parent WHERE id=1` -> error
+/// `FOREIGN KEY constraint failed`; parent 1 stays, child 10 keeps pid=1.
+#[test]
+fn set_null_raise_ignore_orphan_trips_statement_end_fk_check() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE SET NULL)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE UPDATE ON child WHEN OLD.id = 10 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
+
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(
+        err.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation, got: {err}"
+    );
+    assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
+
+    // sqlite3 3.51.0: statement rolled back — parent and child both intact,
+    // child still references the parent (pid unchanged).
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
+    assert_eq!(query_col(&db, "SELECT pid FROM child"), vec![SqlValue::Integer(1)]);
+}
+
+/// #5501 + #5465: the same RAISE(IGNORE) skip on a SET DEFAULT child trips
+/// the orphan check (the skipped child keeps its OLD FK to the deleted parent).
+#[test]
+fn set_default_raise_ignore_orphan_trips_statement_end_fk_check() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER DEFAULT 99 REFERENCES parent(id) ON DELETE SET DEFAULT)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE UPDATE ON child WHEN OLD.id = 10 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1), (99)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
+
+    let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
+    assert!(
+        err.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation, got: {err}"
+    );
+    assert!(!db.in_transaction());
+
+    // Statement rolled back: parent 1 and child 10 (pid=1) both intact.
+    assert_eq!(
+        query_col(&db, "SELECT id FROM parent ORDER BY id"),
+        vec![SqlValue::Integer(1), SqlValue::Integer(99)]
+    );
+    assert_eq!(query_col(&db, "SELECT pid FROM child"), vec![SqlValue::Integer(1)]);
+}
+
+/// #5501 + #5465 control: a SET NULL RAISE(IGNORE) under a DEFERRABLE
+/// INITIALLY DEFERRED FK does NOT raise at statement end. The skipped child is
+/// queued and the violation surfaces only at COMMIT, matching sqlite3 3.51.0.
+#[test]
+fn set_null_raise_ignore_deferred_fk_defers_orphan_to_commit() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER child_skip BEFORE UPDATE ON child WHEN OLD.id = 10 BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+    // Deferred: the DELETE itself succeeds mid-transaction (no immediate error).
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+    // Mid-txn: parent gone, child 10 survives orphaned with its OLD pid=1.
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), Vec::<SqlValue>::new());
+    assert_eq!(query_col(&db, "SELECT pid FROM child"), vec![SqlValue::Integer(1)]);
+
+    let commit = crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db);
+    assert!(commit.is_err(), "COMMIT must fail on the deferred orphan");
+    let msg = format!("{:?}", commit.unwrap_err());
+    assert!(
+        msg.contains("FOREIGN KEY constraint failed"),
+        "expected FK violation at COMMIT, got: {msg}"
+    );
+}
+
+/// #5501 sanity: SET NULL with no child triggers still rewrites the FK to
+/// NULL — no behavioral regression on the no-trigger path.
+#[test]
+fn set_null_without_child_triggers_unaffected() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE SET NULL)",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES (1), (2)").unwrap();
+    exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1), (20, 2)").unwrap();
+
+    exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
+
+    // Children of parent 1 nulled; child of parent 2 unchanged.
+    assert_eq!(
+        query_col(&db, "SELECT IFNULL(pid, -1) FROM child ORDER BY id"),
+        vec![SqlValue::Integer(-1), SqlValue::Integer(-1), SqlValue::Integer(2)]
+    );
+}
