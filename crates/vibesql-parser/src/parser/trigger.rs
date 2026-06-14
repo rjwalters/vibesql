@@ -190,14 +190,17 @@ impl Parser {
         // Parse optional WHEN condition
         // SQLite syntax: WHEN expression (no parens required)
         // PostgreSQL syntax: WHEN (expression) (parens required)
-        // We support both for compatibility
+        //
+        // We delegate to the full expression parser, which natively handles
+        // both forms: a bare condition (`WHEN new.a > 20`), a parenthesized
+        // condition (`WHEN (new.a > 20)`), AND a leading subquery
+        // (`WHEN (SELECT count(*) FROM tbl) = 0`, trigger2-3.2). Consuming the
+        // opening paren ourselves as an optional PostgreSQL-style wrapper would
+        // mis-handle the subquery case — the `(` belongs to the subquery, so
+        // stripping it leaves `SELECT ... ) = 0`, which the expression parser
+        // (rightly) rejects. Letting `parse_expression` see the `(` lets its
+        // scalar-subquery / parenthesized-expression handling do the right thing.
         let when_condition = if self.try_consume_keyword(Keyword::When) {
-            let has_paren = if self.peek() == &Token::LParen {
-                self.advance(); // consume optional (
-                true
-            } else {
-                false
-            };
             // The WHEN condition is part of the trigger-program, so SQLite
             // permits RAISE() there too. Mark the parser as inside a trigger
             // body for the duration of the WHEN expression so RAISE() is
@@ -207,9 +210,6 @@ impl Parser {
             let expr_result = self.parse_expression();
             self.in_trigger_body = prev_in_trigger_body;
             let expr = expr_result?;
-            if has_paren {
-                self.expect_token(Token::RParen)?;
-            }
             // SQLite rejects a bound parameter / variable in the WHEN clause at
             // create time (triggerE-1.1.1: `WHEN new.a = ?`). NEW/OLD column
             // references are *not* variables and must still be allowed.

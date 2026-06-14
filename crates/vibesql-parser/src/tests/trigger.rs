@@ -1,6 +1,6 @@
 //! Tests for CREATE TRIGGER and DROP TRIGGER parsing
 
-use vibesql_ast::{Statement, TriggerEvent, TriggerGranularity, TriggerTiming};
+use vibesql_ast::{Expression, Statement, TriggerEvent, TriggerGranularity, TriggerTiming};
 
 use crate::Parser;
 
@@ -161,6 +161,39 @@ fn test_create_trigger_with_when_condition() {
         Statement::CreateTrigger(trigger) => {
             assert_eq!(trigger.trigger_name, "my_trigger");
             assert!(trigger.when_condition.is_some(), "Expected WHEN condition");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_when_subquery() {
+    // trigger2-3.2: SQLite accepts a subquery in the WHEN clause. The leading
+    // `(` belongs to the scalar subquery, not a PostgreSQL-style wrapper, so the
+    // full expression parser must see it (regression guard for the previous
+    // optional-paren handling that mis-parsed `(SELECT ...) = 0`).
+    let sql = "CREATE TRIGGER t2 BEFORE INSERT ON tbl \
+               WHEN (SELECT count(*) FROM tbl) = 0 \
+               BEGIN UPDATE log SET a = a + 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse WHEN subquery: {:?}", result.err());
+
+    let stmt = result.unwrap();
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "t2");
+            let when = trigger.when_condition.expect("Expected WHEN condition");
+            // The condition is `<scalar subquery> = 0`.
+            match when.as_ref() {
+                Expression::BinaryOp { left, .. } => {
+                    assert!(
+                        matches!(left.as_ref(), Expression::ScalarSubquery(_)),
+                        "Expected LHS of WHEN to be a scalar subquery, got {:?}",
+                        left
+                    );
+                }
+                other => panic!("Expected BinaryOp in WHEN, got {:?}", other),
+            }
         }
         _ => panic!("Expected CreateTrigger statement"),
     }
