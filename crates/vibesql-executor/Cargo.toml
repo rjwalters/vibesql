@@ -34,13 +34,6 @@ tokio = { version = "1.0", features = ["sync"] }
 rand = "0.10"
 md-5 = "0.11"
 
-# On-demand stack growth for native trigger recursion (#5534). Lets nested
-# trigger firing reach SQLite's full SQLITE_MAX_TRIGGER_DEPTH (1000) without
-# overflowing a fixed worker-thread stack. stacker has no wasm backend, so it is
-# gated to non-wasm targets; wasm keeps the lower stack-safe native cap.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-stacker = "0.1.24"
-
 # Arrow dependencies for vectorized execution
 # Using 53.0+ for chrono 0.4.42 compatibility (fixes quarter() method ambiguity)
 arrow = "59.0"
@@ -54,6 +47,16 @@ mysql = { version = "28.0", optional = true }
 # These must be in [dependencies] (not dev-dependencies) to be feature-gated
 tikv-jemallocator = { version = "0.7", optional = true }
 tikv-jemalloc-ctl = { version = "0.7", features = ["stats"], optional = true }
+
+# On-demand stack growth for native trigger recursion (#5534). Lets nested
+# trigger firing reach SQLite's full SQLITE_MAX_TRIGGER_DEPTH (1000) without
+# overflowing a fixed worker-thread stack. stacker has no wasm backend, so it is
+# gated to non-wasm targets; wasm keeps the lower stack-safe native cap.
+# NOTE: this target table must stay at the END of the dependency section — a TOML
+# table header captures every key until the next header, so any plain
+# [dependencies] entry placed below it would be accidentally gated to non-wasm.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+stacker = "0.1.24"
 
 [dev-dependencies]
 vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
