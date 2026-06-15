@@ -16,12 +16,18 @@
 //!   rewrites the column name in its definition position, preserving everything
 //!   else.
 //!
-//! This module implements those three in-place edits at the token level (using
-//! the parser's lexer for span tracking, the same approach as
-//! `crate::trigger_rename`). DROP COLUMN and the type/constraint-changing ALTER
-//! variants are deliberately out of scope here: they fall back to invalidating
-//! `sql_source` and reconstructing from the (now-synced) catalog schema, which
-//! is correct, just lower fidelity. See issue #5625.
+//! - `ALTER TABLE t DROP COLUMN c`
+//!   removes the column's definition span (the dropped column's name through the
+//!   start of the next column's name, or — for the last column — from the
+//!   preceding comma to the end of the column list), preserving everything else.
+//!
+//! This module implements those in-place edits at the token level (using the
+//! parser's lexer for span tracking, the same approach as
+//! `crate::trigger_rename`). The type/constraint-changing ALTER variants
+//! (ALTER/MODIFY/CHANGE COLUMN, ADD/DROP CONSTRAINT) remain out of scope here:
+//! they fall back to invalidating `sql_source` and reconstructing from the
+//! (now-synced) catalog schema, which is correct, just lower fidelity. See
+//! issues #5625 and #5634.
 //!
 //! Every function returns `Option<String>`: `Some(edited)` only when the edit
 //! is unambiguous and the structure matches expectations; otherwise `None`, so
@@ -108,12 +114,9 @@ fn ident_matches(tok: &Token, name: &str) -> bool {
 /// `CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]`. Returns `None` if it cannot
 /// be located.
 ///
-/// NOTE: not yet wired into RENAME TO — that variant currently invalidates and
-/// reconstructs (issue #5625 follow-on) because the preserved verbatim text for
-/// a renamed table interacts with a pre-existing SQL-dump reload gap for quoted
-/// identifiers containing `'`. Retained (and unit-tested) so the follow-on can
-/// enable it once the dump/reload path handles such identifiers.
-#[allow(dead_code)]
+/// Wired into RENAME TO via `super::alter::table_options::execute_rename_table`
+/// (issue #5634). The dump statement splitter is quote-aware, so the emitted
+/// `"new_name"` identifier round-trips through `.sql` / `.vbsql` reloads.
 pub fn rename_table(create_sql: &str, new_name: &str) -> Option<String> {
     let tokens = tokenize(create_sql)?;
     let name_idx = table_name_index(&tokens)?;
@@ -155,10 +158,8 @@ fn table_name_index(tokens: &[(Token, Span)]) -> Option<usize> {
     }
     if matches!(tokens.get(i + 1), Some((Token::Symbol('.'), _))) {
         i += 2; // skip `schema .`, the real name follows
-        if !matches!(
-            tokens.get(i),
-            Some((Token::Identifier(_) | Token::DelimitedIdentifier(_), _))
-        ) {
+        if !matches!(tokens.get(i), Some((Token::Identifier(_) | Token::DelimitedIdentifier(_), _)))
+        {
             return None;
         }
     }
@@ -215,12 +216,141 @@ pub fn rename_column(create_sql: &str, old_col: &str, new_col: &str) -> Option<S
 
     let idx = target?;
     let span = tokens[idx].1;
-    let replacement = if is_safe_bare_identifier(new_col) {
-        new_col.to_string()
-    } else {
-        quote_ident(new_col)
-    };
+    let replacement =
+        if is_safe_bare_identifier(new_col) { new_col.to_string() } else { quote_ident(new_col) };
     Some(replace_span(create_sql, span, &replacement))
+}
+
+/// The byte position where a top-level definition begins inside the column
+/// list: the index of the *name token* of a column definition, paired with
+/// whether that definition is a column (vs. a table-level constraint, which we
+/// leave alone).
+struct DefStart {
+    /// Index into the token slice of this definition's first token.
+    tok_idx: usize,
+    /// True when the definition is a column (its first token is an identifier);
+    /// false for a table-level constraint (`PRIMARY KEY`, `UNIQUE`, `CHECK`,
+    /// `FOREIGN KEY`, `CONSTRAINT …`).
+    is_column: bool,
+}
+
+/// Collect the start of every top-level definition in the column list (columns
+/// and table-level constraints), in source order. Depth-1 only; nested parens
+/// (e.g. type sizes, `CHECK(...)`) are skipped.
+fn definition_starts(tokens: &[(Token, Span)], open: usize, close: usize) -> Vec<DefStart> {
+    let mut defs = Vec::new();
+    let mut depth = 0usize;
+    let mut at_def_start = false;
+    for (i, (tok, _)) in tokens.iter().enumerate().take(close).skip(open) {
+        match tok {
+            Token::LParen => {
+                depth += 1;
+                if depth == 1 {
+                    at_def_start = true; // first token inside the column list
+                }
+            }
+            Token::RParen => depth -= 1,
+            Token::Comma if depth == 1 => at_def_start = true,
+            _ if depth == 1 && at_def_start => {
+                at_def_start = false;
+                let is_column = matches!(tok, Token::Identifier(_) | Token::DelimitedIdentifier(_));
+                defs.push(DefStart { tok_idx: i, is_column });
+            }
+            _ => {}
+        }
+    }
+    defs
+}
+
+/// Remove a column definition from the verbatim `CREATE TABLE` text in place,
+/// matching SQLite's `ALTER TABLE ... DROP COLUMN` byte-for-byte (verified
+/// against sqlite3 3.51.0).
+///
+/// SQLite deletes the span from the start of the dropped column's *name* to the
+/// start of the next column's name. For the last column (no following column) it
+/// instead walks backward from the column name to the preceding `,` and deletes
+/// from there to the end of the column list (the closing `)` or the first
+/// table-level constraint). This preserves the user's surrounding whitespace
+/// exactly as SQLite does.
+///
+/// Returns `None` (so the caller falls back to reconstruction) when the column
+/// cannot be located unambiguously, when it is the only/first-of-one column, or
+/// when the structure is otherwise unexpected.
+pub fn drop_column(create_sql: &str, col: &str) -> Option<String> {
+    let tokens = tokenize(create_sql)?;
+    let (open, close) = column_list_parens(&tokens)?;
+    let defs = definition_starts(&tokens, open, close);
+
+    // Index within `defs` of the target column.
+    let mut target: Option<usize> = None;
+    for (di, def) in defs.iter().enumerate() {
+        if def.is_column && ident_matches(&tokens[def.tok_idx].0, col) {
+            if target.is_some() {
+                return None; // ambiguous duplicate column name
+            }
+            target = Some(di);
+        }
+    }
+    let di = target?;
+
+    // Never drop the only remaining column.
+    let column_count = defs.iter().filter(|d| d.is_column).count();
+    if column_count <= 1 {
+        return None;
+    }
+
+    let name_start = tokens[defs[di].tok_idx].1.start;
+
+    // The "next column" is the next *column* definition after this one (a table
+    // constraint does not count — see the table-constraint cases verified
+    // against sqlite3). If there is one, delete `[name_start, next_name_start)`.
+    let next_col = defs[di + 1..].iter().find(|d| d.is_column);
+
+    let bytes = create_sql.as_bytes();
+    let (del_start, del_end) = if let Some(next) = next_col {
+        (name_start, tokens[next.tok_idx].1.start)
+    } else {
+        // Last column (no following *column*; a table-level constraint may
+        // still follow). SQLite deletes from the comma preceding this column up
+        // to its `addColOffset` — the point where ADD COLUMN would insert, which
+        // is the comma preceding the first table-level constraint, or the
+        // closing `)` when there are no constraints. So:
+        //   - end: if a table constraint follows, the comma just before it;
+        //     otherwise the closing `)`.
+        //   - start: walk back to the preceding `,` (matching SQLite's
+        //     `while(*z!=',') z--`).
+        let end = match defs[di + 1..].first() {
+            Some(constraint) => {
+                // Walk back from the constraint token over whitespace to the
+                // separating comma; that comma (and the column text before it)
+                // is what gets removed.
+                let mut e = tokens[constraint.tok_idx].1.start;
+                while e > 0 && bytes[e - 1] != b',' {
+                    e -= 1;
+                }
+                if e == 0 || bytes[e - 1] != b',' {
+                    return None;
+                }
+                e - 1
+            }
+            None => tokens[close].1.start,
+        };
+        let mut start = name_start;
+        while start > 0 && bytes[start - 1] != b',' {
+            start -= 1;
+        }
+        if start == 0 || bytes[start - 1] != b',' {
+            // No preceding comma found (shouldn't happen for a non-first column,
+            // but guards the first-column-with-no-next pathological case).
+            return None;
+        }
+        (start - 1, end)
+    };
+
+    let mut out = String::with_capacity(create_sql.len());
+    out.push_str(&create_sql[..del_start]);
+    out.push_str(&create_sql[del_end..]);
+    Some(out)
 }
 
 /// Extract the verbatim column-definition text from an
@@ -233,14 +363,12 @@ pub fn rename_column(create_sql: &str, old_col: &str, new_col: &str) -> Option<S
 /// located.
 pub fn extract_add_column_text(alter_sql: &str) -> Option<String> {
     let tokens = tokenize(alter_sql)?;
-    let add_pos =
-        tokens.iter().position(|(t, _)| matches!(t, Token::Keyword { keyword: Keyword::Add, .. }))?;
+    let add_pos = tokens
+        .iter()
+        .position(|(t, _)| matches!(t, Token::Keyword { keyword: Keyword::Add, .. }))?;
     let mut start_tok = add_pos + 1;
     // Optional COLUMN keyword.
-    if matches!(
-        tokens.get(start_tok),
-        Some((Token::Keyword { keyword: Keyword::Column, .. }, _))
-    ) {
+    if matches!(tokens.get(start_tok), Some((Token::Keyword { keyword: Keyword::Column, .. }, _))) {
         start_tok += 1;
     }
     let first = tokens.get(start_tok)?;
@@ -359,6 +487,96 @@ mod tests {
         assert!(rename_column(sql, "zzz", "qqq").is_none());
     }
 
+    // DROP COLUMN — byte-for-byte against sqlite3 3.51.0 (verified manually).
+
+    #[test]
+    fn drop_column_last_multiline_matches_sqlite() {
+        // sqlite3: removes `,\n  c   INTEGER\n` (preceding comma to the `)`).
+        let sql = "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT,\n  c   INTEGER\n)";
+        let out = drop_column(sql, "c").unwrap();
+        assert_eq!(out, "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT)");
+    }
+
+    #[test]
+    fn drop_column_first_matches_sqlite() {
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT, c INTEGER)";
+        let out = drop_column(sql, "a").unwrap();
+        assert_eq!(out, "CREATE TABLE t (b TEXT, c INTEGER)");
+    }
+
+    #[test]
+    fn drop_column_middle_matches_sqlite() {
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT, c INTEGER)";
+        let out = drop_column(sql, "b").unwrap();
+        assert_eq!(out, "CREATE TABLE t (a INTEGER, c INTEGER)");
+    }
+
+    #[test]
+    fn drop_column_middle_multiline_matches_sqlite() {
+        let sql = "CREATE TABLE t (\n  a INTEGER,\n  b TEXT,\n  c INTEGER\n)";
+        let out = drop_column(sql, "b").unwrap();
+        assert_eq!(out, "CREATE TABLE t (\n  a INTEGER,\n  c INTEGER\n)");
+    }
+
+    #[test]
+    fn drop_column_first_with_spaces_matches_sqlite() {
+        let sql = "CREATE TABLE t (a INTEGER , b TEXT , c INTEGER)";
+        let out = drop_column(sql, "a").unwrap();
+        assert_eq!(out, "CREATE TABLE t (b TEXT , c INTEGER)");
+    }
+
+    #[test]
+    fn drop_column_last_with_spaces_matches_sqlite() {
+        let sql = "CREATE TABLE t (a INTEGER , b TEXT , c INTEGER)";
+        let out = drop_column(sql, "c").unwrap();
+        assert_eq!(out, "CREATE TABLE t (a INTEGER , b TEXT )");
+    }
+
+    #[test]
+    fn drop_column_before_table_constraint_matches_sqlite() {
+        // sqlite3: the column before a table-level constraint is the "last"
+        // column; its preceding comma through the constraint's start is removed.
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT, c INTEGER, UNIQUE(a))";
+        let out = drop_column(sql, "c").unwrap();
+        assert_eq!(out, "CREATE TABLE t (a INTEGER, b TEXT, UNIQUE(a))");
+    }
+
+    #[test]
+    fn drop_column_middle_with_table_constraint_matches_sqlite() {
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT, c INTEGER, UNIQUE(c))";
+        let out = drop_column(sql, "b").unwrap();
+        assert_eq!(out, "CREATE TABLE t (a INTEGER, c INTEGER, UNIQUE(c))");
+    }
+
+    #[test]
+    fn drop_column_missing_returns_none() {
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
+        assert!(drop_column(sql, "zzz").is_none());
+    }
+
+    #[test]
+    fn drop_column_only_column_returns_none() {
+        let sql = "CREATE TABLE t (a INTEGER)";
+        assert!(drop_column(sql, "a").is_none());
+    }
+
+    #[test]
+    fn drop_column_quoted_name_target() {
+        let sql = "CREATE TABLE t (\"a\" INTEGER, b TEXT)";
+        let out = drop_column(sql, "a").unwrap();
+        assert_eq!(out, "CREATE TABLE t (b TEXT)");
+    }
+
+    #[test]
+    fn rename_table_result_reloads_through_splitter() {
+        // The in-place RENAME TO output is double-quoted; ensure the result is
+        // still a single well-formed CREATE TABLE statement (re-parseable on
+        // reload, issue #5619/#5634).
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
+        let out = rename_table(sql, "t2").unwrap();
+        assert_eq!(out, "CREATE TABLE \"t2\" (a INTEGER, b TEXT)");
+    }
+
     #[test]
     fn extract_add_column_text_with_column_keyword() {
         assert_eq!(
@@ -387,7 +605,8 @@ mod tests {
     fn append_then_extract_matches_sqlite_end_to_end() {
         // ALTER TABLE t ADD COLUMN d TEXT DEFAULT 'x' on the post-ADD-c text.
         let create = "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT\n, c INTEGER)";
-        let coldef = extract_add_column_text("ALTER TABLE t ADD COLUMN d TEXT DEFAULT 'x'").unwrap();
+        let coldef =
+            extract_add_column_text("ALTER TABLE t ADD COLUMN d TEXT DEFAULT 'x'").unwrap();
         let out = append_column(create, &coldef).unwrap();
         assert_eq!(
             out,

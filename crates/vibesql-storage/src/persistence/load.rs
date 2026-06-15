@@ -79,6 +79,20 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
     }
 }
 
+/// The quoted context the dump splitter is currently inside. SQLite has three
+/// independent quoting contexts; a delimiter for one is ordinary text inside
+/// another (issue #5634).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Quote {
+    /// `'…'` string literal. Escapes an embedded quote by doubling (`''`); also
+    /// honors the legacy `\'` backslash escape.
+    Single,
+    /// `"…"` quoted identifier. Escapes an embedded quote by doubling (`""`).
+    Double,
+    /// `[…]` quoted identifier. No escape; the first `]` closes it.
+    Bracket,
+}
+
 /// Parse SQL dump content into individual statements
 ///
 /// Handles:
@@ -86,6 +100,8 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
 /// - Multi-line statements
 /// - Statement termination by semicolon
 /// - String literals (preserves content within quotes)
+/// - Quoted identifiers (`"…"` and `[…]`); a `'` inside one is literal text, not
+///   a string delimiter, and vice versa (tracked via [`Quote`], issue #5634)
 /// - `CREATE TRIGGER ... BEGIN ... END;` blocks where embedded semicolons inside
 ///   the trigger body must NOT terminate the outer statement. We track BEGIN/END
 ///   nesting depth (matched as whole-word identifiers, case-insensitively) and
@@ -96,8 +112,21 @@ pub fn read_sql_dump<P: AsRef<Path>>(path: P) -> Result<String, StorageError> {
 pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> {
     let mut statements = Vec::new();
     let mut current_statement = String::new();
-    let mut in_string = false;
-    let mut string_char = ' ';
+    // The kind of quote we are currently inside, if any. SQLite has three
+    // distinct quoting contexts that nest independently — a delimiter for one
+    // context is ordinary text inside another:
+    //   - `Quote::Single` (`'…'`): a string literal. Only `''` escapes; the
+    //     legacy `\'` escape is also honored here (see the `\\` arm below).
+    //   - `Quote::Double` (`"…"`): a quoted identifier. Only `""` escapes.
+    //   - `Quote::Bracket` (`[…]`): a quoted identifier. Has no escape; the
+    //     first `]` closes it.
+    // Tracking these separately is what lets a `'` inside a `"…"`/`[…]`
+    // identifier (e.g. a table renamed by `ALTER TABLE … RENAME TO`, which
+    // sqlite3 emits double-quoted) be treated as literal text rather than as a
+    // string-literal delimiter — without it, such a `'` desyncs statement
+    // splitting and the dump fails to reload with `near "CREATE": syntax error`
+    // (issue #5634).
+    let mut quote: Option<Quote> = None;
     let mut escape_next = false;
     // BEGIN/END nesting depth. While > 0, semicolons inside the trigger body do
     // not terminate the outer statement.
@@ -133,18 +162,18 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
                 continue;
             }
 
-            // Check for inline comment (-- outside of string)
-            if !in_string && ch == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
+            // Check for inline comment (-- outside of any quoted context)
+            if quote.is_none() && ch == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
                 // Skip rest of line (inline comment)
                 break;
             }
 
             // Detect BEGIN/END as whole-word, case-insensitive identifiers when
-            // not inside a string literal. Track nesting depth so `;` inside a
+            // not inside a quoted context. Track nesting depth so `;` inside a
             // trigger body doesn't prematurely terminate the CREATE TRIGGER.
-            if !in_string && ch.is_ascii_alphabetic() {
-                let prev_is_ident = i > 0
-                    && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_');
+            if quote.is_none() && ch.is_ascii_alphabetic() {
+                let prev_is_ident =
+                    i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_');
                 if !prev_is_ident {
                     if let Some(consumed) = match_keyword(&chars, i, "BEGIN") {
                         begin_depth += 1;
@@ -178,20 +207,55 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
             }
 
             match ch {
-                '\\' if in_string && string_char == '\'' => {
+                // Legacy backslash escape inside a `'…'` string literal only.
+                '\\' if quote == Some(Quote::Single) => {
                     current_statement.push(ch);
                     escape_next = true;
                 }
-                '\'' | '"' if !in_string => {
-                    in_string = true;
-                    string_char = ch;
+                // Open a quoted context. Each kind is tracked separately so a
+                // delimiter for one kind is literal text inside another.
+                '\'' if quote.is_none() => {
+                    quote = Some(Quote::Single);
                     current_statement.push(ch);
                 }
-                c if in_string && c == string_char => {
-                    in_string = false;
+                '"' if quote.is_none() => {
+                    quote = Some(Quote::Double);
                     current_statement.push(ch);
                 }
-                ';' if !in_string && begin_depth == 0 => {
+                '[' if quote.is_none() => {
+                    quote = Some(Quote::Bracket);
+                    current_statement.push(ch);
+                }
+                // Close (or escape, via doubling) a `'…'` string literal. SQLite
+                // escapes an embedded quote by doubling it (`''`); a `''` is the
+                // literal quote, not a close. Look ahead one char to disambiguate.
+                '\'' if quote == Some(Quote::Single) => {
+                    if chars.get(i + 1) == Some(&'\'') {
+                        current_statement.push(ch);
+                        current_statement.push('\'');
+                        i += 2;
+                        continue;
+                    }
+                    quote = None;
+                    current_statement.push(ch);
+                }
+                // Close (or escape, via doubling) a `"…"` quoted identifier.
+                '"' if quote == Some(Quote::Double) => {
+                    if chars.get(i + 1) == Some(&'"') {
+                        current_statement.push(ch);
+                        current_statement.push('"');
+                        i += 2;
+                        continue;
+                    }
+                    quote = None;
+                    current_statement.push(ch);
+                }
+                // Close a `[…]` quoted identifier (no escape; first `]` closes).
+                ']' if quote == Some(Quote::Bracket) => {
+                    quote = None;
+                    current_statement.push(ch);
+                }
+                ';' if quote.is_none() && begin_depth == 0 => {
                     current_statement.push(ch);
                     // Statement complete
                     if !current_statement.trim().is_empty() {
@@ -212,9 +276,9 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
         // statement string we return here as `sqlite_master.sql`, so flattening
         // newlines to spaces would silently rewrite the user's formatting on a
         // .sql reload. A newline is whitespace to the SQL parser, so statement
-        // splitting and re-parsing are unaffected. The `!in_string` guard
+        // splitting and re-parsing are unaffected. The `quote.is_none()` guard
         // matches the prior behavior (no separator injected mid-literal).
-        if !in_string {
+        if quote.is_none() {
             current_statement.push('\n');
         }
     }
@@ -276,6 +340,71 @@ mod tests {
         let statements = parse_sql_statements(content).unwrap();
         assert_eq!(statements.len(), 1);
         assert!(statements[0].contains("John; Doe"));
+    }
+
+    #[test]
+    fn test_quote_inside_double_quoted_identifier_splits_correctly() {
+        // A `'` inside a `"…"` quoted identifier is literal text, not a string
+        // delimiter. Tracking `'` and `"` as one symmetric context would desync
+        // here, gluing the two statements together (issue #5634).
+        let content = "CREATE TABLE \"weird'name\" (x);\nINSERT INTO \"weird'name\" VALUES (1);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("CREATE TABLE"));
+        assert!(statements[0].contains("weird'name"));
+        assert!(statements[1].contains("INSERT INTO"));
+    }
+
+    #[test]
+    fn test_semicolon_inside_double_quoted_identifier_not_a_terminator() {
+        // A `;` inside a `"…"` identifier must not terminate the statement.
+        let content = "CREATE TABLE \"a;b\" (x);\nCREATE TABLE c (y);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("\"a;b\""));
+        assert!(statements[1].contains("CREATE TABLE c"));
+    }
+
+    #[test]
+    fn test_quote_inside_bracket_identifier_splits_correctly() {
+        // A `'` (and `;`) inside a `[…]` quoted identifier is literal text.
+        let content = "CREATE TABLE [weird';name] (x);\nINSERT INTO [weird';name] VALUES (1);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("[weird';name]"));
+        assert!(statements[1].contains("INSERT INTO"));
+    }
+
+    #[test]
+    fn test_double_quote_inside_string_literal_is_literal() {
+        // A `"` inside a `'…'` string literal is literal text, not an identifier
+        // delimiter; a following `;` still terminates.
+        let content = "INSERT INTO t VALUES ('say \"hi\"');\nINSERT INTO t VALUES (2);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("say \"hi\""));
+        assert!(statements[1].contains("VALUES (2)"));
+    }
+
+    #[test]
+    fn test_doubled_quote_escapes_within_quoted_identifier() {
+        // `""` is an escaped quote inside a `"…"` identifier, not a close. The
+        // `;` that follows the real closing quote terminates the statement.
+        let content = "CREATE TABLE \"a\"\"b\" (x);\nCREATE TABLE c (y);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("\"a\"\"b\""));
+        assert!(statements[1].contains("CREATE TABLE c"));
+    }
+
+    #[test]
+    fn test_doubled_quote_escapes_within_string_literal() {
+        // `''` is an escaped quote inside a `'…'` string literal, not a close.
+        let content = "INSERT INTO t VALUES ('it''s; here');\nINSERT INTO t VALUES (2);";
+        let statements = parse_sql_statements(content).unwrap();
+        assert_eq!(statements.len(), 2, "got: {statements:?}");
+        assert!(statements[0].contains("it''s; here"));
+        assert!(statements[1].contains("VALUES (2)"));
     }
 
     #[test]

@@ -42,13 +42,13 @@ impl AlterTableExecutor {
     ///
     /// 2. **`sql_source` upkeep.** SQLite edits the verbatim `CREATE TABLE` text
     ///    in `sqlite_master.sql` in place on ALTER rather than reconstructing it.
-    ///    For ADD COLUMN and RENAME COLUMN the stored verbatim text is edited to
-    ///    match SQLite (when `alter_sql` is available / the structure permits);
-    ///    for the remaining variants — including RENAME TO, deferred as a
-    ///    follow-on (see `table_options::execute_rename_table`) — the stale text
-    ///    is invalidated so it is reconstructed from the (now-synced) schema.
-    ///    Either way the stored text remains re-parseable on reload (issue
-    ///    #5619).
+    ///    For ADD COLUMN, RENAME COLUMN, DROP COLUMN, and RENAME TO the stored
+    ///    verbatim text is edited to match SQLite (when `alter_sql` is available
+    ///    / the structure permits; RENAME TO is handled in
+    ///    `table_options::execute_rename_table`). For the remaining variants, and
+    ///    whenever an in-place edit cannot apply cleanly, the stale text is
+    ///    invalidated so it is reconstructed from the (now-synced) schema. Either
+    ///    way the stored text remains re-parseable on reload (issue #5619).
     pub fn execute_with_source(
         stmt: &AlterTableStmt,
         database: &mut Database,
@@ -94,9 +94,10 @@ impl AlterTableExecutor {
                 let old_name = &rename_table.table_name;
                 let new_name = &rename_table.new_table_name;
                 // `execute_rename_table` edits the verbatim CREATE TABLE text in
-                // place (rewriting the table name, quoting it like SQLite) and
-                // keeps the catalog + storage copies in sync via its drop+create,
-                // so no further bookkeeping is needed here.
+                // place (rewriting the table name to the double-quoted new name,
+                // matching sqlite3) and keeps the catalog + storage copies in
+                // sync via its drop+create, so no further bookkeeping is needed
+                // here (issue #5634).
                 let result = table_options::execute_rename_table(rename_table, database);
                 if result.is_ok() {
                     // Invalidate the database-level columnar cache for both table names
@@ -158,12 +159,13 @@ fn sync_catalog_schema_from_storage(database: &mut Database, table_name: &str) {
 /// Edit (or invalidate) the verbatim `CREATE TABLE` text on the storage `Table`
 /// schema for `table_name` after a successful column ALTER.
 ///
-/// For ADD COLUMN and RENAME COLUMN — the cases SQLite edits in place — the
-/// stored text is edited to match SQLite (when the verbatim `alter_sql` is
-/// available / the structure permits). For every other variant, and whenever
-/// the in-place edit cannot be applied cleanly, the stale text is invalidated so
-/// `sqlite_master.sql` falls back to reconstruction from the synced schema. The
-/// result is always re-parseable on reload (issue #5619).
+/// For ADD COLUMN, RENAME COLUMN, and DROP COLUMN — the cases SQLite edits in
+/// place — the stored text is edited to match SQLite (when the verbatim
+/// `alter_sql` is available / the structure permits). (RENAME TO is edited in
+/// place separately, in `table_options::execute_rename_table`.) For every other
+/// variant, and whenever the in-place edit cannot be applied cleanly, the stale
+/// text is invalidated so `sqlite_master.sql` falls back to reconstruction from
+/// the synced schema. The result is always re-parseable on reload (issue #5619).
 fn update_sql_source_after_alter(
     database: &mut Database,
     table_name: &str,
@@ -187,8 +189,11 @@ fn update_sql_source_after_alter(
             &rename.old_column_name,
             &rename.new_column_name,
         ),
-        // DROP COLUMN, ALTER/MODIFY/CHANGE COLUMN, ADD/DROP CONSTRAINT: SQLite's
-        // in-place editing for these is not yet matched; reconstruct instead.
+        AlterTableStmt::DropColumn(drop) => {
+            crate::alter_rewrite::drop_column(&current, &drop.column_name)
+        }
+        // ALTER/MODIFY/CHANGE COLUMN, ADD/DROP CONSTRAINT: SQLite's in-place
+        // editing for these is not yet matched; reconstruct instead.
         _ => None,
     };
 

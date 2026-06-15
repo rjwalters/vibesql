@@ -48,18 +48,26 @@ pub(super) fn execute_rename_table(
     new_table.schema_mut().name = stmt.new_table_name.clone();
     // The cloned schema still carries the verbatim CREATE TABLE text captured
     // for the *old* table name (issue #5619). SQLite edits this text in place on
-    // RENAME TO (rewriting the name, quoting it), but matching that here is
-    // deferred (issue #5625, follow-on): the preserved verbatim text for a
-    // renamed table interacts badly with a pre-existing SQL-dump reload gap
-    // (the dump's statement splitter mishandles a `'` inside a `"…"`/`[…]`
-    // quoted identifier, so a renamed table whose original name contained such
-    // characters can corrupt the dump on reload). Reconstructing instead emits
-    // a clean, plainly-quoted name that always reloads. So discard the stale
-    // verbatim text on RENAME TO and fall back to reconstruction — the same
-    // proven-safe behavior as #5623. ADD COLUMN / RENAME COLUMN, which do not
-    // change the table name, *do* get in-place text edits (see
-    // `super::update_sql_source_after_alter`).
-    new_table.schema_mut().invalidate_sql_source();
+    // RENAME TO — rewriting the table name to the double-quoted new name and
+    // preserving all other formatting — rather than reconstructing it
+    // (issue #5634). Apply the same in-place edit here. The dump statement
+    // splitter is now quote-aware (a `'` inside the emitted `"new_name"`
+    // identifier no longer desyncs reload — see
+    // `vibesql_storage::persistence::load::parse_sql_statements`), so the
+    // preserved verbatim text round-trips through both the `.sql` and `.vbsql`
+    // formats. If the in-place edit cannot be applied cleanly, fall back to the
+    // proven-safe invalidate-and-reconstruct path (which emits a clean,
+    // plainly-quoted name) — preserving the re-parseable-on-reload invariant
+    // (issue #5619).
+    let renamed_sql = new_table
+        .schema
+        .sql_source
+        .as_deref()
+        .and_then(|sql| crate::alter_rewrite::rename_table(sql, &stmt.new_table_name));
+    match renamed_sql {
+        Some(text) => new_table.schema_mut().set_sql_source(text),
+        None => new_table.schema_mut().invalidate_sql_source(),
+    }
 
     // Drop old table and create new one with the renamed schema
     // This handles indexes and spatial indexes via CASCADE
