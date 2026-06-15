@@ -76,6 +76,12 @@ impl Schema {
         self.tables.get(identifier.canonical())
     }
 
+    /// Mutable lookup of a table in this schema by name.
+    pub fn get_table_mut(&mut self, name: &str, case_sensitive: bool) -> Option<&mut TableSchema> {
+        let identifier = TableIdentifier::new(name, case_sensitive);
+        self.tables.get_mut(identifier.canonical())
+    }
+
     /// Drop a table from this schema using TableIdentifier for proper case handling.
     pub fn drop_table_by_identifier(
         &mut self,

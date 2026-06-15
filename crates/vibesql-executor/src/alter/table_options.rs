@@ -46,6 +46,12 @@ pub(super) fn execute_rename_table(
     // Clone the table and update its schema name
     let mut new_table = old_table.clone();
     new_table.schema_mut().name = stmt.new_table_name.clone();
+    // The cloned schema still carries the verbatim CREATE TABLE text captured
+    // for the *old* table name (issue #5619). Discard it here, before the schema
+    // is cloned into both the catalog and storage copies, so sqlite_master.sql
+    // and the SQL dump fall back to a reconstruction that names the renamed
+    // table instead of re-emitting stale text (which could break reload).
+    new_table.schema_mut().invalidate_sql_source();
 
     // Drop old table and create new one with the renamed schema
     // This handles indexes and spatial indexes via CASCADE

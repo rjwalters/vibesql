@@ -225,6 +225,28 @@ impl Catalog {
                 .map(|(_, schema)| schema)
         }
     }
+
+    /// Mutable counterpart to `get_schema_case_insensitive`.
+    pub(crate) fn get_schema_case_insensitive_mut(
+        &mut self,
+        schema_name: &str,
+    ) -> Option<&mut crate::Schema> {
+        let effective_schema_name = if schema_name.eq_ignore_ascii_case(crate::TEMP_SCHEMA) {
+            self.temp_schema_name.clone()
+        } else {
+            schema_name.to_string()
+        };
+
+        if self.case_sensitive_identifiers {
+            self.schemas.get_mut(&effective_schema_name)
+        } else {
+            let normalized_name = effective_schema_name.to_uppercase();
+            self.schemas
+                .iter_mut()
+                .find(|(key, _)| key.to_uppercase() == normalized_name)
+                .map(|(_, schema)| schema)
+        }
+    }
 }
 
 impl Default for Catalog {

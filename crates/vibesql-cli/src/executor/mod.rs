@@ -214,7 +214,13 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateTable(create_stmt) => {
-                match vibesql_executor::CreateTableExecutor::execute(&create_stmt, &mut self.db) {
+                // Pass the verbatim original statement text so sqlite_master.sql
+                // preserves the user's exact CREATE TABLE formatting (issue #5619).
+                match vibesql_executor::CreateTableExecutor::execute_with_source(
+                    &create_stmt,
+                    &mut self.db,
+                    Some(sql),
+                ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
                     }

@@ -48,6 +48,47 @@ fn test_quoted_table_identifier_roundtrip() {
     std::fs::remove_file(path).ok();
 }
 
+/// Issue #5619: the verbatim original `CREATE TABLE` source text must survive a
+/// full file-level `save_binary` → `load_binary` round-trip (header + catalog +
+/// data sections), not just the in-memory catalog encoder. This is the actual
+/// cross-process path: one process writes the `.vbsql` file, another opens it
+/// and answers `SELECT sql FROM sqlite_master`.
+#[test]
+fn test_binary_file_roundtrip_preserves_verbatim_sql_source() {
+    let mut db = Database::new();
+
+    let original_sql = "CREATE TABLE t1(\n  a INTEGER,\n  b TEXT\n)";
+    let mut schema = TableSchema::new(
+        "t1".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("b".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+    );
+    schema.set_sql_source(original_sql);
+    db.create_table_with_identifier(schema, TableIdentifier::new("t1", false)).unwrap();
+
+    // Insert a row so the data section is exercised alongside the catalog.
+    db.get_table_mut("t1")
+        .unwrap()
+        .insert(crate::Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("x".into())]))
+        .unwrap();
+
+    let path = "/tmp/test_sql_source_binary_roundtrip.vbsql";
+    db.save_binary(path).unwrap();
+
+    let loaded_db = Database::load_binary(path).unwrap();
+    let table = loaded_db.get_table("t1").expect("t1 must survive the binary file round-trip");
+    assert_eq!(
+        table.schema.sql_source.as_deref(),
+        Some(original_sql),
+        "verbatim multi-line CREATE TABLE source must survive a save_binary/load_binary cycle"
+    );
+    assert_eq!(table.row_count(), 1);
+
+    std::fs::remove_file(path).ok();
+}
+
 /// Test that unquoted tables remain unquoted through roundtrip
 #[test]
 fn test_unquoted_table_identifier_roundtrip() {
@@ -322,8 +363,6 @@ fn test_default_rows_carry_pre_mvcc_sentinel() {
 /// as a real v6 file would.
 #[test]
 fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
-    use std::io::Write;
-
     use crate::row::PRE_MVCC_TXN_ID;
 
     // 1) Build a v7 database with default-sentinel rows. We pick rows whose
@@ -369,7 +408,14 @@ fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
         // Patch version byte from 7 back to 6 to claim v6 format.
         v6_bytes[5] = 6;
 
-        // Catalog (unchanged between v6 and v7).
+        // Catalog: emitted by the current writer (latest catalog format). This
+        // test only synthesizes the v6 *data* layout (the per-row MVCC prefix is
+        // what differs at the v6/v7 boundary); the catalog section is read back
+        // at the current version below so that catalog fields added in later
+        // versions (e.g. v9 verbatim sql_source, #5619) stay byte-aligned. The
+        // header still claims v6 to document the synthetic data layout, but the
+        // sections are decoded with explicit per-section versions rather than a
+        // single header-derived version.
         crate::persistence::binary::catalog::write_catalog(&mut v6_bytes, &db).unwrap();
 
         // Data section, v6 layout: per-table {name, row_count, then for each
@@ -394,15 +440,22 @@ fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
         let _ = v7_bytes; // silence unused warning if logic above changes
     }
 
-    // 4) Write the synthetic v6 bytes to disk and load via the public API.
-    let v6_path = "/tmp/test_v6_compat_synthetic.vbsql";
-    {
-        let mut f = std::fs::File::create(v6_path).unwrap();
-        f.write_all(&v6_bytes).unwrap();
-        f.flush().unwrap();
-    }
+    // 4) Decode the synthetic file directly, reading the catalog at the current
+    //    version (it was written by the latest writer) and the data section at
+    //    v6 (the layout we synthesized: no per-row MVCC prefix). This mirrors
+    //    what `Database::load_binary` does, except it lets us mix the catalog
+    //    and data versions — necessary because the single header version byte
+    //    cannot express "latest catalog + v6 data".
+    let mut reader = &v6_bytes[..];
+    let header_version = crate::persistence::binary::read_header(&mut reader).unwrap();
+    assert_eq!(header_version, 6, "synthetic file claims v6 in its header");
+    let mut loaded_db = crate::persistence::binary::read_catalog_v(
+        &mut reader,
+        crate::persistence::binary::format::VERSION,
+    )
+    .unwrap();
+    crate::persistence::binary::read_data(&mut reader, &mut loaded_db, 6).unwrap();
 
-    let loaded_db = Database::load_binary(v6_path).unwrap();
     let loaded_table = loaded_db.get_table("v6compat").unwrap();
     assert_eq!(loaded_table.row_count(), 2);
 
@@ -424,8 +477,6 @@ fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
     }
     assert!(found.contains(&11));
     assert!(found.contains(&22));
-
-    std::fs::remove_file(v6_path).ok();
 }
 
 /// Sanity: confirm the public format constant has actually been bumped to v7.

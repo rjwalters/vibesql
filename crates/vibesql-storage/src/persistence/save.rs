@@ -170,6 +170,27 @@ impl Database {
                 // CREATE TABLE statement
                 let schema = &table.schema;
                 let quoted_output_name = quote_identifier(&output_name);
+
+                // Emit the verbatim original CREATE TABLE text when we captured
+                // it (issue #5619), so sqlite_master.sql keeps the user's exact
+                // formatting across a .vbsql save/reload round-trip. The verbatim
+                // text uses the unqualified, originally-spelled table name, so it
+                // is only valid for the default schema; tables in other schemas
+                // fall through to the qualified reconstruction below. The reload
+                // path re-stamps sql_source from this emitted text.
+                if schema_name == vibesql_catalog::DEFAULT_SCHEMA {
+                    if let Some(src) = schema.sql_source.as_deref() {
+                        writeln!(writer, "{};", src.trim_end_matches(';').trim_end()).map_err(
+                            |e| StorageError::NotImplemented(format!("Write error: {}", e)),
+                        )?;
+                        write_table_data(&mut writer, table, schema, &quoted_output_name)?;
+                        writeln!(writer).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                        continue;
+                    }
+                }
+
                 write!(writer, "CREATE TABLE {} (", &quoted_output_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
@@ -364,61 +385,11 @@ impl Database {
                 writeln!(writer, ";")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-                // INSERT statements for data (only live/non-deleted rows)
-                // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
-                // Note: We must skip generated columns - they cannot be inserted directly.
-                if table.row_count() > 0 {
-                    writeln!(writer)
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-
-                    // Find indices of non-generated columns
-                    let non_generated_indices: Vec<usize> = schema
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, col)| col.generated_expr.is_none())
-                        .map(|(i, _)| i)
-                        .collect();
-
-                    // Build column list for INSERT if we have generated columns
-                    let has_generated_columns = non_generated_indices.len() < schema.columns.len();
-                    let column_list: String = if has_generated_columns {
-                        let col_names: Vec<&str> = non_generated_indices
-                            .iter()
-                            .map(|&i| schema.columns[i].name.as_str())
-                            .collect();
-                        format!(" ({})", col_names.join(", "))
-                    } else {
-                        String::new()
-                    };
-
-                    for (_idx, row) in table.scan_live() {
-                        write!(
-                            writer,
-                            "INSERT INTO {}{} VALUES (",
-                            &quoted_output_name, column_list
-                        )
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-
-                        // Only include values for non-generated columns
-                        let mut first = true;
-                        for &col_idx in &non_generated_indices {
-                            if !first {
-                                write!(writer, ", ").map_err(|e| {
-                                    StorageError::NotImplemented(format!("Write error: {}", e))
-                                })?;
-                            }
-                            first = false;
-                            write!(writer, "{}", sql_value_to_literal(&row.values[col_idx]))
-                                .map_err(|e| {
-                                    StorageError::NotImplemented(format!("Write error: {}", e))
-                                })?;
-                        }
-                        writeln!(writer, ");").map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                    }
-                }
+                // INSERT statements for data (only live/non-deleted rows).
+                // Shared with the verbatim-source path via write_table_data so
+                // both emit identical data (scan_live skips deleted rows and
+                // generated columns are excluded).
+                write_table_data(&mut writer, table, schema, &quoted_output_name)?;
 
                 writeln!(writer)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
@@ -590,6 +561,64 @@ impl Database {
 
         Ok(())
     }
+}
+
+/// Emit `INSERT INTO ...` statements for a table's live (non-deleted) rows.
+///
+/// Shared by the verbatim and reconstructed CREATE TABLE paths so that a table
+/// whose original source text is preserved (issue #5619) still dumps its data
+/// identically. Generated columns are skipped — they cannot be inserted
+/// directly — and only live rows (via `scan_live`) are written.
+fn write_table_data<W: Write>(
+    writer: &mut W,
+    table: &crate::Table,
+    schema: &vibesql_catalog::TableSchema,
+    quoted_output_name: &str,
+) -> Result<(), StorageError> {
+    if table.row_count() == 0 {
+        return Ok(());
+    }
+
+    writeln!(writer).map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+    // Find indices of non-generated columns.
+    let non_generated_indices: Vec<usize> = schema
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, col)| col.generated_expr.is_none())
+        .map(|(i, _)| i)
+        .collect();
+
+    // Build column list for INSERT only when generated columns are present.
+    let has_generated_columns = non_generated_indices.len() < schema.columns.len();
+    let column_list: String = if has_generated_columns {
+        let col_names: Vec<&str> =
+            non_generated_indices.iter().map(|&i| schema.columns[i].name.as_str()).collect();
+        format!(" ({})", col_names.join(", "))
+    } else {
+        String::new()
+    };
+
+    for (_idx, row) in table.scan_live() {
+        write!(writer, "INSERT INTO {}{} VALUES (", quoted_output_name, column_list)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        let mut first = true;
+        for &col_idx in &non_generated_indices {
+            if !first {
+                write!(writer, ", ")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            first = false;
+            write!(writer, "{}", sql_value_to_literal(&row.values[col_idx]))
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+        writeln!(writer, ");")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+
+    Ok(())
 }
 
 /// Quote an identifier if it contains special characters or starts with a digit.

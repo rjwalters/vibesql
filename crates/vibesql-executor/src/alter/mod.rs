@@ -64,6 +64,11 @@ impl AlterTableExecutor {
                     // since the cache key is based on table name
                     database.invalidate_columnar_cache(old_name);
                     database.invalidate_columnar_cache(new_name);
+                    // Discard the verbatim CREATE TABLE text carried over from the
+                    // pre-rename schema: it still names the old table, so emitting
+                    // it in sqlite_master.sql / the SQL dump would be wrong and
+                    // could break reload (issue #5619).
+                    invalidate_sql_source(database, new_name);
                 }
                 return result;
             }
@@ -83,8 +88,27 @@ impl AlterTableExecutor {
         // fresh data with the updated schema rather than stale cached data.
         if result.is_ok() {
             database.invalidate_columnar_cache(table_name);
+            // Any structural ALTER (add/drop/rename column, change type, add/drop
+            // constraint, ...) makes the captured verbatim CREATE TABLE text
+            // stale. Discard it so sqlite_master.sql and the SQL dump fall back
+            // to a reconstruction that matches the live schema (issue #5619).
+            invalidate_sql_source(database, table_name);
         }
 
         result
     }
+}
+
+/// Discard any preserved verbatim CREATE TABLE source text for `table_name`
+/// after a successful ALTER, so that sqlite_master.sql and SQL-dump persistence
+/// reflect the mutated schema instead of the original text. See issue #5619.
+///
+/// The schema is stored twice — once in the storage `Table` (read by the
+/// SQL-dump path) and once in the catalog (read by sqlite_master) — so both
+/// copies must be cleared.
+fn invalidate_sql_source(database: &mut Database, table_name: &str) {
+    if let Some(table) = database.get_table_mut(table_name) {
+        table.schema_mut().invalidate_sql_source();
+    }
+    database.catalog.invalidate_table_sql_source(table_name);
 }

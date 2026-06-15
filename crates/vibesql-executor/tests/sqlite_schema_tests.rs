@@ -9,7 +9,9 @@
 //! SELECT name FROM sqlite_master WHERE type = 'table';
 //! ```
 
-use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, SelectExecutor, ViewExecutor};
+use vibesql_executor::{
+    AlterTableExecutor, CreateIndexExecutor, CreateTableExecutor, SelectExecutor, ViewExecutor,
+};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
@@ -20,6 +22,31 @@ fn execute_create_table(db: &mut Database, sql: &str) {
         CreateTableExecutor::execute(&create_stmt, db).expect("Failed to execute CREATE TABLE");
     } else {
         panic!("Expected CREATE TABLE statement");
+    }
+}
+
+/// Helper to execute a CREATE TABLE statement while preserving the verbatim
+/// original source text (issue #5619), mirroring how the CLI/load paths call
+/// `execute_with_source`.
+fn execute_create_table_with_source(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("Failed to parse SQL");
+    if let vibesql_ast::Statement::CreateTable(create_stmt) = stmt {
+        CreateTableExecutor::execute_with_source(&create_stmt, db, Some(sql))
+            .expect("Failed to execute CREATE TABLE");
+    } else {
+        panic!("Expected CREATE TABLE statement");
+    }
+}
+
+/// Extract the single text value from a one-row, one-column query result.
+fn single_text(db: &Database, query: &str) -> String {
+    let (_columns, rows) = execute_select(db, query);
+    assert_eq!(rows.len(), 1, "expected exactly one row for query: {}", query);
+    match &rows[0].values[0] {
+        vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+            s.to_string()
+        }
+        other => panic!("expected text sql value, got {:?}", other),
     }
 }
 
@@ -216,4 +243,88 @@ fn test_sqlite_schema_in_subquery() {
 
     assert_eq!(columns.len(), 1);
     assert!(!rows.is_empty());
+}
+
+/// Issue #5619 / table-1.1: SQLite stores the original CREATE TABLE statement
+/// byte-verbatim in sqlite_master.sql, preserving the user's exact whitespace
+/// and formatting. When the source text is captured at CREATE time, the engine
+/// must return it as-is rather than a normalized reconstruction.
+#[test]
+fn test_sqlite_master_sql_preserves_verbatim_whitespace() {
+    let mut db = Database::new();
+    // This is the exact statement from SQLite's table.test table-1.1, including
+    // the multi-line layout and leading indentation on the column definitions.
+    let create_sql = "CREATE TABLE test1 (\n      one varchar(10),\n      two text\n    )";
+    execute_create_table_with_source(&mut db, create_sql);
+
+    let stored = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert_eq!(
+        stored, create_sql,
+        "sqlite_master.sql must preserve the verbatim CREATE TABLE text (issue #5619)"
+    );
+}
+
+/// A trailing semicolon on the original statement must not be stored: SQLite's
+/// sqlite_master.sql excludes the terminating `;`.
+#[test]
+fn test_sqlite_master_sql_strips_trailing_semicolon() {
+    let mut db = Database::new();
+    execute_create_table_with_source(&mut db, "CREATE TABLE   t  (  a   INT ,  b  TEXT ) ;");
+
+    let stored = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert_eq!(stored, "CREATE TABLE   t  (  a   INT ,  b  TEXT )");
+}
+
+/// Issue #5619 (correctness guard): after ALTER TABLE mutates the schema, the
+/// previously-captured verbatim CREATE text is stale (it still names the old
+/// table / lacks the new column). It must be discarded so sqlite_master.sql
+/// reflects the live schema instead of the original source text — which would
+/// otherwise be wrong and could break SQL-dump reload.
+#[test]
+fn test_sqlite_master_sql_invalidated_after_alter_rename() {
+    let mut db = Database::new();
+    let create_sql = "CREATE TABLE oldname (\n      a INTEGER,\n      b TEXT\n    )";
+    execute_create_table_with_source(&mut db, create_sql);
+
+    // Sanity: verbatim text is returned before any ALTER.
+    let before = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert_eq!(before, create_sql);
+
+    // Rename the table; this invalidates the stale verbatim source.
+    let stmt = Parser::parse_sql("ALTER TABLE oldname RENAME TO newname").expect("parse");
+    if let vibesql_ast::Statement::AlterTable(alter) = stmt {
+        AlterTableExecutor::execute(&alter, &mut db).expect("rename");
+    } else {
+        panic!("expected ALTER TABLE");
+    }
+
+    let after = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert_ne!(after, create_sql, "stale verbatim text must not survive a rename");
+    assert!(
+        after.contains("newname"),
+        "reconstructed sql should name the renamed table, got: {}",
+        after
+    );
+    assert!(
+        !after.contains("oldname"),
+        "reconstructed sql must not reference the old table name, got: {}",
+        after
+    );
+}
+
+/// Without captured source text (e.g. AST built programmatically), the engine
+/// falls back to reconstructing a valid CREATE TABLE statement.
+#[test]
+fn test_sqlite_master_sql_reconstructs_without_source() {
+    let mut db = Database::new();
+    // execute_create_table uses the plain `execute` path (no source text).
+    execute_create_table(&mut db, "CREATE TABLE noverb (a INTEGER, b TEXT)");
+
+    let stored = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert!(
+        stored.to_uppercase().starts_with("CREATE TABLE"),
+        "fallback reconstruction should still produce CREATE TABLE, got: {}",
+        stored
+    );
+    assert!(stored.contains("noverb"), "reconstruction should name the table, got: {}", stored);
 }

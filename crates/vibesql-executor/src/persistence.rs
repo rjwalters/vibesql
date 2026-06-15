@@ -111,7 +111,17 @@ fn execute_statement_for_load(
             // ALTER TABLE RENAME gap) must still reload rather than brick the
             // database. User-issued CREATE TABLE still goes through
             // `CreateTableExecutor::execute`, which keeps the guards (issue #5614).
-            CreateTableExecutor::execute_for_load(&create_stmt, db)?;
+            //
+            // We use the trusted+verbatim variant so the reload ALSO preserves
+            // the byte-for-byte original CREATE TABLE text for sqlite_master.sql
+            // (issue #5619). The bypassed guards (#5614/#5553) and the verbatim
+            // source capture are complementary: a persisted dump must reload AND
+            // keep the user's original formatting after a save/reload cycle.
+            CreateTableExecutor::execute_for_load_with_source(
+                &create_stmt,
+                db,
+                Some(original_sql),
+            )?;
         }
         vibesql_ast::Statement::CreateIndex(index_stmt) => {
             CreateIndexExecutor::execute(&index_stmt, db)?;

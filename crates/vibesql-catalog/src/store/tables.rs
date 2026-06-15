@@ -263,6 +263,44 @@ impl super::Catalog {
         }
     }
 
+    /// Discard the verbatim `CREATE TABLE` source text (`TableSchema::sql_source`)
+    /// stored on the catalog copy of `name`'s schema. Used after ALTER TABLE so
+    /// that `sqlite_master.sql` reflects the mutated schema via reconstruction
+    /// instead of stale original text. No-op when the table is not found. Mirrors
+    /// `get_table`'s name-resolution order (temp schema, then current schema).
+    /// See issue #5619.
+    pub fn invalidate_table_sql_source(&mut self, name: &str) {
+        let case_sensitive = self.case_sensitive_identifiers;
+
+        if let Some((schema_name, table_name)) = name.split_once('.') {
+            let normalized_table = self.normalize_identifier(table_name);
+            if let Some(schema) = self.get_schema_case_insensitive_mut(schema_name) {
+                if let Some(table) = schema.get_table_mut(&normalized_table, case_sensitive) {
+                    table.invalidate_sql_source();
+                }
+            }
+            return;
+        }
+
+        let normalized_table = self.normalize_identifier(name);
+
+        // Temp schema shadows the current schema (SQLite semantics).
+        let temp_schema_name = self.temp_schema_name.clone();
+        if let Some(temp_schema) = self.schemas.get_mut(&temp_schema_name) {
+            if let Some(table) = temp_schema.get_table_mut(&normalized_table, case_sensitive) {
+                table.invalidate_sql_source();
+                return;
+            }
+        }
+
+        let current_schema = self.current_schema.clone();
+        if let Some(schema) = self.schemas.get_mut(&current_schema) {
+            if let Some(table) = schema.get_table_mut(&normalized_table, case_sensitive) {
+                table.invalidate_sql_source();
+            }
+        }
+    }
+
     /// Drop a table schema (supports qualified names like "schema.table").
     /// Respects the `case_sensitive_identifiers` setting.
     ///
