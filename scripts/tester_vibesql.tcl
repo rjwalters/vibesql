@@ -40,6 +40,20 @@ set ::total_changes 0
 set ::sql_batch {}
 set ::in_transaction 0
 
+# Maximum batch size for which we perform the per-statement in-transaction
+# "trial check" (see trial_check_in_transaction). The trial re-executes the
+# ENTIRE accumulated batch + the new statement + ROLLBACK on every statement
+# submitted inside a transaction, which is O(n^2) over the transaction length.
+# That is fine for the small transactions that actually need precise error
+# attribution (e.g. fkey6's BEGIN; UPDATE; ... COMMIT, 1-2 statements), but it
+# makes large stress transactions (e.g. table.test table-15: 2000 CREATE/DROP
+# statements inside one BEGIN/COMMIT) take O(n^2) time and blow past the
+# harness timeout. Once the batch exceeds this threshold we stop trial-checking
+# and simply accumulate; any error then surfaces at the eventual COMMIT/flush
+# (the pre-#5210 behavior), which is correct for these stress cases since they
+# do not assert per-statement error boundaries.
+set ::trial_check_max_batch 50
+
 # When an aborting RAISE (RAISE(ABORT) / RAISE(FAIL)) or an ordinary constraint
 # violation fires *inside* an open transaction, SQLite rolls back only the
 # offending statement and leaves the enclosing transaction OPEN (#5478). The
@@ -1181,6 +1195,18 @@ proc trial_check_in_transaction {new_sql} {
     #
     # Returns: a TCL error (via `error ...`) if the trial reports an error,
     # otherwise returns silently.
+    #
+    # PERFORMANCE GUARD: re-executing the whole accumulated batch on every
+    # statement is O(n^2) over the transaction length. For large transactions
+    # (well beyond anything that asserts per-statement error attribution) this
+    # dominates runtime and can exceed the harness timeout (table.test
+    # table-15: 2000 statements in one BEGIN/COMMIT). Once the batch is large,
+    # skip the trial and just accumulate; errors then surface at the eventual
+    # COMMIT/flush, which is the correct/expected behavior for such stress
+    # transactions. See $::trial_check_max_batch for the rationale.
+    if {[llength $::sql_batch] >= $::trial_check_max_batch} {
+        return
+    }
     set trial_stmts {}
     foreach stmt $::sql_batch {
         set s [string trimright $stmt]
