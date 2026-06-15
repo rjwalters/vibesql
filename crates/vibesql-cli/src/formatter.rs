@@ -196,14 +196,33 @@ impl ResultFormatter {
     }
 
     /// Print results in raw format for SQLite TCL test compatibility.
-    /// - ASCII 31 (Unit Separator) between values within each row
-    /// - One row per line
+    /// - ASCII 31 (Unit Separator, `\x1f`) between values within each row
+    /// - ASCII 30 (Record Separator, `\x1e`) terminating each row
     /// - NULL values output as empty strings
     /// - No headers, no borders, no row count
     ///
-    /// We use ASCII 31 instead of pipe because pipe can appear in SQL string values.
-    /// The TCL shim (scripts/tester_vibesql.tcl) expects this delimiter.
+    /// We use ASCII 31 between values (instead of pipe) because pipe can appear
+    /// in SQL string values. We terminate rows with ASCII 30 (instead of a plain
+    /// newline) because a single column VALUE may itself contain an embedded
+    /// newline (e.g. the verbatim multi-line `CREATE TABLE` text stored in
+    /// `sqlite_master.sql`). Using `\n` as the row terminator made such values
+    /// ambiguous with the row boundary, mis-splitting one row into several.
+    /// ASCII 30/31 are the canonical control characters for record/field
+    /// framing and cannot occur in ordinary SQL values, so embedded newlines are
+    /// preserved verbatim. The TCL shim (scripts/tester_vibesql.tcl,
+    /// `parse_raw_result`) splits on these same separators.
     fn print_raw(&self, result: &QueryResult) {
+        // Single write; no trailing newline. The harness frames rows on \x1e.
+        print!("{}", Self::format_raw(result));
+    }
+
+    /// Build the raw-format payload for `result` (see `print_raw`).
+    ///
+    /// Columns are joined with ASCII 31 (`\x1f`) and each row is terminated with
+    /// ASCII 30 (`\x1e`). Zero rows yields an empty string. Extracted as a pure
+    /// function so the exact framing can be unit-tested.
+    fn format_raw(result: &QueryResult) -> String {
+        let mut out = String::new();
         for row in &result.rows {
             let values: Vec<&str> = row
                 .iter()
@@ -213,8 +232,10 @@ impl ResultFormatter {
                     val.as_ref().map(|s| s.as_str()).unwrap_or("")
                 })
                 .collect();
-            println!("{}", values.join("\x1f"));
+            out.push_str(&values.join("\x1f"));
+            out.push('\x1e');
         }
+        out
     }
 }
 
@@ -343,5 +364,56 @@ mod tests {
 
         // Should handle empty results gracefully
         formatter.print_raw(&result);
+    }
+
+    #[test]
+    fn test_format_raw_framing() {
+        // Rows are terminated with \x1e (Record Separator) and columns are
+        // joined with \x1f (Unit Separator). Zero rows yields empty output.
+        let result = create_test_result();
+        assert_eq!(
+            ResultFormatter::format_raw(&result),
+            "1\x1fAlice\x1e2\x1fBob\x1e"
+        );
+
+        // NULL (None) renders as an empty string; a real "NULL" string stays.
+        let nulls = QueryResult {
+            columns: vec!["a".to_string(), "b".to_string()],
+            rows: vec![vec![None, Some("NULL".to_string())]],
+            row_count: 1,
+            execution_time_ms: None,
+            message: None,
+        };
+        assert_eq!(ResultFormatter::format_raw(&nulls), "\x1fNULL\x1e");
+
+        // Zero rows => empty string.
+        let empty = QueryResult {
+            columns: vec![],
+            rows: vec![],
+            row_count: 0,
+            execution_time_ms: None,
+            message: None,
+        };
+        assert_eq!(ResultFormatter::format_raw(&empty), "");
+    }
+
+    #[test]
+    fn test_format_raw_preserves_embedded_newline() {
+        // A single column value containing an embedded newline (e.g. the
+        // verbatim multi-line CREATE TABLE text from sqlite_master.sql) must be
+        // emitted verbatim, framed by a single trailing \x1e — NOT split into
+        // multiple rows. This is the bug fixed by issue #5630.
+        let multiline = "CREATE TABLE t(\n  a INT\n)";
+        let result = QueryResult {
+            columns: vec!["sql".to_string()],
+            rows: vec![vec![Some(multiline.to_string())]],
+            row_count: 1,
+            execution_time_ms: None,
+            message: None,
+        };
+        let out = ResultFormatter::format_raw(&result);
+        assert_eq!(out, format!("{}\x1e", multiline));
+        // Exactly one row terminator: the embedded \n did not create a boundary.
+        assert_eq!(out.matches('\x1e').count(), 1);
     }
 }
