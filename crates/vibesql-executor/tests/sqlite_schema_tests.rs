@@ -275,14 +275,12 @@ fn test_sqlite_master_sql_strips_trailing_semicolon() {
     assert_eq!(stored, "CREATE TABLE   t  (  a   INT ,  b  TEXT )");
 }
 
-/// Issue #5625: `ALTER TABLE ... RENAME TO` is deferred from in-place verbatim
-/// text editing (the preserved text interacts badly with a pre-existing SQL-dump
-/// reload gap for quoted identifiers containing `'`). It keeps the #5619
-/// behavior: the stale verbatim text is discarded and `sqlite_master.sql` is
-/// reconstructed, so the new name appears and the old one never survives, and
-/// the result stays re-parseable on reload.
+/// Issue #5634: `ALTER TABLE ... RENAME TO` edits the verbatim CREATE TABLE
+/// text in place, rewriting the table name to the double-quoted new name and
+/// preserving all other formatting — byte-for-byte matching sqlite3 3.51.0
+/// (previously deferred to invalidate-and-reconstruct, issue #5625).
 #[test]
-fn test_sqlite_master_sql_rename_table_reconstructs() {
+fn test_sqlite_master_sql_rename_table_edits_text_in_place() {
     let mut db = Database::new();
     let create_sql = "CREATE TABLE oldname (\n      a INTEGER,\n      b TEXT\n    )";
     execute_create_table_with_source(&mut db, create_sql);
@@ -298,17 +296,12 @@ fn test_sqlite_master_sql_rename_table_reconstructs() {
         panic!("expected ALTER TABLE");
     }
 
+    // sqlite3 3.51.0 emits the new name double-quoted, preserving everything
+    // else verbatim: `CREATE TABLE "newname" (\n      a INTEGER,\n      b TEXT\n    )`.
     let after = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
-    assert_ne!(after, create_sql, "stale verbatim text must not survive a rename");
-    assert!(
-        after.contains("newname"),
-        "reconstructed sql should name the renamed table, got: {}",
-        after
-    );
-    assert!(
-        !after.contains("oldname"),
-        "reconstructed sql must not reference the old table name, got: {}",
-        after
+    assert_eq!(
+        after, "CREATE TABLE \"newname\" (\n      a INTEGER,\n      b TEXT\n    )",
+        "RENAME TO must rewrite the table name in place, double-quoted (issue #5634)"
     );
 }
 
@@ -352,14 +345,15 @@ fn test_sqlite_master_sql_add_column_syncs_catalog_and_edits_text() {
     );
 }
 
-/// Issue #5625 part (1): after `ALTER TABLE ... DROP COLUMN`, the catalog schema
-/// copy must drop the column too. The verbatim text is invalidated for DROP
-/// COLUMN (reconstruction is correct, just lower fidelity — see follow-on), so
-/// the reconstructed sql must reflect the dropped column.
+/// Issue #5634: after `ALTER TABLE ... DROP COLUMN`, the verbatim CREATE TABLE
+/// text is edited in place (the dropped column's definition span removed,
+/// byte-for-byte matching sqlite3 3.51.0), and the catalog schema copy drops the
+/// column too (issue #5625 part 1).
 #[test]
-fn test_drop_column_syncs_catalog_schema() {
+fn test_drop_column_edits_text_and_syncs_catalog() {
     let mut db = Database::new();
-    execute_create_table_with_source(&mut db, "CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT, c INTEGER)");
+    let create_sql = "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT,\n  c   INTEGER\n)";
+    execute_create_table_with_source(&mut db, create_sql);
 
     let stmt = Parser::parse_sql("ALTER TABLE t DROP COLUMN c").expect("parse");
     if let vibesql_ast::Statement::AlterTable(alter) = stmt {
@@ -368,6 +362,13 @@ fn test_drop_column_syncs_catalog_schema() {
         panic!("expected ALTER TABLE");
     }
 
+    // sqlite3 3.51.0: removes `,\n  c   INTEGER` (preceding comma to the `)`).
+    let sql = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
+    assert_eq!(
+        sql, "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT)",
+        "DROP COLUMN must remove the column-def span in place (issue #5634)"
+    );
+
     let catalog_schema = db.catalog.get_table("t").expect("catalog has table t");
     let col_names: Vec<&str> = catalog_schema.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(
@@ -375,9 +376,6 @@ fn test_drop_column_syncs_catalog_schema() {
         vec!["a", "b"],
         "catalog schema must drop the column after DROP COLUMN (issue #5625)"
     );
-
-    let sql = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
-    assert!(!sql.contains(" c "), "reconstructed sql must not mention dropped column c, got: {}", sql);
 }
 
 /// Issue #5625: `ALTER TABLE ... RENAME COLUMN` rewrites the column name in its
