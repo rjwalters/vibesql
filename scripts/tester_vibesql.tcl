@@ -1778,59 +1778,70 @@ proc execsql {sql {db ""}} {
 }
 
 proc parse_raw_result {output} {
-    # Parse VibeSQL raw format output into TCL list
-    # Raw format uses ASCII 31 (Unit Separator) between values, one row per line
-    # We use ASCII 31 instead of pipe because pipe can appear in SQL values
-    # NULL values are already empty strings, string 'NULL' stays as "NULL"
-    # This matches SQLite TCL interface behavior for NULL representation
+    # Parse VibeSQL raw format output into TCL list.
+    #
+    # Raw format framing (see crates/vibesql-cli/src/formatter.rs print_raw):
+    #   - ASCII 31 (Unit Separator, \x1f) between values within a row
+    #   - ASCII 30 (Record Separator, \x1e) terminating each row
+    #
+    # We deliberately split ROWS on \x1e rather than on a plain newline: a
+    # single column VALUE may itself contain embedded newlines (e.g. the
+    # verbatim multi-line CREATE TABLE text returned by
+    # `SELECT sql FROM sqlite_master` after issue #5619/#5623). Splitting rows
+    # on \n mis-split such a value into several rows (issue #5630). ASCII 30/31
+    # are control characters that cannot appear in ordinary SQL values, so an
+    # embedded newline is preserved verbatim inside its column.
+    #
+    # NULL values are emitted as empty strings; the literal string 'NULL' stays
+    # as "NULL". This matches SQLite's TCL interface NULL representation.
     set data {}
 
-    # Special case: completely empty output means zero rows
-    # This must be checked BEFORE stripping the trailing newline
+    # Special case: completely empty output means zero rows.
+    # Check this BEFORE stripping the trailing record separator.
     if {$output eq ""} {
         return {}
     }
 
-    # Special case: single newline means one row with NULL value
-    # This is how VibeSQL outputs a single-column NULL result
-    # Check this BEFORE stripping the trailing newline
-    if {$output eq "\n"} {
+    # Special case: a single record separator means one row whose single column
+    # is NULL (VibeSQL emits an empty value followed by \x1e). Check this BEFORE
+    # stripping the trailing separator.
+    if {$output eq "\x1e"} {
         # Return null_string if set, otherwise empty string
         set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
         return [list $null_rep]
     }
 
-    # Strip exactly one trailing newline if present.
-    # VibeSQL outputs each row followed by a newline, including the last row.
+    # Strip exactly one trailing record separator if present.
+    # VibeSQL terminates every row with \x1e, including the last row.
     # Without this, split would create an extra empty element at the end.
-    # Example: "abc\n" (one row) → split gives {"abc" ""} but we want {"abc"}
-    if {[string index $output end] eq "\n"} {
+    # Example: "abc\x1e" (one row) -> split gives {"abc" ""} but we want {"abc"}
+    if {[string index $output end] eq "\x1e"} {
         set output [string range $output 0 end-1]
     }
 
-    set lines [split $output "\n"]
+    set rows [split $output "\x1e"]
 
-    foreach line $lines {
-        # Skip error lines
-        if {[regexp {^Error} $line]} {
-            error [translate_error_to_sqlite $line]
+    foreach row $rows {
+        # Skip error lines. Errors are reported as plain text (not raw-framed),
+        # so they may still arrive newline-terminated; match the leading token.
+        if {[regexp {^Error} $row]} {
+            error [translate_error_to_sqlite $row]
         }
 
-        # Handle empty lines (represent rows where all values are NULL)
-        # For a single-column query with NULL, the line will be empty
-        if {$line eq ""} {
-            # Empty line = row with single NULL value
+        # Handle empty rows (represent a row whose single column is NULL).
+        # For a single-column query returning NULL, the row will be empty.
+        if {$row eq ""} {
+            # Empty row = row with single NULL value
             # Use null_string if set, otherwise empty string
             set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
             lappend data $null_rep
             continue
         }
 
-        # Split by Unit Separator (ASCII 31) and add each value to the result
-        # VibeSQL uses ASCII 31 as delimiter because pipe can appear in SQL values
-        # Empty values represent NULL - use null_string if set
+        # Split by Unit Separator (ASCII 31) and add each value to the result.
+        # Empty values represent NULL - use null_string if set.
         set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
-        foreach val [split $line "\x1f"] {
+        foreach val [split $row "\x1f"] {
             if {$val eq ""} {
                 lappend data $null_rep
             } else {
