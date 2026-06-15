@@ -165,7 +165,7 @@ your custom strings.
 |------|---------|
 | `scripts/install/create-pr.sh` | Generates the install PR with markers |
 | `scripts/install-loom.sh` | Top-level installer; parses `--skip-target-ci` |
-| `defaults/.loom/docs/ci-integration.md` | This document (shipped with installs) |
+| `defaults/docs/ci-integration.md` | This document (shipped with installs) |
 
 For questions or improvements, file an issue at
 <https://github.com/rjwalters/loom/issues>.

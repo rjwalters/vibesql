@@ -362,16 +362,16 @@ assert_contains "$HELP_OUT" "Skip-CI-Hint" \
     "install-loom.sh --help mentions the Skip-CI-Hint commit trailer"
 
 # -----------------------------------------------------------------------------
-# Group 5: ci-integration.md exists in defaults/.loom/docs/
+# Group 5: ci-integration.md exists in defaults/docs/
 # -----------------------------------------------------------------------------
 echo ""
 echo "Group 5: Integration doc exists"
 
-CI_DOC="$REPO_ROOT/defaults/.loom/docs/ci-integration.md"
+CI_DOC="$REPO_ROOT/defaults/docs/ci-integration.md"
 TESTS_RUN=$((TESTS_RUN + 1))
 if [[ -f "$CI_DOC" ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "  ${GREEN}PASS${NC}: defaults/.loom/docs/ci-integration.md exists"
+    echo -e "  ${GREEN}PASS${NC}: defaults/docs/ci-integration.md exists"
     # Sanity-check the doc mentions key things.
     DOC_CONTENT=$(cat "$CI_DOC")
     assert_contains "$DOC_CONTENT" "paths-ignore" \
@@ -386,7 +386,7 @@ if [[ -f "$CI_DOC" ]]; then
         "Integration doc documents --skip-target-ci flag"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "  ${RED}FAIL${NC}: defaults/.loom/docs/ci-integration.md missing"
+    echo -e "  ${RED}FAIL${NC}: defaults/docs/ci-integration.md missing"
 fi
 
 # -----------------------------------------------------------------------------

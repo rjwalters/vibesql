@@ -345,6 +345,83 @@ if [[ "$AUTO_MERGE" == "true" ]]; then
       break
     fi
 
+    # PR is UNSTABLE — GitHub's enablePullRequestAutoMerge mutation rejects this
+    # state with "Pull request Pull request is in unstable status" when one or
+    # more rollup checks are red. The auto-merge call would deadlock indefinitely
+    # waiting for those checks to go green, but if every failing check is
+    # informational (NOT in branch protection's requiredStatusCheckContexts)
+    # the immediate-merge path would succeed. Detect that case and fall through;
+    # otherwise preserve the existing UNSTABLE refusal so we never bypass a
+    # genuinely required check. Sibling of the CLEAN-fallback above. See #3486.
+    if echo "$AUTO_MERGE_OUTPUT" | grep -q "is in unstable status"; then
+      # Resolve the failing check names from the rollup against the PR's head
+      # SHA, then compute (failing_checks) \ (required_contexts). If the set
+      # difference equals failing_checks, every failure is informational.
+      _UNSTABLE_HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // empty')"
+      _UNSTABLE_BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // empty')"
+      if [[ -z "$_UNSTABLE_HEAD_SHA" ]] || [[ -z "$_UNSTABLE_BASE_REF" ]]; then
+        # Can't make a safe decision without the head SHA and base ref — fall
+        # through to the existing refusal.
+        error "Failed to enable auto-merge for PR #$PR_NUMBER: $AUTO_MERGE_OUTPUT"
+      fi
+
+      _UNSTABLE_FAILING_RAW="$(forge_get_check_runs "$REPO_NWO" "$_UNSTABLE_HEAD_SHA" 2>/dev/null || echo '{"check_runs":[]}')"
+      # Names of failing check runs (conclusion=failure OR conclusion=timed_out).
+      # Sort + uniq to dedupe re-runs with the same context.
+      _UNSTABLE_FAILING="$(echo "$_UNSTABLE_FAILING_RAW" | \
+        jq -r '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required") | .name] | unique | .[]' 2>/dev/null || true)"
+
+      if [[ -z "$_UNSTABLE_FAILING" ]]; then
+        # No failing checks were enumerated — could be a transient API gap or
+        # commit-status (vs check-run) failures. Be safe and keep the existing
+        # error path.
+        error "Failed to enable auto-merge for PR #$PR_NUMBER: $AUTO_MERGE_OUTPUT"
+      fi
+
+      # Required contexts on the merge-target branch. Empty output means there
+      # is no branch protection rule (or no required checks configured), so
+      # every failing check is informational. A nonzero exit from the helper
+      # signals a lookup failure (e.g. Gitea 5xx, network error, missing token,
+      # or an unknown forge) — fail closed and preserve the UNSTABLE refusal.
+      _UNSTABLE_REQUIRED=""
+      _UNSTABLE_LOOKUP_RC=0
+      _UNSTABLE_REQUIRED="$(forge_get_required_status_check_contexts "$REPO_NWO" "$_UNSTABLE_BASE_REF" "$GH" 2>/dev/null)" || _UNSTABLE_LOOKUP_RC=$?
+      if [[ "$_UNSTABLE_LOOKUP_RC" -ne 0 ]]; then
+        warning "Failed to resolve required status checks for $_UNSTABLE_BASE_REF (rc=$_UNSTABLE_LOOKUP_RC); preserving UNSTABLE refusal"
+        unset _UNSTABLE_LOOKUP_RC
+        error "Failed to enable auto-merge for PR #$PR_NUMBER: $AUTO_MERGE_OUTPUT"
+      fi
+      unset _UNSTABLE_LOOKUP_RC
+
+      # Compute set difference: failing_checks \ required_contexts.
+      # `comm -23 <failing> <required>` lists lines unique to failing.
+      _UNSTABLE_INFORMATIONAL="$(comm -23 \
+        <(printf '%s\n' "$_UNSTABLE_FAILING" | sort -u) \
+        <(printf '%s\n' "$_UNSTABLE_REQUIRED" | sort -u))"
+      _UNSTABLE_OVERLAP="$(comm -12 \
+        <(printf '%s\n' "$_UNSTABLE_FAILING" | sort -u) \
+        <(printf '%s\n' "$_UNSTABLE_REQUIRED" | sort -u))"
+
+      if [[ -z "$_UNSTABLE_OVERLAP" ]] && [[ -n "$_UNSTABLE_INFORMATIONAL" ]]; then
+        # Every failing check is informational. Log a clear INFO message
+        # naming them, then fall through to the synchronous-merge path.
+        _UNSTABLE_COUNT="$(printf '%s\n' "$_UNSTABLE_INFORMATIONAL" | wc -l | tr -d ' ')"
+        info "Falling back to immediate merge: ${_UNSTABLE_COUNT} informational check(s) failing (not in branch protection):"
+        printf '%s\n' "$_UNSTABLE_INFORMATIONAL" | while IFS= read -r _ctx; do
+          [[ -n "$_ctx" ]] && info "    - $_ctx"
+        done
+        AUTO_MERGE=false      # let the synchronous-merge block below run
+        AUTO_MERGE_OK=true    # bypass the post-loop "after N attempts" guard
+        unset _UNSTABLE_HEAD_SHA _UNSTABLE_BASE_REF _UNSTABLE_FAILING_RAW _UNSTABLE_FAILING _UNSTABLE_REQUIRED _UNSTABLE_INFORMATIONAL _UNSTABLE_OVERLAP _UNSTABLE_COUNT
+        break
+      fi
+
+      # At least one failing check IS branch-protection-required — preserve
+      # the existing UNSTABLE refusal so we never silently bypass a required
+      # gate. Fall through to the error path below.
+      unset _UNSTABLE_HEAD_SHA _UNSTABLE_BASE_REF _UNSTABLE_FAILING_RAW _UNSTABLE_FAILING _UNSTABLE_REQUIRED _UNSTABLE_INFORMATIONAL _UNSTABLE_OVERLAP
+    fi
+
     # Other auto-merge errors — fail immediately (no retry would help)
     error "Failed to enable auto-merge for PR #$PR_NUMBER: $AUTO_MERGE_OUTPUT"
   done

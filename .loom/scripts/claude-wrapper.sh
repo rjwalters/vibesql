@@ -27,6 +27,13 @@
 #   LOOM_AUTH_CACHE_TTL    - Auth cache TTL in seconds (default: 120)
 #   LOOM_AUTH_CACHE_STALE_LOCK_THRESHOLD - Stale lock cleanup threshold in seconds (default: 90)
 #   LOOM_AUTH_CACHE_LOCK_WAIT - Max time to wait for lock holder in seconds (default: 60)
+#   LOOM_MODEL             - Model to pass as `claude --model <value>` (issue
+#                            #3477). An explicit `--model` in the wrapper args
+#                            always wins. The flag is appended once before the
+#                            retry loop, so every retry attempt reuses the SAME
+#                            model (re-consulting policy on retry is strategy B
+#                            of #3477 and intentionally out of scope). When
+#                            neither is set, NO --model flag is emitted.
 
 set -euo pipefail
 
@@ -1582,6 +1589,30 @@ main() {
         log_info "Stop signal already present - exiting without starting"
         _write_exit_sidecar 0
         exit 0
+    fi
+
+    # Model selection (issue #3477, Phase 1).
+    # Precedence: explicit `--model` in args > LOOM_MODEL env > nothing
+    # (session/CLI default — no --model flag emitted at all). The flag is
+    # appended ONCE here, before run_with_retry, so all retry attempts
+    # invoke `claude "$@"` with the same model (retries never re-consult
+    # model policy — that is strategy B of #3477, out of scope).
+    local _has_model_arg=false
+    for arg in "$@"; do
+        case "$arg" in
+            --model|--model=*)
+                _has_model_arg=true
+                break
+                ;;
+        esac
+    done
+    if [[ -n "${LOOM_MODEL:-}" ]]; then
+        if [[ "${_has_model_arg}" == "false" ]]; then
+            set -- "$@" --model "${LOOM_MODEL}"
+            log_info "Model: ${LOOM_MODEL} (from LOOM_MODEL)"
+        else
+            log_info "Explicit --model in args wins over LOOM_MODEL='${LOOM_MODEL}'"
+        fi
     fi
 
     # Run Claude with retry logic
