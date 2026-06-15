@@ -301,6 +301,52 @@ impl super::Catalog {
         }
     }
 
+    /// Overwrite the catalog copy of `name`'s schema with `new_schema`.
+    ///
+    /// VibeSQL stores a table's schema twice — once in the storage `Table`
+    /// (mutated directly by ALTER TABLE column operations) and once here in the
+    /// catalog (the copy read by `sqlite_master`, `PRAGMA table_info`, and
+    /// column resolution for DML). The two copies start out identical at CREATE
+    /// time, but ALTER ADD/DROP/RENAME/MODIFY COLUMN only edited the storage
+    /// copy, leaving the catalog stale. This pushes the freshly mutated storage
+    /// schema back into the catalog so both copies stay consistent (issue #5625).
+    ///
+    /// No-op when the table is not found. Mirrors `invalidate_table_sql_source`'s
+    /// name-resolution order (qualified schema, then temp schema, then current
+    /// schema). The lookup key (canonical, possibly case-folded name) is left
+    /// unchanged; only the stored `TableSchema` value is replaced.
+    pub fn replace_table_schema(&mut self, name: &str, new_schema: TableSchema) {
+        let case_sensitive = self.case_sensitive_identifiers;
+
+        if let Some((schema_name, table_name)) = name.split_once('.') {
+            let normalized_table = self.normalize_identifier(table_name);
+            if let Some(schema) = self.get_schema_case_insensitive_mut(schema_name) {
+                if let Some(table) = schema.get_table_mut(&normalized_table, case_sensitive) {
+                    *table = new_schema;
+                }
+            }
+            return;
+        }
+
+        let normalized_table = self.normalize_identifier(name);
+
+        // Temp schema shadows the current schema (SQLite semantics).
+        let temp_schema_name = self.temp_schema_name.clone();
+        if let Some(temp_schema) = self.schemas.get_mut(&temp_schema_name) {
+            if let Some(table) = temp_schema.get_table_mut(&normalized_table, case_sensitive) {
+                *table = new_schema;
+                return;
+            }
+        }
+
+        let current_schema = self.current_schema.clone();
+        if let Some(schema) = self.schemas.get_mut(&current_schema) {
+            if let Some(table) = schema.get_table_mut(&normalized_table, case_sensitive) {
+                *table = new_schema;
+            }
+        }
+    }
+
     /// Drop a table schema (supports qualified names like "schema.table").
     /// Respects the `case_sensitive_identifiers` setting.
     ///
