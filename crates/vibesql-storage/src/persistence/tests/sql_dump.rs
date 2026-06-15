@@ -422,10 +422,7 @@ fn test_sql_dump_preserves_index_name_case() {
         content.contains("CREATE INDEX MyIdx ON"),
         "Index name case must be preserved (expected `MyIdx`). Got:\n{content}"
     );
-    assert!(
-        !content.contains("myidx"),
-        "Index name must not be lowercased. Got:\n{content}"
-    );
+    assert!(!content.contains("myidx"), "Index name must not be lowercased. Got:\n{content}");
     assert!(
         content.contains("\"x1 (b Asc, c Asc)\""),
         "Quoted index name must preserve original case. Got:\n{content}"
@@ -662,4 +659,71 @@ fn test_read_sql_dump_file_not_found() {
     let result = read_sql_dump("/tmp/nonexistent_file_xyz123.sql");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("does not exist"));
+}
+
+// Issue #5618: the SQL dump must echo a table's *original* declared spelling
+// (not the lowercase canonical catalog key) so a reload reproduces the same
+// `sqlite_master.name`. A keyword-named identifier (e.g. `"create"`) must also
+// be double-quoted so the reload re-lexes it as an identifier rather than the
+// keyword token (which would otherwise come back uppercased as `CREATE`).
+#[test]
+fn test_sql_dump_preserves_quoted_keyword_table_name() {
+    use vibesql_ast::TableIdentifier;
+
+    let mut db = Database::new();
+    let schema = TableSchema::new(
+        "create".to_string(),
+        vec![ColumnSchema::new("f1".to_string(), DataType::Integer, true)],
+    );
+    // Quoted reserved word as a table name (CREATE TABLE "create" (f1 int)).
+    db.create_table_with_identifier(schema, TableIdentifier::new("create", true)).unwrap();
+
+    let path = "/tmp/test_dump_quoted_keyword.sql";
+    db.save_sql_dump(path).unwrap();
+    let content = std::fs::read_to_string(path).unwrap();
+    std::fs::remove_file(path).ok();
+
+    // The keyword name must be quoted with its original (lowercase) spelling.
+    assert!(
+        content.contains("CREATE TABLE \"create\" ("),
+        "dump should quote the keyword table name verbatim; got:\n{content}"
+    );
+    // It must NOT emit a bare `CREATE TABLE create (` which would re-lex as the
+    // CREATE keyword and round-trip to the wrong case.
+    assert!(
+        !content.contains("CREATE TABLE create ("),
+        "dump must not emit an unquoted keyword table name; got:\n{content}"
+    );
+}
+
+#[test]
+fn test_sql_dump_preserves_mixed_case_table_and_column_names() {
+    use vibesql_ast::TableIdentifier;
+
+    let mut db = Database::new();
+    let schema = TableSchema::new(
+        "MixedCase".to_string(),
+        vec![
+            ColumnSchema::new("ColA".to_string(), DataType::Integer, true),
+            ColumnSchema::new("B".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table_with_identifier(schema, TableIdentifier::new("MixedCase", true)).unwrap();
+
+    let path = "/tmp/test_dump_mixed_case.sql";
+    db.save_sql_dump(path).unwrap();
+    let content = std::fs::read_to_string(path).unwrap();
+    std::fs::remove_file(path).ok();
+
+    // Original case must be preserved for both table and column names.
+    assert!(
+        content.contains("CREATE TABLE MixedCase ("),
+        "dump should echo the original table case; got:\n{content}"
+    );
+    assert!(content.contains("ColA"), "dump should echo the original column case; got:\n{content}");
+    // It must NOT have been folded to the lowercase canonical key.
+    assert!(
+        !content.contains("CREATE TABLE mixedcase ("),
+        "dump must not fold the table name to lowercase; got:\n{content}"
+    );
 }

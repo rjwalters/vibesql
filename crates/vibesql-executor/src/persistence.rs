@@ -411,4 +411,48 @@ CREATE TABLE data (id INTEGER);
         // Verify table exists (note: identifiers are uppercased)
         assert!(db.get_table("DATA").is_some());
     }
+
+    // Issue #5618: a dump → reload round-trip must preserve the *original*
+    // declared spelling that `sqlite_master.name` / `PRAGMA table_info` echo,
+    // even though lookups remain case-insensitive (#5553). Before the fix, the
+    // dump emitted the lowercase canonical catalog key, and a keyword name like
+    // `"create"` was written unquoted and re-lexed back to the keyword `CREATE`.
+    #[test]
+    fn test_dump_reload_preserves_original_case_and_quoted_keywords() {
+        let mut db = Database::new();
+        for sql in [
+            "CREATE TABLE \"create\" (f1 INT)",
+            "CREATE TABLE big (a, b)",
+            "CREATE TABLE \"MixedCase\" (\"ColA\" INT, \"B\" INT)",
+        ] {
+            let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+            if let vibesql_ast::Statement::CreateTable(s) = stmt {
+                CreateTableExecutor::execute(&s, &mut db).unwrap();
+            } else {
+                panic!("expected CreateTable for: {sql}");
+            }
+        }
+
+        let temp_file = NamedTempFile::new().unwrap();
+        db.save_sql_dump(temp_file.path()).unwrap();
+        let reloaded = load_sql_dump(temp_file.path().to_str().unwrap()).unwrap();
+
+        // Table name echo preserves the original spelling. Lookup is
+        // case-insensitive, so resolve via the canonical key, then assert the
+        // stored display name.
+        let create_tbl = reloaded.get_table("create").expect("quoted-keyword table must survive");
+        assert_eq!(
+            create_tbl.schema.name, "create",
+            "quoted keyword table name must round-trip verbatim (not folded to CREATE)"
+        );
+
+        let mixed = reloaded.get_table("mixedcase").expect("mixed-case table must survive");
+        assert_eq!(mixed.schema.name, "MixedCase", "mixed-case table name must be preserved");
+        // Column-name echo preserves original case too.
+        assert_eq!(mixed.schema.columns[0].name, "ColA");
+        assert_eq!(mixed.schema.columns[1].name, "B");
+
+        let big = reloaded.get_table("big").expect("table must survive");
+        assert_eq!(big.schema.name, "big");
+    }
 }

@@ -153,11 +153,19 @@ impl Database {
                     continue;
                 };
 
+                // Echo the table's *original* declared spelling, not the
+                // lowercase canonical catalog key. SQLite preserves the original
+                // case (including quoted reserved words like `"create"`) in
+                // sqlite_master, and the dump must round-trip that spelling so a
+                // reload reproduces the same `sqlite_master.name` (issue #5618).
+                // `table.schema.name` retains the verbatim name; `table_name`
+                // (from `schema.list_tables()`) is the case-folded key.
+                let original_name = &table.schema.name;
                 // For default schema, use unqualified name in output for cleaner SQL
                 let output_name = if schema_name == vibesql_catalog::DEFAULT_SCHEMA {
-                    table_name.clone()
+                    original_name.clone()
                 } else {
-                    qualified_name.clone()
+                    format!("{}.{}", schema_name, original_name)
                 };
                 // CREATE TABLE statement
                 let schema = &table.schema;
@@ -385,10 +393,12 @@ impl Database {
                     };
 
                     for (_idx, row) in table.scan_live() {
-                        write!(writer, "INSERT INTO {}{} VALUES (", &quoted_output_name, column_list)
-                            .map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
+                        write!(
+                            writer,
+                            "INSERT INTO {}{} VALUES (",
+                            &quoted_output_name, column_list
+                        )
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
                         // Only include values for non-generated columns
                         let mut first = true;
@@ -495,9 +505,8 @@ impl Database {
             if let Some(catalog_meta) = self.catalog.find_index_by_name(&index_name) {
                 if let Some(where_expr) = catalog_meta.where_clause.as_deref() {
                     use vibesql_ast::pretty_print::ToSql;
-                    write!(writer, " WHERE {}", where_expr.to_sql()).map_err(|e| {
-                        StorageError::NotImplemented(format!("Write error: {}", e))
-                    })?;
+                    write!(writer, " WHERE {}", where_expr.to_sql())
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
             }
 
@@ -555,9 +564,7 @@ impl Database {
                             "-- Skipped trigger '{}' (no preserved SQL text)",
                             trigger_def.name
                         )
-                        .map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                     }
                 }
             }
@@ -594,7 +601,11 @@ fn quote_identifier(name: &str) -> String {
     // - is empty
     let needs_quoting = name.is_empty()
         || name.starts_with(|c: char| c.is_ascii_digit())
-        || !name.chars().all(|c| c.is_alphanumeric() || c == '_');
+        || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        // A keyword-named identifier (e.g. `create`, `select`) must be quoted so
+        // a reload re-lexes it as an identifier rather than the keyword token,
+        // preserving the original spelling/case in sqlite_master (issue #5618).
+        || vibesql_parser::is_keyword(name);
 
     if needs_quoting {
         // Escape any embedded double-quotes by doubling them
