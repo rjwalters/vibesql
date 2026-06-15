@@ -665,6 +665,9 @@ fn exec_sql_collision(db: &mut Database, sql: &str) -> Result<String, String> {
         vibesql_ast::Statement::CreateIndex(s) => crate::CreateIndexExecutor::execute(&s, db)
             .map(|_| "ok".to_string())
             .map_err(|e| e.to_string()),
+        vibesql_ast::Statement::DropTable(s) => crate::DropTableExecutor::execute(&s, db)
+            .map(|_| "ok".to_string())
+            .map_err(|e| e.to_string()),
         other => Err(format!("Unsupported statement type: {:?}", other)),
     }
 }
@@ -737,4 +740,113 @@ fn create_table_as_select_rejects_existing_index_name() {
     let err = exec_sql_collision(&mut db, "CREATE TABLE ix AS SELECT * FROM src").unwrap_err();
     assert_eq!(err, "there is already an index named ix");
     assert!(!db.catalog.table_exists("ix"));
+}
+
+// ---------------------------------------------------------------------------
+// Issue #5614: misc CREATE TABLE conformance gaps surfaced by table.test.
+//
+// These reuse the `exec_sql_collision` parse+execute helper above so each test
+// exercises the full parser -> executor path and asserts the exact
+// SQLite-compatible error string (verified against sqlite3 3.51.0).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_table_rejects_reserved_sqlite_master_name() {
+    // table-2.1b/2.1c: a user CREATE TABLE named `sqlite_master` is reserved.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE sqlite_master(two text)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: sqlite_master");
+    assert!(!db.catalog.table_exists("sqlite_master"));
+}
+
+#[test]
+fn create_table_rejects_any_sqlite_prefixed_name() {
+    // SQLite reserves the entire `sqlite_` prefix, not just sqlite_master.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE sqlite_foo(x)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: sqlite_foo");
+}
+
+#[test]
+fn create_table_reserved_name_echoes_original_case() {
+    // sqlite3 echoes the name exactly as written (case-insensitive match but
+    // original-case echo): `CREATE TABLE SQLITE_foo` -> `... SQLITE_foo`.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE SQLITE_foo(x)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: SQLITE_foo");
+}
+
+#[test]
+fn create_table_reserved_name_quoted_is_dequoted() {
+    // A quoted reserved name is still rejected; the echo strips the quotes.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE \"sqlite_quoted\"(x)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: sqlite_quoted");
+}
+
+#[test]
+fn create_index_rejects_reserved_sqlite_name() {
+    // index-18.4: a user CREATE INDEX with a `sqlite_` prefix is reserved.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE realt(x)").unwrap();
+    let err = exec_sql_collision(&mut db, "CREATE INDEX sqlite_idx ON realt(x)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: sqlite_idx");
+    assert!(!db.index_exists("sqlite_idx"));
+}
+
+#[test]
+fn create_table_rejects_duplicate_column_names() {
+    // table-9.1: duplicate column names are rejected.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE t9(a, a)").unwrap_err();
+    assert_eq!(err, "duplicate column name: a");
+    assert!(!db.catalog.table_exists("t9"));
+}
+
+#[test]
+fn create_table_duplicate_column_detection_is_case_insensitive() {
+    // #5553: `a` and `A` collide; sqlite echoes the *second* occurrence's case.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE t9b(a, A)").unwrap_err();
+    assert_eq!(err, "duplicate column name: A");
+}
+
+#[test]
+fn create_table_duplicate_column_quoted_variant() {
+    // table-9.2: bracketed-quote variant still collides.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "CREATE TABLE t9c(a, [a])").unwrap_err();
+    assert_eq!(err, "duplicate column name: a");
+}
+
+#[test]
+fn create_table_allows_distinct_columns() {
+    // No false positives: distinct (even similar-prefix) column names are fine.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE okcols(a, ab, abc)").unwrap();
+    assert!(db.catalog.table_exists("okcols"));
+}
+
+#[test]
+fn drop_table_sqlite_master_is_rejected() {
+    // table-5.2: DROP TABLE sqlite_master is forbidden.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "DROP TABLE sqlite_master").unwrap_err();
+    assert_eq!(err, "table sqlite_master may not be dropped");
+}
+
+#[test]
+fn drop_table_sqlite_master_rejected_regardless_of_case() {
+    // sqlite echoes the canonical (lowercase) name even when the user upcases.
+    let mut db = Database::new();
+    let err = exec_sql_collision(&mut db, "DROP TABLE SQLITE_MASTER").unwrap_err();
+    assert_eq!(err, "table sqlite_master may not be dropped");
+}
+
+#[test]
+fn user_table_named_sqlitewithoutunderscore_is_allowed() {
+    // Only the `sqlite_` prefix is reserved; `sqlitefoo` (no underscore) is fine.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE sqlitefoo(x)").unwrap();
+    assert!(db.catalog.table_exists("sqlitefoo"));
 }

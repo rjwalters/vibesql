@@ -56,6 +56,21 @@ impl TriggerExecutor {
             return Err(ExecutorError::TriggerAlreadyExists(echoed));
         }
 
+        // Reject user attempts to create a trigger with a reserved name. Like
+        // tables and indexes, SQLite reserves the `sqlite_` prefix for its own
+        // schema objects and errors `object name reserved for internal use:
+        // <name>` (sqlite3 3.51.0, index-18.4). This is checked *before*
+        // resolving the trigger's target table — index-18.4 names a dropped
+        // table, and sqlite3 still reports the reserved-name error rather than
+        // "no such table". `trigger_name` preserves the user's original spelling
+        // and is echoed verbatim (issue #5614).
+        if crate::sqlite_schema::is_reserved_object_name(&stmt.trigger_name) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "object name reserved for internal use: {}",
+                stmt.trigger_name
+            )));
+        }
+
         // Reject triggers on SQLite system tables (any "sqlite_" prefixed name,
         // e.g. sqlite_master / sqlite_schema / sqlite_stat1). SQLite emits exactly
         // "cannot create trigger on system table" (sqlite3 3.51.0, trigger1-1.9).

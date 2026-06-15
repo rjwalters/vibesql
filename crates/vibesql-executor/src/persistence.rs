@@ -104,7 +104,14 @@ fn execute_statement_for_load(
             }
         }
         vibesql_ast::Statement::CreateTable(create_stmt) => {
-            CreateTableExecutor::execute(&create_stmt, db)?;
+            // Trusted replay of the engine's own persisted dump. A dump must
+            // always round-trip, so we bypass the user-facing reserved-name and
+            // duplicate-column guards: a `sqlite_`-prefixed table that
+            // legitimately reached the catalog before #5614 (via the then-open
+            // ALTER TABLE RENAME gap) must still reload rather than brick the
+            // database. User-issued CREATE TABLE still goes through
+            // `CreateTableExecutor::execute`, which keeps the guards (issue #5614).
+            CreateTableExecutor::execute_for_load(&create_stmt, db)?;
         }
         vibesql_ast::Statement::CreateIndex(index_stmt) => {
             CreateIndexExecutor::execute(&index_stmt, db)?;
@@ -317,6 +324,75 @@ CREATE TABLE test3 (two TEXT);
             "expected index-collision wording, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn test_load_dump_with_sqlite_prefixed_table_reloads_cleanly() {
+        // Regression for issue #5614. Before the fix, a database that contained a
+        // `sqlite_`-prefixed *user* table (reachable via the then-unguarded
+        // ALTER TABLE RENAME TO) would dump as `CREATE TABLE sqlite_t3 (...)`,
+        // and on reload the new user-facing reserved-name guard would reject the
+        // engine's own dump — permanently bricking the database. The trusted
+        // load path (`execute_for_load`) must reconstruct whatever was
+        // legitimately persisted, so such a dump reloads cleanly.
+        let temp_file = NamedTempFile::new().unwrap();
+        let sql_dump = r#"
+CREATE TABLE sqlite_t3 (a BLOB, b BLOB, c BLOB);
+INSERT INTO sqlite_t3 VALUES (1, 2, 3);
+"#;
+        fs::write(temp_file.path(), sql_dump).unwrap();
+
+        let db = load_sql_dump(temp_file.path().to_str().unwrap())
+            .expect("a persisted sqlite_-prefixed table must reload, not brick (issue #5614)");
+
+        // The table and its data survived the trusted reload.
+        let table = db.get_table("sqlite_t3").expect("sqlite_t3 must exist after reload");
+        assert_eq!(table.row_count(), 1);
+    }
+
+    #[test]
+    fn test_user_create_sqlite_prefixed_table_still_rejected() {
+        // The #5614 feature must remain intact on the USER path: a user-issued
+        // CREATE TABLE with a reserved `sqlite_` name is still rejected. Only the
+        // trusted load/replay path bypasses the guard.
+        let mut db = Database::new();
+        let stmt = vibesql_parser::Parser::parse_sql("CREATE TABLE sqlite_foo (x INTEGER)").unwrap();
+        if let vibesql_ast::Statement::CreateTable(s) = stmt {
+            let err = CreateTableExecutor::execute(&s, &mut db).unwrap_err();
+            assert_eq!(err.to_string(), "object name reserved for internal use: sqlite_foo");
+        } else {
+            panic!("expected CreateTable");
+        }
+    }
+
+    #[test]
+    fn test_alter_rename_to_reserved_name_rejected() {
+        // Regression for issue #5614 fix #2 (sqlite3 3.51.0 alter-2.5): renaming
+        // a table to a reserved `sqlite_`-prefixed name must error
+        // `object name reserved for internal use: <name>`, preventing a
+        // `sqlite_`-prefixed user table from ever being persisted (the root
+        // enabler of the reload-brick regression).
+        use crate::AlterTableExecutor;
+
+        let mut db = Database::new();
+        let create = vibesql_parser::Parser::parse_sql("CREATE TABLE t3(a, b, c)").unwrap();
+        if let vibesql_ast::Statement::CreateTable(s) = create {
+            CreateTableExecutor::execute(&s, &mut db).unwrap();
+        }
+
+        let alter =
+            vibesql_parser::Parser::parse_sql("ALTER TABLE t3 RENAME TO sqlite_t3").unwrap();
+        if let vibesql_ast::Statement::AlterTable(s) = alter {
+            let err = AlterTableExecutor::execute(&s, &mut db).unwrap_err();
+            assert_eq!(err.to_string(), "object name reserved for internal use: sqlite_t3");
+        } else {
+            panic!("expected AlterTable");
+        }
+
+        // The rename was rejected, so the original table is intact and no
+        // sqlite_-prefixed table leaked into the catalog.
+        assert!(db.get_table("t3").is_some());
+        assert!(db.get_table("sqlite_t3").is_none());
     }
 
     #[test]

@@ -12,8 +12,9 @@ use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
 use crate::{
-    errors::ExecutorError, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
+    errors::ExecutorError,
+    privilege_checker::PrivilegeChecker,
+    sqlite_schema::{is_reserved_object_name, is_sqlite_schema_table},
 };
 
 /// Result of validating a CREATE INDEX statement
@@ -65,6 +66,20 @@ pub fn validate_create_index(
             table_name: table_name.clone(),
             operation: "indexed".to_string(),
         });
+    }
+
+    // Reject user attempts to create an index with a reserved name. Like
+    // CREATE TABLE, SQLite forbids the `sqlite_` prefix for user objects and
+    // errors `object name reserved for internal use: <name>` (sqlite3 3.51.0,
+    // index-18.4). `stmt.index_name` preserves the user's original spelling, so
+    // it is echoed verbatim. The engine's own `sqlite_autoindex_*` indexes are
+    // built via a dedicated catalog path that bypasses this validator, so they
+    // are unaffected (issue #5614).
+    if is_reserved_object_name(&stmt.index_name) {
+        return Err(ExecutorError::SqliteCompatError(format!(
+            "object name reserved for internal use: {}",
+            stmt.index_name
+        )));
     }
 
     // Check CREATE privilege on the schema

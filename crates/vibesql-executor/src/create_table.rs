@@ -71,6 +71,39 @@ impl CreateTableExecutor {
         stmt: &CreateTableStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
+        Self::execute_impl(stmt, database, false)
+    }
+
+    /// Execute a CREATE TABLE statement on a TRUSTED (engine-internal) path.
+    ///
+    /// This is used when replaying the engine's own persisted schema (e.g.
+    /// `load_sql_dump` / consensus state-machine replay), not for user-issued
+    /// DDL. A persisted dump is engine-internal data that was already validated
+    /// when first created, so it must always round-trip — it must NOT be
+    /// re-rejected by the user-facing conformance guards.
+    ///
+    /// Specifically this skips:
+    /// - the reserved `sqlite_`-prefix guard, so a table that legitimately
+    ///   reached the catalog (e.g. a pre-#5614 DB where ALTER TABLE RENAME TO
+    ///   `sqlite_x` was still accepted) reloads cleanly instead of bricking the
+    ///   database (issue #5614);
+    /// - the duplicate-column guard, for the same backward-compat reason — a
+    ///   schema that was once persisted must remain loadable.
+    ///
+    /// All other validation (namespace collisions, etc.) still applies, matching
+    /// the prior behavior of the load path for #5613.
+    pub fn execute_for_load(
+        stmt: &CreateTableStmt,
+        database: &mut Database,
+    ) -> Result<String, ExecutorError> {
+        Self::execute_impl(stmt, database, true)
+    }
+
+    fn execute_impl(
+        stmt: &CreateTableStmt,
+        database: &mut Database,
+        trusted: bool,
+    ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
         // For TEMP tables, use the session-specific temp schema (SQLite compatibility)
         let (schema_name, table_name, identifier) = if stmt.temporary {
@@ -94,6 +127,41 @@ impl CreateTableExecutor {
 
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
+
+        // The reserved-name and duplicate-column guards are USER-facing
+        // conformance checks (issue #5614). They are skipped on the trusted
+        // load/replay path so the engine's own persisted dump always reloads —
+        // see `execute_for_load`.
+        if !trusted {
+            // Reject user attempts to create a table with a reserved name. SQLite
+            // reserves the `sqlite_` prefix for its own schema objects and errors
+            // `object name reserved for internal use: <name>` (sqlite3 3.51.0),
+            // echoing the name exactly as the user spelled it (dequoted, original
+            // case — e.g. `SQLITE_foo`). `table_name` already holds that verbatim
+            // bare-name spelling. This guard is on the user-facing executor only;
+            // the engine's internal sqlite_-prefixed objects are created via
+            // dedicated catalog APIs and never pass through here (issue #5614).
+            if crate::sqlite_schema::is_reserved_object_name(&table_name) {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "object name reserved for internal use: {}",
+                    table_name
+                )));
+            }
+
+            // Reject duplicate column names. SQLite compares column names
+            // case-insensitively (#5553) and errors `duplicate column name: <name>`,
+            // echoing the *second* (colliding) occurrence's original spelling —
+            // `CREATE TABLE t(a, A)` reports `duplicate column name: A`
+            // (sqlite3 3.51.0). The AST preserves each column's as-written casing.
+            for (i, col) in stmt.columns.iter().enumerate() {
+                if stmt.columns[..i].iter().any(|prev| prev.name.eq_ignore_ascii_case(&col.name)) {
+                    return Err(ExecutorError::SqliteCompatError(format!(
+                        "duplicate column name: {}",
+                        col.name
+                    )));
+                }
+            }
+        }
 
         // Handle CREATE TABLE AS SELECT syntax
         if let Some(query) = &stmt.as_query {

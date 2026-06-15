@@ -13,6 +13,21 @@ pub(super) fn execute_rename_table(
     stmt: &RenameTableStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
+    // Reject renaming a table to a reserved `sqlite_`-prefixed name. SQLite
+    // reserves that prefix for its own schema objects and errors
+    // `object name reserved for internal use: <name>` (sqlite3 3.51.0,
+    // alter-2.5), echoing the target name verbatim. Without this guard a user
+    // could smuggle a `sqlite_`-prefixed *user table* into the catalog via
+    // RENAME; that table then dumps as `CREATE TABLE sqlite_x (...)`, which the
+    // load-path reserved-name guard would reject — bricking the database on
+    // reload (issue #5614). Guarding RENAME closes that gap at the source.
+    if crate::sqlite_schema::is_reserved_object_name(&stmt.new_table_name) {
+        return Err(ExecutorError::SqliteCompatError(format!(
+            "object name reserved for internal use: {}",
+            stmt.new_table_name
+        )));
+    }
+
     // Check if the new name already names a table or an index. SQLite shares a
     // single object namespace for tables and indexes, so a RENAME TO collision
     // against either reports the same SQLite-compatible message
