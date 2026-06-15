@@ -47,10 +47,18 @@ pub(super) fn execute_rename_table(
     let mut new_table = old_table.clone();
     new_table.schema_mut().name = stmt.new_table_name.clone();
     // The cloned schema still carries the verbatim CREATE TABLE text captured
-    // for the *old* table name (issue #5619). Discard it here, before the schema
-    // is cloned into both the catalog and storage copies, so sqlite_master.sql
-    // and the SQL dump fall back to a reconstruction that names the renamed
-    // table instead of re-emitting stale text (which could break reload).
+    // for the *old* table name (issue #5619). SQLite edits this text in place on
+    // RENAME TO (rewriting the name, quoting it), but matching that here is
+    // deferred (issue #5625, follow-on): the preserved verbatim text for a
+    // renamed table interacts badly with a pre-existing SQL-dump reload gap
+    // (the dump's statement splitter mishandles a `'` inside a `"…"`/`[…]`
+    // quoted identifier, so a renamed table whose original name contained such
+    // characters can corrupt the dump on reload). Reconstructing instead emits
+    // a clean, plainly-quoted name that always reloads. So discard the stale
+    // verbatim text on RENAME TO and fall back to reconstruction — the same
+    // proven-safe behavior as #5623. ADD COLUMN / RENAME COLUMN, which do not
+    // change the table name, *do* get in-place text edits (see
+    // `super::update_sql_source_after_alter`).
     new_table.schema_mut().invalidate_sql_source();
 
     // Drop old table and create new one with the renamed schema

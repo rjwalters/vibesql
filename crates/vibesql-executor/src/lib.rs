@@ -4,6 +4,7 @@
 
 pub mod advanced_objects;
 mod alter;
+mod alter_rewrite;
 pub mod arena;
 pub mod cache;
 mod compaction_guard;

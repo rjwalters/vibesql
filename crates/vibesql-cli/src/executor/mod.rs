@@ -517,7 +517,14 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::AlterTable(alter_stmt) => {
-                match vibesql_executor::AlterTableExecutor::execute(&alter_stmt, &mut self.db) {
+                // Pass the verbatim original statement text so ADD COLUMN /
+                // RENAME edits the stored CREATE TABLE text in place (matching
+                // SQLite) instead of reconstructing it (issue #5625).
+                match vibesql_executor::AlterTableExecutor::execute_with_source(
+                    &alter_stmt,
+                    &mut self.db,
+                    Some(sql),
+                ) {
                     Ok(msg) => {
                         result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
