@@ -39,6 +39,28 @@ pub use token::Token;
 pub use trigger_body::split_trigger_body_statements;
 use vibesql_ast::Statement;
 
+/// Returns `true` if `name` is a SQL keyword (case-insensitive).
+///
+/// Used by callers that emit SQL text (e.g. the persistence dump) to decide
+/// whether a bare identifier must be double-quoted to survive a round-trip. A
+/// keyword-named identifier such as `create` must be written as `"create"`;
+/// otherwise the reload re-lexes it as the keyword token and loses the original
+/// spelling/case (issue #5618).
+pub fn is_keyword(name: &str) -> bool {
+    // Re-lex the bare name: if it tokenizes to a single keyword token, the
+    // word is reserved/keyword and must be quoted to round-trip as an
+    // identifier. (A genuine identifier lexes to `Token::Identifier`.)
+    let mut lexer = Lexer::new(name);
+    match lexer.tokenize() {
+        Ok(tokens) => {
+            // tokenize() appends a trailing Eof token.
+            matches!(tokens.first(), Some(Token::Keyword { .. }))
+                && matches!(tokens.get(1), Some(Token::Eof) | None)
+        }
+        Err(_) => false,
+    }
+}
+
 /// Parse SQL using arena allocation where supported, falling back to standard parsing.
 ///
 /// This function provides optimized parsing by:
@@ -199,5 +221,28 @@ mod arena_fallback_tests {
         let sql = "SELECT row_number() OVER win2 FROM t1 WINDOW win AS (PARTITION BY z), win2 AS (win ORDER BY x)";
         let result = Parser::parse_sql(sql);
         assert!(result.is_ok(), "Window inheritance failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_is_keyword() {
+        // Reserved/keyword words (case-insensitive) — these must be quoted to be
+        // used as identifiers, and a SQL emitter must quote them (issue #5618).
+        assert!(is_keyword("create"));
+        assert!(is_keyword("CREATE"));
+        assert!(is_keyword("Select"));
+        assert!(is_keyword("from"));
+        assert!(is_keyword("table"));
+
+        // Ordinary identifiers are not keywords.
+        assert!(!is_keyword("mixedcase"));
+        assert!(!is_keyword("MixedCase"));
+        assert!(!is_keyword("f1"));
+        assert!(!is_keyword("users"));
+        assert!(!is_keyword("col_a"));
+
+        // A multi-token / punctuated string is not a single keyword.
+        assert!(!is_keyword("create table"));
+        assert!(!is_keyword("a.b"));
+        assert!(!is_keyword(""));
     }
 }
