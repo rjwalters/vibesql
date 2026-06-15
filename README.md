@@ -17,6 +17,8 @@
 - **100% SQL:1999 Core compliance** - 739/739 sqltest tests passing
 - **100% SQLLogicTest conformance** - 622 files (~7.4M tests)
 - **7,000+ unit tests** - comprehensive test coverage
+- **Raft-based replication** - single-group whole-database consensus via `openraft`
+- **MVCC** - snapshot isolation with on-demand `VACUUM` garbage collection
 - **Real-time subscriptions** - Convex-like reactivity with delta updates
 - **HTTP REST & GraphQL API** - Full CRUD and query endpoints
 - **Vector search** - AI/ML embeddings with similarity search
@@ -25,7 +27,6 @@
 - **TypeScript SDK** with React hooks and Drizzle ORM adapter
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
-- **485,000+ lines** of Rust across 12 crates
 
 Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
 
@@ -141,10 +142,12 @@ function ChatRoom({ channelId }) {
 - Stored procedures and functions (IN/OUT/INOUT parameters)
 - Full-text search (MATCH AGAINST)
 - Spatial functions (ST_* library)
-- Triggers (BEFORE/AFTER)
+- Triggers (BEFORE/AFTER, full SQLITE_MAX_TRIGGER_DEPTH parity)
 - [Scheduled functions](docs/scheduled-functions.md) (SCHEDULE AFTER/AT, CREATE CRON)
 - [Vector types](docs/vector-search.md) for AI embeddings (VECTOR(n), distance functions)
 - [Blob storage](docs/file-storage.md) with STORAGE_URL/STORAGE_SIZE functions
+- MVCC with snapshot isolation, `VACUUM` / `VACUUM INTO` for on-demand GC
+- Raft replication (`vibesql-consensus` crate) — leader leases, bounded-staleness follower reads, replicated HTTP/GraphQL/CRUD/subscriptions
 
 ### Performance
 

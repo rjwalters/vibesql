@@ -55,9 +55,35 @@ make test-tcl-status
 python3 scripts/export_tcl_results.py --verbose
 ```
 
+## Replication and Consensus
+
+VibeSQL ships single-group Raft replication via the `vibesql-consensus` crate (built on `openraft`). See [docs/decisions/0004-consensus-library.md](docs/decisions/0004-consensus-library.md) for the architectural decision.
+
+```bash
+# Spin up a local multi-node test cluster (TCP transport)
+make test-cluster
+
+# Enable MVCC (snapshot isolation + on-demand GC via VACUUM)
+cargo build --release --features mvcc_enabled
+```
+
+The replicated state machine applies committed transactions from the Raft log. HTTP REST, GraphQL, and CRUD writes route through consensus when the server runs in replicated mode.
+
+## Release Flow
+
+Run `/loom:release` from this repo to drive a v0.X.Y cut interactively:
+
+- Pre-flight checks (CI status, open PRs, version-file alignment)
+- Gather changes since last tag, classify by conventional-commit scope
+- Semver decision + CHANGELOG entry drafting
+- Atomic bump across the four version sources: workspace `Cargo.toml`, `Cargo.lock`, root `pyproject.toml`, `crates/vibesql-python-bindings/pyproject.toml`
+- Bulk-bump all internal `vibesql-* = { version = "..." }` pins so published artifacts carry self-consistent requirements
+- Commit + annotated tag; pushing the tag triggers `release-crates.yml` (crates.io) and `release-pypi.yml` (PyPI) in parallel
+- Final GitHub Release with the CHANGELOG block as notes
+
 ## Benchmarking and Website Updates
 
-VibeSQL uses a dogfooded SQLite-compatible database (`~/.vibesql/test_results/benchmark_results.vbsql`) to store all benchmark results. The web demo at https://rjwalters.github.io/vibesql/ displays this data.
+VibeSQL uses a dogfooded SQLite-compatible database (`~/.vibesql/test_results/benchmark_results.vbsql`) to store all benchmark results. The web demo at https://vibesql.org/ displays this data.
 
 ### Running Benchmarks
 

@@ -68,3 +68,19 @@ A timeline of major milestones in the development of VibeSQL.
 - Debug instrumentation consolidation with VIBESQL_DEBUG umbrella flag
 - Structured JSON debug output for performance analysis
 - Cloudflare CDN deployment documentation for web demo
+
+### January - June 2026: Replication, MVCC, and SQLite Compatibility (v0.2.0)
+
+- **Raft replication track** — new `vibesql-consensus` crate built on `openraft`, single-group whole-DB replication (ADR-0004)
+  - Durable Raft log + vote persistence, network snapshot transfer + purge safety
+  - MVCC state machine applies committed transactions from the Raft log
+  - Linearizable leader reads + stale-leader fencing
+  - Bounded-staleness follower reads + read-your-writes tokens
+  - TCP transport + multi-node test cluster (`make test-cluster`)
+  - HTTP REST, GraphQL, CRUD, blob storage, and prepared statements all routable through consensus
+- **MVCC end-to-end** — `xmin`/`xmax` row stamps, visibility filter threaded through all read sites
+  - `VACUUM` / `VACUUM INTO` syntax mapped to on-demand old-version GC
+  - SIMD/columnar fast paths preserved under `mvcc_enabled`
+- **SQLite compatibility push** — full SQLITE_MAX_TRIGGER_DEPTH (1000) trigger semantics, ALTER TABLE RENAME COLUMN with trigger-body rewrite, schema-aware index manager, FK deferral, window-function correctness
+- **EXPLAIN QUERY PLAN** moved close to sqlite3 parity (view/subquery expansion, window-sort annotations, ordering-index scan lines)
+- Released as **v0.2.0** on 2026-06-15 (369 commits since v0.1.4)

@@ -17,6 +17,22 @@ See [HISTORY.md](HISTORY.md) for development timeline.
 
 ## Recently Completed
 
+### Replication & Consensus (v0.2.0)
+- Single-group Raft replication via `vibesql-consensus` crate (built on `openraft`) — see [ADR-0004](decisions/0004-consensus-library.md)
+- Durable Raft log + vote persistence, network snapshot transfer + purge safety
+- MVCC state machine applies committed transactions from the Raft log
+- Linearizable leader reads + stale-leader fencing
+- Bounded-staleness follower reads + read-your-writes tokens
+- TCP transport + multi-node test cluster (`make test-cluster`)
+- HTTP REST, GraphQL, CRUD, blob storage, prepared statements all routable through consensus
+- SSE subscriptions fed from applied consensus entries
+
+### MVCC (v0.2.0)
+- Snapshot isolation via `xmin`/`xmax` row stamps (behind `mvcc_enabled` feature)
+- Visibility filter threaded through all read sites (sequential scan, index scan, PK lookup, UNIQUE)
+- `VACUUM` / `VACUUM INTO` syntax mapped to on-demand old-version GC
+- SIMD/columnar fast paths preserved under MVCC
+
 ### Server & Real-Time Features
 - PostgreSQL wire protocol (compatible with psql, JDBC, ODBC)
 - HTTP REST API with full CRUD operations
@@ -61,9 +77,9 @@ Compile SQL to native code for hot queries using LLVM or Cranelift. Could provid
 
 Durable on-disk storage with WAL and recovery. Current in-memory storage works well for many use cases.
 
-### Distributed Execution
+### Range-Sharded Replication
 
-Multi-node query execution with partitioning and replication. Would require complete architectural redesign.
+Multi-Raft-group replication where each key range owns its own consensus group (CockroachDB/TiKV model). VibeSQL v0.2.0 ships single-group whole-database replication (rqlite/dqlite model) via the `vibesql-consensus` crate; range sharding and distributed multi-shard transactions are deferred until single-group scale shows specific bottlenecks. See [ADR-0004](decisions/0004-consensus-library.md) for the topology decision.
 
 ### Materialized Views
 
