@@ -137,6 +137,35 @@ impl CreateTableExecutor {
             return Err(ExecutorError::TableAlreadyExists(echoed));
         }
 
+        // SQLite places tables, indexes, and views in ONE object namespace per
+        // schema. A `CREATE TABLE <name>` must therefore fail when an index of
+        // that name already exists, reporting `there is already an index named
+        // <name>` (sqlite3 3.51.0). This mirrors the symmetric CREATE INDEX
+        // check (`there is already a table named <name>`) and—critically—keeps
+        // the on-disk schema reloadable: previously VibeSQL accepted the
+        // colliding table, then the DDL-replay on the next open hit its own
+        // collision and bricked the database (issue #5613).
+        //
+        // The check is schema-aware (a temp index does not collide with a main
+        // table) and case-insensitive (#5553 identifier folding), reusing the
+        // canonical identifier's table-name component for the comparison.
+        //
+        // Note: IF NOT EXISTS does NOT suppress this cross-type collision —
+        // sqlite3 still raises `there is already an index named X` (verified
+        // against 3.51.0). IF NOT EXISTS only silences a same-type (table)
+        // collision, handled above.
+        if database
+            .catalog
+            .index_name_exists_in_schema(&schema_name, identifier.table_canonical())
+        {
+            // Echo the name as the user spelled it (sqlite3 prints the bare
+            // index name without schema qualification).
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "there is already an index named {}",
+                table_name
+            )));
+        }
+
         // Check for AUTO_INCREMENT constraints
         // MySQL allows only one AUTO_INCREMENT column per table
         let auto_increment_columns: Vec<&str> = stmt
@@ -632,6 +661,19 @@ impl CreateTableExecutor {
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("{}.{}", schema_name, identifier.display()));
             return Err(ExecutorError::TableAlreadyExists(echoed));
+        }
+
+        // Cross-type namespace collision: a CTAS name already used by an index
+        // must fail with `there is already an index named <name>`, just like the
+        // bare CREATE TABLE path. Keeps the schema reloadable (issue #5613).
+        if database
+            .catalog
+            .index_name_exists_in_schema(schema_name, identifier.table_canonical())
+        {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "there is already an index named {}",
+                table_name
+            )));
         }
 
         // Execute the SELECT query to get results
