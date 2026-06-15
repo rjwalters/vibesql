@@ -145,6 +145,27 @@ impl Catalog {
         self.indexes.values().filter(|index| index.schema == resolved).collect()
     }
 
+    /// Check whether an index with `index_name` exists in `schema_name`.
+    ///
+    /// SQLite places tables, indexes, and views in a single object namespace per
+    /// schema, so CREATE TABLE must reject a name already taken by an index in
+    /// the same schema (`there is already an index named X`). This is the
+    /// table-side counterpart to the index-side `there is already a table named
+    /// X` check.
+    ///
+    /// The lookup is schema-aware (so a temp index does not collide with a main
+    /// table and vice versa — issue #5513) and case-insensitive (SQLite folds
+    /// identifiers regardless of quoting — issue #5553). `schema_name` may be a
+    /// user-facing alias (e.g. `temp`); it is resolved to the internal schema
+    /// name before comparison.
+    pub fn index_name_exists_in_schema(&self, schema_name: &str, index_name: &str) -> bool {
+        let resolved_schema = self.resolve_schema_name(schema_name).to_lowercase();
+        let index_lc = index_name.to_lowercase();
+        self.indexes.values().any(|idx| {
+            idx.schema.to_lowercase() == resolved_schema && idx.name.to_lowercase() == index_lc
+        })
+    }
+
     /// Look up an index by its name alone (across all tables in this catalog).
     ///
     /// The storage layer keys its index manager by name only (without a table
@@ -532,6 +553,33 @@ mod tests {
         // Main index survives.
         assert_eq!(catalog.get_schema_indexes("main").len(), 1);
         assert!(catalog.get_schema_indexes(&temp_schema).is_empty());
+    }
+
+    #[test]
+    fn test_index_name_exists_in_schema_is_schema_aware_and_case_insensitive() {
+        // #5613: index/table namespace collision check must be schema-aware and
+        // case-insensitive (#5553), and must not leak a temp index into main.
+        let mut catalog = create_test_catalog();
+        let temp_schema = catalog.temp_schema_name().to_string();
+
+        catalog
+            .add_index(IndexMetadata::new(
+                "idx_name".to_string(),
+                "users".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("name".to_string(), SortOrder::Ascending)],
+                false,
+            ))
+            .unwrap(); // defaults to schema "main"
+
+        // Present in main, in either case.
+        assert!(catalog.index_name_exists_in_schema("main", "idx_name"));
+        assert!(catalog.index_name_exists_in_schema("main", "IDX_NAME"));
+        // Absent from a different (temp) schema -> a temp table named `idx_name`
+        // must NOT see this main index as a collision.
+        assert!(!catalog.index_name_exists_in_schema(&temp_schema, "idx_name"));
+        // Unknown name -> no collision.
+        assert!(!catalog.index_name_exists_in_schema("main", "nope"));
     }
 
     #[test]

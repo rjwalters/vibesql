@@ -641,3 +641,100 @@ fn test_create_table_multipolygon_sqllogictest() {
     let schema = db.catalog.get_table("t1710a").unwrap();
     assert_eq!(schema.column_count(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Object-namespace collision matrix (issue #5613)
+//
+// SQLite keeps tables, indexes, and views in ONE namespace per schema. A
+// CREATE TABLE whose name is already taken by an index must fail with
+// `there is already an index named <name>` (and the symmetric CREATE INDEX
+// over a table name fails with `there is already a table named <name>`). The
+// pre-fix bug accepted the colliding table, producing an on-disk schema that
+// could not reload (the DDL replay hit its own collision). See `table-2.2a`.
+// ---------------------------------------------------------------------------
+
+/// Parse and execute one statement, returning the SQLite-compatible error
+/// string (via Display) on failure so we can assert on exact wording.
+fn exec_sql_collision(db: &mut Database, sql: &str) -> Result<String, String> {
+    let stmt =
+        vibesql_parser::Parser::parse_sql(sql).map_err(|e| format!("Parse error: {:?}", e))?;
+    match stmt {
+        vibesql_ast::Statement::CreateTable(s) => {
+            CreateTableExecutor::execute(&s, db).map_err(|e| e.to_string())
+        }
+        vibesql_ast::Statement::CreateIndex(s) => crate::CreateIndexExecutor::execute(&s, db)
+            .map(|_| "ok".to_string())
+            .map_err(|e| e.to_string()),
+        other => Err(format!("Unsupported statement type: {:?}", other)),
+    }
+}
+
+#[test]
+fn create_table_rejects_existing_index_name() {
+    // table-2.2a: CREATE TABLE over an existing index name must fail.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE test2(one text)").unwrap();
+    exec_sql_collision(&mut db, "CREATE INDEX test3 ON test2(one)").unwrap();
+
+    let err = exec_sql_collision(&mut db, "CREATE TABLE test3(two text)").unwrap_err();
+    assert_eq!(err, "there is already an index named test3");
+
+    // The colliding table must NOT have been created.
+    assert!(!db.catalog.table_exists("test3"));
+}
+
+#[test]
+fn create_table_if_not_exists_still_rejects_index_name() {
+    // sqlite3 3.51.0: IF NOT EXISTS does not suppress a cross-type collision.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE t2(a)").unwrap();
+    exec_sql_collision(&mut db, "CREATE INDEX t3 ON t2(a)").unwrap();
+
+    let err = exec_sql_collision(&mut db, "CREATE TABLE IF NOT EXISTS t3(b)").unwrap_err();
+    assert_eq!(err, "there is already an index named t3");
+}
+
+#[test]
+fn create_table_index_collision_is_case_insensitive() {
+    // #5553 identifier folding: T3 collides with index t3, and the error echoes
+    // the name as the user spelled it.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE t2(a)").unwrap();
+    exec_sql_collision(&mut db, "CREATE INDEX t3 ON t2(a)").unwrap();
+
+    let err = exec_sql_collision(&mut db, "CREATE TABLE T3(b)").unwrap_err();
+    assert_eq!(err, "there is already an index named T3");
+}
+
+#[test]
+fn create_index_rejects_existing_table_name() {
+    // Symmetric direction: CREATE INDEX over an existing table name.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE t1(a)").unwrap();
+
+    let err = exec_sql_collision(&mut db, "CREATE INDEX t1 ON t1(a)").unwrap_err();
+    assert_eq!(err, "there is already a table named t1");
+}
+
+#[test]
+fn create_table_allows_distinct_names() {
+    // No false positives: distinct table/index names coexist fine.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE a(x)").unwrap();
+    exec_sql_collision(&mut db, "CREATE INDEX idx_a ON a(x)").unwrap();
+    exec_sql_collision(&mut db, "CREATE TABLE b(y)").unwrap();
+    assert!(db.catalog.table_exists("a"));
+    assert!(db.catalog.table_exists("b"));
+}
+
+#[test]
+fn create_table_as_select_rejects_existing_index_name() {
+    // The CTAS path shares the same namespace rule.
+    let mut db = Database::new();
+    exec_sql_collision(&mut db, "CREATE TABLE src(one text)").unwrap();
+    exec_sql_collision(&mut db, "CREATE INDEX ix ON src(one)").unwrap();
+
+    let err = exec_sql_collision(&mut db, "CREATE TABLE ix AS SELECT * FROM src").unwrap_err();
+    assert_eq!(err, "there is already an index named ix");
+    assert!(!db.catalog.table_exists("ix"));
+}

@@ -253,6 +253,73 @@ CREATE INDEX idx_dept ON employees (dept Asc);
     }
 
     #[test]
+    fn test_table_index_namespace_collision_round_trips_cleanly() {
+        // Regression for issue #5613. Before the fix, CREATE TABLE accepted a
+        // name already used by an index. The resulting saved schema then failed
+        // to reload because the DDL-replay (this very `load_sql_dump`) hit its
+        // own collision and aborted, bricking the database. With the namespace
+        // check in place, the collision is rejected up-front, so a database can
+        // never persist a state it cannot itself reload.
+        //
+        // Here we build a *valid* schema (table + index with distinct names plus
+        // a colliding-but-rejected attempt), save it, and confirm the dump
+        // reloads cleanly via the same replay path.
+        let mut db = Database::new();
+
+        let create_t2 = vibesql_parser::Parser::parse_sql("CREATE TABLE test2(one text)").unwrap();
+        if let vibesql_ast::Statement::CreateTable(s) = create_t2 {
+            CreateTableExecutor::execute(&s, &mut db).unwrap();
+        }
+        let create_ix =
+            vibesql_parser::Parser::parse_sql("CREATE INDEX test3 ON test2(one)").unwrap();
+        if let vibesql_ast::Statement::CreateIndex(s) = create_ix {
+            CreateIndexExecutor::execute(&s, &mut db).unwrap();
+        }
+
+        // The colliding CREATE TABLE is rejected (never persisted).
+        let collide = vibesql_parser::Parser::parse_sql("CREATE TABLE test3(two text)").unwrap();
+        if let vibesql_ast::Statement::CreateTable(s) = collide {
+            let err = CreateTableExecutor::execute(&s, &mut db).unwrap_err();
+            assert_eq!(err.to_string(), "there is already an index named test3");
+        }
+
+        // Save the (clean) schema and reload it through the replay path.
+        let temp_file = NamedTempFile::new().unwrap();
+        db.save_sql_dump(temp_file.path()).unwrap();
+
+        let reloaded = load_sql_dump(temp_file.path().to_str().unwrap())
+            .expect("schema must reload without bricking (issue #5613)");
+
+        // Both objects survived the round-trip; the bogus table never appeared.
+        assert!(reloaded.get_table("test2").is_some());
+        assert!(reloaded.get_index("test3").is_some());
+    }
+
+    #[test]
+    fn test_dump_with_table_index_collision_is_rejected_on_load() {
+        // Defense in depth: even a hand-authored dump that puts a CREATE INDEX
+        // and a same-named CREATE TABLE in one file must be rejected on load
+        // with the SQLite-compatible wording — not silently accepted into an
+        // unloadable state.
+        let temp_file = NamedTempFile::new().unwrap();
+        let sql_dump = r#"
+CREATE TABLE test2 (one TEXT);
+CREATE INDEX test3 ON test2 (one);
+CREATE TABLE test3 (two TEXT);
+"#;
+        fs::write(temp_file.path(), sql_dump).unwrap();
+
+        let err = load_sql_dump(temp_file.path().to_str().unwrap())
+            .expect_err("colliding dump must be rejected, not bricked")
+            .to_string();
+        assert!(
+            err.contains("there is already an index named test3"),
+            "expected index-collision wording, got: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_load_with_roles() {
         let temp_file = NamedTempFile::new().unwrap();
         let sql_dump = r#"
