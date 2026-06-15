@@ -269,6 +269,157 @@ CREATE INDEX idx_dept ON employees (dept Asc);
         assert!(db.get_index("IDX_DEPT").is_some());
     }
 
+    // Helper used by the issue #5624 regression tests: run one statement through
+    // the appropriate executor so a save_sql_dump round-trip can be exercised.
+    #[cfg(test)]
+    fn exec_one(db: &mut Database, sql: &str) {
+        use crate::{
+            index_ddl::IndexExecutor, BeginTransactionExecutor, CommitExecutor, DropTableExecutor,
+        };
+        let st = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        match st {
+            vibesql_ast::Statement::CreateTable(s) => {
+                CreateTableExecutor::execute(&s, db).unwrap();
+            }
+            vibesql_ast::Statement::CreateIndex(s) => {
+                CreateIndexExecutor::execute(&s, db).unwrap();
+            }
+            vibesql_ast::Statement::DropIndex(s) => {
+                IndexExecutor::execute_drop(&s, db).unwrap();
+            }
+            vibesql_ast::Statement::DropTable(s) => {
+                DropTableExecutor::execute(&s, db).unwrap();
+            }
+            vibesql_ast::Statement::BeginTransaction(s) => {
+                BeginTransactionExecutor::execute(&s, db).unwrap();
+            }
+            vibesql_ast::Statement::Commit(s) => {
+                CommitExecutor::execute(&s, db).unwrap();
+            }
+            other => panic!("unexpected statement in test helper: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_transactional_bulk_create_drop_round_trips_cleanly() {
+        // Regression for issue #5624. table.test table-15.1/15.2 create and then
+        // drop ~2000 tables inside single BEGIN/COMMIT transactions. After such a
+        // transaction commits, the persisted dump must NOT contain any of the
+        // created-then-dropped tables — earlier engine states emitted a stale or
+        // duplicate CREATE for a table that had been dropped within the
+        // transaction, so the next reload aborted with
+        // `there is already a table named <name>` (or similar). The dropped
+        // tables must simply be absent, exactly like sqlite3.
+        let mut db = Database::new();
+
+        // BEGIN; CREATE TABLE tbl0..tblN; COMMIT  (mirrors table-15.1)
+        exec_one(&mut db, "BEGIN");
+        for i in 0..200 {
+            exec_one(&mut db, &format!("CREATE TABLE tbl{} (a, b, c)", i));
+        }
+        exec_one(&mut db, "COMMIT");
+
+        // BEGIN; DROP TABLE tbl0..tblN; COMMIT  (mirrors table-15.2)
+        exec_one(&mut db, "BEGIN");
+        for i in 0..200 {
+            exec_one(&mut db, &format!("DROP TABLE tbl{}", i));
+        }
+        exec_one(&mut db, "COMMIT");
+
+        // After the drop transaction commits, no tbl* tables remain.
+        assert!(db.list_tables().is_empty(), "all tables should be dropped: {:?}", db.list_tables());
+
+        // Save and reload via the engine's own replay path. The dump must reload
+        // cleanly — no duplicate / stale CREATE TABLE for a dropped table.
+        let temp_file = NamedTempFile::new().unwrap();
+        db.save_sql_dump(temp_file.path()).unwrap();
+        let reloaded = load_sql_dump(temp_file.path().to_str().unwrap())
+            .expect("dump of a committed bulk create+drop transaction must reload (issue #5624)");
+        assert!(
+            reloaded.list_tables().is_empty(),
+            "reloaded DB should have no tables, got: {:?}",
+            reloaded.list_tables()
+        );
+    }
+
+    #[test]
+    fn test_transactional_partial_drop_round_trips_cleanly() {
+        // A committed transaction that creates several tables but drops only some
+        // of them must persist exactly the survivors — neither a stale CREATE for
+        // a dropped table nor a missing CREATE for a kept one. Round-trips
+        // through the replay path. (Issue #5624.)
+        let mut db = Database::new();
+
+        exec_one(&mut db, "BEGIN");
+        for i in 0..10 {
+            exec_one(&mut db, &format!("CREATE TABLE t{} (a, b)", i));
+        }
+        // Drop the even-numbered tables within the same transaction.
+        for i in (0..10).step_by(2) {
+            exec_one(&mut db, &format!("DROP TABLE t{}", i));
+        }
+        exec_one(&mut db, "COMMIT");
+
+        let temp_file = NamedTempFile::new().unwrap();
+        db.save_sql_dump(temp_file.path()).unwrap();
+        let reloaded = load_sql_dump(temp_file.path().to_str().unwrap())
+            .expect("partial-drop transaction dump must reload (issue #5624)");
+
+        for i in 0..10 {
+            let exists = reloaded.get_table(&format!("t{}", i)).is_some();
+            if i % 2 == 0 {
+                assert!(!exists, "dropped table t{} must NOT survive reload", i);
+            } else {
+                assert!(exists, "kept table t{} must survive reload", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_table_replacing_dropped_index_round_trips_cleanly() {
+        // Regression for issue #5624, modeled on table.test lines ~120-142:
+        //   CREATE TABLE test2(one);
+        //   CREATE INDEX test3 ON test2(one);   -- `test3` is an INDEX
+        //   DROP INDEX test3;                    -- `test3` freed
+        //   CREATE TABLE test3(two);             -- `test3` is now a TABLE
+        // After DROP INDEX, the catalog must NOT retain a stale `test3` index.
+        // If it did, the dump would emit BOTH `CREATE TABLE test3` and
+        // `CREATE INDEX test3 ...`, and the reload would abort with
+        // `there is already a table named test3` when the CREATE INDEX replay
+        // hit the namespace-collision guard. Both objects (and only them) must
+        // round-trip.
+        let mut db = Database::new();
+        exec_one(&mut db, "CREATE TABLE test2(one text)");
+        exec_one(&mut db, "CREATE INDEX test3 ON test2(one)");
+        exec_one(&mut db, "DROP INDEX test3");
+        exec_one(&mut db, "CREATE TABLE test3(two text)");
+
+        // No residual `test3` index should remain after DROP INDEX + the
+        // same-named CREATE TABLE.
+        assert!(
+            db.catalog.list_all_indexes().iter().all(|idx| idx.name.to_lowercase() != "test3"),
+            "stale `test3` index must not survive DROP INDEX: {:?}",
+            db.catalog.list_all_indexes().iter().map(|i| i.name.clone()).collect::<Vec<_>>()
+        );
+
+        let temp_file = NamedTempFile::new().unwrap();
+        db.save_sql_dump(temp_file.path()).unwrap();
+        let dump = fs::read_to_string(temp_file.path()).unwrap();
+        // Defense-in-depth: the dump must not emit a CREATE INDEX for the freed
+        // name (which would collide with table test3 on reload).
+        assert!(
+            !dump.to_uppercase().contains("CREATE INDEX TEST3"),
+            "dump must not re-emit the dropped `test3` index:\n{}",
+            dump
+        );
+
+        let reloaded = load_sql_dump(temp_file.path().to_str().unwrap()).expect(
+            "table replacing a dropped same-named index must reload without collision (issue #5624)",
+        );
+        assert!(reloaded.get_table("test2").is_some(), "test2 must survive reload");
+        assert!(reloaded.get_table("test3").is_some(), "test3 (table) must survive reload");
+    }
+
     #[test]
     fn test_table_index_namespace_collision_round_trips_cleanly() {
         // Regression for issue #5613. Before the fix, CREATE TABLE accepted a
