@@ -33,14 +33,14 @@ doc = false  # Binaries don't need documentation
 
 [dependencies]
 # Core VibeSQL crates
-vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
-vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
-vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }
-vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }
-vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
-vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types" }
+vibesql-ast = { version = "0.2.0", path = "../vibesql-ast" }
+vibesql-catalog = { version = "0.2.0", path = "../vibesql-catalog" }
+vibesql-storage = { version = "0.2.0", path = "../vibesql-storage" }
+vibesql-executor = { version = "0.2.0", path = "../vibesql-executor" }
+vibesql-parser = { version = "0.2.0", path = "../vibesql-parser" }
 # Replicated mode (#5383): sessions route writes through MvccRaftNode.
-vibesql-consensus = { version = "0.1.4", path = "../vibesql-consensus" }
+vibesql-consensus = { version = "0.2.0", path = "../vibesql-consensus" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -96,7 +96,7 @@ tokio-postgres = "0.7"
 tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.13", features = ["stream", "query"] }
 # Shared benchmark infrastructure
-vibesql-bench-common = { version = "0.1.4", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
+vibesql-bench-common = { version = "0.2.0", path = "../vibesql-bench-common", features = ["vibesql", "sqlite"] }
 # Additional dependencies for server benchmarks (moved from vibesql-executor)
 rand_chacha = "0.10"
 rusqlite = { workspace = true }

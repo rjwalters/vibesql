@@ -5,6 +5,211 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-15
+
+This release introduces a **Raft-based replication track** (new `vibesql-consensus` crate) and turns on the **MVCC visibility + on-demand GC** subsystem end-to-end. 369 commits since v0.1.4 also push SQLite compatibility forward — full SQLITE_MAX_TRIGGER_DEPTH (1000) trigger semantics, window-function correctness, ALTER TABLE RENAME COLUMN with trigger-body rewrite — and bring EXPLAIN QUERY PLAN output much closer to sqlite3 parity.
+
+### Replication & Consensus
+
+A new `vibesql-consensus` workspace crate built on `openraft` introduces single-group whole-database replication. The MVCC state machine applies committed transactions from the Raft log; HTTP and prepared-statement writes can now be routed through consensus.
+
+- **Durable Raft log + vote persistence** (#5357)
+- **In-process channel network + multi-node test cluster** (#5364)
+- **TCP transport + cluster config + `make test-cluster`** (#5368)
+- **Network snapshot transfer + durable snapshots + purge safety** (#5369, #5374)
+- **MVCC state machine — apply committed txns from the Raft log** (#5378, #5384)
+- **Freeze nondeterministic SQL at propose time** (#5377, #5382)
+- **Freeze volatile DEFAULTs + validate replicated trigger bodies** (#5396)
+- **Linearizable leader reads + stale-leader fencing** (#5387)
+- **Bounded-staleness follower reads + read-your-writes tokens** (#5390)
+- **Reject residual TIME→TIMESTAMP casts over non-target operands** (#5398, #5405)
+- **Boot TCP test clusters on pre-bound ephemeral listeners** (#5507, #5514)
+
+### Replicated server surface
+
+The server now exposes the consensus surface across its HTTP and PostgreSQL-wire endpoints.
+
+- **Replicated operational surface** — prepared-stmt writes, /health role, HTTP gating (#5411)
+- **Interactive transactions (BEGIN…COMMIT) in replicated sessions** (#5402)
+- **Mid-transaction RYW + savepoints in replicated sessions** (#5413)
+- **Route HTTP `/api/query` + CRUD-create writes through consensus** (#5423)
+- **Route HTTP CRUD by-id endpoints through consensus** (#5441)
+- **Route HTTP GraphQL queries + mutations through consensus** (#5447)
+- **Route HTTP blob storage writes through consensus** (#5457)
+- **Buffer prepared EXECUTE inside a replicated transaction** (#5430)
+- **Route replicated sessions' writes through MvccRaftNode** (#5395)
+- **Feed HTTP SSE subscriptions from applied consensus entries** (#5452)
+- **Coalesce apply-path change events for replicated subscriptions** (#5456, #5467)
+- **Names-only replicated Describe to avoid materializing rows** (#5503)
+- **Prune replicated subscription re-queries by changed PK** (#5496)
+- **Resolve real column names in replicated SELECT results** (#5428)
+
+### MVCC
+
+VibeSQL's MVCC subsystem now covers the read path end-to-end, with on-demand garbage collection wired to `VACUUM`.
+
+- **Stamp xmin/xmax on INSERT/UPDATE/DELETE behind `mvcc_enabled`** (#5193)
+- **TxnSnapshot + Row::visible_to predicate (Phase 1b)** (#5184)
+- **Add xmin/xmax to Row + bump vbsql to v7 (Phase 1a)** (#5142)
+- **Phase 1d read-path visible_to filtering + FK deferred-replay coordination** (#5209)
+- **Extend visible_to to index scans, PK lookup, UNIQUE scans** (#5204, #5222)
+- **Widen snapshots for autocommit + in-txn self-write visibility** (#5223)
+- **On-demand `vacuum_mvcc` for old-version garbage collection** (#5224)
+- **Thread visibility filter through DML read sites** (#5205, #5225)
+- **Enable SIMD/columnar fast paths under `mvcc_enabled`** (#5227)
+- **Parse `VACUUM` / `VACUUM INTO` and map execution to MVCC GC** (#5226)
+
+### SQL Compatibility
+
+#### Triggers
+
+Trigger semantics got a heavy pass to align with sqlite3 3.51.
+
+- **Honor `sqlite3_limit(SQLITE_LIMIT_TRIGGER_DEPTH)` at runtime** (#5605)
+- **Reach SQLite's full SQLITE_MAX_TRIGGER_DEPTH (1000) via on-demand stack growth** (#5610)
+- **Raise recursion depth cap 16 → 700 toward SQLite** (#5533)
+- **Honor `PRAGMA recursive_triggers = off`** (#5550)
+- **Schema-aware trigger firing for temp vs. main triggers** (#5592)
+- **Parse `CREATE TEMP/TEMPORARY TRIGGER` + schema-qualified names** (#5532)
+- **Parse `CREATE TRIGGER`: `IF NOT EXISTS`, reject `FOR EACH STATEMENT`, surface body syntax errors** (#5495)
+- **Reject `CREATE TRIGGER` with bound parameter in body / `WHEN`** (#5499)
+- **Accept unparenthesized `UPDATE OF` column list** (#5580)
+- **Accept subquery in trigger `WHEN` clause** (#5586)
+- **Support `RAISE()` in trigger bodies** (#5415)
+- **Reject `RAISE()` outside trigger programs at parse time** (#5424)
+- **Resolve `NEW`/`OLD` in trigger `WHEN`-clause subqueries** (#5585, #5593)
+- **Resolve `NEW.rowid` / `OLD.rowid` (oid / _rowid_) in trigger bodies** (#5519)
+- **Live columnar values for BEFORE/AFTER UPDATE triggers** (#5543, #5546)
+- **Live `count(*)` for combined BEFORE+AFTER DELETE triggers** (#5542)
+- **Interleave BEFORE/AFTER row triggers per-row in multi-row DML** (#5504)
+- **Cascade-drop triggers ON a dropped table (temp lifecycle)** (#5597)
+- **Cascade-drop INSTEAD OF triggers when their view is dropped** (#5604)
+- **List temp views + temp triggers in `sqlite_temp_master`** (#5582)
+- **Transactional DDL rollback + `DROP TRIGGER IF EXISTS`** (#5506)
+- **`UPDATE OR REPLACE/IGNORE` conflict resolution + DELETE triggers on WITHOUT ROWID** (#5522)
+- **Fire child UPDATE triggers on `ON DELETE SET NULL`/`SET DEFAULT` cascades** (#5518)
+- **Statement-end orphan FK check after cascade-fired `RAISE(IGNORE)`** (#5498)
+- **Auto-commit statement atomicity for cascade / `RAISE(ABORT)` and multi-row DML** (#5473)
+- **`OLD/NEW` in `INSERT…SELECT` trigger bodies + trigger\*.test triage** (#5493)
+- **Rewrite trigger table refs + verbatim SQL on `ALTER TABLE RENAME`** (#5510)
+
+#### Window Functions
+
+- **Match SQLite last-pass row order and sort `GROUP BY` output by key** (#5311)
+- **Propagate `PARTITION BY` evaluation errors instead of NULL-keying** (#5305)
+- **Honor `NULLS FIRST/LAST` and collation in sort and RANGE frames** (#5297)
+- **Resolve aggregate args of embedded window functions via hidden columns** (#5280)
+- **Evaluate window functions mixed with aggregates in one `SELECT`** (#5265)
+- **Window IN-subqueries and ordinal `ORDER BY` through wildcards** (#5256)
+- **window1.test residuals — nested scope binding, UNION-arm misuse, text coercion** (#5273)
+- **WHERE push-down into window subqueries + covering-index window-sort EQP** (#5349)
+- **Pre-compute aggregates in `OVER (PARTITION BY/ORDER BY/frame)`** (#5127)
+- **Reject non-window aggregates in `ORDER BY` of window queries** (#5094, #5119)
+- **Detect window-function misuse in positional `GROUP BY`** (#5111)
+- **`COUNT()`/`COUNT(*)` over post-aggregate frames now counts all frame rows** (#5089)
+- **Preserve REAL type in `sum()` over float inputs**
+- **`GROUP_CONCAT` dispatch and `RANGE ORDER BY` validation** (#5058)
+- **Thread `case_sensitive_like` PRAGMA through all filter paths**
+- **Recurse through all expression variants for window detection** (#5095, #5121)
+
+#### ALTER TABLE
+
+- **`ALTER TABLE RENAME COLUMN` with trigger-body column rewrite** (#5602)
+- **Abort `RENAME COLUMN` on ambiguous trigger-body column ref** (#5607)
+- **Edit verbatim `sqlite_master.sql` in place for `DROP COLUMN` / `RENAME TO`** (#5635)
+- **Sync catalog schema on ALTER + edit verbatim SQL in place** (#5633)
+- **Match sqlite3 wording for `ALTER TABLE RENAME TO` collision** (#5560)
+
+#### Foreign Keys
+
+- **Partial-index awareness unblocks fkey1-6.0/6.1/6.2** (#5213)
+- **Wire `sqlite3_db_status DBSTATUS_DEFERRED_FKS` bridge** (#5211)
+- **Persist DEFERRABLE clause and skip auto-save inside txn** (#5185)
+- **Self-ref multi-row INSERT + tcl-shim multi-table parse** (#5180)
+- **Collation-aware comparison in CASCADE/SET NULL/SET DEFAULT helpers** (#5176)
+- **Self-FK + deferral introspection (Phase C3 of #5085)** (#5141)
+- **Deferred FK violation queue + COMMIT-time enforcement (Phase C2 of #5085)** (#5133)
+- **Catalog metadata + `PRAGMA defer_foreign_keys` (Phase C1 of #5085)** (#5124)
+- **Emit "foreign key mismatch" error class for invalid FK targets** (#5120)
+- **Fire child row triggers on FK ON DELETE/UPDATE CASCADE** (#5463)
+
+#### Parser
+
+- **Parse `VACUUM` / `VACUUM INTO`** (#5226)
+- **Support `WITH` clause before `VALUES` statement** (#5358)
+- **Support `date()` and `time()` as scalar function calls** (#5316)
+- **Accept `TEMP/TEMPORARY` modifier on `CREATE TRIGGER`** (#5229)
+- **Support partial-index `WHERE` clauses in `CREATE INDEX`** (#5109)
+- **Support `RESTRICT`, post-constraint `DEFAULT`, empty statements** (#5088)
+
+### EXPLAIN QUERY PLAN
+
+EQP output moved much closer to sqlite3 parity this cycle.
+
+- **Expand views / subqueries in EQP output (windowpushd)** (#5354)
+- **Flatten plain views in EQP output** (#5360)
+- **Render blocked view bodies as CO-ROUTINE blocks in EQP** (#5366)
+- **Emit temp B-tree annotations for GROUP BY/DISTINCT/compound** (#5370)
+- **Ordering-index scan lines + compound `ORDER BY` shape** (#5372)
+- **Suppress `ORDER BY` temp B-tree for rowid-alias natural-order scans** (#5380)
+- **Emit EQP window-sort entries for `OVER`-clause sorting passes** (#5244)
+- **Suppress statement `ORDER BY` temp-B-tree entry when covered by first window sort key** (#5249)
+- **Restrict window-sort index suppression to the innermost pass** (#5250)
+
+### Storage & Indexes
+
+- **Schema-aware index manager — same-named indexes coexist across schemas** (#5540, #5555)
+- **Schema-aware spatial indexes — same-name cross-schema coexistence** (#5558, #5576)
+- **Schema-aware indexes + `sqlite_temp_master`** (#5513, #5539)
+- **HNSW threshold-triggered graph compaction to restore recall** (#5461)
+- **Vector index per-row maintenance — keep IVFFlat/HNSW in sync on non-compacting INSERT/UPDATE/DELETE** (#5453)
+- **Rebuild IVFFlat/HNSW vector indexes on table compaction** (#5449)
+- **Make full-tree index rebuild reversible mid-transaction** (#5443)
+- **Undo disk-backed (spilled) index mutations on ROLLBACK** (#5433)
+- **Scope spilled-index undo to statement savepoint (RAISE(ABORT))** (#5458)
+- **Copy-on-write Operations snapshot for txn rollback** (#5426)
+- **Preserve original index-name case in SQL dump** (#5579, #5590)
+- **Quote identifiers in SQL-dump index DDL round-trip** (#5567)
+- **Index-ordered scans wrong after mid-statement tombstone delete** (#5524, #5530)
+- **Repopulate catalog index metadata on binary load** (#5220)
+- **Preserve original-case identifier echo across dump/reload** (#5618, #5621)
+- **Persist `CREATE TRIGGER` in SQL-dump format** (#5086)
+
+### Planner & Optimizer
+
+- **Select partial indexes via structural predicate implication** (#5331)
+- **Preserve NULL semantics in scalar-comparison decorrelation** (#5281)
+- **Implicit-outer-aggregate-collapse + correlated window subquery** (#5134)
+- **Scope-aware outer-aggregate-collapse for nested FROM subqueries** (#5139)
+
+### Performance
+
+- **Add HNSW recall@k benchmark to the suite for regression tracking** (#5476)
+- **Add explicit SIMD intrinsics for filtered `SUM` on f64** (#5042)
+- **Incremental columnar maintenance for INSERT/UPDATE** (#5043)
+- **Extend vectorized execution to LEFT/RIGHT JOINs and `ORDER BY`** (#5039)
+- **Early bail-out checks in columnar JOIN dispatch** (#5051)
+
+### Web Demo
+
+- **Surface HNSW recall@k on the trends dashboard** (#5481)
+- **Restore expectedRows/expectedCount payloads for example validation** (#5259)
+- **Restore sqllogictest SQL payloads** (#5257)
+- **Pin web-demo as standalone pnpm workspace and resync lockfile** (#5252)
+
+### Infrastructure
+
+- **New `vibesql-consensus` workspace crate** — published to crates.io alongside the rest of the workspace.
+- **Consolidate `rusqlite` under `[workspace.dependencies]`** (#5171, follow-up clean-up #5237)
+- **Migrate pnpm overrides to `pnpm-workspace.yaml`** (#5169)
+- **Loom 0.10.0 installation** (#5168)
+- **Add VibeSQL-specific `/loom:release` skill** — interactive release flow with awareness of the four version-bearing files and the dual crates.io / PyPI tag-triggered workflows.
+- **Add `scripts/version.sh` for version sync + release tagging** (#5356)
+- **`pyo3` 0.28 → 0.29** (#5379), **`arrow` 58.1 → 59.0** (#5242), **`rusqlite` 0.39 → 0.40** (#5163), **`rstar` 0.12 → 0.13** (#5162)
+- **Routine dependabot grouped bumps** across web-demo, benchmarks, and root.
+
+---
+
 ## [0.1.4] - 2026-01-18
 
 This release focuses on **SQLite compatibility** and **morsel-driven parallel execution**. With 878 commits since v0.1.3, highlights include 100% TCL test pass rate on Priority 1 tests, memory-bounded operators with spill-to-disk, UPDATE FROM syntax, and CHECK constraint enforcement.

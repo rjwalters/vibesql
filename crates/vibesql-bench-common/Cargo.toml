@@ -30,10 +30,10 @@ rand = "0.10"
 rand_chacha = "0.10"
 
 # VibeSQL dependencies (optional, for schema loading)
-vibesql-types = { version = "0.1.4", path = "../vibesql-types", optional = true }
-vibesql-ast = { version = "0.1.4", path = "../vibesql-ast", optional = true }
-vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog", optional = true }
-vibesql-storage = { version = "0.1.4", path = "../vibesql-storage", optional = true }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types", optional = true }
+vibesql-ast = { version = "0.2.0", path = "../vibesql-ast", optional = true }
+vibesql-catalog = { version = "0.2.0", path = "../vibesql-catalog", optional = true }
+vibesql-storage = { version = "0.2.0", path = "../vibesql-storage", optional = true }
 arcstr = { version = "1.2", optional = true }
 
 # Comparison engine dependencies (optional)

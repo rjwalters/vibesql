@@ -38,11 +38,11 @@ storage-memory = ["opendal", "opendal/services-memory"]
 storage-all = ["storage-fs", "storage-s3", "storage-gcs", "storage-azure", "storage-memory"]
 
 [dependencies]
-vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
-vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }
-vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
-vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
-vibesql-l10n = { version = "0.1.4", path = "../vibesql-l10n" }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types" }
+vibesql-catalog = { version = "0.2.0", path = "../vibesql-catalog" }
+vibesql-ast = { version = "0.2.0", path = "../vibesql-ast" }
+vibesql-parser = { version = "0.2.0", path = "../vibesql-parser" }
+vibesql-l10n = { version = "0.2.0", path = "../vibesql-l10n" }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

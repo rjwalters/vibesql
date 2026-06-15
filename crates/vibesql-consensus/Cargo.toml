@@ -26,15 +26,15 @@ mvcc_enabled = ["vibesql-storage/mvcc_enabled", "vibesql-executor/mvcc_enabled"]
 # Raft Phase B1 (#5199): the replicated state machine applies committed
 # log entries to a real database. Dependency direction is consensus →
 # executor → storage (never the reverse), per ADR-0004's layering rule.
-vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
+vibesql-ast = { version = "0.2.0", path = "../vibesql-ast" }
 # `catalog` for TableSchema in the freeze pass (#5377): the propose-side
 # evaluation context and the volatile-DEFAULT audit inspect column
 # defaults.
-vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }
-vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
-vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
-vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }
-vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
+vibesql-catalog = { version = "0.2.0", path = "../vibesql-catalog" }
+vibesql-executor = { version = "0.2.0", path = "../vibesql-executor" }
+vibesql-parser = { version = "0.2.0", path = "../vibesql-parser" }
+vibesql-storage = { version = "0.2.0", path = "../vibesql-storage" }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types" }
 # `storage-v2` unseals the RaftLogStorage/RaftStateMachine traits (the v2
 # storage API) so this crate can implement them; `serde` because our log
 # entry payloads and vote state will be serialized for durability in PR 2.
@@ -60,4 +60,4 @@ tokio = { version = "1.0", features = ["rt", "macros", "time"] }
 # `MvccRaftNode::query*` returns `Vec<Vec<SqlValue>>`, and integration
 # test binaries only see dev-dependencies. Same crate the library itself
 # depends on above.
-vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types" }

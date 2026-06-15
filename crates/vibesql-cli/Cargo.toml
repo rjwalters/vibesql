@@ -16,13 +16,13 @@ doc = false  # Binaries don't need documentation
 
 [dependencies]
 # Core VibeSQL crates
-vibesql-types = { version = "0.1.4", path = "../vibesql-types" }
-vibesql-ast = { version = "0.1.4", path = "../vibesql-ast" }
-vibesql-catalog = { version = "0.1.4", path = "../vibesql-catalog" }
-vibesql-storage = { version = "0.1.4", path = "../vibesql-storage" }
-vibesql-executor = { version = "0.1.4", path = "../vibesql-executor" }
-vibesql-parser = { version = "0.1.4", path = "../vibesql-parser" }
-vibesql-l10n = { version = "0.1.4", path = "../vibesql-l10n" }
+vibesql-types = { version = "0.2.0", path = "../vibesql-types" }
+vibesql-ast = { version = "0.2.0", path = "../vibesql-ast" }
+vibesql-catalog = { version = "0.2.0", path = "../vibesql-catalog" }
+vibesql-storage = { version = "0.2.0", path = "../vibesql-storage" }
+vibesql-executor = { version = "0.2.0", path = "../vibesql-executor" }
+vibesql-parser = { version = "0.2.0", path = "../vibesql-parser" }
+vibesql-l10n = { version = "0.2.0", path = "../vibesql-l10n" }
 
 # CLI dependencies
 clap = { version = "4", features = ["derive"] }

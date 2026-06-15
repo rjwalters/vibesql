@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "vibesql"
-version = "0.1.4"
+version = "0.2.0"
 description = "Python bindings for VibeSQL SQL database engine"
 readme = "README.md"
 requires-python = ">=3.8"
