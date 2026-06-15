@@ -38,6 +38,14 @@ pub struct TableSchema {
     /// `no such column: rowid` (SQLite semantics; `allow_rowid_in_view` is off by
     /// default). See issue #5492.
     pub is_view: bool,
+    /// Verbatim original `CREATE TABLE` source text, exactly as the user typed
+    /// it (whitespace and formatting preserved), with any trailing semicolon
+    /// stripped. SQLite stores the byte-for-byte original statement in
+    /// `sqlite_master.sql`; when this is `Some`, `sqlite_master` returns it
+    /// verbatim instead of a reconstruction from the parsed schema. `None` when
+    /// the source text is unavailable (e.g. schema built programmatically), in
+    /// which case callers fall back to reconstructing the SQL. See issue #5619.
+    pub sql_source: Option<String>,
 }
 
 impl TableSchema {
@@ -61,6 +69,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -85,6 +94,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -109,6 +119,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -133,6 +144,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -158,6 +170,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -185,6 +198,7 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
@@ -209,12 +223,35 @@ impl TableSchema {
             rowid_alias_column: None,
             without_rowid: false,
             is_view: false,
+            sql_source: None,
         }
     }
 
     /// Set the storage format for this table
     pub fn set_storage_format(&mut self, storage_format: StorageFormat) {
         self.storage_format = storage_format;
+    }
+
+    /// Set the verbatim original `CREATE TABLE` source text (see `sql_source`).
+    /// Any trailing semicolon and surrounding whitespace are stripped so the
+    /// stored text matches SQLite's `sqlite_master.sql` (which excludes the
+    /// terminating `;`). See issue #5619.
+    pub fn set_sql_source(&mut self, sql_source: impl Into<String>) {
+        let s = sql_source.into();
+        let trimmed = s.trim();
+        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+        self.sql_source = Some(trimmed.to_string());
+    }
+
+    /// Discard any captured verbatim `CREATE TABLE` source text (see
+    /// `sql_source`). Must be called whenever the schema is structurally mutated
+    /// (e.g. by ALTER TABLE) so the stale original text is not re-emitted in
+    /// `sqlite_master.sql` or the SQL-dump persistence path — which would no
+    /// longer match the live schema and could even fail to reload (a renamed
+    /// table whose verbatim text still names the old table). After invalidation,
+    /// callers fall back to reconstructing the SQL. See issue #5619.
+    pub fn invalidate_sql_source(&mut self) {
+        self.sql_source = None;
     }
 
     /// Set the rowid alias column (for INTEGER PRIMARY KEY columns)

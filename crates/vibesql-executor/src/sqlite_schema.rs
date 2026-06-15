@@ -217,6 +217,16 @@ pub fn execute_sqlite_temp_schema_query(
 
 /// Generate CREATE TABLE SQL statement for a table
 fn generate_create_table_sql(table: &TableSchema) -> String {
+    // SQLite stores the original CREATE TABLE statement byte-verbatim in
+    // sqlite_master.sql (whitespace and formatting preserved). When we captured
+    // the original source text at CREATE time (issue #5619), return it as-is
+    // rather than reconstructing a normalized form from the parsed schema. We
+    // only reconstruct when the verbatim text is unavailable (e.g. schemas built
+    // programmatically, or after ALTER TABLE invalidated the stale source).
+    if let Some(ref src) = table.sql_source {
+        return src.clone();
+    }
+
     let mut sql = format!("CREATE TABLE {} (\n", table.name);
     let mut definitions: Vec<String> = Vec::new();
 

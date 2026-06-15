@@ -71,7 +71,30 @@ impl CreateTableExecutor {
         stmt: &CreateTableStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
-        Self::execute_impl(stmt, database, false)
+        Self::execute_impl(stmt, database, false, None)
+    }
+
+    /// Execute a `CREATE TABLE` statement (user-facing path), recording the
+    /// verbatim original source text.
+    ///
+    /// SQLite stores the byte-for-byte original `CREATE TABLE` statement in
+    /// `sqlite_master.sql` (whitespace and formatting preserved). When
+    /// `sql_source` is `Some`, it is stamped onto the catalog `TableSchema` so
+    /// that `sqlite_master`/`sqlite_schema` returns it verbatim instead of a
+    /// reconstruction. The trailing semicolon (if any) is stripped by
+    /// `TableSchema::set_sql_source` to match SQLite. Pass `None` when the source
+    /// text is unavailable (e.g. AST built programmatically); callers then fall
+    /// back to reconstructing the SQL. See issue #5619.
+    ///
+    /// This is the UNTRUSTED path — it keeps the #5614 reserved-name and #5553
+    /// duplicate-column guards. For replaying a persisted dump use
+    /// [`execute_for_load_with_source`].
+    pub fn execute_with_source(
+        stmt: &CreateTableStmt,
+        database: &mut Database,
+        sql_source: Option<&str>,
+    ) -> Result<String, ExecutorError> {
+        Self::execute_impl(stmt, database, false, sql_source)
     }
 
     /// Execute a CREATE TABLE statement on a TRUSTED (engine-internal) path.
@@ -96,13 +119,30 @@ impl CreateTableExecutor {
         stmt: &CreateTableStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
-        Self::execute_impl(stmt, database, true)
+        Self::execute_impl(stmt, database, true, None)
+    }
+
+    /// Trusted load path (see [`execute_for_load`]) that ALSO records the
+    /// verbatim original `CREATE TABLE` source text for `sqlite_master.sql`.
+    ///
+    /// This is the entry point used when reloading a persisted `.sql` dump: it
+    /// must bypass the user-facing guards (#5614/#5553) so a previously
+    /// persisted schema always round-trips, while still preserving the byte-for-
+    /// byte original source so `sqlite_master.sql` keeps the user's formatting
+    /// across a save/reload cycle (issue #5619).
+    pub fn execute_for_load_with_source(
+        stmt: &CreateTableStmt,
+        database: &mut Database,
+        sql_source: Option<&str>,
+    ) -> Result<String, ExecutorError> {
+        Self::execute_impl(stmt, database, true, sql_source)
     }
 
     fn execute_impl(
         stmt: &CreateTableStmt,
         database: &mut Database,
         trusted: bool,
+        sql_source: Option<&str>,
     ) -> Result<String, ExecutorError> {
         // Parse qualified table name (schema.table or just table)
         // For TEMP tables, use the session-specific temp schema (SQLite compatibility)
@@ -302,6 +342,13 @@ impl CreateTableExecutor {
 
         // Create TableSchema with unqualified name
         let mut table_schema = TableSchema::new(table_name.clone(), columns);
+
+        // Preserve the verbatim original CREATE TABLE text for sqlite_master.sql
+        // (SQLite stores it byte-for-byte; see issue #5619). The trailing
+        // semicolon is stripped by set_sql_source to match SQLite.
+        if let Some(src) = sql_source {
+            table_schema.set_sql_source(src);
+        }
 
         // Apply WITHOUT ROWID flag from AST (SQLite compatibility)
         table_schema.without_rowid = stmt.without_rowid;

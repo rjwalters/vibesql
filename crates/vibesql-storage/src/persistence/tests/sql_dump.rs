@@ -56,6 +56,38 @@ fn test_save_sql_dump() {
     std::fs::remove_file(path).ok();
 }
 
+/// Issue #5619: a TableSchema carrying verbatim CREATE TABLE source text must
+/// emit that text byte-for-byte in the SQL dump (instead of a normalized
+/// reconstruction), so the original whitespace survives a save/reload round-trip
+/// and sqlite_master.sql stays SQLite-compatible.
+#[test]
+fn test_sql_dump_emits_verbatim_create_source() {
+    let mut db = Database::new();
+
+    let mut schema = TableSchema::new(
+        "test1".to_string(),
+        vec![
+            ColumnSchema::new("one".to_string(), DataType::Varchar { max_length: Some(10) }, true),
+            ColumnSchema::new("two".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+    );
+    let verbatim = "CREATE TABLE test1 (\n      one varchar(10),\n      two text\n    )";
+    schema.set_sql_source(verbatim);
+    db.create_table(schema).unwrap();
+
+    let path = "/tmp/test_db_verbatim_5619.sql";
+    db.save_sql_dump(path).unwrap();
+
+    let content = std::fs::read_to_string(path).unwrap();
+    assert!(
+        content.contains(verbatim),
+        "dump should contain the verbatim CREATE TABLE text, got:\n{}",
+        content
+    );
+
+    std::fs::remove_file(path).ok();
+}
+
 #[test]
 fn test_sql_value_to_literal() {
     use crate::persistence::save::sql_value_to_literal;
