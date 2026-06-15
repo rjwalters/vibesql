@@ -55,6 +55,20 @@ impl DropTableExecutor {
     /// assert!(result.is_ok());
     /// ```
     pub fn execute(stmt: &DropTableStmt, database: &mut Database) -> Result<String, ExecutorError> {
+        // `sqlite_master`/`sqlite_schema` may never be dropped. SQLite errors
+        // `table sqlite_master may not be dropped` (sqlite3 3.51.0, table-5.2),
+        // echoing the canonical (lowercase) name regardless of the user's casing
+        // — `DROP TABLE SQLITE_MASTER` still reports `sqlite_master`. This guard
+        // precedes the existence check because sqlite_master is a virtual table
+        // that is not registered in the catalog. Other non-existent `sqlite_`
+        // names fall through to the normal "no such table" path, matching
+        // sqlite3 (issue #5614).
+        if crate::sqlite_schema::is_sqlite_schema_table(&stmt.table_name) {
+            return Err(ExecutorError::SqliteCompatError(
+                "table sqlite_master may not be dropped".to_string(),
+            ));
+        }
+
         // Check if table exists
         let table_exists = database.catalog.table_exists(&stmt.table_name);
 

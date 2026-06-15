@@ -95,6 +95,35 @@ impl CreateTableExecutor {
         // Check CREATE privilege on the schema
         PrivilegeChecker::check_create(database, &schema_name)?;
 
+        // Reject user attempts to create a table with a reserved name. SQLite
+        // reserves the `sqlite_` prefix for its own schema objects and errors
+        // `object name reserved for internal use: <name>` (sqlite3 3.51.0),
+        // echoing the name exactly as the user spelled it (dequoted, original
+        // case — e.g. `SQLITE_foo`). `table_name` already holds that verbatim
+        // bare-name spelling. This guard is on the user-facing executor only;
+        // the engine's internal sqlite_-prefixed objects are created via
+        // dedicated catalog APIs and never pass through here (issue #5614).
+        if crate::sqlite_schema::is_reserved_object_name(&table_name) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "object name reserved for internal use: {}",
+                table_name
+            )));
+        }
+
+        // Reject duplicate column names. SQLite compares column names
+        // case-insensitively (#5553) and errors `duplicate column name: <name>`,
+        // echoing the *second* (colliding) occurrence's original spelling —
+        // `CREATE TABLE t(a, A)` reports `duplicate column name: A`
+        // (sqlite3 3.51.0). The AST preserves each column's as-written casing.
+        for (i, col) in stmt.columns.iter().enumerate() {
+            if stmt.columns[..i].iter().any(|prev| prev.name.eq_ignore_ascii_case(&col.name)) {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "duplicate column name: {}",
+                    col.name
+                )));
+            }
+        }
+
         // Handle CREATE TABLE AS SELECT syntax
         if let Some(query) = &stmt.as_query {
             return Self::execute_create_as_select(

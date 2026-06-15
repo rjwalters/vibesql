@@ -29,6 +29,28 @@ pub fn is_sqlite_schema_table(table_name: &str) -> bool {
     matches!(normalized.as_str(), "sqlite_master" | "sqlite_schema")
 }
 
+/// Check whether an object name is reserved for internal use.
+///
+/// SQLite reserves the `sqlite_` prefix for its own schema objects
+/// (`sqlite_master`, `sqlite_sequence`, `sqlite_autoindex_*`, …) and rejects any
+/// *user* `CREATE TABLE`/`CREATE INDEX` whose name begins with that prefix:
+///
+/// ```text
+/// sqlite> CREATE TABLE sqlite_foo(x);
+/// Error: object name reserved for internal use: sqlite_foo
+/// ```
+///
+/// The match is case-insensitive (issue #5553 identifier folding); `SQLITE_foo`
+/// is rejected just like `sqlite_foo`. This guard applies ONLY to user-issued
+/// DDL — VibeSQL's own internal schema objects (sqlite_master, the
+/// `sqlite_autoindex_*` auto-indexes, etc.) are created through dedicated
+/// catalog APIs that never route through the user-facing executors, so they are
+/// unaffected.
+pub fn is_reserved_object_name(name: &str) -> bool {
+    name.len() >= "sqlite_".len()
+        && name.as_bytes()[.."sqlite_".len()].eq_ignore_ascii_case(b"sqlite_")
+}
+
 /// Check if a table reference is sqlite_temp_master or sqlite_temp_schema.
 ///
 /// These are the temp-schema introspection views: they list objects that live
