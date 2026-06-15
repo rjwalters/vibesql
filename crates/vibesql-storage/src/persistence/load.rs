@@ -206,9 +206,16 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
             i += 1;
         }
 
-        // Add space between lines (preserves SQL readability)
+        // Re-insert the line break that `content.lines()` stripped, rather than
+        // collapsing it to a single space. The on-disk dump stores the verbatim
+        // multi-line `CREATE TABLE` text (issue #5619); the executor captures the
+        // statement string we return here as `sqlite_master.sql`, so flattening
+        // newlines to spaces would silently rewrite the user's formatting on a
+        // .sql reload. A newline is whitespace to the SQL parser, so statement
+        // splitting and re-parsing are unaffected. The `!in_string` guard
+        // matches the prior behavior (no separator injected mid-literal).
         if !in_string {
-            current_statement.push(' ');
+            current_statement.push('\n');
         }
     }
 

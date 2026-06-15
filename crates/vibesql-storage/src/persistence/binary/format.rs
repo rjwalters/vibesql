@@ -27,7 +27,12 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 /// - v8: Added partial-index WHERE clause persistence per index. v7 files
 ///       remain readable: the read path treats absent partial-index data as
 ///       "no WHERE clause" (full index). Issue #5181.
-pub const VERSION: u8 = 8;
+/// - v9: Added verbatim `TableSchema::sql_source` persistence per table (the
+///       byte-for-byte original `CREATE TABLE` text shown in
+///       `sqlite_master.sql`). v8 and earlier files remain readable: the read
+///       path treats the absent field as `sql_source = None`, falling back to
+///       the reconstructed CREATE TABLE text. Issue #5619.
+pub const VERSION: u8 = 9;
 
 /// Type tags for binary serialization
 #[repr(u8)]

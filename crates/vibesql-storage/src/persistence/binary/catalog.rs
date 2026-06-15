@@ -103,6 +103,23 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 .map(|id| id.is_quoted())
                 .unwrap_or(false);
             write_bool(writer, quoted)?;
+
+            // Write the verbatim original CREATE TABLE text (v9+, issue #5619).
+            // SQLite stores the byte-for-byte source in sqlite_master.sql; the
+            // binary catalog must persist it so a cross-process reload (e.g. the
+            // TCL shim's per-batch CLI processes against a shared .vbsql file)
+            // returns the user's exact formatting rather than a reconstruction.
+            // Written last in the per-table record so v8-and-earlier readers,
+            // which stop after `quoted`, are unaffected.
+            match &table.schema.sql_source {
+                Some(src) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, src)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
         }
     }
 
@@ -395,16 +412,38 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         // For older versions, default to unquoted (case-insensitive)
         let quoted = if version >= 4 { read_bool(reader)? } else { false };
 
-        table_schemas.push((table_name, columns, primary_key, quoted));
+        // Read the verbatim original CREATE TABLE text (v9+, issue #5619).
+        // v8-and-earlier files do not include this field, so absence means
+        // "no captured source" (None) and the schema falls back to a
+        // reconstructed CREATE TABLE for sqlite_master.sql.
+        let sql_source = if version >= 9 {
+            let has_source = read_bool(reader)?;
+            if has_source {
+                Some(read_string(reader)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        table_schemas.push((table_name, columns, primary_key, quoted, sql_source));
     }
 
     // Create tables
-    for (table_name, columns, primary_key, quoted) in table_schemas {
-        let schema = if let Some(pk_cols) = primary_key {
+    for (table_name, columns, primary_key, quoted, sql_source) in table_schemas {
+        let mut schema = if let Some(pk_cols) = primary_key {
             vibesql_catalog::TableSchema::with_primary_key(table_name.clone(), columns, pk_cols)
         } else {
             vibesql_catalog::TableSchema::new(table_name.clone(), columns)
         };
+
+        // Restore the verbatim CREATE TABLE source dropped by the TableSchema
+        // constructors above (issue #5619). set_sql_source strips the trailing
+        // semicolon to match SQLite.
+        if let Some(src) = sql_source {
+            schema.set_sql_source(src);
+        }
 
         // Use TableIdentifier to preserve case-sensitivity semantics
         let identifier = vibesql_catalog::TableIdentifier::from_canonical(table_name, quoted);
@@ -776,5 +815,97 @@ pub(super) fn parse_data_type(type_str: &str) -> Result<vibesql_types::DataType,
         // Null type
         "NULL" => Ok(DataType::Null),
         _ => Err(StorageError::NotImplemented(format!("Unsupported data type: {}", type_str))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::format::VERSION;
+    use super::{read_catalog_v, write_catalog};
+    use crate::Database;
+
+    /// Issue #5619: the verbatim original `CREATE TABLE` source text
+    /// (`TableSchema::sql_source`) must survive a binary catalog round-trip.
+    ///
+    /// This is the cross-process reload guarantee: the TCL shim spawns a fresh
+    /// CLI process per batch against a shared `.vbsql` file, so a CREATE in one
+    /// process is read back via `SELECT sql FROM sqlite_master` in another only
+    /// if the binary format persists `sql_source`. Before v9 the catalog
+    /// reconstructed each table via `TableSchema::new`, silently dropping the
+    /// field.
+    #[test]
+    fn test_binary_catalog_preserves_verbatim_sql_source() {
+        let mut db = Database::new();
+
+        // A deliberately multi-line, original-formatting CREATE TABLE.
+        let original_sql = "CREATE TABLE t1(\n  a INTEGER,\n  b TEXT\n)";
+
+        let mut schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![
+                vibesql_catalog::ColumnSchema {
+                    name: "a".to_string(),
+                    data_type: vibesql_types::DataType::Integer,
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: true,
+                },
+                vibesql_catalog::ColumnSchema {
+                    name: "b".to_string(),
+                    data_type: vibesql_types::DataType::Varchar { max_length: None },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: false,
+                },
+            ],
+        );
+        schema.set_sql_source(original_sql);
+        let identifier = vibesql_catalog::TableIdentifier::new("t1", false);
+        db.create_table_with_identifier(schema, identifier).unwrap();
+
+        // Round-trip the catalog through the binary encoder/decoder at the
+        // current version.
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let table = reloaded.get_table("t1").expect("t1 must survive the round-trip");
+        assert_eq!(
+            table.schema.sql_source.as_deref(),
+            Some(original_sql),
+            "verbatim multi-line CREATE TABLE source must survive binary persistence (issue #5619)"
+        );
+    }
+
+    /// A table with no captured source must round-trip as `None` (the
+    /// reconstructed-SQL fallback path), not as an empty string or an error.
+    #[test]
+    fn test_binary_catalog_no_sql_source_round_trips_as_none() {
+        let mut db = Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "t2".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "x".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        let identifier = vibesql_catalog::TableIdentifier::new("t2", false);
+        db.create_table_with_identifier(schema, identifier).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let table = reloaded.get_table("t2").expect("t2 must survive the round-trip");
+        assert_eq!(table.schema.sql_source, None);
     }
 }
