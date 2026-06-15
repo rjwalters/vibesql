@@ -3709,7 +3709,6 @@ variable vibesql_skip_patterns {
     {utf16align- "UTF16 alignment test - encoding differs"}
     {subquery- "Subquery handling differs"}
     {resolver01- "Name resolution handling differs"}
-    {table- "Table creation error messages differ"}
     {tableopts- "Table options differ"}
     {temptable- "Temp table tests require cross-test session state"}
     {temptable2- "Temp table tests require cross-test session state"}
