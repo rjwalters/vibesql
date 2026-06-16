@@ -108,6 +108,32 @@ def get_git_info() -> Dict[str, str]:
         return {"commit": "unknown", "branch": "unknown"}
 
 
+def record_skipped_engine(test_name: str, engine: str, reason: str) -> None:
+    """Record an engine skip so the orchestrator (bench-all) can surface it.
+
+    Some phases of `make benchmark-all` (notably MySQL) can silently drop out
+    mid-run if Docker dies after the pre-flight check. Without a record, the
+    orchestrator reports "All phases completed successfully!" and the web
+    dashboard ships stale data from the previous cycle (see #5644).
+
+    We append a TSV line `<test>\\t<engine>\\t<reason>` to the marker file
+    pointed at by the `VIBESQL_BENCH_SKIP_MARKER` env var. If unset, this is
+    a no-op — single-shot `./scripts/bench` invocations stay quiet, only
+    `./scripts/bench-all` opts in.
+    """
+    marker = os.environ.get("VIBESQL_BENCH_SKIP_MARKER")
+    if not marker:
+        return
+    try:
+        with open(marker, "a") as f:
+            # Sanitize: the orchestrator parses lines by tab; replace tabs/newlines.
+            safe_reason = reason.replace("\t", " ").replace("\n", " ")
+            f.write(f"{test_name}\t{engine}\t{safe_reason}\n")
+    except OSError:
+        # Don't let bookkeeping errors blow up the benchmark itself.
+        pass
+
+
 def clean_benchmark_crates():
     """Clean benchmark crates to ensure fresh builds.
 
@@ -515,6 +541,7 @@ def run_tpch_comparison(config: BenchConfig) -> int:
                 print(f"✓ MySQL ready: {mysql_url}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("tpch", "mysql", "Docker not available")
             if len(config.engines) == 1:
                 return 1
             # Continue without MySQL
@@ -659,11 +686,12 @@ def run_tpcc(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("tpcc", "mysql", "Docker not available")
             if "mysql" in config.engines and len(config.engines) == 1:
                 return 1
             # Remove MySQL from engines if it's the only one failing
             config.engines = [e for e in config.engines if e != "mysql"]
-    
+
     # Run benchmark
     print(f"\nRunning TPC-C (duration={duration}s)...")
 
@@ -744,6 +772,7 @@ def run_tpcds(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {mysql_url}")
     else:
         print("⚠ MySQL unavailable (Docker not available, skipping MySQL comparison)")
+        record_skipped_engine("tpcds", "mysql", "Docker not available")
 
     # Use isolated runner to avoid memory pressure
     print("Running TPC-DS (isolated mode - each engine in separate process)...")
@@ -788,6 +817,7 @@ def run_sysbench(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("sysbench", "mysql", "Docker not available")
             # Remove MySQL from engines if Docker not available
             config.engines = [e for e in config.engines if e != "mysql"]
 
@@ -980,6 +1010,7 @@ def run_sysbench_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("sysbench-server", "mysql", "Docker not available")
 
     print(f"\nRunning Sysbench server (duration={duration}s)...")
     with open("/tmp/sysbench_server_results.txt", "w") as f:
@@ -1063,6 +1094,7 @@ def run_tpch_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("tpch-server", "mysql", "Docker not available")
 
     print(f"\nRunning TPC-H server (SF={scale_factor})...")
     result = subprocess.run(
@@ -1171,6 +1203,7 @@ def run_tpcc_server(config: BenchConfig) -> int:
             print(f"✓ MySQL ready: {env['MYSQL_URL']}")
         else:
             print("⚠ MySQL unavailable (Docker not available)")
+            record_skipped_engine("tpcc-server", "mysql", "Docker not available")
 
     # Build command with transaction filter if specified
     cmd = [bench_bin]
