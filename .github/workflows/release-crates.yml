@@ -52,20 +52,20 @@ jobs:
         if: github.event.inputs.dry_run == 'true'
         run: |
           echo "Dry run mode - will verify packages but not publish"
-          cargo publish -p vibesql-types --dry-run
-          cargo publish -p vibesql-l10n --dry-run
-          cargo publish -p vibesql-ast --dry-run
-          cargo publish -p vibesql-parser --dry-run
-          cargo publish -p vibesql-catalog --dry-run
-          cargo publish -p vibesql-storage --dry-run
-          cargo publish -p vibesql-bench-common --dry-run
-          cargo publish -p vibesql-executor --dry-run
-          cargo publish -p vibesql-consensus --dry-run
-          cargo publish -p vibesql --dry-run
+          cargo publish -p vibesql-types --dry-run --skip-existing
+          cargo publish -p vibesql-l10n --dry-run --skip-existing
+          cargo publish -p vibesql-ast --dry-run --skip-existing
+          cargo publish -p vibesql-parser --dry-run --skip-existing
+          cargo publish -p vibesql-catalog --dry-run --skip-existing
+          cargo publish -p vibesql-storage --dry-run --skip-existing
+          cargo publish -p vibesql-bench-common --dry-run --skip-existing
+          cargo publish -p vibesql-executor --dry-run --skip-existing
+          cargo publish -p vibesql-consensus --dry-run --skip-existing
+          cargo publish -p vibesql --dry-run --skip-existing
 
       - name: Publish vibesql-types
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -73,7 +73,7 @@ jobs:
 
       - name: Publish vibesql-l10n
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -81,7 +81,7 @@ jobs:
 
       - name: Publish vibesql-ast
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -89,7 +89,7 @@ jobs:
 
       - name: Publish vibesql-parser
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -97,7 +97,7 @@ jobs:
 
       - name: Publish vibesql-catalog
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -105,7 +105,7 @@ jobs:
 
       - name: Publish vibesql-storage
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -113,7 +113,7 @@ jobs:
 
       - name: Publish vibesql-bench-common
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-bench-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-bench-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -121,7 +121,7 @@ jobs:
 
       - name: Publish vibesql-executor
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -129,7 +129,7 @@ jobs:
 
       - name: Publish vibesql-consensus
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-consensus --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql-consensus --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Wait for index update
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
@@ -137,7 +137,7 @@ jobs:
 
       - name: Publish vibesql
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || echo "Already published or failed"
+        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
 
       - name: Summary
         run: |
