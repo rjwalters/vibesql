@@ -15,7 +15,7 @@ This skill guides a careful, interactive release process. Every release must:
 
 **Do not rush. Each phase requires user confirmation before proceeding.**
 
-**Project-specific customization**: this skill is generic. If your project needs release-time reminders (e.g., "remember to bump the protocol version when the API changes"), drop a `release.md` file in `.loom/context/topics/` — the methodology-injection hook will inject it on every invocation. Do NOT fork this skill.
+**Project-specific customization**: this skill is generic. If your project needs release-time reminders (e.g., "remember to bump the protocol version when the API changes"), drop a `release.md` file in `.loom/context/topics/` — the methodology-injection hook will inject it on every invocation. For procedural overrides that must execute at a specific phase boundary (e.g., "poll workflow X before creating the GitHub Release"), reference one of the named seams documented under [Operator extension points](#operator-extension-points) at the bottom of this skill. Do NOT fork this skill.
 
 ## Phase 1: Pre-flight Checks
 
@@ -44,6 +44,8 @@ Present findings to the user:
 - If CI is absent, treat clean `git status` + zero blocking open PRs as the gate.
 - If there are open PRs, ask if they should land before the release.
 
+<!-- LOOM-EXTENSION-POINT: pre-changelog-style -->
+
 ## Phase 1.5: CHANGELOG Completeness Gate
 
 Before gathering changes for the **current** release, verify that the last N shipped tags each have an entry in `CHANGELOG.md`. This catches the "we shipped v0.10.0 and v0.10.1 without adding their CHANGELOG blocks" failure mode — it's cheap to detect at release time and forensically expensive to reconstruct weeks later.
@@ -62,6 +64,7 @@ else
   # Use a portable read loop (avoids `mapfile`, which is bash 4+ only).
   _all_tags=()
   while IFS= read -r _t; do
+    [ -n "$_t" ] || continue   # defensive: skip empty lines from process substitution
     _all_tags+=("$_t")
   done < <(git tag --sort=-v:refname)
   _limit=$RECENT_TAG_COUNT
@@ -420,6 +423,8 @@ git tag -f vX.Y.Z
 
 Show the user the result and ask for final confirmation.
 
+<!-- LOOM-EXTENSION-POINT: pre-push -->
+
 ## Phase 6: Push and Release
 
 After final confirmation:
@@ -429,7 +434,10 @@ After final confirmation:
    git push origin main --tags
    ```
 
+<!-- LOOM-EXTENSION-POINT: post-push -->
+
 2. **Create GitHub Release**:
+   <!-- LOOM-EXTENSION-POINT: pre-github-release -->
    ```bash
    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file - <<< "$(changelog excerpt)"
    ```
@@ -471,6 +479,45 @@ For the version-files line, report what the chosen tool actually modified:
 - `bumpversion`/`bump2version`: the `[bumpversion:file:*]` set from `.bumpversion.cfg` / `setup.cfg`
 - `poetry`: `pyproject.toml`
 - `npm`: `package.json` (+ `package-lock.json` if present)
+
+<!-- LOOM-EXTENSION-POINT: post-summary -->
+
+## `scripts/version.sh` interface
+
+When the skill detects `./scripts/version.sh` (Phase 2a), it dispatches the following subcommands. Projects that ship a custom `scripts/version.sh` from a pre-v0.10.3 install must implement these, or delete the script entirely and let detection fall through to the next supported tool (`cargo-release`, `bumpversion`, `poetry`, `npm`).
+
+| Subcommand | Purpose | Required by Phase |
+|---|---|---|
+| `./scripts/version.sh` | Print current version to stdout | 2b |
+| `./scripts/version.sh list` | List version-bearing files, one per line | 5 step 2 |
+| `./scripts/version.sh check` | Verify all version-bearing files agree | 5 step 4 |
+| `./scripts/version.sh bump <level> --tag` | Bump (`patch`/`minor`/`major`), commit, tag | 5 step 3 |
+| `./scripts/version.sh set <version> [--tag]` | Set explicit version, commit, optionally tag | (not used by skill; supported by Loom's bundled script for operator convenience) |
+
+The skill currently never invokes `set`, but it is documented here because the bundled `scripts/version.sh` ships with it and downstream `version.sh` forks should not silently drop it.
+
+## Operator extension points
+
+This skill exposes the following named seams (HTML-comment markers) that project-specific topic injections can target. Seam names are stable contracts — once published they will not be renamed; new seams may be added over time. Markers are HTML comments, so they do not render in the prose.
+
+| Seam | Location | Intended use |
+|---|---|---|
+| `pre-changelog-style` | Just before Phase 1.5 (CHANGELOG Completeness Gate) | Inject CHANGELOG-style overrides (e.g., themed-section grouping, Keep-a-Changelog opt-outs, project-specific entry conventions). |
+| `pre-push` | Just before Phase 6 (Push and Release) | Inject the project's irreversibility prompt or any final pre-push gate (e.g., "confirm you intend to push tag `vX.Y.Z` and trigger N downstream workflows"). |
+| `post-push` | Inside Phase 6, after the `git push origin main --tags` step and before the GitHub Release is created | Inject post-push procedural steps such as polling multiple registry/publish workflows for completion before continuing. |
+| `pre-github-release` | Inside Phase 6, immediately before `gh release create` | Inject pre-release-creation gates (e.g., "wait for both Crates and npm workflows to finish before creating the GitHub Release"). |
+| `post-summary` | After Phase 7 (Post-Release Summary) | Inject project-specific follow-up steps (e.g., "post release announcement", "ping #releases Slack channel", "open the next milestone"). |
+
+**How projects use these seams**: drop a `release.md` file in `.loom/context/topics/` (the existing methodology-injection mechanism) and reference the target seam name in prose. The agent reading the skill plus the injected topic file will compose them at runtime. Example topic snippet:
+
+```markdown
+At extension point `pre-github-release`: do NOT run `gh release create` until BOTH of the following workflows succeed:
+  - `.github/workflows/publish-crate.yml`
+  - `.github/workflows/publish-npm.yml`
+Poll with `gh run list --workflow=<file> --limit 1 --json conclusion` until both report `success`.
+```
+
+Projects that find injection insufficient (i.e. need to REPLACE a phase's content, not just inject alongside it) should file an issue requesting Option A (named phase-extension files) — see the architect notes on #3503.
 
 ## Important Notes
 
