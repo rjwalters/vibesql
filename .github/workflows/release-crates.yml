@@ -61,6 +61,7 @@ jobs:
           cargo publish -p vibesql-bench-common --dry-run --skip-existing
           cargo publish -p vibesql-executor --dry-run --skip-existing
           cargo publish -p vibesql-consensus --dry-run --skip-existing
+          cargo publish -p vibesql-cli --dry-run --skip-existing
           cargo publish -p vibesql --dry-run --skip-existing
 
       - name: Publish vibesql-types
@@ -135,6 +136,14 @@ jobs:
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
         run: sleep 30
 
+      - name: Publish vibesql-cli
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: cargo publish -p vibesql-cli --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
+
+      - name: Wait for index update
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
       - name: Publish vibesql
         if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
         run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
@@ -153,4 +162,5 @@ jobs:
           echo "- vibesql-bench-common" >> $GITHUB_STEP_SUMMARY
           echo "- vibesql-executor" >> $GITHUB_STEP_SUMMARY
           echo "- vibesql-consensus" >> $GITHUB_STEP_SUMMARY
+          echo "- vibesql-cli" >> $GITHUB_STEP_SUMMARY
           echo "- vibesql" >> $GITHUB_STEP_SUMMARY
