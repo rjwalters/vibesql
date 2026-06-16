@@ -6,18 +6,9 @@ Procedural overrides target the named extension points the default skill exposes
 
 ## Advisory reminders (any phase)
 
-### Pre-flight: four version-bearing files must agree
+### Pre-flight: four version-bearing files
 
-VibeSQL has four version-bearing files. The default's Phase 2a tool detection finds `./scripts/version.sh` first; `scripts/version.sh check` verifies the workspace Cargo files but does NOT check the two pyproject files. Run this Phase 1 sanity check in addition to whatever the default does:
-
-```bash
-grep -m1 '^version' Cargo.toml
-grep -m1 '^version' pyproject.toml
-grep -m1 '^version' crates/vibesql-python-bindings/pyproject.toml
-grep -A1 '^name = "vibesql"' Cargo.lock | grep '^version' | sort -u
-```
-
-All four must report the same version. Stop and resolve drift before bumping.
+VibeSQL has four version-bearing file groups: `Cargo.toml` (workspace.package + member-crate internal `vibesql-*` pins), `pyproject.toml` (root), `crates/vibesql-python-bindings/pyproject.toml`, and `Cargo.lock`. `scripts/version.sh check` (invoked automatically by the default Phase 5 verify step) covers all of them. Drift surfaces as a non-zero exit and a `DRIFT: …` line per offending file — stop and resolve before bumping.
 
 ### Pre-flight: CI gating policy
 
@@ -48,21 +39,11 @@ VibeSQL is **pre-1.0**, so MAJOR/MINOR semantics are looser. Treat `0.X.0` as "m
 
 **PATCH bump**: Bug fixes; performance improvements with no semantic change; internal refactors; docs/CLAUDE.md/README updates; dependency bumps; test additions; web demo updates.
 
-### Phase 5: scripts/version.sh interface gap
+### Phase 5: scripts/version.sh implements the v0.10.4 contract
 
-VibeSQL's `scripts/version.sh` exposes `set X.Y.Z [--tag]` and `check`, but **not** the `bump <level>` / `list` subcommands the v0.10.4 default's Phase 5 dispatches to. Workaround until version.sh is extended:
+`scripts/version.sh` exposes `show` / `list` / `check` / `bump <level> [--tag]` / `set <X.Y.Z> [--tag]` per the contract documented in the default skill's "scripts/version.sh interface" section. `bump`/`set` touch all four version-bearing files atomically (workspace.package + member-crate `vibesql-*` pins + both pyprojects + `cargo update -w` to refresh `Cargo.lock`), so Phase 5's auto-dispatch (`./scripts/version.sh bump <level> --tag`) drives the entire bump without operator intervention.
 
-1. Operator manually runs `./scripts/version.sh set <X.Y.Z>` (handles workspace.package version + internal `vibesql-*` dependency pins).
-2. Operator manually bumps the two pyproject files (version.sh doesn't touch them):
-   ```bash
-   sed -i '' 's/^version = ".*"/version = "<X.Y.Z>"/' pyproject.toml
-   sed -i '' 's/^version = ".*"/version = "<X.Y.Z>"/' crates/vibesql-python-bindings/pyproject.toml
-   ```
-3. Refresh Cargo.lock: `cargo update -w`
-4. Verify all four sources agree (see "Pre-flight" above).
-5. Commit + tag (the snippet at the end of the default's Phase 5).
-
-**DO NOT bump** `crates/vibesql-sqllogictest/Cargo.toml` (pinned to upstream sqllogictest's `0.28.x`) or `web-demo/package.json` (independent version line). Confirm explicitly if the operator wants those changed.
+**DO NOT bump** `crates/vibesql-sqllogictest/Cargo.toml` (pinned to upstream sqllogictest's `0.28.x`) or `web-demo/package.json` (independent version line). The bump script intentionally leaves them alone. If the operator wants either changed, that's a separate decision.
 
 ## Procedural overrides at named seams
 
