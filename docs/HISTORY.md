@@ -84,3 +84,9 @@ A timeline of major milestones in the development of VibeSQL.
 - **SQLite compatibility push** — full SQLITE_MAX_TRIGGER_DEPTH (1000) trigger semantics, ALTER TABLE RENAME COLUMN with trigger-body rewrite, schema-aware index manager, FK deferral, window-function correctness
 - **EXPLAIN QUERY PLAN** moved close to sqlite3 parity (view/subquery expansion, window-sort annotations, ordering-index scan lines)
 - Released as **v0.2.0** on 2026-06-15 (369 commits since v0.1.4)
+
+### June 15, 2026: TPC-C Dashboard Contention Caveat
+
+- v0.2.0 release-window TPC-C dashboard captured all three engines (VibeSQL, SQLite, DuckDB) at ~1/3 of their v0.1.4 throughput, the signature of host-level contention rather than a code regression (see [docs/performance/tpcc_regression.md](performance/tpcc_regression.md))
+- Same-host re-measurement on `feature/issue-5643` (head `9e1ac205`, descended from the v0.2.0 release commit `ec54522d1`) recovered VibeSQL TPC-C to **9,276 TPS** (vs the 5,307 TPS dashboard number, vs the 10,758 TPS v0.1.4 README baseline); SQLite recovered to 2,813 TPS and DuckDB to 450 TPS
+- Re-measurement was itself taken under sweep-concurrency contention; a truly idle re-run is still warranted before refreshing the website dashboard or filing a bisect
