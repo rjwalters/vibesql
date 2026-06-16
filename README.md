@@ -253,27 +253,6 @@ This project originated from a challenge about AI capabilities: implement a NIST
 
 Inspired by [posix4e/nistmemsql](https://github.com/posix4e/nistmemsql).
 
-## VibeSQL Challenge
-
-**Can you build a SQL database faster than we did?**
-
-The VibeSQL Challenge: pass all 622 SQLLogicTest files using AI tools. Our benchmark is **25 days** from first commit to 100% conformance—but we spent significant time on features beyond the core challenge (storage engine, server mode, i18n, benchmarks). A focused effort could beat this.
-
-**How to participate:**
-
-1. Fork a seed repo or start from scratch
-2. Use any AI tools—Claude, Copilot, Cursor, or your own agents
-3. Run `make test` to track progress against 622 SQLLogicTest files
-4. When all tests pass, [submit to the leaderboard](https://github.com/vibesql-challenge/submissions)
-
-**Starter templates:**
-
-| Language | Repository |
-|----------|------------|
-| Rust | [challenge-seed-rust](https://github.com/vibesql-challenge/challenge-seed-rust) |
-| C++ | [challenge-seed-cpp](https://github.com/vibesql-challenge/challenge-seed-cpp) |
-| Go | [challenge-seed-go](https://github.com/vibesql-challenge/challenge-seed-go) |
-
 ## License
 
 MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
