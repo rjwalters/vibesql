@@ -909,18 +909,31 @@ def run_hnsw(config: BenchConfig) -> int:
     with open("/tmp/hnsw_results.txt", "w") as f:
         f.write(result.stdout)
 
-    if result.returncode != 0:
-        print("❌ HNSW recall benchmark failed (recall invariants not met)")
+    # Process results into the dogfooded results DB even if the benchmark
+    # binary exited non-zero (an assert! firing means a recall *regression*
+    # — we still want the measurements in the DB so the trends dashboard
+    # surfaces the drop instead of silently emitting `0 measurements`. See #5645.
+    bench_failed = result.returncode != 0
+    if bench_failed:
+        print("⚠ HNSW recall benchmark exited non-zero (recall invariants not met) — capturing measurements anyway")
+
+    # Only attempt to process if we actually got the expected output table.
+    # Avoid feeding empty / build-failure stdout to the parser.
+    has_results_block = "--- VibeSQL Recall Results ---" in result.stdout
+    if has_results_block:
+        print("\nProcessing results into database...")
+        proc = subprocess.run(
+            ["./scripts/process_results.py", "--type=hnsw", "--input", "/tmp/hnsw_results.txt"],
+            cwd=repo_root
+        )
+        if proc.returncode != 0:
+            print("⚠ HNSW result processing failed")
+            return proc.returncode
+    else:
+        print("❌ HNSW benchmark produced no parseable results table")
         return 1
 
-    # Process results into the dogfooded results DB.
-    print("\nProcessing results into database...")
-    subprocess.run(
-        ["./scripts/process_results.py", "--type=hnsw", "--input", "/tmp/hnsw_results.txt"],
-        cwd=repo_root
-    )
-
-    return 0
+    return 1 if bench_failed else 0
 
 
 def run_sysbench_server(config: BenchConfig) -> int:
@@ -1345,12 +1358,17 @@ def run_all(config: BenchConfig) -> int:
     # Define benchmark list based on mode
     # In smoke test mode, include server benchmarks for fair MySQL comparison
     # TPC-DS now supports QUERY_FILTER, so we include it for full pipeline validation
+    # Note: `hnsw` is intentionally NOT in this list. It is run as its own phase
+    # in `scripts/bench-all` (via `make benchmark-hnsw`) so a failure or skip in
+    # the latency suites does not silently drop the recall@k measurements from
+    # the trends dashboard. See #5645. Direct callers of `./scripts/bench
+    # --test=all` who want HNSW should additionally invoke `--test=hnsw`.
     if config.test_mode:
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "hnsw", "sysbench-server", "tpch-server", "tpcc-server"]
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server", "tpcc-server"]
         print("Note: Skipping footprint in smoke test mode")
     else:
         # Full benchmark suite includes server benchmarks and footprint
-        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "hnsw", "sysbench-server", "tpch-server", "tpcc-server", "footprint"]
+        benchmarks = ["tpch", "tpcc", "tpcds", "sysbench", "sysbench-server", "tpch-server", "tpcc-server", "footprint"]
 
     for test in benchmarks:
         config.test = test

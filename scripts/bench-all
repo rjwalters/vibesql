@@ -5,6 +5,12 @@
 # Runs the full benchmark matrix with timing breakdown:
 # 1. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)
 # 2. Server benchmarks (TPC-H, TPC-C, Sysbench over PostgreSQL wire protocol)
+# 3. HNSW recall@k vector-index quality benchmark (VibeSQL)
+#
+# Phase 3 is run independently of phases 1 and 2 because recall@k is an
+# in-process quality metric that does not depend on Docker / MySQL / server
+# transports — a failure in the latency suites must not silently drop the
+# HNSW measurements from the trends dashboard. See #5645.
 #
 # Note: Tests (unit tests, SQLLogicTest) are NOT included.
 # Run 'make test' separately if you need test validation.
@@ -31,8 +37,10 @@ NC='\033[0m'
 # Timing data (bash 3 compatible - use separate variables)
 PHASE1_TIME=0
 PHASE2_TIME=0
+PHASE3_TIME=0
 PHASE1_STATUS=""
 PHASE2_STATUS=""
+PHASE3_STATUS=""
 TOTAL_START=$(date +%s)
 
 # Ensure Docker is running for MySQL benchmarks
@@ -139,6 +147,13 @@ print_summary() {
         bench_time=$((bench_time + PHASE2_TIME))
     fi
 
+    if [ -n "$PHASE3_STATUS" ]; then
+        local icon="✓"
+        [ "$PHASE3_STATUS" != "success" ] && icon="✗"
+        printf "%-25s %10s %10s\n" "HNSW Recall@k" "$(format_duration $PHASE3_TIME)" "$icon"
+        bench_time=$((bench_time + PHASE3_TIME))
+    fi
+
     echo "═════════════════════════════════════════════════════"
     printf "${BOLD}%-25s %10s${NC}\n" "TOTAL:" "$(format_duration $total_duration)"
     echo ""
@@ -184,6 +199,7 @@ main() {
     echo "Running full benchmark matrix:"
     echo "  1. Embedded benchmarks (TPC-H, TPC-C, TPC-DS, Sysbench)"
     echo "  2. Server benchmarks (PostgreSQL wire protocol)"
+    echo "  3. HNSW recall@k vector-index quality (VibeSQL)"
     echo ""
     echo "Note: Tests not included. Run 'make test' separately."
     echo ""
@@ -227,6 +243,27 @@ main() {
         fi
         PHASE2_TIME=$(($(date +%s) - phase_start))
     fi
+
+    # Phase 3: HNSW recall@k (vector index quality, VibeSQL only).
+    # Intentionally NOT gated on earlier phases — recall@k is an in-process
+    # quality metric independent of Docker / MySQL / server transports, and a
+    # failure in the latency suites previously caused the trends dashboard to
+    # silently render `HNSW Recall: 0 measurements`. See #5645.
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}[HNSW Recall@k]${NC} Starting..."
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    phase_start=$(date +%s)
+
+    if make benchmark-hnsw; then
+        PHASE3_STATUS="success"
+        echo -e "${GREEN}✓ [HNSW Recall@k] completed in $(format_duration $(($(date +%s) - phase_start)))${NC}"
+    else
+        PHASE3_STATUS="failed"
+        failed=1
+        echo -e "${RED}✗ [HNSW Recall@k] failed after $(format_duration $(($(date +%s) - phase_start)))${NC}"
+    fi
+    PHASE3_TIME=$(($(date +%s) - phase_start))
 
     # Print summary
     print_summary
