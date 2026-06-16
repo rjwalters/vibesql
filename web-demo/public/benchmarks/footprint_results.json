@@ -3,11 +3,11 @@
     {
       "database": "vibesql",
       "binary_path": "/Users/rwalters/GitHub/vibesql/target/release/vibesql",
-      "binary_size_bytes": 21406656,
-      "startup_time_ms": 17.27773739839904,
-      "startup_time_stddev_ms": 5.827157890519341,
-      "peak_memory_kb": 12484.8,
-      "peak_memory_stddev_kb": 38.49617585625299,
+      "binary_size_bytes": 36197584,
+      "startup_time_ms": 51.66880019241944,
+      "startup_time_stddev_ms": 32.37942549127871,
+      "peak_memory_kb": 13721.6,
+      "peak_memory_stddev_kb": 37.10405787930898,
       "version": "vibesql 0.1.0",
       "available": true,
       "error": null,
@@ -18,11 +18,11 @@
     {
       "database": "sqlite",
       "binary_path": "/usr/bin/sqlite3",
-      "binary_size_bytes": 4690560,
-      "startup_time_ms": 8.01648740307428,
-      "startup_time_stddev_ms": 1.0727577547540765,
-      "peak_memory_kb": 2992.0,
-      "peak_memory_stddev_kb": 13.063945294843617,
+      "binary_size_bytes": 4641296,
+      "startup_time_ms": 33.224966505076736,
+      "startup_time_stddev_ms": 7.544908661342539,
+      "peak_memory_kb": 2960.0,
+      "peak_memory_stddev_kb": 0.0,
       "version": "3.51.0",
       "available": true,
       "error": null,
@@ -33,12 +33,12 @@
     {
       "database": "duckdb",
       "binary_path": "/opt/homebrew/bin/duckdb",
-      "binary_size_bytes": 44583960,
-      "startup_time_ms": 17.706737300613895,
-      "startup_time_stddev_ms": 10.162840361641909,
-      "peak_memory_kb": 10779.2,
-      "peak_memory_stddev_kb": 51.18333061977633,
-      "version": "v1.4.3 (Andium) d1dc88f950",
+      "binary_size_bytes": 49493192,
+      "startup_time_ms": 16.60020409617573,
+      "startup_time_stddev_ms": 0.5959917400458922,
+      "peak_memory_kb": 12857.6,
+      "peak_memory_stddev_kb": 68.79793278548097,
+      "version": "v1.5.3 (Variegata) 14eca11bd9",
       "available": true,
       "error": null,
       "wasm_size_bytes": null,
@@ -46,13 +46,13 @@
       "wasm_size_brotli_bytes": null
     }
   ],
-  "datetime": "2026-01-19T08:50:22.545821",
+  "datetime": "2026-06-15T14:22:54.467953",
   "machine_info": {
     "system": "Darwin",
-    "release": "25.2.0",
+    "release": "25.5.0",
     "machine": "arm64",
     "processor": "arm",
-    "python_version": "3.14.2"
+    "python_version": "3.14.6"
   },
   "num_runs": 10
 }

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-14T15:02:41.892494",
-  "git_commit": "d00d58ed1",
+  "generated_at": "2026-06-15T18:21:58.155761",
+  "git_commit": "164aabd88",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -546,6 +546,50 @@
           "geomean_ms": 20.51,
           "queries_passed": 22,
           "total_queries": 22
+        },
+        {
+          "date": "2026-04-25",
+          "timestamp": "2026-04-25T21:12:11.594832",
+          "commit": "b62039bb",
+          "avg_ms": 72.43,
+          "min_ms": 0.67,
+          "max_ms": 347.58,
+          "geomean_ms": 27.69,
+          "queries_passed": 22,
+          "total_queries": 22
+        },
+        {
+          "date": "2026-06-10",
+          "timestamp": "2026-06-10T13:37:52.654379",
+          "commit": "3e2da6dd",
+          "avg_ms": 0.15,
+          "min_ms": 0.15,
+          "max_ms": 0.15,
+          "geomean_ms": 0.15,
+          "queries_passed": 1,
+          "total_queries": 1
+        },
+        {
+          "date": "2026-06-10",
+          "timestamp": "2026-06-10T13:38:52.763388",
+          "commit": "3e2da6dd",
+          "avg_ms": 129.58,
+          "min_ms": 4.11,
+          "max_ms": 299.78,
+          "geomean_ms": 75.51,
+          "queries_passed": 6,
+          "total_queries": 6
+        },
+        {
+          "date": "2026-06-15",
+          "timestamp": "2026-06-15T13:45:29.323142",
+          "commit": "965bfdd4",
+          "avg_ms": 123.12,
+          "min_ms": 2.48,
+          "max_ms": 497.53,
+          "geomean_ms": 50.19,
+          "queries_passed": 22,
+          "total_queries": 22
         }
       ]
     },
@@ -979,6 +1023,13 @@
           "commit": "11fcc052",
           "tps": 9400.57,
           "latency_us": 161.89
+        },
+        {
+          "date": "2026-06-15",
+          "timestamp": "2026-06-15T13:56:44.197570",
+          "commit": "965bfdd4",
+          "tps": 5306.65,
+          "latency_us": 276.15
         }
       ]
     },
@@ -1273,6 +1324,22 @@
             "update_non_index": 0.0025,
             "delete": 0.004,
             "range_queries": 0.0293
+          }
+        },
+        {
+          "date": "2026-06-15",
+          "timestamp": "2026-06-15T14:14:06.244219",
+          "commit": "965bfdd4",
+          "avg_ms": 0.012,
+          "min_ms": 0.0033,
+          "max_ms": 0.0333,
+          "workloads": {
+            "point_select": 0.0034,
+            "insert": 0.021,
+            "update_index": 0.0064,
+            "update_non_index": 0.0033,
+            "delete": 0.0046,
+            "range_queries": 0.0333
           }
         }
       ]

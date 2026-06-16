@@ -159,7 +159,7 @@ function ChatRoom({ channelId }) {
 
 ## Benchmarks
 
-VibeSQL achieves **10,758 TPS** on TPC-C mixed workload (5.5x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries.
+VibeSQL achieves **5,307 TPS** on TPC-C mixed workload (6.7x faster than SQLite) and passes 100% of TPC-H and TPC-DS queries. Live numbers at [vibesql.org](https://vibesql.org/).
 
 ### Test Coverage
 
@@ -176,11 +176,11 @@ VibeSQL achieves **10,758 TPS** on TPC-C mixed workload (5.5x faster than SQLite
 
 | Database | TPS | vs SQLite |
 |----------|-----|-----------|
-| **VibeSQL** | **10,758** | **5.5x faster** |
-| SQLite | 1,969 | baseline |
-| DuckDB | 323 | 6x slower |
+| **VibeSQL** | **5,307** | **6.7x faster** |
+| SQLite | 795 | baseline |
+| DuckDB | 95 | 8.4x slower |
 
-*Scale Factor 1, 60-second duration, mixed workload (New Order, Payment, Order Status, Delivery, Stock Level).*
+*Scale Factor 1, 60-second duration, mixed workload (New Order, Payment, Order Status, Delivery, Stock Level). v0.2.0 cycle, 2026-06-15.*
 
 ### TPC-DS (Complex Analytics)
 
