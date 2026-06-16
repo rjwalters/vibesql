@@ -43,6 +43,14 @@ PHASE2_STATUS=""
 PHASE3_STATUS=""
 TOTAL_START=$(date +%s)
 
+# Marker file used by `scripts/bench` to record engines that were silently
+# skipped mid-run (typically MySQL when Docker dies after the pre-flight
+# check). See #5644. We export the env var so child invocations of
+# `./scripts/bench` participate, and reset the file at startup so stale
+# entries from prior runs don't carry over.
+export VIBESQL_BENCH_SKIP_MARKER="${VIBESQL_BENCH_SKIP_MARKER:-/tmp/vibesql-benchmark-skipped-engines}"
+: > "$VIBESQL_BENCH_SKIP_MARKER" || true
+
 # Ensure Docker is running for MySQL benchmarks
 ensure_docker() {
     echo -e "${BOLD}Pre-flight check: Docker${NC}"
@@ -271,6 +279,35 @@ main() {
     if [ $failed -ne 0 ]; then
         echo -e "${RED}Some phases failed. Check output above for details.${NC}"
         exit 1
+    fi
+
+    # Check for engines that were silently skipped mid-run (e.g. Docker died,
+    # so MySQL phases were dropped). Without this surfacing, the orchestrator
+    # would claim success while the web dashboard ships stale data from the
+    # previous cycle. See #5644.
+    if [ -s "$VIBESQL_BENCH_SKIP_MARKER" ]; then
+        local skipped_count
+        skipped_count=$(wc -l < "$VIBESQL_BENCH_SKIP_MARKER" | tr -d ' ')
+        local skipped_engines
+        skipped_engines=$(awk -F'\t' '{print $2}' "$VIBESQL_BENCH_SKIP_MARKER" | sort -u | paste -sd, -)
+
+        echo ""
+        echo -e "${YELLOW}══════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}${BOLD}                    PARTIAL SUCCESS                                ${NC}"
+        echo -e "${YELLOW}══════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}Completed with ${skipped_count} skipped engine phase(s): ${skipped_engines}${NC}"
+        echo ""
+        echo "Skipped phase(s):"
+        # Format: <test>\t<engine>\t<reason>
+        awk -F'\t' '{printf "  - %-20s engine=%-10s reason=%s\n", $1, $2, $3}' "$VIBESQL_BENCH_SKIP_MARKER"
+        echo ""
+        echo "Web dashboard will ship stale data for these engines unless they"
+        echo "are re-run. To recover MySQL phases:"
+        echo "  - Ensure Docker Desktop is running"
+        echo "  - Run: make benchmark-server-all   # re-runs all MySQL phases"
+        echo -e "${YELLOW}══════════════════════════════════════════════════════════════════${NC}"
+        # Exit 2 to distinguish partial-success from full failure (exit 1).
+        exit 2
     fi
 
     echo -e "${GREEN}All phases completed successfully!${NC}"
