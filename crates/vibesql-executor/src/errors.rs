@@ -391,6 +391,16 @@ pub enum ExecutorError {
     NoSuchFunction {
         function_name: String,
     },
+    /// Unknown function used where it is not valid (SQLite-compatible error).
+    /// Format: "unknown function: X()"
+    ///
+    /// SQLite reports this when a function that is not a valid scalar function
+    /// (e.g. an aggregate such as `avg`/`count`, or a genuinely unknown name)
+    /// is referenced while materializing a DEFAULT value at INSERT time
+    /// (table-16.2 .. table-16.7).
+    UnknownFunction {
+        function_name: String,
+    },
     /// No such index (SQLite-compatible error, e.g. INDEXED BY with an
     /// unknown index or an index on a different table)
     /// Format: "no such index: X"
@@ -1327,6 +1337,10 @@ impl std::fmt::Display for ExecutorError {
                     "{}",
                     vibe_msg!("executor-no-such-function", function_name = function_name.as_str())
                 )
+            }
+            ExecutorError::UnknownFunction { function_name } => {
+                // SQLite-compatible: "unknown function: name()"
+                write!(f, "unknown function: {}()", function_name)
             }
             ExecutorError::NoSuchIndex { index_name } => {
                 // SQLite-compatible error message format

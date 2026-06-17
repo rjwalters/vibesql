@@ -172,7 +172,7 @@ pub fn evaluate_default_expression(
             let col_name = col_id.column_canonical();
             Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(col_name)))
         }
-        vibesql_ast::Expression::Function { name, .. } => {
+        vibesql_ast::Expression::Function { name, args, .. } => {
             // Evaluate special SQL functions that can be used in DEFAULT
             match name.to_uppercase().as_str() {
                 "CURRENT_DATE" => {
@@ -236,11 +236,40 @@ pub fn evaluate_default_expression(
                     // Return current role (placeholder - would come from session context)
                     Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("public")))
                 }
-                _ => Err(ExecutorError::UnsupportedExpression(format!(
-                    "Function '{}' not supported in DEFAULT expressions",
-                    name
-                ))),
+                _ => {
+                    // SQLite allows deterministic scalar functions in DEFAULT
+                    // clauses (e.g. `DEFAULT(abs(1))`, table-16.3). The value is
+                    // materialized at INSERT time, so the arguments must reduce
+                    // to constants. Evaluate each argument as a DEFAULT
+                    // sub-expression, then dispatch to the scalar function table.
+                    let mut arg_values = Vec::with_capacity(args.len());
+                    for arg in args {
+                        arg_values.push(evaluate_default_expression(arg)?);
+                    }
+                    crate::evaluator::functions::eval_scalar_function_for_default(
+                        name.display(),
+                        &arg_values,
+                    )
+                    .map_err(|err| match err {
+                        // A scalar function that does not exist surfaces as
+                        // SQLite's "unknown function: name()" in this
+                        // context rather than the generic "no such function".
+                        ExecutorError::NoSuchFunction { function_name } => {
+                            ExecutorError::UnknownFunction {
+                                function_name: function_name.to_lowercase(),
+                            }
+                        }
+                        other => other,
+                    })
+                }
             }
+        }
+        // Aggregate functions (COUNT, AVG, MIN, MAX, STRING_AGG, ...) are not
+        // valid in DEFAULT expressions. SQLite reports these as unknown
+        // functions when the default is materialized at INSERT time
+        // (table-16.2 max, 16.4 avg, 16.5 count, 16.6/16.7 string_agg).
+        vibesql_ast::Expression::AggregateFunction { name, .. } => {
+            Err(ExecutorError::UnknownFunction { function_name: name.canonical().to_string() })
         }
         // The parser represents bare `DEFAULT CURRENT_DATE` /
         // `CURRENT_TIME` / `CURRENT_TIMESTAMP` as dedicated AST variants
@@ -437,6 +466,57 @@ fn compute_next_integer_pk_value(
 
     // Return max + 1 (or 1 if table was empty, since max_val starts at 0)
     Ok(max_val + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_ast::{Expression, FunctionIdentifier};
+    use vibesql_types::SqlValue;
+
+    fn int_lit(v: i64) -> Expression {
+        Expression::Literal(SqlValue::Integer(v))
+    }
+
+    #[test]
+    fn deterministic_scalar_function_evaluates_in_default() {
+        // table-16.3: DEFAULT(abs(1)) -> 1
+        let expr = Expression::Function {
+            name: FunctionIdentifier::new("abs"),
+            args: vec![int_lit(-1)],
+            character_unit: None,
+        };
+        let result = evaluate_default_expression(&expr).expect("abs(-1) should evaluate");
+        assert_eq!(result, SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn aggregate_function_rejected_as_unknown_in_default() {
+        // table-16.4 / 16.5 / 16.6: aggregates surface as "unknown function: name()".
+        for name in ["avg", "count", "max", "string_agg"] {
+            let expr = Expression::AggregateFunction {
+                name: FunctionIdentifier::new(name),
+                distinct: false,
+                args: vec![int_lit(1)],
+                order_by: None,
+                filter: None,
+            };
+            let err =
+                evaluate_default_expression(&expr).expect_err("aggregate in DEFAULT should error");
+            assert_eq!(err.to_string(), format!("unknown function: {}()", name));
+        }
+    }
+
+    #[test]
+    fn unknown_scalar_function_reports_unknown_function() {
+        let expr = Expression::Function {
+            name: FunctionIdentifier::new("definitely_not_a_function"),
+            args: vec![],
+            character_unit: None,
+        };
+        let err = evaluate_default_expression(&expr).expect_err("unknown function should error");
+        assert_eq!(err.to_string(), "unknown function: definitely_not_a_function()");
+    }
 }
 
 /// Apply generated/computed column values
