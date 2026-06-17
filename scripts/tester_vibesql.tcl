@@ -4207,6 +4207,63 @@ proc uses_sqlite_internals {script} {
 # Test execution commands
 #-----------------------------------------------------------------------------
 
+proc reconcile_skipped_txn_state {script} {
+    # Keep the shim's batched-transaction bookkeeping consistent when a test
+    # that would have closed an open transaction is SKIPPED (#5659).
+    #
+    # Background: because VibeSQL runs each batch as a fresh process, the shim
+    # accumulates everything between BEGIN and COMMIT/ROLLBACK in $::sql_batch
+    # and replays it at the closing statement (see the transaction-batching
+    # block in execsql). where9.test interleaves transaction-mutating blocks
+    # with SELECT-then-ROLLBACK cleanup blocks, e.g.:
+    #
+    #   6.2.6  count_steps -- BEGIN; UPDATE ...      -- opens a txn
+    #   6.2.7  db eval     -- SELECT ...; ROLLBACK   -- closes it
+    #   6.2.8  count_steps -- BEGIN; DELETE ...      -- opens a txn
+    #
+    # 6.2.7 uses `db status sort`, so it is auto-skipped. Skipping it meant its
+    # ROLLBACK never ran, so ::in_transaction stayed 1 with the 6.2.6 BEGIN
+    # still batched. 6.2.8's BEGIN then trial-replayed two nested BEGINs, which
+    # VibeSQL rejected with "Transaction already active" -- cascading the
+    # failure into every subsequent transaction block in the file.
+    #
+    # The fix: if we are inside a batched transaction and the skipped script has
+    # a net transaction-closing effect (more COMMIT/END/ROLLBACK than BEGIN),
+    # apply that close to the shim state so the next BEGIN starts clean. We
+    # discard the pending batch (equivalent to ROLLBACK) rather than flush it:
+    # the skipped cleanup blocks in practice ROLLBACK, and discarding is the
+    # safe choice (a half-built transaction we chose not to run should not be
+    # committed).
+    if {!$::in_transaction} {
+        return
+    }
+
+    # Mask CREATE TRIGGER bodies so trigger BEGIN/END syntax is not miscounted
+    # as transaction control (mirrors the counting in execsql).
+    #
+    # NOTE: unlike execsql's counting (which sees the bare SQL string), the
+    # script here is the raw do_test body and still carries its db-eval /
+    # count_steps wrapper braces. A trailing transaction-control keyword with no
+    # terminating semicolon (the closing ROLLBACK before the wrapper's closing
+    # brace) is therefore NOT at end-of-string, so the trailing condition is
+    # relaxed to match a semicolon, surrounding whitespace, OR end-of-string --
+    # so the closing keyword is still counted. The leading anchor keeps it from
+    # matching substrings inside identifiers or string literals.
+    set count_sql [mask_trigger_bodies $script]
+    set begin_count [regexp -all -nocase \
+        {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s|$)} $count_sql]
+    set end_count [expr {[regexp -all -nocase \
+        {(?:^|;|\n)\s*(?:COMMIT|END)(?:\s+TRANSACTION)?\s*(?:;|\s|$)} $count_sql] + \
+        [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s|$)} $count_sql]}]
+
+    if {$end_count > $begin_count} {
+        # Net close: drop the in-flight batch and leave no open transaction.
+        set ::sql_batch {}
+        set ::in_transaction 0
+        set ::txn_had_tolerated_error 0
+    }
+}
+
 proc do_test {name script expected} {
     # Run a test and compare result to expected
 
@@ -4214,6 +4271,7 @@ proc do_test {name script expected} {
     # These are tests that verify SQLite-specific behavior we intentionally don't support
     set skip_check [vibesql_should_skip $name]
     if {[lindex $skip_check 0]} {
+        reconcile_skipped_txn_state $script
         omit_test $name [lindex $skip_check 1]
         return
     }
@@ -4237,6 +4295,7 @@ proc do_test {name script expected} {
             && [string trim $expected] eq ""
         }]
         if {!$is_conflict_setup} {
+            reconcile_skipped_txn_state $script
             omit_test $name $reason
             return
         }
