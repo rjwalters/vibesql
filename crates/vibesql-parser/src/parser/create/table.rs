@@ -104,9 +104,15 @@ impl Parser {
                     self.advance();
                     c
                 }
-                // Allow unreserved keywords (like TIMESTAMP, DATE, TIME, INTERVAL) as column names
-                // SQL:1999: normalize to lowercase when used as unquoted identifier
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: at the start of a column definition, a keyword
+                // can only be a column name. Table-level constraint keywords (CONSTRAINT,
+                // PRIMARY, FOREIGN, UNIQUE, CHECK, FULLTEXT) are already consumed above,
+                // so any remaining keyword here is an unquoted column name. SQLite reserves
+                // very few words and accepts the rest as identifiers in this position,
+                // including DESC, ASC, KEY, BEGIN, END (see table.test table-7.x).
+                //
+                // SQL:1999: normalize to lowercase when used as an unquoted identifier.
+                Token::Keyword { keyword: kw, .. } => {
                     let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name

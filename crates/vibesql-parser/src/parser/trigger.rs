@@ -214,9 +214,7 @@ impl Parser {
             // create time (triggerE-1.1.1: `WHEN new.a = ?`). NEW/OLD column
             // references are *not* variables and must still be allowed.
             if Self::expression_references_variable(&expr) {
-                return Err(ParseError {
-                    message: TRIGGER_CANNOT_USE_VARIABLES.to_string(),
-                });
+                return Err(ParseError { message: TRIGGER_CANNOT_USE_VARIABLES.to_string() });
             }
             Some(Box::new(expr))
         } else {
@@ -357,9 +355,7 @@ impl Parser {
         // every position is covered uniformly. NEW/OLD references tokenize as
         // ordinary identifiers, never as variable tokens, so they are not caught.
         if Self::trigger_body_text_references_variable(raw_sql) {
-            return Err(ParseError {
-                message: TRIGGER_CANNOT_USE_VARIABLES.to_string(),
-            });
+            return Err(ParseError { message: TRIGGER_CANNOT_USE_VARIABLES.to_string() });
         }
 
         for stmt_sql in crate::split_trigger_body_statements(raw_sql) {

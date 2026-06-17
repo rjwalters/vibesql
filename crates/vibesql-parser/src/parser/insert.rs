@@ -52,13 +52,11 @@ impl Parser {
                     p.advance();
                     Ok(name)
                 }
-                // SQLite allows inserting into the virtual rowid column
-                Token::Keyword { keyword: Keyword::Rowid, .. } => {
-                    p.advance();
-                    Ok("rowid".to_string())
-                }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: inside an INSERT column list `( ... )` any
+                // keyword is an unquoted column name (this includes the virtual ROWID
+                // column and otherwise-reserved words like RELEASE, BEGIN, END used as
+                // column names — see table.test table-7.3). Normalize to lowercase.
+                Token::Keyword { keyword: kw, .. } => {
                     let name = format!("{}", kw).to_lowercase();
                     p.advance();
                     Ok(name)
@@ -194,13 +192,11 @@ impl Parser {
                     p.advance();
                     Ok(name)
                 }
-                // SQLite allows inserting into the virtual rowid column
-                Token::Keyword { keyword: Keyword::Rowid, .. } => {
-                    p.advance();
-                    Ok("rowid".to_string())
-                }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: inside an INSERT column list `( ... )` any
+                // keyword is an unquoted column name (this includes the virtual ROWID
+                // column and otherwise-reserved words like RELEASE, BEGIN, END used as
+                // column names — see table.test table-7.3). Normalize to lowercase.
+                Token::Keyword { keyword: kw, .. } => {
                     let name = format!("{}", kw).to_lowercase();
                     p.advance();
                     Ok(name)
@@ -303,13 +299,11 @@ impl Parser {
                     p.advance();
                     Ok(name)
                 }
-                // SQLite allows inserting into the virtual rowid column
-                Token::Keyword { keyword: Keyword::Rowid, .. } => {
-                    p.advance();
-                    Ok("rowid".to_string())
-                }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: inside an INSERT column list `( ... )` any
+                // keyword is an unquoted column name (this includes the virtual ROWID
+                // column and otherwise-reserved words like RELEASE, BEGIN, END used as
+                // column names — see table.test table-7.3). Normalize to lowercase.
+                Token::Keyword { keyword: kw, .. } => {
                     let name = format!("{}", kw).to_lowercase();
                     p.advance();
                     Ok(name)

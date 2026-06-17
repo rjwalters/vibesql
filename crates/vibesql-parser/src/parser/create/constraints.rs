@@ -419,7 +419,7 @@ impl Parser {
                 }
                 Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance(); // consume REFERENCES
-                    // Accept both regular and quoted identifiers (e.g., REFERENCES t1, REFERENCES "t1")
+                                    // Accept both regular and quoted identifiers (e.g., REFERENCES t1, REFERENCES "t1")
                     let table = self.parse_identifier().map_err(|_| ParseError {
                         message: "Expected table name after REFERENCES".to_string(),
                     })?;
@@ -427,7 +427,7 @@ impl Parser {
                     // Column specification is optional in SQLite - defaults to PK
                     let column = if self.peek() == &Token::LParen {
                         self.advance(); // consume LParen
-                        // Accept both regular and quoted identifiers for column names
+                                        // Accept both regular and quoted identifiers for column names
                         let col_name = self.parse_identifier().map_err(|_| ParseError {
                             message: "Expected column name in REFERENCES".to_string(),
                         })?;

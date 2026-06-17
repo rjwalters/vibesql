@@ -74,12 +74,12 @@ impl Parser {
                     c
                 }
                 // SQLite allows updating the virtual rowid column
-                Token::Keyword { keyword: Keyword::Rowid, .. } => {
-                    self.advance();
-                    "rowid".to_string()
-                }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: the left-hand side of a SET assignment is an
+                // unambiguous column-name position (it is followed by `=`), so any
+                // keyword here is an unquoted column name. This covers the virtual ROWID
+                // column and otherwise-reserved words like RELEASE used as column names
+                // (see table.test table-7.3). Normalize to lowercase.
+                Token::Keyword { keyword: kw, .. } => {
                     let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name
@@ -232,12 +232,12 @@ impl Parser {
                     self.advance();
                     c
                 }
-                Token::Keyword { keyword: Keyword::Rowid, .. } => {
-                    self.advance();
-                    "rowid".to_string()
-                }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // SQLite compatibility: the left-hand side of a SET assignment is an
+                // unambiguous column-name position (it is followed by `=`), so any
+                // keyword here is an unquoted column name. This covers the virtual ROWID
+                // column and otherwise-reserved words like RELEASE used as column names
+                // (see table.test table-7.3). Normalize to lowercase.
+                Token::Keyword { keyword: kw, .. } => {
                     let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name

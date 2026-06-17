@@ -16,6 +16,9 @@ Cargo.lock
 # Claude Code
 .claude/settings.local.json
 
+# Loom worktree-ownership marker
+.loom-managed
+
 # Testing
 *.profdata
 *.profraw

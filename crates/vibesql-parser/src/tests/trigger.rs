@@ -653,8 +653,7 @@ fn test_create_trigger_with_temp_schema_qualifier() {
 #[test]
 fn test_create_temp_trigger_if_not_exists_sets_schema() {
     // TEMP modifier + IF NOT EXISTS: both flags set, schema is temp.
-    let sql =
-        "CREATE TEMP TRIGGER IF NOT EXISTS r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    let sql = "CREATE TEMP TRIGGER IF NOT EXISTS r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
     match Parser::parse_sql(sql).expect("parse") {
         Statement::CreateTrigger(trigger) => {
             assert_eq!(trigger.trigger_name, "r1");
@@ -818,7 +817,11 @@ fn test_create_trigger_body_case_end_not_treated_as_body_terminator() {
             TriggerAction::RawSql(body) => {
                 let up = body.to_uppercase();
                 // Both the CASE expression and the trailing INSERT survive.
-                assert!(up.contains("CASE"), "Body should retain the CASE expression. Got: {}", body);
+                assert!(
+                    up.contains("CASE"),
+                    "Body should retain the CASE expression. Got: {}",
+                    body
+                );
                 assert!(
                     up.contains("INSERT INTO BASE"),
                     "Body should retain the statement after the CASE...END. Got: {}",
@@ -840,11 +843,7 @@ fn test_create_trigger_body_multiple_case_expressions() {
                INSERT INTO log VALUES(CASE WHEN NEW.v > 0 THEN 'a' ELSE 'b' END); \
                END;";
     let result = Parser::parse_sql(sql);
-    assert!(
-        result.is_ok(),
-        "trigger body with multiple CASE...END must parse: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "trigger body with multiple CASE...END must parse: {:?}", result.err());
 }
 
 #[test]
@@ -860,11 +859,7 @@ fn test_create_trigger_body_nested_case_expressions() {
                INSERT INTO log VALUES('done'); \
                END;";
     let result = Parser::parse_sql(sql);
-    assert!(
-        result.is_ok(),
-        "trigger body with nested CASE...END must parse: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "trigger body with nested CASE...END must parse: {:?}", result.err());
 
     match result.unwrap() {
         Statement::CreateTrigger(trigger) => match &trigger.triggered_action {
@@ -889,11 +884,7 @@ fn test_create_trigger_body_case_in_where_clause() {
                INSERT INTO log VALUES('w'); \
                END;";
     let result = Parser::parse_sql(sql);
-    assert!(
-        result.is_ok(),
-        "trigger body with CASE...END in WHERE must parse: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "trigger body with CASE...END in WHERE must parse: {:?}", result.err());
 }
 
 #[test]
@@ -926,11 +917,7 @@ const TRIGGER_VAR_ERR: &str = "trigger cannot use variables";
 fn assert_rejected_as_variable(sql: &str) {
     let result = Parser::parse_sql(sql);
     let err = result.expect_err(&format!("expected rejection for: {sql}"));
-    assert_eq!(
-        err.message, TRIGGER_VAR_ERR,
-        "wrong message for: {sql}\n  got: {}",
-        err.message
-    );
+    assert_eq!(err.message, TRIGGER_VAR_ERR, "wrong message for: {sql}\n  got: {}", err.message);
 }
 
 fn assert_trigger_accepted(sql: &str) {
@@ -949,9 +936,7 @@ fn test_create_trigger_rejects_param_in_when_clause() {
 #[test]
 fn test_create_trigger_rejects_param_in_select_body() {
     // triggerE-1.1.2: SELECT ?
-    assert_rejected_as_variable(
-        "CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT ?; END;",
-    );
+    assert_rejected_as_variable("CREATE TRIGGER tr1 BEFORE DELETE ON t1 BEGIN SELECT ?; END;");
 }
 
 #[test]
@@ -1006,9 +991,7 @@ fn test_create_trigger_rejects_param_in_update_where() {
 #[test]
 fn test_create_trigger_rejects_param_in_function_arg() {
     // triggerE-1.1.10: function argument
-    assert_rejected_as_variable(
-        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT abs(?); END;",
-    );
+    assert_rejected_as_variable("CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN SELECT abs(?); END;");
 }
 
 #[test]
@@ -1107,36 +1090,32 @@ fn parse_trigger_name_source(sql: &str) -> (String, Option<String>) {
 
 #[test]
 fn test_name_source_unquoted() {
-    let (name, source) = parse_trigger_name_source(
-        "CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT 1; END;",
-    );
+    let (name, source) =
+        parse_trigger_name_source("CREATE TRIGGER tr1 DELETE ON t1 BEGIN SELECT 1; END;");
     assert_eq!(name, "tr1");
     assert_eq!(source.as_deref(), Some("tr1"));
 }
 
 #[test]
 fn test_name_source_double_quoted() {
-    let (name, source) = parse_trigger_name_source(
-        "CREATE TRIGGER \"tr1\" DELETE ON t1 BEGIN SELECT 1; END;",
-    );
+    let (name, source) =
+        parse_trigger_name_source("CREATE TRIGGER \"tr1\" DELETE ON t1 BEGIN SELECT 1; END;");
     assert_eq!(name, "tr1");
     assert_eq!(source.as_deref(), Some("\"tr1\""));
 }
 
 #[test]
 fn test_name_source_bracket_quoted() {
-    let (name, source) = parse_trigger_name_source(
-        "CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;",
-    );
+    let (name, source) =
+        parse_trigger_name_source("CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;");
     assert_eq!(name, "tr1");
     assert_eq!(source.as_deref(), Some("[tr1]"));
 }
 
 #[test]
 fn test_name_source_backtick_quoted() {
-    let (name, source) = parse_trigger_name_source(
-        "CREATE TRIGGER `tr1` DELETE ON t1 BEGIN SELECT 1; END;",
-    );
+    let (name, source) =
+        parse_trigger_name_source("CREATE TRIGGER `tr1` DELETE ON t1 BEGIN SELECT 1; END;");
     assert_eq!(name, "tr1");
     assert_eq!(source.as_deref(), Some("`tr1`"));
 }

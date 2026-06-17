@@ -445,9 +445,7 @@ impl Parser {
     /// The error-message is required for ABORT/FAIL/ROLLBACK and forbidden for
     /// IGNORE (matching SQLite, which reports a `near ","`/`near ")"` syntax
     /// error for the mismatched forms).
-    fn parse_raise_expression(
-        &mut self,
-    ) -> Result<vibesql_ast::Expression, ParseError> {
+    fn parse_raise_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
         use vibesql_ast::RaiseAction;
 
         // SQLite only permits RAISE() inside a trigger-program (a
