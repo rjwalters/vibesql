@@ -39,6 +39,8 @@ pub mod arena_prepared;
 mod bind;
 pub mod plan;
 
+pub use bind::fill_unbound_placeholders_with_null;
+
 pub use plan::{
     CachedPlan, ColumnProjection, PkDeletePlan, PkPointLookupPlan, ProjectionPlan,
     ResolvedProjection, SimpleFastPathPlan,

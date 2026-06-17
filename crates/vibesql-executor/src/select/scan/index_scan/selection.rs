@@ -147,8 +147,18 @@ pub(crate) fn should_use_index_scan(
                 .unwrap_or(false);
 
             // Count how many leading index columns are pinned by equality predicates
-            // Note: For expression indexes, we count expression matches as pinned
+            // Note: For expression indexes, we count expression matches as pinned.
+            // This (IN-inclusive) count drives index *seeking* and cost comparison.
             let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
+
+            // For ORDER BY satisfaction we must use the stricter single-value pin
+            // count: a column constrained by a multi-valued IN-list is NOT
+            // constant within the scan output, so it cannot be skipped when
+            // matching the ORDER BY against trailing index columns. Treating an
+            // IN-pinned column as constant produced wrong row order for
+            // `x IN (..) ORDER BY x DESC, y` (where-5.102 / where-5.103).
+            let order_pinned_columns =
+                count_single_value_pinned_index_columns(where_clause, &index_metadata.columns);
 
             // Check if this index can be used for ORDER BY clause
             let can_use_for_order = if let Some(order_items) = order_by {
@@ -156,7 +166,7 @@ pub(crate) fn should_use_index_scan(
                 let columns_match = can_use_index_for_order_by_with_pinned(
                     order_items,
                     &index_metadata.columns,
-                    pinned_columns,
+                    order_pinned_columns,
                 );
 
                 // Don't use index for ORDER BY if any non-pinned column is nullable.
@@ -170,7 +180,7 @@ pub(crate) fn should_use_index_scan(
                         order_items,
                         &table.schema,
                         &index_metadata.columns,
-                        pinned_columns,
+                        order_pinned_columns,
                     )
                 {
                     false
@@ -985,6 +995,48 @@ pub(crate) fn count_pinned_index_columns(
     count
 }
 
+/// Count how many leading index columns are pinned to a **single** value by a
+/// true equality predicate (`col = literal`), ignoring multi-valued IN pins.
+///
+/// This is the pin count that is meaningful for ORDER BY satisfaction: only a
+/// column constrained to exactly one value is constant within the scan output
+/// and may therefore be skipped when matching the ORDER BY against trailing
+/// index columns. See [`collect_single_value_equality_columns`].
+pub(crate) fn count_single_value_pinned_index_columns(
+    where_clause: Option<&Expression>,
+    index_columns: &[vibesql_ast::IndexColumn],
+) -> usize {
+    let where_clause = match where_clause {
+        Some(expr) => expr,
+        None => return 0,
+    };
+
+    let mut pinned_columns = std::collections::HashSet::new();
+    collect_single_value_equality_columns(where_clause, &mut pinned_columns);
+
+    let mut pinned_expressions: Vec<&Expression> = Vec::new();
+    collect_single_value_equality_expressions(where_clause, &mut pinned_expressions);
+
+    let mut count = 0;
+    for index_col in index_columns {
+        let is_pinned = match index_col {
+            vibesql_ast::IndexColumn::Column { column_name, .. } => {
+                pinned_columns.iter().any(|c| c.eq_ignore_ascii_case(column_name))
+            }
+            vibesql_ast::IndexColumn::Expression { expr: index_expr, .. } => {
+                pinned_expressions.iter().any(|e| expressions_match(e, index_expr))
+            }
+        };
+
+        if is_pinned {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
 /// Collect all column names that have equality predicates (col = literal or col IS literal)
 ///
 /// Also recognizes positive IN-list (`col IN (literal-list)`) and IN-subquery
@@ -997,6 +1049,38 @@ pub(crate) fn count_pinned_index_columns(
 /// literals (or parameter placeholders) — a column reference inside the list
 /// would make the IN equivalent to a join condition, not an equality.
 fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::HashSet<String>) {
+    collect_pinned_columns(expr, columns, true);
+}
+
+/// Like `collect_equality_columns`, but only collects columns pinned to a
+/// **single** value by a true equality (`col = literal` / `col IS literal`).
+///
+/// IN-lists and IN-subqueries pin a column to a *finite set* of values, which
+/// is enough to drive an index seek but does NOT make the column constant
+/// within the scan output. For ORDER BY satisfaction a multi-valued pin cannot
+/// be treated as a constant: scanning `(x, y)` for `x IN (1, 5)` yields the
+/// y-runs for x=1 and x=5 concatenated, which is not globally ordered by y, and
+/// (for `ORDER BY x DESC, y`) cannot be produced by any single forward/reverse
+/// index traversal. Excluding IN-pins here forces a post-scan sort in those
+/// cases (where-5.102 / where-5.103).
+fn collect_single_value_equality_columns(
+    expr: &Expression,
+    columns: &mut std::collections::HashSet<String>,
+) {
+    collect_pinned_columns(expr, columns, false);
+}
+
+/// Shared traversal for [`collect_equality_columns`] and
+/// [`collect_single_value_equality_columns`].
+///
+/// When `include_in_lists` is true, positive `col IN (...)` predicates pin the
+/// column (finite-set equality, used for index *seeking*). When false, only
+/// single-value equalities pin the column (used for ORDER BY satisfaction).
+fn collect_pinned_columns(
+    expr: &Expression,
+    columns: &mut std::collections::HashSet<String>,
+    include_in_lists: bool,
+) {
     match expr {
         Expression::BinaryOp { left, op, right } => {
             match op {
@@ -1015,8 +1099,8 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
                 }
                 vibesql_ast::BinaryOperator::And => {
                     // Recurse into both sides of AND
-                    collect_equality_columns(left, columns);
-                    collect_equality_columns(right, columns);
+                    collect_pinned_columns(left, columns, include_in_lists);
+                    collect_pinned_columns(right, columns, include_in_lists);
                 }
                 _ => {}
             }
@@ -1038,7 +1122,7 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
         // IN-list with literal values: `col IN (1, 2, 3)` pins the column.
         // Empty lists, NOT IN, and lists containing non-literal expressions are
         // excluded since they don't behave as a finite-set equality.
-        Expression::InList { expr: target, values, negated: false } => {
+        Expression::InList { expr: target, values, negated: false } if include_in_lists => {
             if let Expression::ColumnRef(col_id) = &**target {
                 if !values.is_empty() && values.iter().all(is_literal) {
                     columns.insert(col_id.column_canonical().to_uppercase());
@@ -1048,7 +1132,7 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
         // IN-subquery: `col IN (SELECT ...)` pins the column. The subquery is
         // resolved at execution time to a finite set of values, equivalent for
         // index-selection purposes to an IN-list.
-        Expression::In { expr: target, negated: false, .. } => {
+        Expression::In { expr: target, negated: false, .. } if include_in_lists => {
             if let Expression::ColumnRef(col_id) = &**target {
                 columns.insert(col_id.column_canonical().to_uppercase());
             }
@@ -1056,7 +1140,7 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
         // Recurse into Conjunction (AND)
         Expression::Conjunction(exprs) => {
             for e in exprs {
-                collect_equality_columns(e, columns);
+                collect_pinned_columns(e, columns, include_in_lists);
             }
         }
         _ => {}
@@ -1072,6 +1156,27 @@ fn collect_equality_columns(expr: &Expression, columns: &mut std::collections::H
 /// and `expr IN (SELECT ...)` as pinning the expression for matching against
 /// expression-index columns.
 fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<&'a Expression>) {
+    collect_pinned_expressions(expr, expressions, true);
+}
+
+/// Like `collect_equality_expressions`, but only collects expressions pinned to
+/// a single value by a true equality. See
+/// [`collect_single_value_equality_columns`] for why IN-pins are excluded when
+/// reasoning about ORDER BY satisfaction.
+fn collect_single_value_equality_expressions<'a>(
+    expr: &'a Expression,
+    expressions: &mut Vec<&'a Expression>,
+) {
+    collect_pinned_expressions(expr, expressions, false);
+}
+
+/// Shared traversal for [`collect_equality_expressions`] and
+/// [`collect_single_value_equality_expressions`].
+fn collect_pinned_expressions<'a>(
+    expr: &'a Expression,
+    expressions: &mut Vec<&'a Expression>,
+    include_in_lists: bool,
+) {
     match expr {
         Expression::BinaryOp { left, op, right } => {
             match op {
@@ -1086,8 +1191,8 @@ fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<
                 }
                 vibesql_ast::BinaryOperator::And => {
                     // Recurse into both sides of AND
-                    collect_equality_expressions(left, expressions);
-                    collect_equality_expressions(right, expressions);
+                    collect_pinned_expressions(left, expressions, include_in_lists);
+                    collect_pinned_expressions(right, expressions, include_in_lists);
                 }
                 _ => {}
             }
@@ -1105,7 +1210,7 @@ fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<
         // IN-list with literal values: `expr IN (1, 2, 3)` pins the expression.
         // Restricted to non-column expressions (column equality is collected via
         // `collect_equality_columns`) and lists where every element is a literal.
-        Expression::InList { expr: target, values, negated: false } => {
+        Expression::InList { expr: target, values, negated: false } if include_in_lists => {
             if !matches!(&**target, Expression::ColumnRef(_))
                 && !values.is_empty()
                 && values.iter().all(is_literal)
@@ -1114,7 +1219,7 @@ fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<
             }
         }
         // IN-subquery: `expr IN (SELECT ...)` pins the expression for non-column targets.
-        Expression::In { expr: target, negated: false, .. } => {
+        Expression::In { expr: target, negated: false, .. } if include_in_lists => {
             if !matches!(&**target, Expression::ColumnRef(_)) {
                 expressions.push(target);
             }
@@ -1122,7 +1227,7 @@ fn collect_equality_expressions<'a>(expr: &'a Expression, expressions: &mut Vec<
         // Recurse into Conjunction (AND)
         Expression::Conjunction(exprs) => {
             for e in exprs {
-                collect_equality_expressions(e, expressions);
+                collect_pinned_expressions(e, expressions, include_in_lists);
             }
         }
         _ => {}
@@ -1892,5 +1997,54 @@ mod tests {
         ];
         let index = idx_cols(&["a", "b"]);
         assert!(can_use_index_for_order_by_with_pinned(&order_by, &index, 2));
+    }
+
+    #[test]
+    fn test_single_value_pin_excludes_in_list() {
+        // WHERE a IN (1, 2, 3): IN-inclusive count pins `a` (for seeking), but the
+        // single-value count does NOT (a is not constant within the scan output),
+        // so ORDER BY satisfaction must not skip `a`.
+        let where_expr = in_list_expr("a", vec![SqlValue::Integer(1), SqlValue::Integer(2)]);
+        let index = idx_cols(&["a", "b"]);
+        assert_eq!(count_pinned_index_columns(Some(&where_expr), &index), 1);
+        assert_eq!(count_single_value_pinned_index_columns(Some(&where_expr), &index), 0);
+    }
+
+    #[test]
+    fn test_single_value_pin_counts_equality() {
+        // WHERE a = 1: a true single-value equality pins `a` under both counts.
+        let where_expr = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        let index = idx_cols(&["a", "b"]);
+        assert_eq!(count_pinned_index_columns(Some(&where_expr), &index), 1);
+        assert_eq!(count_single_value_pinned_index_columns(Some(&where_expr), &index), 1);
+    }
+
+    #[test]
+    fn test_single_value_pin_mixed_equality_and_in_list() {
+        // WHERE a = 1 AND b IN (2, 3): equality pins `a` for ordering; the IN on
+        // `b` does not. So the single-value prefix stops at `a` (count 1), while
+        // the IN-inclusive count covers both (count 2).
+        let eq_a = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        };
+        let in_b = in_list_expr("b", vec![SqlValue::Integer(2), SqlValue::Integer(3)]);
+        let where_expr = Expression::BinaryOp {
+            op: BinaryOperator::And,
+            left: Box::new(eq_a),
+            right: Box::new(in_b),
+        };
+        let index = idx_cols(&["a", "b", "c"]);
+        assert_eq!(count_pinned_index_columns(Some(&where_expr), &index), 2);
+        assert_eq!(count_single_value_pinned_index_columns(Some(&where_expr), &index), 1);
     }
 }

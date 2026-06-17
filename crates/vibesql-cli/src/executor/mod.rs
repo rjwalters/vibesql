@@ -181,6 +181,14 @@ impl SqlExecutor {
         // Parse SQL using arena fallback for SELECT statements (preserves original case in source_text)
         let statement = parse_with_arena_fallback(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
+        // The CLI executes statements directly and has no parameter-binding
+        // mechanism. SQLite treats a parameter that was never bound as NULL
+        // (e.g. `SELECT b FROM t WHERE a > ?` with no binding yields no rows
+        // because `a > NULL` is NULL). Substitute any leftover `?`/`$N`/`:name`
+        // placeholders with NULL literals so they evaluate the same way instead
+        // of being rejected as unbound.
+        let statement = vibesql_executor::fill_unbound_placeholders_with_null(statement);
+
         // Execute statement through appropriate executor
         let mut result = QueryResult {
             rows: Vec::new(),
