@@ -363,6 +363,12 @@ pub(crate) fn resolve_order_by_alias<'a>(
                     };
                     return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(col_id)));
                 }
+                ResolvedPosition::OwnedExpression(expr) => {
+                    // USING/NATURAL OUTER-JOIN output column: sort by the merged
+                    // COALESCE value rather than a single base-table column
+                    // (issue #5657).
+                    return Ok(Cow::Owned(expr));
+                }
                 ResolvedPosition::NotFound => {
                     // Fallback: shouldn't reach here if validation passed
                 }

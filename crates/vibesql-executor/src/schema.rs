@@ -1015,6 +1015,133 @@ impl CombinedSchema {
         None
     }
 
+    /// Compute the ordered list of output columns produced by `SELECT *`.
+    ///
+    /// Each entry is the COALESCE chain of absolute row indices that backs one
+    /// output column. For ordinary columns the chain is a single index; for
+    /// USING/NATURAL columns in OUTER JOINs the chain holds every index that
+    /// participates in the N-way COALESCE (in COALESCE priority order).
+    ///
+    /// This mirrors the column ordering and coalescing applied by
+    /// `project_row_combined` for `SELECT *`, so positional references
+    /// (`ORDER BY 1`) resolve to the *output* column — including its coalesced
+    /// value — rather than a single base-table column. Without this, a
+    /// positional ORDER BY over a RIGHT/FULL JOIN sorts by the (often NULL)
+    /// left-side column instead of the merged USING column (issue #5657).
+    ///
+    /// Returns `None` when the schema has no special join structure to mirror
+    /// (no hidden columns, no coalesce chains, no alias/shadow tables), letting
+    /// callers fall back to the simpler index-based expansion.
+    pub fn wildcard_output_chains(&self) -> Option<Vec<Vec<usize>>> {
+        // Only take over when there is join-specific structure to account for.
+        if self.hidden_columns.is_empty()
+            && self.using_coalesce_indices.is_empty()
+            && self.column_replacement_map.is_empty()
+            && self.alias_tables.is_empty()
+            && self.shadowed_tables.is_empty()
+        {
+            return None;
+        }
+
+        // Mirror the aliased-join handling in project_row_combined: when an
+        // alias table shadows all non-alias tables, use its column order.
+        let alias_covering_all = self.alias_tables.iter().find(|alias_id| {
+            if let Some(shadowed) = self.shadowed_tables.get(*alias_id) {
+                let non_alias_tables: Vec<_> =
+                    self.table_schemas.keys().filter(|t| !self.alias_tables.contains(*t)).collect();
+                non_alias_tables.iter().all(|t| shadowed.contains(*t))
+            } else {
+                false
+            }
+        });
+
+        let mut chains: Vec<Vec<usize>> = Vec::new();
+
+        if let Some(alias_id) = alias_covering_all {
+            if let Some((_, alias_schema)) = self.table_schemas.get(alias_id) {
+                let alias_name = alias_id.display().to_string();
+                for col_schema in &alias_schema.columns {
+                    if let Some(actual_idx) =
+                        self.get_column_index(Some(&alias_name), &col_schema.name)
+                    {
+                        chains.push(self.coalesce_chain_for_index(actual_idx));
+                    }
+                }
+            }
+            return Some(chains);
+        }
+
+        // No covering alias: iterate tables in start_index order, applying the
+        // same skip/include rules as SELECT * projection.
+        let mut sorted_tables: Vec<_> = self.table_schemas.iter().collect();
+        sorted_tables.sort_by_key(|(_, (start_index, _))| *start_index);
+
+        for (table_id, (start_index, table_schema)) in sorted_tables {
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
+            for (col_idx, _col) in table_schema.columns.iter().enumerate() {
+                let abs_idx = start_index + col_idx;
+
+                // Skip replacement targets (emitted via the hidden column's slot).
+                if self.column_replacement_map.values().any(|&v| v == abs_idx) {
+                    continue;
+                }
+                // Skip right-side USING columns (emitted via the left-side COALESCE).
+                if self.is_using_coalesce_right_side(abs_idx) {
+                    continue;
+                }
+
+                let should_include = if self.is_column_hidden(abs_idx) {
+                    self.get_column_replacement(abs_idx).is_some()
+                        || self.get_using_coalesce_right_for_left(abs_idx).is_some()
+                } else {
+                    true
+                };
+
+                if should_include {
+                    chains.push(self.coalesce_chain_for_index(abs_idx));
+                }
+            }
+        }
+
+        Some(chains)
+    }
+
+    /// Return the COALESCE chain backing the output column at `idx`.
+    ///
+    /// For USING/NATURAL OUTER-JOIN columns this is the full N-way chain; for a
+    /// simple hidden column with a single replacement it is `[replacement]`;
+    /// otherwise it is `[idx]`. Mirrors the value selection in
+    /// `project_row_combined`.
+    fn coalesce_chain_for_index(&self, idx: usize) -> Vec<usize> {
+        if let Some(all_indices) = self.get_all_coalesce_indices_for_column(idx) {
+            return all_indices.clone();
+        }
+        if self.is_column_hidden(idx) {
+            if let Some(replacement_idx) = self.get_column_replacement(idx) {
+                return vec![replacement_idx];
+            }
+        }
+        vec![idx]
+    }
+
+    /// Reverse-lookup the (canonical table name, column name) for an absolute
+    /// row index, skipping alias tables. Used to build qualified column
+    /// references when resolving positional ORDER BY over `SELECT *`.
+    pub fn table_column_for_index(&self, idx: usize) -> Option<(String, String)> {
+        for (table_id, (start_index, schema)) in &self.table_schemas {
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
+            if idx >= *start_index && idx < start_index + schema.columns.len() {
+                let col = &schema.columns[idx - start_index];
+                return Some((table_id.table_canonical().to_string(), col.name.clone()));
+            }
+        }
+        None
+    }
+
     /// Build a map from column names to their indices.
     ///
     /// This is used by window function frame calculations to resolve named column
@@ -1886,5 +2013,97 @@ mod tests {
         // value1 and value2 are unique to their tables - not ambiguous
         assert!(!schema.is_column_ambiguous("value1"));
         assert!(!schema.is_column_ambiguous("value2"));
+    }
+
+    // ==========================================================================
+    // wildcard_output_chains / coalesce_chain_for_index (issue #5657)
+    // ==========================================================================
+
+    /// A plain join with no USING/NATURAL coalescing has no special structure,
+    /// so wildcard_output_chains returns None and callers fall back to the
+    /// simple index expansion.
+    #[test]
+    fn test_wildcard_output_chains_none_for_plain_join() {
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns(
+                "t1",
+                vec![("a", DataType::Integer), ("b", DataType::Integer)],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns(
+                "t2",
+                vec![("c", DataType::Integer), ("d", DataType::Integer)],
+            ),
+        );
+
+        assert!(schema.wildcard_output_chains().is_none());
+    }
+
+    /// For a USING/NATURAL OUTER JOIN coalesce chain, the merged column's output
+    /// chain holds every participating index (in COALESCE order), and the
+    /// right-side member is suppressed from the output sequence. This is what
+    /// lets positional ORDER BY sort by the merged value (issue #5657).
+    #[test]
+    fn test_wildcard_output_chains_coalesces_using_column() {
+        // Simulate `t4 NATURAL RIGHT JOIN t5`: both have `id`; the left `id`
+        // (index 0) is hidden and coalesces with the right `id` (index 2).
+        let t4 = CombinedSchema::from_table(
+            "t4".to_string(),
+            table_schema_with_columns(
+                "t4",
+                vec![("id", DataType::Integer), ("x", DataType::Varchar { max_length: None })],
+            ),
+        );
+        let mut schema = CombinedSchema::combine(
+            t4,
+            "t5".to_string(),
+            table_schema_with_columns(
+                "t5",
+                vec![("id", DataType::Integer), ("y", DataType::Varchar { max_length: None })],
+            ),
+        );
+        // id at index 0 (t4) and index 2 (t5) form the coalesce chain.
+        schema.add_joined_column("id");
+        schema.add_using_coalesce_pair("id", 0, 2);
+        schema.hide_column(0);
+
+        let chains = schema.wildcard_output_chains().expect("join structure present");
+
+        // Output columns: merged id (chain [0,2]), t4.x (idx 1), t5.y (idx 3).
+        // The right-side id (idx 2) must not appear as its own output column.
+        assert_eq!(chains.len(), 3, "merged id collapses to one output column");
+        assert_eq!(chains[0], vec![0, 2], "id coalesces left then right");
+        assert_eq!(chains[1], vec![1], "t4.x is a plain column");
+        assert_eq!(chains[2], vec![3], "t5.y is a plain column");
+    }
+
+    /// table_column_for_index reverse-maps an absolute row index back to its
+    /// (canonical table, column) so positional ORDER BY can build qualified
+    /// column references for the coalesce chain.
+    #[test]
+    fn test_table_column_for_index_reverse_lookup() {
+        let t1 = CombinedSchema::from_table(
+            "t1".to_string(),
+            table_schema_with_columns(
+                "t1",
+                vec![("a", DataType::Integer), ("b", DataType::Integer)],
+            ),
+        );
+        let schema = CombinedSchema::combine(
+            t1,
+            "t2".to_string(),
+            table_schema_with_columns(
+                "t2",
+                vec![("c", DataType::Integer), ("d", DataType::Integer)],
+            ),
+        );
+
+        assert_eq!(schema.table_column_for_index(0), Some(("t1".to_string(), "a".to_string())));
+        assert_eq!(schema.table_column_for_index(3), Some(("t2".to_string(), "d".to_string())));
+        assert_eq!(schema.table_column_for_index(99), None);
     }
 }
