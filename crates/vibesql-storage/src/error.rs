@@ -25,6 +25,7 @@ pub enum StorageError {
         table_name: String,
     },
     NullConstraintViolation {
+        table: String,
         column: String,
     },
     TypeMismatch {
@@ -102,12 +103,9 @@ impl std::fmt::Display for StorageError {
                     )
                 )
             }
-            StorageError::NullConstraintViolation { column } => {
-                write!(
-                    f,
-                    "{}",
-                    vibe_msg!("storage-null-constraint-violation", column = column.as_str())
-                )
+            StorageError::NullConstraintViolation { table, column } => {
+                // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+                write!(f, "NOT NULL constraint failed: {}.{}", table, column)
             }
             StorageError::TypeMismatch { column, expected, actual } => {
                 write!(

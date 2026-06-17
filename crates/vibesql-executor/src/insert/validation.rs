@@ -496,6 +496,14 @@ pub fn coerce_value(
                         | SqlValue::Float(_) => {
                             Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string())))
                         }
+                        // Temporal values render to their canonical string form (matches
+                        // SQLite storing CURRENT_TIME/DATE/TIMESTAMP defaults as TEXT).
+                        SqlValue::Date(_)
+                        | SqlValue::Time(_)
+                        | SqlValue::Timestamp(_)
+                        | SqlValue::Interval(_) => {
+                            Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string())))
+                        }
                         _ => Ok(value), // Other types pass through
                     }
                 }
@@ -636,6 +644,14 @@ pub fn coerce_value(
         (SqlValue::Boolean(b), DataType::Varchar { .. }) => {
             Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
         }
+        // Temporal values → TEXT affinity: SQLite stores CURRENT_TIME / CURRENT_DATE /
+        // CURRENT_TIMESTAMP (and any DATE/TIME/TIMESTAMP literal default) as TEXT, so a
+        // TEXT-affinity column must accept a temporal value by rendering its canonical
+        // string form rather than rejecting it as a datatype mismatch (table-13.2.*).
+        (
+            SqlValue::Date(_) | SqlValue::Time(_) | SqlValue::Timestamp(_) | SqlValue::Interval(_),
+            DataType::Varchar { .. },
+        ) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
 
         // Blob → Any column type (SQLite stores blobs as-is regardless of column affinity)
         // In SQLite, blobs can be stored in any column and retain their blob type

@@ -169,9 +169,10 @@ impl<'a> ConstraintValidator<'a> {
                 .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_idx })?;
 
             if !col.nullable && *value == vibesql_types::SqlValue::Null {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "NOT NULL constraint violation: column '{}' in table '{}' cannot be NULL",
-                    col.name, table_name
+                // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "NOT NULL constraint failed: {}.{}",
+                    table_name, col.name
                 )));
             }
         }

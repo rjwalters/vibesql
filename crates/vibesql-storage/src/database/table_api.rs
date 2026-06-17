@@ -645,7 +645,10 @@ impl Database {
             // Check NOT NULL constraint
             let column = &schema.columns[col_index];
             if !column.nullable && *new_value == vibesql_types::SqlValue::Null {
-                return Err(StorageError::NullConstraintViolation { column: col_name.to_string() });
+                return Err(StorageError::NullConstraintViolation {
+                    table: resolved_name.clone(),
+                    column: col_name.to_string(),
+                });
             }
 
             new_row.set(col_index, new_value.clone())?;

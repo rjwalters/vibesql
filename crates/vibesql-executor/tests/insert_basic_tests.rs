@@ -306,12 +306,11 @@ fn test_insert_not_null_constraint_violation() {
     let result = InsertExecutor::execute(&mut db, &stmt);
     assert!(result.is_err());
     match result.unwrap_err() {
-        ExecutorError::ConstraintViolation(msg) => {
-            assert!(msg.contains("NOT NULL constraint violation"));
-            assert!(msg.contains("column 'id'"));
-            assert!(msg.contains("table 'users'"));
-            assert!(msg.contains("cannot be NULL"));
+        // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+        ExecutorError::SqliteCompatError(msg) => {
+            assert!(msg.contains("NOT NULL constraint failed"), "got: {msg}");
+            assert!(msg.contains("users.id"), "got: {msg}");
         }
-        other => panic!("Expected ConstraintViolation, got {:?}", other),
+        other => panic!("Expected SqliteCompatError, got {:?}", other),
     }
 }

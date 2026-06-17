@@ -183,9 +183,10 @@ pub(super) fn try_fast_path_update(
     for &col_idx in &changed_columns {
         let column = &schema.columns[col_idx];
         if !column.nullable && new_row.values[col_idx] == SqlValue::Null {
-            return Err(ExecutorError::ConstraintViolation(format!(
-                "NOT NULL constraint violation: column '{}' cannot be NULL",
-                column.name
+            // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "NOT NULL constraint failed: {}.{}",
+                table_name, column.name
             )));
         }
     }
@@ -313,9 +314,10 @@ fn try_super_fast_path(
 
         // Check NOT NULL constraint (after coercion)
         if !column.nullable && coerced_value == SqlValue::Null {
-            return Err(ExecutorError::ConstraintViolation(format!(
-                "NOT NULL constraint violation: column '{}' cannot be NULL",
-                column.name
+            // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "NOT NULL constraint failed: {}.{}",
+                table_name, column.name
             )));
         }
 

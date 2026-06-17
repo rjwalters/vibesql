@@ -367,9 +367,10 @@ pub fn assert_constraint_violation(
 /// Asserts that an error is a NOT NULL constraint violation
 #[allow(dead_code)]
 pub fn assert_not_null_violation(result: Result<usize, ExecutorError>, column: &str, table: &str) {
+    // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
     assert_constraint_violation(
         result,
-        &["NOT NULL constraint violation", column, table, "cannot be NULL"],
+        &["NOT NULL constraint failed", &format!("{}.{}", table, column)],
     );
 }
 
