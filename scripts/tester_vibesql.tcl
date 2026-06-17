@@ -1227,10 +1227,26 @@ proc trial_check_in_transaction {new_sql} {
     puts $f $combined
     close $f
 
+    # Run the trial against an isolated COPY of the shared database, never the
+    # real $::db_file. The trial appends a ROLLBACK so that statements *inside*
+    # the transaction leave nothing behind — but any statement that runs BEFORE
+    # the transaction's BEGIN (e.g. select3-1.0's `CREATE TABLE t1(...); BEGIN;`)
+    # auto-commits and is NOT undone by that ROLLBACK. Running the trial directly
+    # against $::db_file therefore leaks such pre-BEGIN DDL/DML into the shared
+    # file; the real batch (replayed at COMMIT) then re-issues the same
+    # `CREATE TABLE t1` and aborts with "table t1 already exists", cascading into
+    # empty results for every later test in the file (#5656). Operating on a
+    # throwaway copy gives identical error-detection behavior with zero
+    # persistent effect on the shared database.
     if {$::db_file eq ""} {
         catch {exec $::vibesql_path < $tmpfile 2>@1} result
     } else {
-        catch {exec $::vibesql_path $::db_file < $tmpfile 2>@1} result
+        set trial_db "/tmp/vibesql_trialdb_[pid]_[clock microseconds].vbsql"
+        if {[file exists $::db_file]} {
+            file copy -force $::db_file $trial_db
+        }
+        catch {exec $::vibesql_path $trial_db < $tmpfile 2>@1} result
+        file delete -force $trial_db
     }
     file delete -force $tmpfile
 
