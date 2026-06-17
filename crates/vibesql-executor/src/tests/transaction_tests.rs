@@ -45,7 +45,12 @@ fn test_begin_transaction_already_active() {
         &mut db,
     );
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Transaction already active"));
+    // A nested BEGIN surfaces SQLite's user-facing wording rather than the
+    // internal storage "Transaction already active" message (#5659).
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "cannot start a transaction within a transaction"
+    );
 }
 
 #[test]

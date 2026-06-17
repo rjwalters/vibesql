@@ -26,7 +26,24 @@ impl BeginTransactionExecutor {
     pub fn execute(stmt: &BeginStmt, db: &mut Database) -> Result<String, ExecutorError> {
         let durability = convert_durability_hint(&stmt.durability);
         db.begin_transaction_with_durability(durability).map_err(|e| {
-            ExecutorError::StorageError(format!("Failed to begin transaction: {}", e))
+            // A BEGIN issued while a transaction is already open is a
+            // user-level error in SQLite, not an internal storage fault.
+            // SQLite raises SQLITE_ERROR with the message "cannot start a
+            // transaction within a transaction" (see vdbe.c OP_AutoCommit).
+            // Surface that wording verbatim instead of leaking the internal
+            // "Failed to begin transaction: Transaction error: Transaction
+            // already active" storage message (#5659).
+            if matches!(
+                e,
+                vibesql_storage::StorageError::TransactionError(ref m)
+                    if m == "Transaction already active"
+            ) {
+                ExecutorError::SqliteCompatError(
+                    "cannot start a transaction within a transaction".to_string(),
+                )
+            } else {
+                ExecutorError::StorageError(format!("Failed to begin transaction: {}", e))
+            }
         })?;
 
         let msg = match stmt.durability {
