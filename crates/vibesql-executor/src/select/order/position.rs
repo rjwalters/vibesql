@@ -110,8 +110,57 @@ pub(crate) enum ResolvedPosition<'a> {
         /// The column name
         column: String,
     },
+    /// An already-built expression resolved from a wildcard expansion.
+    ///
+    /// Used for USING/NATURAL OUTER-JOIN columns whose `SELECT *` output is a
+    /// COALESCE over several base-table columns. Sorting by such a positional
+    /// reference must use the merged (coalesced) value, not a single base-table
+    /// column (issue #5657).
+    OwnedExpression(vibesql_ast::Expression),
     /// Position not found (shouldn't happen if validation passed)
     NotFound,
+}
+
+/// Convert a `SELECT *` output column's COALESCE chain (a list of absolute row
+/// indices) into a [`ResolvedPosition`] for ORDER BY.
+///
+/// - A single-index chain resolves to a table-qualified column name, matching
+///   the existing wildcard behaviour (and keeping #5231's ambiguity fix).
+/// - A multi-index chain resolves to a `COALESCE(t1.c, t2.c, ...)` expression so
+///   sorting uses the merged USING/NATURAL OUTER-JOIN value (issue #5657).
+fn resolve_chain_to_position<'a>(
+    chain: &[usize],
+    schema: &crate::schema::CombinedSchema,
+) -> ResolvedPosition<'a> {
+    // Build a qualified ColumnRef for one absolute index, if resolvable.
+    let column_ref_for = |idx: usize| -> Option<vibesql_ast::Expression> {
+        schema.table_column_for_index(idx).map(|(table, column)| {
+            vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                &table, true, &column, true,
+            ))
+        })
+    };
+
+    match chain {
+        [] => ResolvedPosition::NotFound,
+        [idx] => match schema.table_column_for_index(*idx) {
+            Some((table, column)) => ResolvedPosition::ColumnName { table: Some(table), column },
+            None => ResolvedPosition::NotFound,
+        },
+        _ => {
+            let args: Vec<vibesql_ast::Expression> =
+                chain.iter().filter_map(|&idx| column_ref_for(idx)).collect();
+            match args.len() {
+                0 => ResolvedPosition::NotFound,
+                1 => ResolvedPosition::OwnedExpression(args.into_iter().next().unwrap()),
+                _ => ResolvedPosition::OwnedExpression(vibesql_ast::Expression::Function {
+                    name: vibesql_ast::FunctionIdentifier::new("coalesce"),
+                    args,
+                    character_unit: None,
+                }),
+            }
+        }
+    }
 }
 
 /// Resolves a column position to an expression or column name, handling wildcard expansion.
@@ -128,6 +177,21 @@ pub(crate) fn resolve_position_with_wildcards<'a>(
     for item in select_list {
         match item {
             vibesql_ast::SelectItem::Wildcard { .. } => {
+                // Prefer join-aware expansion that mirrors SELECT * output,
+                // including USING/NATURAL OUTER-JOIN coalescing (issue #5657).
+                if let Some(s) = schema {
+                    if let Some(chains) = s.wildcard_output_chains() {
+                        let wildcard_cols = chains.len();
+                        if target_col < current_col + wildcard_cols {
+                            let offset_in_wildcard = target_col - current_col;
+                            let chain = &chains[offset_in_wildcard];
+                            return resolve_chain_to_position(chain, s);
+                        }
+                        current_col += wildcard_cols;
+                        continue;
+                    }
+                }
+
                 // Count how many columns this wildcard expands to
                 let wildcard_cols = if let Some(s) = schema {
                     s.table_schemas.values().map(|(_, ts)| ts.columns.len()).sum()
@@ -224,9 +288,16 @@ pub(crate) fn count_select_columns(
             vibesql_ast::SelectItem::Wildcard { .. } => {
                 // Expand wildcard to all columns from schema
                 if let Some(s) = schema {
-                    // Count all columns from all tables in the schema
-                    for (_, table_schema) in s.table_schemas.values() {
-                        count += table_schema.columns.len();
+                    // Prefer the join-aware output-column count so positional
+                    // ORDER BY validation matches the actual SELECT * output
+                    // (hidden/coalesced columns collapse to one) (issue #5657).
+                    if let Some(chains) = s.wildcard_output_chains() {
+                        count += chains.len();
+                    } else {
+                        // Count all columns from all tables in the schema
+                        for (_, table_schema) in s.table_schemas.values() {
+                            count += table_schema.columns.len();
+                        }
                     }
                 } else {
                     // No schema available, count as 1
