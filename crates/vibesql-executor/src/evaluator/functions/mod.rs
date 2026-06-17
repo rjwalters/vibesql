@@ -313,6 +313,31 @@ pub(super) fn eval_scalar_function(
     }
 }
 
+/// Evaluate a scalar function for a DEFAULT expression at INSERT time.
+///
+/// DEFAULT expressions are materialized without a row/schema/database context,
+/// so only deterministic scalar functions whose arguments reduce to constants
+/// (e.g. `abs(1)`) are supported. Aggregate functions never reach this path:
+/// they parse as `Expression::AggregateFunction` and are rejected by the
+/// DEFAULT evaluator with an `unknown function` error (table-16.2 ..
+/// table-16.7), matching SQLite.
+///
+/// `schema_context` is `None` here because DEFAULT materialization is not a
+/// schema-attached context (CHECK/generated/index); the non-deterministic
+/// date/time guards do not apply.
+pub(crate) fn eval_scalar_function_for_default(
+    name: &str,
+    args: &[vibesql_types::SqlValue],
+) -> Result<vibesql_types::SqlValue, ExecutorError> {
+    eval_scalar_function(
+        name,
+        args,
+        &None,
+        &vibesql_types::SqlMode::default(),
+        super::SchemaExprContext::None,
+    )
+}
+
 /// Pins `eval_scalar_function`'s dispatch table against the central
 /// volatility classification in [`vibesql_ast::volatility`].
 ///

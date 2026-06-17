@@ -19,6 +19,19 @@ impl Parser {
     pub(in crate::parser) fn parse_data_type_with_integer_flag(
         &mut self,
     ) -> Result<(vibesql_types::DataType, bool), ParseError> {
+        // A delimited (quoted/bracketed) type name is taken verbatim and treated
+        // as an opaque SQLite-style type whose storage is governed by affinity
+        // only. This covers `"col.1" [char.3]` and `f "VARCHAR (+1,-10, 5)"`
+        // (table-8.9, table-8.10), where the quoted text is the full type name.
+        if let Token::DelimitedIdentifier(name) = self.peek() {
+            let type_name = name.clone();
+            self.advance();
+            // A delimited identifier may still be followed by a size specifier,
+            // e.g. `"DECIMAL"(10,2)`. Consume and discard it (affinity only).
+            self.consume_optional_type_arg_list()?;
+            return Ok((vibesql_types::DataType::UserDefined { type_name }, false));
+        }
+
         // Get the type name from the token. Note that identifiers are already
         // normalized to lowercase by the lexer, so we use uppercase for matching
         // but store the lowercase form.
@@ -221,34 +234,16 @@ impl Parser {
             }
             "VARCHAR" => {
                 // Parse VARCHAR or VARCHAR(n) or VARCHAR(n CHARACTERS) or VARCHAR(n OCTETS)
-                // Length is optional - if not specified, defaults to None (unlimited)
+                // Length is optional - if not specified, defaults to None (unlimited).
+                //
+                // SQLite accepts arbitrary, possibly-signed, multi-argument size
+                // specifiers on any type name (e.g. VARCHAR(1,10), VARCHAR(+1,-10);
+                // table-8.10). The arguments are ignored for affinity, so we keep
+                // the first non-negative argument as the length (when present) and
+                // tolerantly skip the rest.
                 let max_length = if matches!(self.peek(), Token::LParen) {
-                    self.advance(); // consume LParen
-                    let len = match self.peek() {
-                        Token::Number(n) => {
-                            let len = n.parse::<usize>().map_err(|_| ParseError {
-                                message: "Invalid VARCHAR length".to_string(),
-                            })?;
-                            self.advance();
-                            len
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: "Expected number after VARCHAR(".to_string(),
-                            })
-                        }
-                    };
-
-                    // Check for CHARACTERS or OCTETS modifier
-                    // For MVP, we accept both but treat them the same (as character count)
-                    if self.try_consume_keyword(Keyword::Characters)
-                        || self.try_consume_keyword(Keyword::Octets)
-                    {
-                        // Modifier consumed, continue
-                    }
-
-                    self.expect_token(Token::RParen)?;
-                    Some(len)
+                    let first = self.consume_optional_type_arg_list()?;
+                    first.and_then(|n| usize::try_from(n).ok())
                 } else {
                     None // No length specified, use default
                 };
@@ -720,52 +715,88 @@ impl Parser {
                 // Handle optional length/precision specifier for multi-word and
                 // unrecognized type names, e.g. NATIVE CHARACTER(70), VARYING
                 // CHARACTER(255), or Oracle/SQLite-style NUMBER(5,10). SQLite accepts
-                // any type name with an optional one- or two-argument size specifier and
-                // stores it by affinity only, so we validate (but discard) the numbers.
-                if matches!(self.peek(), Token::LParen) {
-                    self.advance(); // consume (
-                    match self.peek() {
-                        Token::Number(n) => {
-                            // Validate and consume the precision/length (we don't store it
-                            // for UserDefined types - affinity is what matters in SQLite)
-                            let _ = n.parse::<usize>().map_err(|_| ParseError {
-                                message: format!("Invalid {} length", full_type_name),
-                            })?;
-                            self.advance();
-                        }
-                        _ => {
-                            return Err(ParseError {
-                                message: format!("Expected number after {}(", full_type_name),
-                            })
-                        }
-                    }
-                    // Optional second argument (scale), e.g. NUMBER(5,10) or DECIMAL(10,2)
-                    // spelled with an unrecognized type name.
-                    if matches!(self.peek(), Token::Comma) {
-                        self.advance(); // consume ,
-                        match self.peek() {
-                            Token::Number(n) => {
-                                let _ = n.parse::<usize>().map_err(|_| ParseError {
-                                    message: format!("Invalid {} scale", full_type_name),
-                                })?;
-                                self.advance();
-                            }
-                            _ => {
-                                return Err(ParseError {
-                                    message: format!(
-                                        "Expected scale after {}(precision,",
-                                        full_type_name
-                                    ),
-                                })
-                            }
-                        }
-                    }
-                    self.expect_token(Token::RParen)?;
-                }
+                // any type name with an optional, possibly-signed, multi-argument size
+                // specifier and stores it by affinity only, so we discard the numbers.
+                self.consume_optional_type_arg_list()?;
 
                 Ok((vibesql_types::DataType::UserDefined { type_name: full_type_name }, false))
             }
         }
+    }
+
+    /// Consume an optional SQLite-style type size specifier and return the
+    /// first numeric argument (signed), if any.
+    ///
+    /// SQLite permits any type name to carry a parenthesized list of one or
+    /// more optionally-signed numeric arguments, e.g. `VARCHAR(1,10)`,
+    /// `VARCHAR(+1,-10)`, `NUMBER(5,10)` (table-8.10). The arguments do not
+    /// affect storage (affinity is derived from the type *name*), so callers
+    /// generally discard the result; `Varchar` keeps the first argument as a
+    /// best-effort declared length when it is non-negative.
+    ///
+    /// CHARACTERS / OCTETS unit modifiers (after a single argument) are also
+    /// accepted and discarded. If the next token is not `(`, this is a no-op
+    /// and returns `None`.
+    pub(in crate::parser) fn consume_optional_type_arg_list(
+        &mut self,
+    ) -> Result<Option<i64>, ParseError> {
+        if !matches!(self.peek(), Token::LParen) {
+            return Ok(None);
+        }
+        self.advance(); // consume (
+
+        let mut first: Option<i64> = None;
+
+        loop {
+            // Optional leading sign on the numeric argument.
+            let mut negate = false;
+            loop {
+                match self.peek() {
+                    Token::Symbol('+') => {
+                        self.advance();
+                    }
+                    Token::Symbol('-') => {
+                        negate = !negate;
+                        self.advance();
+                    }
+                    _ => break,
+                }
+            }
+
+            match self.peek() {
+                Token::Number(n) => {
+                    let value = n.parse::<i64>().map_err(|_| ParseError {
+                        message: format!("Invalid numeric type argument: {}", n),
+                    })?;
+                    let value = if negate { -value } else { value };
+                    if first.is_none() {
+                        first = Some(value);
+                    }
+                    self.advance();
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected numeric type argument".to_string(),
+                    })
+                }
+            }
+
+            // CHARACTERS / OCTETS unit modifier (single-argument character types).
+            if self.try_consume_keyword(Keyword::Characters)
+                || self.try_consume_keyword(Keyword::Octets)
+            {
+                // Modifier consumed, continue.
+            }
+
+            if matches!(self.peek(), Token::Comma) {
+                self.advance(); // consume , and parse the next argument
+                continue;
+            }
+            break;
+        }
+
+        self.expect_token(Token::RParen)?;
+        Ok(first)
     }
 
     /// Parse interval field (YEAR, MONTH, DAY, HOUR, MINUTE, SECOND)
