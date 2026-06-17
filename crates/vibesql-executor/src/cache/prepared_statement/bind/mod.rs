@@ -84,6 +84,37 @@ pub fn bind_parameters(stmt: &Statement, params: &[SqlValue]) -> Statement {
     result
 }
 
+/// Replace every remaining unbound placeholder in a statement with a NULL literal.
+///
+/// SQLite treats a parameter that was never bound to a value as NULL: running
+/// `SELECT b FROM t WHERE a > ?` with no binding evaluates `a > NULL` to NULL
+/// (false), yielding no rows. VibeSQL's direct-execution path (the CLI / TCL
+/// shim) has no parameter-binding mechanism, so a literal `?`/`$N`/`:name`
+/// token would otherwise reach the evaluator and be rejected as "unbound".
+///
+/// This helper substitutes positional (`?`), numbered (`$N`), and named
+/// (`:name`) placeholders with `Literal(NULL)`, matching SQLite's behaviour for
+/// directly executed statements. Statements with no placeholders are returned
+/// unchanged.
+pub fn fill_unbound_placeholders_with_null(stmt: Statement) -> Statement {
+    use vibesql_ast::visitor::{transform_statement, ExpressionMutVisitor};
+
+    struct NullFiller;
+
+    impl ExpressionMutVisitor for NullFiller {
+        fn post_visit_expression(&mut self, expr: Expression) -> Expression {
+            match expr {
+                Expression::Placeholder(_)
+                | Expression::NumberedPlaceholder(_)
+                | Expression::NamedPlaceholder(_) => Expression::Literal(SqlValue::Null),
+                other => other,
+            }
+        }
+    }
+
+    transform_statement(&mut NullFiller, stmt)
+}
+
 /// Bind named parameters to a statement by replacing NamedPlaceholder expressions with Literal
 /// values
 ///
@@ -128,6 +159,36 @@ mod tests {
         let sql = "SELECT * FROM users WHERE id = 1";
         let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
         assert_eq!(count_placeholders(&stmt), 0);
+    }
+
+    #[test]
+    fn test_fill_unbound_placeholders_with_null() {
+        // Unbound `?` placeholders become NULL literals (SQLite semantics for an
+        // unbound parameter). After substitution no placeholders remain.
+        let sql = "SELECT b FROM t1 WHERE a > ? AND a < ?";
+        let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        assert_eq!(count_placeholders(&stmt), 2);
+
+        let filled = fill_unbound_placeholders_with_null(stmt);
+        assert_eq!(count_placeholders(&filled), 0);
+
+        // Each substituted placeholder is a NULL literal.
+        let mut null_literals = 0;
+        visit_statement(&filled, &mut |expr| {
+            if matches!(expr, Expression::Literal(SqlValue::Null)) {
+                null_literals += 1;
+            }
+        });
+        assert_eq!(null_literals, 2);
+    }
+
+    #[test]
+    fn test_fill_unbound_placeholders_noop_without_placeholders() {
+        // Statements without placeholders are returned structurally unchanged.
+        let sql = "SELECT b FROM t1 WHERE a > 1 AND a < 4";
+        let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        let filled = fill_unbound_placeholders_with_null(stmt.clone());
+        assert_eq!(filled, stmt);
     }
 
     #[test]

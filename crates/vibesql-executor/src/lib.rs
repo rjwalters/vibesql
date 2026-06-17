@@ -68,8 +68,9 @@ pub mod simd;
 
 pub use alter::AlterTableExecutor;
 pub use cache::{
-    CacheManager, CacheStats, CachedQueryContext, PreparedStatement, PreparedStatementCache,
-    PreparedStatementCacheStats, PreparedStatementError, QueryPlanCache, QuerySignature,
+    fill_unbound_placeholders_with_null, CacheManager, CacheStats, CachedQueryContext,
+    PreparedStatement, PreparedStatementCache, PreparedStatementCacheStats, PreparedStatementError,
+    QueryPlanCache, QuerySignature,
 };
 pub use constraint_validator::ConstraintValidator;
 pub use create_table::CreateTableExecutor;
