@@ -113,6 +113,6 @@ Append these VibeSQL-specific follow-ups to the operator hand-off:
 ## Important Notes (VibeSQL-specific)
 
 - **Four version-bearing files, propagation pattern**: only `[workspace.package]` in `Cargo.toml` carries the canonical Rust version; every member crate inherits via `version.workspace = true`. The exception is `crates/vibesql-sqllogictest/Cargo.toml`, which pins to upstream sqllogictest's `0.28.x` — do not touch it.
-- **`Cargo.lock` IS a version-bearing file**: every `vibesql-*` workspace crate has an entry in `Cargo.lock`. `cargo update -w` is required after bumping `Cargo.toml` — it is not a no-op.
+- **`Cargo.lock` IS a version-bearing file, but it is gitignored**: every `vibesql-*` workspace crate has an entry in `Cargo.lock`, so `cargo update -w` is required after bumping `Cargo.toml` — it is not a no-op. However, `Cargo.lock` is gitignored in this repo (regenerated locally), so `commit_and_tag` does NOT stage or commit it; only the four tracked sources (`Cargo.toml`, member `vibesql-*` pins, both pyprojects) are committed atomically.
 - **Web demo and dashboard data are separate**: `make website` + `wrangler deploy` are NOT part of the release tag flow — they run after to refresh the public dashboard.
 - **Do not auto-publish to extra registries.** This skill only triggers what the existing workflows do. If the operator later adds a Homebrew formula, npm package, etc., that's a separate manual step.

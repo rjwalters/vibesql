@@ -19,6 +19,10 @@
 #   4. crates/vibesql-python-bindings/pyproject.toml       (Python bindings manifest)
 #   5. Cargo.lock                                          (refreshed via `cargo update -w`)
 #
+# NOTE: Cargo.lock is gitignored in this repo — it is regenerated locally and is
+# NOT staged or committed by `commit_and_tag`. Files 1-4 are the tracked version
+# sources committed atomically by the `--tag`/commit path.
+#
 # NOTE: pushing a v* tag triggers .github/workflows/release-crates.yml and
 # release-pypi.yml (publishes to crates.io / PyPI). `--tag` only creates the
 # tag locally; push it deliberately with: git push origin vX.Y.Z
@@ -176,8 +180,12 @@ commit_and_tag() {
   local new="$1"
   local want_tag="$2"
   cd "$REPO_ROOT"
+  # Cargo.lock is intentionally omitted: it is gitignored in this repo (regenerated
+  # locally via `cargo update -w`, never committed). Adding it here would make
+  # `git add` exit non-zero on the ignored path and abort the script under
+  # `set -euo pipefail` before the commit/tag runs.
   git add Cargo.toml crates/*/Cargo.toml pyproject.toml \
-    crates/vibesql-python-bindings/pyproject.toml Cargo.lock
+    crates/vibesql-python-bindings/pyproject.toml
   git commit -m "chore(release): prepare v$new release"
   if [[ "$want_tag" == "--tag" ]]; then
     git tag "v$new"
