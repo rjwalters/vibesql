@@ -6,18 +6,9 @@ Procedural overrides target the named extension points the default skill exposes
 
 ## Advisory reminders (any phase)
 
-### Pre-flight: four version-bearing files must agree
+### Pre-flight: four version-bearing files
 
-VibeSQL has four version-bearing files. The default's Phase 2a tool detection finds `./scripts/version.sh` first; `scripts/version.sh check` verifies the workspace Cargo files but does NOT check the two pyproject files. Run this Phase 1 sanity check in addition to whatever the default does:
-
-```bash
-grep -m1 '^version' Cargo.toml
-grep -m1 '^version' pyproject.toml
-grep -m1 '^version' crates/vibesql-python-bindings/pyproject.toml
-grep -A1 '^name = "vibesql"' Cargo.lock | grep '^version' | sort -u
-```
-
-All four must report the same version. Stop and resolve drift before bumping.
+VibeSQL has four version-bearing file groups: `Cargo.toml` (workspace.package + member-crate internal `vibesql-*` pins), `pyproject.toml` (root), `crates/vibesql-python-bindings/pyproject.toml`, and `Cargo.lock`. `scripts/version.sh check` (invoked automatically by the default Phase 5 verify step) covers all of them. Drift surfaces as a non-zero exit and a `DRIFT: …` line per offending file — stop and resolve before bumping.
 
 ### Pre-flight: CI gating policy
 
@@ -48,21 +39,11 @@ VibeSQL is **pre-1.0**, so MAJOR/MINOR semantics are looser. Treat `0.X.0` as "m
 
 **PATCH bump**: Bug fixes; performance improvements with no semantic change; internal refactors; docs/CLAUDE.md/README updates; dependency bumps; test additions; web demo updates.
 
-### Phase 5: scripts/version.sh interface gap
+### Phase 5: scripts/version.sh implements the v0.10.4 contract
 
-VibeSQL's `scripts/version.sh` exposes `set X.Y.Z [--tag]` and `check`, but **not** the `bump <level>` / `list` subcommands the v0.10.4 default's Phase 5 dispatches to. Workaround until version.sh is extended:
+`scripts/version.sh` exposes `show` / `list` / `check` / `bump <level> [--tag]` / `set <X.Y.Z> [--tag]` per the contract documented in the default skill's "scripts/version.sh interface" section. `bump`/`set` touch all four version-bearing files atomically (workspace.package + member-crate `vibesql-*` pins + both pyprojects + `cargo update -w` to refresh `Cargo.lock`), so Phase 5's auto-dispatch (`./scripts/version.sh bump <level> --tag`) drives the entire bump without operator intervention.
 
-1. Operator manually runs `./scripts/version.sh set <X.Y.Z>` (handles workspace.package version + internal `vibesql-*` dependency pins).
-2. Operator manually bumps the two pyproject files (version.sh doesn't touch them):
-   ```bash
-   sed -i '' 's/^version = ".*"/version = "<X.Y.Z>"/' pyproject.toml
-   sed -i '' 's/^version = ".*"/version = "<X.Y.Z>"/' crates/vibesql-python-bindings/pyproject.toml
-   ```
-3. Refresh Cargo.lock: `cargo update -w`
-4. Verify all four sources agree (see "Pre-flight" above).
-5. Commit + tag (the snippet at the end of the default's Phase 5).
-
-**DO NOT bump** `crates/vibesql-sqllogictest/Cargo.toml` (pinned to upstream sqllogictest's `0.28.x`) or `web-demo/package.json` (independent version line). Confirm explicitly if the operator wants those changed.
+**DO NOT bump** `crates/vibesql-sqllogictest/Cargo.toml` (pinned to upstream sqllogictest's `0.28.x`) or `web-demo/package.json` (independent version line). The bump script intentionally leaves them alone. If the operator wants either changed, that's a separate decision.
 
 ## Procedural overrides at named seams
 
@@ -132,6 +113,6 @@ Append these VibeSQL-specific follow-ups to the operator hand-off:
 ## Important Notes (VibeSQL-specific)
 
 - **Four version-bearing files, propagation pattern**: only `[workspace.package]` in `Cargo.toml` carries the canonical Rust version; every member crate inherits via `version.workspace = true`. The exception is `crates/vibesql-sqllogictest/Cargo.toml`, which pins to upstream sqllogictest's `0.28.x` — do not touch it.
-- **`Cargo.lock` IS a version-bearing file**: every `vibesql-*` workspace crate has an entry in `Cargo.lock`. `cargo update -w` is required after bumping `Cargo.toml` — it is not a no-op.
+- **`Cargo.lock` IS a version-bearing file, but it is gitignored**: every `vibesql-*` workspace crate has an entry in `Cargo.lock`, so `cargo update -w` is required after bumping `Cargo.toml` — it is not a no-op. However, `Cargo.lock` is gitignored in this repo (regenerated locally), so `commit_and_tag` does NOT stage or commit it; only the four tracked sources (`Cargo.toml`, member `vibesql-*` pins, both pyprojects) are committed atomically.
 - **Web demo and dashboard data are separate**: `make website` + `wrangler deploy` are NOT part of the release tag flow — they run after to refresh the public dashboard.
 - **Do not auto-publish to extra registries.** This skill only triggers what the existing workflows do. If the operator later adds a Homebrew formula, npm package, etc., that's a separate manual step.
