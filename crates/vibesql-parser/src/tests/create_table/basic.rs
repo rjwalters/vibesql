@@ -288,3 +288,48 @@ fn test_parse_create_table_as_select_captures_name_source() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+/// SQLite accepts otherwise-reserved keywords as unquoted column names in a
+/// CREATE TABLE column list. Table-constraint keywords (PRIMARY, FOREIGN, ...)
+/// are consumed earlier, so any keyword in column-name position is an identifier.
+/// Regression test for issue #5661 (table.test table-7.x: `no such table: weird`).
+#[test]
+fn test_parse_create_table_keyword_column_names() {
+    // desc, asc, key, begin, end are all keywords but valid SQLite column names.
+    let sql = "CREATE TABLE weird(desc text, asc text, key int, begin blob, end clob)";
+    match Parser::parse_sql(sql).expect("keyword column names should parse") {
+        vibesql_ast::Statement::CreateTable(create) => {
+            let names: Vec<&str> = create.columns.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["desc", "asc", "key", "begin", "end"]);
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+/// SQLite accepts `release` (a keyword) as both a column name and a SET target.
+/// Regression test for issue #5661 (table.test table-7.3: `CREATE TABLE
+/// savepoint(release)` followed by INSERT/UPDATE on `release`).
+#[test]
+fn test_parse_keyword_column_in_insert_and_update() {
+    Parser::parse_sql("CREATE TABLE savepoint(release)")
+        .expect("keyword table and column names should parse");
+    Parser::parse_sql("INSERT INTO savepoint(release) VALUES(10)")
+        .expect("keyword column name in INSERT list should parse");
+    Parser::parse_sql("UPDATE savepoint SET release = 5")
+        .expect("keyword column name in SET clause should parse");
+}
+
+/// SQLite/Oracle-style `NUMBER(precision, scale)` (with an unrecognized type
+/// name carrying a two-argument size specifier) must parse. Regression test for
+/// issue #5661 (table.test table-11.x: `b number(5,10)` blocked `t7` creation).
+#[test]
+fn test_parse_create_table_number_precision_scale() {
+    let sql = "CREATE TABLE t7(a integer primary key, b number(5,10))";
+    match Parser::parse_sql(sql).expect("NUMBER(p,s) should parse") {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.columns.len(), 2);
+            assert_eq!(create.columns[1].name, "b");
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}

@@ -540,19 +540,21 @@ impl Parser {
                     let mut order_items = Vec::new();
                     loop {
                         let expr = self.parse_expression()?;
-                        let direction =
-                            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. }) {
-                                self.advance();
-                                vibesql_ast::OrderDirection::Asc
-                            } else if matches!(
-                                self.peek(),
-                                Token::Keyword { keyword: Keyword::Desc, .. }
-                            ) {
-                                self.advance();
-                                vibesql_ast::OrderDirection::Desc
-                            } else {
-                                vibesql_ast::OrderDirection::Asc
-                            };
+                        let direction = if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Asc, .. }
+                        ) {
+                            self.advance();
+                            vibesql_ast::OrderDirection::Asc
+                        } else if matches!(
+                            self.peek(),
+                            Token::Keyword { keyword: Keyword::Desc, .. }
+                        ) {
+                            self.advance();
+                            vibesql_ast::OrderDirection::Desc
+                        } else {
+                            vibesql_ast::OrderDirection::Asc
+                        };
 
                         // Window ORDER BY supports NULLS FIRST/LAST (SQL:2003).
                         let nulls_order = if matches!(
@@ -560,10 +562,8 @@ impl Parser {
                             Token::Keyword { keyword: Keyword::Nulls, .. }
                         ) {
                             self.advance(); // consume NULLS
-                            if matches!(
-                                self.peek(),
-                                Token::Keyword { keyword: Keyword::First, .. }
-                            ) {
+                            if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. })
+                            {
                                 self.advance();
                                 Some(vibesql_ast::NullsOrder::First)
                             } else if matches!(

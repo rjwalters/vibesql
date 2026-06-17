@@ -717,14 +717,17 @@ impl Parser {
                     }
                 }
 
-                // Handle optional length specifier for multi-word types like
-                // NATIVE CHARACTER(70) or VARYING CHARACTER(255)
+                // Handle optional length/precision specifier for multi-word and
+                // unrecognized type names, e.g. NATIVE CHARACTER(70), VARYING
+                // CHARACTER(255), or Oracle/SQLite-style NUMBER(5,10). SQLite accepts
+                // any type name with an optional one- or two-argument size specifier and
+                // stores it by affinity only, so we validate (but discard) the numbers.
                 if matches!(self.peek(), Token::LParen) {
                     self.advance(); // consume (
                     match self.peek() {
                         Token::Number(n) => {
-                            // Validate and consume the length (we don't store it for
-                            // UserDefined types - affinity is what matters in SQLite)
+                            // Validate and consume the precision/length (we don't store it
+                            // for UserDefined types - affinity is what matters in SQLite)
                             let _ = n.parse::<usize>().map_err(|_| ParseError {
                                 message: format!("Invalid {} length", full_type_name),
                             })?;
@@ -734,6 +737,27 @@ impl Parser {
                             return Err(ParseError {
                                 message: format!("Expected number after {}(", full_type_name),
                             })
+                        }
+                    }
+                    // Optional second argument (scale), e.g. NUMBER(5,10) or DECIMAL(10,2)
+                    // spelled with an unrecognized type name.
+                    if matches!(self.peek(), Token::Comma) {
+                        self.advance(); // consume ,
+                        match self.peek() {
+                            Token::Number(n) => {
+                                let _ = n.parse::<usize>().map_err(|_| ParseError {
+                                    message: format!("Invalid {} scale", full_type_name),
+                                })?;
+                                self.advance();
+                            }
+                            _ => {
+                                return Err(ParseError {
+                                    message: format!(
+                                        "Expected scale after {}(precision,",
+                                        full_type_name
+                                    ),
+                                })
+                            }
                         }
                     }
                     self.expect_token(Token::RParen)?;

@@ -96,14 +96,7 @@ impl Parser {
     /// with its original quoting), which SQLite preserves in some error
     /// messages.
     pub fn new_with_source(tokens: Vec<Token>, spans: Vec<Span>, source: String) -> Self {
-        Parser {
-            tokens,
-            position: 0,
-            placeholder_count: 0,
-            in_trigger_body: false,
-            source,
-            spans,
-        }
+        Parser { tokens, position: 0, placeholder_count: 0, in_trigger_body: false, source, spans }
     }
 
     /// Current token index (cursor position within the token stream).
@@ -185,9 +178,7 @@ impl Parser {
     /// fire-time re-parse (`TriggerFirer::parse_trigger_sql`) must use this
     /// entry point so a trigger body containing `RAISE()` is admitted on both
     /// paths.
-    pub fn parse_sql_in_trigger_body(
-        input: &str,
-    ) -> Result<vibesql_ast::Statement, ParseError> {
+    pub fn parse_sql_in_trigger_body(input: &str) -> Result<vibesql_ast::Statement, ParseError> {
         let mut lexer = Lexer::new(input);
         let tokens_with_spans = lexer
             .tokenize_with_spans()

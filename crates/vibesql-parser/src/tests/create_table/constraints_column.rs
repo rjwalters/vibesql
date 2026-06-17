@@ -578,12 +578,14 @@ fn test_parse_default_interleaved_with_constraints() {
         vibesql_ast::Statement::CreateTable(create) => {
             assert!(create.columns[0].default_value.is_some(), "DEFAULT 0 should be captured");
             // NOT NULL + CHECK should both appear as constraints
-            assert!(create.columns[0].constraints.iter().any(
-                |c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)
-            ));
-            assert!(create.columns[0].constraints.iter().any(
-                |c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check(_))
-            ));
+            assert!(create.columns[0]
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::NotNull)));
+            assert!(create.columns[0]
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check(_))));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

@@ -408,9 +408,7 @@ impl Parser {
     /// Emits SQLite's canonical error string `unsupported use of NULLS FIRST`
     /// or `unsupported use of NULLS LAST` so the TCL test suite's
     /// error-message assertions match (nulls1.test 3.1.*).
-    pub(in crate::parser) fn reject_nulls_in_index_position(
-        &mut self,
-    ) -> Result<(), ParseError> {
+    pub(in crate::parser) fn reject_nulls_in_index_position(&mut self) -> Result<(), ParseError> {
         if self.peek_keyword(Keyword::Nulls) {
             self.advance(); // consume NULLS
             let position = if self.peek_keyword(Keyword::First) {
@@ -422,9 +420,7 @@ impl Parser {
                     message: "Expected FIRST or LAST after NULLS".to_string(),
                 });
             };
-            return Err(ParseError {
-                message: format!("unsupported use of NULLS {}", position),
-            });
+            return Err(ParseError { message: format!("unsupported use of NULLS {}", position) });
         }
         Ok(())
     }
