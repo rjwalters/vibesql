@@ -38,6 +38,16 @@ vibesql-types = { version = "0.2.0", path = "../vibesql-types" }
 # `storage-v2` unseals the RaftLogStorage/RaftStateMachine traits (the v2
 # storage API) so this crate can implement them; `serde` because our log
 # entry payloads and vote state will be serialized for durability in PR 2.
+#
+# POLICY: this crate tracks openraft STABLE releases only — never alphas.
+# This is ADR-0004's #1 driver (correctness risk: prefer code "hardened by
+# production use, not a first draft") applied consistently. A #5389 spike
+# against 0.10.0-alpha.21 confirmed 0.10 is a wholesale storage+network
+# trait rewrite (361 build errors, no upstream changelog); reverse-
+# engineering a pre-release migration in consensus-critical code is exactly
+# the risk the policy exists to avoid. #5389 (LeaseRead fast path) is parked
+# blocked-on-upstream until openraft 0.10 ships stable; the migration
+# inventory lives on that issue. Do not bump to a non-stable openraft here.
 openraft = { version = "0.9.24", features = ["serde", "storage-v2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
