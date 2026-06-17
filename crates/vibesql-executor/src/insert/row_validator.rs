@@ -149,9 +149,10 @@ impl<'a> RowValidator<'a> {
 
             // 1. NOT NULL constraint check
             if !col.nullable && *value == vibesql_types::SqlValue::Null {
-                return Err(ExecutorError::ConstraintViolation(format!(
-                    "NOT NULL constraint violation: column '{}' in table '{}' cannot be NULL",
-                    col.name, self.table_name
+                // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "NOT NULL constraint failed: {}.{}",
+                    self.table_name, col.name
                 )));
             }
 

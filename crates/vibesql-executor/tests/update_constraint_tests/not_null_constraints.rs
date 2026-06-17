@@ -20,11 +20,12 @@ fn test_update_not_null_constraint_violation() {
     let result = UpdateExecutor::execute(&stmt, &mut db);
     assert!(result.is_err());
     match result.unwrap_err() {
-        ExecutorError::ConstraintViolation(msg) => {
-            assert!(msg.contains("NOT NULL"));
-            assert!(msg.contains("name"));
+        // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+        ExecutorError::SqliteCompatError(msg) => {
+            assert!(msg.contains("NOT NULL constraint failed"), "got: {msg}");
+            assert!(msg.contains("employees.name"), "got: {msg}");
         }
-        other => panic!("Expected ConstraintViolation, got {:?}", other),
+        other => panic!("Expected SqliteCompatError, got {:?}", other),
     }
 }
 

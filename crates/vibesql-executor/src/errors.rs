@@ -1401,10 +1401,11 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
             vibesql_storage::StorageError::RowNotFound => {
                 ExecutorError::StorageError("Row not found".to_string())
             }
-            vibesql_storage::StorageError::NullConstraintViolation { column } => {
-                ExecutorError::ConstraintViolation(format!(
-                    "NOT NULL constraint violation: column '{}' cannot be NULL",
-                    column
+            vibesql_storage::StorageError::NullConstraintViolation { table, column } => {
+                // SQLite-compatible format: "NOT NULL constraint failed: <table>.<column>"
+                ExecutorError::SqliteCompatError(format!(
+                    "NOT NULL constraint failed: {}.{}",
+                    table, column
                 ))
             }
             vibesql_storage::StorageError::TypeMismatch { column, expected, actual } => {

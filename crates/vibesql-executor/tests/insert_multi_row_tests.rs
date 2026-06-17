@@ -92,7 +92,13 @@ fn test_multi_row_insert_atomic_failure() {
 
     let result = InsertExecutor::execute(&mut db, &stmt);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ExecutorError::ConstraintViolation(_)));
+    // NOT NULL violations now surface as the SQLite-compatible
+    // "NOT NULL constraint failed: <table>.<column>" via SqliteCompatError.
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, ExecutorError::SqliteCompatError(ref m) if m.contains("NOT NULL constraint failed")),
+        "expected NOT NULL constraint failure, got: {err:?}"
+    );
 
     // No rows should be inserted due to atomicity
     let table = db.get_table("users").unwrap();

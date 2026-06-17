@@ -43,6 +43,7 @@ impl<'a> RowNormalizer<'a> {
                 // NULL checking - verify non-nullable columns have values
                 if !column.nullable && *value == SqlValue::Null {
                     return Err(StorageError::NullConstraintViolation {
+                        table: self.schema.name.clone(),
                         column: column.name.clone(),
                     });
                 }

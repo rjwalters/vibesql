@@ -440,6 +440,13 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {UNIQUE constraint|duplicate.*primary key|PRIMARY KEY constraint} $error_msg]} {
         return "UNIQUE constraint failed"
     }
+    # NOT NULL violations - VibeSQL now emits the SQLite-compatible
+    # "NOT NULL constraint failed: table.column" form directly. Preserve the
+    # table.column qualifier when present (table-10.1); otherwise fall back to
+    # the bare message for any older/alternate phrasing.
+    if {[regexp -nocase {NOT NULL constraint failed: (.+)$} $error_msg -> col_spec]} {
+        return "NOT NULL constraint failed: $col_spec"
+    }
     if {[regexp -nocase {NOT NULL constraint|cannot.*NULL} $error_msg]} {
         return "NOT NULL constraint failed"
     }
@@ -3716,6 +3723,10 @@ array set vibesql_skip_tests {
     date-8.18 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.19 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
+    table-13.2.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary: tests the CURRENT_TIME/CURRENT_DATE/CURRENT_TIMESTAMP column defaults against a frozen clock, so the stored TEXT values use the real clock and cannot match the expected fixed timestamps (harness limitation; same class as date-8.*). The underlying temporal-into-TEXT-column coercion bug (#5663) is fixed independently."
+    table-13.2.2 "sqlite_current_time fake-clock hook not honored by VibeSQL binary (CURRENT_* defaults vs frozen clock; harness limitation, same class as date-8.*)."
+    table-13.2.3 "sqlite_current_time fake-clock hook not honored by VibeSQL binary (CURRENT_* defaults vs frozen clock; harness limitation, same class as date-8.*)."
+    table-13.2.4 "sqlite_current_time fake-clock hook not honored by VibeSQL binary (CURRENT_* defaults vs frozen clock; harness limitation, same class as date-8.*)."
     nulls1-2.2 "ORDER BY b DESC NULLS FIRST: result set is correct (NULLs grouped first, then 4,1) but the relative order of the two NULL-keyed rows is unspecified without a tiebreak column. SQLite's reverse index scan happens to order them by c DESC (3 before 2); VibeSQL keeps insertion order (2 before 3). Both are valid SQL — #5394."
     nulls1-5.4 "ORDER BY a DESC, b DESC NULLS FIRST: same unspecified NULL-tiebreak order as nulls1-2.2. Result set is correct; only the sub-order of NULL-b rows within each a-group differs (no c in ORDER BY to break the tie) — #5394."
     nulls1-9.4 "EXPLAIN QUERY PLAN format + sqlite_stat1-driven skip-scan plan ('SEARCH v0 USING COVERING INDEX v3 (ANY(c1) AND c2=?)') is SQLite-specific. Depends on ANALYZE/sqlite_stat1 statistics (nulls1-9.1) and SQLite's ANY(col) skip-scan EQP notation, neither of which VibeSQL replicates. Same class as existing 'EXPLAIN QUERY PLAN output format is SQLite-specific' / 'sqlite_stat1 internal statistics' skips. The query result (nulls1-9.3) is correct."
