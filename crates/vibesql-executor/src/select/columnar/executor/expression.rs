@@ -370,14 +370,24 @@ pub fn eval_expr_on_batch(
                     // integral for +, -, * (matters for MIN/MAX which preserve the
                     // operand type, e.g. max(b+c) over integer columns yields an
                     // integer, not a real). Division falls through to the f64 path.
+                    //
+                    // On i64 overflow, SQLite promotes to float rather than
+                    // wrapping. Mirror the canonical operators in
+                    // evaluator/operators/arithmetic/{addition,subtraction,
+                    // multiplication}.rs by using checked_* and returning the
+                    // integer result on success; on overflow (None) fall through
+                    // to the f64/Double path below.
                     if let (Some(l_i), Some(r_i)) = (sql_value_as_i64(&l), sql_value_as_i64(&r)) {
                         let int_result = match op {
-                            BinaryOperator::Plus => Some(l_i.wrapping_add(r_i)),
-                            BinaryOperator::Minus => Some(l_i.wrapping_sub(r_i)),
-                            BinaryOperator::Multiply => Some(l_i.wrapping_mul(r_i)),
+                            BinaryOperator::Plus => Some(l_i.checked_add(r_i)),
+                            BinaryOperator::Minus => Some(l_i.checked_sub(r_i)),
+                            BinaryOperator::Multiply => Some(l_i.checked_mul(r_i)),
                             _ => None,
                         };
-                        if let Some(v) = int_result {
+                        // Some(Some(v)): in-range integer result -> preserve integer.
+                        // Some(None): integer op overflowed -> fall through to float.
+                        // None: not an integer-preserving op -> fall through to float.
+                        if let Some(Some(v)) = int_result {
                             return Ok(SqlValue::Integer(v));
                         }
                     }
