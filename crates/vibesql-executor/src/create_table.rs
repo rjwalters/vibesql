@@ -879,12 +879,15 @@ impl CreateTableExecutor {
                         return Err(ExecutorError::TableNotFound(qualifier.clone()));
                     }
                 }
-                vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                vibesql_ast::SelectItem::Expression { expr, alias, source_text } => {
                     let name = if let Some(alias) = alias {
                         alias.clone()
                     } else {
-                        // Try to derive from expression
-                        Self::derive_column_name_from_expr(expr, &mut counter)
+                        // Derive a name from the expression, preferring the
+                        // original SQL source text so expression columns are
+                        // named after the expression the way SQLite does
+                        // (e.g. `max(b+c)`, `b+c`) rather than `column1`.
+                        Self::derive_column_name_from_expr(expr, source_text, &mut counter)
                     };
                     names.push(name);
                 }
@@ -935,14 +938,35 @@ impl CreateTableExecutor {
         Ok(names)
     }
 
-    /// Derive a column name from an expression
-    fn derive_column_name_from_expr(expr: &vibesql_ast::Expression, counter: &mut usize) -> String {
+    /// Derive a column name from a CTAS select-list expression.
+    ///
+    /// SQLite names a result column after the original text of the
+    /// expression when there is no explicit alias (e.g. `SELECT max(b+c)`
+    /// yields a column named `max(b+c)`, `SELECT b+c` yields `b+c`). For a
+    /// bare column reference the name is just the column name. Only when no
+    /// source text is available (e.g. a programmatically-built AST) do we
+    /// fall back to the synthetic `columnN` placeholder.
+    fn derive_column_name_from_expr(
+        expr: &vibesql_ast::Expression,
+        source_text: &Option<String>,
+        counter: &mut usize,
+    ) -> String {
+        // A bare column reference is always named after the column itself,
+        // matching the regular SELECT result-column naming (short mode).
+        if let vibesql_ast::Expression::ColumnRef(col_id) = expr {
+            return col_id.column_canonical().to_string();
+        }
+
+        // For every other expression (functions, aggregates, arithmetic,
+        // literals, ...) SQLite uses the original SQL text of the
+        // select-list item as the column name.
+        if let Some(src) = source_text {
+            return src.clone();
+        }
+
+        // No source text available (programmatically-built AST): fall back to
+        // the previous best-effort naming.
         match expr {
-            vibesql_ast::Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
-            vibesql_ast::Expression::Literal(_) => {
-                *counter += 1;
-                format!("column{}", counter)
-            }
             vibesql_ast::Expression::Function { name, .. } => {
                 // Use the function name as the column name
                 name.to_string().to_lowercase()
