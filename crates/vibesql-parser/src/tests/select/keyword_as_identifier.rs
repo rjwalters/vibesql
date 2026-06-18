@@ -70,3 +70,134 @@ fn test_column_m_in_expression() {
     let result = Parser::parse_sql("SELECT m + 1 FROM t;");
     assert!(result.is_ok(), "Failed to parse m in expression: {:?}", result);
 }
+
+// Issue #5670: otherwise-reserved keywords must be accepted as column references
+// in SELECT-list / expression position and as table names in FROM position, the
+// way SQLite does (table.test table-7.3). The CREATE/INSERT/UPDATE side was fixed
+// in #5674; these tests cover the read/expression side.
+
+#[test]
+fn test_keyword_release_as_column_in_select() {
+    // The exact repro from issue #5670.
+    let result = Parser::parse_sql("SELECT release FROM savepoint;");
+    assert!(result.is_ok(), "Failed to parse SELECT release FROM savepoint: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 1);
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                    vibesql_ast::Expression::ColumnRef(col_id) => {
+                        assert_eq!(col_id.column_canonical(), "release");
+                    }
+                    _ => panic!("Expected ColumnRef, got {:?}", expr),
+                },
+                _ => panic!("Expected Expression select item"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_keyword_release_in_where_and_arithmetic() {
+    assert!(Parser::parse_sql("SELECT release + 1 FROM savepoint;").is_ok());
+    assert!(Parser::parse_sql("SELECT release FROM savepoint WHERE release = 10;").is_ok());
+}
+
+#[test]
+fn test_keyword_table_name_in_from() {
+    // `savepoint` is a keyword; it must be usable as a table name in FROM position
+    // (it was already usable in CREATE TABLE via #5674).
+    let result = Parser::parse_sql("SELECT release FROM savepoint;");
+    assert!(result.is_ok(), "keyword table name in FROM failed: {:?}", result);
+
+    let stmt = result.unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from {
+            Some(vibesql_ast::FromClause::Table { name, .. }) => {
+                // `parse_table_ref` carries the keyword through via its Display form
+                // (uppercase); table-name resolution is case-insensitive, so the
+                // end-to-end repro resolves regardless. Assert case-insensitively.
+                assert!(
+                    name.eq_ignore_ascii_case("savepoint"),
+                    "expected table name savepoint, got {name:?}"
+                );
+            }
+            other => panic!("Expected FROM table savepoint, got {:?}", other),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_assorted_keyword_column_refs() {
+    // A spread of otherwise-reserved, non-operator/non-clause keywords used as
+    // column references in expression position.
+    for sql in [
+        "SELECT asc FROM t;",
+        "SELECT desc FROM t;",
+        "SELECT key FROM t;",
+        "SELECT begin FROM t;",
+        "SELECT commit FROM t;",
+        "SELECT rollback FROM t;",
+        "SELECT match FROM t;",
+        "SELECT column FROM t;",
+        "SELECT index FROM t;",
+    ] {
+        assert!(Parser::parse_sql(sql).is_ok(), "expected to parse: {sql}");
+    }
+}
+
+#[test]
+fn test_order_by_keyword_column_disambiguates_direction() {
+    // `ORDER BY asc DESC` must parse column `asc` with direction DESC, not as a
+    // bare direction. The expression parser stops before ASC/DESC because they are
+    // not operators, so they bubble up to the ORDER BY direction slot.
+    let stmt = Parser::parse_sql("SELECT asc FROM t ORDER BY asc DESC;")
+        .expect("ORDER BY asc DESC should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            let order_by = select.order_by.expect("expected ORDER BY");
+            assert_eq!(order_by.len(), 1);
+            assert_eq!(order_by[0].direction, vibesql_ast::OrderDirection::Desc);
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+// --- Ambiguity-safety: reserved operator/clause keywords MUST stay reserved ---
+
+#[test]
+fn test_reserved_operators_not_treated_as_columns() {
+    // These must still parse as their operator/keyword meaning, NOT as column refs.
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a AND b;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE NOT a;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a IS NULL;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a IS NOT NULL;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a IN (1, 2, 3);").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a BETWEEN 1 AND 5;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a LIKE '%x%';").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a = 1 OR b = 2;").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE EXISTS (SELECT 1 FROM t);").is_ok());
+    assert!(Parser::parse_sql("SELECT a FROM t WHERE a IN (SELECT b FROM t);").is_ok());
+}
+
+#[test]
+fn test_reserved_keywords_in_operand_position_still_error() {
+    // A reserved clause/operator keyword where an operand is expected must remain
+    // a syntax error — it must NOT be silently accepted as a column reference.
+    for sql in [
+        "SELECT FROM t;",       // FROM where a select item is expected
+        "SELECT a, FROM t;",    // trailing comma then FROM
+        "SELECT select FROM t;", // SELECT in operand position
+        "SELECT a FROM t WHERE and b;", // AND with no left operand
+        "SELECT a FROM t WHERE a = where;", // WHERE in operand position
+    ] {
+        assert!(
+            Parser::parse_sql(sql).is_err(),
+            "expected a syntax error for: {sql}"
+        );
+    }
+}

@@ -388,8 +388,14 @@ impl Parser {
                     index_hint,
                 })
             }
-            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as table names
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+            // Allow keywords as table names in FROM position. After FROM a keyword
+            // that is not a clause/operator word is an unquoted table name, mirroring
+            // the column-reference handling in `parse_identifier_expression` and the
+            // CREATE TABLE side (so `FROM savepoint` resolves the table created by
+            // `CREATE TABLE savepoint(...)` — see table.test table-7.3). Clause and
+            // operator keywords (WHERE, JOIN, ON, ...) are excluded by
+            // `can_be_identifier_in_expression()` and continue to terminate the clause.
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
                 let table = self.parse_table_ref()?;
 
                 // Check for optional alias

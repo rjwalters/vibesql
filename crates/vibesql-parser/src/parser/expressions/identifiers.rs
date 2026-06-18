@@ -20,9 +20,20 @@ impl Parser {
                 self.advance();
                 (name, true)
             }
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
-                // Allow certain keywords (MONTH, YEAR, DAY, etc.) to be used as column names
-                // SQL:1999 normalizes unquoted identifiers to lowercase
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
+                // SQLite compatibility: in expression / primary position, a keyword that
+                // is not a reserved operator, clause-structure word, or special primary
+                // form is an unquoted column reference. This covers temporal words
+                // (MONTH, YEAR, DAY, ...) as well as otherwise-reserved column names like
+                // RELEASE, SAVEPOINT, ASC, DESC, KEY (see table.test table-7.3).
+                //
+                // Reserved operators (AND, OR, NOT, IN, IS, ...) and clause keywords
+                // (FROM, WHERE, SELECT, ...) are excluded by
+                // `can_be_identifier_in_expression()`, so they still terminate the
+                // expression / are handled in operator position rather than being
+                // swallowed here.
+                //
+                // SQL:1999 normalizes unquoted identifiers to lowercase.
                 let name = format!("{}", kw).to_lowercase();
                 self.advance();
                 (name, false)
