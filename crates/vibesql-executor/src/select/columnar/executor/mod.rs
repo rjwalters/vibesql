@@ -275,4 +275,124 @@ mod tests {
             panic!("Expected Double for SUM(col1)");
         }
     }
+
+    /// Build a batch with named integer columns "a" and "b".
+    fn make_named_batch() -> ColumnarBatch {
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2)]),
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Integer(5)]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(1)]),
+        ];
+        let mut batch = ColumnarBatch::from_rows(&rows).unwrap();
+        batch.set_column_names(vec!["a".to_string(), "b".to_string()]);
+        batch
+    }
+
+    /// `a + b` as an AST expression over the two named columns.
+    fn col_a_plus_col_b() -> vibesql_ast::Expression {
+        use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("a", false))),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("b", false))),
+        }
+    }
+
+    /// Regression test for #5672: MIN/MAX over a non-column expression must be
+    /// supported (previously rejected with "MIN/MAX not supported for
+    /// expression aggregates"). Integer arithmetic must stay integral so the
+    /// result matches SQLite (e.g. max(b+c) over integers is an integer).
+    #[test]
+    fn test_min_max_over_expression() {
+        let batch = make_named_batch();
+        // a + b yields: 3, 9, 4
+        let aggregates = vec![
+            AggregateSpec {
+                op: AggregateOp::Max,
+                source: AggregateSource::Expression(col_a_plus_col_b()),
+            },
+            AggregateSpec {
+                op: AggregateOp::Min,
+                source: AggregateSource::Expression(col_a_plus_col_b()),
+            },
+        ];
+
+        let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
+        assert_eq!(result.len(), 1);
+
+        // MAX(a + b) = 9, preserved as an integer (not 9.0)
+        assert_eq!(result[0].get(0), Some(&SqlValue::Integer(9)));
+        // MIN(a + b) = 3, preserved as an integer
+        assert_eq!(result[0].get(1), Some(&SqlValue::Integer(3)));
+    }
+
+    /// MIN/MAX over a float expression returns a Double result.
+    #[test]
+    fn test_min_max_over_float_expression() {
+        use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+
+        let rows = vec![
+            Row::new(vec![SqlValue::Double(1.5), SqlValue::Double(2.5)]),
+            Row::new(vec![SqlValue::Double(3.0), SqlValue::Double(0.5)]),
+        ];
+        let mut batch = ColumnarBatch::from_rows(&rows).unwrap();
+        batch.set_column_names(vec!["a".to_string(), "b".to_string()]);
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("a", false))),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("b", false))),
+        };
+
+        // a + b yields: 4.0, 3.5
+        let aggregates = vec![
+            AggregateSpec {
+                op: AggregateOp::Max,
+                source: AggregateSource::Expression(expr.clone()),
+            },
+            AggregateSpec { op: AggregateOp::Min, source: AggregateSource::Expression(expr) },
+        ];
+
+        let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
+        assert_eq!(result[0].get(0), Some(&SqlValue::Double(4.0)));
+        assert_eq!(result[0].get(1), Some(&SqlValue::Double(3.5)));
+    }
+
+    /// Regression test for the integer-overflow path in eval_expr_on_batch.
+    /// On i64 overflow, integer arithmetic must promote to float (matching
+    /// SQLite) rather than silently wrapping. Previously `max(i64::MAX + 1)`
+    /// returned the wrapped i64::MIN; it must now return the float value.
+    #[test]
+    fn test_min_max_over_expression_integer_overflow_promotes_to_float() {
+        use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+
+        // Single row: a = i64::MAX, b = 1. a + b overflows i64.
+        let rows = vec![Row::new(vec![SqlValue::Integer(i64::MAX), SqlValue::Integer(1)])];
+        let mut batch = ColumnarBatch::from_rows(&rows).unwrap();
+        batch.set_column_names(vec!["a".to_string(), "b".to_string()]);
+
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("a", false))),
+            op: BinaryOperator::Plus,
+            right: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("b", false))),
+        };
+
+        let aggregates =
+            vec![AggregateSpec { op: AggregateOp::Max, source: AggregateSource::Expression(expr) }];
+
+        let result = execute_columnar_batch(&batch, &[], &aggregates, None).unwrap();
+        assert_eq!(result.len(), 1);
+
+        // Must promote to float (≈ 9.223e18), NOT wrap to i64::MIN.
+        match result[0].get(0) {
+            Some(SqlValue::Double(v)) => {
+                let expected = i64::MAX as f64 + 1.0;
+                assert!(
+                    (v - expected).abs() < expected.abs() * 1e-12,
+                    "expected float ≈ {expected}, got {v}"
+                );
+            }
+            other => panic!("expected float promotion on overflow, got {other:?}"),
+        }
+    }
 }
