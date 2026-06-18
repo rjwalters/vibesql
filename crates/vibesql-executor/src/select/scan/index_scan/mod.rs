@@ -19,6 +19,9 @@
 
 pub(crate) mod covering;
 mod execution;
+// MULTI-INDEX OR branch analysis (epic #5668, PR 1). Pure plan representation +
+// analysis; not yet wired into selection/execution (no behavior change).
+pub(crate) mod or_analysis;
 pub(crate) mod predicate;
 pub(crate) mod selection;
 

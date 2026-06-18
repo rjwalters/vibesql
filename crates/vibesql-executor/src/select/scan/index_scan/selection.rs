@@ -16,6 +16,42 @@ use crate::evaluator::expression_hash::ExpressionHasher;
 
 use crate::optimizer::index_planner::{IndexPlanner, SkipScanInfo};
 
+/// Classification of an OR branch's index lookup shape.
+///
+/// SQLite routes `IS NULL` branches to a *different* index lookup than equality
+/// (`=`) branches: `d IS NULL` seeks the NULL key, while `d = ?` seeks a concrete
+/// value. Preserving this distinction in the plan representation lets later PRs
+/// dispatch each branch to the correct lookup. For PR 1 it is dead-but-tested
+/// metadata; the `branch_predicate` carries the original expression regardless.
+#[allow(dead_code)] // PR 1: plan representation only; consumed in PR 2+.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OrBranchKind {
+    /// `col IS NULL` — seeks the NULL key (distinct from `=`).
+    IsNull,
+    /// Any other indexable predicate (`=`, range, `IN`, `BETWEEN`, ...).
+    Lookup,
+}
+
+/// One indexable branch of a top-level OR, in MULTI-INDEX OR plan form.
+///
+/// `ordinal` is the branch's **1-based term position in the original OR
+/// expression**, NOT a renumbering over the chosen branches. SQLite renders OR
+/// branches as `INDEX <ordinal>` keyed by this original position (e.g. where9-3.1
+/// expects `INDEX 1` / `INDEX 3` for a three-term OR whose middle term is folded
+/// away), so the analyzer must preserve original ordinals.
+#[allow(dead_code)] // PR 1: plan representation only; consumed in PR 2+.
+#[derive(Debug, Clone)]
+pub(crate) struct OrBranch {
+    /// 1-based term position in the original OR expression.
+    pub ordinal: usize,
+    /// Name of the index this branch resolves to.
+    pub index_name: String,
+    /// The original predicate for this branch (e.g. `c = 31031`, `d IS NULL`).
+    pub branch_predicate: Expression,
+    /// Whether this branch is an `IS NULL` seek or an ordinary lookup.
+    pub kind: OrBranchKind,
+}
+
 /// Result of index selection, distinguishing between regular and skip-scan
 #[derive(Debug, Clone)]
 pub(crate) enum IndexScanChoice {
@@ -26,6 +62,23 @@ pub(crate) enum IndexScanChoice {
     },
     /// Skip-scan using non-prefix column filter
     SkipScan { index_name: String, skip_scan_info: SkipScanInfo },
+    /// MULTI-INDEX OR: a union of per-branch index lookups.
+    ///
+    /// Selected only when *every* top-level OR branch is independently
+    /// indexable. Each branch lookup yields a set of rowids; the union
+    /// (deduplicated by rowid) is the result, with `residual` applied as a
+    /// post-filter for the non-OR AND-conjuncts.
+    ///
+    /// NOTE (PR 1): this variant is plan representation only. Selection and
+    /// execution intentionally never produce or consume it yet — it is
+    /// dead-but-tested code. Behavior is byte-identical to before.
+    #[allow(dead_code)]
+    MultiIndexOr {
+        /// One entry per indexable OR branch, in original-branch ordinal order.
+        branches: Vec<OrBranch>,
+        /// Non-OR AND-conjuncts applied around the union (e.g. `b > 1000`).
+        residual: Option<Expression>,
+    },
 }
 
 /// Check if any ORDER BY column is nullable in a way that prevents using the index
@@ -830,11 +883,8 @@ pub(crate) fn eqp_ordering_index(
         }
 
         // ORDER BY must structurally fit (pinned-prefix + trailing-index suffix).
-        if can_use_index_for_order_by_with_pinned(
-            order_by,
-            &index_metadata.columns,
-            pinned_columns,
-        ) {
+        if can_use_index_for_order_by_with_pinned(order_by, &index_metadata.columns, pinned_columns)
+        {
             return Some(index_name.clone());
         }
     }
@@ -897,8 +947,7 @@ pub(crate) fn can_use_index_for_order_by_with_pinned(
     let mut all_reversed = true;
 
     // Check each ORDER BY column against corresponding index column
-    for (order_item, index_col) in
-        remaining_order_items.iter().zip(remaining_index_columns.iter())
+    for (order_item, index_col) in remaining_order_items.iter().zip(remaining_index_columns.iter())
     {
         // For expression indexes, we need to check if ORDER BY uses the same expression
         // For column indexes, ORDER BY must be a simple column reference
@@ -1861,8 +1910,10 @@ mod tests {
     #[test]
     fn test_count_pinned_columns_in_list() {
         // WHERE a IN (1, 2, 3) — column `a` should be pinned for index (a, b).
-        let where_expr =
-            in_list_expr("a", vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)]);
+        let where_expr = in_list_expr(
+            "a",
+            vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)],
+        );
         let index = idx_cols(&["a", "b"]);
         assert_eq!(count_pinned_index_columns(Some(&where_expr), &index), 1);
     }
