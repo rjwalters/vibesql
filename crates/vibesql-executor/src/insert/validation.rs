@@ -195,6 +195,56 @@ pub fn coerce_value(
         (SqlValue::Varchar(_), DataType::Varchar { .. }) => Ok(value),
         (SqlValue::Character(_), DataType::Character { .. }) => Ok(value),
         (SqlValue::Boolean(_), DataType::Boolean) => Ok(value),
+
+        // BOOLEAN-declared columns follow SQLite NUMERIC affinity. SQLite has no
+        // native boolean storage class — a `BOOLEAN` column gets NUMERIC affinity
+        // and stores 0/1 as integers (e.g. `[14_vac] boolean` accepting the
+        // integer 0 in table-7.2). Mirror the NUMERIC-affinity arms below so a
+        // BOOLEAN column accepts the same inputs a NUMERIC column would, without
+        // forcing values into VibeSQL's strict Boolean storage class.
+        // Numeric inputs are stored as-is; whole-valued reals collapse to integers.
+        (SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_), DataType::Boolean) => {
+            Ok(value)
+        }
+        (SqlValue::Numeric(f) | SqlValue::Double(f), DataType::Boolean) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Real(f), DataType::Boolean) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Float(f), DataType::Boolean) => {
+            let f64_val = *f as f64;
+            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(f64_val as i64))
+            } else {
+                Ok(SqlValue::Double(f64_val))
+            }
+        }
+        // Text into a BOOLEAN column: NUMERIC affinity tries integer, then real,
+        // otherwise the text is kept verbatim (SQLite behavior).
+        (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Boolean) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                Ok(SqlValue::Integer(i))
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                    Ok(SqlValue::Integer(f as i64))
+                } else {
+                    Ok(SqlValue::Double(f))
+                }
+            } else {
+                Ok(value)
+            }
+        }
+
         (SqlValue::Float(_), DataType::Float { .. }) => Ok(value),
         (SqlValue::Real(_), DataType::Real) => Ok(value),
         (SqlValue::Double(_), DataType::DoublePrecision) => Ok(value),
@@ -437,6 +487,22 @@ pub fn coerce_value(
         // (which default to BLOB affinity) can store values of any type.
         // The value is stored as-is without conversion.
         (_, DataType::BinaryLargeObject) => Ok(value),
+
+        // CharacterLargeObject (CLOB) has TEXT affinity in SQLite (the type name
+        // contains "CLOB"). A CLOB column must accept any value by rendering its
+        // text form rather than rejecting it as a datatype mismatch — this
+        // unblocks the `end clob` column in table-7.2/8.1/8.6, which stores the
+        // string `y'all`. Text passes through; numbers and booleans stringify;
+        // blobs are stored as-is (SQLite keeps blobs in any column).
+        (_, DataType::CharacterLargeObject) => match &value {
+            SqlValue::Varchar(_) | SqlValue::Character(_) | SqlValue::Blob(_) => Ok(value),
+            SqlValue::Boolean(b) => {
+                Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b { "1" } else { "0" })))
+            }
+            // REAL -> TEXT keeps SQLite's %!.15g formatting (whole reals retain ".0")
+            // via SqlValue's Display impl; integers/temporals stringify canonically.
+            _ => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
+        },
 
         // UserDefined types: Apply SQLite's type affinity rules based on the type name
         // See https://www.sqlite.org/datatype3.html#determination_of_column_affinity
@@ -716,5 +782,69 @@ mod text_affinity_tests {
         assert_eq!(coerce_to_text(SqlValue::Integer(45)), "45");
         assert_eq!(coerce_to_text(SqlValue::Bigint(-42)), "-42");
         assert_eq!(coerce_to_text(SqlValue::Smallint(7)), "7");
+    }
+}
+
+#[cfg(test)]
+mod boolean_affinity_tests {
+    use vibesql_types::{DataType, SqlValue};
+
+    use super::coerce_value;
+
+    fn coerce_to_bool_col(value: SqlValue) -> SqlValue {
+        coerce_value(value, &DataType::Boolean)
+            .expect("coercion into a BOOLEAN-affinity column should succeed")
+    }
+
+    /// SQLite has NUMERIC affinity for BOOLEAN-declared columns and stores
+    /// integer 0/1 as integers. The integer must round-trip unchanged
+    /// (table-7.2: `INSERT INTO weird(... [14_vac] boolean ...) VALUES(...,0,...)`).
+    #[test]
+    fn integer_inserts_round_trip() {
+        assert_eq!(coerce_to_bool_col(SqlValue::Integer(0)), SqlValue::Integer(0));
+        assert_eq!(coerce_to_bool_col(SqlValue::Integer(1)), SqlValue::Integer(1));
+        assert_eq!(coerce_to_bool_col(SqlValue::Integer(42)), SqlValue::Integer(42));
+        assert_eq!(coerce_to_bool_col(SqlValue::Bigint(7)), SqlValue::Bigint(7));
+        assert_eq!(coerce_to_bool_col(SqlValue::Smallint(-3)), SqlValue::Smallint(-3));
+    }
+
+    /// Genuine boolean values are preserved (TRUE/FALSE literals, predicate results).
+    #[test]
+    fn boolean_values_preserved() {
+        assert_eq!(coerce_to_bool_col(SqlValue::Boolean(true)), SqlValue::Boolean(true));
+        assert_eq!(coerce_to_bool_col(SqlValue::Boolean(false)), SqlValue::Boolean(false));
+    }
+
+    /// NULL is accepted for any type (NOT NULL is enforced separately).
+    #[test]
+    fn null_passes_through() {
+        assert_eq!(coerce_to_bool_col(SqlValue::Null), SqlValue::Null);
+    }
+
+    /// NUMERIC affinity collapses whole-valued reals to integers and keeps
+    /// fractional reals as floating point.
+    #[test]
+    fn real_inputs_follow_numeric_affinity() {
+        assert_eq!(coerce_to_bool_col(SqlValue::Real(1.0)), SqlValue::Integer(1));
+        assert_eq!(coerce_to_bool_col(SqlValue::Double(0.0)), SqlValue::Integer(0));
+        assert_eq!(coerce_to_bool_col(SqlValue::Numeric(2.0)), SqlValue::Integer(2));
+        assert_eq!(coerce_to_bool_col(SqlValue::Real(1.5)), SqlValue::Real(1.5));
+    }
+
+    /// Text into a BOOLEAN column converts to a number when possible, else stays text.
+    #[test]
+    fn text_inputs_follow_numeric_affinity() {
+        assert_eq!(
+            coerce_to_bool_col(SqlValue::Varchar(arcstr::ArcStr::from("1"))),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            coerce_to_bool_col(SqlValue::Varchar(arcstr::ArcStr::from("0"))),
+            SqlValue::Integer(0)
+        );
+        assert_eq!(
+            coerce_to_bool_col(SqlValue::Varchar(arcstr::ArcStr::from("abc"))),
+            SqlValue::Varchar(arcstr::ArcStr::from("abc"))
+        );
     }
 }
