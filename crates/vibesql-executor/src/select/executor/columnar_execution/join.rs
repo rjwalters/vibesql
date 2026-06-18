@@ -359,10 +359,21 @@ impl SelectExecutor<'_> {
         } else {
             // No GROUP BY - convert to rows and apply projection
 
-            // Check if we need projection (i.e., not just SELECT *)
-            let is_select_star = stmt.select_list.iter().all(|item| {
-                matches!(item, SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. })
-            });
+            // Check if we need projection.
+            //
+            // Only a plain unqualified `*` (one or more) may bypass projection
+            // and return the physical batch rows directly, because the physical
+            // row layout already matches `SELECT *` column order.
+            //
+            // A qualified wildcard (`t1.*`) must NOT bypass projection: it
+            // selects a subset of columns, and when the SELECT-list table order
+            // differs from the FROM/physical order, returning the raw physical
+            // row emits the wrong columns under the derived headers (#5665).
+            // Route any select list containing a qualified wildcard through
+            // `project_row_combined`, which resolves each table's columns by its
+            // actual start index in the combined schema.
+            let is_select_star =
+                stmt.select_list.iter().all(|item| matches!(item, SelectItem::Wildcard { .. }));
 
             if is_select_star {
                 // SELECT * - apply columnar deduplication if DISTINCT, then convert to rows
