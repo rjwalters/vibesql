@@ -22,10 +22,13 @@ pub fn compute_expression_aggregate_batch(
     expr: &Expression,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
-    // Try to evaluate the expression as a simple binary operation on columns
+    // Try to evaluate the expression as a simple binary operation on columns.
+    // The SIMD multiply fast path only computes SUM/COUNT/AVG, so MIN/MAX must
+    // fall through to the generic row-by-row evaluation below.
     if let Expression::BinaryOp { left, op: bin_op, right } = expr {
         // For now, only support multiplication (most common in TPC-H)
-        if *bin_op == BinaryOperator::Multiply {
+        if *bin_op == BinaryOperator::Multiply && !matches!(op, AggregateOp::Min | AggregateOp::Max)
+        {
             // Get column indices from left and right operands
             if let (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2)) =
                 (left.as_ref(), right.as_ref())
@@ -48,10 +51,48 @@ pub fn compute_expression_aggregate_batch(
     let row_count = batch.row_count();
     let mut sum = 0.0f64;
     let mut count = 0i64;
+    // Running MIN/MAX accumulator, tracking the per-row evaluated SqlValue so we
+    // preserve the original type (e.g. Integer vs Double) rather than coercing to f64.
+    let mut min_max: Option<SqlValue> = None;
 
     for row_idx in 0..row_count {
         // Evaluate expression for this row
         if let Ok(value) = eval_expr_on_batch(batch, expr, row_idx) {
+            // Skip NULLs for every aggregate (SQLite semantics).
+            if matches!(value, SqlValue::Null) {
+                continue;
+            }
+
+            // Maintain MIN/MAX over the evaluated values.
+            match op {
+                AggregateOp::Min => {
+                    min_max = Some(match min_max.take() {
+                        None => value.clone(),
+                        Some(current) => {
+                            if value < current {
+                                value.clone()
+                            } else {
+                                current
+                            }
+                        }
+                    });
+                }
+                AggregateOp::Max => {
+                    min_max = Some(match min_max.take() {
+                        None => value.clone(),
+                        Some(current) => {
+                            if value > current {
+                                value.clone()
+                            } else {
+                                current
+                            }
+                        }
+                    });
+                }
+                _ => {}
+            }
+
+            // Maintain SUM/COUNT/AVG accumulators over numeric values.
             match value {
                 SqlValue::Integer(v) => {
                     sum += v as f64;
@@ -73,7 +114,6 @@ pub fn compute_expression_aggregate_batch(
                     sum += v;
                     count += 1;
                 }
-                SqlValue::Null => {}
                 _ => {}
             }
         }
@@ -85,9 +125,7 @@ pub fn compute_expression_aggregate_batch(
         AggregateOp::Avg => {
             Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
         }
-        _ => Err(ExecutorError::UnsupportedExpression(
-            "MIN/MAX not supported for expression aggregates".to_string(),
-        )),
+        AggregateOp::Min | AggregateOp::Max => Ok(min_max.unwrap_or(SqlValue::Null)),
     }
 }
 
@@ -328,6 +366,22 @@ pub fn eval_expr_on_batch(
             match (left_val, right_val) {
                 (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(SqlValue::Null),
                 (l, r) => {
+                    // Integer-preserving fast path: SQLite keeps integer arithmetic
+                    // integral for +, -, * (matters for MIN/MAX which preserve the
+                    // operand type, e.g. max(b+c) over integer columns yields an
+                    // integer, not a real). Division falls through to the f64 path.
+                    if let (Some(l_i), Some(r_i)) = (sql_value_as_i64(&l), sql_value_as_i64(&r)) {
+                        let int_result = match op {
+                            BinaryOperator::Plus => Some(l_i.wrapping_add(r_i)),
+                            BinaryOperator::Minus => Some(l_i.wrapping_sub(r_i)),
+                            BinaryOperator::Multiply => Some(l_i.wrapping_mul(r_i)),
+                            _ => None,
+                        };
+                        if let Some(v) = int_result {
+                            return Ok(SqlValue::Integer(v));
+                        }
+                    }
+
                     let l_f64 = sql_value_to_f64(&l).ok_or_else(|| {
                         ExecutorError::ColumnarTypeMismatch {
                             operation: "binary_op".to_string(),
@@ -362,6 +416,19 @@ pub fn eval_expr_on_batch(
         _ => Err(ExecutorError::UnsupportedExpression(
             "Complex expression not supported".to_string(),
         )),
+    }
+}
+
+/// Return the integer value of a SqlValue if it is an integral type.
+///
+/// Used to keep integer arithmetic integral (matching SQLite), which matters
+/// for MIN/MAX over expressions where the operand type must be preserved.
+pub fn sql_value_as_i64(val: &SqlValue) -> Option<i64> {
+    match val {
+        SqlValue::Integer(v) => Some(*v),
+        SqlValue::Bigint(v) => Some(*v),
+        SqlValue::Smallint(v) => Some(*v as i64),
+        _ => None,
     }
 }
 
