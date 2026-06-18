@@ -414,6 +414,116 @@ impl Keyword {
             Keyword::Returning
         )
     }
+
+    /// Returns true if this keyword may be used as an unquoted column reference
+    /// in **expression / primary position** (e.g. `SELECT release FROM t`,
+    /// `WHERE asc = 1`).
+    ///
+    /// SQLite reserves only a small set of words and accepts the rest as
+    /// identifiers when they appear where a column reference is expected. This
+    /// predicate models that behavior with a *denylist*: it accepts any keyword
+    /// EXCEPT the ones that must stay reserved as the start of an operand,
+    /// because allowing them there would create grammar ambiguity or mask
+    /// genuine syntax errors.
+    ///
+    /// The denylist intentionally covers three categories of keyword:
+    ///
+    /// 1. **Operators** consumed by the expression precedence cascade in
+    ///    *operator* position (`AND`, `OR`, `NOT`, `IN`, `BETWEEN`, `LIKE`,
+    ///    `GLOB`, `ESCAPE`, `IS`, `ISNULL`, `NOTNULL`, `COLLATE`, `DIV`,
+    ///    `ALL`/`ANY`/`SOME`, `AS`). These must never be reinterpreted as a
+    ///    column when an operand is expected.
+    /// 2. **Statement / clause structure** keywords that terminate or introduce
+    ///    a clause and which the expression caller relies on to STOP parsing
+    ///    (`SELECT`, `FROM`, `WHERE`, `GROUP`, `BY`, `HAVING`, `ORDER`,
+    ///    `LIMIT`, `OFFSET`, `WINDOW`, `UNION`, `INTERSECT`, `EXCEPT`, `INTO`,
+    ///    `VALUES`, `SET`, `ON`, `USING`, `JOIN` and its modifiers, the DML/DDL
+    ///    verbs, etc.).
+    /// 3. **Special primary forms / literals** that have dedicated parsing
+    ///    (`CASE`/`WHEN`/`THEN`/`ELSE`/`END`, `CAST`, `EXISTS`, `NULL`, `TRUE`,
+    ///    `FALSE`, `UNKNOWN`, the `CURRENT_*` constants, `DISTINCT`).
+    ///
+    /// Everything else — including otherwise-reserved column-name words like
+    /// `RELEASE`, `SAVEPOINT`, `KEY`, `ASC`, `DESC`, `BEGIN`, `COMMIT`,
+    /// `ROLLBACK`, `MATCH`, `COLUMN`, `INDEX`, ... — is accepted as a column
+    /// reference, matching SQLite (see table.test table-7.3).
+    pub fn can_be_identifier_in_expression(&self) -> bool {
+        // Words that already round-trip as identifiers in any position are a
+        // superset-safe shortcut.
+        if self.can_be_identifier() {
+            return true;
+        }
+
+        !matches!(
+            self,
+            // --- Category 1: operators (operator-position keywords) ---
+            Keyword::And
+                | Keyword::Or
+                | Keyword::Not
+                | Keyword::In
+                | Keyword::Between
+                | Keyword::Asymmetric
+                | Keyword::Symmetric
+                | Keyword::Like
+                | Keyword::Glob
+                | Keyword::Escape
+                | Keyword::Is
+                | Keyword::Isnull
+                | Keyword::Notnull
+                | Keyword::Collate
+                | Keyword::Div
+                | Keyword::All
+                | Keyword::Any
+                | Keyword::Some
+                | Keyword::As
+                // --- Category 2: statement / clause structure ---
+                | Keyword::Select
+                | Keyword::From
+                | Keyword::Where
+                | Keyword::Group
+                | Keyword::By
+                | Keyword::Having
+                | Keyword::Order
+                | Keyword::Limit
+                | Keyword::Offset
+                | Keyword::Into
+                | Keyword::Values
+                | Keyword::Set
+                | Keyword::On
+                | Keyword::Using
+                | Keyword::Join
+                | Keyword::Union
+                | Keyword::Intersect
+                | Keyword::Except
+                | Keyword::With
+                | Keyword::Recursive
+                | Keyword::Insert
+                | Keyword::Update
+                | Keyword::Delete
+                | Keyword::Create
+                | Keyword::Drop
+                | Keyword::Alter
+                | Keyword::Truncate
+                | Keyword::Replace
+                | Keyword::Pragma
+                // --- Category 3: special primary forms / literals ---
+                | Keyword::Case
+                | Keyword::When
+                | Keyword::Then
+                | Keyword::Else
+                | Keyword::End
+                | Keyword::Cast
+                | Keyword::Exists
+                | Keyword::Null
+                | Keyword::True
+                | Keyword::False
+                | Keyword::Unknown
+                | Keyword::Distinct
+                | Keyword::CurrentDate
+                | Keyword::CurrentTime
+                | Keyword::CurrentTimestamp
+        )
+    }
 }
 
 impl fmt::Display for Keyword {
