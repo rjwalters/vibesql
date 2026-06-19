@@ -121,6 +121,11 @@ pub struct PlanNode {
     /// analyzer — SQLite labels branches by original position, not a
     /// renumbering over chosen branches).
     pub multi_index_or_branches: Vec<(usize, PlanNode)>,
+    /// When true, this scan is the inner side of a LEFT (outer) join, so its
+    /// SEARCH line carries SQLite's trailing ` LEFT-JOIN` marker
+    /// (where9-3.2). Applies to ordinary SEARCH/COVERING lines and to each
+    /// inner `SEARCH` line of a correlated-join MULTI-INDEX OR subtree.
+    pub left_join: bool,
 }
 
 impl PlanNode {
@@ -143,6 +148,7 @@ impl PlanNode {
             is_compound_query: false,
             coroutine: None,
             multi_index_or_branches: Vec::new(),
+            left_join: false,
         }
     }
 
@@ -740,8 +746,9 @@ fn format_sqlite_eqp_node(node: &PlanNode) -> String {
                 ""
             };
 
+            let suffix = if node.left_join { " LEFT-JOIN" } else { "" };
             if node.index_predicates.is_empty() {
-                format!("SEARCH {} USING {}INDEX {}", table_name, covering, index_name)
+                format!("SEARCH {} USING {}INDEX {}{}", table_name, covering, index_name, suffix)
             } else {
                 let predicates: Vec<String> = node
                     .index_predicates
@@ -749,11 +756,12 @@ fn format_sqlite_eqp_node(node: &PlanNode) -> String {
                     .map(|p| format!("{}{}?", p.column, p.predicate_type))
                     .collect();
                 format!(
-                    "SEARCH {} USING {}INDEX {} ({})",
+                    "SEARCH {} USING {}INDEX {} ({}){}",
                     table_name,
                     covering,
                     index_name,
-                    predicates.join(" AND ")
+                    predicates.join(" AND "),
+                    suffix
                 )
             }
         }
@@ -1767,6 +1775,27 @@ impl ExplainExecutor {
                 natural,
                 ..
             } => {
+                // Correlated-join MULTI-INDEX OR (epic #5668, where9-3.1/3.2):
+                // a 2-table (CROSS or LEFT) join whose OR join predicate
+                // `(t1.c=t2.c AND t1.d=t2.d) OR t1.f=t2.f` drives a parameterized
+                // MULTI-INDEX OR on the inner table. Render the outer driver line
+                // plus the inner MULTI-INDEX OR subtree to match sqlite3 3.51.0.
+                // The runtime already produces correct rows via nested-loop scan;
+                // this only fixes the EQP access-path rendering. Returns `None`
+                // (falling through to the generic join rendering) for any shape it
+                // does not handle, and is suppressed by `MULTI_INDEX_OR_DISABLED`.
+                if let Some(node) = Self::try_explain_correlated_join_multi_index_or(
+                    left,
+                    right,
+                    join_type,
+                    condition.as_ref(),
+                    where_clause.as_ref(),
+                    needed_columns,
+                    database,
+                )? {
+                    return Ok(node);
+                }
+
                 let join_name = match join_type {
                     vibesql_ast::JoinType::Inner => "Inner Join",
                     vibesql_ast::JoinType::LeftOuter => "Left Outer Join",
@@ -1859,6 +1888,497 @@ impl ExplainExecutor {
                 Ok(values_node)
             }
         }
+    }
+
+    /// Try to render a 2-table (CROSS or LEFT) join whose OR join predicate is a
+    /// **correlated MULTI-INDEX OR** on the inner table (epic #5668,
+    /// where9-3.1/3.2).
+    ///
+    /// Shape handled (verified against sqlite3 3.51.0):
+    /// ```text
+    /// SELECT ... FROM t1, t2 WHERE t1.a=80 AND ((t1.c=t2.c AND t1.d=t2.d) OR t1.f=t2.f)
+    /// SELECT ... FROM t1 LEFT JOIN t2 ON (t1.c+1=t2.c AND t1.d=t2.d) OR (t1.f||'x')=t2.f WHERE t1.a=80
+    /// ```
+    /// SQLite drives the outer table `t1` (here by rowid, `t1.a=80`) and on the
+    /// inner table `t2` performs a MULTI-INDEX OR keyed by the correlated outer
+    /// values. VibeSQL's runtime already returns correct rows via nested-loop
+    /// scan; this method only corrects the EQP access-path rendering.
+    ///
+    /// Returns `Ok(None)` (caller falls back to generic join rendering) for any
+    /// shape this does not handle, and is suppressed entirely when
+    /// `MULTI_INDEX_OR_DISABLED` is set.
+    ///
+    /// # Branch ordinals
+    /// SQLite labels each branch `INDEX <n>` by an internal WHERE-term slot, not
+    /// a clean 1..N over chosen branches. For the handled shape (a leading
+    /// multi-equality AND branch followed by single-equality branches) the slot
+    /// advances by the number of **plain `col = col`** equality conjuncts in each
+    /// branch (minimum one), which reproduces where9-3.1 (`INDEX 1`/`INDEX 3`)
+    /// and where9-3.2 (`INDEX 1`/`INDEX 2`) exactly. See module probes in
+    /// `explain_correlated_join_or_tests.rs`.
+    #[allow(clippy::too_many_arguments)]
+    fn try_explain_correlated_join_multi_index_or(
+        left: &vibesql_ast::FromClause,
+        right: &vibesql_ast::FromClause,
+        join_type: &vibesql_ast::JoinType,
+        condition: Option<&Expression>,
+        where_clause: Option<&Expression>,
+        needed_columns: &HashSet<String>,
+        database: &Database,
+    ) -> Result<Option<PlanNode>, ExecutorError> {
+        use crate::select::scan::index_scan::multi_index_or_enabled;
+
+        // Kill switch: behave exactly as before the feature when disabled.
+        if !multi_index_or_enabled() {
+            return Ok(None);
+        }
+
+        // Only CROSS (comma) and LEFT OUTER joins are in scope.
+        let is_left_join = match join_type {
+            vibesql_ast::JoinType::Cross | vibesql_ast::JoinType::Inner => false,
+            vibesql_ast::JoinType::LeftOuter => true,
+            _ => return Ok(None),
+        };
+
+        // Both sides must be plain base tables (no nested joins/subqueries).
+        let (Some((outer_name, outer_alias)), Some((inner_name, inner_alias))) =
+            (Self::base_table_of(left), Self::base_table_of(right))
+        else {
+            return Ok(None);
+        };
+        let outer_ref = outer_alias.unwrap_or(outer_name);
+        let inner_ref = inner_alias.unwrap_or(inner_name);
+
+        // The correlated OR lives in the ON condition (LEFT JOIN) or, for a comma
+        // join, as a top-level conjunct of the WHERE clause.
+        let or_expr = if let Some(cond) = condition {
+            Self::top_level_or(cond)
+        } else {
+            where_clause.and_then(Self::find_correlated_or_conjunct)
+        };
+        let Some(or_expr) = or_expr else {
+            return Ok(None);
+        };
+
+        let branches = Self::or_branches_flat(or_expr);
+        // Need at least two branches for a union.
+        if branches.len() < 2 {
+            return Ok(None);
+        }
+
+        // Inner-table columns referenced anywhere in the query: SELECT list
+        // (`needed_columns`) plus every inner column constrained by the OR.
+        // Used for covering-index detection per branch.
+        let mut inner_needed: HashSet<String> = HashSet::new();
+        for col in needed_columns {
+            inner_needed.insert(col.to_lowercase());
+        }
+        Self::collect_table_columns(or_expr, inner_ref, inner_name, database, &mut inner_needed);
+
+        // Build one MULTI-INDEX OR branch per OR branch. Every branch must
+        // contribute at least one indexable inner-table equality constraint; if
+        // any branch does not, this is not a correlated MULTI-INDEX OR.
+        let mut or_branch_nodes: Vec<(usize, PlanNode)> = Vec::with_capacity(branches.len());
+        let mut slot: usize = 1;
+        for branch in &branches {
+            // Inner-table equality constraints in this branch, in order.
+            let inner_eqs = Self::inner_equality_columns(branch, inner_ref, inner_name, database);
+            if inner_eqs.is_empty() {
+                return Ok(None);
+            }
+
+            // Choose the index VibeSQL would use for this branch's inner
+            // constraints.
+            let Some(index_name) =
+                Self::resolve_inner_branch_index(inner_name, &inner_eqs, database)
+            else {
+                return Ok(None);
+            };
+
+            let is_covering = is_covering_index(
+                &index_name,
+                &Self::covering_needed_columns(inner_name, &inner_needed, database),
+                database,
+            );
+            let scan_type = if is_covering { ScanType::CoveringIndex } else { ScanType::Search };
+
+            let mut search = PlanNode::new("Index Scan")
+                .with_object(inner_name)
+                .with_scan_type(scan_type)
+                .with_index_name(&index_name);
+            search.left_join = is_left_join;
+            if let Some(leading) = Self::index_leading_column(&index_name, database) {
+                search = search.with_index_predicate(&leading, "=");
+            }
+
+            or_branch_nodes.push((slot, search));
+
+            // Advance the WHERE-term slot by the count of plain `col = col`
+            // equality conjuncts in this branch (minimum one). This reproduces
+            // SQLite's branch-ordinal slots for the handled shape.
+            let plain_eqs = Self::plain_column_equality_count(branch);
+            slot += plain_eqs.max(1);
+        }
+
+        // Require a genuine multi-index union (at least two distinct indexes).
+        let distinct: HashSet<&str> =
+            or_branch_nodes.iter().map(|(_, n)| n.index_name.as_deref().unwrap_or("")).collect();
+        if distinct.len() < 2 {
+            return Ok(None);
+        }
+
+        // Outer driver: render via the normal single-table path so `t1.a=80`
+        // becomes `SEARCH t1 USING INTEGER PRIMARY KEY (rowid=?)` (or whatever
+        // index the outer WHERE selects). Pass only the outer table's portion of
+        // the WHERE so the OR (which references the inner table) is not applied.
+        let outer_where = where_clause.and_then(|w| {
+            Self::outer_only_where(w, outer_ref, outer_name, inner_ref, inner_name, database)
+        });
+        let empty_cols = HashSet::new();
+        let mut join_node =
+            PlanNode::new(if is_left_join { "Left Outer Join" } else { "Cross Join" });
+        let outer_node = Self::explain_table_scan(
+            outer_name,
+            outer_alias,
+            &outer_where,
+            &None,
+            false,
+            &empty_cols,
+            database,
+        )?;
+        join_node.add_child(outer_node);
+
+        // Inner: the MULTI-INDEX OR subtree.
+        let mut inner_node = PlanNode::new("Multi-Index Or").with_object(inner_name);
+        inner_node.multi_index_or_branches = or_branch_nodes;
+        join_node.add_child(inner_node);
+
+        Ok(Some(join_node))
+    }
+
+    /// Extract `(name, alias)` if `from` is a plain base table, else `None`.
+    fn base_table_of(from: &vibesql_ast::FromClause) -> Option<(&str, Option<&str>)> {
+        match from {
+            vibesql_ast::FromClause::Table { name, alias, .. } => {
+                Some((name.as_str(), alias.as_deref()))
+            }
+            _ => None,
+        }
+    }
+
+    /// If `expr` is itself a top-level OR (`Disjunction` or `OR` BinaryOp),
+    /// return it; otherwise `None`.
+    fn top_level_or(expr: &Expression) -> Option<&Expression> {
+        match expr {
+            Expression::Disjunction(_) => Some(expr),
+            Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, .. } => Some(expr),
+            _ => None,
+        }
+    }
+
+    /// Find a top-level (AND-reachable) OR conjunct in a WHERE clause. Returns
+    /// the first OR sub-expression found, or `None`.
+    fn find_correlated_or_conjunct(expr: &Expression) -> Option<&Expression> {
+        match expr {
+            Expression::Disjunction(_)
+            | Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, .. } => Some(expr),
+            Expression::Conjunction(exprs) => {
+                exprs.iter().find_map(Self::find_correlated_or_conjunct)
+            }
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                Self::find_correlated_or_conjunct(left)
+                    .or_else(|| Self::find_correlated_or_conjunct(right))
+            }
+            _ => None,
+        }
+    }
+
+    /// Flatten a top-level OR into its branch expressions.
+    fn or_branches_flat(or_expr: &Expression) -> Vec<&Expression> {
+        match or_expr {
+            Expression::Disjunction(exprs) => exprs.iter().collect(),
+            Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, left, right } => {
+                let mut v = Self::or_branches_flat(left);
+                v.extend(Self::or_branches_flat(right));
+                v
+            }
+            _ => vec![or_expr],
+        }
+    }
+
+    /// Flatten a branch (a single predicate or an AND-conjunction) into its
+    /// conjunct expressions.
+    fn branch_conjuncts(branch: &Expression) -> Vec<&Expression> {
+        match branch {
+            Expression::Conjunction(exprs) => {
+                exprs.iter().flat_map(Self::branch_conjuncts).collect()
+            }
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                let mut v = Self::branch_conjuncts(left);
+                v.extend(Self::branch_conjuncts(right));
+                v
+            }
+            _ => vec![branch],
+        }
+    }
+
+    /// Resolve whether a column reference belongs to the inner table (by alias
+    /// or, for unqualified columns, by schema membership).
+    fn column_is_inner(
+        col: &vibesql_ast::ColumnIdentifier,
+        inner_ref: &str,
+        inner_name: &str,
+        database: &Database,
+    ) -> bool {
+        if let Some(tbl) = col.table_canonical() {
+            return tbl.eq_ignore_ascii_case(inner_ref) || tbl.eq_ignore_ascii_case(inner_name);
+        }
+        // Unqualified: belongs to the inner table iff that table has the column.
+        database
+            .get_table(inner_name)
+            .map(|t| t.schema.get_column_index(col.column_canonical()).is_some())
+            .unwrap_or(false)
+    }
+
+    /// The inner-table columns that appear as one side of an equality
+    /// (`inner.col = <outer expr>`), in branch order. Each such column is an
+    /// index seek key keyed by the correlated outer value.
+    fn inner_equality_columns(
+        branch: &Expression,
+        inner_ref: &str,
+        inner_name: &str,
+        database: &Database,
+    ) -> Vec<String> {
+        let mut cols = Vec::new();
+        for conj in Self::branch_conjuncts(branch) {
+            if let Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::Equal, right } =
+                conj
+            {
+                // Inner column on either side; the other side is the outer
+                // parameter (a column ref, expression, or literal).
+                if let Expression::ColumnRef(c) = left.as_ref() {
+                    if Self::column_is_inner(c, inner_ref, inner_name, database) {
+                        cols.push(c.column_canonical().to_string());
+                        continue;
+                    }
+                }
+                if let Expression::ColumnRef(c) = right.as_ref() {
+                    if Self::column_is_inner(c, inner_ref, inner_name, database) {
+                        cols.push(c.column_canonical().to_string());
+                    }
+                }
+            }
+        }
+        cols
+    }
+
+    /// Count plain `col = col` equality conjuncts (both sides bare column refs)
+    /// in a branch. Drives the SQLite branch-ordinal slot advance.
+    fn plain_column_equality_count(branch: &Expression) -> usize {
+        Self::branch_conjuncts(branch)
+            .iter()
+            .filter(|conj| {
+                matches!(
+                    conj,
+                    Expression::BinaryOp {
+                        left,
+                        op: vibesql_ast::BinaryOperator::Equal,
+                        right,
+                    } if matches!(left.as_ref(), Expression::ColumnRef(_))
+                        && matches!(right.as_ref(), Expression::ColumnRef(_))
+                )
+            })
+            .count()
+    }
+
+    /// Choose the index VibeSQL would use for a branch's inner-table equality
+    /// constraints. Among indexes whose **leading** column is one of the
+    /// branch's equality-constrained inner columns, pick deterministically the
+    /// one whose leading column is MOST selective (highest distinct count) —
+    /// matching SQLite, which seeks on the most selective constrained column
+    /// (where9-3.1/3.2: `c=? AND d=?` → `t2d`, because `d` has more distinct
+    /// values than `c`). Ties break by the sorted index name for stability.
+    /// This avoids the HashMap-iteration non-determinism the general cost-based
+    /// selector exhibits on near-equal-cost indexes.
+    fn resolve_inner_branch_index(
+        inner_name: &str,
+        inner_eq_cols: &[String],
+        database: &Database,
+    ) -> Option<String> {
+        let constrained: HashSet<String> = inner_eq_cols.iter().map(|c| c.to_lowercase()).collect();
+        let table = database.get_table(inner_name)?;
+
+        let mut best: Option<(usize, String)> = None; // (distinct_count, index_name)
+        let mut candidates: Vec<String> = database.list_indexes_for_table(inner_name);
+        candidates.sort(); // deterministic iteration order
+        for index_name in candidates {
+            let Some(meta) = database.get_index(&index_name) else { continue };
+            let Some(leading) = meta.columns.first().and_then(|c| c.column_name()) else {
+                continue;
+            };
+            let leading_lower = leading.to_lowercase();
+            if !constrained.contains(&leading_lower) {
+                continue;
+            }
+            let distinct = Self::column_distinct_count(table, &leading_lower);
+            let is_better = match &best {
+                None => true,
+                Some((best_distinct, _)) => distinct > *best_distinct,
+            };
+            if is_better {
+                best = Some((distinct, index_name));
+            }
+        }
+        best.map(|(_, name)| name)
+    }
+
+    /// Count distinct non-NULL values of `column_lower` (case-insensitive) in a
+    /// table by scanning its rows. Used to pick the most selective constrained
+    /// column deterministically for a correlated-join MULTI-INDEX OR branch.
+    fn column_distinct_count(table: &vibesql_storage::Table, column_lower: &str) -> usize {
+        let Some(col_idx) = table.schema.get_column_index(column_lower) else {
+            return 0;
+        };
+        let mut seen: HashSet<String> = HashSet::new();
+        for row in table.scan() {
+            if let Some(value) = row.values.get(col_idx) {
+                if !matches!(value, vibesql_types::SqlValue::Null) {
+                    seen.insert(format!("{:?}", value));
+                }
+            }
+        }
+        seen.len()
+    }
+
+    /// Collect inner-table column names referenced (qualified or by membership)
+    /// within an expression.
+    fn collect_table_columns(
+        expr: &Expression,
+        inner_ref: &str,
+        inner_name: &str,
+        database: &Database,
+        out: &mut HashSet<String>,
+    ) {
+        match expr {
+            Expression::ColumnRef(c) => {
+                if Self::column_is_inner(c, inner_ref, inner_name, database) {
+                    out.insert(c.column_canonical().to_lowercase());
+                }
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                Self::collect_table_columns(left, inner_ref, inner_name, database, out);
+                Self::collect_table_columns(right, inner_ref, inner_name, database, out);
+            }
+            Expression::Conjunction(es) | Expression::Disjunction(es) => {
+                for e in es {
+                    Self::collect_table_columns(e, inner_ref, inner_name, database, out);
+                }
+            }
+            Expression::UnaryOp { expr: e, .. } | Expression::IsNull { expr: e, .. } => {
+                Self::collect_table_columns(e, inner_ref, inner_name, database, out);
+            }
+            Expression::Function { args, .. } => {
+                for a in args {
+                    Self::collect_table_columns(a, inner_ref, inner_name, database, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The needed-column set for inner covering-index detection: the columns the
+    /// query reads from the inner table, with the rowid-alias column carried
+    /// implicitly (SQLite indexes always store the rowid).
+    fn covering_needed_columns(
+        inner_name: &str,
+        inner_needed: &HashSet<String>,
+        database: &Database,
+    ) -> HashSet<String> {
+        let mut needed = inner_needed.clone();
+        if let Some(table) = database.get_table(inner_name) {
+            if let Some(rowid_idx) = table.schema.rowid_alias_column {
+                if let Some(col) = table.schema.columns.get(rowid_idx) {
+                    needed.remove(&col.name.to_lowercase());
+                }
+            }
+        }
+        needed
+    }
+
+    /// Extract the outer-table portion of a WHERE clause: the top-level
+    /// AND-conjuncts that reference only the outer table (e.g. `t1.a=80`). The
+    /// correlated OR conjunct (which references the inner table) is dropped so
+    /// the outer driver renders its own access path.
+    fn outer_only_where(
+        where_expr: &Expression,
+        outer_ref: &str,
+        outer_name: &str,
+        inner_ref: &str,
+        inner_name: &str,
+        database: &Database,
+    ) -> Option<Expression> {
+        let mut kept: Vec<Expression> = Vec::new();
+        Self::collect_outer_conjuncts(
+            where_expr, outer_ref, outer_name, inner_ref, inner_name, database, &mut kept,
+        );
+        match kept.len() {
+            0 => None,
+            1 => Some(kept.into_iter().next().unwrap()),
+            _ => Some(Expression::Conjunction(kept)),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_outer_conjuncts(
+        expr: &Expression,
+        outer_ref: &str,
+        outer_name: &str,
+        inner_ref: &str,
+        inner_name: &str,
+        database: &Database,
+        out: &mut Vec<Expression>,
+    ) {
+        match expr {
+            Expression::Conjunction(es) => {
+                for e in es {
+                    Self::collect_outer_conjuncts(
+                        e, outer_ref, outer_name, inner_ref, inner_name, database, out,
+                    );
+                }
+            }
+            Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                Self::collect_outer_conjuncts(
+                    left, outer_ref, outer_name, inner_ref, inner_name, database, out,
+                );
+                Self::collect_outer_conjuncts(
+                    right, outer_ref, outer_name, inner_ref, inner_name, database, out,
+                );
+            }
+            other => {
+                // Keep conjuncts that reference the outer table but not the inner
+                // table (so the OR, which references the inner table, is dropped).
+                let mut inner_cols = HashSet::new();
+                Self::collect_table_columns(other, inner_ref, inner_name, database, &mut inner_cols);
+                if inner_cols.is_empty()
+                    && Self::expr_references_table(other, outer_ref, outer_name, database)
+                {
+                    out.push(other.clone());
+                }
+            }
+        }
+    }
+
+    /// True when `expr` references a column of the given table (by alias or
+    /// schema membership).
+    fn expr_references_table(
+        expr: &Expression,
+        table_ref: &str,
+        table_name: &str,
+        database: &Database,
+    ) -> bool {
+        let mut cols = HashSet::new();
+        Self::collect_table_columns(expr, table_ref, table_name, database, &mut cols);
+        !cols.is_empty()
     }
 
     /// True when `index_name` covers every column the query reads from
@@ -2085,6 +2605,20 @@ impl ExplainExecutor {
                 database,
             );
             idx_node
+        } else if is_pk_lookup
+            && Self::is_rowid_equality_lookup(table_name, where_clause, database)
+        {
+            // No regular/skip/ordering index applies, but the WHERE clause has a
+            // top-level equality on the single-column INTEGER PRIMARY KEY (rowid
+            // alias). The runtime resolves this as an O(1) rowid point lookup
+            // (`try_primary_key_lookup` in select/scan/table.rs), so EQP renders
+            // SQLite's `SEARCH <t> USING INTEGER PRIMARY KEY (rowid=?)` rather
+            // than `SCAN <t>`. This is the outer-driver line for the
+            // correlated-join MULTI-INDEX OR cases (where9-3.1/3.2), and also
+            // matches sqlite3 3.51.0 for a bare `WHERE pk = ?` single-table scan.
+            PlanNode::new("Index Scan")
+                .with_object(table_name)
+                .with_scan_type(ScanType::IntegerPrimaryKey)
         } else {
             PlanNode::new("Seq Scan").with_object(table_name).with_scan_type(ScanType::Scan)
         };
@@ -2145,6 +2679,45 @@ impl ExplainExecutor {
 
         false
     }
+
+    /// True when the WHERE clause carries a **top-level equality** on the
+    /// single-column INTEGER PRIMARY KEY (rowid alias) — the precise shape the
+    /// runtime resolves as an O(1) rowid point lookup
+    /// (`try_primary_key_lookup` / `extract_primary_key_values` in
+    /// select/scan/table.rs).
+    ///
+    /// Distinct from (and stricter than) [`is_primary_key_lookup`], which only
+    /// asks whether the PK column is *referenced anywhere* (used to upgrade an
+    /// already-chosen index scan to the PK rendering). This stricter check
+    /// gates the EQP fallback that emits `SEARCH <t> USING INTEGER PRIMARY KEY
+    /// (rowid=?)` when no other index applies: it must mirror the runtime so
+    /// EQP never claims a rowid seek the executor would not perform (e.g. for
+    /// `WHERE pk > ?` or `WHERE pk = ? OR ...`, where the equality is not a
+    /// top-level AND-conjunct).
+    fn is_rowid_equality_lookup(
+        table_name: &str,
+        where_clause: &Option<Expression>,
+        database: &Database,
+    ) -> bool {
+        let Some(table) = database.get_table(table_name) else {
+            return false;
+        };
+        // Must be a single-column INTEGER PRIMARY KEY (rowid alias).
+        if table.schema.rowid_alias_column.is_none() {
+            return false;
+        }
+        let Some(pk_columns) = table.schema.primary_key.as_ref() else {
+            return false;
+        };
+        if pk_columns.len() != 1 {
+            return false;
+        }
+        let pk_col_lower = pk_columns[0].to_lowercase();
+        let Some(where_expr) = where_clause else {
+            return false;
+        };
+        top_level_equality_on_column(where_expr, &pk_col_lower)
+    }
 }
 
 /// Recursively check if an expression contains aggregate functions.
@@ -2184,6 +2757,40 @@ fn contains_aggregate_function(expr: &Expression) -> bool {
         }
         // Conservative: subqueries may contain anything; block flattening.
         Expression::ScalarSubquery(_) | Expression::In { .. } | Expression::Exists { .. } => true,
+        _ => false,
+    }
+}
+
+/// True when `expr` contains a top-level (AND-reachable) equality `column = ?`
+/// or `? = column`, where `column` is a bare column reference (case-insensitive)
+/// and the other side is not also that column.
+///
+/// Mirrors the runtime's `collect_equality_predicates_recursive`
+/// (select/scan/table.rs): only equalities reachable through top-level `AND`
+/// conjuncts qualify — an equality buried under an `OR` does not, because the
+/// runtime cannot turn it into a single rowid seek.
+fn top_level_equality_on_column(expr: &Expression, column: &str) -> bool {
+    match expr {
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::Equal, right } => {
+            let left_is = matches!(
+                left.as_ref(),
+                Expression::ColumnRef(c) if c.column_canonical().eq_ignore_ascii_case(column)
+            );
+            let right_is = matches!(
+                right.as_ref(),
+                Expression::ColumnRef(c) if c.column_canonical().eq_ignore_ascii_case(column)
+            );
+            // Exactly one side must be the rowid column (a literal/parameter on
+            // the other side). `col = col` self-equality is not a seek.
+            left_is ^ right_is
+        }
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+            top_level_equality_on_column(left, column)
+                || top_level_equality_on_column(right, column)
+        }
+        Expression::Conjunction(exprs) => {
+            exprs.iter().any(|e| top_level_equality_on_column(e, column))
+        }
         _ => false,
     }
 }
