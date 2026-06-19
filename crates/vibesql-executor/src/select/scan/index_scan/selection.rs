@@ -1762,6 +1762,27 @@ pub(crate) fn select_index_scan_method(
     order_by: Option<&[vibesql_ast::OrderByItem]>,
     database: &Database,
 ) -> Option<IndexScanChoice> {
+    // CONSERVATIVE TRIGGER (epic #5668, PR 2). Try MULTI-INDEX OR FIRST, but only
+    // for a genuine multi-index union (see `try_multi_index_or`). This must be
+    // checked before regular single-index selection because the rule/cost-based
+    // selectors return *some* single index for almost any OR that mentions an
+    // indexed column (then apply the whole OR as a residual filter) — which would
+    // shadow the union path entirely. The trigger is narrow (≥2 distinct indexes,
+    // flag on, rowid table) and produces an identical row set, so no query's
+    // results change; only the access path differs for true multi-index ORs.
+    if let Some(choice) = try_multi_index_or(table_name, where_clause, order_by, database) {
+        if crate::profiling::is_scan_debug_enabled() {
+            if let IndexScanChoice::MultiIndexOr { ref branches, .. } = choice {
+                eprintln!(
+                    "[SCAN_PATH] Selected MULTI-INDEX OR for table={}, branches={}",
+                    table_name,
+                    branches.len()
+                );
+            }
+        }
+        return Some(choice);
+    }
+
     // First, try regular cost-based index selection
     if let Some((index_name, sorted_columns)) =
         cost_based_index_selection(table_name, where_clause, order_by, database)
@@ -1796,6 +1817,111 @@ pub(crate) fn select_index_scan_method(
 
     // No index or skip-scan option found
     None
+}
+
+/// Whether the MULTI-INDEX OR optimization (epic #5668) is enabled.
+///
+/// The feature is **ON by default** and disabled only when the
+/// `MULTI_INDEX_OR_DISABLED` environment variable is set, mirroring the
+/// `JOIN_REORDER_DISABLED` opt-out (see `reorder::utils::should_apply_join_reordering`).
+/// When disabled, [`select_index_scan_method`] never produces an
+/// [`IndexScanChoice::MultiIndexOr`], so behavior is byte-identical to before
+/// the feature landed.
+pub(crate) fn multi_index_or_enabled() -> bool {
+    std::env::var("MULTI_INDEX_OR_DISABLED").is_err()
+}
+
+/// Database-backed [`BranchIndexResolver`](super::or_analysis::BranchIndexResolver).
+///
+/// Resolves a single OR-branch predicate to the index VibeSQL would actually use
+/// for it, by running the branch predicate through [`cost_based_index_selection`]
+/// (the same selection used for the whole WHERE clause). A branch is considered
+/// independently indexable iff that selection yields a `Regular` index. This
+/// reuses the existing, well-tested selection logic so a resolved branch is
+/// guaranteed executable via [`execute_index_scan`](super::execution).
+struct DatabaseBranchResolver<'a> {
+    table_name: &'a str,
+    database: &'a Database,
+}
+
+impl super::or_analysis::BranchIndexResolver for DatabaseBranchResolver<'_> {
+    fn resolve(&self, branch: &Expression) -> Option<String> {
+        // No ORDER BY here: a branch is indexable purely as a WHERE lookup.
+        cost_based_index_selection(self.table_name, Some(branch), None, self.database)
+            .map(|(index_name, _sorted_columns)| index_name)
+    }
+}
+
+/// Attempt to build a MULTI-INDEX OR plan for `where_clause` against `table_name`.
+///
+/// Returns `Some(IndexScanChoice::MultiIndexOr { .. })` only for a **genuine
+/// multi-index union**: every top-level OR branch independently resolves to an
+/// index AND the branches reference **at least two distinct indexes**. Returns
+/// `None` (leaving the caller's existing single-scan / full-scan path unchanged)
+/// when the feature is disabled, the table is WITHOUT ROWID, the analyzer rejects
+/// the WHERE clause, or all branches resolve to the **same** index (the existing
+/// single-index scan already handles that case identically and more cheaply).
+///
+/// ## Conservative trigger (epic #5668, PR 2)
+///
+/// This is the entry condition for the new execution path. It is intentionally
+/// the *narrowest* trigger that still exercises MULTI-INDEX OR execution:
+/// - It fires only for ORs whose branches genuinely span multiple distinct
+///   indexes — exactly the case a single-index scan cannot model without falling
+///   back to a full residual filter.
+/// - The result row set is **identical** to the prior single-index-scan +
+///   full-OR-residual path (an OR over indexed branches), so there is **no result
+///   change** for any query — only the access path differs. The oracle/property
+///   test asserts this set-equality against the full-scan baseline.
+/// - The honest cost-model decision (weighing MULTI-INDEX OR against a single
+///   index or full scan by estimated cost) is deferred to PR 3; here selection is
+///   a structural trigger, not a cost decision.
+///
+/// ## WITHOUT ROWID guard
+///
+/// MULTI-INDEX OR deduplicates by rowid, which WITHOUT ROWID tables do not have.
+/// Such tables fall back to the single-scan + residual path (out of scope for
+/// this PR, per #5668 §2b).
+fn try_multi_index_or(
+    table_name: &str,
+    where_clause: Option<&Expression>,
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    database: &Database,
+) -> Option<IndexScanChoice> {
+    if !multi_index_or_enabled() {
+        return None;
+    }
+
+    // ORDER BY out of scope for the conservative trigger: a single index may
+    // satisfy the ordering, and the union has no inherent sort order. Defer any
+    // ORDER BY query to the existing single-index / full-scan path so we never
+    // perturb ORDER BY plan optimizations. (PR 3+ can revisit under the cost
+    // model.)
+    if order_by.is_some() {
+        return None;
+    }
+
+    let where_expr = where_clause?;
+
+    // WITHOUT ROWID tables have no rowid to dedup on — fall back.
+    let table = database.get_table(table_name)?;
+    if table.schema.without_rowid {
+        return None;
+    }
+
+    let resolver = DatabaseBranchResolver { table_name, database };
+    let plan = super::or_analysis::analyze_multi_index_or(where_expr, &resolver)?;
+
+    // Genuine multi-index union only: require at least two DISTINCT indexes.
+    // If every branch resolves to the same index, the existing single-index
+    // scan + residual already covers it identically and more cheaply.
+    let distinct_indexes: std::collections::HashSet<&str> =
+        plan.branches.iter().map(|b| b.index_name.as_str()).collect();
+    if distinct_indexes.len() < 2 {
+        return None;
+    }
+
+    Some(IndexScanChoice::MultiIndexOr { branches: plan.branches, residual: plan.residual })
 }
 
 #[cfg(test)]

@@ -695,6 +695,128 @@ pub(crate) fn execute_index_scan(
     }
 }
 
+/// Execute a MULTI-INDEX OR scan (epic #5668, PR 2).
+///
+/// Executes the union of per-branch index lookups for a top-level OR whose every
+/// branch is independently indexable, then applies the residual non-OR
+/// AND-conjuncts as a post-filter.
+///
+/// # Correctness (the dominant risk — see #5668 §2b/§3)
+///
+/// - **Exactly-once semantics.** A row satisfying multiple branches (e.g.
+///   `c = 31031 OR d IS NULL` where both hold) must appear **exactly once**.
+///   SQLite deduplicates by **rowid**: it unions the rowid sets from each
+///   per-branch lookup, deduplicating, then fetches each surviving row once.
+///   This function accumulates rows into an **insertion-ordered** dedup set
+///   keyed by rowid (first-encounter order: branch 1's matches, then branch 2's
+///   not-already-seen, ...), matching SQLite's union emission order. Any explicit
+///   `ORDER BY` sorts downstream as today.
+/// - **`IS NULL` vs `=`.** Each branch is executed by running its original
+///   branch predicate through [`execute_index_scan`]. An `IS NULL` branch is
+///   therefore evaluated as `col IS NULL` (a NULL-key match), distinct from the
+///   `=` equality seek a `col = ?` branch performs — never conflated.
+/// - **Residual.** The non-OR AND-conjuncts (e.g. `b > 1000`) are applied as a
+///   filter **around** the deduped union, so they constrain rows regardless of
+///   which branch matched them.
+///
+/// # Rowid source
+///
+/// [`execute_index_scan`] sets each cloned row's `row_id` (1-based; an explicitly
+/// relocated rowid wins over physical-index+1). MULTI-INDEX OR is only selected
+/// for tables that have a rowid (WITHOUT ROWID tables fall back to single-scan +
+/// residual at selection time), so every branch row carries a stable rowid.
+#[allow(private_interfaces)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_multi_index_or(
+    table_name: &str,
+    alias: Option<&String>,
+    branches: &[super::selection::OrBranch],
+    residual: Option<&Expression>,
+    database: &Database,
+    cte_results: &HashMap<String, CteResult>,
+) -> Result<super::super::FromResult, ExecutorError> {
+    use std::collections::HashSet;
+
+    // Build the result schema once (independent of the per-branch scans, which
+    // each build their own equivalent schema internally).
+    let table = database
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+    let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+    let schema = CombinedSchema::from_table(effective_name, table.schema.clone());
+
+    // Insertion-ordered rowid dedup: `seen` rejects duplicates, `deduped` holds
+    // the surviving rows in first-encounter order.
+    let mut seen: HashSet<u64> = HashSet::new();
+    let mut deduped: Vec<Row> = Vec::new();
+
+    for branch in branches {
+        // Execute this branch's index lookup with the branch predicate as the
+        // WHERE clause. We pass no ORDER BY / LIMIT: the union's ordering is the
+        // first-encounter order, and any LIMIT must apply to the whole union
+        // downstream (never per-branch). `execute_index_scan` re-applies the
+        // branch predicate as a filter on the fetched rows, so both `=` and
+        // `IS NULL` branches return exactly their matching rows.
+        let branch_result = execute_index_scan(
+            table_name,
+            &branch.index_name,
+            alias,
+            Some(&branch.branch_predicate),
+            None, // sorted_columns: union order, not index order
+            None, // limit: applied downstream over the whole union
+            database,
+            cte_results,
+        )?;
+
+        for row in branch_result.into_rows() {
+            // Every branch row carries a rowid (see #4954 / #5517 handling in
+            // execute_index_scan). If one is somehow absent, fall back to a
+            // synthetic key that still dedups identical rows within this union.
+            let key = match row.row_id {
+                Some(id) => id,
+                None => {
+                    // Defensive: should not happen for rowid tables (selection
+                    // guards out WITHOUT ROWID). Skip the row rather than risk a
+                    // mis-dedup; the debug_assert flags it in test builds.
+                    debug_assert!(
+                        false,
+                        "MULTI-INDEX OR branch row missing row_id on a rowid table"
+                    );
+                    continue;
+                }
+            };
+
+            if seen.insert(key) {
+                deduped.push(row);
+            }
+        }
+    }
+
+    // Apply the residual non-OR AND-conjuncts (e.g. `b > 1000`) around the union.
+    let rows = if let Some(residual_expr) = residual {
+        let predicate_plan = PredicatePlan::from_where_clause(Some(residual_expr), &schema)
+            .map_err(ExecutorError::InvalidWhereClause)?;
+        let row_refs: Vec<&Row> = deduped.iter().collect();
+        let filtered = apply_where_filter_zerocopy(
+            row_refs,
+            &schema,
+            &predicate_plan,
+            table_name,
+            database,
+            cte_results,
+        )?;
+        filtered.into_iter().cloned().collect()
+    } else {
+        deduped
+    };
+
+    // The union has no inherent sort order (first-encounter), so report it as a
+    // plain WHERE-filtered result: the original WHERE clause is fully satisfied
+    // by the branch predicates + residual, so downstream WHERE re-filtering is
+    // unnecessary.
+    Ok(super::super::FromResult::from_rows_where_filtered(schema, rows, None))
+}
+
 /// Apply WHERE filter using zero-copy row references
 ///
 /// This function filters rows by reference, avoiding clones for rows that don't pass the filter.

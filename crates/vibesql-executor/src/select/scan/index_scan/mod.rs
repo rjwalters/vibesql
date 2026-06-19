@@ -27,6 +27,8 @@ pub(crate) mod selection;
 
 // Re-export public APIs
 pub(crate) use execution::execute_index_scan;
+// MULTI-INDEX OR execution (epic #5668, PR 2).
+pub(crate) use execution::execute_multi_index_or;
 pub(super) use execution::execute_skip_scan;
 pub(crate) use selection::{
     cost_based_index_selection, eqp_ordering_index, needs_temp_btree_for_order_by_eqp,

@@ -492,14 +492,31 @@ pub(crate) fn execute_table_scan(
                     );
                 }
             }
-            super::index_scan::IndexScanChoice::MultiIndexOr { .. } => {
-                // MULTI-INDEX OR (epic #5668). PR 1 only adds the plan
-                // representation + analyzer; selection never produces this
-                // variant yet, so this arm is unreachable. Execution lands in
-                // PR 2. The `unreachable!` documents the invariant without
-                // changing any existing behavior.
-                unreachable!(
-                    "MultiIndexOr is plan representation only in PR 1 and is never selected"
+            super::index_scan::IndexScanChoice::MultiIndexOr { branches, residual } => {
+                // MULTI-INDEX OR (epic #5668, PR 2). Execute the union of
+                // per-branch index lookups, deduplicating by rowid
+                // (insertion-ordered), then apply the residual non-OR
+                // AND-conjuncts as a post-filter.
+                //
+                // Selection only produces this variant for a genuine multi-index
+                // union (>= 2 distinct indexes, no ORDER BY, rowid table) with
+                // the feature flag on — see `try_multi_index_or`. The resulting
+                // row set is identical to the prior single-index-scan + full-OR
+                // residual path; only the access path differs.
+                if crate::profiling::is_scan_debug_enabled() {
+                    eprintln!(
+                        "[SCAN_PATH] Using MULTI-INDEX OR: table={}, branches={}",
+                        table_name,
+                        branches.len()
+                    );
+                }
+                return super::index_scan::execute_multi_index_or(
+                    table_name,
+                    alias,
+                    &branches,
+                    residual.as_ref(),
+                    database,
+                    cte_results,
                 );
             }
         }
