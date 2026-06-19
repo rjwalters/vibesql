@@ -2504,8 +2504,7 @@ array set vibesql_skip_tests {
     where9-10.2 "Uses INDEXED BY hint - SQLite-specific"
     where9-3.1 "Requires MULTI-INDEX OR optimization - real index-selection gap, tracked in #5668"
     where9-3.2 "Requires MULTI-INDEX OR optimization - real index-selection gap, tracked in #5668"
-    where9-5.1 "Requires MULTI-INDEX OR optimization - real index-selection gap, tracked in #5668"
-    where9-5.3 "OR-aware index selection differs (t1c full scan vs SQLite t1b range) - real optimizer gap, tracked in #5668"
+    where9-5.3 "Pre-existing non-deterministic single-index selector picks t1c/SCAN instead of t1b/SEARCH(b>?) - real optimizer gap, tracked in #5692"
 
     func-10.1 "Uses testfunc - SQLite test extension"
     func-10.2 "Uses testfunc - SQLite test extension"

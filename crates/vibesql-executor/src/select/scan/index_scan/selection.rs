@@ -1633,6 +1633,78 @@ fn estimate_branch_index_cost(
     Some(cost_estimator.estimate_index_scan(table_stats, col_stats, selectivity))
 }
 
+/// Whether an OR branch is a cheap **point seek** — an equality (`col = ?`) or an
+/// `IS NULL` seek — as opposed to a range scan (`>`, `>=`, `<`, `<=`, `BETWEEN`)
+/// that reads many rows.
+///
+/// Used by the no-statistics rule-based MULTI-INDEX OR heuristic in
+/// [`select_or_aware_index_method`]: SQLite's default optimizer (no ANALYZE)
+/// chooses a MULTI-INDEX OR union only when every branch is a point seek, because
+/// a union of cheap seeks beats a single scan, whereas a range OR-branch is
+/// cheaper to handle via a single index on the AND-clause. This is the structural
+/// form of the equality-seek-vs-range-scan cost signal that, with statistics,
+/// [`multi_index_or_cost`] computes numerically.
+fn branch_is_point_seek(branch: &OrBranch) -> bool {
+    match branch.kind {
+        // `col IS NULL` seeks a single NULL key — a point seek.
+        OrBranchKind::IsNull => true,
+        OrBranchKind::Lookup => matches!(
+            &branch.branch_predicate,
+            Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Equal, .. }
+        ),
+    }
+}
+
+/// Whether the residual AND-clause contains a top-level **equality** predicate
+/// (`col = <literal>`) on a column that is the leading column of some index on
+/// `table_name`.
+///
+/// Used by the no-statistics MULTI-INDEX OR heuristic: when the AND-clause around
+/// an OR has an indexable equality (e.g. where9-5.2 `b=1000`), SQLite prefers that
+/// single equality seek over the OR-union, so the union is declined.
+fn residual_has_equality_index(
+    table_name: &str,
+    residual: &Expression,
+    database: &Database,
+) -> bool {
+    // Flatten top-level AND-conjuncts (the residual may be a single predicate or
+    // a conjunction of several).
+    let conjuncts: Vec<&Expression> = match residual {
+        Expression::Conjunction(exprs) => exprs.iter().collect(),
+        Expression::BinaryOp { op: vibesql_ast::BinaryOperator::And, left, right } => {
+            vec![left.as_ref(), right.as_ref()]
+        }
+        other => vec![other],
+    };
+
+    for conjunct in conjuncts {
+        if let Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Equal, left, right } =
+            conjunct
+        {
+            // Accept `col = literal` or `literal = col`.
+            let col = match (left.as_ref(), right.as_ref()) {
+                (Expression::ColumnRef(c), _) => Some(c.column_canonical()),
+                (_, Expression::ColumnRef(c)) => Some(c.column_canonical()),
+                _ => None,
+            };
+            if let Some(col) = col {
+                for index_name in database.list_indexes_for_table(table_name) {
+                    if let Some(meta) = database.get_index(&index_name) {
+                        if let Some(first) = meta.columns.first() {
+                            if let Some(name) = first.column_name() {
+                                if name.eq_ignore_ascii_case(col) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Total estimated cost of executing a MULTI-INDEX OR plan.
 ///
 /// Cost = (sum over branches of per-branch index-seek/scan cost) + a dedup/fetch
@@ -2200,14 +2272,50 @@ fn select_or_aware_index_method(
         return None;
     }
 
-    // Cost the three alternatives. We require real statistics to make an honest
-    // decision; without them, decline the union and let the existing rule-based
-    // / single-index path run (it never chose the union before, so this is a
-    // strict no-regression fallback).
-    let table_stats = table.get_statistics()?;
-    if table_stats.needs_refresh() {
-        return None;
-    }
+    // Cost the three alternatives. We prefer real statistics to make an honest
+    // cost decision; without them (no ANALYZE — the common case in the SQLite
+    // conformance harness, which strips ANALYZE), fall back to a rule-based
+    // structural heuristic that mirrors SQLite's default optimizer. SQLite's
+    // preference order (verified against sqlite3 3.51.0 on the where9 fixture):
+    //
+    //   1. A single index on an AND-clause **equality** (`b=?`) beats everything
+    //      — it is the most selective point seek (where9-5.2: `b=1000 AND (...)`
+    //      → `SEARCH t1 USING INDEX t1b (b=?)`).
+    //   2. Otherwise, a MULTI-INDEX OR union wins iff *every* OR branch is an
+    //      equality / IS-NULL point seek (where9-5.1: `b>1000 AND (c=? OR d IS
+    //      NULL)` → the union of two cheap seeks beats the `b>?` range search).
+    //   3. A range OR-branch (`c>=?`) scans many rows, so the union loses to the
+    //      single AND-clause index (where9-5.3: `b>1000 AND (c>=? OR d IS NULL)`
+    //      → `SEARCH t1 USING INDEX t1b (b>?)`).
+    //
+    // This is the structural form of the equality-seek-vs-range-scan cost signal
+    // the architect identified; with statistics, the numeric cost comparison
+    // below computes the same decision.
+    let table_stats = match table.get_statistics() {
+        Some(stats) if !stats.needs_refresh() => stats,
+        _ => {
+            // (1) An AND-clause equality on an indexed column wins outright.
+            let residual_equality_index = plan
+                .residual
+                .as_ref()
+                .map(|r| residual_has_equality_index(table_name, r, database))
+                .unwrap_or(false);
+            // (2) Otherwise the union wins iff every branch is a point seek.
+            if !residual_equality_index && plan.branches.iter().all(branch_is_point_seek) {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!(
+                        "[INDEX_SELECT] MULTI-INDEX OR (no-stats rule) table={}: all branches are point seeks, no AND-clause equality index -> OR wins",
+                        table_name
+                    );
+                }
+                return Some(IndexScanChoice::MultiIndexOr {
+                    branches: plan.branches,
+                    residual: plan.residual,
+                });
+            }
+            return None;
+        }
+    };
     let cost_estimator = CostEstimator::default();
 
     let or_cost = multi_index_or_cost(&plan.branches, table_stats, &cost_estimator, database)?;

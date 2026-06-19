@@ -25,6 +25,7 @@ use crate::{
     optimizer::index_planner::IndexPlanner,
     select::scan::index_scan::{
         cost_based_index_selection, eqp_ordering_index, needs_temp_btree_for_order_by_eqp,
+        select_index_scan_method, IndexScanChoice,
     },
 };
 
@@ -105,6 +106,21 @@ pub struct PlanNode {
     /// is nested under the CO-ROUTINE entry and the outer query reads it via
     /// a trailing `SCAN <name>` entry (windowpushd.test, #5347).
     pub coroutine: Option<String>,
+    /// When non-empty, this node is a single-table MULTI-INDEX OR access path
+    /// (epic #5668): one per-branch index `SEARCH` PlanNode, in original-branch
+    /// ordinal order. EQP renders it as SQLite's `MULTI-INDEX OR` subtree:
+    /// ```text
+    /// MULTI-INDEX OR
+    /// |--INDEX <ordinal>
+    /// |  `--SEARCH <table> USING INDEX <idx> (<pred>)
+    /// `--INDEX <ordinal>
+    ///    `--SEARCH ...
+    /// ```
+    /// Each tuple is `(ordinal, branch_search_node)` where `ordinal` is the
+    /// 1-based term position in the original OR expression (preserved from the
+    /// analyzer — SQLite labels branches by original position, not a
+    /// renumbering over chosen branches).
+    pub multi_index_or_branches: Vec<(usize, PlanNode)>,
 }
 
 impl PlanNode {
@@ -126,6 +142,7 @@ impl PlanNode {
             set_operation_type: None,
             is_compound_query: false,
             coroutine: None,
+            multi_index_or_branches: Vec::new(),
         }
     }
 
@@ -571,6 +588,30 @@ fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
     //   ...
     if node.is_compound_query {
         entries.push(compound_eqp_entry(node));
+        return;
+    }
+
+    // Single-table MULTI-INDEX OR (epic #5668): render SQLite's subtree
+    //   MULTI-INDEX OR
+    //   |--INDEX <ordinal>
+    //   |  `--SEARCH <table> USING [COVERING ]INDEX <idx> (<pred>)
+    //   `--INDEX <ordinal>
+    //      `--SEARCH ...
+    // Each branch is an `INDEX <ordinal>` entry whose only child is the branch's
+    // SEARCH line, reusing `format_sqlite_eqp_node` so covering-index detection
+    // and predicate formatting stay byte-identical to ordinary single-index
+    // SEARCH lines. Ordinals are the original OR-term positions (preserved by the
+    // analyzer), not a renumbering over the chosen branches.
+    if !node.multi_index_or_branches.is_empty() {
+        let branch_entries: Vec<EqpEntry> = node
+            .multi_index_or_branches
+            .iter()
+            .map(|(ordinal, search_node)| EqpEntry {
+                text: format!("INDEX {}", ordinal),
+                children: vec![EqpEntry::leaf(format_sqlite_eqp_node(search_node))],
+            })
+            .collect();
+        entries.push(EqpEntry { text: "MULTI-INDEX OR".to_string(), children: branch_entries });
         return;
     }
 
@@ -1859,6 +1900,52 @@ impl ExplainExecutor {
         needed_columns: &HashSet<String>,
         database: &Database,
     ) -> Result<PlanNode, ExecutorError> {
+        // MULTI-INDEX OR (epic #5668): the runtime may execute this WHERE as a
+        // union of per-branch index lookups. EQP must render the same plan the
+        // runtime chooses, so we consult the actual runtime selector
+        // (`select_index_scan_method`) — not just `cost_based_index_selection`,
+        // which only ever returns a single index. When the selector picks
+        // MULTI-INDEX OR, build SQLite's subtree and return early; otherwise fall
+        // through to the existing single-scan rendering below (byte-identical).
+        if order_by.is_none() {
+            if let Some(IndexScanChoice::MultiIndexOr { branches, .. }) =
+                select_index_scan_method(table_name, where_clause.as_ref(), None, database)
+            {
+                let mut node = PlanNode::new("Multi-Index Or").with_object(table_name);
+                for branch in &branches {
+                    // Inner SEARCH line: `SEARCH <table> USING [COVERING ]INDEX
+                    // <idx> (<col>=?)`. SQLite renders every branch — including an
+                    // `IS NULL` branch — as a `<col>=?` equality seek on the
+                    // index's leading column, so we emit `=` uniformly.
+                    let is_covering = Self::index_covers_scan(
+                        table_name,
+                        &branch.index_name,
+                        where_clause,
+                        needed_columns,
+                        database,
+                    );
+                    let scan_type =
+                        if is_covering { ScanType::CoveringIndex } else { ScanType::Search };
+                    let mut search = PlanNode::new("Index Scan")
+                        .with_object(table_name)
+                        .with_scan_type(scan_type)
+                        .with_index_name(&branch.index_name);
+                    if let Some(leading) = Self::index_leading_column(&branch.index_name, database)
+                    {
+                        search = search.with_index_predicate(&leading, "=");
+                    }
+                    node.multi_index_or_branches.push((branch.ordinal, search));
+                }
+                if let Some(table) = database.get_table(table_name) {
+                    node = node.with_estimated_rows(table.row_count() as f64);
+                }
+                if let Some(a) = alias {
+                    node.details.push(format!("Alias: {}", a));
+                }
+                return Ok(node);
+            }
+        }
+
         // First check for regular index scan
         let index_info = cost_based_index_selection(
             table_name,
@@ -2014,6 +2101,19 @@ impl ExplainExecutor {
         }
 
         Ok(node)
+    }
+
+    /// Leading (first) indexed column name of `index_name`, if any.
+    ///
+    /// Used to render each MULTI-INDEX OR branch's inner `SEARCH ... (<col>=?)`
+    /// line: SQLite shows the leading index column with an `=` seek for every
+    /// branch (including `IS NULL` branches).
+    fn index_leading_column(index_name: &str, database: &Database) -> Option<String> {
+        database
+            .get_index(index_name)
+            .and_then(|meta| meta.columns.first())
+            .and_then(|col| col.column_name())
+            .map(|s| s.to_string())
     }
 
     /// Check if this is a primary key lookup (INTEGER PRIMARY KEY in SQLite)
