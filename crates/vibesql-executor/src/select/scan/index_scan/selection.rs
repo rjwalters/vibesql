@@ -1571,6 +1571,252 @@ pub(crate) fn cost_based_index_selection(
     None
 }
 
+/// Estimate the cost of a single MULTI-INDEX OR *branch* as an index seek/scan.
+///
+/// This is the heart of the OR-aware cost model (epic #5668, PR 3). It costs one
+/// OR branch (e.g. `c = 31031`, `d IS NULL`, `c >= 31031`) as the per-branch index
+/// scan VibeSQL would run for it, using **real column statistics**. The returned
+/// cost feeds [`multi_index_or_cost`], whose sum-over-branches decides whether the
+/// union beats a single index or a full scan.
+///
+/// ## Why this distinguishes where9-5.1 from where9-5.3 honestly
+///
+/// The branch cost is `CostEstimator::estimate_index_scan(table_stats, col_stats,
+/// selectivity)`, and `selectivity` is derived from the branch predicate:
+/// - An **equality** branch (`c = 31031`) gets `estimate_eq_selectivity` ≈
+///   `1/n_distinct` — a point seek matching very few rows → **cheap**.
+/// - An **IS NULL** branch (`d IS NULL`) gets `null_count / row_count` — typically
+///   a handful of rows → **cheap**.
+/// - An **inequality/range** branch (`c >= 31031`) gets
+///   `estimate_range_selectivity` — a range scan matching many rows → **expensive**.
+///
+/// So the equality-seek-vs-range-scan distinction the conformance gate demands
+/// falls directly out of the selectivity, not out of any per-query special case.
+///
+/// Returns `None` if the branch is not costable with statistics (no index, no
+/// column stats, expression index) — the caller then declines the MULTI-INDEX OR
+/// plan and falls back to single-index / full-scan selection.
+fn estimate_branch_index_cost(
+    branch: &OrBranch,
+    table_stats: &vibesql_storage::statistics::TableStatistics,
+    cost_estimator: &CostEstimator,
+    database: &Database,
+) -> Option<f64> {
+    let index_metadata = database.get_index(&branch.index_name)?;
+    let first_indexed_column = index_metadata.columns.first()?;
+
+    // Expression indexes have no column statistics — not costable here.
+    if first_indexed_column.is_expression() {
+        return None;
+    }
+    let column_name = first_indexed_column.column_name()?;
+    let col_stats = get_column_stats_ignore_case(&table_stats.columns, column_name)?;
+
+    // Selectivity is what makes equality seeks cheap and range scans expensive.
+    // IS NULL branches are routed to the NULL-key seek and costed from the
+    // measured null fraction; `estimate_selectivity` does not model IS NULL
+    // (it falls through to a flat 0.33), which would wrongly make a NULL seek
+    // look like a mid-range scan, so handle it explicitly here.
+    let selectivity = match branch.kind {
+        OrBranchKind::IsNull => {
+            if table_stats.row_count > 0 {
+                (col_stats.null_count as f64 / table_stats.row_count as f64).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        }
+        OrBranchKind::Lookup => {
+            estimate_selectivity(&branch.branch_predicate, column_name, col_stats)
+        }
+    };
+
+    Some(cost_estimator.estimate_index_scan(table_stats, col_stats, selectivity))
+}
+
+/// Total estimated cost of executing a MULTI-INDEX OR plan.
+///
+/// Cost = (sum over branches of per-branch index-seek/scan cost) + a dedup/fetch
+/// overhead proportional to the total rows the branches produce. The dedup term
+/// charges the union for materializing and de-duplicating each branch's rowids
+/// before fetching — without it the model would treat a union of N branches as
+/// free coordination, biasing toward MULTI-INDEX OR. The overhead is deliberately
+/// modest (CPU-tuple cost per produced rowid) so it never dominates the seek
+/// costs; its role is to break ties against an equivalently-selective single
+/// index, matching SQLite's mild preference for a single B-tree search.
+///
+/// Returns `None` if **any** branch is not costable with statistics — a partial
+/// cost would be meaningless, so the whole MULTI-INDEX OR alternative is declined.
+fn multi_index_or_cost(
+    branches: &[OrBranch],
+    table_stats: &vibesql_storage::statistics::TableStatistics,
+    cost_estimator: &CostEstimator,
+    database: &Database,
+) -> Option<f64> {
+    let mut total = 0.0;
+    let mut estimated_rows = 0.0;
+    for branch in branches {
+        let branch_cost =
+            estimate_branch_index_cost(branch, table_stats, cost_estimator, database)?;
+        total += branch_cost;
+        // Recover the branch's row estimate to charge dedup/fetch overhead. The
+        // index-scan cost already includes a fetch term; this adds the union's
+        // bookkeeping (collect + dedup rowids) on top.
+        if let Some(index_metadata) = database.get_index(&branch.index_name) {
+            if let Some(col) = index_metadata.columns.first() {
+                if let Some(col_name) = col.column_name() {
+                    if let Some(col_stats) =
+                        get_column_stats_ignore_case(&table_stats.columns, col_name)
+                    {
+                        let selectivity = match branch.kind {
+                            OrBranchKind::IsNull => {
+                                if table_stats.row_count > 0 {
+                                    col_stats.null_count as f64 / table_stats.row_count as f64
+                                } else {
+                                    0.0
+                                }
+                            }
+                            OrBranchKind::Lookup => {
+                                estimate_selectivity(&branch.branch_predicate, col_name, col_stats)
+                            }
+                        };
+                        estimated_rows += table_stats.row_count as f64 * selectivity;
+                    }
+                }
+            }
+        }
+    }
+
+    // Dedup/fetch overhead: one CPU-tuple cost per rowid produced across branches.
+    total += estimated_rows * cost_estimator.cpu_tuple_cost;
+    Some(total)
+}
+
+/// Estimate the cost of the best *single index* over the full WHERE clause, with
+/// the OR (if any) applied as a residual filter. This is alternative (2) of the
+/// OR-aware cost model — the competing plan that wins where9-5.3 (a single range
+/// search on the AND-clause `b > 1000` via index `t1b`).
+///
+/// Returns `(index_name, sorted_columns, cost)` for the cheapest applicable index,
+/// or `None` when no index applies or statistics are unavailable. The selection
+/// mirrors [`cost_based_index_selection`]'s scoring (pinned columns then cost) but
+/// also surfaces the winning index's estimated cost so it can be compared against
+/// the MULTI-INDEX OR and full-scan alternatives.
+#[allow(clippy::type_complexity)]
+fn best_single_index_cost(
+    table_name: &str,
+    where_clause: Option<&Expression>,
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    table_stats: &vibesql_storage::statistics::TableStatistics,
+    cost_estimator: &CostEstimator,
+    database: &Database,
+) -> Option<(String, Option<Vec<(String, vibesql_ast::OrderDirection)>>, f64)> {
+    let indexes = database.list_indexes_for_table(table_name);
+    if indexes.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(String, Option<Vec<(String, vibesql_ast::OrderDirection)>>, usize, f64)> =
+        None;
+
+    for index_name in &indexes {
+        let Some(index_metadata) = database.get_index(index_name) else { continue };
+
+        if !crate::optimizer::predicate_implication::partial_index_usable(
+            database,
+            index_name,
+            where_clause,
+        ) {
+            continue;
+        }
+
+        let Some(first_indexed_column) = index_metadata.columns.first() else { continue };
+
+        let can_use_for_where = where_clause
+            .map(|expr| index_column_can_filter(expr, first_indexed_column))
+            .unwrap_or(false);
+        let pinned_columns = count_pinned_index_columns(where_clause, &index_metadata.columns);
+
+        let can_use_for_order = if let Some(order_items) = order_by {
+            let columns_match = can_use_index_for_order_by_with_pinned(
+                order_items,
+                &index_metadata.columns,
+                pinned_columns,
+            );
+            if columns_match {
+                let table = database.get_table(table_name)?;
+                !any_order_by_column_nullable(
+                    order_items,
+                    &table.schema,
+                    &index_metadata.columns,
+                    pinned_columns,
+                )
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !can_use_for_where && !can_use_for_order {
+            continue;
+        }
+
+        // Expression indexes / indexes without column stats are not costable here.
+        if first_indexed_column.is_expression() {
+            continue;
+        }
+        let Some(column_name) = first_indexed_column.column_name() else { continue };
+        let Some(col_stats) = get_column_stats_ignore_case(&table_stats.columns, column_name)
+        else {
+            continue;
+        };
+
+        let selectivity = if let Some(where_expr) = where_clause {
+            estimate_selectivity(where_expr, column_name, col_stats)
+        } else {
+            1.0
+        };
+
+        let cost = cost_estimator.estimate_index_scan(table_stats, col_stats, selectivity);
+
+        let sorted_columns = if can_use_for_order {
+            let order_items = order_by.unwrap();
+            Some(
+                order_items
+                    .iter()
+                    .map(|item| {
+                        let col_name = match &item.expr {
+                            Expression::ColumnRef(col_id) => col_id.column_canonical().to_string(),
+                            expr => expr.to_sql(),
+                        };
+                        (col_name, item.direction.clone())
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
+        let is_better = match &best {
+            None => true,
+            Some((_, _, best_pinned, best_cost)) => {
+                if pinned_columns > *best_pinned {
+                    true
+                } else if pinned_columns == *best_pinned {
+                    cost < *best_cost
+                } else {
+                    false
+                }
+            }
+        };
+        if is_better {
+            best = Some((index_name.clone(), sorted_columns, pinned_columns, cost));
+        }
+    }
+
+    best.map(|(name, sorted, _pinned, cost)| (name, sorted, cost))
+}
+
 /// Estimate selectivity of a predicate on a specific column
 ///
 /// Uses column statistics to estimate what fraction of rows will match the predicate.
@@ -1762,15 +2008,17 @@ pub(crate) fn select_index_scan_method(
     order_by: Option<&[vibesql_ast::OrderByItem]>,
     database: &Database,
 ) -> Option<IndexScanChoice> {
-    // CONSERVATIVE TRIGGER (epic #5668, PR 2). Try MULTI-INDEX OR FIRST, but only
-    // for a genuine multi-index union (see `try_multi_index_or`). This must be
-    // checked before regular single-index selection because the rule/cost-based
-    // selectors return *some* single index for almost any OR that mentions an
-    // indexed column (then apply the whole OR as a residual filter) — which would
-    // shadow the union path entirely. The trigger is narrow (≥2 distinct indexes,
-    // flag on, rowid table) and produces an identical row set, so no query's
-    // results change; only the access path differs for true multi-index ORs.
-    if let Some(choice) = try_multi_index_or(table_name, where_clause, order_by, database) {
+    // OR-AWARE COST MODEL (epic #5668, PR 3). When the WHERE clause contains a
+    // genuine multi-index OR, cost the MULTI-INDEX OR union against the best
+    // single index and the full table scan, and take the cheapest — replacing
+    // PR 2's conservative "only when no single index applies" trigger. This is
+    // where where9-5.1 (cheap equality/IS-NULL seeks → union wins) and where9-5.3
+    // (range OR-branches lose to a single range search on the AND-clause `b>?`)
+    // diverge honestly. `select_or_aware_index_method` returns the union only
+    // when it is actually the cheapest plan; otherwise it declines and selection
+    // continues to single-index / skip-scan below.
+    if let Some(choice) = select_or_aware_index_method(table_name, where_clause, order_by, database)
+    {
         if crate::profiling::is_scan_debug_enabled() {
             if let IndexScanChoice::MultiIndexOr { ref branches, .. } = choice {
                 eprintln!(
@@ -1846,43 +2094,77 @@ struct DatabaseBranchResolver<'a> {
 
 impl super::or_analysis::BranchIndexResolver for DatabaseBranchResolver<'_> {
     fn resolve(&self, branch: &Expression) -> Option<String> {
+        // `col IS NULL` is a NULL-key index seek (see execution.rs), but it is not
+        // a `=`/range predicate, so `cost_based_index_selection` (which routes
+        // through `index_column_can_filter`) does not recognize it. Resolve such a
+        // branch directly to an index whose **leading** column is the IS-NULL
+        // column — exactly the index `execute_index_scan` will use for the NULL
+        // seek. This is what makes where9-5.1 (`c=31031 OR d IS NULL`) resolve all
+        // branches and become eligible for the MULTI-INDEX OR cost comparison.
+        if let Expression::IsNull { expr, negated: false } = branch {
+            if let Expression::ColumnRef(col_id) = expr.as_ref() {
+                return self.leading_column_index(col_id.column_canonical());
+            }
+            return None;
+        }
+
         // No ORDER BY here: a branch is indexable purely as a WHERE lookup.
         cost_based_index_selection(self.table_name, Some(branch), None, self.database)
             .map(|(index_name, _sorted_columns)| index_name)
     }
 }
 
-/// Attempt to build a MULTI-INDEX OR plan for `where_clause` against `table_name`.
+impl DatabaseBranchResolver<'_> {
+    /// Find an index on `table_name` whose **leading** column is `column_name`
+    /// (case-insensitive). Returns the index name, or `None` if no such index
+    /// exists. Used to resolve `IS NULL` branches to their NULL-seek index.
+    fn leading_column_index(&self, column_name: &str) -> Option<String> {
+        for index_name in self.database.list_indexes_for_table(self.table_name) {
+            if let Some(index_metadata) = self.database.get_index(&index_name) {
+                if let Some(first) = index_metadata.columns.first() {
+                    if let Some(col) = first.column_name() {
+                        if col.eq_ignore_ascii_case(column_name) {
+                            return Some(index_name);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// OR-aware index selection (epic #5668, PR 3).
 ///
-/// Returns `Some(IndexScanChoice::MultiIndexOr { .. })` only for a **genuine
-/// multi-index union**: every top-level OR branch independently resolves to an
-/// index AND the branches reference **at least two distinct indexes**. Returns
-/// `None` (leaving the caller's existing single-scan / full-scan path unchanged)
-/// when the feature is disabled, the table is WITHOUT ROWID, the analyzer rejects
-/// the WHERE clause, or all branches resolve to the **same** index (the existing
-/// single-index scan already handles that case identically and more cheaply).
+/// Returns `Some(IndexScanChoice::MultiIndexOr { .. })` only when a genuine
+/// multi-index OR union is **the cheapest** of three costed alternatives:
 ///
-/// ## Conservative trigger (epic #5668, PR 2)
+/// 1. **MULTI-INDEX OR** — sum of per-branch index-seek/scan costs plus a
+///    dedup/fetch overhead ([`multi_index_or_cost`]).
+/// 2. **Best single index** over the full WHERE, with the OR applied as a
+///    residual filter ([`best_single_index_cost`]).
+/// 3. **Full table scan** ([`CostEstimator::estimate_table_scan`]).
 ///
-/// This is the entry condition for the new execution path. It is intentionally
-/// the *narrowest* trigger that still exercises MULTI-INDEX OR execution:
-/// - It fires only for ORs whose branches genuinely span multiple distinct
-///   indexes — exactly the case a single-index scan cannot model without falling
-///   back to a full residual filter.
-/// - The result row set is **identical** to the prior single-index-scan +
-///   full-OR-residual path (an OR over indexed branches), so there is **no result
-///   change** for any query — only the access path differs. The oracle/property
-///   test asserts this set-equality against the full-scan baseline.
-/// - The honest cost-model decision (weighing MULTI-INDEX OR against a single
-///   index or full scan by estimated cost) is deferred to PR 3; here selection is
-///   a structural trigger, not a cost decision.
+/// This replaces PR 2's conservative "only when no single index applies"
+/// structural trigger with an honest cost comparison. The union is returned iff
+/// its estimated cost is strictly cheaper than both the best single index and the
+/// full scan — so an OR of cheap equality/IS-NULL seeks (where9-5.1) wins, while
+/// an OR of range scans that loses to a single range search on an AND-clause
+/// (where9-5.3) does not.
 ///
-/// ## WITHOUT ROWID guard
-///
-/// MULTI-INDEX OR deduplicates by rowid, which WITHOUT ROWID tables do not have.
-/// Such tables fall back to the single-scan + residual path (out of scope for
-/// this PR, per #5668 §2b).
-fn try_multi_index_or(
+/// Returns `None` (leaving the caller's single-index / skip-scan / full-scan path
+/// unchanged) when:
+/// - the feature is disabled via `MULTI_INDEX_OR_DISABLED`,
+/// - there is an ORDER BY (a single index may satisfy the ordering; the union has
+///   no inherent sort order — deferred per #5668),
+/// - the table is WITHOUT ROWID (no rowid to dedup on, #5668 §2b),
+/// - the analyzer finds no fully-indexable top-level OR,
+/// - all branches resolve to the **same** index (a single-index scan covers it
+///   identically and more cheaply),
+/// - statistics are missing/stale (cannot cost honestly — defer to the existing
+///   rule-based / single-index path rather than guess), or
+/// - the union is not the cheapest alternative.
+fn select_or_aware_index_method(
     table_name: &str,
     where_clause: Option<&Expression>,
     order_by: Option<&[vibesql_ast::OrderByItem]>,
@@ -1892,11 +2174,8 @@ fn try_multi_index_or(
         return None;
     }
 
-    // ORDER BY out of scope for the conservative trigger: a single index may
-    // satisfy the ordering, and the union has no inherent sort order. Defer any
-    // ORDER BY query to the existing single-index / full-scan path so we never
-    // perturb ORDER BY plan optimizations. (PR 3+ can revisit under the cost
-    // model.)
+    // ORDER BY out of scope: a single index may satisfy the ordering, and the
+    // union has no inherent sort order. Defer to the existing path.
     if order_by.is_some() {
         return None;
     }
@@ -1921,7 +2200,68 @@ fn try_multi_index_or(
         return None;
     }
 
-    Some(IndexScanChoice::MultiIndexOr { branches: plan.branches, residual: plan.residual })
+    // Cost the three alternatives. We require real statistics to make an honest
+    // decision; without them, decline the union and let the existing rule-based
+    // / single-index path run (it never chose the union before, so this is a
+    // strict no-regression fallback).
+    let table_stats = table.get_statistics()?;
+    if table_stats.needs_refresh() {
+        return None;
+    }
+    let cost_estimator = CostEstimator::default();
+
+    let or_cost = multi_index_or_cost(&plan.branches, table_stats, &cost_estimator, database)?;
+
+    let single_index_cost = best_single_index_cost(
+        table_name,
+        where_clause,
+        order_by,
+        table_stats,
+        &cost_estimator,
+        database,
+    )
+    .map(|(_, _, cost)| cost);
+
+    // What the non-OR path would actually choose: a single index (if one is
+    // applicable via the normal selectivity-aware selection) or a full table
+    // scan. We must compare the OR-union against THAT decision, not against the
+    // raw table-scan cost — because the normal selection (`cost_based_index_selection`)
+    // deliberately prefers a selective index over a literally-cheaper table scan
+    // (see the `selectivity < 0.40` rule there). If we vetoed the union with the
+    // raw scan cost, we would reject a union that beats the very index the engine
+    // is about to use, which is incoherent. So:
+    //   - If a single index is applicable, the union competes head-to-head with
+    //     it (the scan is not a separate veto — the engine already preferred the
+    //     index over the scan for this selectivity).
+    //   - If NO single index is applicable, the non-OR fallback is a full scan,
+    //     so the union must beat the table scan to be worthwhile.
+    let single_index_applicable =
+        cost_based_index_selection(table_name, where_clause, order_by, database).is_some();
+    let table_scan_cost = cost_estimator.estimate_table_scan(table_stats);
+
+    let or_wins = match single_index_cost {
+        Some(c) if single_index_applicable => or_cost < c,
+        // No applicable single index — compete against the full table scan.
+        _ => or_cost < table_scan_cost,
+    };
+
+    if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+        eprintln!(
+            "[INDEX_SELECT] MULTI-INDEX OR cost-compare table={}: or={:.3} single={:?} (applicable={}) scan={:.3} -> {}",
+            table_name,
+            or_cost,
+            single_index_cost,
+            single_index_applicable,
+            table_scan_cost,
+            if or_wins { "OR wins" } else { "OR loses" }
+        );
+    }
+
+    if or_wins {
+        Some(IndexScanChoice::MultiIndexOr { branches: plan.branches, residual: plan.residual })
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -2223,5 +2563,280 @@ mod tests {
         let index = idx_cols(&["a", "b", "c"]);
         assert_eq!(count_pinned_index_columns(Some(&where_expr), &index), 2);
         assert_eq!(count_single_value_pinned_index_columns(Some(&where_expr), &index), 1);
+    }
+
+    // ---- OR-aware cost model (epic #5668, PR 3) -----------------------------
+    //
+    // These tests exercise `select_index_scan_method` against a real `Database`
+    // with computed statistics (via `ANALYZE`) and assert the **chosen access
+    // path** programmatically (the returned `IndexScanChoice` variant), per
+    // #5668 §2c / PR 3 acceptance. EQP text rendering + where9 un-skip is PR 4.
+    mod or_aware_cost {
+        use std::sync::Mutex;
+
+        use super::super::IndexScanChoice;
+
+        // `MULTI_INDEX_OR_DISABLED` is set via process-global `std::env::set_var`
+        // in the kill-switch test. Serialize ALL tests in this module so the flag
+        // toggle cannot race with the default-ON cost-decision tests.
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        /// Build a fresh `t1` mirroring the where9 fixture (`a INTEGER PRIMARY
+        /// KEY,b,c,d,e,f,g`) with the 99 canonical rows and single-column indexes
+        /// on b, c, d, then run `ANALYZE` so cost-based selection engages with
+        /// **real** column statistics (null counts, n_distinct, min/max).
+        fn where9_t1() -> vibesql_storage::Database {
+            let mut db = vibesql_storage::Database::new();
+            // The 7-column fixture rows from docs/reference/sqlite/test/where9.test.
+            // We only need columns a,b,c,d to be faithful for selection on b/c/d;
+            // e,f,g are filled with simple placeholders.
+            let inserts: &[(i64, Option<i64>, Option<i64>, Option<f64>)] = &WHERE9_ROWS;
+            run(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c, d, e, f, g)");
+            for &(a, b, c, d) in inserts {
+                let b_s = b.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into());
+                let c_s = c.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into());
+                let d_s = d.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into());
+                run(
+                    &mut db,
+                    &format!("INSERT INTO t1 VALUES ({a}, {b_s}, {c_s}, {d_s}, 0, 'x', 'y')"),
+                );
+            }
+            run(&mut db, "CREATE INDEX t1b ON t1(b)");
+            run(&mut db, "CREATE INDEX t1c ON t1(c)");
+            run(&mut db, "CREATE INDEX t1d ON t1(d)");
+            run(&mut db, "ANALYZE");
+            db
+        }
+
+        fn run(db: &mut vibesql_storage::Database, sql: &str) {
+            let stmt = vibesql_parser::Parser::parse_sql(sql)
+                .unwrap_or_else(|e| panic!("parse {sql}: {e:?}"));
+            match stmt {
+                vibesql_ast::Statement::CreateTable(c) => {
+                    crate::CreateTableExecutor::execute(&c, db).unwrap();
+                }
+                vibesql_ast::Statement::CreateIndex(c) => {
+                    crate::CreateIndexExecutor::execute(&c, db).unwrap();
+                }
+                vibesql_ast::Statement::Insert(i) => {
+                    crate::InsertExecutor::execute(db, &i).unwrap();
+                }
+                vibesql_ast::Statement::Analyze(a) => {
+                    crate::AnalyzeExecutor::execute(&a, db).unwrap();
+                }
+                other => panic!("unsupported setup statement: {other:?}"),
+            }
+        }
+
+        /// Parse a bare WHERE expression by parsing a SELECT and extracting it.
+        fn where_of(sql: &str) -> vibesql_ast::Expression {
+            let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+            let vibesql_ast::Statement::Select(select) = stmt else { panic!("not select") };
+            select.where_clause.expect("query has a WHERE clause")
+        }
+
+        fn choose(db: &vibesql_storage::Database, sql: &str) -> Option<IndexScanChoice> {
+            let where_expr = where_of(sql);
+            super::super::select_index_scan_method("t1", Some(&where_expr), None, db)
+        }
+
+        #[test]
+        fn where9_5_1_chooses_multi_index_or() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // c=31031 OR d IS NULL — two cheap equality/IS-NULL point seeks. The
+            // OR-union beats the single range search on the AND-clause b>1000, so
+            // MULTI-INDEX OR wins.
+            let db = where9_t1();
+            let choice = choose(&db, "SELECT a FROM t1 WHERE b>1000 AND (c=31031 OR d IS NULL)");
+            match choice {
+                Some(IndexScanChoice::MultiIndexOr { branches, .. }) => {
+                    assert_eq!(branches.len(), 2, "two OR branches");
+                }
+                other => panic!("expected MULTI-INDEX OR for where9-5.1, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn where9_5_3_does_not_choose_multi_index_or() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // c>=31031 OR d IS NULL — branch 1 is a RANGE scan (many rows). The
+            // OR-union of a range scan + IS-NULL seek is MORE expensive than a
+            // single index on the AND-clause `b>1000`, so the OR-aware cost model
+            // declines MULTI-INDEX OR and a single Regular index is chosen instead.
+            //
+            // This is the PR-3 conformance gate's contrast to where9-5.1: the
+            // equality-seek-vs-range-scan signal flips the decision purely on
+            // cost (or≈57 vs single≈29; for 5.1 it was or≈12 vs single≈19).
+            //
+            // NOTE: the *specific* single index here (SQLite renders `t1b (b>?)`)
+            // is decided by the pre-existing single-index selector's ranking of
+            // t1b vs t1c for an `AND`+`OR` clause, which is independent of this
+            // PR's OR-aware cost model and is the EQP-conformance concern of PR 4.
+            // PR 3 only guarantees the union is NOT chosen.
+            let db = where9_t1();
+            let choice = choose(&db, "SELECT a FROM t1 WHERE b>1000 AND (c>=31031 OR d IS NULL)");
+            assert!(
+                matches!(choice, Some(IndexScanChoice::Regular { .. })),
+                "where9-5.3 must choose a single index, NOT MULTI-INDEX OR, got {choice:?}"
+            );
+            assert!(
+                !matches!(choice, Some(IndexScanChoice::MultiIndexOr { .. })),
+                "a range OR-branch must NOT trigger MULTI-INDEX OR"
+            );
+        }
+
+        #[test]
+        fn pure_equality_or_over_two_indexes_chooses_multi_index_or() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // No AND-clause competitor: a pure equality OR over two distinct
+            // single-column indexes is the textbook MULTI-INDEX OR win.
+            let db = where9_t1();
+            let choice = choose(&db, "SELECT a FROM t1 WHERE c=31031 OR d IS NULL");
+            assert!(
+                matches!(choice, Some(IndexScanChoice::MultiIndexOr { .. })),
+                "pure equality/IS-NULL OR over two indexes should choose MULTI-INDEX OR, got {choice:?}"
+            );
+        }
+
+        #[test]
+        fn wide_range_or_does_not_choose_multi_index_or() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // c>=1001 matches essentially every non-NULL row (c's minimum is
+            // 1001), so the OR-union is at least a near-full scan + a seek — never
+            // cheaper than the plain alternatives. The honest cost says: do NOT
+            // use MULTI-INDEX OR. (It picks a single index or a full scan; either
+            // is acceptable — the point is the union must lose.)
+            let db = where9_t1();
+            let choice = choose(&db, "SELECT a FROM t1 WHERE c>=1001 OR d IS NULL");
+            assert!(
+                !matches!(choice, Some(IndexScanChoice::MultiIndexOr { .. })),
+                "a wide-range OR branch must not trigger MULTI-INDEX OR, got {choice:?}"
+            );
+        }
+
+        #[test]
+        fn kill_switch_disables_multi_index_or() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // The MULTI_INDEX_OR_DISABLED kill switch must still suppress the union
+            // even for a query the cost model would otherwise pick it for.
+            // SAFETY: serialized within this single-threaded test; restored before
+            // returning.
+            let db = where9_t1();
+            unsafe {
+                std::env::set_var("MULTI_INDEX_OR_DISABLED", "1");
+            }
+            let choice = choose(&db, "SELECT a FROM t1 WHERE c=31031 OR d IS NULL");
+            unsafe {
+                std::env::remove_var("MULTI_INDEX_OR_DISABLED");
+            }
+            assert!(
+                !matches!(choice, Some(IndexScanChoice::MultiIndexOr { .. })),
+                "kill switch must disable MULTI-INDEX OR, got {choice:?}"
+            );
+        }
+
+        // The 99 canonical where9 rows, projected to (a, b, c, d). NULLs preserved
+        // from the fixture (rows 90,91,92,96,97,99 carry NULLs in b/c/d).
+        const WHERE9_ROWS: [(i64, Option<i64>, Option<i64>, Option<f64>); 99] = [
+            (1, Some(11), Some(1001), Some(1.001)),
+            (2, Some(22), Some(1001), Some(2.002)),
+            (3, Some(33), Some(1001), Some(3.003)),
+            (4, Some(44), Some(2002), Some(4.004)),
+            (5, Some(55), Some(2002), Some(5.005)),
+            (6, Some(66), Some(2002), Some(6.006)),
+            (7, Some(77), Some(3003), Some(7.007)),
+            (8, Some(88), Some(3003), Some(8.008)),
+            (9, Some(99), Some(3003), Some(9.009)),
+            (10, Some(110), Some(4004), Some(10.01)),
+            (11, Some(121), Some(4004), Some(11.011)),
+            (12, Some(132), Some(4004), Some(12.012)),
+            (13, Some(143), Some(5005), Some(13.013)),
+            (14, Some(154), Some(5005), Some(14.014)),
+            (15, Some(165), Some(5005), Some(15.015)),
+            (16, Some(176), Some(6006), Some(16.016)),
+            (17, Some(187), Some(6006), Some(17.017)),
+            (18, Some(198), Some(6006), Some(18.018)),
+            (19, Some(209), Some(7007), Some(19.019)),
+            (20, Some(220), Some(7007), Some(20.02)),
+            (21, Some(231), Some(7007), Some(21.021)),
+            (22, Some(242), Some(8008), Some(22.022)),
+            (23, Some(253), Some(8008), Some(23.023)),
+            (24, Some(264), Some(8008), Some(24.024)),
+            (25, Some(275), Some(9009), Some(25.025)),
+            (26, Some(286), Some(9009), Some(26.026)),
+            (27, Some(297), Some(9009), Some(27.027)),
+            (28, Some(308), Some(10010), Some(28.028)),
+            (29, Some(319), Some(10010), Some(29.029)),
+            (30, Some(330), Some(10010), Some(30.03)),
+            (31, Some(341), Some(11011), Some(31.031)),
+            (32, Some(352), Some(11011), Some(32.032)),
+            (33, Some(363), Some(11011), Some(33.033)),
+            (34, Some(374), Some(12012), Some(34.034)),
+            (35, Some(385), Some(12012), Some(35.035)),
+            (36, Some(396), Some(12012), Some(36.036)),
+            (37, Some(407), Some(13013), Some(37.037)),
+            (38, Some(418), Some(13013), Some(38.038)),
+            (39, Some(429), Some(13013), Some(39.039)),
+            (40, Some(440), Some(14014), Some(40.04)),
+            (41, Some(451), Some(14014), Some(41.041)),
+            (42, Some(462), Some(14014), Some(42.042)),
+            (43, Some(473), Some(15015), Some(43.043)),
+            (44, Some(484), Some(15015), Some(44.044)),
+            (45, Some(495), Some(15015), Some(45.045)),
+            (46, Some(506), Some(16016), Some(46.046)),
+            (47, Some(517), Some(16016), Some(47.047)),
+            (48, Some(528), Some(16016), Some(48.048)),
+            (49, Some(539), Some(17017), Some(49.049)),
+            (50, Some(550), Some(17017), Some(50.05)),
+            (51, Some(561), Some(17017), Some(51.051)),
+            (52, Some(572), Some(18018), Some(52.052)),
+            (53, Some(583), Some(18018), Some(53.053)),
+            (54, Some(594), Some(18018), Some(54.054)),
+            (55, Some(605), Some(19019), Some(55.055)),
+            (56, Some(616), Some(19019), Some(56.056)),
+            (57, Some(627), Some(19019), Some(57.057)),
+            (58, Some(638), Some(20020), Some(58.058)),
+            (59, Some(649), Some(20020), Some(59.059)),
+            (60, Some(660), Some(20020), Some(60.06)),
+            (61, Some(671), Some(21021), Some(61.061)),
+            (62, Some(682), Some(21021), Some(62.062)),
+            (63, Some(693), Some(21021), Some(63.063)),
+            (64, Some(704), Some(22022), Some(64.064)),
+            (65, Some(715), Some(22022), Some(65.065)),
+            (66, Some(726), Some(22022), Some(66.066)),
+            (67, Some(737), Some(23023), Some(67.067)),
+            (68, Some(748), Some(23023), Some(68.068)),
+            (69, Some(759), Some(23023), Some(69.069)),
+            (70, Some(770), Some(24024), Some(70.07)),
+            (71, Some(781), Some(24024), Some(71.071)),
+            (72, Some(792), Some(24024), Some(72.072)),
+            (73, Some(803), Some(25025), Some(73.073)),
+            (74, Some(814), Some(25025), Some(74.074)),
+            (75, Some(825), Some(25025), Some(75.075)),
+            (76, Some(836), Some(26026), Some(76.076)),
+            (77, Some(847), Some(26026), Some(77.077)),
+            (78, Some(858), Some(26026), Some(78.078)),
+            (79, Some(869), Some(27027), Some(79.079)),
+            (80, Some(880), Some(27027), Some(80.08)),
+            (81, Some(891), Some(27027), Some(81.081)),
+            (82, Some(902), Some(28028), Some(82.082)),
+            (83, Some(913), Some(28028), Some(83.083)),
+            (84, Some(924), Some(28028), Some(84.084)),
+            (85, Some(935), Some(29029), Some(85.085)),
+            (86, Some(946), Some(29029), Some(86.086)),
+            (87, Some(957), Some(29029), Some(87.087)),
+            (88, Some(968), Some(30030), Some(88.088)),
+            (89, Some(979), Some(30030), Some(89.089)),
+            (90, None, Some(30030), Some(90.09)),
+            (91, Some(1001), None, Some(91.091)),
+            (92, Some(1012), Some(31031), None),
+            (93, Some(1023), Some(31031), Some(93.093)),
+            (94, Some(1034), Some(32032), Some(94.094)),
+            (95, Some(1045), Some(32032), Some(95.095)),
+            (96, None, None, Some(96.096)),
+            (97, Some(1067), Some(33033), None),
+            (98, Some(1078), Some(33033), Some(98.098)),
+            (99, None, None, None),
+        ];
     }
 }
