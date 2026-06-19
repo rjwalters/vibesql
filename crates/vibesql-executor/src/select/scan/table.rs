@@ -492,6 +492,16 @@ pub(crate) fn execute_table_scan(
                     );
                 }
             }
+            super::index_scan::IndexScanChoice::MultiIndexOr { .. } => {
+                // MULTI-INDEX OR (epic #5668). PR 1 only adds the plan
+                // representation + analyzer; selection never produces this
+                // variant yet, so this arm is unreachable. Execution lands in
+                // PR 2. The `unreachable!` documents the invariant without
+                // changing any existing behavior.
+                unreachable!(
+                    "MultiIndexOr is plan representation only in PR 1 and is never selected"
+                );
+            }
         }
     }
 
