@@ -24,12 +24,35 @@ set ::vibesql_path [file normalize [file join $::script_dir ".." "target" "relea
 set ::db_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
 set ::verbose 0
 
+# When set, emit a machine-readable per-test detail line for every test
+# outcome (pass/fail/skip). The Python runner (tcl_runner.py) parses these
+# lines to populate per-test rows in the tcl_test_results detail table.
+# Enabled via the --emit-detail argument or TCLTEST_EMIT_DETAIL env var.
+set ::emit_detail 0
+if {[info exists ::env(TCLTEST_EMIT_DETAIL)] && $::env(TCLTEST_EMIT_DETAIL) ne "" && $::env(TCLTEST_EMIT_DETAIL) ne "0"} {
+    set ::emit_detail 1
+}
+
 # Test counters
 set ::nTest 0
 set ::nPass 0
 set ::nFail 0
 set ::nSkip 0
 set ::failList {}
+
+# Emit a structured per-test detail line consumed by tcl_runner.py.
+#
+# Format: "##TCLTEST## <status>\t<name>"
+#   - status is one of: passed, failed, skipped
+#   - name is the test name (test names never contain tabs or newlines)
+#
+# The sentinel prefix lets the Python runner distinguish these lines from the
+# human-readable output, so the same stream serves both humans and the parser.
+proc emit_test_detail {status name} {
+    if {$::emit_detail} {
+        puts "##TCLTEST## $status\t$name"
+    }
+}
 
 # Track row changes for db changes command
 # Since each SQL execution is a separate process, we need to track changes ourselves
@@ -4500,6 +4523,7 @@ proc do_test {name script expected} {
         # Script error - always print failures
         incr ::nFail
         lappend ::failList $name
+        emit_test_detail failed $name
         puts "  $name... FAILED (error: $result)"
         return
     }
@@ -4510,12 +4534,14 @@ proc do_test {name script expected} {
         set result_str [normalize_result $result]
         if {[match_regex_pattern $result_str $expected]} {
             incr ::nPass
+            emit_test_detail passed $name
             if {$::verbose} {
                 puts "  $name... ok"
             }
         } else {
             incr ::nFail
             lappend ::failList $name
+            emit_test_detail failed $name
             puts "  $name... FAILED"
             puts "    Expected pattern: $expected"
             puts "    Got:              $result"
@@ -4529,6 +4555,7 @@ proc do_test {name script expected} {
 
     if {$result_norm eq $expected_norm} {
         incr ::nPass
+        emit_test_detail passed $name
         if {$::verbose} {
             puts "  $name... ok"
         }
@@ -4544,12 +4571,14 @@ proc do_test {name script expected} {
         set uses_count_helper [regexp "(?:^|\\s)count\\s+\\\{" $script]
         if {$uses_count_helper && [is_search_count_mismatch $result_norm $expected_norm]} {
             incr ::nPass
+            emit_test_detail passed $name
             if {$::verbose} {
                 puts "  $name... ok (search count ignored)"
             }
         } else {
             incr ::nFail
             lappend ::failList $name
+            emit_test_detail failed $name
             puts "  $name... FAILED"
             puts "    Expected: $expected"
             puts "    Got:      $result"
@@ -4970,6 +4999,7 @@ proc integrity_check {name} {
     }
     incr ::nFail
     lappend ::failList $name
+    emit_test_detail failed $name
     # Always print failures
     puts "  $name... FAILED (integrity check: $result)"
 }
@@ -5380,6 +5410,7 @@ proc finish_test {} {
 
 proc omit_test {name reason {append 0}} {
     incr ::nSkip
+    emit_test_detail skipped $name
     if {$::verbose} {
         puts "  $name... SKIPPED ($reason)"
     }
@@ -5860,6 +5891,7 @@ proc run_test_file {filename} {
         puts ""
         # Count as skipped but don't run any tests
         incr ::nSkip
+        emit_test_detail skipped "$basename (entire file)"
         return
     }
 
@@ -5965,6 +5997,9 @@ if {$argc > 0} {
     set test_file [lindex $argv 0]
     if {[lsearch $argv "--verbose"] >= 0 || [lsearch $argv "-v"] >= 0} {
         set ::verbose 1
+    }
+    if {[lsearch $argv "--emit-detail"] >= 0} {
+        set ::emit_detail 1
     }
     run_test_file $test_file
 } else {

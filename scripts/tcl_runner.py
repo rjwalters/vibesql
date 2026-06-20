@@ -29,6 +29,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, str(Path(__file__).parent))
 from tcl_parser import TclTestParser, ParsedTest, ParsedFile, TestType
 
+# Set to True by save_to_database() when more than 5% of detail-row inserts
+# fail. main() inspects this to exit non-zero so CI/callers notice that the
+# tcl_test_results detail table is incomplete.
+_SAVE_HAD_FATAL_INSERT_FAILURES = False
+
 
 @dataclass
 class TestResult:
@@ -703,83 +708,135 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
         print(f"Warning: Failed to save run summary: {e.stderr}")
         return
 
-    # Helper to escape SQL strings
-    def escape_sql(s: str, max_len: int = 1000) -> str:
+    # Helper to escape SQL string literals. Returns the full SQL literal
+    # including surrounding quotes (or NULL for empty values).
+    def sql_literal(s: Optional[str], max_len: int = 1000) -> str:
         if not s:
-            return ""
+            return "NULL"
         # Remove null bytes and other control chars that break subprocess/SQL
         s = s.replace('\x00', '')
-        # Replace single quotes with doubled quotes
-        s = s.replace("'", "''")
-        # Remove newlines and other control chars that might break the INSERT
+        # Collapse newlines/tabs so the INSERT stays on a manageable single
+        # logical value (the detail table is for analysis, not byte-fidelity).
         s = s.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-        # Truncate
-        return s[:max_len]
+        # Truncate before escaping so the doubled quotes are not split.
+        s = s[:max_len]
+        # SQL-escape single quotes by doubling them.
+        s = s.replace("'", "''")
+        return f"'{s}'"
 
-    # Get next result ID
-    result = subprocess.run(
-        [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(id), 0) FROM tcl_test_results", "--format", "raw"],
-        capture_output=True,
-        text=True,
+    def row_values(r: TestResult) -> str:
+        return (
+            f"({run_id}, "
+            f"{sql_literal(r.file_path, 500)}, "
+            f"{sql_literal(r.test_name, 200)}, "
+            f"{sql_literal(r.test_type, 64)}, "
+            f"{sql_literal(r.status, 32)}, "
+            f"{sql_literal(r.sql, 1000)}, "
+            f"{sql_literal(r.expected_output, 1000)}, "
+            f"{sql_literal(r.actual_output, 1000)}, "
+            f"{sql_literal(r.error_message, 500)}, "
+            f"{float(r.execution_time_ms or 0.0)}, "
+            f"{int(r.line_number or 0)})"
+        )
+
+    # Column list intentionally omits `id`: the schema declares it
+    # INTEGER PRIMARY KEY AUTOINCREMENT, so the engine assigns unique ids
+    # atomically. This removes the non-atomic SELECT MAX(id)+1 pattern that
+    # caused id collisions (and silently-dropped rows) under concurrent runs.
+    columns = (
+        "run_id, file_path, test_name, test_type, status, "
+        "sql_text, expected_output, actual_output, error_message, "
+        "execution_time_ms, line_number"
     )
-    try:
-        lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-        next_id = int(lines[-1]) + 1
-    except (ValueError, IndexError):
-        next_id = 1
 
-    # Insert results one at a time to avoid batch issues
-    for r in summary.results:
-        sql_escaped = escape_sql(r.sql, 1000)
-        expected = escape_sql(r.expected_output, 1000)
-        actual = escape_sql(r.actual_output, 1000)
-        error = escape_sql(r.error_message, 500)
-        file_path = escape_sql(r.file_path, 500)
-        test_name = escape_sql(r.test_name, 200)
-
-        insert_sql = f"""
-            INSERT INTO tcl_test_results (
-                id, run_id, file_path, test_name, test_type, status,
-                sql_text, expected_output, actual_output, error_message,
-                execution_time_ms, line_number
-            ) VALUES (
-                {next_id},
-                {run_id},
-                '{file_path}',
-                '{test_name}',
-                '{r.test_type}',
-                '{r.status}',
-                '{sql_escaped}',
-                '{expected}',
-                '{actual}',
-                '{error}',
-                {r.execution_time_ms},
-                {r.line_number}
-            );
-        """
-        next_id += 1
-
+    def insert_batch(rows: list[TestResult]) -> bool:
+        """Insert a batch of rows in one statement. Returns True on success."""
+        if not rows:
+            return True
+        values = ",\n".join(row_values(r) for r in rows)
+        insert_sql = f"INSERT INTO tcl_test_results ({columns}) VALUES\n{values};"
         try:
             subprocess.run(
                 [vibesql_path, db_path, "-c", insert_sql],
                 capture_output=True,
                 check=True,
             )
-        except subprocess.CalledProcessError as e:
-            # Silently skip problematic records
-            pass
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    total_rows = len(summary.results)
+    inserted = 0
+    failed_inserts = 0
+    failure_samples: list[str] = []
+
+    # Insert in batches for speed. If a batch fails (e.g. one malformed value),
+    # fall back to per-row inserts so we lose at most the genuinely-bad rows and
+    # can count/report exactly how many failed instead of silently dropping the
+    # entire batch.
+    BATCH_SIZE = 200
+    for start in range(0, total_rows, BATCH_SIZE):
+        batch = summary.results[start:start + BATCH_SIZE]
+        if insert_batch(batch):
+            inserted += len(batch)
+            continue
+        # Batch failed: retry each row individually.
+        for r in batch:
+            if insert_batch([r]):
+                inserted += 1
+            else:
+                failed_inserts += 1
+                if len(failure_samples) < 5:
+                    failure_samples.append(f"{r.file_path}::{r.test_name}")
+
+    if total_rows > 0:
+        fail_pct = 100.0 * failed_inserts / total_rows
+        print(
+            f"Detail rows: {inserted}/{total_rows} inserted into tcl_test_results "
+            f"(run_id={run_id}); {failed_inserts} failed ({fail_pct:.1f}%)."
+        )
+        if failed_inserts > 0:
+            for sample in failure_samples:
+                print(f"  failed insert: {sample}", file=sys.stderr)
+            if fail_pct > 5.0:
+                print(
+                    f"ERROR: {fail_pct:.1f}% of detail-row inserts failed "
+                    f"(threshold 5%). The tcl_test_results detail table is "
+                    f"incomplete for run_id={run_id}.",
+                    file=sys.stderr,
+                )
+                # Surface the failure to callers/CI without aborting before the
+                # run summary has been recorded.
+                global _SAVE_HAD_FATAL_INSERT_FAILURES
+                _SAVE_HAD_FATAL_INSERT_FAILURES = True
+            else:
+                print(
+                    f"WARNING: {failed_inserts} detail-row insert(s) failed for "
+                    f"run_id={run_id} (within 5% tolerance).",
+                    file=sys.stderr,
+                )
 
 
-def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 60.0) -> tuple[int, int, int, list[str]]:
+# Sentinel prefix the TCL shim uses for machine-readable per-test detail lines.
+# Format emitted by tester_vibesql.tcl: "##TCLTEST## <status>\t<name>"
+TCL_DETAIL_PREFIX = "##TCLTEST## "
+
+
+def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 60.0) -> tuple[int, int, int, list[str], list[TestResult]]:
     """
     Run a TCL test file using the native tclsh interpreter with our VibeSQL shim.
 
     This mode is for test files that use TCL constructs (like for loops) that
     can't be statically parsed.
 
-    Returns: (passed, failed, skipped, failed_test_names)
+    The shim is invoked with --emit-detail so it prints one machine-readable
+    "##TCLTEST## <status>\t<name>" line per test. We parse those into per-test
+    TestResult rows so native-TCL runs populate the tcl_test_results detail
+    table (not just the tcl_test_runs summary).
+
+    Returns: (passed, failed, skipped, failed_test_names, per_test_results)
     """
-    cmd = ["tclsh", shim_path, test_file]
+    cmd = ["tclsh", shim_path, test_file, "--emit-detail"]
     if verbose:
         cmd.append("--verbose")
 
@@ -803,8 +860,31 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
         failed = 0
         skipped = 0
         failed_tests = []
+        per_test_results: list[TestResult] = []
+        human_lines: list[str] = []
 
         for line in output.split('\n'):
+            # Machine-readable per-test detail line
+            if line.startswith(TCL_DETAIL_PREFIX):
+                payload = line[len(TCL_DETAIL_PREFIX):]
+                if '\t' in payload:
+                    status, test_name = payload.split('\t', 1)
+                else:
+                    status, test_name = payload, ""
+                status = status.strip()
+                test_name = test_name.strip()
+                per_test_results.append(TestResult(
+                    test_name=test_name,
+                    file_path=test_file,
+                    test_type="native-tcl",
+                    status=status,
+                    sql="",
+                ))
+                continue
+
+            # Non-detail line: keep for human output and summary parsing
+            human_lines.append(line)
+
             if 'Tests passed:' in line:
                 match = re.search(r'Tests passed:\s*(\d+)', line)
                 if match:
@@ -819,28 +899,29 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
                     skipped = int(match.group(1))
 
         # Extract failed test names if present
-        if 'Failed tests:' in output:
+        human_output = '\n'.join(human_lines)
+        if 'Failed tests:' in human_output:
             in_failed_section = False
-            for line in output.split('\n'):
+            for line in human_lines:
                 if 'Failed tests:' in line:
                     in_failed_section = True
                     continue
                 if in_failed_section and line.strip().startswith('-'):
                     failed_tests.append(line.strip().lstrip('- '))
 
-        # Always print output - in non-verbose mode, TCL shim only outputs failures
-        # In verbose mode, it outputs all test results
-        if output.strip():
-            print(output)
+        # Print human-readable output only (detail markers are stripped so they
+        # don't clutter the console).
+        if human_output.strip():
+            print(human_output)
 
-        return passed, failed, skipped, failed_tests
+        return passed, failed, skipped, failed_tests, per_test_results
 
     except subprocess.TimeoutExpired:
         print(f"Timeout running {test_file}")
-        return 0, 0, 0, ["TIMEOUT"]
+        return 0, 0, 0, ["TIMEOUT"], []
     except Exception as e:
         print(f"Error running {test_file}: {e}")
-        return 0, 0, 0, [str(e)]
+        return 0, 0, 0, [str(e)], []
 
 
 def main():
@@ -894,18 +975,20 @@ def main():
         total_failed = 0
         total_skipped = 0
         all_failed_tests = []
+        all_results: list[TestResult] = []
 
         for file_path in file_paths:
             if args.verbose:
                 print(f"\nRunning: {file_path}")
 
-            passed, failed, skipped, failed_tests = run_native_tcl(
+            passed, failed, skipped, failed_tests, results = run_native_tcl(
                 file_path, shim_path, verbose=args.verbose, timeout=args.timeout
             )
             total_passed += passed
             total_failed += failed
             total_skipped += skipped
             all_failed_tests.extend(failed_tests)
+            all_results.extend(results)
 
         # Print summary
         total_tests = total_passed + total_failed + total_skipped
@@ -940,11 +1023,13 @@ def main():
                 skipped_setup_failed=0,
                 parse_errors=0,
                 setup_failures=0,
-                results=[]  # Native TCL mode doesn't have individual test results yet
+                results=all_results,  # Per-test detail parsed from the shim's --emit-detail output
             )
             save_to_database(summary, args.results_db, args.vibesql)
             print(f"\nResults saved to: {args.results_db}")
 
+        if _SAVE_HAD_FATAL_INSERT_FAILURES:
+            sys.exit(2)
         if total_failed > 0:
             sys.exit(1)
         sys.exit(0)
@@ -985,6 +1070,8 @@ def main():
         print(f"JSON output: {args.output}")
 
     # Exit with error if there were failures
+    if _SAVE_HAD_FATAL_INSERT_FAILURES:
+        sys.exit(2)
     if summary.failed > 0:
         sys.exit(1)
 

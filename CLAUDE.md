@@ -48,6 +48,54 @@ make test-tcl-status
 - **CLI**: `scripts/tcltest` - Unified command-line interface
 - **Results**: `~/.vibesql/test_results/tcl_test_results.vbsql`
 
+### Results Tables and the Canonical Pass-Rate Query
+
+Results are stored in two tables in `~/.vibesql/test_results/tcl_test_results.vbsql`:
+
+- **`tcl_test_runs`** — one summary row per run (totals only). This is what `make test-tcl-status` reads (`ORDER BY run_id DESC LIMIT 1`).
+- **`tcl_test_results`** — one detail row per test (per-file, per-test status). Required for per-file failure analysis. The `id` column is `INTEGER PRIMARY KEY AUTOINCREMENT` so concurrent runs never collide.
+
+Both native-TCL mode (the default) and static-parsing mode now write per-test detail rows, so the summary and detail tables reconcile exactly.
+
+**Canonical "current pass rate" query** (run against `tcl_test_results`; its numbers match `make test-tcl-status` to within ±1 rounding):
+
+```sql
+SELECT
+  run_id,
+  COUNT(*) AS total,
+  SUM(CASE WHEN status='passed'  THEN 1 ELSE 0 END) AS passed,
+  SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END) AS failed,
+  SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped,
+  ROUND(
+    100.0 * SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END)
+      / NULLIF(SUM(CASE WHEN status IN ('passed','failed') THEN 1 ELSE 0 END), 0),
+    1
+  ) AS pass_rate
+FROM tcl_test_results
+WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results)
+GROUP BY run_id;
+```
+
+Run it with:
+
+```bash
+./target/release/vibesql ~/.vibesql/test_results/tcl_test_results.vbsql -c "<query above>"
+```
+
+**Per-file failure breakdown** (these per-file failure counts sum to the total-failed reported by `make test-tcl-status`):
+
+```sql
+SELECT file_path,
+  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
+FROM tcl_test_results
+WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results)
+GROUP BY file_path
+ORDER BY failed DESC
+LIMIT 10;
+```
+
+> **Source-of-truth note:** `make test-tcl-status` reads the `tcl_test_runs` summary table for the headline numbers. Any per-file or per-test analysis must query the `tcl_test_results` detail table using the queries above. The two reconcile because every run (native-TCL and static) now writes both. If a detail-row insert fails, `tcl_runner.py` logs it to stderr, counts it, and exits non-zero when more than 5% of inserts fail — so silent divergence between the tables cannot recur unnoticed.
+
 ### Exporting Results
 
 ```bash
