@@ -288,17 +288,29 @@ pub(crate) fn should_use_index_scan(
             // Tie-break order (all deterministic — no HashMap-iteration
             // dependence, which was the source of the where9-5.3
             // non-determinism, #5660):
-            //   1. more pinned columns (narrows more rows)
-            //   2. leading column seekable at top level (SEARCH beats SCAN)
+            //   1. leading column seekable at top level (SEARCH beats SCAN)
+            //   2. more pinned columns (narrows more rows)
             //   3. can satisfy ORDER BY
             //   4. lexicographically smaller index name (stable final tie-break)
+            //
+            // Seekability is the PRIMARY signal because a pin that does not
+            // produce a real seek is illusory: an `IN (SELECT ...)` subquery on
+            // the leading column counts as a "pinned" column for cost purposes,
+            // yet the seek extractor produces NO seek for it, so EQP renders that
+            // index as a bare `SCAN`. Ranking such a (pinned-but-SCAN) index
+            // above a genuinely-seekable (`SEARCH`) competitor is exactly the
+            // SEARCH-over-SCAN inversion this PR fixes (e.g. `x IN (SELECT ...)
+            // AND y>?` must pick `SEARCH ty (y>?)`, not `SCAN tx`). Any index
+            // with a genuine equality/`IN`-list pin on its leading column is
+            // itself top-level seekable, so this reordering only demotes the
+            // illusory-pin (IN-subquery / negated-predicate) case.
             let is_better = match &best_index {
                 None => true,
                 Some((best_name, best_pinned, best_seekable, best_can_order, _)) => {
-                    if pinned_columns != *best_pinned {
-                        pinned_columns > *best_pinned
-                    } else if top_level_seekable != *best_seekable {
+                    if top_level_seekable != *best_seekable {
                         top_level_seekable && !*best_seekable
+                    } else if pinned_columns != *best_pinned {
+                        pinned_columns > *best_pinned
                     } else if can_use_for_order != *best_can_order {
                         can_use_for_order && !*best_can_order
                     } else {
@@ -539,10 +551,79 @@ fn leading_column_seekable_top_level(expr: &Expression, leading: &IndexColumn) -
         // OR / Disjunction: nothing here is a top-level seek — stop descending.
         Expression::Disjunction(_)
         | Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, .. } => false,
-        // A leaf predicate: does it directly filter the leading column?
-        // Reuse `index_column_can_filter`, which on a leaf (no AND/OR to recurse
-        // through) reports exactly "is this column compared to a literal here".
-        other => index_column_can_filter(other, leading),
+        // A leaf predicate: does it directly produce an index *seek* on the
+        // leading column? We must mirror the seek extractor's leaf set EXACTLY
+        // (`extract_predicates_recursive` in explain.rs) so the two functions
+        // genuinely agree — otherwise the selector could deterministically pick
+        // a SCAN-rendering index over an available SEARCH-rendering one.
+        other => leaf_predicate_produces_seek(other, leading),
+    }
+}
+
+/// Whether a single leaf predicate produces an index *seek* on `leading`.
+///
+/// This mirrors the accepted leaf set of the seek extractor
+/// (`extract_predicates_recursive` in explain.rs) EXACTLY. It is deliberately
+/// NARROWER than [`index_column_can_filter`] / [`expression_filters_column`],
+/// which accept a wider predicate set (negated `BETWEEN`/`IN-list`, and
+/// `IN (SELECT ...)` subqueries) that the extractor produces NO seek for.
+/// Accepting those wider shapes here would make the selector report an index as
+/// "seekable at top level" when EQP actually renders it as a bare `SCAN`.
+///
+/// Accepted (matching the extractor):
+/// - comparison ops `= < <= > >=` (column compared to a literal/parameter),
+/// - `IsDistinctFrom { negated: true }` (NULL-safe `IS`, rendered as `=`),
+/// - `Between { negated: false }`,
+/// - `InList { negated: false }`.
+///
+/// Explicitly EXCLUDED (the extractor produces no seek for these):
+/// - `Expression::In` (IN-subquery),
+/// - negated `Between` / `InList`,
+/// - `!=` / `NotEqual`.
+fn leaf_predicate_produces_seek(expr: &Expression, leading: &IndexColumn) -> bool {
+    // For expression indexes, compare by structural hash against the indexed
+    // expression; for column indexes, compare against the column name.
+    let leaf_matches_index = |target: &Expression| -> bool {
+        match leading {
+            IndexColumn::Column { column_name, .. } => is_column_reference(target, column_name),
+            IndexColumn::Expression { expr: index_expr, .. } => {
+                ExpressionHasher::hash(target) == ExpressionHasher::hash(index_expr)
+            }
+        }
+    };
+
+    match expr {
+        Expression::BinaryOp { left, op, right } => {
+            match op {
+                vibesql_ast::BinaryOperator::Equal
+                | vibesql_ast::BinaryOperator::GreaterThan
+                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                | vibesql_ast::BinaryOperator::LessThan
+                | vibesql_ast::BinaryOperator::LessThanOrEqual => {
+                    // index_expr op literal OR literal op index_expr.
+                    // Comparing the indexed column/expr to another column is an
+                    // equijoin condition, not a seek bound, so require a literal
+                    // on the opposite side.
+                    (leaf_matches_index(left) && is_literal(right))
+                        || (is_literal(left) && leaf_matches_index(right))
+                }
+                // NotEqual and all other ops: no seek.
+                _ => false,
+            }
+        }
+        // IS (NULL-safe equals): negated=true is "IS NOT DISTINCT FROM" == "IS",
+        // rendered as `=`. negated=false (IS DISTINCT FROM) produces no seek.
+        Expression::IsDistinctFrom { left, right, negated: true } => {
+            (leaf_matches_index(left) && is_literal(right))
+                || (is_literal(left) && leaf_matches_index(right))
+        }
+        // BETWEEN expands to `>= AND <=` — a seek — but ONLY when not negated.
+        Expression::Between { expr, negated: false, .. } => leaf_matches_index(expr),
+        // IN-list is treated as equality — a seek — but ONLY when not negated.
+        Expression::InList { expr, negated: false, .. } => leaf_matches_index(expr),
+        // Everything else (IN-subquery, negated BETWEEN/InList, ...) is NOT a
+        // top-level seek; the extractor produces nothing for these.
+        _ => false,
     }
 }
 
@@ -1601,18 +1682,26 @@ pub(crate) fn cost_based_index_selection(
             // Track the best index.
             // Tie-break order (deterministic — eliminates the HashMap-iteration
             // dependence behind the where9-5.3 non-determinism, #5660):
-            //   1. more pinned columns (better filtering)
-            //   2. leading column seekable at top level (SEARCH beats SCAN)
+            //   1. leading column seekable at top level (SEARCH beats SCAN)
+            //   2. more pinned columns (better filtering)
             //   3. lower estimated cost
             //   4. lexicographically smaller index name (stable final tie-break)
+            //
+            // Seekability leads because a pin that yields no real seek (an
+            // `IN (SELECT ...)` subquery on the leading column counts as pinned
+            // for cost yet the extractor produces no seek → EQP renders `SCAN`)
+            // must not outrank a genuinely-seekable `SEARCH` competitor. Any
+            // genuine equality/`IN`-list pin is itself top-level seekable, so
+            // this only demotes the illusory-pin case. Mirrors the ordering in
+            // `should_use_index_scan`.
             if access_method.is_index_scan() {
                 let is_better = match &best_index {
                     None => true,
                     Some((best_name, best_method, best_pinned, best_seekable, _)) => {
-                        if pinned_columns != *best_pinned {
-                            pinned_columns > *best_pinned
-                        } else if top_level_seekable != *best_seekable {
+                        if top_level_seekable != *best_seekable {
                             top_level_seekable && !*best_seekable
+                        } else if pinned_columns != *best_pinned {
+                            pinned_columns > *best_pinned
                         } else if access_method.cost() != best_method.cost() {
                             access_method.cost() < best_method.cost()
                         } else {
@@ -2957,6 +3046,91 @@ mod tests {
                     &make_col("d")
                 ),
                 "d IS NULL is OR-nested → not a top-level seek"
+            );
+        }
+
+        #[test]
+        fn top_level_seekable_leaf_set_matches_seek_extractor() {
+            // Regression guard for #5694 (Judge feedback): the helper's leaf
+            // check must mirror the seek extractor's accepted set EXACTLY. The
+            // extractor produces NO seek for IN-subqueries or negated
+            // BETWEEN/IN-list, so the helper must report those as NOT seekable —
+            // otherwise the selector deterministically picks a SCAN-rendering
+            // index over an available SEARCH-rendering one.
+            let make_col = |name: &str| {
+                vec![vibesql_ast::IndexColumn::Column {
+                    column_name: name.to_string(),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                    prefix_length: None,
+                }]
+            };
+            let seekable = |sql: &str, col: &str| {
+                super::super::index_leading_column_seekable_at_top_level(
+                    Some(&where_of(sql)),
+                    &make_col(col),
+                )
+            };
+
+            // Shape 1: `x NOT BETWEEN 10 AND 20 AND y>100`.
+            // x's only predicate is a NEGATED BETWEEN → extractor yields no seek
+            // → x must NOT be top-level seekable (else we'd pick SCAN on x's
+            // index over SEARCH on y's). y>100 IS a top-level seek.
+            let sql1 = "SELECT a FROM t1 WHERE x NOT BETWEEN 10 AND 20 AND y>100";
+            assert!(
+                !seekable(sql1, "x"),
+                "negated BETWEEN on leading column must NOT be top-level seekable"
+            );
+            assert!(seekable(sql1, "y"), "y>100 is a top-level seek");
+
+            // Shape 2: `x IN (SELECT v FROM s) AND y>100`.
+            // x's only predicate is an IN-subquery (Expression::In) → extractor
+            // yields no seek → x must NOT be top-level seekable. y>100 IS a seek.
+            let sql2 = "SELECT a FROM t1 WHERE x IN (SELECT v FROM s) AND y>100";
+            assert!(
+                !seekable(sql2, "x"),
+                "IN (SELECT ...) on leading column must NOT be top-level seekable"
+            );
+            assert!(seekable(sql2, "y"), "y>100 is a top-level seek");
+
+            // Negated IN-list is likewise not a seek.
+            assert!(
+                !seekable("SELECT a FROM t1 WHERE x NOT IN (1, 2, 3) AND y>100", "x"),
+                "negated IN-list on leading column must NOT be top-level seekable"
+            );
+        }
+
+        #[test]
+        fn top_level_seekable_accepts_valid_between_and_inlist() {
+            // Guard against over-restriction: a NON-negated BETWEEN or IN-list on
+            // the leading column DOES produce a seek (the extractor expands
+            // BETWEEN to `>= AND <=` and treats IN-list as `=`), so the helper
+            // must still report these as top-level seekable.
+            let make_col = |name: &str| {
+                vec![vibesql_ast::IndexColumn::Column {
+                    column_name: name.to_string(),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                    prefix_length: None,
+                }]
+            };
+            let seekable = |sql: &str, col: &str| {
+                super::super::index_leading_column_seekable_at_top_level(
+                    Some(&where_of(sql)),
+                    &make_col(col),
+                )
+            };
+
+            assert!(
+                seekable("SELECT a FROM t1 WHERE x BETWEEN 10 AND 20", "x"),
+                "non-negated BETWEEN on leading column IS a top-level seek"
+            );
+            assert!(
+                seekable("SELECT a FROM t1 WHERE x IN (1, 2, 3)", "x"),
+                "non-negated IN-list on leading column IS a top-level seek"
+            );
+            // And `=` plus IS (NULL-safe equals) remain seeks.
+            assert!(
+                seekable("SELECT a FROM t1 WHERE x = 5", "x"),
+                "equality on leading column IS a top-level seek"
             );
         }
 
