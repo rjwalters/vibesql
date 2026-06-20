@@ -12,6 +12,10 @@ VibeSQL has achieved **100% SQL:1999 compliance** and **100% SQLLogicTest confor
 | TPC-H | 22/22 queries (100%) |
 | TPC-C | All transactions |
 | TPC-DS | 102/102 queries (100%) |
+| SQLite TCL suite (canonical) | Core SQL passing; remaining gaps are optimizer-plan parity — run `make test-tcl-status` for the live number |
+
+The curated suites above are at 100%. The canonical SQLite TCL suite (1,174 files) is the
+ongoing conformance frontier — see [Current Focus](#current-focus) and [Known Gaps](#known-gaps).
 
 See [HISTORY.md](HISTORY.md) for development timeline.
 
@@ -26,6 +30,13 @@ See [HISTORY.md](HISTORY.md) for development timeline.
 - TCP transport + multi-node test cluster (`make test-cluster`)
 - HTTP REST, GraphQL, CRUD, blob storage, prepared statements all routable through consensus
 - SSE subscriptions fed from applied consensus entries
+
+### Storage & Persistence (v0.2.0)
+- Versioned `VBSQL` binary snapshot format (currently format v9, evolved across MVCC and other additions) with optional zstd compression
+- CLI loads a database on open and auto-saves on exit (`auto_save = true`); JSON and SQL-dump load/save also supported
+- Write-ahead log engine — writer/reader/checkpoint/scheduler/truncate plus crash recovery (checkpoint + WAL replay with corruption tolerance), exposed via `enable_persistence()` / `sync_persistence()` / `emit_wal_*`. Currently opt-in, not the default durability path.
+- OPFS backend for browser/WASM (Origin Private File System)
+- Server-mode durability runs through the Raft log + MVCC state machine (see Replication & Consensus)
 
 ### MVCC (v0.2.0)
 - Snapshot isolation via `xmin`/`xmax` row stamps (behind `mvcc_enabled` feature)
@@ -60,10 +71,11 @@ See [HISTORY.md](HISTORY.md) for development timeline.
 
 ## Current Focus
 
-1. **Performance optimization** - TPC-C OLTP throughput improvements
-2. **Bug fixes** - Address issues as discovered
-3. **Documentation** - Keep guides current, improve API docs
-4. **Code quality** - Technical debt, test coverage
+1. **SQLite TCL conformance** - Closing the canonical-suite tail, concentrated in join/index/where optimizer-plan parity (e.g. MULTI-INDEX OR planning, EXPLAIN QUERY PLAN shape, type affinity, parser edge cases). This is where the bulk of recent commits land.
+2. **Performance optimization** - TPC-C OLTP throughput improvements
+3. **Bug fixes** - Address issues as discovered
+4. **Documentation** - Keep guides current, improve API docs
+5. **Code quality** - Technical debt, test coverage
 
 ## Future Ideas
 
@@ -73,9 +85,9 @@ These are potential enhancements, not committed work. They would only be pursued
 
 Compile SQL to native code for hot queries using LLVM or Cranelift. Could provide 5-10x speedup but requires significant architectural changes.
 
-### Persistent Storage
+### Default-On WAL Durability
 
-Durable on-disk storage with WAL and recovery. Current in-memory storage works well for many use cases.
+The WAL + crash-recovery engine already exists (see [Storage & Persistence](#storage--persistence-v020)) but is opt-in; the shipping default is in-memory with snapshot-on-exit. Wiring the WAL as the default durability path in the CLI and server — so an unclean shutdown recovers automatically — is the natural next step.
 
 ### Range-Sharded Replication
 
@@ -87,8 +99,10 @@ Pre-computed aggregations with incremental refresh. Useful for repeated complex 
 
 ## Known Gaps
 
-All major test suites are at 100% coverage. Current focus areas:
+The curated suites (SQLLogicTest, SQL:1999, TPC-H/DS/C) are at 100%. Open areas:
 
+- **SQLite TCL conformance** - canonical suite not yet fully green; remaining failures cluster in join/index/where optimizer-plan parity (run `make test-tcl-status` for current numbers)
+- **Default-on durability** - WAL/crash-recovery engine is built but opt-in; default mode is snapshot-on-exit, so an unclean shutdown loses changes since the last save
 - TPC-C OLTP throughput optimization
 - Query performance for complex analytical queries
 - Memory efficiency for large-scale workloads
