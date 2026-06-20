@@ -26,10 +26,19 @@ pub struct Repl {
 }
 
 impl Repl {
-    pub fn new(database: Option<String>, format: Option<OutputFormat>) -> anyhow::Result<Self> {
+    /// Construct a REPL.
+    ///
+    /// `wal` activates the opt-in WAL persistence path for file-backed
+    /// databases (see `SqlExecutor::new_with_wal`); `false` preserves the
+    /// default snapshot-on-exit behavior.
+    pub fn new(
+        database: Option<String>,
+        format: Option<OutputFormat>,
+        wal: bool,
+    ) -> anyhow::Result<Self> {
         // Treat :memory: as an in-memory database (no file path for saving)
         let database_path = database.as_ref().filter(|p| !is_memory_database(p)).cloned();
-        let executor = SqlExecutor::new(database)?;
+        let executor = SqlExecutor::new_with_wal(database, wal)?;
         let editor = DefaultEditor::new()?;
         let mut formatter = ResultFormatter::new();
 

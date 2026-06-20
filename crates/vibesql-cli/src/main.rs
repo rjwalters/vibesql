@@ -50,6 +50,7 @@ CONFIGURATION:
     [database]
     default_path = \"~/data.db\"    # Default database file
     auto_save = true               # Auto-save on exit
+    wal = false                    # Opt-in Write-Ahead Log durability (default off)
 
     [history]
     file = \"~/.vibesql_history\"   # Command history file
@@ -57,6 +58,21 @@ CONFIGURATION:
 
     [query]
     timeout_seconds = 0            # Query timeout (0 = no limit)
+
+WRITE-AHEAD LOG (WAL) DURABILITY (opt-in):
+  Set [database] wal = true to enable WAL persistence for a file-backed
+  database. When active for 'mydata.vbsql', the CLI maintains two sibling
+  files next to the database:
+    mydata.wal              # active write-ahead log
+    mydata-checkpoints/     # checkpoint archive (checkpoint_*.vchk)
+  On open the CLI recovers from the latest checkpoint and replays the WAL;
+  on \\save / clean exit it writes a checkpoint and truncates the WAL.
+
+  Phase 1 status: table schemas (DDL) survive an unclean shutdown, and
+  committed row data is durable as of the last checkpoint. Replay of row
+  changes (DML) written after the last checkpoint is not yet implemented,
+  so a crash between writes and the next checkpoint may lose those rows.
+  Default is wal = false, which preserves the snapshot-on-exit behavior.
 
 EXAMPLES:
   # Start interactive REPL with in-memory database
@@ -232,18 +248,22 @@ fn main() -> anyhow::Result<()> {
     // Use command-line database if provided, otherwise use config default
     let database = database_arg.or(config.database.default_path.clone());
 
+    // Opt-in WAL durability ([database] wal = true). Default false leaves the
+    // existing snapshot-on-exit behavior untouched.
+    let wal = config.database.wal;
+
     if let Some(cmd) = args.command {
         // Execute command mode
-        execute_command(&cmd, database, format)?;
+        execute_command(&cmd, database, format, wal)?;
     } else if let Some(file_path) = args.file {
         // Execute file mode
-        execute_file(&file_path, database, args.verbose, format)?;
+        execute_file(&file_path, database, args.verbose, format, wal)?;
     } else if args.stdin || is_stdin_piped() {
         // Execute from stdin
-        execute_stdin(database, args.verbose, format)?;
+        execute_stdin(database, args.verbose, format, wal)?;
     } else {
         // Interactive REPL mode
-        let mut repl = Repl::new(database, format)?;
+        let mut repl = Repl::new(database, format, wal)?;
         repl.run()?;
     }
 
@@ -374,8 +394,9 @@ fn execute_command(
     cmd: &str,
     database: Option<String>,
     format: Option<OutputFormat>,
+    wal: bool,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, false, format)?;
+    let mut executor = ScriptExecutor::new(database, false, format, wal)?;
     executor.execute_script(cmd)?;
     Ok(())
 }
@@ -385,8 +406,9 @@ fn execute_file(
     database: Option<String>,
     verbose: bool,
     format: Option<OutputFormat>,
+    wal: bool,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, verbose, format)?;
+    let mut executor = ScriptExecutor::new(database, verbose, format, wal)?;
     executor.execute_file(path)?;
     Ok(())
 }
@@ -395,8 +417,9 @@ fn execute_stdin(
     database: Option<String>,
     verbose: bool,
     format: Option<OutputFormat>,
+    wal: bool,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, verbose, format)?;
+    let mut executor = ScriptExecutor::new(database, verbose, format, wal)?;
     executor.execute_stdin()?;
     Ok(())
 }

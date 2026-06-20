@@ -8,6 +8,21 @@ fn test_list_schemas() {
 }
 
 #[test]
+fn test_wal_off_by_default() {
+    // `new` (and the default config) must never activate the WAL path.
+    let executor = SqlExecutor::new(None).unwrap();
+    assert!(!executor.wal_active());
+}
+
+#[test]
+fn test_wal_disabled_for_memory_database() {
+    // Documented edge case: requesting WAL for an in-memory database silently
+    // disables it (there is no file to attach the WAL to).
+    let executor = SqlExecutor::new_with_wal(Some(":memory:".to_string()), true).unwrap();
+    assert!(!executor.wal_active());
+}
+
+#[test]
 fn test_list_indexes_empty() {
     let executor = SqlExecutor::new(None).unwrap();
     // New database should have no indexes
