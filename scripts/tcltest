@@ -89,7 +89,7 @@ init_results_db() {
             );
 
             CREATE TABLE IF NOT EXISTS tcl_test_results (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_id INTEGER NOT NULL,
                 file_path TEXT NOT NULL,
                 test_name TEXT NOT NULL,
@@ -119,6 +119,55 @@ init_results_db() {
                 ALTER TABLE tcl_test_runs ADD COLUMN setup_failures INTEGER DEFAULT 0;
             " 2>/dev/null || true
         }
+
+        # Migrate tcl_test_results.id to INTEGER PRIMARY KEY AUTOINCREMENT.
+        # VibeSQL cannot ALTER a column's type/constraint, so detect the legacy
+        # (non-AUTOINCREMENT) schema and rebuild the table. sqlite_sequence only
+        # exists once a table uses AUTOINCREMENT, so its presence is the marker
+        # for an already-migrated DB.
+        local has_autoincrement
+        has_autoincrement="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name='tcl_test_results'
+              AND sql LIKE '%AUTOINCREMENT%'
+        " 2>/dev/null | tr -d '[:space:]')" || has_autoincrement=""
+
+        if [ "$has_autoincrement" != "1" ]; then
+            print_info "Migrating tcl_test_results to AUTOINCREMENT id..."
+            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+                CREATE TABLE tcl_test_results_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    file_path TEXT NOT NULL,
+                    test_name TEXT NOT NULL,
+                    test_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    sql_text TEXT,
+                    expected_output TEXT,
+                    actual_output TEXT,
+                    error_message TEXT,
+                    execution_time_ms REAL,
+                    line_number INTEGER,
+                    FOREIGN KEY (run_id) REFERENCES tcl_test_runs(run_id)
+                );
+                INSERT INTO tcl_test_results_new (
+                    id, run_id, file_path, test_name, test_type, status,
+                    sql_text, expected_output, actual_output, error_message,
+                    execution_time_ms, line_number
+                )
+                SELECT
+                    id, run_id, file_path, test_name, test_type, status,
+                    sql_text, expected_output, actual_output, error_message,
+                    execution_time_ms, line_number
+                FROM tcl_test_results;
+                DROP TABLE tcl_test_results;
+                ALTER TABLE tcl_test_results_new RENAME TO tcl_test_results;
+                CREATE INDEX IF NOT EXISTS idx_tcl_results_run ON tcl_test_results(run_id);
+                CREATE INDEX IF NOT EXISTS idx_tcl_results_file ON tcl_test_results(file_path);
+                CREATE INDEX IF NOT EXISTS idx_tcl_results_status ON tcl_test_results(status);
+            " 2>/dev/null && print_success "Migrated tcl_test_results to AUTOINCREMENT" \
+              || print_warning "tcl_test_results AUTOINCREMENT migration skipped (already migrated or unsupported)"
+        fi
     fi
 }
 
