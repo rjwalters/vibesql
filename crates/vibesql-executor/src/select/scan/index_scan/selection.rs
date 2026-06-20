@@ -16,6 +16,13 @@ use crate::evaluator::expression_hash::ExpressionHasher;
 
 use crate::optimizer::index_planner::{IndexPlanner, SkipScanInfo};
 
+/// Conservative selectivity assumed for an **expression-index** predicate when no
+/// column histogram is available. Matches the flat 0.33 fallback `estimate_selectivity`
+/// returns for predicates it cannot model from statistics, so an expression index
+/// (e.g. `CREATE INDEX t1a1 ON t1(substr(a,1,12))`) is costed the same whether the
+/// query routes through the column path or the expression path.
+const EXPRESSION_INDEX_SELECTIVITY: f64 = 0.33;
+
 /// Classification of an OR branch's index lookup shape.
 ///
 /// SQLite routes `IS NULL` branches to a *different* index lookup than equality
@@ -1588,54 +1595,70 @@ pub(crate) fn cost_based_index_selection(
                 );
             }
 
-            // For expression indexes, we don't have column statistics
-            // Fall back to rule-based selection for them
-            if first_indexed_column.is_expression() {
+            // Compute the per-index (selectivity, access_method).
+            //
+            // Expression indexes (`CREATE INDEX t1a1 ON t1(substr(a,1,12))`) carry
+            // no per-column statistics, so they cannot be costed via the usual
+            // column-histogram path. Rather than bail out of the cost comparison
+            // entirely (which let a less-selective *column* index on the same
+            // table win, and broke the `indexexpr1`/`indexexpr2` EQP parity
+            // tests), cost them conservatively: assume the flat 0.33 selectivity
+            // VibeSQL uses for predicates with no histogram and let the
+            // expression index compete in the `best_index` comparison below. This
+            // mirrors `estimate_selectivity`'s expression-index default.
+            let (selectivity, access_method) = if first_indexed_column.is_expression() {
+                let selectivity =
+                    if where_clause.is_some() { EXPRESSION_INDEX_SELECTIVITY } else { 1.0 };
+                let access_method =
+                    cost_estimator.choose_access_method_no_col_stats(table_stats, selectivity);
                 if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
                     eprintln!(
-                        "[INDEX_SELECT] {} is expression index, will use rule-based selection",
-                        index_name
+                        "[INDEX_SELECT] {} is expression index, costed conservatively (selectivity={:.4})",
+                        index_name, selectivity
                     );
                 }
+                // Still record that a stats-free applicable index exists so the
+                // post-loop rule-based fallback fires if no index ends up chosen
+                // (e.g. the conservative cost lost to a table scan).
                 has_applicable_index_without_stats = true;
-                continue;
-            }
-
-            // Get column statistics for the indexed column (case-insensitive lookup)
-            // For expression indexes, we don't have direct column stats - fall back to rule-based
-            let col_stats =
-                column_name.and_then(|cn| get_column_stats_ignore_case(&table_stats.columns, cn));
-            if col_stats.is_none() {
-                // Track that we found an applicable index without column stats
-                // We'll fall back to rule-based selection if cost-based fails
-                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                    let col_debug = column_name.unwrap_or("<expression>");
-                    eprintln!(
-                        "[INDEX_SELECT] {} no column stats for {}, will fallback",
-                        index_name, col_debug
-                    );
-                }
-                has_applicable_index_without_stats = true;
-                continue; // No stats for this column, try next index
-            }
-            let col_stats = col_stats.unwrap();
-            // At this point, column_name must be Some since we got col_stats
-            let column_name = column_name.unwrap();
-
-            if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
-                eprintln!("[INDEX_SELECT] {} has column stats for {}", index_name, column_name);
-            }
-
-            // Estimate selectivity based on WHERE clause
-            let selectivity = if let Some(where_expr) = where_clause {
-                estimate_selectivity(where_expr, column_name, col_stats)
+                (selectivity, access_method)
             } else {
-                1.0 // No WHERE clause means all rows
-            };
+                // Get column statistics for the indexed column (case-insensitive lookup)
+                let col_stats = column_name
+                    .and_then(|cn| get_column_stats_ignore_case(&table_stats.columns, cn));
+                if col_stats.is_none() {
+                    // Track that we found an applicable index without column stats
+                    // We'll fall back to rule-based selection if cost-based fails
+                    if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                        let col_debug = column_name.unwrap_or("<expression>");
+                        eprintln!(
+                            "[INDEX_SELECT] {} no column stats for {}, will fallback",
+                            index_name, col_debug
+                        );
+                    }
+                    has_applicable_index_without_stats = true;
+                    continue; // No stats for this column, try next index
+                }
+                let col_stats = col_stats.unwrap();
+                // At this point, column_name must be Some since we got col_stats
+                let column_name = column_name.unwrap();
 
-            // Use cost estimator to decide
-            let access_method =
-                cost_estimator.choose_access_method(table_stats, Some(col_stats), selectivity);
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!("[INDEX_SELECT] {} has column stats for {}", index_name, column_name);
+                }
+
+                // Estimate selectivity based on WHERE clause
+                let selectivity = if let Some(where_expr) = where_clause {
+                    estimate_selectivity(where_expr, column_name, col_stats)
+                } else {
+                    1.0 // No WHERE clause means all rows
+                };
+
+                // Use cost estimator to decide
+                let access_method =
+                    cost_estimator.choose_access_method(table_stats, Some(col_stats), selectivity);
+                (selectivity, access_method)
+            };
 
             if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
                 eprintln!(
