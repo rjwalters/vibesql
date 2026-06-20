@@ -2502,7 +2502,6 @@ array set vibesql_skip_tests {
     where9-9.1 "Uses INDEXED BY hint - SQLite-specific"
     where9-10.1 "Uses INDEXED BY hint - SQLite-specific"
     where9-10.2 "Uses INDEXED BY hint - SQLite-specific"
-    where9-5.3 "Pre-existing non-deterministic single-index selector picks t1c/SCAN instead of t1b/SEARCH(b>?) - real optimizer gap, tracked in #5692"
 
     func-10.1 "Uses testfunc - SQLite test extension"
     func-10.2 "Uses testfunc - SQLite test extension"
