@@ -384,8 +384,7 @@ mod tests {
     fn test_columnar_hash_join_left_outer_preserves_matched_nulls() {
         // Left: a single row with key 'X'
         let left_columns = vec![ColumnArray::String(Arc::new(vec!["X".into()]), None)];
-        let left_batch =
-            ColumnarBatch::from_columns(left_columns, Some(vec!["x".into()])).unwrap();
+        let left_batch = ColumnarBatch::from_columns(left_columns, Some(vec!["x".into()])).unwrap();
 
         // Right: three rows all matching key 'X', but row index 1 has c = NULL.
         // c is the value column (col 0), d is the join key (col 1).
@@ -394,14 +393,10 @@ mod tests {
                 Arc::new(vec![5, 0, 7]),                  // 0 is placeholder for NULL
                 Some(Arc::new(vec![false, true, false])), // row 1 is NULL
             ),
-            ColumnArray::String(
-                Arc::new(vec!["X".into(), "X".into(), "X".into()]),
-                None,
-            ),
+            ColumnArray::String(Arc::new(vec!["X".into(), "X".into(), "X".into()]), None),
         ];
         let right_batch =
-            ColumnarBatch::from_columns(right_columns, Some(vec!["c".into(), "d".into()]))
-                .unwrap();
+            ColumnarBatch::from_columns(right_columns, Some(vec!["c".into(), "d".into()])).unwrap();
 
         // LEFT JOIN t1 ON d = x — three matches.
         // left key col = 0 (x), right key col = 1 (d).
@@ -410,14 +405,79 @@ mod tests {
 
         let rows = result.to_rows().unwrap();
         // Result columns are: x (0), c (1), d (2). Exactly one c must be NULL.
-        let null_c_count = rows
-            .iter()
-            .filter(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Null)))
-            .count();
+        let null_c_count =
+            rows.iter().filter(|r| matches!(r.get(1), Some(vibesql_types::SqlValue::Null))).count();
         assert_eq!(
             null_c_count, 1,
             "matched-row NULL in c must be preserved; got rows: {:?}",
             rows
+        );
+    }
+
+    /// Regression test for issue #5696: LEFT OUTER JOIN must emit every left row
+    /// exactly once, in left-table insertion order — matched and unmatched rows
+    /// interleaved by position, NOT all matches first followed by all unmatched
+    /// rows. The columnar probe previously collected matched rows in a first pass
+    /// then appended NULL-padded unmatched rows at the end, producing a
+    /// "matches-then-unmatched" order that diverged from SQLite across ~302 join
+    /// tests. This test asserts positional ordering, which earlier `.find()`-by-
+    /// value tests did not catch.
+    #[test]
+    fn test_columnar_hash_join_left_outer_preserves_left_order() {
+        // Left: ids 10, 20, 30, 40 in insertion order.
+        let left_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![10, 20, 30, 40]), None),
+            ColumnArray::String(
+                Arc::new(vec!["ten".into(), "twenty".into(), "thirty".into(), "forty".into()]),
+                None,
+            ),
+        ];
+        let left_batch =
+            ColumnarBatch::from_columns(left_columns, Some(vec!["id".into(), "val".into()]))
+                .unwrap();
+
+        // Right: only 20 and 40 match — so 10 (first) and 30 (third) are unmatched.
+        // If unmatched rows were appended at the end, the output order would be
+        // 20, 40, 10, 30 instead of the correct 10, 20, 30, 40.
+        let right_columns = vec![
+            ColumnArray::Int64(Arc::new(vec![20, 40]), None),
+            ColumnArray::String(Arc::new(vec!["r-twenty".into(), "r-forty".into()]), None),
+        ];
+        let right_batch =
+            ColumnarBatch::from_columns(right_columns, Some(vec!["id".into(), "rval".into()]))
+                .unwrap();
+
+        // LEFT OUTER JOIN on id (left col 0 = right col 0).
+        let result = columnar_hash_join_left_outer(&left_batch, &right_batch, 0, 0).unwrap();
+        assert_eq!(result.row_count(), 4);
+
+        let rows = result.to_rows().unwrap();
+        let ids: Vec<i64> = rows
+            .iter()
+            .map(|r| match r.get(0) {
+                Some(vibesql_types::SqlValue::Integer(id)) => *id,
+                other => panic!("expected integer left id, got {:?}", other),
+            })
+            .collect();
+
+        // The defining assertion: left rows appear in insertion order, with
+        // unmatched rows (10, 30) interleaved in their original positions.
+        assert_eq!(
+            ids,
+            vec![10, 20, 30, 40],
+            "LEFT OUTER JOIN must preserve left-table row order; got {:?}",
+            rows
+        );
+
+        // And the unmatched rows (10, 30) must carry NULL on the right side.
+        assert!(matches!(rows[0].get(3), Some(vibesql_types::SqlValue::Null)));
+        assert!(matches!(rows[2].get(3), Some(vibesql_types::SqlValue::Null)));
+        // Matched rows (20, 40) carry their right value.
+        assert!(
+            matches!(rows[1].get(3), Some(vibesql_types::SqlValue::Varchar(s)) if s.as_str() == "r-twenty")
+        );
+        assert!(
+            matches!(rows[3].get(3), Some(vibesql_types::SqlValue::Varchar(s)) if s.as_str() == "r-forty")
         );
     }
 }
