@@ -359,4 +359,61 @@ impl CostEstimator {
             AccessMethod::TableScan { estimated_cost: table_scan_cost }
         }
     }
+
+    /// Choose an access method for an index whose leading column is an
+    /// **expression** (e.g. `CREATE INDEX t1a1 ON t1(substr(a,1,12))`).
+    ///
+    /// Expression indexes carry no per-column statistics (we only collect stats
+    /// for plain columns), so [`choose_access_method`] cannot cost them and would
+    /// fall back to a table scan, leaving the expression index unable to compete
+    /// in the planner's cost comparison. This variant lets the expression index
+    /// participate: it synthesizes a conservative index-scan cost from the table
+    /// statistics and a caller-supplied `selectivity` (typically the flat 0.33
+    /// estimate VibeSQL uses for predicates with no column histogram), treating
+    /// the index as if it had one distinct entry per row (the worst case for
+    /// B-tree depth / entries scanned). If even that conservative estimate beats
+    /// the table scan, the index wins.
+    pub fn choose_access_method_no_col_stats(
+        &self,
+        table_stats: &TableStatistics,
+        selectivity: f64,
+    ) -> AccessMethod {
+        let table_scan_cost = self.estimate_table_scan(table_stats);
+        let index_scan_cost = self.estimate_index_scan_no_col_stats(table_stats, selectivity);
+
+        if index_scan_cost < table_scan_cost {
+            AccessMethod::IndexScan {
+                estimated_cost: index_scan_cost,
+                estimated_rows: (table_stats.row_count as f64 * selectivity) as usize,
+            }
+        } else {
+            AccessMethod::TableScan { estimated_cost: table_scan_cost }
+        }
+    }
+
+    /// Conservative index-scan cost when no column statistics are available
+    /// (expression indexes). Mirrors [`estimate_index_scan`] but uses the table
+    /// row count as a stand-in for the column's distinct-value count, which is
+    /// the worst case for the index-traversal and entries-scanned terms.
+    fn estimate_index_scan_no_col_stats(
+        &self,
+        table_stats: &TableStatistics,
+        selectivity: f64,
+    ) -> f64 {
+        let row_count = table_stats.row_count as f64;
+        let rows_fetched = row_count * selectivity;
+
+        // Treat every row as a distinct index entry (no histogram available).
+        let index_entries = row_count.max(1.0);
+        let index_depth = (index_entries.log10() / 100_f64.log10()).ceil().max(1.0);
+        let index_traversal_cost = index_depth * self.random_page_cost;
+
+        let index_entries_scanned = index_entries * selectivity;
+        let index_scan_cost = index_entries_scanned * self.cpu_index_tuple_cost;
+
+        let table_fetch_cost = rows_fetched * self.random_page_cost;
+        let cpu_cost = rows_fetched * self.cpu_tuple_cost;
+
+        index_traversal_cost + index_scan_cost + table_fetch_cost + cpu_cost
+    }
 }
