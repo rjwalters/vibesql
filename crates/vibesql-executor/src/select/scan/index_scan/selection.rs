@@ -168,9 +168,10 @@ pub(crate) fn should_use_index_scan(
         String,
         usize,
         bool,
+        bool,
         Option<Vec<(String, vibesql_ast::OrderDirection)>>,
     )> = None;
-    // (index_name, pinned_count, can_use_for_order, sorted_columns)
+    // (index_name, pinned_count, top_level_seekable, can_use_for_order, sorted_columns)
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
@@ -274,32 +275,52 @@ pub(crate) fn should_use_index_scan(
                 None
             };
 
-            // Compare with best index so far
-            // Prefer: more pinned columns > can satisfy ORDER BY > first found
+            // Whether this index's leading column yields a real index *seek*
+            // from a top-level AND conjunct (renders `SEARCH ... (col op ?)`)
+            // rather than degrading to a bare `SCAN` because its only predicate
+            // is buried inside an OR branch. This is the principled
+            // SEARCH-over-SCAN tie-break that fixes where9-5.3 (`b>1000 AND
+            // (c>=31031 OR d IS NULL)` must pick `t1b`/SEARCH over `t1c`/SCAN).
+            let top_level_seekable =
+                index_leading_column_seekable_at_top_level(where_clause, &index_metadata.columns);
+
+            // Compare with best index so far.
+            // Tie-break order (all deterministic — no HashMap-iteration
+            // dependence, which was the source of the where9-5.3
+            // non-determinism, #5660):
+            //   1. more pinned columns (narrows more rows)
+            //   2. leading column seekable at top level (SEARCH beats SCAN)
+            //   3. can satisfy ORDER BY
+            //   4. lexicographically smaller index name (stable final tie-break)
             let is_better = match &best_index {
                 None => true,
-                Some((_, best_pinned, best_can_order, _)) => {
-                    // More pinned columns = better (narrows down rows more)
-                    if pinned_columns > *best_pinned {
-                        true
-                    } else if pinned_columns == *best_pinned {
-                        // Same pinned count: prefer one that can satisfy ORDER BY
+                Some((best_name, best_pinned, best_seekable, best_can_order, _)) => {
+                    if pinned_columns != *best_pinned {
+                        pinned_columns > *best_pinned
+                    } else if top_level_seekable != *best_seekable {
+                        top_level_seekable && !*best_seekable
+                    } else if can_use_for_order != *best_can_order {
                         can_use_for_order && !*best_can_order
                     } else {
-                        false
+                        index_name.as_str() < best_name.as_str()
                     }
                 }
             };
 
             if is_better {
-                best_index =
-                    Some((index_name.clone(), pinned_columns, can_use_for_order, sorted_columns));
+                best_index = Some((
+                    index_name.clone(),
+                    pinned_columns,
+                    top_level_seekable,
+                    can_use_for_order,
+                    sorted_columns,
+                ));
             }
         }
     }
 
     // Return the best index if we found one
-    if let Some((index_name, _, _, sorted_columns)) = best_index {
+    if let Some((index_name, _, _, _, sorted_columns)) = best_index {
         return Some((index_name, sorted_columns));
     }
 
@@ -462,6 +483,66 @@ pub(crate) fn index_column_can_filter(where_expr: &Expression, index_col: &Index
         IndexColumn::Expression { expr, .. } => {
             expression_filters_index_expression(where_expr, expr)
         }
+    }
+}
+
+/// Whether the leading column of `index_columns` is constrained by a predicate
+/// that lives in a **top-level conjunct** of `where_clause` — i.e. a predicate
+/// that survives as an index *seek/range bound* (`SEARCH ... (col op ?)`) rather
+/// than degrading to a full `SCAN`.
+///
+/// ## Why this is the SEARCH-vs-SCAN distinguisher (where9-5.3)
+///
+/// `extract_index_predicates` (the EQP / runtime seek extractor) descends into
+/// `AND`/`Conjunction`/`BETWEEN` but **not** into `OR`/`Disjunction`: only a
+/// predicate reachable through top-level AND structure becomes an index seek.
+/// A leading column referenced *only* inside an OR branch (e.g. `c>=31031` in
+/// `b>1000 AND (c>=31031 OR d IS NULL)`) yields **no** extractable predicate, so
+/// that index renders as a bare `SCAN` — strictly worse than a `SEARCH` range
+/// seek on the AND-clause column `b>1000`.
+///
+/// `index_column_can_filter` cannot make this distinction: it descends into OR
+/// (so it reports `true` for both `t1b` and `t1c`), which is exactly why the
+/// pre-fix selector could pick `t1c`/SCAN. This predicate mirrors the seek
+/// extractor's descent rule so the selector prefers the index that actually
+/// produces a seek. It is the general, query-shape-driven signal — not a
+/// where9-5.3 special case.
+pub(crate) fn index_leading_column_seekable_at_top_level(
+    where_clause: Option<&Expression>,
+    index_columns: &[IndexColumn],
+) -> bool {
+    let where_clause = match where_clause {
+        Some(expr) => expr,
+        None => return false,
+    };
+    let leading = match index_columns.first() {
+        Some(col) => col,
+        None => return false,
+    };
+    leading_column_seekable_top_level(where_clause, leading)
+}
+
+/// Recursive helper for [`index_leading_column_seekable_at_top_level`]. Descends
+/// through top-level AND structure only (`Conjunction` / `BinaryOp { And }`),
+/// matching the descent rule of the seek extractor; an `OR`/`Disjunction` node
+/// short-circuits to `false` because nothing inside it is a top-level seek.
+fn leading_column_seekable_top_level(expr: &Expression, leading: &IndexColumn) -> bool {
+    match expr {
+        // AND structure: a top-level seek may live in any conjunct.
+        Expression::Conjunction(exprs) => {
+            exprs.iter().any(|e| leading_column_seekable_top_level(e, leading))
+        }
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+            leading_column_seekable_top_level(left, leading)
+                || leading_column_seekable_top_level(right, leading)
+        }
+        // OR / Disjunction: nothing here is a top-level seek — stop descending.
+        Expression::Disjunction(_)
+        | Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Or, .. } => false,
+        // A leaf predicate: does it directly filter the leading column?
+        // Reuse `index_column_can_filter`, which on a leaf (no AND/OR to recurse
+        // through) reports exactly "is this column compared to a literal here".
+        other => index_column_can_filter(other, leading),
     }
 }
 
@@ -1333,9 +1414,10 @@ pub(crate) fn cost_based_index_selection(
         String,
         AccessMethod,
         usize,
+        bool,
         Option<Vec<(String, vibesql_ast::OrderDirection)>>,
     )> = None;
-    // (index_name, access_method, pinned_count, sorted_columns)
+    // (index_name, access_method, pinned_count, top_level_seekable, sorted_columns)
     let mut has_applicable_index_without_stats = false;
 
     for index_name in &indexes {
@@ -1509,27 +1591,44 @@ pub(crate) fn cost_based_index_selection(
                 None
             };
 
-            // Track the best index
-            // Priority: more pinned columns (better filtering) > lower cost
+            // Whether this index's leading column yields a real index *seek*
+            // from a top-level AND conjunct (`SEARCH ... (col op ?)`) rather than
+            // a bare `SCAN` (only OR-nested predicates). See
+            // `index_leading_column_seekable_at_top_level`.
+            let top_level_seekable =
+                index_leading_column_seekable_at_top_level(where_clause, &index_metadata.columns);
+
+            // Track the best index.
+            // Tie-break order (deterministic — eliminates the HashMap-iteration
+            // dependence behind the where9-5.3 non-determinism, #5660):
+            //   1. more pinned columns (better filtering)
+            //   2. leading column seekable at top level (SEARCH beats SCAN)
+            //   3. lower estimated cost
+            //   4. lexicographically smaller index name (stable final tie-break)
             if access_method.is_index_scan() {
                 let is_better = match &best_index {
                     None => true,
-                    Some((_, best_method, best_pinned, _)) => {
-                        // More pinned columns is always better (filters more rows)
-                        if pinned_columns > *best_pinned {
-                            true
-                        } else if pinned_columns == *best_pinned {
-                            // Same pinned count: prefer lower cost
+                    Some((best_name, best_method, best_pinned, best_seekable, _)) => {
+                        if pinned_columns != *best_pinned {
+                            pinned_columns > *best_pinned
+                        } else if top_level_seekable != *best_seekable {
+                            top_level_seekable && !*best_seekable
+                        } else if access_method.cost() != best_method.cost() {
                             access_method.cost() < best_method.cost()
                         } else {
-                            false
+                            index_name.as_str() < best_name.as_str()
                         }
                     }
                 };
 
                 if is_better {
-                    best_index =
-                        Some((index_name.clone(), access_method, pinned_columns, sorted_columns));
+                    best_index = Some((
+                        index_name.clone(),
+                        access_method,
+                        pinned_columns,
+                        top_level_seekable,
+                        sorted_columns,
+                    ));
                 }
             } else if selectivity < 0.40 && can_use_for_where {
                 // Cost-based chose table scan, but selectivity is good enough for index
@@ -1548,7 +1647,7 @@ pub(crate) fn cost_based_index_selection(
     }
 
     // Return the best index if we found one
-    if let Some((index_name, _, _, sorted_columns)) = best_index {
+    if let Some((index_name, _, _, _, sorted_columns)) = best_index {
         if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
             eprintln!("[INDEX_SELECT] selected best_index={} for table={}", index_name, table_name);
         }
@@ -2776,20 +2875,88 @@ mod tests {
             // equality-seek-vs-range-scan signal flips the decision purely on
             // cost (or≈57 vs single≈29; for 5.1 it was or≈12 vs single≈19).
             //
-            // NOTE: the *specific* single index here (SQLite renders `t1b (b>?)`)
-            // is decided by the pre-existing single-index selector's ranking of
-            // t1b vs t1c for an `AND`+`OR` clause, which is independent of this
-            // PR's OR-aware cost model and is the EQP-conformance concern of PR 4.
-            // PR 3 only guarantees the union is NOT chosen.
+            // The *specific* single index here (SQLite renders `t1b (b>?)`) is
+            // decided by the single-index selector's ranking of t1b vs t1c for an
+            // `AND`+`OR` clause. With the #5692 fix this is deterministic: t1b is
+            // chosen because its leading column has a top-level seekable predicate
+            // (`b>1000` → SEARCH), whereas t1c's only predicate is OR-nested
+            // (`c>=31031` → would degrade to SCAN). See
+            // `index_leading_column_seekable_at_top_level`.
             let db = where9_t1();
             let choice = choose(&db, "SELECT a FROM t1 WHERE b>1000 AND (c>=31031 OR d IS NULL)");
+            match &choice {
+                Some(IndexScanChoice::Regular { index_name, .. }) => {
+                    assert_eq!(
+                        index_name, "t1b",
+                        "where9-5.3 must pick t1b (top-level seekable b>?), not t1c/SCAN; got {index_name}"
+                    );
+                }
+                other => {
+                    panic!("where9-5.3 must choose a single Regular index, got {other:?}")
+                }
+            }
+        }
+
+        #[test]
+        fn where9_5_3_single_index_choice_is_deterministic() {
+            let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            // Regression guard for #5692 (non-determinism flagged in #5660):
+            // the single-index selector must pick t1b on EVERY evaluation, not
+            // sometimes t1c, regardless of HashMap index-iteration order. Repeat
+            // the selection many times and require a stable answer. Pre-fix this
+            // flipped between t1b/SEARCH and t1c/SCAN across runs.
+            let db = where9_t1();
+            for i in 0..64 {
+                let choice =
+                    choose(&db, "SELECT a FROM t1 WHERE b>1000 AND (c>=31031 OR d IS NULL)");
+                match &choice {
+                    Some(IndexScanChoice::Regular { index_name, .. }) => {
+                        assert_eq!(
+                            index_name, "t1b",
+                            "iteration {i}: expected t1b, got {index_name}"
+                        );
+                    }
+                    other => panic!("iteration {i}: expected Regular(t1b), got {other:?}"),
+                }
+            }
+        }
+
+        #[test]
+        fn top_level_seekable_distinguishes_and_clause_from_or_branch() {
+            // Unit-level check of the principle: a leading column constrained by a
+            // top-level AND conjunct is seekable; one referenced only inside an OR
+            // branch is not.
+            let make_col = |name: &str| {
+                vec![vibesql_ast::IndexColumn::Column {
+                    column_name: name.to_string(),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                    prefix_length: None,
+                }]
+            };
+            let where_expr = where_of("SELECT a FROM t1 WHERE b>1000 AND (c>=31031 OR d IS NULL)");
+            // b is in the top-level AND conjunct → seekable.
             assert!(
-                matches!(choice, Some(IndexScanChoice::Regular { .. })),
-                "where9-5.3 must choose a single index, NOT MULTI-INDEX OR, got {choice:?}"
+                super::super::index_leading_column_seekable_at_top_level(
+                    Some(&where_expr),
+                    &make_col("b")
+                ),
+                "b>1000 is a top-level conjunct → seekable"
             );
+            // c is only inside the OR branch → NOT a top-level seek (would SCAN).
             assert!(
-                !matches!(choice, Some(IndexScanChoice::MultiIndexOr { .. })),
-                "a range OR-branch must NOT trigger MULTI-INDEX OR"
+                !super::super::index_leading_column_seekable_at_top_level(
+                    Some(&where_expr),
+                    &make_col("c")
+                ),
+                "c>=31031 is OR-nested → not a top-level seek"
+            );
+            // d is only inside the OR branch (IS NULL) → NOT a top-level seek.
+            assert!(
+                !super::super::index_leading_column_seekable_at_top_level(
+                    Some(&where_expr),
+                    &make_col("d")
+                ),
+                "d IS NULL is OR-nested → not a top-level seek"
             );
         }
 
