@@ -111,53 +111,55 @@ pub(crate) fn probe_columnar_left_outer(
 ) -> Result<LeftOuterJoinIndices, ExecutorError> {
     let mut left_indices = Vec::new();
     let mut right_indices = Vec::new();
-    let mut left_matched = vec![false; left_row_count];
 
+    // Emit every left row exactly once, in left-table insertion order. A matched
+    // left row emits one output row per matching right row (fan-out); an
+    // unmatched left row emits a single NULL-padded row. This MUST be a single
+    // ordered pass: collecting matched rows first and appending unmatched rows
+    // in a separate phase produces a "matches-then-unmatched" ordering that
+    // violates LEFT OUTER JOIN row order (issue #5696).
     match (left_key, right_key) {
         (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, _)) => {
             for (left_idx, &key) in left_values.iter().enumerate() {
-                // Skip NULL keys - they never match but still output with NULLs
-                let is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
-                if is_null {
-                    continue; // Will be handled as unmatched
-                }
-
-                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
-                if !hash_table.bloom_might_contain_i64(key) {
-                    continue; // Definitely no match, will be output as unmatched
-                }
+                // NULL keys never match in equi-joins, but the left row is still
+                // emitted NULL-padded on the right side.
+                let key_is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
 
                 let mut found_match = false;
-                for right_idx in hash_table.probe_i64(key, right_values) {
-                    left_indices.push(left_idx as u32);
-                    right_indices.push(right_idx);
-                    found_match = true;
+                if !key_is_null && hash_table.bloom_might_contain_i64(key) {
+                    // BLOOM FILTER OPTIMIZATION: only probe when the key might be
+                    // present on the build side.
+                    for right_idx in hash_table.probe_i64(key, right_values) {
+                        left_indices.push(left_idx as u32);
+                        right_indices.push(right_idx);
+                        found_match = true;
+                    }
                 }
-                if found_match {
-                    left_matched[left_idx] = true;
+
+                if !found_match {
+                    left_indices.push(left_idx as u32);
+                    right_indices.push(u32::MAX); // NULL marker
                 }
             }
         }
         (ColumnArray::String(left_values, left_nulls), ColumnArray::String(right_values, _)) => {
             for (left_idx, key) in left_values.iter().enumerate() {
-                let is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
-                if is_null {
-                    continue;
-                }
-
-                // BLOOM FILTER OPTIMIZATION: Quick rejection of non-matching keys
-                if !hash_table.bloom_might_contain_string(key) {
-                    continue; // Definitely no match, will be output as unmatched
-                }
+                let key_is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
 
                 let mut found_match = false;
-                for right_idx in hash_table.probe_string(key, right_values) {
-                    left_indices.push(left_idx as u32);
-                    right_indices.push(right_idx);
-                    found_match = true;
+                if !key_is_null && hash_table.bloom_might_contain_string(key) {
+                    // BLOOM FILTER OPTIMIZATION: only probe when the key might be
+                    // present on the build side.
+                    for right_idx in hash_table.probe_string(key, right_values) {
+                        left_indices.push(left_idx as u32);
+                        right_indices.push(right_idx);
+                        found_match = true;
+                    }
                 }
-                if found_match {
-                    left_matched[left_idx] = true;
+
+                if !found_match {
+                    left_indices.push(left_idx as u32);
+                    right_indices.push(u32::MAX); // NULL marker
                 }
             }
         }
@@ -168,13 +170,9 @@ pub(crate) fn probe_columnar_left_outer(
         }
     }
 
-    // Add unmatched left rows with NULL marker for right side
-    for (left_idx, &matched) in left_matched.iter().enumerate() {
-        if !matched {
-            left_indices.push(left_idx as u32);
-            right_indices.push(u32::MAX); // NULL marker
-        }
-    }
+    // `left_row_count` is retained for signature compatibility; the single-pass
+    // loop above already visits every left row in order.
+    let _ = left_row_count;
 
     Ok(LeftOuterJoinIndices { left_indices, right_indices })
 }
