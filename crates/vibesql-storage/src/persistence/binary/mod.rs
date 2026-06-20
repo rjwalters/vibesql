@@ -67,6 +67,28 @@ impl Database {
         Ok(())
     }
 
+    /// Serialize the database to an in-memory uncompressed binary buffer.
+    ///
+    /// Produces exactly the same byte layout as [`Database::save_binary`]
+    /// (header + catalog + data, little-endian, uncompressed) but returns the
+    /// bytes instead of writing them to a file. This is the format expected by
+    /// the WAL checkpoint reader (`read_checkpoint_data` /
+    /// `RecoveryManager::load_checkpoint`), so it is used by the CLI to create
+    /// WAL checkpoints without a round-trip through the filesystem.
+    pub fn to_uncompressed_bytes(&self) -> Result<Vec<u8>, StorageError> {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = BufWriter::new(&mut bytes);
+            write_header(&mut writer)?;
+            write_catalog(&mut writer, self)?;
+            write_data(&mut writer, self)?;
+            writer
+                .flush()
+                .map_err(|e| StorageError::NotImplemented(format!("Failed to flush: {}", e)))?;
+        }
+        Ok(bytes)
+    }
+
     /// Load database from binary format
     ///
     /// Reads a binary `.vbsql` file and reconstructs the database.

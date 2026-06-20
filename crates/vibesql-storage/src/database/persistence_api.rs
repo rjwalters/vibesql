@@ -44,6 +44,14 @@ impl Database {
         self.persistence_engine.as_ref().map(|e| e.stats())
     }
 
+    /// Get the next WAL log-sequence-number the engine will assign (if enabled).
+    ///
+    /// Returns `None` when persistence is not enabled. Used by the CLI to stamp
+    /// a checkpoint at the current LSN so the WAL can be truncated up to it.
+    pub fn persistence_next_lsn(&self) -> Option<crate::wal::Lsn> {
+        self.persistence_engine.as_ref().map(|e| e.next_lsn())
+    }
+
     /// Emit a WAL operation to the persistence engine (if enabled)
     ///
     /// This is a no-op if persistence is not enabled, providing zero overhead

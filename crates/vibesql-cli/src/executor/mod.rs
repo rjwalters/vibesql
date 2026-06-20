@@ -8,6 +8,7 @@ use vibesql_types::SqlValue;
 mod copy_handler;
 pub mod display;
 pub mod validation;
+pub mod wal;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,11 @@ pub struct SqlExecutor {
     /// When ON, INSERT/UPDATE/DELETE statements return a one-row, one-column
     /// result containing the change count.
     count_changes: bool,
+    /// Active WAL persistence state, present only when the opt-in
+    /// `[database] wal = true` flag is set AND a file-backed database is in use.
+    /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
+    /// writing a full snapshot. `None` preserves the default snapshot behavior.
+    wal_state: Option<wal::WalState>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,9 +125,51 @@ fn format_sql_value(v: &SqlValue) -> String {
 }
 
 impl SqlExecutor {
+    /// Create an executor with WAL disabled (default snapshot persistence).
+    ///
+    /// Equivalent to `new_with_wal(database, false)`. Retained for callers and
+    /// tests that do not opt into the WAL path. (The binary itself always goes
+    /// through `new_with_wal`; this wrapper is used by the in-crate tests.)
+    #[allow(dead_code)]
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
+        Self::new_with_wal(database, false)
+    }
+
+    /// Create an executor, optionally activating the opt-in WAL persistence path.
+    ///
+    /// When `wal` is `true` AND `database` resolves to a real file path (not
+    /// `:memory:` and not `None`), the executor:
+    ///   * recovers the database from `<stem>-checkpoints/` + `<stem>.wal` via
+    ///     `RecoveryManager::recover()`,
+    ///   * attaches a live `PersistenceEngine` so subsequent writes are logged,
+    ///   * and routes `save_database` to checkpoint + WAL truncate.
+    ///
+    /// When `wal` is `false` (the default), or for in-memory databases, behavior
+    /// is unchanged: snapshot load on open, full snapshot save on `\save`/exit.
+    ///
+    /// Phase 1 durability note: DDL survives an unclean shutdown via WAL replay;
+    /// committed row data is durable as of the last checkpoint. Post-checkpoint
+    /// DML replay is a Phase 2 stub (see `executor::wal` module docs and #5698).
+    pub fn new_with_wal(database: Option<String>, wal: bool) -> anyhow::Result<Self> {
         // Treat :memory: as an in-memory database (no file path)
         let database = database.filter(|p| !is_memory_database(p));
+
+        // WAL-active path: only when explicitly opted in AND a file path exists.
+        // For in-memory databases the WAL is silently disabled (no file to
+        // attach to) — consistent with the issue's documented edge case.
+        if wal {
+            if let Some(ref db_path) = database {
+                let (db, wal_state) = wal::WalState::open(db_path).map_err(|e| {
+                    anyhow::anyhow!("Failed to open WAL-backed database at {}: {}", db_path, e)
+                })?;
+                return Ok(SqlExecutor {
+                    db,
+                    timing_enabled: false,
+                    count_changes: false,
+                    wal_state: Some(wal_state),
+                });
+            }
+        }
 
         // Load database from file if provided, otherwise create new in-memory database
         let db = if let Some(db_path) = database {
@@ -167,7 +215,14 @@ impl SqlExecutor {
             Database::new()
         };
 
-        Ok(SqlExecutor { db, timing_enabled: false, count_changes: false })
+        Ok(SqlExecutor { db, timing_enabled: false, count_changes: false, wal_state: None })
+    }
+
+    /// Returns true if the WAL persistence path is active for this session.
+    /// (Used by the in-crate tests to assert the opt-in / edge-case behavior.)
+    #[allow(dead_code)]
+    pub fn wal_active(&self) -> bool {
+        self.wal_state.is_some()
     }
 
     /// Returns true if the current session is inside an active transaction.
@@ -667,8 +722,19 @@ impl SqlExecutor {
         println!("Timing is {}", state);
     }
 
-    /// Save database to SQL dump file
-    pub fn save_database(&self, path: &str) -> anyhow::Result<()> {
+    /// Persist the database.
+    ///
+    /// When the WAL path is active (`[database] wal = true` + file-backed DB),
+    /// this writes a checkpoint at the current LSN and truncates the WAL up to
+    /// it (the WAL-active durability mechanism). Otherwise it falls back to the
+    /// default full-state SQL dump snapshot at `path`.
+    pub fn save_database(&mut self, path: &str) -> anyhow::Result<()> {
+        if let Some(wal_state) = self.wal_state.as_mut() {
+            return wal_state
+                .checkpoint(&self.db)
+                .map_err(|e| anyhow::anyhow!("Failed to checkpoint WAL database: {}", e));
+        }
+
         self.db
             .save_sql_dump(path)
             .map_err(|e| anyhow::anyhow!("Failed to save database to {}: {}", path, e))
