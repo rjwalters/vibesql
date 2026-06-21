@@ -49,13 +49,31 @@ pub struct TableSchema {
 }
 
 impl TableSchema {
+    /// Build the column-name -> index lookup cache, preserving the FIRST
+    /// occurrence of each name on duplicates.
+    ///
+    /// Real tables reject duplicate column names at CREATE TABLE time, but VIEW
+    /// pseudo-schemas built from `SELECT *` over a join can legitimately carry
+    /// duplicate column names (e.g. two columns named `c`). When that happens,
+    /// `get_column_index` must agree with the FIRST-match semantics of
+    /// `columns.iter().position(...)` used by the view UPDATE path. A plain
+    /// `HashMap` collect is last-write-wins, which disagreed with `position()`
+    /// and caused INSTEAD OF UPDATE triggers on such views to read the wrong
+    /// `new.<col>` slot (see issue #5703). Using `entry().or_insert()` keeps the
+    /// first index, matching `position()`.
+    fn build_column_index_cache(columns: &[ColumnSchema]) -> HashMap<String, usize> {
+        columns.iter().enumerate().fold(HashMap::new(), |mut map, (idx, col)| {
+            map.entry(col.name.clone()).or_insert(idx);
+            map
+        })
+    }
+
     pub fn new(name: String, columns: Vec<ColumnSchema>) -> Self {
         // Store columns by exact name for case-sensitive lookups.
         // The parser normalizes unquoted identifiers to uppercase, so case-insensitive
         // matching for regular identifiers works automatically. Delimited identifiers
         // (quoted with "") preserve exact case per SQL:1999 Section 5.2.
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -79,8 +97,7 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         primary_key: Vec<String>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -104,8 +121,7 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -129,8 +145,7 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -155,8 +170,7 @@ impl TableSchema {
         primary_key: Option<Vec<String>>,
         unique_constraints: Vec<Vec<String>>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -183,8 +197,7 @@ impl TableSchema {
         check_constraints: Vec<(String, vibesql_ast::Expression)>,
         foreign_keys: Vec<ForeignKeyConstraint>,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
@@ -208,8 +221,7 @@ impl TableSchema {
         columns: Vec<ColumnSchema>,
         storage_format: StorageFormat,
     ) -> Self {
-        let column_index_cache: HashMap<String, usize> =
-            columns.iter().enumerate().map(|(idx, col)| (col.name.clone(), idx)).collect();
+        let column_index_cache: HashMap<String, usize> = Self::build_column_index_cache(&columns);
 
         TableSchema {
             name,
