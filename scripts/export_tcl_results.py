@@ -68,12 +68,23 @@ def query_db(sql: str, db_path: str = RESULTS_DB) -> List[str]:
 
 
 def get_latest_run() -> Optional[Dict]:
-    """Get the latest test run info."""
+    """Get the latest test run that has per-test detail rows.
+
+    A summary row in ``tcl_test_runs`` can outpace ``tcl_test_results`` when a
+    run records zero detail rows. The per-file/per-category exports key off this
+    run_id against the detail table, so returning the bare ``MAX(run_id)``
+    summary would yield empty per-file data for the "latest" run. We restrict to
+    the latest run that actually has detail rows, falling back to the latest
+    summary run only when no detail rows exist at all.
+    """
     rows = query_db("""
         SELECT run_id, started_at, completed_at, git_commit,
                total_files, total_tests, passed, failed, skipped, parse_errors
         FROM tcl_test_runs
-        ORDER BY run_id DESC
+        WHERE run_id = COALESCE(
+            (SELECT MAX(run_id) FROM tcl_test_results),
+            (SELECT MAX(run_id) FROM tcl_test_runs)
+        )
         LIMIT 1
     """)
 

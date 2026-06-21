@@ -546,7 +546,11 @@ cmd_status() {
     echo "Results database: $RESULTS_DB"
     echo ""
 
-    # Query the database for latest run
+    # Query the database for the latest run that actually has per-test detail
+    # rows. A summary row in tcl_test_runs can outpace tcl_test_results when a
+    # run records zero detail rows, so reporting the bare MAX(run_id) summary
+    # would diverge from the per-file analysis (see cmd_analyze). Scoping to the
+    # latest run with detail keeps `status` and per-file failure sums in sync.
     "$VIBESQL_BIN" "$RESULTS_DB" -c "
         SELECT
             started_at as latest_run,
@@ -558,7 +562,10 @@ cmd_status() {
             setup_failures as 'files w/ setup fail',
             ROUND(100.0 * passed / NULLIF(total_tests - skipped, 0), 1) as pass_rate
         FROM tcl_test_runs
-        ORDER BY run_id DESC
+        WHERE run_id = COALESCE(
+            (SELECT MAX(run_id) FROM tcl_test_results),
+            (SELECT MAX(run_id) FROM tcl_test_runs)
+        )
         LIMIT 1
     " 2>/dev/null || print_warning "No test runs yet. Run: ./scripts/tcltest run"
 }
@@ -579,7 +586,7 @@ cmd_analyze() {
             GROUP_CONCAT(DISTINCT SUBSTR(file_path, -30)) as sample_files
         FROM tcl_test_results
         WHERE status = 'failed'
-        AND run_id = (SELECT MAX(run_id) FROM tcl_test_runs)
+        AND run_id = (SELECT MAX(run_id) FROM tcl_test_results)
         GROUP BY SUBSTR(error_message, 1, 60)
         ORDER BY count DESC
         LIMIT 20
