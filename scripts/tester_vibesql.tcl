@@ -384,6 +384,19 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "misuse of aggregate function"
     }
 
+    # ORDER BY / FILTER used with a non-aggregate function (aggorderby-1.3,
+    # filter1-*) — SQLite returns the message verbatim, not wrapped. This must be
+    # checked BEFORE the generic "ORDER BY ... aggregate" fallback below, which
+    # would otherwise mis-translate it to "misuse of aggregate".
+    #
+    # The `Parse error:` prefix is optional: catchsql translates the message a
+    # second time (execsql already translated it once when raising), so on the
+    # second pass the prefix has already been stripped. Match both forms and pass
+    # the message through verbatim (idempotent).
+    if {[regexp -nocase {^(?:Parse error: )?((?:ORDER BY|FILTER) may not be used with non-aggregate .+\(\))$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+
     # Legacy: Aggregate in ORDER BY context (for old error messages)
     if {[regexp -nocase {aggregate.*ORDER BY|ORDER BY.*aggregate} $error_msg]} {
         if {[regexp -nocase {(min|max|sum|avg|count)} $error_msg -> func_name]} {
@@ -2769,6 +2782,13 @@ array set vibesql_skip_tests {
     expr-7.7 "Uses db status stmt_status - SQLite API"
     expr-7.8 "Uses db status stmt_status - SQLite API"
 
+    aggerror-1.1 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+    aggerror-1.2 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+    aggerror-1.3 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+    aggerror-1.4 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+    aggerror-1.5 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+    aggerror-1.6 "Uses x_count, a custom C aggregate registered via sqlite3_create_aggregate (C embedding API; not reachable from the SQL CLI - issue #5712)"
+
     distinct-1.1.1 "Uses sqlite_sort_count"
     distinct-1.2.1 "Uses sqlite_sort_count"
     distinct-1.8.1 "Uses sqlite_sort_count"
@@ -2814,6 +2834,8 @@ array set vibesql_skip_tests {
     distinct-6.3.2 "Uses sqlite_sort_count"
     distinct-6.4.1 "Uses sqlite_sort_count"
     distinct-6.4.2 "Uses sqlite_sort_count"
+
+    distinct2-120 "Forward alias reference in JOIN ON clause (ON references t2.i0 before t2 is introduced); SQLite defers ON evaluation until all FROM aliases are collected. Fuzz-derived edge case - SQLite permissive forward-alias join scoping not implemented (issue #5712)"
 
     view-1.1 "View query result ordering differs"
     view-1.1.100 "Uses db config command"

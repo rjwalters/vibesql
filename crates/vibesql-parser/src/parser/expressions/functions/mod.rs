@@ -260,12 +260,16 @@ impl Parser {
                 }
             }
 
-            // Parse optional ORDER BY clause for aggregate functions
+            // Parse optional ORDER BY clause inside a function call.
             // SQL:2003 syntax: aggregate(expr ORDER BY order_list)
             // Example: GROUP_CONCAT(name ORDER BY name ASC)
-            if might_be_aggregate
-                && matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. })
-            {
+            //
+            // We parse ORDER BY unconditionally (not gated on `might_be_aggregate`)
+            // so that the keyword is always consumed. Whether ORDER BY is *allowed*
+            // is validated post-parse via the `is_aggregate` check below, which emits
+            // the SQLite-compatible "ORDER BY may not be used with non-aggregate F()"
+            // error instead of a generic `near "ORDER"` syntax error.
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Order, .. }) {
                 self.advance(); // consume ORDER
                 self.expect_keyword(Keyword::By)?;
 
@@ -412,21 +416,17 @@ impl Parser {
                 filter,
             }))
         } else {
-            // ORDER BY and FILTER are only allowed in aggregate functions
+            // ORDER BY and FILTER are only allowed in aggregate functions.
+            // SQLite reports the function name using its original (as-written)
+            // case, e.g. `... non-aggregate abs()` for `abs(a ORDER BY ...)`.
             if order_by.is_some() {
                 return Err(ParseError {
-                    message: format!(
-                        "ORDER BY may not be used with non-aggregate {}()",
-                        first.to_uppercase()
-                    ),
+                    message: format!("ORDER BY may not be used with non-aggregate {}()", first),
                 });
             }
             if filter.is_some() {
                 return Err(ParseError {
-                    message: format!(
-                        "FILTER may not be used with non-aggregate {}()",
-                        first.to_uppercase()
-                    ),
+                    message: format!("FILTER may not be used with non-aggregate {}()", first),
                 });
             }
             Ok(Some(vibesql_ast::Expression::Function { name: func_id, args, character_unit }))

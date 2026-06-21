@@ -333,3 +333,20 @@ fn test_filter_not_allowed_on_non_aggregate() {
     let result = Parser::parse_sql("SELECT UPPER(name) FILTER (WHERE active = 1) FROM users;");
     assert!(result.is_err(), "Expected parse error for FILTER on non-aggregate");
 }
+
+#[test]
+fn test_order_by_not_allowed_on_non_aggregate() {
+    // Issue #5712 (aggorderby-1.3): ORDER BY inside a non-aggregate function
+    // must produce the SQLite-compatible message
+    // "ORDER BY may not be used with non-aggregate <F>()" rather than a generic
+    // `near "ORDER": syntax error`. The ORDER BY keyword must be parsed
+    // unconditionally so the post-parse aggregate check can emit the error.
+    let result = Parser::parse_sql("SELECT abs(a ORDER BY max(d)) FROM t1;");
+    assert!(result.is_err(), "Expected parse error for ORDER BY on non-aggregate");
+    let msg = result.unwrap_err().to_string();
+    // SQLite reports the function name in its original case: `abs()`.
+    assert!(
+        msg.contains("ORDER BY may not be used with non-aggregate abs()"),
+        "Unexpected error message: {msg}"
+    );
+}
