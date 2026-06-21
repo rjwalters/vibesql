@@ -146,6 +146,19 @@ pub(super) fn filter_out_nullable_side_predicates(
     let kept_predicates: Vec<vibesql_ast::Expression> = conjuncts
         .into_iter()
         .filter(|pred| {
+            // Issue #5709: An equijoin between two distinct columns (e.g. `t1.b = t2.b`)
+            // never tests a join-produced NULL relationship. When both columns live on the
+            // nullable side, the equality constrains rows *within* that side's own subtree
+            // (e.g. `t1 INNER JOIN t2 ON true`); it is not a "nullable-side predicate" in the
+            // sense this function guards against. Stripping it would turn that inner join into
+            // a cartesian product and silently drop the WHERE constraint. Keep it so the
+            // nullable-side scan can apply it (as a join key or post-join filter).
+            //
+            // A `col = NULL` literal comparison is NOT a column-to-column equijoin and is left
+            // to the table-reference analysis below (it always evaluates false in SQL anyway).
+            if is_column_to_column_equijoin(pred) {
+                return true;
+            }
             // extract_referenced_tables_branch returns Option<HashSet<String>>
             // None means the expression couldn't be analyzed (keep it, evaluate post-join)
             // Some(empty set) means no tables referenced (keep it - e.g., constant expression)
@@ -175,4 +188,22 @@ pub(super) fn filter_out_nullable_side_predicates(
 
     // Combine remaining predicates with AND (returns None if empty)
     combine_with_and(kept_predicates)
+}
+
+/// Returns true if `pred` is an equality comparison between two distinct column
+/// references (i.e. `a.x = b.y`), as opposed to a column/literal comparison.
+///
+/// Such equijoins are safe to push into the nullable side's subtree because they
+/// constrain rows that already coexist there; they never test a NULL produced by
+/// the outer join itself. See `filter_out_nullable_side_predicates` and #5709.
+fn is_column_to_column_equijoin(pred: &vibesql_ast::Expression) -> bool {
+    matches!(
+        pred,
+        vibesql_ast::Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left,
+            right,
+        } if matches!(**left, vibesql_ast::Expression::ColumnRef(_))
+            && matches!(**right, vibesql_ast::Expression::ColumnRef(_))
+    )
 }

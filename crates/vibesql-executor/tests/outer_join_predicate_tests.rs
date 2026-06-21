@@ -274,3 +274,133 @@ fn test_unqualified_is_null_with_tables_full_join() {
     let result = SelectExecutor::new(&db).execute(&select).unwrap();
     assert_eq!(result.len(), 0, "Direct table: x IS NULL should return 0 rows");
 }
+
+// ---------------------------------------------------------------------------
+// Issue #5709: an ON-true inner join whose equijoin lives in the WHERE clause,
+// followed by a RIGHT/FULL JOIN, silently dropped the WHERE equijoin once the
+// intermediate result crossed VECTORIZE_THRESHOLD (256 rows).
+//
+// Two interacting bugs:
+//   * pushdown.rs stripped the intra-left-side equijoin `t1.b = t2.b` from the
+//     left subtree's WHERE, turning `t1 INNER JOIN t2 ON true` into a cartesian
+//     product.
+//   * compiled_predicate.rs then dropped the same column-to-column equality from
+//     the vectorized post-join filter, assuming a hash join had enforced it.
+//
+// We need enough rows in t1 so the t3 amplification pushes the intermediate
+// result above 256 rows and the vectorized compiled-predicate path fires.
+// ---------------------------------------------------------------------------
+
+/// Build the 4-table repro from issue #5709 with `n` rows in t1 (x = 0..n).
+fn setup_issue_5709_db(n: i64) -> Database {
+    let mut db = Database::new();
+
+    // t1(a, b, c, d) = (x, x+100, x+200, x+300) for x in 0..n
+    let t1_schema = TableSchema::new(
+        "T1".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+            ColumnSchema::new("c".to_string(), DataType::Integer, true),
+            ColumnSchema::new("d".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t1_schema).unwrap();
+
+    // t2(b, x): rows for even a
+    let t2_schema = TableSchema::new(
+        "T2".to_string(),
+        vec![
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+            ColumnSchema::new("x".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t2_schema).unwrap();
+
+    // t3(c, y): rows for a divisible by 3
+    let t3_schema = TableSchema::new(
+        "T3".to_string(),
+        vec![
+            ColumnSchema::new("c".to_string(), DataType::Integer, true),
+            ColumnSchema::new("y".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t3_schema).unwrap();
+
+    // t4(d, z): rows for a divisible by 5
+    let t4_schema = TableSchema::new(
+        "T4".to_string(),
+        vec![
+            ColumnSchema::new("d".to_string(), DataType::Integer, true),
+            ColumnSchema::new("z".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t4_schema).unwrap();
+
+    for x in 0..n {
+        let (a, b, c, d) = (x, x + 100, x + 200, x + 300);
+        db.insert_row(
+            "T1",
+            Row::new(vec![
+                SqlValue::Integer(a),
+                SqlValue::Integer(b),
+                SqlValue::Integer(c),
+                SqlValue::Integer(d),
+            ]),
+        )
+        .unwrap();
+        if a % 2 == 0 {
+            db.insert_row("T2", Row::new(vec![SqlValue::Integer(b), SqlValue::Integer(a)]))
+                .unwrap();
+        }
+        if a % 3 == 0 {
+            db.insert_row("T3", Row::new(vec![SqlValue::Integer(c), SqlValue::Integer(a)]))
+                .unwrap();
+        }
+        if a % 5 == 0 {
+            db.insert_row("T4", Row::new(vec![SqlValue::Integer(d), SqlValue::Integer(a)]))
+                .unwrap();
+        }
+    }
+
+    db
+}
+
+/// The WHERE equijoin `t1.b = t2.b` must survive a FULL JOIN that follows an
+/// `ON true` inner join, even when the intermediate result crosses the
+/// vectorized-predicate threshold (n=40 => 266 intermediate rows >= 256).
+#[test]
+fn test_issue_5709_on_true_join_then_full_join_where_equijoin() {
+    let db = setup_issue_5709_db(40);
+
+    let sql = "SELECT * FROM t1 INNER JOIN t2 ON true \
+        INNER JOIN t3 ON t1.c = t3.c AND t3.y > 0 \
+        FULL JOIN t4 ON t1.d = t4.d AND t4.z > 0 \
+        WHERE t1.b = t2.b AND t2.x > 0";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+
+    assert_eq!(result.len(), 6, "Expected 6 rows (t1.b=t2.b enforced), not a cartesian product");
+}
+
+/// Same shape as above but with RIGHT JOIN instead of FULL JOIN, which the
+/// curator confirmed also triggers the bug.
+#[test]
+fn test_issue_5709_on_true_join_then_right_join_where_equijoin() {
+    let db = setup_issue_5709_db(40);
+
+    let sql = "SELECT * FROM t1 INNER JOIN t2 ON true \
+        INNER JOIN t3 ON t1.c = t3.c AND t3.y > 0 \
+        RIGHT JOIN t4 ON t1.d = t4.d AND t4.z > 0 \
+        WHERE t1.b = t2.b AND t2.x > 0";
+    let select = parse_select(sql);
+    let result = SelectExecutor::new(&db).execute(&select).unwrap();
+
+    // RIGHT JOIN keeps only t4 rows (plus matching left rows), so the correct
+    // count differs from FULL JOIN; SQLite returns 1 for this data set.
+    assert_eq!(
+        result.len(),
+        1,
+        "RIGHT JOIN variant must also enforce t1.b=t2.b (SQLite oracle = 1)"
+    );
+}
