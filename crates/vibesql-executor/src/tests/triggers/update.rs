@@ -367,6 +367,108 @@ fn test_update_from_on_view_with_instead_of_trigger() {
     assert_eq!(extract_string(&rows[1]), "(4,four)->(fourteen,four)");
 }
 
+/// Regression test for #5703: an INSTEAD OF UPDATE trigger on a view whose
+/// `SELECT *` over a JOIN expands to duplicate column names (two columns named
+/// `c`) must resolve `new.c` to the FIRST `c` (the one targeted by the SET
+/// assignment), not the last.
+///
+/// Root cause: `TableSchema::get_column_index` built its lookup cache via
+/// last-write-wins `HashMap::collect`, while the view UPDATE row-builder uses
+/// first-match `columns.iter().position()`. On a view with duplicate `c`
+/// columns these disagreed, so the trigger body read the unchanged `c` slot and
+/// the UPDATE became a no-op.
+#[test]
+fn test_instead_of_update_of_column_list_on_joined_view() {
+    let mut db = Database::new();
+
+    // t1 and t3 both have a column named `c`. `SELECT *` over the join expands
+    // to columns (a, b, c, d, c, y) — two columns named `c`. v1.c (the first
+    // one) is t1.c. The join on t1.a = t3.k pairs each t1 row with exactly one
+    // t3 row, so each t1 row yields exactly one v1 row (one trigger firing).
+    let setup = [
+        "CREATE TABLE t1(a INT, b INT, c INT, d INT)",
+        "CREATE TABLE t3(k INT, c INT, y INT)",
+        "INSERT INTO t1 VALUES (1, 2, 230, 4)",
+        "INSERT INTO t1 VALUES (5, 6, 236, 8)",
+        "INSERT INTO t3 VALUES (1, 999, 30)",
+        "INSERT INTO t3 VALUES (5, 998, 36)",
+        // The view's SELECT * expands to (a, b, c, d, k, c, y) — two columns
+        // named `c`. v1.c (the first match) is t1.c.
+        "CREATE VIEW v1 AS SELECT * FROM t1 JOIN t3 ON t1.a = t3.k",
+    ];
+
+    for sql in setup {
+        let stmt = Parser::parse_sql(sql).expect("Failed to parse setup SQL");
+        match stmt {
+            Statement::CreateTable(s) => {
+                CreateTableExecutor::execute(&s, &mut db).expect("Failed CREATE TABLE");
+            }
+            Statement::CreateView(s) => {
+                advanced_objects::execute_create_view(&s, &mut db).expect("Failed CREATE VIEW");
+            }
+            Statement::Insert(s) => {
+                InsertExecutor::execute(&mut db, &s).expect("Failed INSERT");
+            }
+            other => panic!("Unexpected setup statement: {:?}", other),
+        }
+    }
+
+    // INSTEAD OF UPDATE OF c trigger: write new.c back into the underlying t1
+    // row identified by old.a. If new.c resolves to the WRONG (last) `c` column,
+    // it carries the unchanged t3.c value and t1.c will not reflect c+1000.
+    let trigger_stmt = CreateTriggerStmt {
+        if_not_exists: false,
+        schema: None,
+        trigger_name: "v1r1".to_string(),
+        name_source: None,
+        timing: TriggerTiming::InsteadOf,
+        event: TriggerEvent::Update(Some(vec!["c".to_string()])),
+        table_name: "V1".to_string(),
+        granularity: TriggerGranularity::Row,
+        when_condition: None,
+        triggered_action: TriggerAction::RawSql(
+            "UPDATE t1 SET c = new.c WHERE a = old.a".to_string(),
+        ),
+    };
+    advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)
+        .expect("Failed to create INSTEAD OF UPDATE OF c trigger");
+
+    // UPDATE v1 SET c = c + 1000 — the SET targets the first `c` (t1.c, values
+    // 230 and 236), so new.c should be 1230 and 1236.
+    let update_sql = "UPDATE v1 SET c = c + 1000";
+    let stmt = Parser::parse_sql(update_sql).expect("Failed to parse UPDATE");
+    let update = match stmt {
+        Statement::Update(s) => s,
+        other => panic!("Expected Update statement, got {:?}", other),
+    };
+    UpdateExecutor::execute(&update, &mut db).expect("UPDATE v1 SET c=c+1000 should succeed");
+
+    // Verify t1.c reflects c+1000 (1230, 1236) — proving new.c resolved to the
+    // first-occurrence column and the trigger UPDATE took effect.
+    let select_sql = "SELECT c FROM t1 ORDER BY a";
+    let stmt = Parser::parse_sql(select_sql).expect("Failed to parse SELECT");
+    let select = match stmt {
+        Statement::Select(s) => s,
+        other => panic!("Expected Select statement, got {:?}", other),
+    };
+    let rows = SelectExecutor::new(&db).execute(&select).expect("SELECT failed");
+
+    let c_values: Vec<i64> = rows
+        .iter()
+        .map(|row| match &row.values[0] {
+            SqlValue::Integer(n) => *n,
+            other => panic!("Expected Integer, got {:?}", other),
+        })
+        .collect();
+
+    assert_eq!(
+        c_values,
+        vec![1230, 1236],
+        "t1.c must reflect c+1000 (new.c resolved to first-occurrence column); \
+         unchanged 230/236 would indicate the split-brain bug (#5703)"
+    );
+}
+
 /// Sanity-check for #5192: UPDATE...FROM on a view where the FROM-side has
 /// zero matching rows should fire zero triggers and not error.
 #[test]

@@ -2368,7 +2368,6 @@ array set vibesql_skip_tests {
     joinD-1124 "Columnar join ignores non-key conjuncts in compound ON predicate (issue #5702)"
     joinD-1140 "Columnar join ignores non-key conjuncts in compound ON predicate (issue #5702)"
     joinD-1156 "Columnar join ignores non-key conjuncts in compound ON predicate (issue #5702)"
-    joinD-extra-1010 "INSTEAD OF UPDATE trigger on view not applied (issue #5703)"
     where-1.1.8 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where-1.4.4 "EXPLAIN QUERY PLAN output format is SQLite-specific"
     where-16.4 "Requires temp table from earlier ifcapable tempdb block (cross-test session state)"
