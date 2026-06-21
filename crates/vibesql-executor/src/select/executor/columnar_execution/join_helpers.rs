@@ -204,6 +204,72 @@ pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<Eq
     }
 }
 
+/// Check whether any ON clause in the join tree carries a residual
+/// (non-equi-join) conjunct that the columnar fast path would silently drop.
+///
+/// The columnar join path extracts only `col = col` equi-join key pairs from
+/// each ON clause (see [`extract_equijoin_conditions`]) and ignores every other
+/// sub-expression. A compound ON clause such as `ON t1.b = t2.x AND t1.c = 1`
+/// has a residual conjunct (`t1.c = 1`) that is never forwarded to the columnar
+/// probe, so key matches that should be NULL-padded are wrongly emitted with
+/// matched right-side values (issue #5702).
+///
+/// This affects INNER, LEFT OUTER, and RIGHT OUTER columnar joins — all of
+/// which dispatch through the same chain. When this returns `true`, the caller
+/// must fall back to the row-based join path, which evaluates residual ON
+/// conjuncts correctly during the probe.
+///
+/// A pure equi-join ON clause — even one that is an AND of multiple `col = col`
+/// conditions (e.g. `ON a.x = b.x AND a.y = b.y`) — returns `false` and stays
+/// on the columnar fast path.
+pub(super) fn join_tree_has_residual_on_conjuncts(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Join { left, right, condition, join_type, .. } => {
+            // Only the join types handled by the columnar path matter here;
+            // unsupported types bail out earlier via is_columnar_supported_join.
+            if matches!(
+                join_type,
+                JoinType::Inner | JoinType::Cross | JoinType::LeftOuter | JoinType::RightOuter
+            ) {
+                if let Some(cond) = condition {
+                    if !on_expression_is_pure_equijoin(cond) {
+                        return true;
+                    }
+                }
+            }
+            join_tree_has_residual_on_conjuncts(left) || join_tree_has_residual_on_conjuncts(right)
+        }
+    }
+}
+
+/// Returns `true` iff every top-level AND conjunct of `expr` is a pure
+/// equi-join condition `col = col` (the only shape the columnar probe honors).
+///
+/// Any other conjunct (a literal comparison like `t1.c = 1`, an inequality like
+/// `t2.x > 0`, a boolean literal like `true`, a function call, etc.) makes this
+/// return `false`, signaling that the columnar path would drop it.
+fn on_expression_is_pure_equijoin(expr: &Expression) -> bool {
+    match expr {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            on_expression_is_pure_equijoin(left) && on_expression_is_pure_equijoin(right)
+        }
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+            // Mirror the extraction rule in extract_equijoin_conditions:
+            // a pure equi-join is `col = col` with unqualified-schema columns.
+            if let (Expression::ColumnRef(left_col_id), Expression::ColumnRef(right_col_id)) =
+                (left.as_ref(), right.as_ref())
+            {
+                left_col_id.schema_canonical().is_none()
+                    && right_col_id.schema_canonical().is_none()
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
 /// Extract equi-join conditions from an expression
 pub(super) fn extract_equijoin_conditions(
     expr: &Expression,
@@ -396,5 +462,73 @@ pub(super) fn extract_table_name_and_alias(
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
         FromClause::Values { .. } => None, // VALUES not supported
+    }
+}
+
+#[cfg(test)]
+mod residual_on_conjunct_tests {
+    use super::join_tree_has_residual_on_conjuncts;
+    use vibesql_parser::Parser;
+
+    fn from_clause_of(sql: &str) -> vibesql_ast::FromClause {
+        match Parser::parse_sql(sql) {
+            Ok(vibesql_ast::Statement::Select(select)) => {
+                select.from.expect("query must have a FROM clause")
+            }
+            other => panic!("expected SELECT, got {:?}", other),
+        }
+    }
+
+    /// A single `col = col` equi-join ON clause stays on the columnar path.
+    #[test]
+    fn pure_single_equijoin_has_no_residual() {
+        let from = from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x");
+        assert!(!join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// An AND of multiple `col = col` equi-joins is still a pure equi-join and
+    /// must NOT trigger the bail-out (regression guard for the guard itself).
+    #[test]
+    fn and_of_equijoins_has_no_residual() {
+        let from = from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x AND t1.c = t2.y");
+        assert!(!join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// A literal-comparison conjunct (`t1.c = 1`) is a residual -> bail out.
+    #[test]
+    fn literal_equality_conjunct_is_residual() {
+        let from = from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x AND t1.c = 1");
+        assert!(join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// An inequality conjunct (`t2.x > 0`) is a residual -> bail out.
+    #[test]
+    fn inequality_conjunct_is_residual() {
+        let from = from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x AND t2.x > 0");
+        assert!(join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// LEFT OUTER join with a compound ON clause is detected.
+    #[test]
+    fn left_outer_compound_on_is_residual() {
+        let from = from_clause_of("SELECT * FROM t1 LEFT JOIN t2 ON t1.b = t2.x AND t1.c = 1");
+        assert!(join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// A residual buried in a nested join tree is still detected.
+    #[test]
+    fn residual_in_nested_join_is_detected() {
+        let from = from_clause_of(
+            "SELECT * FROM t1 JOIN t2 ON t1.b = t2.x JOIN t3 ON t2.y = t3.z AND t3.w = 5",
+        );
+        assert!(join_tree_has_residual_on_conjuncts(&from));
+    }
+
+    /// A multi-table chain of pure equi-joins stays columnar.
+    #[test]
+    fn nested_pure_equijoins_have_no_residual() {
+        let from =
+            from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x JOIN t3 ON t2.y = t3.z");
+        assert!(!join_tree_has_residual_on_conjuncts(&from));
     }
 }

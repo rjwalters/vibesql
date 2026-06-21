@@ -13,7 +13,7 @@ use super::join_helpers::{
     extract_join_conditions, extract_non_join_predicates, flatten_join_tree_simple,
     flatten_join_tree_with_types, has_cross_join_with_on_condition, has_outer_join,
     is_columnar_supported_join, is_column_in_table, is_column_in_tables,
-    resolve_join_column_indices, EquiJoinCondition,
+    join_tree_has_residual_on_conjuncts, resolve_join_column_indices, EquiJoinCondition,
 };
 use crate::{
     errors::ExecutorError,
@@ -115,6 +115,21 @@ impl SelectExecutor<'_> {
         // Fall back to regular execution to produce proper error message
         if has_cross_join_with_on_condition(from_clause) {
             log::debug!("Columnar join: CROSS JOIN with ON condition detected, falling back");
+            return Ok(None);
+        }
+
+        // Compound ON clause with non-key conjuncts (#5702).
+        // The columnar probe only honors the equi-join key columns; any extra
+        // ON conjunct (e.g. `ON t1.b = t2.x AND t1.c = 1`) is silently dropped,
+        // so key matches that should be NULL-padded get matched right values.
+        // This affects INNER / LEFT OUTER / RIGHT OUTER columnar joins. Bail out
+        // to the row-based path, which evaluates the residual during the probe.
+        // Pure equi-join ON clauses (including ANDs of multiple `col = col`
+        // conditions) stay on the columnar fast path.
+        if join_tree_has_residual_on_conjuncts(from_clause) {
+            log::debug!(
+                "Columnar join: ON clause has non-equi-join conjuncts (#5702), falling back to row-based path"
+            );
             return Ok(None);
         }
 
