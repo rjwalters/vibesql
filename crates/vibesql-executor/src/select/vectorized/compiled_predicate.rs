@@ -25,6 +25,8 @@ use crate::{errors::ExecutorError, schema::CombinedSchema};
 enum CompiledPredicate {
     /// Column comparison: column_idx op literal_value
     ColumnLiteral { column_idx: usize, op: ComparisonOp, literal: SqlValue },
+    /// Column-to-column comparison: left_idx op right_idx (e.g. `t1.b = t2.b`)
+    ColumnColumn { left_idx: usize, right_idx: usize, op: ComparisonOp },
     /// BETWEEN: column_idx BETWEEN low AND high
     Between { column_idx: usize, low: SqlValue, high: SqlValue, negated: bool, symmetric: bool },
     /// IN list: column_idx IN (value1, value2, ...)
@@ -74,6 +76,13 @@ impl CompiledPredicate {
 
             // IS NOT NULL is very unselective (most rows are not NULL, ~99%)
             CompiledPredicate::IsNull { negated: true, .. } => 0.99,
+
+            // Column-to-column equality is typically a join key — very selective.
+            CompiledPredicate::ColumnColumn { op: ComparisonOp::Equal, .. } => 0.001,
+            // Column-to-column inequality is unselective.
+            CompiledPredicate::ColumnColumn { op: ComparisonOp::NotEqual, .. } => 0.99,
+            // Column-to-column range comparisons: rough ~33% estimate.
+            CompiledPredicate::ColumnColumn { .. } => 0.33,
         }
     }
 
@@ -84,6 +93,10 @@ impl CompiledPredicate {
             CompiledPredicate::Between { column_idx, .. } => *column_idx,
             CompiledPredicate::InList { column_idx, .. } => *column_idx,
             CompiledPredicate::IsNull { column_idx, .. } => *column_idx,
+            // Contradiction grouping is a single-column heuristic; report the left
+            // operand's column. A column-to-column predicate never participates in the
+            // IS NULL / non-null contradiction check, so this choice is inconsequential.
+            CompiledPredicate::ColumnColumn { left_idx, .. } => *left_idx,
         }
     }
 
@@ -109,6 +122,9 @@ impl CompiledPredicate {
             // IS NULL checks don't require non-null (they check for NULL!)
             // IS NOT NULL requires non-null values to pass
             CompiledPredicate::IsNull { negated, .. } => *negated,
+            // A column-to-column comparison yields NULL (false in WHERE) if either side
+            // is NULL, so it effectively requires both operands to be non-null.
+            CompiledPredicate::ColumnColumn { .. } => true,
         }
     }
 }
@@ -483,20 +499,21 @@ impl CompiledWhereClause {
             _ => return false, // Not a comparison operator
         };
 
-        // Skip column-to-column equality predicates in post-join context.
-        // These are already enforced by the hash join (e.g., p_partkey = l_partkey in TPC-H Q19).
-        // We return true to indicate "handled" but don't add a predicate since the join
-        // already ensures the equality holds for all rows in the result.
-        if matches!(comp_op, ComparisonOp::Equal)
-            && Self::try_extract_column(left, schema).is_some()
-            && Self::try_extract_column(right, schema).is_some()
+        // Column-to-column comparison (e.g. `t1.b = t2.b`).
+        //
+        // Issue #5709: this branch previously returned `true` *without adding a predicate*,
+        // on the assumption that such an equality was already enforced by the hash join.
+        // That assumption is not always valid — when the predicate is a WHERE filter on a
+        // join that did NOT use it as a key (e.g. `t1 INNER JOIN t2 ON true WHERE t1.b=t2.b`),
+        // silently dropping it produces a cartesian-product result. Instead we compile it into
+        // an explicit ColumnColumn predicate so it is always evaluated. This preserves the
+        // vectorized fast path (no fallback to the expression tree) while staying correct:
+        // for genuine join keys the predicate is trivially satisfied for every row, and for
+        // un-enforced equalities it correctly filters.
+        if let (Some(left_idx), Some(right_idx)) =
+            (Self::try_extract_column(left, schema), Self::try_extract_column(right, schema))
         {
-            if std::env::var("OR_COMPILE_DEBUG").is_ok() {
-                eprintln!(
-                    "[COMPILED_PRED] Skipping column-to-column equality (join-satisfied): {:?} = {:?}",
-                    left, right
-                );
-            }
+            predicates.push(CompiledPredicate::ColumnColumn { left_idx, right_idx, op: comp_op });
             return true;
         }
 
@@ -576,6 +593,11 @@ impl CompiledWhereClause {
             CompiledPredicate::ColumnLiteral { column_idx, op, literal } => {
                 let column_value = &row.values[*column_idx];
                 self.compare_values(column_value, literal, *op)
+            }
+            CompiledPredicate::ColumnColumn { left_idx, right_idx, op } => {
+                let left_value = &row.values[*left_idx];
+                let right_value = &row.values[*right_idx];
+                self.compare_values(left_value, right_value, *op)
             }
             CompiledPredicate::Between { column_idx, low, high, negated, symmetric } => {
                 let column_value = &row.values[*column_idx];
@@ -1139,10 +1161,11 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_column_to_column_equality_in_or_branch() {
-        // Test that column-to-column equality predicates (e.g., p_partkey = l_partkey)
-        // are skipped during OR compilation since they're already satisfied by hash join.
-        // This is the key optimization for TPC-H Q19.
+    fn test_column_to_column_equality_compiled_in_or_branch() {
+        // Column-to-column equality predicates (e.g., p_partkey = l_partkey) are now
+        // compiled into an explicit ColumnColumn predicate rather than being silently
+        // dropped (issue #5709). For genuine join keys the predicate is trivially true
+        // for every row; for un-enforced equalities it correctly filters.
         let schema = make_joined_schema();
 
         // Create an OR-of-ANDs expression similar to Q19:
@@ -1214,32 +1237,32 @@ mod tests {
             right: Box::new(branch2),
         };
 
-        // The OR clause should compile successfully now that we skip column-to-column equalities
+        // The OR clause should compile successfully.
         let compiled = CompiledOrClause::try_compile(&or_expr, &schema);
         assert!(
             compiled.is_some(),
-            "CompiledOrClause should succeed when column-to-column equalities are skipped"
+            "CompiledOrClause should succeed for column-to-column equalities"
         );
 
         let compiled = compiled.unwrap();
-        // Each branch should have only 1 predicate (the p_brand comparison),
-        // not 2 (the column-to-column equality should be skipped)
+        // Each branch should now have 2 predicates: the p_brand literal comparison AND
+        // the p_partkey = l_partkey column-to-column equality (no longer dropped).
         for (i, branch) in compiled.branches.iter().enumerate() {
             assert_eq!(
                 branch.predicates.len(),
-                1,
-                "Branch {} should have 1 predicate (column-to-column equality should be skipped)",
+                2,
+                "Branch {} should keep both predicates (column-to-column equality not dropped)",
                 i
             );
         }
     }
 
     #[test]
-    fn test_column_to_column_inequality_not_skipped() {
-        // Ensure we only skip EQUALITY comparisons, not other operators
+    fn test_column_to_column_inequality_compiled() {
+        // Column-to-column inequality (e.g. l_partkey > p_partkey) is compiled into a
+        // ColumnColumn predicate and evaluated, rather than being dropped (issue #5709).
         let schema = make_joined_schema();
 
-        // l_partkey > p_partkey (inequality - should NOT be skipped, should fail compilation)
         let expr = Expression::BinaryOp {
             left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
                 "lineitem",
@@ -1256,11 +1279,11 @@ mod tests {
             ))),
         };
 
-        // This should fail to compile since column-to-column inequality is not supported
         let compiled = CompiledWhereClause::try_compile(&expr, &schema);
         assert!(
-            compiled.is_none(),
-            "Column-to-column inequality should not compile (not skipped, not supported)"
+            compiled.is_some(),
+            "Column-to-column inequality should compile into a ColumnColumn predicate"
         );
+        assert_eq!(compiled.unwrap().predicates.len(), 1);
     }
 }
