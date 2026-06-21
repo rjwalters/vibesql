@@ -189,6 +189,37 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Issue #5712 (distinct2-5020): when every ORDER BY term references a
+        // SELECT output column whose projected expression is non-deterministic
+        // (e.g. `abs(random())%5 AS r ... ORDER BY r`), the expression must be
+        // evaluated exactly once — at projection time — and the sort must read
+        // the already-projected output value. The normal flow sorts *before*
+        // projecting, which re-evaluates the volatile expression and yields a
+        // sort key that doesn't match the row's output value.
+        //
+        // In that case we flip the order: project (and DISTINCT-dedup) first,
+        // then sort the projected rows positionally by output column index.
+        if let Some(term_output_indices) = self.volatile_order_by_output_indices(stmt, &sorted_by) {
+            // Convert to RowWithSortKeys without sorting; project eagerly.
+            let result_rows: Vec<RowWithSortKeys> =
+                filtered_rows.into_iter().map(|row| (row, None)).collect();
+            let projected = self.apply_eager_projection(
+                stmt,
+                result_rows,
+                &schema,
+                &evaluator,
+                &window_mapping,
+            )?;
+
+            let order_by = stmt.order_by.as_ref().expect("volatile path requires ORDER BY");
+            let sorted = crate::select::order::apply_order_by_on_projected_output(
+                projected,
+                order_by,
+                &term_output_indices,
+            );
+            return Ok(sorted);
+        }
+
         // Convert to RowWithSortKeys format
         let mut result_rows: Vec<RowWithSortKeys> =
             filtered_rows.into_iter().map(|row| (row, None)).collect();
@@ -402,6 +433,57 @@ impl SelectExecutor<'_> {
             }
         }
         false
+    }
+
+    /// Detect the issue #5712 volatile-ORDER-BY case.
+    ///
+    /// Returns `Some(indices)` — one output column index per ORDER BY term — when
+    /// the query must be evaluated by projecting first and then sorting on the
+    /// projected output (so a non-deterministic projected expression is computed
+    /// exactly once). Returns `None` to use the normal sort-then-project flow.
+    ///
+    /// Conditions (all must hold):
+    /// - there is an explicit ORDER BY,
+    /// - the rows are not already pre-sorted by an index scan,
+    /// - there is no LIMIT/OFFSET (the project-first path would otherwise clip rows before
+    ///   sorting),
+    /// - there are no window functions or set operations,
+    /// - every ORDER BY term references an output column whose projected expression is
+    ///   non-deterministic.
+    fn volatile_order_by_output_indices(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+        sorted_by: &Option<Vec<(String, vibesql_ast::OrderDirection)>>,
+    ) -> Option<Vec<usize>> {
+        let order_by = stmt.order_by.as_ref()?;
+
+        if stmt.set_operation.is_some()
+            || stmt.limit.is_some()
+            || stmt.offset.is_some()
+            || has_window_functions(&stmt.select_list)
+        {
+            return None;
+        }
+
+        // If an index scan already produced the requested order, the normal path
+        // (which skips re-sorting) is correct and cheaper.
+        if self.check_if_already_sorted(sorted_by, order_by) {
+            return None;
+        }
+
+        let mut indices = Vec::with_capacity(order_by.len());
+        for item in order_by {
+            // Only the volatile-output case is special-cased; if any term is not
+            // a non-deterministic output-column reference, fall back to the
+            // normal flow (which is correct for deterministic expressions).
+            let idx = crate::select::order::order_by_volatile_output_index(
+                &item.expr,
+                &stmt.select_list,
+            )?;
+            indices.push(idx);
+        }
+
+        Some(indices)
     }
 
     /// Apply projection strategy (eager or lazy based on DISTINCT/SET operations)

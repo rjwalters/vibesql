@@ -488,13 +488,33 @@ impl SelectExecutor<'_> {
                     for item in &expanded_select_list {
                         match item {
                             vibesql_ast::SelectItem::Expression { expr, .. } => {
-                                let value = self.evaluate_with_aggregates_and_grouping(
-                                    expr,
-                                    &group_rows,
-                                    &group_key,
-                                    &evaluator,
-                                    &grouping_context,
-                                )?;
+                                // Issue #5712 (distinct2-5030): when a SELECT expression
+                                // is non-deterministic (e.g. `abs(random())%5`) and is also
+                                // a GROUP BY key, it must be evaluated exactly once — at
+                                // grouping time. Re-evaluating it here would call the
+                                // volatile function again and produce an output value that
+                                // disagrees with the group key (and with ORDER BY, which
+                                // references the same key). Reuse the already-computed
+                                // group_key value for such columns.
+                                let reused = if !crate::evaluator::expression_hash::ExpressionHasher::is_deterministic(expr) {
+                                    resolved_set
+                                        .group_by_exprs
+                                        .iter()
+                                        .position(|gb| gb == expr)
+                                        .and_then(|idx| group_key.get(idx).cloned())
+                                } else {
+                                    None
+                                };
+                                let value = match reused {
+                                    Some(v) => v,
+                                    None => self.evaluate_with_aggregates_and_grouping(
+                                        expr,
+                                        &group_rows,
+                                        &group_key,
+                                        &evaluator,
+                                        &grouping_context,
+                                    )?,
+                                };
                                 aggregate_results.push(value);
                             }
                             vibesql_ast::SelectItem::Wildcard { .. }

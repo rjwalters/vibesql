@@ -304,6 +304,83 @@ fn expressions_equal(a: &vibesql_ast::Expression, b: &vibesql_ast::Expression) -
     }
 }
 
+/// For a single ORDER BY term, determine whether it references a SELECT output
+/// column whose projected expression is **non-deterministic** (e.g.
+/// `abs(random())%5`). When it does, the term must be sorted on the already
+/// projected output value (by column position) rather than by re-evaluating the
+/// expression — otherwise a volatile function like `random()` is called a second
+/// time during sort-key evaluation and the sort key no longer matches the row's
+/// output value (issue #5712, distinct2-5020).
+///
+/// Returns `Some(output_column_index)` when the term maps to a non-deterministic
+/// projected column and the mapping is unambiguous; otherwise `None` (the caller
+/// falls back to normal expression-based resolution).
+///
+/// Only the wildcard-free case is handled: when the SELECT list contains a
+/// wildcard the 1:1 mapping from select-item index to output-column index no
+/// longer holds, so we conservatively return `None`.
+pub(crate) fn order_by_volatile_output_index(
+    order_expr: &vibesql_ast::Expression,
+    select_list: &[vibesql_ast::SelectItem],
+) -> Option<usize> {
+    use crate::evaluator::expression_hash::ExpressionHasher;
+
+    // Wildcards break the simple item-index == output-index mapping.
+    let has_wildcard = select_list.iter().any(|item| {
+        matches!(
+            item,
+            vibesql_ast::SelectItem::Wildcard { .. }
+                | vibesql_ast::SelectItem::QualifiedWildcard { .. }
+        )
+    });
+    if has_wildcard {
+        return None;
+    }
+
+    // Helper: a projected select item is "volatile" if it is an expression that
+    // is not deterministic (RANDOM(), CURRENT_TIMESTAMP, etc.).
+    let item_is_volatile = |item: &vibesql_ast::SelectItem| -> bool {
+        matches!(
+            item,
+            vibesql_ast::SelectItem::Expression { expr, .. }
+            if !ExpressionHasher::is_deterministic(expr)
+        )
+    };
+
+    // Case 1: ORDER BY N (positional reference into the SELECT list).
+    if let ColumnPositionResult::Position(pos) = extract_column_position(order_expr) {
+        if pos >= 1 && (pos as usize) <= select_list.len() {
+            let idx = (pos as usize) - 1;
+            if item_is_volatile(&select_list[idx]) {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+
+    // Case 2: ORDER BY <alias>, where <alias> is a bare (unqualified) name that
+    // matches a SELECT-list alias whose expression is non-deterministic.
+    if let vibesql_ast::Expression::ColumnRef(col_id) = order_expr {
+        if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            let column = col_id.column_canonical();
+            for (idx, item) in select_list.iter().enumerate() {
+                if let vibesql_ast::SelectItem::Expression {
+                    expr, alias: Some(alias_name), ..
+                } = item
+                {
+                    if alias_name.eq_ignore_ascii_case(column)
+                        && !ExpressionHasher::is_deterministic(expr)
+                    {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 // =============================================================================
 // ORDER BY Alias Resolution for Regular Queries
 // =============================================================================

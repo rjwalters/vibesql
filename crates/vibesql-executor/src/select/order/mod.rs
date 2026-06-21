@@ -19,9 +19,9 @@ use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 // Re-export public API
 pub(crate) use resolution::{
-    extract_order_by_aggregates, extract_window_aggregates, resolve_order_by_alias,
-    resolve_order_by_for_aggregates, resolve_where_aliases, resolve_where_aliases_with_schema,
-    select_list_has_aliases,
+    extract_order_by_aggregates, extract_window_aggregates, order_by_volatile_output_index,
+    resolve_order_by_alias, resolve_order_by_for_aggregates, resolve_where_aliases,
+    resolve_where_aliases_with_schema, select_list_has_aliases,
 };
 
 /// Sort key for ORDER BY: (value, direction, nulls_order, collation)
@@ -80,6 +80,47 @@ pub(super) fn apply_order_by(
     parallel::sort_rows(&mut rows);
 
     Ok(rows)
+}
+
+/// Sort already-projected output rows by ORDER BY terms that reference output
+/// columns positionally.
+///
+/// This is used when at least one ORDER BY term references a SELECT output
+/// column whose projected expression is non-deterministic (e.g.
+/// `abs(random())%5`). In that situation the expression must be evaluated
+/// exactly once — at projection time — and the sort must read the projected
+/// output value rather than re-evaluating the expression (which would call the
+/// volatile function again and produce a sort key inconsistent with the row's
+/// output). See issue #5712 (distinct2-5020).
+///
+/// `term_output_indices[i]` gives the 0-based output column index that ORDER BY
+/// term `i` sorts on. All terms must map to an output column for this path.
+pub(crate) fn apply_order_by_on_projected_output(
+    rows: Vec<vibesql_storage::Row>,
+    order_by: &[vibesql_ast::OrderByItem],
+    term_output_indices: &[usize],
+) -> Vec<vibesql_storage::Row> {
+    debug_assert_eq!(order_by.len(), term_output_indices.len());
+
+    let mut rows_with_keys: Vec<RowWithSortKeys> = rows
+        .into_iter()
+        .map(|row| {
+            let keys: Vec<SortKey> = order_by
+                .iter()
+                .zip(term_output_indices.iter())
+                .map(|(order_item, &out_idx)| {
+                    let value =
+                        row.values.get(out_idx).cloned().unwrap_or(vibesql_types::SqlValue::Null);
+                    (value, order_item.direction.clone(), order_item.nulls_order, None)
+                })
+                .collect();
+            (row, Some(keys))
+        })
+        .collect();
+
+    parallel::sort_rows(&mut rows_with_keys);
+
+    rows_with_keys.into_iter().map(|(row, _)| row).collect()
 }
 
 #[cfg(test)]
