@@ -473,9 +473,15 @@ impl SelectExecutor<'_> {
         // IMPORTANT: If we have a WHERE clause but can't extract predicates (e.g., IS NULL,
         // IS NOT NULL, or other unsupported expressions), we MUST fall back to row-based
         // execution. Using an empty predicate list would incorrectly skip filtering! (#4XXX)
+        // Issue #5719: this native columnar path applies the WHERE itself and
+        // returns the aggregate result, so the extracted predicates must FULLY
+        // cover the WHERE. Use the strict full-coverage extractor — it returns
+        // `None` when any conjunct (e.g. a scalar subquery) is non-columnar, so
+        // we fall back to row-based execution rather than silently dropping the
+        // conjunct and over-counting.
         let predicates = match stmt.where_clause.as_ref() {
             Some(where_expr) => {
-                match columnar::extract_column_predicates(
+                match columnar::extract_full_coverage_predicates(
                     where_expr,
                     &schema,
                     self.database.case_sensitive_like(),

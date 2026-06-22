@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use vibesql_catalog::TableIdentifier;
+
 use super::predicates::{apply_table_local_predicates, filter_and_clone_rows};
 #[cfg(feature = "parallel")]
 use crate::select::parallel::parallel_scan_materialize;
@@ -36,7 +38,6 @@ use crate::{
         execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table,
     },
 };
-use vibesql_catalog::TableIdentifier;
 
 /// Minimum row count to benefit from SIMD columnar filtering
 /// Below this threshold, row-by-row filtering is faster due to conversion overhead
@@ -595,10 +596,23 @@ pub(crate) fn execute_table_scan(
         // - IN predicates from OR expressions use the alias (e.g., "n1" from "nation n1")
         // - Regular predicates may use the actual table name
         let effective_name_lower = effective_name.to_lowercase();
-        let has_filters = predicate_plan.has_table_filters(&effective_name)
+        let has_table_local = predicate_plan.has_table_filters(&effective_name)
             || predicate_plan.has_table_filters(&effective_name_lower)
             || predicate_plan.has_table_filters(table_name)
             || predicate_plan.has_table_filters(&table_name.to_lowercase());
+
+        // Issue #5719: the optimized `has_filters` block below applies only the
+        // table-local predicates and then marks the WHERE as fully consumed
+        // (`from_rows_where_filtered(.., None)`). When the WHERE also carries a
+        // "complex" predicate — e.g. a scalar-subquery equality
+        // `run_id = (SELECT MAX(run_id) FROM t)`, which `decompose_where_clause`
+        // routes to `complex_predicates` rather than `table_local_predicates` —
+        // consuming the WHERE here would silently DROP that conjunct and
+        // over-return rows. In that case fall through to the unfiltered path,
+        // which preserves the WHERE (`where_filtered = false`) so the executor
+        // re-evaluates the FULL WHERE clause (including the scalar subquery).
+        let has_complex_predicates = !predicate_plan.get_complex_predicates().is_empty();
+        let has_filters = has_table_local && !has_complex_predicates;
 
         if crate::profiling::is_scan_debug_enabled() {
             eprintln!("[SCAN_PATH] {} (alias={}) table: has_filters={} (effective_name={}, table_name={})",
@@ -610,11 +624,24 @@ pub(crate) fn execute_table_scan(
         if has_filters {
             // Try columnar filter optimization for simple predicates
             // Extract predicates once and choose the best execution path (#2972)
-            if let Some(column_predicates) = crate::select::columnar::extract_column_predicates(
-                where_expr,
-                &schema,
-                database.case_sensitive_like(),
-            ) {
+            //
+            // Issue #5719: this single-table scan path consumes the ENTIRE WHERE
+            // clause — on success it returns `from_rows_where_filtered(.., None)`,
+            // marking the WHERE as fully applied. The lenient
+            // `extract_column_predicates` silently skips conjuncts it cannot fold
+            // (e.g. a scalar subquery `run_id = (SELECT MAX(run_id) FROM t)`),
+            // which would then be dropped entirely, over-returning rows. Use the
+            // strict full-coverage extractor: it returns `Some` only when every
+            // conjunct is columnar, otherwise we fall through to the generic
+            // predicate path below, which evaluates the full WHERE (including
+            // scalar subqueries) correctly.
+            if let Some(column_predicates) =
+                crate::select::columnar::extract_full_coverage_predicates(
+                    where_expr,
+                    &schema,
+                    database.case_sensitive_like(),
+                )
+            {
                 // OPTIMIZATION: Avoid double-cloning rows
                 // Before: scan_live_vec() clones ALL rows, then filter clones passing rows again
                 // After: scan() returns &[Row] references, filter returns indices,
