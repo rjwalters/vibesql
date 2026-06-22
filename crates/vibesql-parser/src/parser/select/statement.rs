@@ -660,6 +660,19 @@ impl Parser {
             None
         };
 
+        // For a compound VALUES source of an INSERT (e.g.
+        // `INSERT INTO t VALUES(2) UNION SELECT 3,4 ORDER BY 1`), the trailing
+        // ORDER BY/LIMIT/OFFSET applies to the whole compound and must be
+        // consumed here. This path is reached with `allow_order_limit=false,
+        // validate_end_tokens=false` (set by the INSERT parser), so those
+        // tokens would otherwise be left for the outer statement's
+        // `expect_statement_end()`, masking the real column-count-mismatch
+        // error with a bogus "near ORDER: syntax error" (issue #5714). The
+        // nested set-operation right-side calls always pass
+        // `validate_end_tokens=true`, so they are unaffected.
+        let allow_order_limit = allow_order_limit
+            || (!validate_end_tokens && set_operation.is_some());
+
         // Parse ORDER BY (only if allowed)
         let order_by = if allow_order_limit && self.peek_keyword(Keyword::Order) {
             self.consume_keyword(Keyword::Order)?;

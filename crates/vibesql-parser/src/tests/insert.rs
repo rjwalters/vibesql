@@ -408,3 +408,36 @@ fn test_parse_insert_compound_values_returning() {
         _ => panic!("Expected INSERT statement"),
     }
 }
+
+#[test]
+fn test_parse_insert_compound_values_order_by() {
+    // Regression for issue #5714: a trailing ORDER BY on a compound VALUES
+    // source of an INSERT must be consumed by the VALUES parser rather than
+    // left for the outer statement-end check. Previously the un-consumed
+    // ORDER BY produced `near "ORDER": syntax error`, masking the real
+    // column-count-mismatch error that the executor reports later.
+    let result = Parser::parse_sql(
+        "INSERT INTO t2(rowid) VALUES(2) UNION SELECT 3,4 UNION SELECT 5,6 ORDER BY 1;",
+    );
+    assert!(
+        result.is_ok(),
+        "compound VALUES source + trailing ORDER BY should parse (not a syntax error): {:?}",
+        result.err()
+    );
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => match &insert.source {
+            vibesql_ast::InsertSource::Select(select) => {
+                assert!(
+                    select.set_operation.is_some(),
+                    "compound VALUES source should carry a set operation"
+                );
+                assert!(
+                    select.order_by.is_some(),
+                    "trailing ORDER BY should be attached to the compound VALUES source"
+                );
+            }
+            other => panic!("Expected Select source for compound VALUES, got {:?}", other),
+        },
+        _ => panic!("Expected INSERT statement"),
+    }
+}

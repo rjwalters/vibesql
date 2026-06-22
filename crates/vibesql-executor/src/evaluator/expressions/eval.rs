@@ -871,18 +871,18 @@ impl ExpressionEvaluator<'_> {
                 if let Some(ctx) = self.trigger_context {
                     ctx.resolve_pseudo_var(*pseudo_table, column)
                 } else {
-                    // This expression type is only valid in trigger context
-                    // Return an error if encountered outside triggers
-                    Err(ExecutorError::UnsupportedExpression(
-                        format!(
-                            "Pseudo-variable {}.{} is only valid within trigger bodies",
-                            match pseudo_table {
-                                vibesql_ast::PseudoTable::Old => "OLD",
-                                vibesql_ast::PseudoTable::New => "NEW",
-                            },
-                            column
-                        )
-                    ))
+                    // Outside of a trigger body, `NEW.col`/`OLD.col` references an
+                    // unknown column. SQLite reports this as a plain column-resolution
+                    // error (e.g. `no such column: new.x`), so emit that exact wording
+                    // for compatibility rather than an "unsupported expression" message.
+                    let pseudo_table_lower = match pseudo_table {
+                        vibesql_ast::PseudoTable::Old => "old",
+                        vibesql_ast::PseudoTable::New => "new",
+                    };
+                    Err(ExecutorError::SqliteCompatError(format!(
+                        "no such column: {}.{}",
+                        pseudo_table_lower, column
+                    )))
                 }
             }
 
