@@ -1,6 +1,9 @@
 //! Set operations (UNION, INTERSECT, EXCEPT) for SELECT queries
 
-use std::{cmp::Ordering, collections::{HashMap, HashSet}};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 
 use crate::errors::ExecutorError;
 
@@ -15,9 +18,9 @@ use crate::errors::ExecutorError;
 ///
 /// Canonicalization rules:
 /// - All exact integer types collapse to `Bigint`.
-/// - All inexact numeric types (`Real`, `Float`, `Double`, `Numeric`) collapse
-///   to `Numeric(f64)`. If the value is a finite whole number, it further
-///   collapses to `Bigint` so e.g. `Real(30.0)` matches `Integer(30)`.
+/// - All inexact numeric types (`Real`, `Float`, `Double`, `Numeric`) collapse to `Numeric(f64)`.
+///   If the value is a finite whole number, it further collapses to `Bigint` so e.g. `Real(30.0)`
+///   matches `Integer(30)`.
 /// - All other values are returned unchanged.
 fn canonicalize_numeric(val: &vibesql_types::SqlValue) -> vibesql_types::SqlValue {
     use vibesql_types::SqlValue;
@@ -164,8 +167,7 @@ pub(super) fn apply_set_operation(
                 let mut combined = left;
                 combined.extend(right);
 
-                let mut index_by_key: HashMap<Vec<vibesql_types::SqlValue>, usize> =
-                    HashMap::new();
+                let mut index_by_key: HashMap<Vec<vibesql_types::SqlValue>, usize> = HashMap::new();
                 let mut result: Vec<vibesql_storage::Row> = Vec::with_capacity(combined.len());
                 for row in combined {
                     let key = normalize_row_for_comparison(&row.values, collations);
@@ -223,6 +225,16 @@ pub(super) fn apply_set_operation(
                         result.push(row);
                     }
                 }
+
+                // Sort the deduplicated result. SQLite's INTERSECT uses an
+                // ephemeral B-tree for deduplication, which naturally yields
+                // sorted output; mirror that here (same sort as UNION DISTINCT)
+                // so we don't leak left-branch scan order.
+                result.sort_by(|a, b| {
+                    let ka = normalize_row_for_comparison(&a.values, collations);
+                    let kb = normalize_row_for_comparison(&b.values, collations);
+                    compare_normalized_rows(&ka, &kb)
+                });
                 Ok(result)
             }
         }
@@ -273,8 +285,140 @@ pub(super) fn apply_set_operation(
                         result.push(row);
                     }
                 }
+
+                // Sort the deduplicated result. SQLite's EXCEPT uses an
+                // ephemeral B-tree for deduplication, which naturally yields
+                // sorted output; mirror that here (same sort as UNION DISTINCT)
+                // so we don't leak left-branch scan order.
+                result.sort_by(|a, b| {
+                    let ka = normalize_row_for_comparison(&a.values, collations);
+                    let kb = normalize_row_for_comparison(&b.values, collations);
+                    compare_normalized_rows(&ka, &kb)
+                });
                 Ok(result)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_ast::{SelectStmt, SetOperation, SetOperator};
+    use vibesql_storage::Row;
+    use vibesql_types::SqlValue;
+
+    use super::apply_set_operation;
+
+    /// Minimal placeholder SELECT for the `right` field of `SetOperation`.
+    /// `apply_set_operation` only inspects `set_op.op` and `set_op.all`; the
+    /// `right` statement is never read (rows are pre-evaluated), so an empty
+    /// statement is sufficient.
+    fn empty_select() -> SelectStmt {
+        SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: Vec::new(),
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    fn set_op(op: SetOperator, all: bool) -> SetOperation {
+        SetOperation { op, all, right: Box::new(empty_select()) }
+    }
+
+    fn int_row(n: i64) -> Row {
+        Row::new(vec![SqlValue::Integer(n)])
+    }
+
+    fn first_cols(rows: &[Row]) -> Vec<i64> {
+        rows.iter()
+            .map(|r| match &r.values[0] {
+                SqlValue::Integer(n) => *n,
+                SqlValue::Bigint(n) => *n,
+                other => panic!("unexpected value: {other:?}"),
+            })
+            .collect()
+    }
+
+    /// INTERSECT DISTINCT must return rows in SQL-canonical sorted order,
+    /// not left-branch scan order. Regression for issue #5720 (Bug 1).
+    #[test]
+    fn intersect_distinct_returns_sorted_rows() {
+        // Left scan order is 3, 9, 6 — deliberately unsorted.
+        let left = vec![int_row(3), int_row(9), int_row(6)];
+        let right = vec![int_row(6), int_row(9), int_row(3)];
+        let collations = vec![None];
+
+        let result =
+            apply_set_operation(left, right, &set_op(SetOperator::Intersect, false), &collations)
+                .expect("intersect distinct");
+
+        assert_eq!(first_cols(&result), vec![3, 6, 9]);
+    }
+
+    /// EXCEPT DISTINCT must return rows in SQL-canonical sorted order,
+    /// not left-branch scan order. Regression for issue #5720 (Bug 1).
+    #[test]
+    fn except_distinct_returns_sorted_rows() {
+        // Left scan order 1, 5, 7, 2, 4, 8, 10 with 3,6,9 removed by right.
+        let left = vec![
+            int_row(1),
+            int_row(5),
+            int_row(7),
+            int_row(2),
+            int_row(4),
+            int_row(8),
+            int_row(10),
+            int_row(3),
+            int_row(6),
+            int_row(9),
+        ];
+        let right = vec![int_row(3), int_row(6), int_row(9)];
+        let collations = vec![None];
+
+        let result =
+            apply_set_operation(left, right, &set_op(SetOperator::Except, false), &collations)
+                .expect("except distinct");
+
+        assert_eq!(first_cols(&result), vec![1, 2, 4, 5, 7, 8, 10]);
+    }
+
+    /// EXCEPT DISTINCT where nothing is removed still sorts the left side.
+    #[test]
+    fn except_distinct_no_matches_still_sorted() {
+        let left = vec![int_row(5), int_row(1), int_row(3)];
+        let right = vec![int_row(99)];
+        let collations = vec![None];
+
+        let result =
+            apply_set_operation(left, right, &set_op(SetOperator::Except, false), &collations)
+                .expect("except distinct");
+
+        assert_eq!(first_cols(&result), vec![1, 3, 5]);
+    }
+
+    /// INTERSECT DISTINCT with an empty left branch yields no rows.
+    #[test]
+    fn intersect_distinct_empty_left() {
+        let left: Vec<Row> = Vec::new();
+        let right = vec![int_row(1), int_row(2)];
+        let collations = vec![None];
+
+        let result =
+            apply_set_operation(left, right, &set_op(SetOperator::Intersect, false), &collations)
+                .expect("intersect distinct");
+
+        assert!(result.is_empty());
     }
 }

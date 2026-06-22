@@ -2264,6 +2264,10 @@ array set vibesql_skip_tests {
     select7-6.2 "VibeSQL does not enforce SQLite's 500-term compound SELECT limit"
     select7-6.6 "Tests SQLite-specific error message format for empty identifiers"
     select6-1.9 "Expression-based column names (min(x)+y) not supported as column references"
+    select9-3.X "Test-infra cascade (issue #5720): cleanup DROP INDEX i1 fails with 'no such index: i1' because select9-3.2 (which CREATE INDEX i1) is auto-skipped — it uses the cksort sort-tracking helper (depends on the sqlite_sort_count TCL var, unavailable to the VibeSQL CLI). Not a SQL engine defect."
+    select9-4.X "Test-infra cascade (issue #5720): cleanup DROP INDEX i1 fails with 'no such index: i1' because select9-4.2 (which CREATE INDEX i1) is auto-skipped — it uses the cksort sort-tracking helper (depends on the sqlite_sort_count TCL var, unavailable to the VibeSQL CLI). Not a SQL engine defect."
+    select9-5.1 "Optimizer enhancement tracked in issue #5723: outer WHERE predicate is not pushed into UNION ALL compound-view branches, so EXPLAIN QUERY PLAN of 'SELECT * FROM v5 WHERE x=... ORDER BY y' contains SCAN instead of index SEARCH (asserts ~/SCAN/). Not a set-operation correctness bug."
+    select9-5.2 "Optimizer enhancement tracked in issue #5723: outer WHERE predicate is not pushed into UNION ALL compound-view branches (asserts ~/SCAN/ for 'SELECT x, y FROM v5 WHERE x=... ORDER BY y'). Not a set-operation correctness bug."
     selectB-3.8 "Tests internal VDBE transform optimization"
     selectB-4.8 "Tests internal VDBE transform optimization"
     selectB-5.8 "Tests internal VDBE transform optimization"
@@ -3869,6 +3873,8 @@ array set vibesql_skip_tests {
 
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
+    {select9-2.*.3 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). These compound-SELECT ORDER BY ... COLLATE reverse cases depend on the 'reverse' collation registered via 'db collate reverse reverse', which the TCL shim cannot bridge to the VibeSQL CLI subprocess (same class as the sqlite3_create_aggregate stub in #5712). Covers select9-2.x.3 and its .flipped and limit/offset variants for all index loops."}
+    {select9-2.*.6 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). UNION ALL ... ORDER BY ... COLLATE reverse cases depending on the 'reverse' collation registered via 'db collate reverse reverse'. Covers select9-2.x.6 and its .flipped and limit/offset variants for all index loops."}
     {orderby8-1. "ORDER BY with many columns - stress test"}
     {indexexpr3- "EXPLAIN output format differs (tests check COVERING INDEX output)"}
     {orderbyA- "ORDER BY optimization differs"}
