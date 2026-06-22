@@ -13,8 +13,8 @@ mod predicates;
 pub(super) use comparison::parse_date_string;
 pub use evaluation::{evaluate_column_compare, evaluate_predicate, evaluate_predicate_tree};
 pub use predicates::{
-    collect_referenced_columns, extract_column_predicates, extract_predicate_tree,
-    remap_predicates, ColumnPredicate, CompareOp, PredicateTree,
+    collect_referenced_columns, extract_column_predicates, extract_full_coverage_predicates,
+    extract_predicate_tree, remap_predicates, ColumnPredicate, CompareOp, PredicateTree,
 };
 
 use crate::{

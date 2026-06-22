@@ -57,7 +57,7 @@ pub use executor::execute_columnar_batch;
 pub use filter::{
     apply_columnar_filter, apply_columnar_filter_simd_streaming, create_filter_bitmap,
     create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
-    extract_predicate_tree, ColumnPredicate, PredicateTree,
+    extract_full_coverage_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree,
 };
 use log;
 pub use scan::ColumnarScan;
@@ -475,9 +475,17 @@ pub fn execute_columnar(
 ) -> Option<Result<Vec<Row>, ExecutorError>> {
     log::debug!("  Executing columnar query with {} rows", rows.len());
 
-    // Extract column predicates from filter expression
+    // Extract column predicates from filter expression.
+    //
+    // Issue #5719: this columnar aggregate path applies the WHERE itself and
+    // returns the aggregate as the final result, so the extracted predicates
+    // must FULLY cover the WHERE clause. Use the strict full-coverage extractor
+    // — it returns `None` when any conjunct (e.g. a scalar subquery) cannot be
+    // folded columnarly, so the caller falls back to row-based execution that
+    // evaluates the complete WHERE. The lenient `extract_column_predicates`
+    // would silently drop the non-foldable conjunct and over-count.
     let predicates = if let Some(filter_expr) = filter {
-        match extract_column_predicates(filter_expr, schema, case_sensitive_like) {
+        match extract_full_coverage_predicates(filter_expr, schema, case_sensitive_like) {
             Some(preds) => {
                 log::debug!("    ✓ Extracted {} column predicates for SIMD filtering", preds.len());
                 preds

@@ -10,7 +10,7 @@ use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 use crate::{
     errors::ExecutorError,
     select::columnar::{
-        extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateSource,
+        extract_aggregates, extract_full_coverage_predicates, simd_filter_batch, AggregateSource,
         ColumnarBatch,
     },
 };
@@ -106,11 +106,21 @@ impl ExecutionPipeline for ColumnarPipeline {
 
             let predicate = predicate.unwrap();
 
-            // Try to extract simple predicates for SIMD filtering
-            let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
+            // Try to extract simple predicates for SIMD filtering.
+            //
+            // Issue #5719: use the strict, full-coverage extractor. It returns
+            // `Some` only when *every* conjunct can be evaluated columnarly, so
+            // a WHERE that mixes a foldable predicate with a scalar subquery (or
+            // any other non-foldable conjunct) falls back to the full-expression
+            // evaluator instead of silently dropping the non-foldable predicate.
+            let predicates = match extract_full_coverage_predicates(
+                predicate,
+                ctx.schema,
+                ctx.database.case_sensitive_like(),
+            ) {
                 Some(preds) => preds,
                 None => {
-                    // Complex predicate - fall back to row-oriented filtering
+                    // Predicate not fully columnar - fall back to row-oriented filtering
                     let rows = batch.to_rows()?;
                     return self.fallback_filter(rows, Some(predicate), ctx);
                 }
@@ -142,11 +152,17 @@ impl ExecutionPipeline for ColumnarPipeline {
 
         let predicate = predicate.unwrap();
 
-        // Try to extract simple predicates for SIMD filtering
-        let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
+        // Try to extract simple predicates for SIMD filtering.
+        //
+        // Issue #5719: strict full-coverage extraction (see batch path above).
+        let predicates = match extract_full_coverage_predicates(
+            predicate,
+            ctx.schema,
+            ctx.database.case_sensitive_like(),
+        ) {
             Some(preds) => preds,
             None => {
-                // Complex predicate - fall back to row-oriented filtering
+                // Predicate not fully columnar - fall back to row-oriented filtering
                 return self.fallback_filter(rows, Some(predicate), ctx);
             }
         };

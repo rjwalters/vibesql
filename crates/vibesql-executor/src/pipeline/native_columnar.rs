@@ -11,7 +11,7 @@ use super::{ExecutionContext, ExecutionPipeline, PipelineInput, PipelineOutput};
 use crate::{
     errors::ExecutorError,
     select::columnar::{
-        extract_aggregates, extract_column_predicates, simd_filter_batch, AggregateOp,
+        extract_aggregates, extract_full_coverage_predicates, simd_filter_batch, AggregateOp,
         AggregateSource, AggregateSpec, ColumnarBatch,
     },
 };
@@ -122,11 +122,20 @@ impl ExecutionPipeline for NativeColumnarPipeline {
 
             let predicate = predicate.unwrap();
 
-            // Extract simple predicates for SIMD filtering
-            let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
+            // Extract simple predicates for SIMD filtering.
+            //
+            // Issue #5719: strict full-coverage extraction. Returns `Some` only
+            // when every conjunct is columnar; otherwise fall back to the full
+            // expression evaluator so non-foldable conjuncts (e.g. scalar
+            // subqueries) are not silently dropped.
+            let predicates = match extract_full_coverage_predicates(
+                predicate,
+                ctx.schema,
+                ctx.database.case_sensitive_like(),
+            ) {
                 Some(preds) => preds,
                 None => {
-                    // Complex predicate - fall back to row filtering
+                    // Predicate not fully columnar - fall back to row filtering
                     let rows = batch.to_rows()?;
                     return self.fallback_filter(rows, Some(predicate), ctx);
                 }
@@ -150,8 +159,14 @@ impl ExecutionPipeline for NativeColumnarPipeline {
 
         let predicate = predicate.unwrap();
 
-        // Try to extract simple predicates
-        let predicates = match extract_column_predicates(predicate, ctx.schema, ctx.database.case_sensitive_like()) {
+        // Try to extract simple predicates.
+        //
+        // Issue #5719: strict full-coverage extraction (see batch path above).
+        let predicates = match extract_full_coverage_predicates(
+            predicate,
+            ctx.schema,
+            ctx.database.case_sensitive_like(),
+        ) {
             Some(preds) => preds,
             None => {
                 return self.fallback_filter(rows, Some(predicate), ctx);

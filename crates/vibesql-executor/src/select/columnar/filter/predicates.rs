@@ -498,6 +498,65 @@ pub fn extract_column_predicates(
     Some(predicates)
 }
 
+/// Extract a flat list of AND-ed column predicates that *fully* cover the WHERE
+/// clause, or `None` if any conjunct cannot be represented columnarly.
+///
+/// Issue #5719: `extract_column_predicates` is deliberately lenient — its AND
+/// branch silently skips conjuncts it cannot fold (so cross-table push-down
+/// callers can still extract the columns they own). That leniency is *wrong*
+/// for the columnar pipeline `apply_filter` step, which marks the WHERE clause
+/// as fully consumed after SIMD filtering. When a WHERE mixes a foldable
+/// predicate (`status = 'failed'`) with a non-foldable one
+/// (`run_id = (SELECT MAX(run_id) FROM t)`), the lenient extractor returns a
+/// partial set, the SIMD path applies only the partial predicate, and the
+/// scalar-subquery predicate is dropped → over-counted results.
+///
+/// This function is strict and all-or-nothing: it builds the `PredicateTree`
+/// (whose AND branch uses `?`, so it fails when *any* conjunct is
+/// non-extractable) and flattens it to a flat AND-of-leaves list suitable for
+/// `simd_filter_batch`. It returns `None` when:
+/// - any conjunct cannot be extracted (→ caller must fall back to the full expression evaluator,
+///   which handles scalar subqueries, functions, etc.);
+/// - the tree contains an OR node (the flat SIMD filter list cannot represent disjunctions; such
+///   queries already fall back today).
+///
+/// When it returns `Some`, the returned predicates fully cover the WHERE
+/// clause, so the fast SIMD path stays correct *and* there is no perf
+/// regression for analytical queries whose WHERE is fully columnar.
+pub fn extract_full_coverage_predicates(
+    expr: &Expression,
+    schema: &CombinedSchema,
+    case_sensitive_like: bool,
+) -> Option<Vec<ColumnPredicate>> {
+    let tree = extract_predicate_tree(expr, schema, case_sensitive_like)?;
+    let mut predicates = Vec::new();
+    flatten_and_tree(&tree, &mut predicates)?;
+    if predicates.is_empty() {
+        return None;
+    }
+    Some(predicates)
+}
+
+/// Flatten a strictly-AND predicate tree into a flat list of leaf predicates.
+///
+/// Returns `None` if the tree contains an OR node, since a flat AND-only
+/// predicate list cannot represent disjunctions.
+fn flatten_and_tree(tree: &PredicateTree, out: &mut Vec<ColumnPredicate>) -> Option<()> {
+    match tree {
+        PredicateTree::Leaf(predicate) => {
+            out.push(predicate.clone());
+            Some(())
+        }
+        PredicateTree::And(children) => {
+            for child in children {
+                flatten_and_tree(child, out)?;
+            }
+            Some(())
+        }
+        PredicateTree::Or(_) => None,
+    }
+}
+
 /// Try to fold a constant expression to a literal value
 ///
 /// Handles simple arithmetic expressions like `1+2`, `10-5`, `2*3`, etc.
