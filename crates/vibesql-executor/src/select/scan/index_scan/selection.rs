@@ -1255,6 +1255,107 @@ pub(crate) fn count_single_value_pinned_index_columns(
     count
 }
 
+/// A column constrained to a single value by a WHERE equality, together with the
+/// collation that governed the comparison. Used by the DISTINCT EQP suppression
+/// (orderby5): a `SELECT DISTINCT` key column may be dropped from the distinctness
+/// key when WHERE constrains it to one value — but only when the collation of the
+/// WHERE comparison matches the collation under which the DISTINCT considers it,
+/// since `a = 'xyz' COLLATE nocase` does not make BINARY-collated `a` constant
+/// (orderby5 1.2.2 / 1.2.3).
+///
+/// `collation` is the lowercased collation name, or `None` for the default
+/// (BINARY) collation when no explicit `COLLATE` appears on the predicate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EqualityPinnedColumn {
+    /// Uppercased column name.
+    pub column: String,
+    /// Lowercased explicit collation, or `None` for default (BINARY).
+    pub collation: Option<String>,
+}
+
+/// Collect the columns constrained to a single value by top-level `col = literal`
+/// equalities in the WHERE clause, recording the collation that governed each
+/// comparison.
+///
+/// Only bare `col = literal` / `literal = col` (and the AND/Conjunction nesting of
+/// such) are recognized. A `COLLATE` wrapper on the column side is captured as the
+/// pin's collation; a `COLLATE` on the literal side is recorded as the comparison
+/// collation as well (SQLite applies the explicit collation of either operand to
+/// the comparison). Anything else — IN-lists, `+a=0`, function calls — does not
+/// produce a single-value, collation-known pin and is skipped, which keeps the
+/// `+a=0` (orderby5 1.7) and IN cases conservative.
+pub(crate) fn collect_equality_pinned_columns_with_collation(
+    where_clause: Option<&Expression>,
+) -> Vec<EqualityPinnedColumn> {
+    let mut out = Vec::new();
+    if let Some(expr) = where_clause {
+        collect_equality_pinned_with_collation_inner(expr, &mut out);
+    }
+    out
+}
+
+/// If `expr` is a bare column reference, optionally wrapped in a single `COLLATE`,
+/// return `(uppercased column, explicit collation lowercased or None)`.
+fn column_with_collation(expr: &Expression) -> Option<(String, Option<String>)> {
+    match expr {
+        Expression::ColumnRef(col_id) => Some((col_id.column_canonical().to_uppercase(), None)),
+        Expression::Collate { expr: inner, collation } => {
+            if let Expression::ColumnRef(col_id) = &**inner {
+                Some((col_id.column_canonical().to_uppercase(), Some(collation.to_lowercase())))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// If `expr` is a literal, optionally wrapped in a single `COLLATE`, return the
+/// explicit collation (lowercased) the comparison would carry from that operand,
+/// or `Some(None)` when it is a bare literal. Returns `None` when `expr` is not a
+/// (possibly collated) literal.
+fn literal_collation(expr: &Expression) -> Option<Option<String>> {
+    match expr {
+        _ if is_literal(expr) => Some(None),
+        Expression::Collate { expr: inner, collation } if is_literal(inner) => {
+            Some(Some(collation.to_lowercase()))
+        }
+        _ => None,
+    }
+}
+
+fn collect_equality_pinned_with_collation_inner(
+    expr: &Expression,
+    out: &mut Vec<EqualityPinnedColumn>,
+) {
+    match expr {
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::Equal, right } => {
+            // Determine the (column, column-side collation) and the literal-side
+            // collation, in whichever order the operands appear.
+            let pair = column_with_collation(left)
+                .zip(literal_collation(right))
+                .or_else(|| column_with_collation(right).zip(literal_collation(left)));
+            if let Some(((column, col_coll), lit_coll)) = pair {
+                // SQLite resolves the comparison collation from an explicit
+                // COLLATE on either operand (column side takes precedence). The
+                // pin only makes the column constant under that collation.
+                let collation = col_coll.or(lit_coll);
+                out.push(EqualityPinnedColumn { column, collation });
+            }
+        }
+        Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+            collect_equality_pinned_with_collation_inner(left, out);
+            collect_equality_pinned_with_collation_inner(right, out);
+        }
+        Expression::Conjunction(exprs) => {
+            for e in exprs {
+                collect_equality_pinned_with_collation_inner(e, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Collect all column names that have equality predicates (col = literal or col IS literal)
 ///
 /// Also recognizes positive IN-list (`col IN (literal-list)`) and IN-subquery

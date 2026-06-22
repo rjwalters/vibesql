@@ -24,8 +24,9 @@ use crate::{
     errors::ExecutorError,
     optimizer::index_planner::IndexPlanner,
     select::scan::index_scan::{
-        cost_based_index_selection, eqp_ordering_index, needs_temp_btree_for_order_by_eqp,
-        select_index_scan_method, IndexScanChoice,
+        collect_equality_pinned_columns_with_collation, cost_based_index_selection,
+        eqp_ordering_index, needs_temp_btree_for_order_by_eqp, select_index_scan_method,
+        EqualityPinnedColumn, IndexScanChoice,
     },
 };
 
@@ -957,17 +958,53 @@ impl ExplainExecutor {
         let distinct_index_order: Option<Vec<vibesql_ast::OrderByItem>> =
             if stmt.distinct && stmt.group_by.is_none() {
                 distinct_key.as_ref().and_then(|key| {
-                    let items = Self::exprs_as_asc_order_items(key);
-                    if Self::needs_temp_btree_for_order_by(
-                        stmt.from.as_ref(),
-                        stmt.where_clause.as_ref(),
-                        &items,
-                        database,
-                    ) {
-                        None
-                    } else {
-                        Some(items)
+                    // Columns the WHERE clause constrains to a single value are
+                    // constant within the scan output, so SQLite drops them from
+                    // the distinctness key before deciding whether an index can
+                    // deliver it (orderby5 1.1–1.6). The collation of the WHERE
+                    // comparison must match the collation the DISTINCT applies to
+                    // the column, or the pin does not make it constant for
+                    // distinctness (orderby5 1.2.2 / 1.2.3).
+                    let pinned =
+                        collect_equality_pinned_columns_with_collation(stmt.where_clause.as_ref());
+                    let mut removed: Vec<&Expression> = Vec::new();
+                    let mut unpinned_key: Vec<&Expression> = Vec::new();
+                    for e in key.iter().copied() {
+                        if Self::distinct_expr_is_where_pinned(e, &pinned) {
+                            removed.push(e);
+                        } else {
+                            unpinned_key.push(e);
+                        }
                     }
+                    if unpinned_key.is_empty() {
+                        // Every DISTINCT column is constant — the result has at
+                        // most one distinct row, so no temp B-tree is needed.
+                        return Some(Vec::new());
+                    }
+                    // The equality predicate that pinned a removed column is
+                    // "consumed" by the distinctness reduction. Drop it from the
+                    // WHERE before the index-delivery check so a column pinned to
+                    // a constant (and NOT itself indexed, e.g. `a=0` over
+                    // `t1bc(b,c)`) does not look like a competing access path that
+                    // would otherwise block riding the ordering index.
+                    let removed_columns: Vec<String> = removed
+                        .iter()
+                        .filter_map(|e| Self::distinct_key_column_name(e))
+                        .collect();
+                    let reduced_where = Self::where_without_pinned_columns(
+                        stmt.where_clause.as_ref(),
+                        &removed_columns,
+                    );
+                    // DISTINCT is order-insensitive, so the index may deliver any
+                    // permutation of the reduced key (orderby5 1.2.1 / 1.5 / 1.6:
+                    // `DISTINCT a, c, b WHERE a=0` reduces to `(c, b)` which index
+                    // t1bc(b, c) covers after reordering to `(b, c)`).
+                    Self::key_index_order(
+                        stmt.from.as_ref(),
+                        reduced_where.as_ref(),
+                        &unpinned_key,
+                        database,
+                    )
                 })
             } else {
                 None
@@ -1261,9 +1298,53 @@ impl ExplainExecutor {
         // merge pre-sorted branches, so rendering MERGE would fabricate a
         // plan shape that never executes (per the #5355/#5360/#5366
         // truthfulness precedent).
-        root.needs_temp_btree_for_order_by = stmt.order_by.is_some();
+        //
+        // Narrow carve-out: when EVERY branch is a constant-row query (no FROM,
+        // SELECT list of literals only — e.g. `SELECT 5 UNION ALL SELECT 3`),
+        // there is no table to sort and SQLite emits no temp B-tree for the
+        // ORDER BY (orderby1 5.1). The runtime likewise sorts a tiny constant
+        // result without a table-backed temp structure, so suppressing the line
+        // is truthful for this shape.
+        root.needs_temp_btree_for_order_by =
+            stmt.order_by.is_some() && !Self::all_compound_branches_are_constant(stmt);
 
         Ok(root)
+    }
+
+    /// True when every branch of a compound (set-operation) query is a
+    /// constant-row query: no FROM clause and a SELECT list consisting solely of
+    /// literal expressions (or a VALUES body of literals). SQLite computes the
+    /// ORDER BY of such an all-constant compound without a temp B-tree
+    /// (orderby1 5.1).
+    fn all_compound_branches_are_constant(stmt: &SelectStmt) -> bool {
+        fn expr_is_literal(expr: &Expression) -> bool {
+            matches!(expr, Expression::Literal(_))
+        }
+        fn branch_is_constant(stmt: &SelectStmt) -> bool {
+            if stmt.from.is_some() {
+                return false;
+            }
+            if let Some(rows) = &stmt.values {
+                return rows.iter().all(|row| row.iter().all(expr_is_literal));
+            }
+            !stmt.select_list.is_empty()
+                && stmt.select_list.iter().all(|item| match item {
+                    SelectItem::Expression { expr, .. } => expr_is_literal(expr),
+                    SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
+                })
+        }
+
+        if !branch_is_constant(stmt) {
+            return false;
+        }
+        let mut current = stmt.set_operation.as_ref();
+        while let Some(set_op) = current {
+            if !branch_is_constant(&set_op.right) {
+                return false;
+            }
+            current = set_op.right.set_operation.as_ref();
+        }
+        true
     }
 
     /// Count the distinct window-function sorting passes required by the
@@ -1517,6 +1598,114 @@ impl ExplainExecutor {
             .collect()
     }
 
+    /// True when a DISTINCT-key expression is a (possibly `COLLATE`-wrapped)
+    /// reference to a column the WHERE clause constrains to a single value under
+    /// the *same* collation. Such a column is constant across the scan output and
+    /// contributes nothing to distinctness, so SQLite removes it from the
+    /// distinctness key (orderby5 1.1–1.6).
+    ///
+    /// The collation must match: `SELECT DISTINCT a ... WHERE a='x' COLLATE
+    /// nocase` does not make BINARY-collated `a` constant (orderby5 1.2.2), and
+    /// `SELECT DISTINCT a COLLATE nocase ... WHERE a='x'` is not made constant by
+    /// a BINARY pin (orderby5 1.2.3). A bare column with no explicit COLLATE on
+    /// either the key or the pin matches (both default to BINARY).
+    fn distinct_expr_is_where_pinned(expr: &Expression, pinned: &[EqualityPinnedColumn]) -> bool {
+        let (column, key_collation) = match expr {
+            Expression::ColumnRef(col_id) => (col_id.column_canonical().to_uppercase(), None),
+            Expression::Collate { expr: inner, collation } => {
+                if let Expression::ColumnRef(col_id) = &**inner {
+                    (col_id.column_canonical().to_uppercase(), Some(collation.to_lowercase()))
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        };
+        pinned
+            .iter()
+            .any(|p| p.column.eq_ignore_ascii_case(&column) && p.collation == key_collation)
+    }
+
+    /// The uppercased column name of a DISTINCT-key expression that is a bare
+    /// column or a single `COLLATE`-wrapped column; `None` otherwise.
+    fn distinct_key_column_name(expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::ColumnRef(col_id) => Some(col_id.column_canonical().to_uppercase()),
+            Expression::Collate { expr: inner, .. } => {
+                if let Expression::ColumnRef(col_id) = &**inner {
+                    Some(col_id.column_canonical().to_uppercase())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Rebuild a WHERE clause with the top-level `col = literal` equality
+    /// conjuncts on any of `removed_columns` dropped (the distinctness reduction
+    /// already accounted for them as constants). Returns `None` when nothing
+    /// remains. Only AND/Conjunction nesting is descended into; any other shape
+    /// is preserved verbatim.
+    fn where_without_pinned_columns(
+        where_clause: Option<&Expression>,
+        removed_columns: &[String],
+    ) -> Option<Expression> {
+        fn is_removed_equality(expr: &Expression, removed: &[String]) -> bool {
+            let col = match expr {
+                Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::Equal, right } => {
+                    let from_side = |side: &Expression| -> Option<String> {
+                        match side {
+                            Expression::ColumnRef(c) => Some(c.column_canonical().to_uppercase()),
+                            Expression::Collate { expr: inner, .. } => {
+                                if let Expression::ColumnRef(c) = &**inner {
+                                    Some(c.column_canonical().to_uppercase())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    };
+                    from_side(left).or_else(|| from_side(right))
+                }
+                _ => None,
+            };
+            col.is_some_and(|c| removed.iter().any(|r| r.eq_ignore_ascii_case(&c)))
+        }
+
+        fn reduce(expr: &Expression, removed: &[String]) -> Option<Expression> {
+            match expr {
+                Expression::BinaryOp { left, op: vibesql_ast::BinaryOperator::And, right } => {
+                    let l = reduce(left, removed);
+                    let r = reduce(right, removed);
+                    match (l, r) {
+                        (Some(l), Some(r)) => Some(Expression::BinaryOp {
+                            left: Box::new(l),
+                            op: vibesql_ast::BinaryOperator::And,
+                            right: Box::new(r),
+                        }),
+                        (Some(e), None) | (None, Some(e)) => Some(e),
+                        (None, None) => None,
+                    }
+                }
+                Expression::Conjunction(exprs) => {
+                    let kept: Vec<Expression> =
+                        exprs.iter().filter_map(|e| reduce(e, removed)).collect();
+                    match kept.len() {
+                        0 => None,
+                        1 => kept.into_iter().next(),
+                        _ => Some(Expression::Conjunction(kept)),
+                    }
+                }
+                _ if is_removed_equality(expr, removed) => None,
+                other => Some(other.clone()),
+            }
+        }
+
+        where_clause.and_then(|w| reduce(w, removed_columns))
+    }
+
     /// Wrap key expressions as ASC ORDER BY items for the index-delivery
     /// checks (grouping and dedup keys have no inherent direction).
     fn exprs_as_asc_order_items(exprs: &[&Expression]) -> Vec<vibesql_ast::OrderByItem> {
@@ -1568,7 +1757,22 @@ impl ExplainExecutor {
         group_key: &[&Expression],
         database: &Database,
     ) -> Option<Vec<vibesql_ast::OrderByItem>> {
-        let items = Self::exprs_as_asc_order_items(group_key);
+        Self::key_index_order(from, where_clause, group_key, database)
+    }
+
+    /// The ASC ORDER BY items under which an index delivers `key` order, trying
+    /// the key as written first and then each candidate index's column-order
+    /// permutation (grouping and DISTINCT are both order-insensitive, so SQLite
+    /// reorders the key terms to match a covering index — `GROUP BY b, a` /
+    /// `SELECT DISTINCT b, a` with index `(a, b)` both suppress, verified live).
+    /// Returns `None` when no index delivers any permutation.
+    fn key_index_order(
+        from: Option<&vibesql_ast::FromClause>,
+        where_clause: Option<&vibesql_ast::Expression>,
+        key: &[&Expression],
+        database: &Database,
+    ) -> Option<Vec<vibesql_ast::OrderByItem>> {
+        let items = Self::exprs_as_asc_order_items(key);
         if !Self::needs_temp_btree_for_order_by(from, where_clause, &items, database) {
             return Some(items);
         }
@@ -1578,7 +1782,7 @@ impl ExplainExecutor {
         let Some(vibesql_ast::FromClause::Table { name, .. }) = from else {
             return None;
         };
-        let col_names: Option<Vec<&str>> = group_key
+        let col_names: Option<Vec<&str>> = key
             .iter()
             .map(|e| match e {
                 Expression::ColumnRef(col_id) => Some(col_id.column_canonical()),
@@ -1589,7 +1793,7 @@ impl ExplainExecutor {
 
         for index_name in database.list_indexes_for_table(name) {
             let Some(index) = database.get_index(&index_name) else { continue };
-            // Permute the group terms into this index's column order; every
+            // Permute the key terms into this index's column order; every
             // term must appear as an index column for the realignment to be
             // meaningful.
             let positions: Option<Vec<usize>> = col_names
@@ -1602,15 +1806,14 @@ impl ExplainExecutor {
                 .collect();
             let Some(positions) = positions else { continue };
 
-            let mut order: Vec<usize> = (0..group_key.len()).collect();
+            let mut order: Vec<usize> = (0..key.len()).collect();
             order.sort_by_key(|&i| positions[i]);
-            if order.iter().zip(0..group_key.len()).all(|(&a, b)| a == b) {
+            if order.iter().zip(0..key.len()).all(|(&a, b)| a == b) {
                 continue; // Same as the as-written key already checked.
             }
-            let permuted: Vec<&Expression> = order.iter().map(|&i| group_key[i]).collect();
+            let permuted: Vec<&Expression> = order.iter().map(|&i| key[i]).collect();
             let permuted_items = Self::exprs_as_asc_order_items(&permuted);
-            if !Self::needs_temp_btree_for_order_by(from, where_clause, &permuted_items, database)
-            {
+            if !Self::needs_temp_btree_for_order_by(from, where_clause, &permuted_items, database) {
                 return Some(permuted_items);
             }
         }
