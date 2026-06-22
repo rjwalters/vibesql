@@ -87,3 +87,45 @@ fn volatile_alias_order_by_positional_is_evaluated_once() {
         assert!(vals.iter().all(|v| (0..=4).contains(v)));
     }
 }
+
+/// Issue #5713 / orderby9-1.1: `SELECT random() AS y FROM t ORDER BY random()`.
+/// The ORDER BY term is neither a positional reference nor a bare alias — it is a
+/// structurally-identical function call to the SELECT-list expression. SQLite
+/// evaluates `random()` once per row and reuses that value for both the projected
+/// output and the sort key, so the output must be sorted by the projected `y`.
+/// Re-evaluating `random()` independently during the sort would leave the output
+/// unsorted (the failure this test guards against).
+#[test]
+fn volatile_order_by_structural_match_is_evaluated_once() {
+    let db = setup_db();
+
+    // random() returns a 64-bit value; run many times since a regression
+    // (independent re-evaluation) would almost surely surface as unsorted output.
+    for _ in 0..50 {
+        let rows = execute_query(&db, "SELECT random() AS y FROM cnt ORDER BY random()");
+        let vals = int_values(&rows);
+        assert_eq!(vals.len(), 50, "one projected value per row");
+
+        let mut sorted = vals.clone();
+        sorted.sort();
+        assert_eq!(
+            vals, sorted,
+            "ORDER BY random() must sort on the projected random() output, not a re-evaluated key"
+        );
+    }
+}
+
+/// The structural-match path must also work without an alias on the SELECT-list
+/// expression (`SELECT random() FROM t ORDER BY random()`).
+#[test]
+fn volatile_order_by_structural_match_no_alias() {
+    let db = setup_db();
+
+    for _ in 0..50 {
+        let rows = execute_query(&db, "SELECT random() FROM cnt ORDER BY random()");
+        let vals = int_values(&rows);
+        let mut sorted = vals.clone();
+        sorted.sort();
+        assert_eq!(vals, sorted, "unaliased ORDER BY random() must sort projected output");
+    }
+}

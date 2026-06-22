@@ -1390,3 +1390,163 @@ fn test_compound_order_by_inside_coroutine() {
          `--SCAN q\n"
     );
 }
+
+// ---------------------------------------------------------------------------
+// DISTINCT with WHERE-equality-pinned columns (orderby5, issue #5713)
+// ---------------------------------------------------------------------------
+//
+// A column constrained to one value by a WHERE equality is constant across the
+// scan output and contributes nothing to distinctness, so SQLite drops it from
+// the DISTINCT key before deciding whether an index delivers the remaining key.
+// `SELECT DISTINCT a, b, c FROM t1 WHERE a=0` reduces its key to (b, c) which
+// the index t1bc(b, c) covers, so no `USE TEMP B-TREE FOR DISTINCT` line.
+// Every shape below was verified live against sqlite3 3.51.0.
+
+/// t1(a, b, c) with a composite index on (b, c) — the orderby5 fixture.
+fn setup_orderby5_db() -> Database {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE t1(a, b, c)");
+    run_ddl(&mut db, "CREATE INDEX t1bc ON t1(b, c)");
+    db
+}
+
+// orderby5 1.1: WHERE pins `a`; reduced key (b, c) is delivered by t1bc.
+#[test]
+fn test_distinct_where_pinned_leading_column_suppressed() {
+    let db = setup_orderby5_db();
+    let output = eqp(&db, "SELECT DISTINCT a, b, c FROM t1 WHERE a=0");
+
+    assert!(
+        !output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "WHERE-pinned `a` reduces DISTINCT key to (b, c), covered by t1bc:\n{}",
+        output
+    );
+}
+
+// orderby5 1.2.1 / 1.5 / 1.6: DISTINCT is order-insensitive, so the reduced
+// key (c, b) is reordered to (b, c) to match t1bc.
+#[test]
+fn test_distinct_where_pinned_permuted_key_suppressed() {
+    let db = setup_orderby5_db();
+
+    for sql in [
+        "SELECT DISTINCT a, c, b FROM t1 WHERE a=0",
+        "SELECT DISTINCT c, a, b FROM t1 WHERE a=0",
+        "SELECT DISTINCT c, b, a FROM t1 WHERE a=0",
+        "SELECT DISTINCT b, a, c FROM t1 WHERE a=0",
+        "SELECT DISTINCT b, c, a FROM t1 WHERE a=0",
+    ] {
+        let output = eqp(&db, sql);
+        assert!(
+            !output.contains("USE TEMP B-TREE FOR DISTINCT"),
+            "reduced/permuted key must be delivered by t1bc for `{}`:\n{}",
+            sql,
+            output
+        );
+    }
+}
+
+// All DISTINCT columns pinned → at most one distinct row, no temp structure.
+#[test]
+fn test_distinct_all_columns_pinned_suppressed() {
+    let db = setup_orderby5_db();
+    let output = eqp(&db, "SELECT DISTINCT a FROM t1 WHERE a=0");
+
+    assert!(
+        !output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "fully-pinned DISTINCT key needs no temp structure:\n{}",
+        output
+    );
+}
+
+// orderby5 1.2.2: WHERE pins `a` under nocase, but the DISTINCT key uses
+// BINARY-collated `a` — the pin does NOT make BINARY `a` constant, so the
+// DISTINCT line MUST stay (collation guard).
+#[test]
+fn test_distinct_where_pin_collation_mismatch_keeps_line() {
+    let db = setup_orderby5_db();
+    let output = eqp(&db, "SELECT DISTINCT a, c, b FROM t1 WHERE a='xyz' COLLATE nocase");
+
+    assert!(
+        output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "nocase WHERE pin must not suppress a BINARY DISTINCT key:\n{}",
+        output
+    );
+}
+
+// orderby5 1.2.3: the DISTINCT key uses `a COLLATE nocase` but WHERE pins
+// BINARY `a` — also a mismatch; the line MUST stay.
+#[test]
+fn test_distinct_key_collation_mismatch_keeps_line() {
+    let db = setup_orderby5_db();
+    let output = eqp(&db, "SELECT DISTINCT a COLLATE nocase, c, b FROM t1 WHERE a='xyz'");
+
+    assert!(
+        output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "BINARY WHERE pin must not suppress a nocase DISTINCT key:\n{}",
+        output
+    );
+}
+
+// orderby5 1.2.4: both the WHERE pin and the DISTINCT key use nocase — the
+// collations match, `a COLLATE nocase` is constant, reduced key (c, b) is
+// delivered by t1bc, and the line is suppressed.
+#[test]
+fn test_distinct_key_collation_match_suppressed() {
+    let db = setup_orderby5_db();
+    let output =
+        eqp(&db, "SELECT DISTINCT a COLLATE nocase, c, b FROM t1 WHERE a='xyz' COLLATE nocase");
+
+    assert!(
+        !output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "matching nocase pin/key must suppress the DISTINCT line:\n{}",
+        output
+    );
+}
+
+// orderby5 1.7: `+a=0` is not a bare equality (the unary `+` blocks the pin),
+// so `a` stays in the key; (c, b, a) is not deliverable by t1bc → line stays.
+#[test]
+fn test_distinct_non_equality_predicate_keeps_line() {
+    let db = setup_orderby5_db();
+    let output = eqp(&db, "SELECT DISTINCT c, b, a FROM t1 WHERE +a=0");
+
+    assert!(
+        output.contains("USE TEMP B-TREE FOR DISTINCT"),
+        "`+a=0` does not pin `a`, so the key is not deliverable:\n{}",
+        output
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Constant-only compound + ORDER BY (orderby1 5.1, issue #5713)
+// ---------------------------------------------------------------------------
+
+// orderby1 5.1: every branch is a constant-row query, so SQLite sorts the tiny
+// result with no temp B-tree. `SELECT 5 UNION ALL SELECT 3 ORDER BY 1` shows no
+// trailing `USE TEMP B-TREE FOR ORDER BY` line.
+#[test]
+fn test_constant_compound_order_by_no_temp_btree() {
+    let db = setup_compound_db();
+    let output = eqp(&db, "SELECT 5 UNION ALL SELECT 3 ORDER BY 1");
+
+    assert!(
+        !output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "all-constant compound ORDER BY needs no temp B-tree:\n{}",
+        output
+    );
+}
+
+// A compound with at least one table-backed branch still emits the trailing
+// sort line (the carve-out is narrow — only all-constant compounds qualify).
+#[test]
+fn test_table_backed_compound_order_by_keeps_temp_btree() {
+    let db = setup_compound_db();
+    let output = eqp(&db, "SELECT a FROM u1 UNION ALL SELECT 3 ORDER BY 1");
+
+    assert!(
+        output.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "a table-backed branch must keep the trailing sort line:\n{}",
+        output
+    );
+}

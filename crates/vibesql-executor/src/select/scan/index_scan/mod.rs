@@ -31,7 +31,8 @@ pub(crate) use execution::execute_index_scan;
 pub(crate) use execution::execute_multi_index_or;
 pub(super) use execution::execute_skip_scan;
 pub(crate) use selection::{
-    cost_based_index_selection, eqp_ordering_index, multi_index_or_enabled,
-    needs_temp_btree_for_order_by_eqp, select_index_scan_method, IndexScanChoice,
+    collect_equality_pinned_columns_with_collation, cost_based_index_selection, eqp_ordering_index,
+    multi_index_or_enabled, needs_temp_btree_for_order_by_eqp, select_index_scan_method,
+    EqualityPinnedColumn, IndexScanChoice,
 };
 // predicate types are accessed directly via predicate::* for better type clarity

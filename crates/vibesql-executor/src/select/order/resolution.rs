@@ -378,6 +378,25 @@ pub(crate) fn order_by_volatile_output_index(
         }
     }
 
+    // Case 3: ORDER BY <expr> where <expr> is structurally identical to a
+    // non-deterministic SELECT-list expression (e.g.
+    // `SELECT random() AS y FROM t1 ORDER BY random()`). The ORDER BY term is
+    // neither a positional reference nor a bare alias, so Cases 1 and 2 miss it,
+    // yet SQLite evaluates the volatile expression once per row and reuses that
+    // value for both the projected output and the sort key. Re-evaluating
+    // `random()` independently during sorting would produce a sort key that no
+    // longer matches the projected value, leaving the output unsorted
+    // (orderby9-1.1).
+    for (idx, item) in select_list.iter().enumerate() {
+        if let vibesql_ast::SelectItem::Expression { expr: select_expr, .. } = item {
+            if !ExpressionHasher::is_deterministic(select_expr)
+                && expressions_equal(order_expr, select_expr)
+            {
+                return Some(idx);
+            }
+        }
+    }
+
     None
 }
 
