@@ -358,8 +358,7 @@ fn test_old_and_new_into_ipk_column_in_update_trigger() {
 
 /// Read `SELECT t FROM log ORDER BY rowid` as a Vec<String>.
 fn log_text(db: &Database) -> Vec<String> {
-    let stmt =
-        vibesql_parser::Parser::parse_sql("SELECT t FROM log ORDER BY rowid;").unwrap();
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT t FROM log ORDER BY rowid;").unwrap();
     let result = match stmt {
         vibesql_ast::Statement::Select(s) => {
             SelectExecutor::new(db).execute_with_columns(&s).unwrap()
@@ -527,11 +526,7 @@ fn test_new_rowid_on_without_rowid_table_errors() {
         vibesql_ast::Statement::Insert(s) => InsertExecutor::execute(&mut db, &s),
         _ => panic!("Expected Insert"),
     };
-    assert!(
-        err.is_err(),
-        "NEW.rowid on a WITHOUT ROWID table should error, got {:?}",
-        err
-    );
+    assert!(err.is_err(), "NEW.rowid on a WITHOUT ROWID table should error, got {:?}", err);
 }
 
 /// On a table with an INTEGER PRIMARY KEY (rowid alias), NEW.rowid returns the
@@ -548,4 +543,81 @@ fn test_new_rowid_uses_integer_primary_key_alias() {
     );
     exec(&mut db, "INSERT INTO t VALUES (42, 'x');");
     assert_eq!(log_text(&db), vec!["42/42".to_string()]);
+}
+
+// ============================================================================
+// #5736: A BEFORE INSERT trigger on a table with an INTEGER PRIMARY KEY (rowid
+// alias) must observe the *unwritten-rowid* sentinel (-1) for NEW.<ipk> /
+// NEW.rowid when the rowid was auto-allocated, because SQLite does not allocate
+// the real rowid until the row is written (AFTER the BEFORE trigger). When the
+// rowid is supplied explicitly the supplied value is visible as-is. In all
+// cases the row persists with its real allocated rowid.
+//
+// Repro distilled from insert3-2.1/2.2; expected values verified against
+// sqlite3 3.51.0.
+// ============================================================================
+
+/// BEFORE INSERT trigger on an INTEGER PRIMARY KEY table sees NEW.<ipk> as -1
+/// when the IPK is auto-allocated, but the table persists the real rowid.
+#[test]
+fn test_before_insert_ipk_auto_allocated_sees_minus_one() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t2 (a INTEGER PRIMARY KEY, b DEFAULT 'b', c DEFAULT 'c');");
+    // Log both NEW.a (the IPK / rowid alias) and NEW.rowid; both must read -1.
+    exec(
+        &mut db,
+        "CREATE TRIGGER t2r1 BEFORE INSERT ON t2 \
+         BEGIN INSERT INTO log VALUES (new.a || '/' || new.rowid || '/' || new.b); END;",
+    );
+    // a is NOT supplied -> auto-allocated -> trigger must see -1 for both a and rowid.
+    exec(&mut db, "INSERT INTO t2(b) VALUES (234);");
+    exec(&mut db, "INSERT INTO t2(c) VALUES (345);");
+    assert_eq!(log_text(&db), vec!["-1/-1/234".to_string(), "-1/-1/b".to_string()]);
+
+    // The actual rows persist with the real auto-allocated rowids (1, 2).
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT a FROM t2 ORDER BY a;").unwrap();
+    let result = match stmt {
+        vibesql_ast::Statement::Select(s) => {
+            SelectExecutor::new(&db).execute_with_columns(&s).unwrap()
+        }
+        _ => panic!("Expected Select"),
+    };
+    let ids: Vec<i64> = result
+        .rows
+        .iter()
+        .map(|r| match &r.values[0] {
+            vibesql_types::SqlValue::Integer(i) | vibesql_types::SqlValue::Bigint(i) => *i,
+            other => panic!("expected integer, got {:?}", other),
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 2]);
+}
+
+/// BEFORE INSERT trigger sees the explicitly-supplied INTEGER PRIMARY KEY value
+/// (not -1), and the row persists with that rowid.
+#[test]
+fn test_before_insert_ipk_explicit_sees_supplied_value() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log (t TEXT);");
+    exec(&mut db, "CREATE TABLE t2 (a INTEGER PRIMARY KEY, b);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t2r1 BEFORE INSERT ON t2 \
+         BEGIN INSERT INTO log VALUES (new.a || '/' || new.rowid); END;",
+    );
+    // a supplied explicitly via the named IPK column -> trigger sees 123.
+    exec(&mut db, "INSERT INTO t2(a, b) VALUES (123, 'x');");
+    assert_eq!(log_text(&db), vec!["123/123".to_string()]);
+
+    // Row persists with rowid 123.
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT a FROM t2;").unwrap();
+    let result = match stmt {
+        vibesql_ast::Statement::Select(s) => {
+            SelectExecutor::new(&db).execute_with_columns(&s).unwrap()
+        }
+        _ => panic!("Expected Select"),
+    };
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values[0], vibesql_types::SqlValue::Integer(123));
 }
