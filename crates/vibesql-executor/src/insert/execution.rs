@@ -86,20 +86,17 @@ enum RowidAffinity {
 /// integer before storing it (and before triggers observe `NEW.rowid`):
 /// - integers pass through;
 /// - a TEXT value that is losslessly an integer (e.g. `'45'`) is coerced;
-/// - a REAL value that is losslessly an integer (e.g. `45.0`, `-42.0`) is
-///   coerced; a value with a fractional part (e.g. `42.4`) cannot be a rowid
-///   and raises `datatype mismatch`;
+/// - a REAL value that is losslessly an integer (e.g. `45.0`, `-42.0`) is coerced; a value with a
+///   fractional part (e.g. `42.4`) cannot be a rowid and raises `datatype mismatch`;
 /// - NULL means auto-assign;
-/// - anything else (non-numeric TEXT, BLOB, fractional REAL) raises
-///   `datatype mismatch`, matching sqlite3 3.51.
+/// - anything else (non-numeric TEXT, BLOB, fractional REAL) raises `datatype mismatch`, matching
+///   sqlite3 3.51.
 ///
 /// sqlite3 3.51.0 accepts any integer rowid, including zero and negatives
 /// (`INSERT INTO t(rowid) VALUES(-42.0)` stores rowid -42; triggerC-4.1.4), so
 /// no positivity restriction is applied — only the affinity coercion and the
 /// lossless-integer check.
-fn coerce_rowid_affinity(
-    value: &vibesql_types::SqlValue,
-) -> Result<RowidAffinity, ExecutorError> {
+fn coerce_rowid_affinity(value: &vibesql_types::SqlValue) -> Result<RowidAffinity, ExecutorError> {
     use vibesql_types::SqlValue;
 
     let datatype_mismatch =
@@ -336,7 +333,8 @@ fn execute_insert_internal(
 
             // Validate column count - if rowid is a pseudo-column (not INTEGER PRIMARY KEY),
             // SELECT should return one extra column for the rowid value.
-            // For INTEGER PRIMARY KEY columns, the rowid value is already part of target_column_info.
+            // For INTEGER PRIMARY KEY columns, the rowid value is already part of
+            // target_column_info.
             let expected_select_columns = if resolved_columns.rowid_is_pseudo_column {
                 target_column_info.len() + 1
             } else {
@@ -405,16 +403,21 @@ fn execute_insert_internal(
 
     // For multi-row INSERT, validate all rows first, then insert all
     // This ensures atomicity: all rows succeed or all fail (unless IGNORE is used)
-    let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>)> = Vec::new();
+    // Each entry is (row values, explicit rowid, ipk_auto_assigned). The
+    // `ipk_auto_assigned` flag records whether the row's INTEGER PRIMARY KEY
+    // (rowid alias) value was auto-allocated rather than supplied by the INSERT;
+    // it is used to present `NEW.<ipk>` as the unwritten-rowid sentinel (-1) to
+    // BEFORE INSERT triggers.
+    let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>, bool)> = Vec::new();
     let mut primary_key_values: Vec<Vec<vibesql_types::SqlValue>> = Vec::new(); // Track PK values for duplicate checking within batch
     let mut unique_constraint_values = if schema.get_unique_constraint_indices().is_empty() {
         Vec::new()
     } else {
         vec![Vec::new(); schema.get_unique_constraint_indices().len()]
     }; // Track UNIQUE values for each constraint
-    // Track previously-validated full rows for self-referential FK lookups
-    // (fkey1-5.1: `INSERT INTO t VALUES (1,NULL),(2,1),(3,2)` where t.parent
-    // references t.x — row N must find its parent among rows 0..N-1).
+       // Track previously-validated full rows for self-referential FK lookups
+       // (fkey1-5.1: `INSERT INTO t VALUES (1,NULL),(2,1),(3,2)` where t.parent
+       // references t.x — row N must find its parent among rows 0..N-1).
     let mut batch_full_rows: Vec<Vec<vibesql_types::SqlValue>> = Vec::new();
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
@@ -522,7 +525,9 @@ fn execute_insert_internal(
                         unreachable!("guarded by matches! above")
                     };
                     let negated = match inner {
-                        vibesql_types::SqlValue::Integer(i) => vibesql_types::SqlValue::Integer(-*i),
+                        vibesql_types::SqlValue::Integer(i) => {
+                            vibesql_types::SqlValue::Integer(-*i)
+                        }
                         vibesql_types::SqlValue::Bigint(i) => vibesql_types::SqlValue::Bigint(-*i),
                         vibesql_types::SqlValue::Smallint(i) => {
                             vibesql_types::SqlValue::Smallint(-*i)
@@ -530,7 +535,9 @@ fn execute_insert_internal(
                         vibesql_types::SqlValue::Float(f) => vibesql_types::SqlValue::Float(-*f),
                         vibesql_types::SqlValue::Real(f) => vibesql_types::SqlValue::Real(-*f),
                         vibesql_types::SqlValue::Double(f) => vibesql_types::SqlValue::Double(-*f),
-                        vibesql_types::SqlValue::Numeric(f) => vibesql_types::SqlValue::Numeric(-*f),
+                        vibesql_types::SqlValue::Numeric(f) => {
+                            vibesql_types::SqlValue::Numeric(-*f)
+                        }
                         _ => {
                             return Err(ExecutorError::UnsupportedExpression(
                                 "datatype mismatch".to_string(),
@@ -560,11 +567,7 @@ fn execute_insert_internal(
                         vibesql_catalog::TableSchema::new("__rowid_expr__".to_string(), vec![]);
                     let dummy_row = vibesql_storage::Row::new(vec![]);
                     let mut evaluator = if let Some(ctx) = trigger_context {
-                        crate::ExpressionEvaluator::with_trigger_context(
-                            ctx.table_schema,
-                            db,
-                            ctx,
-                        )
+                        crate::ExpressionEvaluator::with_trigger_context(ctx.table_schema, db, ctx)
                     } else if let Some(ctx) = procedural_context {
                         crate::ExpressionEvaluator::with_procedural_context(&dummy_schema, db, ctx)
                     } else {
@@ -642,6 +645,23 @@ fn execute_insert_internal(
 
             full_row_values[*col_idx] = coerced_value;
         }
+
+        // Determine whether the INTEGER PRIMARY KEY (rowid alias) value will be
+        // auto-allocated by the default-value pass below, rather than being
+        // supplied by this INSERT. SQLite does not allocate the real rowid until
+        // the row is written (AFTER the BEFORE INSERT trigger fires), so inside a
+        // BEFORE INSERT trigger `NEW.<ipk>` / `NEW.rowid` must read as the
+        // unwritten-rowid sentinel (-1) when auto-allocated, but as the supplied
+        // value when explicitly provided (insert3-2.1/2.2, triggerC-4.1.2).
+        //
+        // The IPK is auto-allocated when neither an explicit rowid pseudo-column
+        // value (`explicit_rowid`) nor a non-NULL named IPK column value was
+        // provided. We check the IPK slot here, *before* the default pass fills
+        // it in.
+        let ipk_auto_assigned = ipk_col_idx.is_some_and(|idx| {
+            explicit_rowid.is_none()
+                && matches!(full_row_values.get(idx), Some(vibesql_types::SqlValue::Null))
+        });
 
         // Apply DEFAULT values for unspecified columns
         // This returns the first generated sequence value (if any)
@@ -764,7 +784,7 @@ fn execute_insert_internal(
         batch_full_rows.push(full_row_values.clone());
 
         // Store validated row for insertion (with optional explicit rowid)
-        validated_rows.push((full_row_values, explicit_rowid));
+        validated_rows.push((full_row_values, explicit_rowid, ipk_auto_assigned));
     }
 
     // All rows validated successfully, now insert them
@@ -855,7 +875,7 @@ fn execute_insert_internal(
             let mut row_offset = initial_row_count;
             for chunk in validated_rows.chunks(optimal_batch_size) {
                 let rows: Vec<vibesql_storage::Row> =
-                    chunk.iter().map(|(v, rowid)| make_row((v.clone(), *rowid))).collect();
+                    chunk.iter().map(|(v, rowid, _)| make_row((v.clone(), *rowid))).collect();
 
                 // Partial-aware unique-constraint check (storage skips
                 // partial UNIQUE indexes; the executor must do this itself).
@@ -897,7 +917,7 @@ fn execute_insert_internal(
         } else {
             // Single batch insert for low-cost tables
             let rows: Vec<vibesql_storage::Row> =
-                validated_rows.into_iter().map(make_row).collect();
+                validated_rows.into_iter().map(|(v, rowid, _)| make_row((v, rowid))).collect();
 
             // Partial-aware unique-constraint check (storage skips partial
             // UNIQUE indexes; the executor must do this itself).
@@ -936,7 +956,7 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for (mut full_row_values, mut explicit_rowid) in validated_rows {
+        for (mut full_row_values, mut explicit_rowid, ipk_auto_assigned) in validated_rows {
             // Check if ON DUPLICATE KEY UPDATE is specified
             if let Some(ref assignments) = stmt.on_duplicate_key_update {
                 // Try to update an existing row if there's a conflict
@@ -1096,8 +1116,30 @@ fn execute_insert_internal(
                 db.release_reserved_rowid(&storage_table_name);
             }
 
-            // Fire BEFORE INSERT triggers only if triggers exist
-            let row_to_insert = make_row((full_row_values.clone(), explicit_rowid));
+            // Fire BEFORE INSERT triggers only if triggers exist.
+            //
+            // SQLite does not allocate the real rowid until the row is written,
+            // which happens AFTER the BEFORE INSERT trigger fires. So inside a
+            // BEFORE INSERT trigger an auto-allocated rowid is reported as the
+            // unwritten-rowid sentinel (-1), both via `NEW.rowid` and via
+            // `NEW.<ipk>` for an INTEGER PRIMARY KEY (the rowid alias). We have
+            // already computed the real rowid and persist it to the actual row,
+            // but the trigger must observe the sentinel — except when the rowid
+            // was supplied explicitly (then the supplied value is visible as-is),
+            // or when a REPLACE reservation has fixed the rowid before triggers
+            // (`explicit_rowid` is then `Some`). insert3-2.1/2.2, triggerC-4.1.2.
+            let row_to_insert = if ipk_auto_assigned && explicit_rowid.is_none() {
+                let mut trigger_values = full_row_values.clone();
+                if let Some(idx) = ipk_col_idx {
+                    trigger_values[idx] = vibesql_types::SqlValue::Integer(-1);
+                }
+                // Pass no row_id so `NEW.rowid` also resolves to the -1 sentinel
+                // (the rowid-alias path in trigger_execution.rs reads the IPK
+                // column above; the non-alias path reads row_id).
+                vibesql_storage::Row::new(trigger_values)
+            } else {
+                make_row((full_row_values.clone(), explicit_rowid))
+            };
             if has_insert_triggers {
                 // RAISE(IGNORE) in a BEFORE INSERT trigger abandons this row:
                 // skip the insert and continue with the next row (SQLite).
@@ -1125,8 +1167,8 @@ fn execute_insert_internal(
             // During REPLACE, the rowid for the new row is allocated BEFORE firing triggers.
             // The behavior depends on the type of reservation:
             // - Auto-allocated reservation: BEFORE DELETE trigger INSERTs fail on rowid conflict
-            // - Explicit reservation: AFTER DELETE trigger auto-INSERTs skip to next rowid
-            //   (SQLite reuses freed rowids, but VibeSQL doesn't, so we skip instead)
+            // - Explicit reservation: AFTER DELETE trigger auto-INSERTs skip to next rowid (SQLite
+            //   reuses freed rowids, but VibeSQL doesn't, so we skip instead)
             let mut final_explicit_rowid = explicit_rowid;
             let rowid_to_use = explicit_rowid.unwrap_or((physical_row_count_before + 1) as u64);
             if let Some((reserved_rowid, is_explicit_reservation)) =
@@ -1151,7 +1193,8 @@ fn execute_insert_internal(
                         final_explicit_rowid = Some(new_rowid);
 
                         // Also update the INTEGER PRIMARY KEY column value to match the new rowid
-                        // The column value was auto-generated earlier but now we're using a different rowid
+                        // The column value was auto-generated earlier but now we're using a
+                        // different rowid
                         if let Some(ipk_idx) = ipk_col_idx {
                             full_row_values[ipk_idx] =
                                 vibesql_types::SqlValue::Integer(new_rowid as i64);
@@ -1210,13 +1253,12 @@ fn execute_insert_internal(
             // machinery in `raise_scope::run_top_level_dml` (which wraps every
             // top-level INSERT) handles undoing the right amount of work, exactly
             // matching sqlite3 3.51 (#5464, #5474):
-            //   - RAISE(ABORT)/RAISE(ROLLBACK)/any non-RAISE trigger error → the
-            //     statement savepoint (in an explicit txn) or implicit
-            //     transaction (auto-commit) rolls back the *whole* statement,
-            //     removing this offending row AND every earlier row.
-            //   - RAISE(FAIL) → the partial changes the statement already applied
-            //     are KEPT, including this offending row (which was inserted
-            //     before its AFTER trigger fired). SQLite keeps it; so do we.
+            //   - RAISE(ABORT)/RAISE(ROLLBACK)/any non-RAISE trigger error → the statement
+            //     savepoint (in an explicit txn) or implicit transaction (auto-commit) rolls back
+            //     the *whole* statement, removing this offending row AND every earlier row.
+            //   - RAISE(FAIL) → the partial changes the statement already applied are KEPT,
+            //     including this offending row (which was inserted before its AFTER trigger fired).
+            //     SQLite keeps it; so do we.
             //
             // Previously this site unconditionally tombstoned the just-inserted
             // offending row on any trigger error. That was redundant for
