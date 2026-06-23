@@ -137,6 +137,9 @@ fn create_update_stmt(
         assignments: vec![Assignment { column: column.to_string(), value }],
         from_clause: None,
         where_clause,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     }
@@ -158,6 +161,9 @@ fn create_multi_column_update_stmt(
             .collect(),
         from_clause: None,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     }

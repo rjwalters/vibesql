@@ -94,6 +94,9 @@ fn test_update_where_in_subquery() {
             subquery,
             negated: false,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -191,6 +194,9 @@ fn test_update_where_not_in_subquery() {
             subquery,
             negated: true,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -281,6 +287,9 @@ fn test_update_where_subquery_empty_result() {
             subquery,
             negated: false,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -388,6 +397,9 @@ fn test_update_where_complex_subquery_condition() {
             subquery,
             negated: false,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -489,6 +501,9 @@ fn test_update_where_multiple_rows_in_subquery() {
             subquery,
             negated: false,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

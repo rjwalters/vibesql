@@ -69,6 +69,9 @@ fn test_create_update_statement() {
         }],
         from_clause: None,
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     });

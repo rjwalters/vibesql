@@ -29,6 +29,9 @@ fn test_update_check_constraint_passes() {
             value: Expression::Literal(SqlValue::Integer(100)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -58,6 +61,9 @@ fn test_update_check_constraint_violation() {
             value: Expression::Literal(SqlValue::Integer(-10)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -95,6 +101,9 @@ fn test_update_check_constraint_with_null() {
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -128,6 +137,9 @@ fn test_update_check_constraint_with_expression() {
             value: Expression::Literal(SqlValue::Integer(15000)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -147,6 +159,9 @@ fn test_update_check_constraint_with_expression() {
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

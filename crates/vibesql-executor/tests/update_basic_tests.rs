@@ -23,6 +23,9 @@ fn test_update_all_rows() {
             value: Expression::Literal(SqlValue::Integer(50000)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -63,6 +66,9 @@ fn test_update_with_where_clause() {
                 "Engineering",
             )))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -111,6 +117,9 @@ fn test_update_multiple_columns() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -153,6 +162,9 @@ fn test_update_with_expression() {
             },
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -182,6 +194,9 @@ fn test_update_table_not_found() {
         table_name: "nonexistent".to_string(),
         assignments: vec![],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -208,6 +223,9 @@ fn test_update_column_not_found() {
             value: Expression::Literal(SqlValue::Integer(123)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -240,6 +258,9 @@ fn test_update_no_matching_rows() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

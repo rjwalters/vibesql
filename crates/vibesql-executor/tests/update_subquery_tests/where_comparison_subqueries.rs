@@ -79,6 +79,9 @@ fn test_update_where_scalar_subquery_equal() {
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -172,6 +175,9 @@ fn test_update_where_scalar_subquery_less_than() {
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -257,6 +263,9 @@ fn test_update_where_subquery_returns_null() {
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -354,6 +363,9 @@ fn test_update_where_subquery_with_aggregate() {
             op: vibesql_ast::BinaryOperator::Equal,
             right: Box::new(Expression::ScalarSubquery(subquery)),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -488,6 +500,9 @@ fn test_update_where_and_set_both_use_subqueries() {
             subquery: where_subquery,
             negated: false,
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
