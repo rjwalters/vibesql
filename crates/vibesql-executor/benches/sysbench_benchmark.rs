@@ -177,6 +177,7 @@ fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
         quoted: false,
         only: stmt.only,
         table_name: stmt.table_name.clone(),
+        index_hint: stmt.index_hint.clone(),
         where_clause: bind_where_clause(&stmt.where_clause, params),
         order_by: None,
         limit: None,
@@ -192,6 +193,7 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
         table_name: stmt.table_name.clone(),
         quoted: false,
         alias: stmt.alias.clone(),
+        index_hint: stmt.index_hint.clone(),
         assignments: stmt
             .assignments
             .iter()

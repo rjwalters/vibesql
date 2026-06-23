@@ -43,6 +43,7 @@ fn test_truncate_optimization_basic() {
 
     // DELETE FROM large_table (no WHERE) - should use TRUNCATE fast path
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "large_table".to_string(),
@@ -123,6 +124,7 @@ fn test_truncate_blocked_by_fk_reference() {
     // Should NOT use TRUNCATE because child references exist
     // Should fail with FK constraint violation
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "parent".to_string(),
@@ -199,6 +201,7 @@ fn test_truncate_allowed_when_no_fk_references() {
     // Cannot use TRUNCATE because FK constraint exists (even though no child rows reference it)
     // This is conservative but correct - we don't scan child table to check
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "parent".to_string(),
@@ -264,6 +267,7 @@ fn test_truncate_blocked_by_delete_trigger() {
     // Should use row-by-row deletion (which currently doesn't execute triggers, but that's
     // separate)
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "test_table".to_string(),
@@ -327,6 +331,7 @@ fn test_truncate_allowed_with_insert_trigger() {
     // DELETE FROM test_table (no WHERE)
     // Should use TRUNCATE because only INSERT trigger exists (not DELETE)
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "test_table".to_string(),
@@ -376,6 +381,7 @@ fn test_truncate_performance() {
     }
 
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "large_table".to_string(),

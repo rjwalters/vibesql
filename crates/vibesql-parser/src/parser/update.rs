@@ -45,9 +45,9 @@ impl Parser {
         let alias = if self.try_consume_keyword(Keyword::As) {
             // AS keyword present, alias required
             Some(self.parse_identifier()?)
-        } else if !self.peek_keyword(Keyword::Set) {
-            // No AS keyword, but might have alias before SET
-            // Check if current token is an identifier (not SET keyword)
+        } else if !self.peek_keyword(Keyword::Set) && !self.peek_index_hint() {
+            // No AS keyword, but might have alias before SET / index hint.
+            // INDEXED / NOT are keywords, so they are not consumed as an alias here.
             match self.peek() {
                 Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                     let alias_name = name.clone();
@@ -59,6 +59,11 @@ impl Parser {
         } else {
             None
         };
+
+        // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
+        // Syntax: UPDATE t1 INDEXED BY idx SET ...
+        // Advisory only: VibeSQL's planner chooses indexes independently.
+        let index_hint = self.parse_index_hint()?;
 
         // Parse SET keyword
         self.expect_keyword(Keyword::Set)?;
@@ -156,6 +161,7 @@ impl Parser {
             table_name,
             quoted,
             alias,
+            index_hint,
             assignments,
             from_clause,
             where_clause,
@@ -207,7 +213,7 @@ impl Parser {
         // Parse optional alias: UPDATE t1 AS alias SET ... or UPDATE t1 alias SET ...
         let alias = if self.try_consume_keyword(Keyword::As) {
             Some(self.parse_identifier()?)
-        } else if !self.peek_keyword(Keyword::Set) {
+        } else if !self.peek_keyword(Keyword::Set) && !self.peek_index_hint() {
             match self.peek() {
                 Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                     let alias_name = name.clone();
@@ -219,6 +225,10 @@ impl Parser {
         } else {
             None
         };
+
+        // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
+        // Advisory only: VibeSQL's planner chooses indexes independently.
+        let index_hint = self.parse_index_hint()?;
 
         // Parse SET keyword
         self.expect_keyword(Keyword::Set)?;
@@ -310,6 +320,7 @@ impl Parser {
             table_name,
             quoted,
             alias,
+            index_hint,
             assignments,
             from_clause,
             where_clause,

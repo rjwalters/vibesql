@@ -59,6 +59,7 @@ fn test_after_update_trigger_fires() {
 
     // Update the user - should fire trigger
     let update = vibesql_ast::UpdateStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         alias: None,
@@ -137,6 +138,7 @@ fn test_before_update_trigger_fires() {
 
     // Update the user - should fire trigger
     let update = vibesql_ast::UpdateStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         alias: None,
@@ -220,6 +222,7 @@ fn test_update_of_fires_only_for_listed_column() {
     // Helper: UPDATE one column of user id=1 to `value`.
     let update_col = |db: &mut Database, column: &str, value: vibesql_types::SqlValue| {
         let update = vibesql_ast::UpdateStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             alias: None,

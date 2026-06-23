@@ -22,6 +22,56 @@ fn test_parse_update_basic() {
 }
 
 #[test]
+fn test_parse_update_indexed_by() {
+    // SQLite INDEXED BY hint on UPDATE (issue #5734, where9-6.8.x).
+    let result = Parser::parse_sql("UPDATE t1 INDEXED BY t1b SET a = a + 100 WHERE a = 1;");
+    assert!(result.is_ok(), "UPDATE ... INDEXED BY should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert_eq!(update.table_name, "t1");
+            assert_eq!(update.alias, None);
+            assert_eq!(
+                update.index_hint,
+                Some(vibesql_ast::IndexHint::IndexedBy("t1b".to_string()))
+            );
+            assert_eq!(update.assignments.len(), 1);
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_not_indexed() {
+    // SQLite NOT INDEXED hint on UPDATE (issue #5734).
+    let result = Parser::parse_sql("UPDATE t1 NOT INDEXED SET a = 1;");
+    assert!(result.is_ok(), "UPDATE ... NOT INDEXED should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert_eq!(update.index_hint, Some(vibesql_ast::IndexHint::NotIndexed));
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_alias_still_parses_with_hint_path() {
+    // Ensure adding the index-hint hook did not break plain alias parsing.
+    let result = Parser::parse_sql("UPDATE t1 x SET a = 1;");
+    assert!(result.is_ok(), "UPDATE with alias should still parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert_eq!(update.table_name, "t1");
+            assert_eq!(update.alias, Some("x".to_string()));
+            assert_eq!(update.index_hint, None);
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
 fn test_parse_update_multiple_columns() {
     let result = Parser::parse_sql("UPDATE users SET name = 'Bob', age = 30;");
     assert!(result.is_ok());

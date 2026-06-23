@@ -80,6 +80,7 @@ impl DeleteExecutor {
     ///     only: false,
     ///     table_name: "users".to_string(),
     ///     quoted: false,
+    ///     index_hint: None,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
     ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
     ///         op: BinaryOperator::Equal,

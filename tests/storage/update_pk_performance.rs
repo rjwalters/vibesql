@@ -50,6 +50,7 @@ fn test_update_with_pk_index_performance() {
 
     for i in 0..1000 {
         let stmt = UpdateStmt {
+            index_hint: None,
             with_clause: None,
             table_name: "test_table".to_string(),
             alias: None,

@@ -30,6 +30,11 @@ impl Parser {
             self.advance(); // consume ')'
         }
 
+        // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
+        // Syntax: DELETE FROM t1 INDEXED BY idx WHERE ...
+        // Advisory only: VibeSQL's planner chooses indexes independently.
+        let index_hint = self.parse_index_hint()?;
+
         // Parse optional WHERE clause
         let where_clause = if self.peek_keyword(Keyword::Where) {
             self.consume_keyword(Keyword::Where)?;
@@ -134,6 +139,7 @@ impl Parser {
             only,
             table_name,
             quoted,
+            index_hint,
             where_clause,
             order_by,
             limit,
@@ -171,6 +177,10 @@ impl Parser {
             }
             self.advance();
         }
+
+        // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
+        // Advisory only: VibeSQL's planner chooses indexes independently.
+        let index_hint = self.parse_index_hint()?;
 
         // Parse optional WHERE clause
         let where_clause = if self.peek_keyword(Keyword::Where) {
@@ -275,6 +285,7 @@ impl Parser {
             only,
             table_name,
             quoted,
+            index_hint,
             where_clause,
             order_by,
             limit,
