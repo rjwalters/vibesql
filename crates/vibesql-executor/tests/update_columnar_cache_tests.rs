@@ -69,6 +69,9 @@ fn test_update_invalidates_columnar_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -142,6 +145,9 @@ fn test_update_invalidates_prewarmed_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob")))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -183,6 +189,9 @@ fn test_update_all_rows_invalidates_cache() {
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -228,6 +237,9 @@ fn test_update_no_match_does_not_invalidate_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))), // No such id
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -274,6 +286,9 @@ fn test_multiple_updates_invalidate_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -306,6 +321,9 @@ fn test_multiple_updates_invalidate_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -360,6 +378,9 @@ fn test_update_multiple_columns_invalidates_cache() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

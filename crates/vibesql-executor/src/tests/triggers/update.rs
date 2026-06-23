@@ -82,6 +82,9 @@ fn test_after_update_trigger_fires() {
                 )),
             },
         )),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -161,6 +164,9 @@ fn test_before_update_trigger_fires() {
                 )),
             },
         )),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -243,6 +249,9 @@ fn test_update_of_fires_only_for_listed_column() {
                     )),
                 },
             )),
+            order_by: None,
+            limit: None,
+            offset: None,
             conflict_clause: None,
             returning: None,
         };

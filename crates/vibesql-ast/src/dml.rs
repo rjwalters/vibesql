@@ -191,6 +191,17 @@ pub struct UpdateStmt {
     /// See: <https://www.sqlite.org/lang_update.html#update_from>
     pub from_clause: Option<Vec<FromClause>>,
     pub where_clause: Option<WhereClause>,
+    /// Optional ORDER BY clause (SQLite extension for UPDATE)
+    /// When present with LIMIT, updates rows in the specified order.
+    /// Requires SQLite to be compiled with SQLITE_ENABLE_UPDATE_DELETE_LIMIT;
+    /// VibeSQL supports it unconditionally to match the conformance suite.
+    pub order_by: Option<Vec<OrderByItem>>,
+    /// Optional LIMIT clause (SQLite extension for UPDATE)
+    /// Limits the number of rows updated. May appear with or without ORDER BY.
+    pub limit: Option<Expression>,
+    /// Optional OFFSET clause (SQLite extension for UPDATE)
+    /// When used with LIMIT, skips rows before updating.
+    pub offset: Option<Expression>,
     /// Optional conflict resolution clause (SQLite extension)
     /// Syntax: UPDATE OR REPLACE|IGNORE|ABORT|ROLLBACK|FAIL table SET ...
     pub conflict_clause: Option<ConflictClause>,

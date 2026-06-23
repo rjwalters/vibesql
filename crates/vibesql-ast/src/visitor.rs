@@ -1452,6 +1452,18 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
             }
             other => other,
         }),
+        order_by: stmt.order_by.map(|items| {
+            items
+                .into_iter()
+                .map(|item| crate::OrderByItem {
+                    expr: transform_expression(visitor, item.expr),
+                    direction: item.direction,
+                    nulls_order: item.nulls_order,
+                })
+                .collect()
+        }),
+        limit: stmt.limit.map(|e| transform_expression(visitor, e)),
+        offset: stmt.offset.map(|e| transform_expression(visitor, e)),
         conflict_clause: stmt.conflict_clause,
         returning: stmt.returning.map(|items| {
             items

@@ -314,3 +314,96 @@ fn test_returning_still_usable_as_identifier() {
         _ => panic!("Expected UPDATE statement"),
     }
 }
+
+// ========================================================================
+// UPDATE ... ORDER BY / LIMIT / OFFSET (SQLite extension, issue #5735)
+// ========================================================================
+
+#[test]
+fn test_parse_update_limit() {
+    let result = Parser::parse_sql("UPDATE t SET col = 1 LIMIT 1;");
+    assert!(result.is_ok(), "UPDATE ... LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.limit.is_some());
+            assert!(update.offset.is_none());
+            assert!(update.order_by.is_none());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_limit_offset() {
+    let result = Parser::parse_sql("UPDATE t SET col = 1 WHERE x > 0 LIMIT 3 OFFSET 2;");
+    assert!(result.is_ok(), "UPDATE ... LIMIT ... OFFSET should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.where_clause.is_some());
+            assert!(update.limit.is_some());
+            assert!(update.offset.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_limit_comma_offset() {
+    // SQLite `LIMIT offset,count` form: offset=2, count=3
+    let result = Parser::parse_sql("UPDATE t SET col = 1 LIMIT 2, 3;");
+    assert!(result.is_ok(), "UPDATE ... LIMIT offset,count should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.limit.is_some());
+            assert!(update.offset.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_order_by_limit_offset() {
+    let result = Parser::parse_sql("UPDATE t SET col = NULL ORDER BY a, b DESC LIMIT 3 OFFSET 1;");
+    assert!(
+        result.is_ok(),
+        "UPDATE ... ORDER BY ... LIMIT ... OFFSET should parse: {:?}",
+        result.err()
+    );
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let order_by = update.order_by.expect("order_by should be present");
+            assert_eq!(order_by.len(), 2);
+            assert!(matches!(order_by[1].direction, vibesql_ast::OrderDirection::Desc));
+            assert!(update.limit.is_some());
+            assert!(update.offset.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_with_cte_limit() {
+    // WITH-CTE UPDATE path must also accept LIMIT (wherelimit2 test 7.1).
+    let result = Parser::parse_sql("WITH t1(b) AS (SELECT 2) UPDATE t1 SET a = 3 LIMIT 1;");
+    assert!(result.is_ok(), "WITH ... UPDATE ... LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.with_clause.is_some());
+            assert!(update.limit.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_no_limit_is_none() {
+    let result = Parser::parse_sql("UPDATE t SET col = 1 WHERE x = 2;");
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.limit.is_none());
+            assert!(update.offset.is_none());
+            assert!(update.order_by.is_none());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}

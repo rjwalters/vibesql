@@ -77,6 +77,9 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -175,6 +178,9 @@ fn test_update_with_subquery_multiple_columns_error() {
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

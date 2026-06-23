@@ -146,6 +146,13 @@ pub(super) fn execute_internal(
         && !has_expression_indexes
         // RETURNING needs the two-phase path so NEW rows can be captured
         && stmt.returning.is_none()
+        // ORDER BY / LIMIT / OFFSET (SQLite extension) restrict which rows are
+        // updated; the single-row PK fast path has no row-limiting logic, so
+        // route through the standard scan path (mirrors DELETE skipping its
+        // TRUNCATE fast path when ORDER BY/LIMIT is present).
+        && stmt.order_by.is_none()
+        && stmt.limit.is_none()
+        && stmt.offset.is_none()
         // OR REPLACE / OR IGNORE need the two-phase path to resolve conflicts:
         // REPLACE deletes the conflicting row (firing its DELETE triggers) and
         // IGNORE skips the row. The fast path has no conflict-resolution logic,
@@ -246,8 +253,23 @@ pub(super) fn execute_internal(
     // visibility. Off-state collapses to the pre-MVCC live-row filter.
     let snapshot = crate::mvcc::read_snapshot(database);
     let row_selector = RowSelector::new(schema);
-    let candidate_rows =
+    let mut candidate_rows =
         row_selector.select_rows(table, &stmt.where_clause, &mut evaluator, &snapshot)?;
+
+    // Apply ORDER BY sorting and LIMIT/OFFSET (SQLite extension for UPDATE).
+    // Mirrors the DELETE ... ORDER BY ... LIMIT path: when LIMIT (and optionally
+    // ORDER BY/OFFSET) is present, restrict which of the matched rows are
+    // actually updated. Without ORDER BY, rows are limited in scan order, which
+    // matches SQLite's UPDATE ... LIMIT behavior.
+    if stmt.order_by.is_some() || stmt.limit.is_some() || stmt.offset.is_some() {
+        apply_order_by_and_limit(
+            &mut candidate_rows,
+            stmt.order_by.as_deref(),
+            &stmt.limit,
+            &stmt.offset,
+            &evaluator,
+        )?;
+    }
 
     // Estimate DML cost for query analysis and optimization decisions
     if std::env::var("DML_COST_DEBUG").is_ok() && !candidate_rows.is_empty() {
@@ -2157,4 +2179,121 @@ fn empty_returning(
             )
         })
         .transpose()
+}
+
+/// Sort the candidate rows by the UPDATE `ORDER BY` clause (if any) and then
+/// apply `OFFSET`/`LIMIT` (SQLite extension for UPDATE).
+///
+/// This mirrors the DELETE executor's `apply_order_by_and_limit`. When
+/// `order_by` is `None` the rows are left in their scan order before LIMIT/OFFSET
+/// are applied, matching `UPDATE ... LIMIT n` semantics.
+fn apply_order_by_and_limit(
+    rows_and_indices: &mut Vec<(usize, Row)>,
+    order_by: Option<&[vibesql_ast::OrderByItem]>,
+    limit: &Option<Expression>,
+    offset: &Option<Expression>,
+    evaluator: &ExpressionEvaluator,
+) -> Result<(), ExecutorError> {
+    use vibesql_ast::OrderDirection;
+
+    // Sort rows by ORDER BY columns (if present)
+    if let Some(order_by) = order_by {
+        rows_and_indices.sort_by(|a, b| {
+            for item in order_by {
+                // Evaluate the ORDER BY expression for both rows
+                let val_a = evaluator.eval(&item.expr, &a.1).unwrap_or(SqlValue::Null);
+                let val_b = evaluator.eval(&item.expr, &b.1).unwrap_or(SqlValue::Null);
+
+                // Compare values with proper NULL handling.
+                // NULLS FIRST: nulls come first (default for DESC)
+                // NULLS LAST: nulls come last (default for ASC)
+                let nulls_first = match item.nulls_order {
+                    Some(vibesql_ast::NullsOrder::First) => true,
+                    Some(vibesql_ast::NullsOrder::Last) => false,
+                    None => matches!(item.direction, OrderDirection::Desc),
+                };
+
+                let cmp = match (&val_a, &val_b) {
+                    (SqlValue::Null, SqlValue::Null) => std::cmp::Ordering::Equal,
+                    (SqlValue::Null, _) => {
+                        if nulls_first {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Greater
+                        }
+                    }
+                    (_, SqlValue::Null) => {
+                        if nulls_first {
+                            std::cmp::Ordering::Greater
+                        } else {
+                            std::cmp::Ordering::Less
+                        }
+                    }
+                    _ => val_a.partial_cmp(&val_b).unwrap_or(std::cmp::Ordering::Equal),
+                };
+
+                // Apply direction
+                let cmp = match item.direction {
+                    OrderDirection::Desc => cmp.reverse(),
+                    OrderDirection::Asc => cmp,
+                };
+
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+    }
+
+    // Evaluate OFFSET expression if present
+    let offset_val = if let Some(ref offset_expr) = offset {
+        let empty_row = Row::new(vec![]);
+        match evaluator.eval(offset_expr, &empty_row)? {
+            SqlValue::Integer(n) if n >= 0 => n as usize,
+            SqlValue::Bigint(n) if n >= 0 => n as usize,
+            SqlValue::Null => 0, // NULL offset treated as 0
+            _ => {
+                return Err(ExecutorError::TypeError(
+                    "OFFSET value must be a non-negative integer".to_string(),
+                ))
+            }
+        }
+    } else {
+        0
+    };
+
+    // Evaluate LIMIT expression if present
+    let limit_val = if let Some(ref limit_expr) = limit {
+        let empty_row = Row::new(vec![]);
+        match evaluator.eval(limit_expr, &empty_row)? {
+            SqlValue::Integer(n) if n >= 0 => Some(n as usize),
+            SqlValue::Bigint(n) if n >= 0 => Some(n as usize),
+            SqlValue::Integer(-1) | SqlValue::Bigint(-1) => None, // -1 means no limit (SQLite extension)
+            SqlValue::Null => None, // NULL limit treated as no limit
+            _ => {
+                return Err(ExecutorError::TypeError(
+                    "LIMIT value must be a non-negative integer".to_string(),
+                ))
+            }
+        }
+    } else {
+        None
+    };
+
+    // Apply OFFSET: skip first N rows
+    if offset_val > 0 {
+        if offset_val >= rows_and_indices.len() {
+            rows_and_indices.clear();
+        } else {
+            rows_and_indices.drain(..offset_val);
+        }
+    }
+
+    // Apply LIMIT: keep only first N rows
+    if let Some(limit) = limit_val {
+        rows_and_indices.truncate(limit);
+    }
+
+    Ok(())
 }

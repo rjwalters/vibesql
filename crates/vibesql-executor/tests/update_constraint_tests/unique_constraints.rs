@@ -183,6 +183,9 @@ fn test_update_unique_constraint_composite() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

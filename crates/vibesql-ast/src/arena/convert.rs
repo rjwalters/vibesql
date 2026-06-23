@@ -707,6 +707,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                 .as_ref()
                 .map(|froms| froms.iter().map(|f| self.convert_from_clause(f)).collect()),
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
+            // Arena UPDATE does not yet carry ORDER BY / LIMIT / OFFSET; the
+            // standard parser path does.
+            order_by: None,
+            limit: None,
+            offset: None,
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
             returning: stmt
                 .returning

@@ -128,6 +128,9 @@ fn test_onepass_multiple_literal_assignments() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -172,6 +175,9 @@ fn test_onepass_single_literal_assignment() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(2))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -208,6 +214,9 @@ fn test_onepass_pk_not_found_returns_zero() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(999))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -253,6 +262,9 @@ fn test_onepass_not_null_constraint_enforced() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -300,6 +312,9 @@ fn test_composite_pk_update_both_columns_specified() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -353,6 +368,9 @@ fn test_composite_pk_update_reversed_order() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -391,6 +409,9 @@ fn test_composite_pk_partial_match_uses_scan() {
             op: BinaryOperator::Equal,
             right: Box::new(Expression::Literal(SqlValue::Integer(1))),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -440,6 +461,9 @@ fn test_composite_pk_not_found_returns_zero() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(99))),
             }),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };
@@ -488,6 +512,9 @@ fn test_composite_pk_multiple_columns_updated() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(1))),
             }),
         })),
+        order_by: None,
+        limit: None,
+        offset: None,
         conflict_clause: None,
         returning: None,
     };

@@ -69,6 +69,9 @@ fn test_update_with_pk_index_performance() {
                 right: Box::new(Expression::Literal(SqlValue::Integer(i))),
             })),
             quoted: false,
+            order_by: None,
+            limit: None,
+            offset: None,
             conflict_clause: None,
             returning: None,
         };
