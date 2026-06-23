@@ -96,6 +96,7 @@ set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
 set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
+set ::pragma_prefix_skip_count_changes 0 ;# Per-block: suppress count_changes prefix replay when the block sets it itself (#5738)
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
@@ -1054,6 +1055,20 @@ proc build_pragma_prefix {} {
     if {$::pragma_case_sensitive_like != 0} {
         append prefix "PRAGMA case_sensitive_like=$::pragma_case_sensitive_like;\n"
     }
+    # Include count_changes if it's been set to ON (#5738). Replaying this into
+    # every fresh per-batch CLI process lets the CLI emit the per-statement row
+    # count after each DML natively (matching SQLite's count_changes behavior),
+    # even when the PRAGMA was set in an earlier execsql block. The DML path then
+    # suppresses its own appended SELECT changes() and passes the CLI output
+    # through verbatim, so a multi-DML block yields one count per statement.
+    #
+    # Skip the replay when the current block sets count_changes itself: the
+    # block's own (possibly mid-block) PRAGMA must control CLI state so that
+    # statements *before* the toggle are not counted. ::pragma_prefix_skip_count_changes
+    # is set by execsql for such blocks.
+    if {$::pragma_count_changes != 0 && !$::pragma_prefix_skip_count_changes} {
+        append prefix "PRAGMA count_changes=$::pragma_count_changes;\n"
+    }
     # Include reverse_unordered_selects if it's been set to ON
     if {$::pragma_reverse_unordered_selects != 0} {
         append prefix "PRAGMA reverse_unordered_selects=$::pragma_reverse_unordered_selects;\n"
@@ -1784,19 +1799,33 @@ proc execsql {sql {db ""}} {
     }
 
     # Direct execution for non-transaction SQL
-    # Build PRAGMA prefix to maintain session state across process invocations
+    # Build PRAGMA prefix to maintain session state across process invocations.
+    # When this block sets count_changes itself (possibly mid-block), let the
+    # block's own PRAGMA drive the CLI's count_changes state instead of the
+    # replayed prefix, so DML *before* the in-block toggle is not counted (#5738).
+    set ::pragma_prefix_skip_count_changes \
+        [regexp -nocase {PRAGMA\s+(?:database\.)?count_changes\s*[=(]} $sql]
     set pragma_prefix [build_pragma_prefix]
+    set ::pragma_prefix_skip_count_changes 0
 
     # Check if this is a data modification statement (INSERT/UPDATE/DELETE/REPLACE)
     # If so, append SELECT changes() to track the row count
     set sql_upper [string toupper [string trim $sql]]
     set is_dml [regexp {^(INSERT|UPDATE|DELETE|REPLACE)\s} $sql_upper]
 
+    # When PRAGMA count_changes=ON, the CLI emits the row count after EACH
+    # modifying statement natively (matching SQLite), interleaved with any
+    # SELECT results in the same block. In that mode we must NOT append our own
+    # SELECT changes() — the CLI already supplies one count row per DML — and we
+    # must pass the result through verbatim rather than collapsing it to a single
+    # count. (#5738: a block with two DELETEs returned {4} instead of {4 4}.)
+    set cli_emits_changes [expr {$is_dml && $::pragma_count_changes}]
+
     # Use raw format for proper NULL handling:
     # - Actual NULL values become empty strings
     # - The literal string 'NULL' remains as "NULL"
     # This matches SQLite TCL interface behavior
-    if {$is_dml} {
+    if {$is_dml && !$cli_emits_changes} {
         # Append SELECT changes() to capture row count in same execution
         # Remove trailing semicolon from sql if present to avoid double semicolon
         set trimmed_sql [string trimright $sql " \t\n;"]
@@ -1819,17 +1848,21 @@ proc execsql {sql {db ""}} {
     set parsed [parse_raw_result $result]
 
     # If this was a DML statement, extract the changes count from the result
-    if {$is_dml && [llength $parsed] > 0} {
+    if {$cli_emits_changes} {
+        # count_changes=ON: the CLI already emitted one count per DML statement,
+        # interleaved with any SELECT results. Pass the output through verbatim
+        # (do NOT strip or collapse it). Track last/total changes from the final
+        # emitted count so `db changes` / `db total_changes` stay consistent.
+        if {[llength $parsed] > 0} {
+            set ::last_changes [lindex $parsed end]
+            set ::total_changes [expr {$::total_changes + $::last_changes}]
+        }
+    } elseif {$is_dml && [llength $parsed] > 0} {
         # The last value should be the changes() result
         set ::last_changes [lindex $parsed end]
         set ::total_changes [expr {$::total_changes + $::last_changes}]
         # Remove the changes count from the result
         set parsed [lrange $parsed 0 end-1]
-
-        # When PRAGMA count_changes=on, return the row count for DML statements
-        if {$::pragma_count_changes} {
-            set parsed [list $::last_changes]
-        }
     }
 
     update_sqlite_counters $sql $parsed
