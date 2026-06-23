@@ -154,12 +154,21 @@ impl SelectExecutor<'_> {
                 });
             }
 
-            // Check for aggregates/windows inside bare scalar subqueries
-            // in HAVING (e.g. `HAVING (SELECT (a, b))` triggers row-value-misused;
-            // `HAVING (SELECT sum(x))` triggers misuse of aggregate). #5069
+            // Check for aggregates/windows inside bare scalar subqueries in
+            // HAVING (e.g. `HAVING (SELECT (a, b))` triggers row-value-misused). #5069
+            //
+            // HAVING only exists on an aggregating outer query, so a bare scalar
+            // subquery whose aggregate references an outer column is NOT a misuse
+            // here — it borrows the established outer aggregation context and
+            // collapses over the current group, exactly like the SELECT-list case
+            // (#5104). SQLite accepts e.g.
+            //   ... GROUP BY a0.a HAVING (SELECT sum((a1.a==a0.a) IN (SELECT b FROM t4)))
+            // (in-23.0). We therefore pass `SubqueryContext::SelectList` so the
+            // outer-correlated-aggregate rejection is skipped while row-value
+            // misuse (an error in any context) is still caught.
             crate::select::executor::validation::validate_subquery_context_misuse(
                 having_expr,
-                crate::select::executor::validation::SubqueryContext::WhereOrEqual,
+                crate::select::executor::validation::SubqueryContext::SelectList,
             )?;
         }
 

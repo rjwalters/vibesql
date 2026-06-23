@@ -221,6 +221,71 @@ fn when_correlated_exists_subquery_referencing_new_5585() {
     assert_eq!(query_scalar_i64(&db, "SELECT count(*) FROM hit WHERE id = 4;"), 1, "id 4 in other");
 }
 
+/// Helper: parse + execute an UPDATE, returning its Result so the caller can
+/// assert success or a specific error. Unlike `exec`, this does not panic on a
+/// DML error.
+fn try_update(db: &mut Database, sql: &str) -> Result<usize, vibesql_executor::ExecutorError> {
+    use vibesql_ast::Statement;
+    let stmt = Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse failed for `{sql}`: {e:?}"));
+    let Statement::Update(s) = stmt else { panic!("expected UPDATE, got {stmt:?}") };
+    UpdateExecutor::execute(&s, db)
+}
+
+/// update-14.2/14.4 regression: a trigger WHEN clause that references a
+/// nonexistent column must surface `no such column` even when the UPDATE matches
+/// zero rows. SQLite resolves the WHEN clause at statement-prepare time, so an
+/// `UPDATE t SET ...` on an *empty* table whose BEFORE/AFTER UPDATE trigger
+/// carries `WHEN nosuchcol` errors rather than silently reporting 0 rows.
+#[test]
+fn trigger_when_unresolvable_column_errors_on_empty_table() {
+    for timing in ["BEFORE", "AFTER"] {
+        let mut db = Database::new();
+        exec(&mut db, "CREATE TABLE t (a, b, c);");
+        exec(
+            &mut db,
+            &format!(
+                "CREATE TRIGGER tr {timing} UPDATE ON t WHEN nosuchcol \
+                 BEGIN SELECT 1; END;",
+            ),
+        );
+
+        // Table is empty: the UPDATE matches zero rows. The WHEN clause's
+        // unresolvable column must still produce a column-not-found error.
+        let err = try_update(&mut db, "UPDATE t SET a = 1;").expect_err(&format!(
+            "{timing} UPDATE trigger with `WHEN nosuchcol` must error on an empty table",
+        ));
+        match err {
+            vibesql_executor::ExecutorError::ColumnNotFound { column_name, .. } => {
+                assert_eq!(
+                    column_name.to_lowercase(),
+                    "nosuchcol",
+                    "error should name the unresolvable WHEN column",
+                );
+            }
+            other => panic!("expected ColumnNotFound for {timing} trigger, got {other:?}"),
+        }
+    }
+}
+
+/// Guard against false positives: a *valid* WHEN clause (including OLD/NEW
+/// pseudo-variable references) on an empty table must NOT error from the
+/// statement-prepare-time WHEN validation — the UPDATE simply matches no rows.
+#[test]
+fn trigger_when_valid_columns_no_error_on_empty_table() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t (a, b);");
+    exec(&mut db, "CREATE TRIGGER tr1 BEFORE UPDATE ON t WHEN a > 0 BEGIN SELECT 1; END;");
+    exec(
+        &mut db,
+        "CREATE TRIGGER tr2 AFTER UPDATE ON t WHEN OLD.a <> NEW.a BEGIN SELECT 1; END;",
+    );
+
+    // Empty table: zero rows matched, valid WHEN clauses, must succeed with 0.
+    let updated = try_update(&mut db, "UPDATE t SET a = 1;")
+        .expect("valid WHEN clauses must not error on an empty-table UPDATE");
+    assert_eq!(updated, 0, "no rows should be updated on an empty table");
+}
+
 /// #5585 regression guard: a *non-trigger* correlated scalar subquery (ordinary
 /// query, no trigger context) is unaffected by the pseudo-variable substitution
 /// path. The subquery here correlates to the outer table's column, not NEW/OLD.
