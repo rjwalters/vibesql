@@ -2275,9 +2275,8 @@ array set vibesql_skip_files {
     orderby7 "Tests ORDER BY on FTS3 virtual-table joins; ifcapable !fts3 exits before any test runs. fts3 is unsupported in VibeSQL."
     whereJ "Tests query-plan choices that depend on STAT4 histogram statistics; ifcapable !stat4 exits before any test runs. VibeSQL uses a different cost model."
     where8 "Tests OR optimization via execsql_status2 internal statistics (sqlite_search_count index-step counts) - query results correct, step counts not meaningful for VibeSQL"
-    update2 "Uses repeat() function which is a SQLite test extension"
+    update2 "Audited #5745: the file injects repeat() via `db func repeat [list string repeat]` and every test calls repeat(str,n) to build large UPDATE payloads. VibeSQL does NOT implement a repeat() scalar function, and REPEAT is a reserved keyword (stored-procedure REPEAT/UNTIL loops), so `SELECT repeat('ab',3)` is a parse error — the test extension cannot be substituted by a native function. All tests depend on repeat(), so the file is skipped. (The original 'SQLite test extension' note was misleading: repeat() is a standard string function elsewhere, just unimplemented + keyword-shadowed here.)"
     func4 "Entire file tests tointeger()/toreal() provided only by the static `totype` test extension (load_static_extension db totype). VibeSQL implements neither function, so 120+ of the 200 tests fail purely because the functions are missing. The load_static_extension shim stub now prevents the crash-abort (the file previously aborted at file scope), but a documented file skip is clearer than 120 visible function-missing failures. Tracked: tointeger()/toreal() are out-of-scope SQLite test extensions."
-    func5 "Uses counter1/counter2 custom TCL functions - SQLite test extension"
     trigger6 "Entire file is built around a custom counter() TCL function (db function counter ...) used to verify INSERT/UPDATE expressions are evaluated exactly once; the tables and triggers are created in 6-1.1 alongside the function registration, so once 6-1.1 is auto-skipped (custom function) every later test cascade-fails with 'no such table: log/t1' (#5470)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
@@ -3734,7 +3733,8 @@ array set vibesql_skip_tests {
 
     update2-1.1.1 "Uses REPEAT TCL command - SQLite test extension"
 
-    func5-2.2 "Uses counter1 - custom TCL function not available"
+    func5-2.2 "Uses counter1 - custom TCL function registered via sqlite3_create_function (C-API, unreachable from SQL CLI). func5-1.* (instr/encoding) run; only func5-2.* need the counter1/counter2 deterministic-vs-nondeterministic factoring test (#5744)."
+    func5-2.3 "Uses counter2 - custom TCL function registered via sqlite3_create_function (C-API, unreachable from SQL CLI) (#5744)"
 
     in6-1.1 "Uses sqlite_stat1 internal statistics table"
     in6-1.5 "Cascades from in6-1.1 sqlite_stat1 failure"
@@ -4891,6 +4891,24 @@ proc ifcapable {args} {
 
     # Evaluate capability expression (may be compound with || or &&)
     set result [eval_capability_expr $capability]
+
+    # where4.test special case (#5746): the file opens with
+    #   ifcapable !tclvar||!bloblit { finish_test; return }
+    # `tclvar` is unsupported in VibeSQL, so `!tclvar` is true and the `||`
+    # guard exits the entire file before any setup runs (silent 0/0/0).
+    # But `bloblit` (hex blob literals like X'78') IS supported, and the
+    # IS-NULL-index-optimization / blob-literal tests (where4-1.0, 1.11,
+    # 2.*, 4.*, 7.*) are valid VibeSQL SQL. Suppress this one file-scope exit
+    # guard so the setup and those tests run. The genuinely tclvar-dependent
+    # test (where4-1.1b, `w IS $null`) and the sqlite_search_count tests stay
+    # per-test skipped in vibesql_skip_tests.
+    if {$result && [info exists ::current_test_file_basename] \
+            && $::current_test_file_basename eq "where4" \
+            && [string match "*tclvar*" $capability] \
+            && [string match "*bloblit*" $capability] \
+            && [string match "*finish_test*" $script]} {
+        return
+    }
 
     if {$result} {
         uplevel 1 $script
