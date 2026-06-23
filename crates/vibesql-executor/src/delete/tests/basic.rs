@@ -14,6 +14,7 @@ fn test_delete_all_rows() {
 
     // DELETE FROM users;
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         only: false,
         table_name: "users".to_string(),
@@ -39,6 +40,7 @@ fn test_delete_with_simple_where() {
 
     // DELETE FROM users WHERE id = 2;
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         only: false,
@@ -81,6 +83,7 @@ fn test_delete_with_boolean_where() {
 
     // DELETE FROM users WHERE active = TRUE;
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         only: false,
@@ -121,6 +124,7 @@ fn test_delete_multiple_rows() {
 
     // DELETE FROM users WHERE id > 1;
     let stmt = DeleteStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         only: false,

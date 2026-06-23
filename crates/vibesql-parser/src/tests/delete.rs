@@ -20,6 +20,39 @@ fn test_parse_delete_basic() {
 }
 
 #[test]
+fn test_parse_delete_indexed_by() {
+    // SQLite INDEXED BY hint on DELETE (issue #5734, where9-6.8.x).
+    let result = Parser::parse_sql("DELETE FROM t1 INDEXED BY t1b WHERE a = 1;");
+    assert!(result.is_ok(), "DELETE ... INDEXED BY should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert_eq!(delete.table_name, "t1");
+            assert_eq!(
+                delete.index_hint,
+                Some(vibesql_ast::IndexHint::IndexedBy("t1b".to_string()))
+            );
+            assert!(delete.where_clause.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_not_indexed() {
+    // SQLite NOT INDEXED hint on DELETE (issue #5734).
+    let result = Parser::parse_sql("DELETE FROM t1 NOT INDEXED WHERE a = 1;");
+    assert!(result.is_ok(), "DELETE ... NOT INDEXED should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert_eq!(delete.index_hint, Some(vibesql_ast::IndexHint::NotIndexed));
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
 fn test_parse_delete_no_where() {
     let result = Parser::parse_sql("DELETE FROM users;");
     assert!(result.is_ok());

@@ -181,6 +181,10 @@ pub struct UpdateStmt {
     pub quoted: bool,
     /// Optional table alias (SQLite extension: UPDATE t1 AS xyz SET ...)
     pub alias: Option<String>,
+    /// Optional index hint (SQLite extension: UPDATE t1 INDEXED BY idx ... / NOT INDEXED).
+    /// Advisory only; VibeSQL's planner chooses indexes independently, so the hint is
+    /// parsed for SQLite compatibility but has no effect on plan selection.
+    pub index_hint: Option<crate::IndexHint>,
     pub assignments: Vec<Assignment>,
     /// Optional FROM clause for multi-table UPDATE (SQLite 3.33.0+ / SQL:1999)
     /// Syntax: UPDATE t1 SET col = t2.val FROM t2 WHERE t1.id = t2.id
@@ -219,6 +223,10 @@ pub struct DeleteStmt {
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
+    /// Optional index hint (SQLite extension: DELETE FROM t1 INDEXED BY idx ... / NOT INDEXED).
+    /// Advisory only; VibeSQL's planner chooses indexes independently, so the hint is
+    /// parsed for SQLite compatibility but has no effect on plan selection.
+    pub index_hint: Option<crate::IndexHint>,
     pub where_clause: Option<WhereClause>,
     /// Optional ORDER BY clause (SQLite extension for DELETE)
     /// When present with LIMIT, deletes rows in the specified order

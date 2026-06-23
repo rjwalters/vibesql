@@ -66,6 +66,7 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
     });
 
     let stmt = UpdateStmt {
+        index_hint: None,
         with_clause: None,
         from_clause: None,
         quoted: false,
@@ -163,6 +164,7 @@ fn test_update_with_subquery_multiple_columns_error() {
     });
 
     let stmt = UpdateStmt {
+        index_hint: None,
         with_clause: None,
         from_clause: None,
         quoted: false,

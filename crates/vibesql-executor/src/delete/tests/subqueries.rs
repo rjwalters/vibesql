@@ -216,6 +216,7 @@ mod in_subquery {
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM inactive_depts)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -288,6 +289,7 @@ mod in_subquery {
 
         // DELETE FROM employees WHERE dept_id NOT IN (SELECT dept_id FROM active_depts)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -371,6 +373,7 @@ mod scalar_subquery {
 
         // DELETE FROM employees WHERE salary < (SELECT AVG(salary) FROM employees)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -456,6 +459,7 @@ mod scalar_subquery {
 
         // DELETE FROM items WHERE price = (SELECT MAX(price) FROM items)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -532,6 +536,7 @@ mod scalar_subquery {
 
         // DELETE FROM employees WHERE salary > (SELECT threshold FROM config)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -607,6 +612,7 @@ mod empty_subquery {
 
         // DELETE FROM employees WHERE dept_id IN (SELECT dept_id FROM old_depts)
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,
@@ -698,6 +704,7 @@ mod complex_subquery {
         // DELETE FROM orders WHERE customer_id IN (SELECT customer_id FROM inactive_customers WHERE
         // status = 'inactive')
         let stmt = DeleteStmt {
+            index_hint: None,
             with_clause: None,
             quoted: false,
             only: false,

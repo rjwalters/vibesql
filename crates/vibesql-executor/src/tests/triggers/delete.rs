@@ -55,6 +55,7 @@ fn test_after_delete_trigger_fires() {
 
     // Delete the user - should fire trigger
     let delete = vibesql_ast::DeleteStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         only: false,
@@ -128,6 +129,7 @@ fn test_before_delete_trigger_fires() {
 
     // Delete the user - should fire trigger
     let delete = vibesql_ast::DeleteStmt {
+        index_hint: None,
         with_clause: None,
         quoted: false,
         only: false,

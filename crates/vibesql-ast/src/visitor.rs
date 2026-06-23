@@ -1437,6 +1437,7 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
         table_name: stmt.table_name,
         quoted: stmt.quoted,
         alias: stmt.alias,
+        index_hint: stmt.index_hint,
         assignments: stmt
             .assignments
             .into_iter()
@@ -1485,6 +1486,7 @@ pub fn transform_delete<V: ExpressionMutVisitor>(visitor: &mut V, stmt: DeleteSt
         only: stmt.only,
         table_name: stmt.table_name,
         quoted: stmt.quoted,
+        index_hint: stmt.index_hint,
         where_clause: stmt.where_clause.map(|w| match w {
             WhereClause::Condition(expr) => {
                 WhereClause::Condition(transform_expression(visitor, expr))

@@ -699,6 +699,8 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,
             alias: stmt.alias.map(|a| self.resolve(a)),
+            // Arena UPDATE does not yet carry an index hint; the standard parser path does.
+            index_hint: None,
             assignments: stmt.assignments.iter().map(|a| self.convert_assignment(a)).collect(),
             from_clause: stmt
                 .from_clause
@@ -734,6 +736,8 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             only: stmt.only,
             table_name: self.resolve(stmt.table_name),
             quoted: stmt.quoted,
+            // Arena DELETE does not yet carry an index hint; the standard parser path does.
+            index_hint: None,
             where_clause: stmt.where_clause.as_ref().map(|wc| self.convert_where_clause(wc)),
             order_by: stmt
                 .order_by
