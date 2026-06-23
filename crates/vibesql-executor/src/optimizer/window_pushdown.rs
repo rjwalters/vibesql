@@ -160,6 +160,15 @@ fn try_push_into_subquery(
     source_name: &str,
     column_aliases: Option<&[String]>,
 ) -> Option<SelectStmt> {
+    // UNION ALL compound subquery/view: push the outer WHERE into each branch
+    // so each branch's table scan can use an index (#5723). This is a distinct
+    // rewrite from the window-function push-down handled below; it is purely
+    // additive (the outer WHERE still applies post-union) so it never changes
+    // results, only enables index use.
+    if subquery.set_operation.is_some() {
+        return try_push_into_union_all_chain(where_clause, subquery, source_name, column_aliases);
+    }
+
     // Inner-query gate: plain SELECT only.
     if subquery.values.is_some()
         || subquery.set_operation.is_some()
@@ -226,6 +235,329 @@ fn try_push_into_subquery(
     all.extend(pushed);
     new_subquery.where_clause = super::combine_with_and(all);
     Some(new_subquery)
+}
+
+/// Push the outer WHERE into every branch of a UNION ALL compound
+/// subquery/view (#5723).
+///
+/// The compound `subquery` is the left-most SELECT whose `set_operation`
+/// chains the remaining branches via `set_op.right`. The output columns of
+/// the whole compound come positionally from the FIRST branch's SELECT list
+/// (SQL semantics), optionally renamed by `column_aliases` (the view's
+/// declared column list or the FROM-clause column aliases). An outer column
+/// reference therefore names the i-th output column; in each branch that
+/// column is produced by that branch's i-th SELECT item.
+///
+/// For each branch we build a per-branch output map (output-column-name →
+/// that branch's i-th expression) keyed by the SAME positional output names,
+/// then map each outer conjunct through it and AND-append the successfully
+/// mapped conjuncts to that branch's WHERE.
+///
+/// Safety:
+/// - UNION ALL only. UNION/INTERSECT/EXCEPT dedup against the full branch contents; filtering a
+///   branch first can change which rows survive dedup, so we bail if any operator is not `UNION
+///   ALL`.
+/// - A trailing LIMIT/OFFSET on the compound (parsed onto the LEFT-most stmt) applies to the whole
+///   union; filtering ANY branch changes which rows the LIMIT sees, so we bail the entire chain. A
+///   LIMIT/OFFSET on a non-first branch (should not occur with the current parser, but is handled
+///   defensively) skips only that branch.
+/// - A conjunct is pushed into a branch only when every column it references maps to a bare
+///   ColumnRef in that branch's i-th output position; complex expressions / literals are not
+///   addressable and are skipped for that branch.
+///
+/// The transform is additive: the outer WHERE is left in place, so any
+/// branch (or conjunct) that could not be pushed is still filtered correctly
+/// after the union.
+///
+/// Returns `Some(rewritten)` if at least one conjunct was pushed into at
+/// least one branch, else `None` (caller leaves the statement unchanged).
+fn try_push_into_union_all_chain(
+    where_clause: &Expression,
+    subquery: &SelectStmt,
+    source_name: &str,
+    column_aliases: Option<&[String]>,
+) -> Option<SelectStmt> {
+    // Collect references to every branch SELECT (left stmt + each right) and
+    // verify every operator is UNION ALL.
+    //
+    // We work on a clone so we can mutate the per-branch WHERE clauses; the
+    // chain is right-nested (`set_op.right` carries the next op), so we walk
+    // it after cloning.
+    // A trailing LIMIT/OFFSET binds to the whole compound (the parser stores
+    // it on the left-most stmt; right branches always have None). Pushing a
+    // filter into any branch then changes which rows the global LIMIT sees,
+    // so bail the entire chain.
+    if subquery.limit.is_some() || subquery.offset.is_some() {
+        return None;
+    }
+
+    let mut new_subquery = subquery.clone();
+
+    // Positional output names come from the first branch's SELECT list,
+    // overridden positionally by the effective column aliases. If we cannot
+    // derive a stable name for an output position it is left absent, and any
+    // conjunct touching that position simply won't be pushed.
+    let output_names = output_column_names(&subquery.select_list, column_aliases)?;
+
+    let conjuncts: Vec<Expression> = flatten_conjuncts(where_clause);
+
+    let mut any_pushed = false;
+
+    // Branch 0: the left statement's own SELECT-level fields.
+    if push_into_branch(&mut new_subquery, &output_names, source_name, &conjuncts) {
+        any_pushed = true;
+    }
+
+    // Remaining branches: walk the set-operation chain. Each `set_op.right`
+    // is the next branch; its own `set_operation` (if any) chains further.
+    let mut current = new_subquery.set_operation.as_mut();
+    while let Some(set_op) = current {
+        // UNION ALL only. A non-ALL operator (or a non-UNION op) deduplicates;
+        // pushing into a branch can change post-dedup results.
+        if !(matches!(set_op.op, vibesql_ast::SetOperator::Union) && set_op.all) {
+            return None;
+        }
+        if push_into_branch(set_op.right.as_mut(), &output_names, source_name, &conjuncts) {
+            any_pushed = true;
+        }
+        current = set_op.right.set_operation.as_mut();
+    }
+
+    if any_pushed {
+        Some(new_subquery)
+    } else {
+        None
+    }
+}
+
+/// AND-append every pushable conjunct to `branch`'s WHERE clause, mapping
+/// outer column references (named by `output_names`) through this branch's
+/// own SELECT list. Returns true if at least one conjunct was pushed.
+///
+/// A branch carrying its own LIMIT/OFFSET is skipped entirely (the filter
+/// would change which rows the LIMIT observes).
+fn push_into_branch(
+    branch: &mut SelectStmt,
+    output_names: &[Option<String>],
+    source_name: &str,
+    conjuncts: &[Expression],
+) -> bool {
+    if branch.limit.is_some() || branch.offset.is_some() {
+        return false;
+    }
+
+    // Per-branch output map: output-column-name → this branch's i-th SELECT
+    // expression. Only bare ColumnRef expressions are addressable (the push
+    // must resolve to a real inner column to enable an index scan).
+    let mut branch_map: HashMap<String, Expression> = HashMap::new();
+    let mut poisoned: Vec<String> = Vec::new();
+    for (i, name) in output_names.iter().enumerate() {
+        let Some(name) = name else { continue };
+        let Some(SelectItem::Expression { expr, .. }) = branch.select_list.get(i) else {
+            // Wildcard or missing position: not addressable.
+            continue;
+        };
+        if matches!(expr, Expression::ColumnRef(_)) {
+            if branch_map.insert(name.clone(), expr.clone()).is_some() {
+                poisoned.push(name.clone());
+            }
+        }
+    }
+    for name in poisoned {
+        branch_map.remove(&name);
+    }
+
+    let ctx = BranchPushContext { source_name, output_map: &branch_map };
+
+    let mut pushed: Vec<Expression> = Vec::new();
+    for conjunct in conjuncts {
+        if let Some(mapped) = map_branch_conjunct(conjunct, &ctx) {
+            pushed.push(mapped);
+        }
+    }
+    if pushed.is_empty() {
+        return false;
+    }
+
+    let mut all = Vec::new();
+    if let Some(existing) = branch.where_clause.take() {
+        all.push(existing);
+    }
+    all.extend(pushed);
+    branch.where_clause = super::combine_with_and(all);
+    true
+}
+
+/// Build the positional output-column names of a compound query: the first
+/// branch's SELECT-list names, overridden positionally by `column_aliases`.
+/// Returns one entry per output column (absent when no stable name exists,
+/// e.g. an unnamed complex expression). Wildcards make positional naming
+/// unreliable without the inner schema, so we bail (`None`) entirely.
+fn output_column_names(
+    select_list: &[SelectItem],
+    column_aliases: Option<&[String]>,
+) -> Option<Vec<Option<String>>> {
+    let mut names: Vec<Option<String>> = Vec::with_capacity(select_list.len());
+    for (i, item) in select_list.iter().enumerate() {
+        let SelectItem::Expression { expr, alias, .. } = item else {
+            return None;
+        };
+        let name: Option<String> = if let Some(aliases) = column_aliases {
+            Some(aliases.get(i)?.to_ascii_lowercase())
+        } else if let Some(a) = alias {
+            Some(a.to_ascii_lowercase())
+        } else if let Expression::ColumnRef(ci) = expr {
+            Some(ci.column_canonical().to_ascii_lowercase())
+        } else {
+            None
+        };
+        names.push(name);
+    }
+    Some(names)
+}
+
+/// Context for mapping an outer conjunct into one UNION ALL branch. Unlike
+/// [`PushContext`] there is no PARTITION BY coverage check — any bare-column
+/// mapping is valid for a plain predicate push.
+struct BranchPushContext<'a> {
+    source_name: &'a str,
+    output_map: &'a HashMap<String, Expression>,
+}
+
+impl BranchPushContext<'_> {
+    fn resolve_column(&self, ci: &vibesql_ast::ColumnIdentifier) -> Option<Expression> {
+        if ci.schema_canonical().is_some() {
+            return None;
+        }
+        if let Some(table) = ci.table_canonical() {
+            if !table.eq_ignore_ascii_case(self.source_name) {
+                return None;
+            }
+        }
+        let inner = self.output_map.get(&ci.column_canonical().to_ascii_lowercase())?;
+        Some(inner.clone())
+    }
+}
+
+/// Map an outer conjunct for pushing into a single UNION ALL branch.
+/// Mirrors [`map_conjunct`] but resolves columns via the branch's own output
+/// map (no window-partition coverage requirement).
+fn map_branch_conjunct(expr: &Expression, ctx: &BranchPushContext) -> Option<Expression> {
+    use Expression as E;
+
+    let map_box = |e: &Expression| map_branch_conjunct(e, ctx).map(Box::new);
+    let map_vec = |es: &[Expression]| {
+        es.iter().map(|e| map_branch_conjunct(e, ctx)).collect::<Option<Vec<_>>>()
+    };
+
+    match expr {
+        E::Literal(_) | E::CurrentDate | E::CurrentTime { .. } | E::CurrentTimestamp { .. } => {
+            if matches!(expr, E::Literal(_)) {
+                Some(expr.clone())
+            } else {
+                None
+            }
+        }
+
+        E::ColumnRef(ci) => ctx.resolve_column(ci),
+
+        E::BinaryOp { op, left, right } => {
+            Some(E::BinaryOp { op: op.clone(), left: map_box(left)?, right: map_box(right)? })
+        }
+
+        E::Conjunction(es) => Some(E::Conjunction(map_vec(es)?)),
+        E::Disjunction(es) => Some(E::Disjunction(map_vec(es)?)),
+
+        E::UnaryOp { op, expr } => Some(E::UnaryOp { op: op.clone(), expr: map_box(expr)? }),
+
+        E::IsNull { expr, negated } => Some(E::IsNull { expr: map_box(expr)?, negated: *negated }),
+
+        E::IsDistinctFrom { left, right, negated } => Some(E::IsDistinctFrom {
+            left: map_box(left)?,
+            right: map_box(right)?,
+            negated: *negated,
+        }),
+
+        E::IsTruthValue { expr, truth_value, negated } => Some(E::IsTruthValue {
+            expr: map_box(expr)?,
+            truth_value: truth_value.clone(),
+            negated: *negated,
+        }),
+
+        E::Case { operand, when_clauses, else_result } => {
+            let operand = match operand {
+                Some(op) => Some(map_box(op)?),
+                None => None,
+            };
+            let when_clauses = when_clauses
+                .iter()
+                .map(|wc| {
+                    Some(vibesql_ast::CaseWhen {
+                        conditions: map_vec(&wc.conditions)?,
+                        result: map_branch_conjunct(&wc.result, ctx)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let else_result = match else_result {
+                Some(er) => Some(map_box(er)?),
+                None => None,
+            };
+            Some(E::Case { operand, when_clauses, else_result })
+        }
+
+        E::InList { expr, values, negated } => {
+            Some(E::InList { expr: map_box(expr)?, values: map_vec(values)?, negated: *negated })
+        }
+
+        E::Between { expr, low, high, negated, symmetric } => Some(E::Between {
+            expr: map_box(expr)?,
+            low: map_box(low)?,
+            high: map_box(high)?,
+            negated: *negated,
+            symmetric: *symmetric,
+        }),
+
+        E::Cast { expr, data_type } => {
+            Some(E::Cast { expr: map_box(expr)?, data_type: data_type.clone() })
+        }
+
+        E::Like { expr, pattern, negated, escape } => Some(E::Like {
+            expr: map_box(expr)?,
+            pattern: map_box(pattern)?,
+            negated: *negated,
+            escape: match escape {
+                Some(e) => Some(map_box(e)?),
+                None => None,
+            },
+        }),
+
+        E::Glob { expr, pattern, negated, escape } => Some(E::Glob {
+            expr: map_box(expr)?,
+            pattern: map_box(pattern)?,
+            negated: *negated,
+            escape: match escape {
+                Some(e) => Some(map_box(e)?),
+                None => None,
+            },
+        }),
+
+        E::Collate { expr, collation } => {
+            Some(E::Collate { expr: map_box(expr)?, collation: collation.clone() })
+        }
+
+        E::Function { name, args, character_unit } => {
+            if is_volatile_function(name.canonical()) {
+                return None;
+            }
+            Some(E::Function {
+                name: name.clone(),
+                args: map_vec(args)?,
+                character_unit: character_unit.clone(),
+            })
+        }
+
+        _ => None,
+    }
 }
 
 /// Map from subquery output column name (case-folded) to the inner
@@ -866,6 +1198,249 @@ mod tests {
             let base = execute_rows(&db, &stmt);
             let opt = execute_rows(&db, &rewritten);
             assert_eq!(base, opt, "results differ for: {}", sql);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // UNION ALL compound-branch push-down (#5723)
+    // ----------------------------------------------------------------
+
+    /// Database with a 2-branch UNION ALL view over indexed text columns,
+    /// mirroring select9 section 5 (t51/t52 with indexes t51x/t52x).
+    fn setup_union_db() -> Database {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE t51(x TEXT, y TEXT)");
+        run_ddl(&mut db, "CREATE TABLE t52(x TEXT, y TEXT)");
+        run_ddl(&mut db, "CREATE INDEX t51x ON t51(x)");
+        run_ddl(&mut db, "CREATE INDEX t52x ON t52(x)");
+        run_ddl(&mut db, "INSERT INTO t51 VALUES('12345','a'),('99','b')");
+        run_ddl(&mut db, "INSERT INTO t52 VALUES('12345','c'),('77','d')");
+        run_ddl(&mut db, "CREATE VIEW v5 AS SELECT x, y FROM t51 UNION ALL SELECT x, y FROM t52");
+        db
+    }
+
+    /// Collect each branch's WHERE clause (debug-formatted) from a rewritten
+    /// compound subquery FROM clause: index 0 is the left-most branch, then
+    /// each `set_op.right` in chain order.
+    fn branch_wheres(stmt: &SelectStmt) -> Vec<Option<String>> {
+        let Some(FromClause::Subquery { query, .. }) = &stmt.from else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        out.push(query.where_clause.as_ref().map(|w| format!("{:?}", w)));
+        let mut cur = query.set_operation.as_ref();
+        while let Some(set_op) = cur {
+            out.push(set_op.right.where_clause.as_ref().map(|w| format!("{:?}", w)));
+            cur = set_op.right.set_operation.as_ref();
+        }
+        out
+    }
+
+    #[test]
+    fn union_all_pushes_predicate_into_every_branch() {
+        let db = setup_union_db();
+        let out = rewrite(&db, "SELECT * FROM v5 WHERE x = '12345'");
+        let wheres = branch_wheres(&out);
+        assert_eq!(wheres.len(), 2, "expected 2 branches, got {:?}", wheres);
+        for (i, w) in wheres.iter().enumerate() {
+            let w = w.as_ref().unwrap_or_else(|| panic!("branch {i} missing WHERE: {wheres:?}"));
+            assert!(w.contains("\"x\"") || w.contains("x"), "branch {i} WHERE: {w}");
+            assert!(w.contains("12345"), "branch {i} WHERE: {w}");
+        }
+        // Outer WHERE is preserved (push is additive).
+        assert!(out.where_clause.is_some());
+    }
+
+    #[test]
+    fn union_all_three_branch_chain_pushes_all() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE c(x INTEGER)");
+        let out = rewrite(
+            &db,
+            "SELECT * FROM (SELECT x FROM a UNION ALL SELECT x FROM b UNION ALL SELECT x FROM c) v \
+             WHERE x = 5",
+        );
+        let wheres = branch_wheres(&out);
+        assert_eq!(wheres.len(), 3, "expected 3 branches, got {:?}", wheres);
+        assert!(wheres.iter().all(|w| w.is_some()), "all branches pushed: {:?}", wheres);
+    }
+
+    #[test]
+    fn dedup_union_does_not_push() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(x INTEGER)");
+        // UNION (dedup) — pushing could change which rows survive dedup.
+        assert_unchanged(
+            &db,
+            "SELECT * FROM (SELECT x FROM a UNION SELECT x FROM b) v WHERE x = 5",
+        );
+    }
+
+    #[test]
+    fn intersect_and_except_do_not_push() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(x INTEGER)");
+        for sql in [
+            "SELECT * FROM (SELECT x FROM a INTERSECT SELECT x FROM b) v WHERE x = 5",
+            "SELECT * FROM (SELECT x FROM a EXCEPT SELECT x FROM b) v WHERE x = 5",
+        ] {
+            assert_unchanged(&db, sql);
+        }
+    }
+
+    #[test]
+    fn union_all_with_trailing_limit_does_not_push() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(x INTEGER)");
+        // Trailing LIMIT binds to the whole compound; filtering any branch
+        // changes which rows the LIMIT observes.
+        assert_unchanged(
+            &db,
+            "SELECT * FROM (SELECT x FROM a UNION ALL SELECT x FROM b LIMIT 1) v WHERE x = 5",
+        );
+        assert_unchanged(
+            &db,
+            "SELECT * FROM (SELECT x FROM a UNION ALL SELECT x FROM b LIMIT 1 OFFSET 2) v \
+             WHERE x = 5",
+        );
+    }
+
+    #[test]
+    fn union_all_skips_expression_column_branch_only() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(z INTEGER)");
+        // Branch 2 produces a literal (999) in the predicate's output column,
+        // which is not addressable: only branch 1 receives the pushed filter.
+        let out =
+            rewrite(&db, "SELECT * FROM (SELECT x FROM a UNION ALL SELECT 999) v WHERE x = 5");
+        let wheres = branch_wheres(&out);
+        assert_eq!(wheres.len(), 2, "got {:?}", wheres);
+        assert!(wheres[0].is_some(), "branch 0 (bare column) should be pushed: {:?}", wheres);
+        assert!(wheres[1].is_none(), "branch 1 (literal column) must NOT be pushed: {:?}", wheres);
+    }
+
+    #[test]
+    fn union_all_and_appends_to_existing_branch_where() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(x INTEGER, k INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(x INTEGER, k INTEGER)");
+        let out = rewrite(
+            &db,
+            "SELECT * FROM (SELECT x, k FROM a WHERE k > 0 UNION ALL SELECT x, k FROM b WHERE k < 9) v \
+             WHERE x = 5",
+        );
+        let wheres = branch_wheres(&out);
+        // Each branch keeps its original predicate AND the pushed x=5.
+        let b0 = wheres[0].as_ref().unwrap();
+        assert!(b0.contains("\"k\"") && b0.contains("\"x\""), "branch 0: {b0}");
+        let b1 = wheres[1].as_ref().unwrap();
+        assert!(b1.contains("\"k\"") && b1.contains("\"x\""), "branch 1: {b1}");
+    }
+
+    #[test]
+    fn union_all_maps_through_view_column_aliases() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE a(p INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE b(q INTEGER)");
+        run_ddl(&mut db, "CREATE VIEW va(col) AS SELECT p FROM a UNION ALL SELECT q FROM b");
+        // Outer `col` must map through the view's column list to p / q.
+        let out = rewrite(&db, "SELECT * FROM va WHERE col = 7");
+        let wheres = branch_wheres(&out);
+        assert_eq!(wheres.len(), 2, "got {:?}", wheres);
+        let b0 = wheres[0].as_ref().expect("branch 0");
+        assert!(b0.contains("\"p\""), "branch 0 should reference p: {b0}");
+        let b1 = wheres[1].as_ref().expect("branch 1");
+        assert!(b1.contains("\"q\""), "branch 1 should reference q: {b1}");
+    }
+
+    // --- result-correctness parity (incl. the #5749 affinity case) ---
+
+    fn rows_as_strings(rows: &[Vec<vibesql_types::SqlValue>]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|row| {
+                row.iter()
+                    .map(|v| match v {
+                        vibesql_types::SqlValue::Character(s)
+                        | vibesql_types::SqlValue::Varchar(s) => s.as_str().to_string(),
+                        vibesql_types::SqlValue::Integer(i) => i.to_string(),
+                        vibesql_types::SqlValue::Bigint(i) => i.to_string(),
+                        vibesql_types::SqlValue::Null => "NULL".to_string(),
+                        other => format!("{:?}", other),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn union_all_results_unchanged_text_predicate() {
+        let db = setup_union_db();
+        let stmt = parse_select("SELECT * FROM v5 WHERE x = '12345' ORDER BY y");
+        let executed = rows_as_strings(&execute_rows(&db, &stmt));
+        assert_eq!(
+            executed,
+            vec![
+                vec!["12345".to_string(), "a".to_string()],
+                vec!["12345".to_string(), "c".to_string()]
+            ],
+            "got {executed:?}"
+        );
+    }
+
+    /// The #5749 affinity case: a TEXT-literal predicate over a UNION ALL
+    /// derived table whose branch column has numeric affinity must still
+    /// return the matching row. Before #5749 the pushed branch WHERE lost
+    /// affinity and returned zero rows.
+    #[test]
+    fn union_all_text_literal_vs_numeric_branch_affinity() {
+        let mut db = Database::new();
+        run_ddl(&mut db, "CREATE TABLE t1(a INTEGER)");
+        run_ddl(&mut db, "CREATE TABLE t2(d INTEGER)");
+        run_ddl(&mut db, "INSERT INTO t1 VALUES(14),(15),(16)");
+        run_ddl(&mut db, "INSERT INTO t2 VALUES(20),(21)");
+
+        // Derived table executes the rewritten branch WHERE directly.
+        let stmt = parse_select(
+            "SELECT * FROM (SELECT a FROM t1 UNION ALL SELECT d FROM t2) AS v WHERE a = '14'",
+        );
+        let executed = rows_as_i64(&execute_rows(&db, &stmt));
+        assert_eq!(
+            executed,
+            vec![vec![14]],
+            "affinity-preserving result expected, got {executed:?}"
+        );
+
+        // Curator's canonical mixed-literal compound branch case.
+        let stmt2 = parse_select(
+            "SELECT * FROM (SELECT a FROM t1 UNION ALL SELECT 999) AS v WHERE a = '14'",
+        );
+        let executed2 = rows_as_i64(&execute_rows(&db, &stmt2));
+        assert_eq!(executed2, vec![vec![14]], "got {executed2:?}");
+    }
+
+    /// Executing the AST-rewritten compound and the original must produce the
+    /// same rows (push-down is value-preserving).
+    #[test]
+    fn union_all_parity_rewritten_vs_original() {
+        let db = setup_union_db();
+        for sql in [
+            "SELECT * FROM v5 WHERE x = '12345' ORDER BY y",
+            "SELECT * FROM v5 WHERE x = '99' OR x = '77' ORDER BY y",
+            "SELECT * FROM (SELECT x, y FROM t51 UNION ALL SELECT x, y FROM t52) v \
+             WHERE x = '12345' ORDER BY y",
+        ] {
+            let stmt = parse_select(sql);
+            let rewritten = push_where_into_window_subqueries(stmt.clone(), &db, &no_outer_ctes());
+            assert_ne!(stmt, rewritten, "rewrite should fire for: {sql}");
+            let base = rows_as_strings(&execute_rows(&db, &stmt));
+            let opt = rows_as_strings(&execute_rows(&db, &rewritten));
+            assert_eq!(base, opt, "results differ for: {sql}");
         }
     }
 }
