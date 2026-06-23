@@ -68,6 +68,17 @@ impl SelectExecutor<'_> {
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         let schema = from_result.schema.clone();
         let _sorted_by = from_result.sorted_by.clone();
+        // Issue #5749: Capture whether the scan already fully applied the WHERE
+        // clause BEFORE consuming `from_result`. When the columnar/table scan
+        // fully consumed the predicate (only set on full coverage — see
+        // `extract_full_coverage_predicates` + the `!has_complex_predicates`
+        // gate in scan/table.rs), the Stage-2 FilterIterator below must NOT
+        // re-evaluate WHERE. Re-evaluation uses the expression evaluator's
+        // affinity rules, which can disagree with the columnar filter for a
+        // NONE-affinity column (e.g. `a = '14'` on a typeless column), wrongly
+        // dropping rows that the scan correctly matched. This mirrors the guards
+        // already present in fast_path/mod.rs and nonagg/materialized.rs.
+        let where_filtered = from_result.where_filtered;
         let rows = from_result.into_rows();
 
         // Create evaluator using consolidated ExecutionContext
@@ -123,39 +134,48 @@ impl SelectExecutor<'_> {
         let mut iterator: Box<dyn RowIterator> =
             Box::new(TableScanIterator::new(schema.clone(), rows));
 
-        // Stage 2: WHERE filter (if present)
-        if let Some(ref where_expr) = resolved_where {
-            // Optimize WHERE clause
-            let where_optimization = optimize_where_clause(Some(where_expr), &evaluator)?;
+        // Stage 2: WHERE filter (if present AND not already consumed by the scan)
+        //
+        // Issue #5749: skip re-evaluation when the scan already fully applied the
+        // WHERE clause (`where_filtered == true`). Re-applying here would run the
+        // predicate through the expression evaluator's affinity rules, which can
+        // contradict the columnar filter for NONE-affinity columns and wrongly
+        // drop matching rows (e.g. `SELECT a FROM t1 WHERE a='14' UNION ALL ...`).
+        // Mirrors the guards in fast_path/mod.rs and nonagg/materialized.rs.
+        if !where_filtered {
+            if let Some(ref where_expr) = resolved_where {
+                // Optimize WHERE clause
+                let where_optimization = optimize_where_clause(Some(where_expr), &evaluator)?;
 
-            match where_optimization {
-                crate::optimizer::WhereOptimization::AlwaysFalse => {
-                    // WHERE FALSE - return empty result immediately
-                    return Ok(Vec::new());
-                }
-                crate::optimizer::WhereOptimization::AlwaysTrue => {
-                    // WHERE TRUE - no filtering needed, keep current iterator
-                }
-                crate::optimizer::WhereOptimization::Optimized(expr) => {
-                    // Apply optimized WHERE clause - use the evaluator that has outer context if
-                    // present
-                    iterator = Box::new(FilterIterator::new(
-                        iterator,
-                        expr,
-                        evaluator.clone_for_new_expression(),
-                    ));
-                }
-                crate::optimizer::WhereOptimization::Unchanged(Some(expr)) => {
-                    // Apply original WHERE clause - use the evaluator that has outer context if
-                    // present
-                    iterator = Box::new(FilterIterator::new(
-                        iterator,
-                        expr.clone(),
-                        evaluator.clone_for_new_expression(),
-                    ));
-                }
-                crate::optimizer::WhereOptimization::Unchanged(None) => {
-                    // No WHERE clause - keep current iterator
+                match where_optimization {
+                    crate::optimizer::WhereOptimization::AlwaysFalse => {
+                        // WHERE FALSE - return empty result immediately
+                        return Ok(Vec::new());
+                    }
+                    crate::optimizer::WhereOptimization::AlwaysTrue => {
+                        // WHERE TRUE - no filtering needed, keep current iterator
+                    }
+                    crate::optimizer::WhereOptimization::Optimized(expr) => {
+                        // Apply optimized WHERE clause - use the evaluator that has outer context
+                        // if present
+                        iterator = Box::new(FilterIterator::new(
+                            iterator,
+                            expr,
+                            evaluator.clone_for_new_expression(),
+                        ));
+                    }
+                    crate::optimizer::WhereOptimization::Unchanged(Some(expr)) => {
+                        // Apply original WHERE clause - use the evaluator that has outer context if
+                        // present
+                        iterator = Box::new(FilterIterator::new(
+                            iterator,
+                            expr.clone(),
+                            evaluator.clone_for_new_expression(),
+                        ));
+                    }
+                    crate::optimizer::WhereOptimization::Unchanged(None) => {
+                        // No WHERE clause - keep current iterator
+                    }
                 }
             }
         }
@@ -203,7 +223,8 @@ impl SelectExecutor<'_> {
 
         // SQLite compatibility: Do NOT apply implicit value-based sorting (issue #4537)
         // SQLite returns rows in storage order (insertion order / rowid order) when no ORDER BY
-        // is specified. Implicit sorting by value breaks this behavior and causes TCL test failures.
+        // is specified. Implicit sorting by value breaks this behavior and causes TCL test
+        // failures.
         //
         // Previously we sorted for "deterministic results", but SQLite's deterministic behavior
         // is based on physical storage order, not value-based sorting.
