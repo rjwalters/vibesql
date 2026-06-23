@@ -1932,24 +1932,29 @@ proc parse_result {output {tolerate_attributed_error 0}} {
     #   +----+
     #   1 rows
     #
-    # When a batch contains multiple result-producing statements (common when
-    # transactions are batched through `flush_batch` and PRAGMA reads are
-    # interleaved), the output contains multiple such tables back-to-back.
-    # We reset the per-table separator counter on the "N rows" trailer (or on
-    # the next leading separator after a 3rd separator) so the header of each
-    # subsequent table is correctly skipped instead of being captured as data.
-    # Without this, fkey6-1.10.1 saw the literal column name `defer_foreign_keys`
-    # appended between each pragma read in the result list.
+    # IMPORTANT: VibeSQL boxes EACH data row in its own `+---+` frame, so a
+    # single N-row result emits a repeating `+---+ | val | +---+ ...` pattern,
+    # NOT one header block followed by a fixed three separators. A separator
+    # *counter* therefore cannot distinguish "row separator" from "new-table
+    # start": a `>= 3` reset misfires every third row within one result and
+    # silently drops it (e.g. where9-6.2.3 lost output rows 86/89/95).
+    #
+    # The only reliable table boundary is the trailing `N rows` line emitted
+    # after every boxed result (including each interleaved PRAGMA read). So we
+    # track header-skip state per table with a boolean: the FIRST pipe row of
+    # each table is its column header (skipped); every later pipe row until the
+    # next `N rows` trailer is data. This both keeps fkey6-1.10.1 correct (each
+    # PRAGMA read's header is still skipped) and stops dropping data rows.
     set data {}
     set lines [split $output "\n"]
-    set separator_count 0
+    set header_seen 0
 
     foreach line $lines {
         # Skip empty lines
         if {[string trim $line] eq ""} continue
-        # `N rows` marks the end of a table — reset for the next one
+        # `N rows` marks the end of a table — the next pipe row is a new header
         if {[regexp {^\d+ rows?$} $line]} {
-            set separator_count 0
+            set header_seen 0
             continue
         }
         if {[regexp {^=+$} $line]} continue
@@ -1968,23 +1973,14 @@ proc parse_result {output {tolerate_attributed_error 0}} {
             error [translate_error_to_sqlite $line]
         }
 
-        # Count separators - header is between 1st and 2nd separator
-        if {[regexp {^\+[-+]+\+$} $line]} {
-            # If we already saw the closing separator of the previous table
-            # (count==3) and no `N rows` trailer arrived (e.g. trimmed), the
-            # next `+---+` is the top of a new table.
-            if {$separator_count >= 3} {
-                set separator_count 1
-            } else {
-                incr separator_count
-            }
-            continue
-        }
+        # Separator frames carry no data — VibeSQL emits one around every row.
+        if {[regexp {^\+[-+]+\+$} $line]} continue
 
         # Extract data from pipe-delimited lines
         if {[regexp {^\|(.+)\|$} $line -> content]} {
-            # Skip header row (first row, before 2nd separator)
-            if {$separator_count < 2} {
+            # The first pipe row of each table is its column header — skip it.
+            if {!$header_seen} {
+                set header_seen 1
                 continue
             }
             set vals [split $content "|"]
