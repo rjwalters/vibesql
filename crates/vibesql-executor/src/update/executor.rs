@@ -118,6 +118,21 @@ pub(super) fn execute_internal(
     // gate on statement triggers.
     let fire_statement_triggers = has_triggers && trigger_context.is_none();
 
+    // Resolve trigger WHEN clauses at statement-prepare time (SQLite semantics).
+    // A trigger `WHEN nosuchcol` must error `no such column: nosuchcol` even when
+    // the UPDATE matches zero rows (update-14.2/14.4); the per-row firing path
+    // never runs in that case, so validate the WHEN clauses up front. Only at the
+    // top level (not inside another trigger body), matching SQLite's prepare-time
+    // resolution of the outermost statement.
+    if has_triggers && trigger_context.is_none() {
+        crate::TriggerFirer::validate_when_clauses_for_event(
+            database,
+            table_name,
+            vibesql_ast::TriggerEvent::Update(None),
+            None,
+        )?;
+    }
+
     // Try fast path for simple single-row PK updates without triggers
     // Conditions: no triggers, no procedural context, simple WHERE pk = value, no assertions
     // Skip fast path if assertions exist because we need rollback capability on violation

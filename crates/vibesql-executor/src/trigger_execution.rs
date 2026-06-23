@@ -394,6 +394,76 @@ impl TriggerFirer {
             .collect()
     }
 
+    /// Validate that every applicable trigger's WHEN clause resolves its column
+    /// references against the target table.
+    ///
+    /// SQLite resolves a trigger's WHEN clause at statement-prepare time, so an
+    /// UPDATE/INSERT/DELETE whose trigger carries `WHEN nosuchcol` errors with
+    /// `no such column: nosuchcol` *even when zero rows match* (update-14.2/14.4).
+    /// The per-row firing path (`evaluate_when_condition`) already propagates
+    /// such errors, but it never runs when the statement touches no rows — so the
+    /// error would otherwise be silently swallowed and the UPDATE would report
+    /// `0 {}`. This method closes that gap by probing the WHEN clause once per
+    /// statement, independent of the matched-row count.
+    ///
+    /// We probe by evaluating each WHEN condition against a synthetic all-NULL
+    /// row of the table schema, reusing the exact resolution semantics of the
+    /// per-row path (OLD/NEW pseudo-variables, rowid aliases, etc.). Only column
+    /// and table resolution failures are propagated; any other evaluation outcome
+    /// (a boolean verdict, a NULL, or a runtime error that depends on actual row
+    /// data) is ignored here and handled by the normal per-row path when rows are
+    /// present.
+    ///
+    /// Called at the top level of a DML statement (not inside a trigger body),
+    /// matching SQLite's prepare-time resolution of the outermost statement.
+    pub fn validate_when_clauses_for_event(
+        db: &Database,
+        table_name: &str,
+        event: TriggerEvent,
+        dml_schema: Option<&str>,
+    ) -> Result<(), ExecutorError> {
+        let triggers = db
+            .catalog
+            .get_triggers_for_table_in_schema(table_name, Some(event), dml_schema)
+            .filter(|trigger| trigger.enabled && trigger.when_condition.is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if triggers.is_empty() {
+            return Ok(());
+        }
+
+        let schema = Self::resolve_trigger_schema(db, table_name)?;
+        let null_row = Row::new(vec![SqlValue::Null; schema.columns.len()]);
+
+        for trigger in &triggers {
+            let when_expr = match trigger.when_condition.as_deref() {
+                Some(expr) => expr,
+                None => continue,
+            };
+
+            // Provide the synthetic NULL row as both OLD and NEW so OLD/NEW
+            // qualified references resolve regardless of the event kind. We
+            // only care about column/table resolution here, not the verdict.
+            match Self::evaluate_when_condition(
+                db,
+                &trigger.table_name,
+                when_expr,
+                Some(&null_row),
+                Some(&null_row),
+            ) {
+                // Resolution errors must surface even with zero matched rows.
+                Err(e @ ExecutorError::ColumnNotFound { .. })
+                | Err(e @ ExecutorError::TableNotFound(_)) => return Err(e),
+                // Any other outcome (verdict, NULL, or a data-dependent runtime
+                // error) is handled by the per-row path when rows are present.
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check if an UPDATE OF trigger should fire based on which columns changed
     ///
     /// # Arguments
