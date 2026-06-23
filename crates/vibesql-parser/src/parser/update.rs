@@ -144,19 +144,11 @@ impl Parser {
             None
         };
 
-        // Parse optional ORDER BY / LIMIT / OFFSET (SQLite extension for UPDATE).
-        // Mirrors the DELETE ... ORDER BY ... LIMIT ... OFFSET path so that
-        // UPDATE ... LIMIT n [OFFSET m] restricts how many rows are updated.
-        let (order_by, limit, offset) = self.parse_update_order_limit_offset()?;
-
-        // Parse optional RETURNING clause (SQLite 3.35.0+)
-        // Syntax: UPDATE ... [WHERE ...] RETURNING expr [, expr ...]
-        let returning = if self.peek_keyword(Keyword::Returning) {
-            self.consume_keyword(Keyword::Returning)?;
-            Some(self.parse_select_list()?)
-        } else {
-            None
-        };
+        // Parse trailing ORDER BY / LIMIT / OFFSET / RETURNING (SQLite extension
+        // for UPDATE). RETURNING may appear before or after the ORDER BY / LIMIT /
+        // OFFSET trio (issue #5747).
+        let super::delete::TrailingDmlClauses { order_by, limit, offset, returning } =
+            self.parse_trailing_dml_clauses("UPDATE")?;
 
         // Require end of statement: trailing tokens are a syntax error (issue #5261)
         self.expect_statement_end()?;
@@ -176,98 +168,6 @@ impl Parser {
             conflict_clause,
             returning,
         })
-    }
-
-    /// Parse the optional `ORDER BY ... LIMIT ... OFFSET ...` tail of an UPDATE
-    /// statement (SQLite extension). Returns `(order_by, limit, offset)`.
-    ///
-    /// This mirrors `parse_delete_statement`'s handling so UPDATE and DELETE
-    /// accept the same LIMIT/OFFSET syntax, including the `LIMIT offset,count`
-    /// comma form.
-    #[allow(clippy::type_complexity)]
-    fn parse_update_order_limit_offset(
-        &mut self,
-    ) -> Result<
-        (
-            Option<Vec<vibesql_ast::OrderByItem>>,
-            Option<vibesql_ast::Expression>,
-            Option<vibesql_ast::Expression>,
-        ),
-        ParseError,
-    > {
-        // Parse optional ORDER BY clause
-        let order_by = if self.peek_keyword(Keyword::Order) {
-            self.consume_keyword(Keyword::Order)?;
-            self.expect_keyword(Keyword::By)?;
-
-            let order_items = self.parse_comma_separated_list(|p| {
-                let expr = p.parse_expression()?;
-                let direction = if p.peek_keyword(Keyword::Asc) {
-                    p.consume_keyword(Keyword::Asc)?;
-                    vibesql_ast::OrderDirection::Asc
-                } else if p.peek_keyword(Keyword::Desc) {
-                    p.consume_keyword(Keyword::Desc)?;
-                    vibesql_ast::OrderDirection::Desc
-                } else {
-                    vibesql_ast::OrderDirection::Asc
-                };
-
-                let nulls_order = if p.peek_keyword(Keyword::Nulls) {
-                    p.consume_keyword(Keyword::Nulls)?;
-                    if p.peek_keyword(Keyword::First) {
-                        p.consume_keyword(Keyword::First)?;
-                        Some(vibesql_ast::NullsOrder::First)
-                    } else if p.peek_keyword(Keyword::Last) {
-                        p.consume_keyword(Keyword::Last)?;
-                        Some(vibesql_ast::NullsOrder::Last)
-                    } else {
-                        return Err(ParseError {
-                            message: format!(
-                                "Expected FIRST or LAST after NULLS, found {}",
-                                p.peek().syntax_error()
-                            ),
-                        });
-                    }
-                } else {
-                    None
-                };
-
-                Ok(vibesql_ast::OrderByItem { expr, direction, nulls_order })
-            })?;
-
-            Some(order_items)
-        } else {
-            None
-        };
-
-        // Parse optional LIMIT clause (supports `LIMIT offset,count` comma syntax)
-        let (limit, offset_from_limit) = if self.peek_keyword(Keyword::Limit) {
-            self.consume_keyword(Keyword::Limit)?;
-            let first_expr = self.parse_expression()?;
-
-            if matches!(self.peek(), Token::Comma) {
-                self.advance();
-                let second_expr = self.parse_expression()?;
-                // LIMIT offset,count syntax
-                (Some(second_expr), Some(first_expr))
-            } else {
-                (Some(first_expr), None)
-            }
-        } else {
-            (None, None)
-        };
-
-        // Parse optional OFFSET clause (only if not already set via comma syntax)
-        let offset = if offset_from_limit.is_some() {
-            offset_from_limit
-        } else if self.peek_keyword(Keyword::Offset) {
-            self.consume_keyword(Keyword::Offset)?;
-            Some(self.parse_expression()?)
-        } else {
-            None
-        };
-
-        Ok((order_by, limit, offset))
     }
 
     /// Parse UPDATE statement with a pre-parsed WITH clause (CTEs)
@@ -403,17 +303,11 @@ impl Parser {
             None
         };
 
-        // Parse optional ORDER BY / LIMIT / OFFSET (SQLite extension for UPDATE).
-        let (order_by, limit, offset) = self.parse_update_order_limit_offset()?;
-
-        // Parse optional RETURNING clause (SQLite 3.35.0+)
-        // Syntax: UPDATE ... [WHERE ...] RETURNING expr [, expr ...]
-        let returning = if self.peek_keyword(Keyword::Returning) {
-            self.consume_keyword(Keyword::Returning)?;
-            Some(self.parse_select_list()?)
-        } else {
-            None
-        };
+        // Parse trailing ORDER BY / LIMIT / OFFSET / RETURNING (SQLite extension
+        // for UPDATE). RETURNING may appear before or after the ORDER BY / LIMIT /
+        // OFFSET trio (issue #5747).
+        let super::delete::TrailingDmlClauses { order_by, limit, offset, returning } =
+            self.parse_trailing_dml_clauses("UPDATE")?;
 
         // Require end of statement: trailing tokens are a syntax error (issue #5261)
         self.expect_statement_end()?;

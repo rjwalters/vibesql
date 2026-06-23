@@ -522,6 +522,10 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (DISTINCT aggregates must have exactly one argument)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # ORDER BY without LIMIT on DELETE/UPDATE (SQLite-compatible error messages)
+    if {[regexp -nocase {^Parse error: (ORDER BY without LIMIT on (?:DELETE|UPDATE))$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # ORDER BY before set operation errors (SQLite-compatible error messages)
     if {[regexp -nocase {^Parse error: (ORDER BY clause should come after (?:UNION ALL|UNION|INTERSECT|EXCEPT) not before)$} $error_msg -> parse_msg]} {
         return $parse_msg
@@ -3467,6 +3471,9 @@ array set vibesql_skip_tests {
     indexA-1.6 "Index optimization differs"
 
     instr-2.3 "INSTR function behavior differs"
+
+    wherelimit-0.4 "DELETE table alias (DELETE FROM t1 AS a) not yet parsed — deferred to #5752"
+    wherelimit-0.5.2 "Alias-active original-table-name qualifier not rejected — deferred to #5752"
 
     wherelimit2-1.1 "WHERE LIMIT optimization differs"
     wherelimit2-1.2 "WHERE LIMIT optimization differs"

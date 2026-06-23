@@ -67,37 +67,8 @@ impl<'arena> ArenaParser<'arena> {
             None
         };
 
-        // Parse optional ORDER BY clause (SQLite extension)
-        let order_by = if self.try_consume_keyword(Keyword::Order) {
-            self.consume_keyword(Keyword::By)?;
-            Some(self.parse_delete_order_by_clause()?)
-        } else {
-            None
-        };
-
-        // Parse optional LIMIT clause (SQLite extension, supports comma syntax)
-        let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
-            let first_expr = self.parse_expression()?;
-
-            if self.try_consume(&Token::Comma) {
-                let second_expr = self.parse_expression()?;
-                // LIMIT offset,count syntax
-                (Some(second_expr), Some(first_expr))
-            } else {
-                (Some(first_expr), None)
-            }
-        } else {
-            (None, None)
-        };
-
-        // Parse optional OFFSET clause (only if not already set via comma syntax)
-        let offset = if offset_from_limit.is_some() {
-            offset_from_limit
-        } else if self.try_consume_keyword(Keyword::Offset) {
-            Some(self.parse_expression()?)
-        } else {
-            None
-        };
+        // Parse trailing ORDER BY / LIMIT / OFFSET in the first position.
+        let (mut order_by, mut limit, mut offset) = self.parse_delete_order_limit_offset()?;
 
         // Parse optional RETURNING clause (SQLite 3.35.0+)
         // Syntax: DELETE FROM ... [WHERE ...] RETURNING expr [, expr ...]
@@ -106,6 +77,22 @@ impl<'arena> ArenaParser<'arena> {
         } else {
             None
         };
+
+        // SQLite also accepts ORDER BY / LIMIT / OFFSET *after* RETURNING
+        // (issue #5747). Only consume them here if they were not already parsed.
+        if returning.is_some()
+            && order_by.is_none()
+            && limit.is_none()
+            && offset.is_none()
+            && (self.peek_keyword(Keyword::Order)
+                || self.peek_keyword(Keyword::Limit)
+                || self.peek_keyword(Keyword::Offset))
+        {
+            let (ob, lim, off) = self.parse_delete_order_limit_offset()?;
+            order_by = ob;
+            limit = lim;
+            offset = off;
+        }
 
         // Require end of statement: trailing tokens are a syntax error (issue #5261)
         self.expect_statement_end()?;
@@ -123,6 +110,65 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         Ok(self.arena.alloc(stmt))
+    }
+
+    /// Parse the optional `ORDER BY ... LIMIT ... OFFSET ...` tail of a DELETE
+    /// statement (SQLite extension), enforcing SQLite's grammar constraints:
+    /// ORDER BY without LIMIT and OFFSET without LIMIT are syntax errors
+    /// (issue #5747).
+    #[allow(clippy::type_complexity)]
+    fn parse_delete_order_limit_offset(
+        &mut self,
+    ) -> Result<
+        (
+            Option<BumpVec<'arena, OrderByItem<'arena>>>,
+            Option<vibesql_ast::arena::Expression<'arena>>,
+            Option<vibesql_ast::arena::Expression<'arena>>,
+        ),
+        ParseError,
+    > {
+        // ORDER BY.
+        let order_by = if self.try_consume_keyword(Keyword::Order) {
+            self.consume_keyword(Keyword::By)?;
+            Some(self.parse_delete_order_by_clause()?)
+        } else {
+            None
+        };
+
+        // LIMIT (supports `LIMIT offset, count` comma syntax).
+        let (limit, offset_from_limit) = if self.try_consume_keyword(Keyword::Limit) {
+            let first_expr = self.parse_expression()?;
+            if self.try_consume(&Token::Comma) {
+                let second_expr = self.parse_expression()?;
+                // LIMIT offset, count syntax
+                (Some(second_expr), Some(first_expr))
+            } else {
+                (Some(first_expr), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        // SQLite rejects ORDER BY on DELETE without a LIMIT.
+        if order_by.is_some() && limit.is_none() {
+            return Err(ParseError { message: "ORDER BY without LIMIT on DELETE".to_string() });
+        }
+
+        // OFFSET (only if not already supplied via comma syntax).
+        let offset = if offset_from_limit.is_some() {
+            offset_from_limit
+        } else if self.peek_keyword(Keyword::Offset) {
+            // SQLite rejects OFFSET without a preceding LIMIT.
+            if limit.is_none() {
+                return Err(ParseError { message: "near \"OFFSET\": syntax error".to_string() });
+            }
+            self.try_consume_keyword(Keyword::Offset);
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        Ok((order_by, limit, offset))
     }
 
     /// Parse ORDER BY clause for DELETE statement

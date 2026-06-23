@@ -287,3 +287,59 @@ fn test_parse_delete_without_returning_is_none() {
         _ => panic!("Expected DELETE statement"),
     }
 }
+
+// ========================================================================
+// Trailing clause ordering and validation (issue #5747)
+// ========================================================================
+
+#[test]
+fn test_parse_delete_returning_before_order_by_limit() {
+    // SQLite allows RETURNING before ORDER BY / LIMIT on DELETE.
+    let result = Parser::parse_sql("DELETE FROM t1 RETURNING x, y, '|' ORDER BY x, y LIMIT 5;");
+    assert!(result.is_ok(), "RETURNING before ORDER BY LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert!(delete.returning.is_some());
+            assert!(delete.order_by.is_some());
+            assert!(delete.limit.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_returning_before_limit_offset() {
+    let result = Parser::parse_sql("DELETE FROM t1 RETURNING x ORDER BY x LIMIT 5 OFFSET 2;");
+    assert!(result.is_ok(), "RETURNING before LIMIT OFFSET should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert!(delete.limit.is_some());
+            assert!(delete.offset.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_order_by_without_limit_is_error() {
+    // SQLite rejects ORDER BY on DELETE without a LIMIT.
+    let result = Parser::parse_sql("DELETE FROM t1 ORDER BY x;");
+    let err = result.expect_err("ORDER BY without LIMIT must be a parse error");
+    assert!(
+        err.message.contains("ORDER BY without LIMIT on DELETE"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
+#[test]
+fn test_parse_delete_offset_without_limit_is_error() {
+    // SQLite rejects OFFSET on DELETE without a LIMIT.
+    let result = Parser::parse_sql("DELETE FROM t1 WHERE x = 1 OFFSET 2;");
+    let err = result.expect_err("OFFSET without LIMIT must be a parse error");
+    assert!(
+        err.message.contains("near \"OFFSET\": syntax error"),
+        "unexpected message: {}",
+        err.message
+    );
+}

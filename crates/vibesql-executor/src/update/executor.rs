@@ -2252,6 +2252,9 @@ fn apply_order_by_and_limit(
         match evaluator.eval(offset_expr, &empty_row)? {
             SqlValue::Integer(n) if n >= 0 => n as usize,
             SqlValue::Bigint(n) if n >= 0 => n as usize,
+            // Any negative OFFSET is treated as 0 (SQLite semantics, #5747).
+            SqlValue::Integer(n) if n < 0 => 0,
+            SqlValue::Bigint(n) if n < 0 => 0,
             SqlValue::Null => 0, // NULL offset treated as 0
             _ => {
                 return Err(ExecutorError::TypeError(
@@ -2269,7 +2272,9 @@ fn apply_order_by_and_limit(
         match evaluator.eval(limit_expr, &empty_row)? {
             SqlValue::Integer(n) if n >= 0 => Some(n as usize),
             SqlValue::Bigint(n) if n >= 0 => Some(n as usize),
-            SqlValue::Integer(-1) | SqlValue::Bigint(-1) => None, // -1 means no limit (SQLite extension)
+            // Any negative LIMIT means "no limit" (SQLite semantics, #5747).
+            SqlValue::Integer(n) if n < 0 => None,
+            SqlValue::Bigint(n) if n < 0 => None,
             SqlValue::Null => None, // NULL limit treated as no limit
             _ => {
                 return Err(ExecutorError::TypeError(

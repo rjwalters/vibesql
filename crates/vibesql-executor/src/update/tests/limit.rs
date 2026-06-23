@@ -146,6 +146,32 @@ fn update_limit_negative_one_updates_all() {
     assert_eq!(count_b(&mut db, 99), 5);
 }
 
+/// Any negative LIMIT (not just -1) means "no limit" in SQLite (#5747).
+#[test]
+fn update_limit_negative_other_updates_all() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    // `LIMIT 0, -5` is `LIMIT offset=0, count=-5` -> no limit, all rows.
+    assert_eq!(update(&mut db, "UPDATE t SET b = 99 ORDER BY a LIMIT 0, -5"), 5);
+    assert_eq!(count_b(&mut db, 99), 5);
+}
+
+/// A negative OFFSET is treated as 0 in SQLite (#5747): the LIMIT still applies
+/// from the start of the (ordered) result.
+#[test]
+fn update_negative_offset_treated_as_zero() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    // ORDER BY a LIMIT 2 OFFSET -3 -> offset clamps to 0 -> rows a=1, a=2.
+    assert_eq!(update(&mut db, "UPDATE t SET b = 99 ORDER BY a LIMIT 2 OFFSET -3"), 2);
+    let rows = select(&mut db, "SELECT a, b FROM t ORDER BY a");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 99), (2, 99), (3, 10), (4, 10), (5, 10)]);
+}
+
 /// `UPDATE` without LIMIT still updates every matching row (no regression).
 #[test]
 fn update_without_limit_updates_all() {
