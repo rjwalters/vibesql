@@ -174,6 +174,30 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
 
         // Mixed numeric types: coerce to f64 with epsilon comparison for floats
         _ => {
+            // Issue #5749: an exact integer compared against an approximate
+            // float must NOT round the integer through `as f64` first — for
+            // magnitudes above 2^53 that loses precision, so e.g.
+            // `Integer(i64::MAX) >= 9223372036854775808.0` (the f64 value that
+            // `i64::MAX + 1` overflows to) wrongly compared Equal and admitted
+            // the row. The expression evaluator handles this with a precise
+            // integer/float comparator; mirror it here so the columnar filter
+            // agrees, keeping `where_filtered` trustworthy across all execution
+            // paths (fast_path, materialized, and the iterator path). Only the
+            // exact-integer storage classes qualify (Numeric is decimal and
+            // handled by the f64 path below).
+            if let Some(int_val) = exact_integer(a) {
+                if let Some(float_val) = approximate_float(b) {
+                    return CompareResult::Ordering(compare_int_float(int_val, float_val));
+                }
+            }
+            if let Some(float_val) = approximate_float(a) {
+                if let Some(int_val) = exact_integer(b) {
+                    return CompareResult::Ordering(
+                        compare_int_float(int_val, float_val).reverse(),
+                    );
+                }
+            }
+
             // First try direct numeric comparison
             if let (Some(a_f64), Some(b_f64)) = (to_f64(a), to_f64(b)) {
                 // Use epsilon comparison for floating point values to handle precision issues
@@ -247,6 +271,95 @@ pub(super) fn compare_values(a: &SqlValue, b: &SqlValue) -> CompareResult {
             return CompareResult::Incomparable;
         }
     })
+}
+
+/// Extract an exact-integer storage-class value as `i64`.
+///
+/// Issue #5749: only the storage classes that hold an exact integer qualify for
+/// the precise integer/float comparator. `Numeric` is a decimal type and
+/// `Boolean` is handled by the generic numeric path, so they are intentionally
+/// excluded here.
+#[inline]
+fn exact_integer(v: &SqlValue) -> Option<i64> {
+    match v {
+        SqlValue::Integer(n) | SqlValue::Bigint(n) => Some(*n),
+        SqlValue::Smallint(n) => Some(*n as i64),
+        SqlValue::Unsigned(n) => i64::try_from(*n).ok(),
+        _ => None,
+    }
+}
+
+/// Extract an approximate (binary floating point) storage-class value as `f64`.
+#[inline]
+fn approximate_float(v: &SqlValue) -> Option<f64> {
+    match v {
+        SqlValue::Float(n) => Some(*n as f64),
+        SqlValue::Real(n) | SqlValue::Double(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// Compare an exact integer with a float precisely, handling the magnitude range
+/// above 2^53 where `i64 as f64` loses precision.
+///
+/// Issue #5749: this mirrors the expression evaluator's `compare_int_float`
+/// (`evaluator/operators/comparison/mod.rs`) so the columnar filter and the
+/// evaluator agree on results such as `i64::MAX` vs `9223372036854775808.0`
+/// (the f64 that `i64::MAX + 1` overflows to). Keeping them in agreement is what
+/// makes the `where_filtered` fast-path guard safe.
+#[inline]
+fn compare_int_float(int_val: i64, float_val: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    // NaN: treat as Equal so every predicate fails (matches evaluator).
+    if float_val.is_nan() {
+        return Ordering::Equal;
+    }
+
+    // Infinity.
+    if float_val.is_infinite() {
+        return if float_val.is_sign_positive() { Ordering::Less } else { Ordering::Greater };
+    }
+
+    // Within the exact-representation range (|x| <= 2^53) with no fractional
+    // part, compare as integers.
+    const EXACT_INT_MAX: f64 = 9007199254740992.0; // 2^53
+    const EXACT_INT_MIN: f64 = -9007199254740992.0;
+    if float_val >= EXACT_INT_MIN && float_val <= EXACT_INT_MAX && float_val.fract() == 0.0 {
+        return int_val.cmp(&(float_val as i64));
+    }
+
+    // Fractional floats: compare via float (int rounding is irrelevant to the
+    // strict inequality result here).
+    if float_val.fract() != 0.0 {
+        let int_as_float = int_val as f64;
+        return int_as_float.partial_cmp(&float_val).unwrap_or(Ordering::Equal);
+    }
+
+    // Imprecise integral floats (2^53 < |value|). float(i64::MAX) rounds UP to
+    // 2^63, so any i64 is strictly less than it.
+    const I64_MAX_PLUS_ONE_AS_F64: f64 = 9223372036854775808.0_f64; // 2^63
+    if float_val >= I64_MAX_PLUS_ONE_AS_F64 {
+        return Ordering::Less;
+    }
+    const I64_MIN_AS_F64: f64 = -9223372036854775808.0_f64; // -2^63
+    if float_val < I64_MIN_AS_F64 {
+        return Ordering::Greater;
+    }
+    if float_val == I64_MIN_AS_F64 {
+        return int_val.cmp(&i64::MIN);
+    }
+
+    // Imprecise zone (2^53 < |value| < 2^63): account for rounding of the int.
+    let int_as_float = int_val as f64;
+    if int_as_float == float_val {
+        let round_trip = int_as_float as i64;
+        if round_trip == int_val {
+            return Ordering::Equal;
+        }
+        return if round_trip > int_val { Ordering::Less } else { Ordering::Greater };
+    }
+    int_as_float.partial_cmp(&float_val).unwrap_or(Ordering::Equal)
 }
 
 /// Parse a date string in YYYY-MM-DD format
@@ -327,6 +440,60 @@ mod tests {
             result,
             CompareResult::Ordering(std::cmp::Ordering::Less),
             "Float(50.0) should be < Integer(85)"
+        );
+    }
+
+    /// Issue #5749: precise integer-vs-float comparison near i64::MAX.
+    ///
+    /// `i64::MAX + 1` overflows arithmetic to the f64 `9223372036854775808.0`
+    /// (= 2^63). A naive `i64::MAX as f64` also rounds UP to 2^63, so the lossy
+    /// path reported Equal and `a >= 2^63` wrongly matched. The precise
+    /// comparator must report `i64::MAX < 2^63`. This mirrors the expression
+    /// evaluator so the columnar `where_filtered` flag stays trustworthy.
+    #[test]
+    fn test_issue_5749_integer_max_vs_overflow_float() {
+        use std::cmp::Ordering;
+
+        let int_max = SqlValue::Integer(i64::MAX);
+        let overflow_float = SqlValue::Double(9223372036854775808.0); // 2^63
+
+        // i64::MAX must compare strictly LESS than 2^63, so `>=` is false.
+        assert_eq!(
+            compare_values(&int_max, &overflow_float),
+            CompareResult::Ordering(Ordering::Less),
+            "i64::MAX must be < 2^63 (not Equal via lossy f64 rounding)"
+        );
+        // And the reversed orientation must be Greater.
+        assert_eq!(
+            compare_values(&overflow_float, &int_max),
+            CompareResult::Ordering(Ordering::Greater),
+            "2^63 must be > i64::MAX"
+        );
+    }
+
+    /// Issue #5749: ordinary small-magnitude integer/float pairs must still
+    /// compare correctly through the precise path (no behavior change below
+    /// 2^53).
+    #[test]
+    fn test_issue_5749_small_integer_vs_float_unchanged() {
+        use std::cmp::Ordering;
+
+        assert_eq!(
+            compare_values(&SqlValue::Integer(85), &SqlValue::Double(85.0)),
+            CompareResult::Ordering(Ordering::Equal),
+        );
+        assert_eq!(
+            compare_values(&SqlValue::Integer(85), &SqlValue::Double(85.5)),
+            CompareResult::Ordering(Ordering::Less),
+        );
+        assert_eq!(
+            compare_values(&SqlValue::Integer(86), &SqlValue::Float(85.5)),
+            CompareResult::Ordering(Ordering::Greater),
+        );
+        // Exact integral float within 2^53 compares as integers.
+        assert_eq!(
+            compare_values(&SqlValue::Bigint(1_000_000), &SqlValue::Double(1_000_000.0)),
+            CompareResult::Ordering(Ordering::Equal),
         );
     }
 
@@ -547,8 +714,7 @@ mod tests {
     /// Test evaluate_predicate with text vs integer
     #[test]
     fn test_evaluate_predicate_text_vs_integer() {
-        use super::super::evaluation::evaluate_predicate;
-        use super::super::predicates::ColumnPredicate;
+        use super::super::{evaluation::evaluate_predicate, predicates::ColumnPredicate};
 
         // GreaterThan predicate: column > 123
         let predicate =
