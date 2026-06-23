@@ -407,3 +407,58 @@ fn test_parse_update_no_limit_is_none() {
         _ => panic!("Expected UPDATE statement"),
     }
 }
+
+// ========================================================================
+// Trailing clause ordering and validation (issue #5747)
+// ========================================================================
+
+#[test]
+fn test_parse_update_returning_before_limit() {
+    // SQLite allows RETURNING before LIMIT on UPDATE.
+    let result = Parser::parse_sql("UPDATE t1 SET y = 1 WHERE x = 1 RETURNING x, y, '|' LIMIT 5;");
+    assert!(result.is_ok(), "RETURNING before LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.returning.is_some());
+            assert!(update.limit.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_returning_before_order_by_limit() {
+    let result = Parser::parse_sql("UPDATE t1 SET y = 1 RETURNING y ORDER BY x LIMIT 5;");
+    assert!(result.is_ok(), "RETURNING before ORDER BY LIMIT should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert!(update.order_by.is_some());
+            assert!(update.limit.is_some());
+        }
+        _ => panic!("Expected UPDATE statement"),
+    }
+}
+
+#[test]
+fn test_parse_update_order_by_without_limit_is_error() {
+    // SQLite rejects ORDER BY on UPDATE without a LIMIT.
+    let result = Parser::parse_sql("UPDATE t1 SET y = 1 WHERE x = 1 ORDER BY x;");
+    let err = result.expect_err("ORDER BY without LIMIT must be a parse error");
+    assert!(
+        err.message.contains("ORDER BY without LIMIT on UPDATE"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
+#[test]
+fn test_parse_update_offset_without_limit_is_error() {
+    // SQLite rejects OFFSET on UPDATE without a LIMIT.
+    let result = Parser::parse_sql("UPDATE t1 SET y = 1 WHERE x = 1 OFFSET 2;");
+    let err = result.expect_err("OFFSET without LIMIT must be a parse error");
+    assert!(
+        err.message.contains("near \"OFFSET\": syntax error"),
+        "unexpected message: {}",
+        err.message
+    );
+}
