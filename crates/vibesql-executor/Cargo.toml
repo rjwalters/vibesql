@@ -206,6 +206,10 @@ name = "tpcc_benchmark"
 harness = false
 
 [[bench]]
+name = "executor_reuse_benchmark"
+harness = false
+
+[[bench]]
 name = "tpch_deep_profiling"
 harness = false
 required-features = ["sqlite"]
