@@ -117,6 +117,22 @@ cargo build --release --features mvcc_enabled
 
 The replicated state machine applies committed transactions from the Raft log. HTTP REST, GraphQL, and CRUD writes route through consensus when the server runs in replicated mode.
 
+## CLI Durability (Write-Ahead Log)
+
+The `vibesql` CLI keeps a Write-Ahead Log for file-backed databases so committed changes survive an unclean shutdown (crash, SIGKILL, power loss). WAL is **on by default**; set `[database] wal = false` in `~/.vibesqlrc` to opt out and use the snapshot-only path.
+
+For a database file `mydata.vbsql`, WAL-active mode maintains two sibling files next to it:
+
+```text
+mydata.vbsql            — binary snapshot (last checkpoint, loaded on open)
+mydata.wal              — active write-ahead log
+mydata-checkpoints/     — checkpoint archive directory (checkpoint_*.vchk)
+```
+
+On open, the CLI recovers from the latest checkpoint and replays WAL entries written after it; on `\save` / clean exit it writes a fresh checkpoint and truncates the WAL. Recovery restores both table schemas (DDL) and committed row data (DML inserts, updates, deletes); uncommitted transactions at crash time are discarded, and a truncated WAL tail recovers up to the last complete, checksum-valid entry.
+
+The engine lives in `crates/vibesql-storage/src/wal/` (writer, reader, checkpoint, truncate, recovery). DML WAL ops carry an inline `table_name` (WAL format version 2) so `RecoveryManager::apply_op` can route each row mutation back to its table during replay. Server-mode durability is separate (the replicated server routes writes through the Raft log + MVCC state machine).
+
 ## Release Flow
 
 Run `/loom:release` from this repo to drive a v0.X.Y cut interactively:

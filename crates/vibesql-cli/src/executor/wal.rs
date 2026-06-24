@@ -1,10 +1,11 @@
 // ============================================================================
-// CLI WAL (Write-Ahead Log) Persistence Wiring — Phase 1
+// CLI WAL (Write-Ahead Log) Persistence Wiring
 // ============================================================================
 //
-// This module wires VibeSQL's existing WAL + crash-recovery engine
-// (`crates/vibesql-storage/src/wal/`) into the CLI behind the opt-in
-// `[database] wal = true` config flag.
+// This module wires VibeSQL's WAL + crash-recovery engine
+// (`crates/vibesql-storage/src/wal/`) into the CLI. WAL is on by default
+// (`[database] wal = true`) for file-backed databases; set `wal = false` to opt
+// out and use the snapshot-only path.
 //
 // ## File layout
 //
@@ -17,27 +18,19 @@
 // mydata-checkpoints/   — checkpoint archive directory (checkpoint_*.vchk)
 // ```
 //
-// ## Durability model (Phase 1)
+// ## Durability model
 //
 // On open (when WAL is active), `RecoveryManager::recover()` loads the latest
 // checkpoint and replays WAL entries written after it. On `\save` / clean exit,
 // the CLI writes a fresh checkpoint at the engine's current LSN and truncates
 // the WAL up to that LSN.
 //
-// IMPORTANT — KNOWN GAP (Phase 2): `RecoveryManager::apply_op` currently only
-// replays DDL (CreateTable) from the WAL; Insert/Update/Delete replay is a stub
-// (it counts ops but does not re-apply them, because the WAL stores a hashed
-// `table_id` with no `table_id -> table_name` resolution). The practical
-// consequence:
-//
-//   * Table *schemas* (DDL) survive an unclean shutdown (SIGKILL) via WAL replay.
-//   * Committed *row data* (DML) is durable only as of the last checkpoint
-//     (every `\save` / clean exit). Rows written to the WAL *after* the last
-//     checkpoint are NOT yet replayed on recovery and may be lost on a crash.
-//
-// Fixing DML replay and flipping the `wal` default to `true` is tracked as
-// Phase 2 of issue #5698. Do not advertise this as full row-level durability
-// until Phase 2 lands.
+// Both DDL and committed DML survive an unclean shutdown (SIGKILL, power loss):
+// `RecoveryManager::apply_op` replays CreateTable/DropTable *and*
+// Insert/Update/Delete, routing each row mutation by the inline `table_name`
+// carried in WAL format v2 DML ops. Uncommitted transactions at crash time are
+// discarded (their ops are buffered but never applied). A truncated WAL tail
+// (partial final write) recovers up to the last complete, checksum-valid entry.
 
 use std::path::{Path, PathBuf};
 

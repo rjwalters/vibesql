@@ -85,9 +85,10 @@ impl<R: Read + Seek> WalReader<R> {
             return Ok(ReadResult::Corruption { position: self.position });
         }
 
-        // Deserialize entry
+        // Deserialize entry using the WAL file's format version (DML ops gained
+        // an inline table_name in version 2; older logs lack it on disk).
         let mut data_reader = &data[..];
-        let entry = WalEntry::deserialize(&mut data_reader)?;
+        let entry = WalEntry::deserialize_versioned(&mut data_reader, self.header.version)?;
 
         // Update state
         self.position += 4 + 4 + len as u64; // len + crc + data
@@ -234,7 +235,12 @@ mod tests {
             let entry = WalEntry::new(
                 i,
                 1234567890 + i,
-                WalOp::Insert { table_id: 1, row_id: i, values: vec![SqlValue::Integer(i as i64)] },
+                WalOp::Insert {
+                    table_id: 1,
+                    table_name: "main.t".to_string(),
+                    row_id: i,
+                    values: vec![SqlValue::Integer(i as i64)],
+                },
             );
             writer.append(&entry).unwrap();
         }

@@ -41,21 +41,21 @@ pub struct DatabaseConfig {
     #[serde(default = "default_sql_mode")]
     pub sql_mode: String,
 
-    /// Opt-in Write-Ahead Log (WAL) durability for file-backed databases.
+    /// Write-Ahead Log (WAL) durability for file-backed databases.
     ///
-    /// Defaults to `false`, so the shipping default behavior (in-memory +
-    /// snapshot-on-exit) is unchanged. When set to `true` AND a database file
-    /// path is given, the CLI initializes the WAL persistence engine on open
-    /// (replaying the last checkpoint + WAL via `RecoveryManager::recover`) and
-    /// replaces snapshot-on-save with a checkpoint + WAL truncate.
+    /// Defaults to `true`. When a database file path is given, the CLI
+    /// initializes the WAL persistence engine on open (replaying the last
+    /// checkpoint + WAL via `RecoveryManager::recover`) and replaces
+    /// snapshot-on-save with a checkpoint + WAL truncate.
     ///
-    /// Phase 1 (current): DDL (table schemas) is durable across an unclean
-    /// shutdown; committed row data is durable as of the last checkpoint
-    /// (every `\save` / clean exit). DML replay of WAL entries written *after*
-    /// the last checkpoint is still a stub (see `RecoveryManager::apply_op`),
-    /// so a crash between writes and the next checkpoint may lose those rows.
-    /// Full DML crash-recovery and flipping this default to `true` is Phase 2.
-    #[serde(default)]
+    /// Both DDL (table schemas) and committed DML (row data) survive an unclean
+    /// shutdown: `RecoveryManager::apply_op` replays Insert/Update/Delete from
+    /// the WAL, routed by the inline `table_name` carried in WAL format v2 ops.
+    /// Uncommitted transactions at crash time are discarded.
+    ///
+    /// Opt out with `[database] wal = false` to fall back to the snapshot-only
+    /// path (in-memory + SQL-dump snapshot on save/exit, no WAL sibling files).
+    #[serde(default = "default_true")]
     pub wal: bool,
 }
 
@@ -114,7 +114,7 @@ impl Default for DatabaseConfig {
             default_path: None,
             auto_save: default_true(),
             sql_mode: default_sql_mode(),
-            wal: false,
+            wal: default_true(),
         }
     }
 }
@@ -186,29 +186,30 @@ mod tests {
         assert_eq!(config.database.sql_mode, "mysql");
         assert_eq!(config.history.max_entries, 10000);
         assert_eq!(config.query.timeout_seconds, 0);
-        // WAL is opt-in: default must be OFF so existing behavior is unchanged.
-        assert!(!config.database.wal);
+        // WAL is on by default (Phase 2, #5698): committed rows survive crashes.
+        assert!(config.database.wal);
     }
 
     #[test]
-    fn test_wal_defaults_off_when_unspecified() {
-        // A config that omits `wal` must parse with wal = false.
+    fn test_wal_defaults_on_when_unspecified() {
+        // A config that omits `wal` must parse with wal = true (the new default).
         let toml_str = r#"
 [database]
 auto_save = true
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(!config.database.wal);
+        assert!(config.database.wal);
     }
 
     #[test]
-    fn test_wal_opt_in_parses() {
+    fn test_wal_opt_out_parses() {
+        // Users can still disable WAL explicitly to get the snapshot-only path.
         let toml_str = r#"
 [database]
-wal = true
+wal = false
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(config.database.wal);
+        assert!(!config.database.wal);
     }
 
     #[test]

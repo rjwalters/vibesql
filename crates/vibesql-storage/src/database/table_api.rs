@@ -384,6 +384,7 @@ impl Database {
         if !self.is_temp_table(table_name) {
             self.emit_wal_op(WalOp::Insert {
                 table_id: self.table_name_to_id(table_name),
+                table_name: table_name.to_string(),
                 row_id: row_index as u64,
                 values: row.values.to_vec(),
             });
@@ -488,6 +489,7 @@ impl Database {
             if !is_temp {
                 self.emit_wal_op(WalOp::Insert {
                     table_id,
+                    table_name: table_name.to_string(),
                     row_id: row_index as u64,
                     values: row.values.to_vec(),
                 });
@@ -686,6 +688,7 @@ impl Database {
         if !self.is_temp_table(&resolved_name) {
             self.emit_wal_op(WalOp::Update {
                 table_id: self.table_name_to_id(&resolved_name),
+                table_name: resolved_name.clone(),
                 row_id: row_index as u64,
                 old_values: old_row.values.to_vec(),
                 new_values: new_row.values.to_vec(),

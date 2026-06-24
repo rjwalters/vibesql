@@ -945,7 +945,12 @@ mod tests {
         let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         let lsn = engine
-            .send(WalOp::Insert { table_id: 1, row_id: 100, values: vec![SqlValue::Integer(42)] })
+            .send(WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 100,
+                values: vec![SqlValue::Integer(42)],
+            })
             .unwrap();
 
         assert_eq!(lsn, 1);
@@ -966,6 +971,7 @@ mod tests {
             let lsn = engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -990,6 +996,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1019,6 +1026,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1047,7 +1055,12 @@ mod tests {
         let engine = PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         engine
-            .send(WalOp::Insert { table_id: 1, row_id: 1, values: vec![SqlValue::Integer(1)] })
+            .send(WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 1,
+                values: vec![SqlValue::Integer(1)],
+            })
             .unwrap();
 
         // Flush should return immediately
@@ -1064,7 +1077,12 @@ mod tests {
             PersistenceEngine::with_writer(cursor, PersistenceConfig::default()).unwrap();
 
         engine
-            .send(WalOp::Insert { table_id: 1, row_id: 1, values: vec![SqlValue::Integer(1)] })
+            .send(WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 1,
+                values: vec![SqlValue::Integer(1)],
+            })
             .unwrap();
 
         // Should complete within timeout
@@ -1089,6 +1107,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1118,6 +1137,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1160,6 +1180,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1204,6 +1225,7 @@ mod tests {
             let lsn = engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
@@ -1238,6 +1260,7 @@ mod tests {
             engine
                 .send(WalOp::Insert {
                     table_id: 1,
+                    table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
                 })
