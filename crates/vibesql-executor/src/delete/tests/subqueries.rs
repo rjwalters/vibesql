@@ -219,6 +219,7 @@ mod in_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
@@ -292,6 +293,7 @@ mod in_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
@@ -376,6 +378,7 @@ mod scalar_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -462,6 +465,7 @@ mod scalar_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "items".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -539,6 +543,7 @@ mod scalar_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -615,6 +620,7 @@ mod empty_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "employees".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {
@@ -707,6 +713,7 @@ mod complex_subquery {
             index_hint: None,
             with_clause: None,
             quoted: false,
+            alias: None,
             only: false,
             table_name: "orders".to_string(),
             where_clause: Some(WhereClause::Condition(Expression::In {

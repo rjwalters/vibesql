@@ -1176,8 +1176,23 @@ impl ExpressionEvaluator<'_> {
             let alias_lower = self.table_alias.as_ref().map(|a| a.to_lowercase());
             let matches_alias = alias_lower.as_ref().is_some_and(|a| a == &qualifier_lower);
 
+            // When an alias is active, SQLite hides the original (un-aliased) table name.
+            // `UPDATE t1 AS a SET y=1 WHERE t1.x=1` must raise `no such column: t1.x`
+            // (the alias `a` is the only valid qualifier for the target table). Reject the
+            // original name here so it produces the SQLite-compatible `no such column`
+            // message rather than falling through to the generic qualifier error.
+            if self.table_alias.is_some() && qualifier_lower == inner_name_lower && !matches_alias {
+                return Err(ExecutorError::NoSuchColumn {
+                    column_ref: format!("{}.{}", qualifier, column),
+                });
+            }
+
+            // The original name only matches the inner schema when no alias is set.
+            let matches_inner_name =
+                self.table_alias.is_none() && qualifier_lower == inner_name_lower;
+
             // Check if qualifier matches inner schema or table alias
-            if qualifier_lower == inner_name_lower || matches_alias {
+            if matches_inner_name || matches_alias {
                 // Qualifier matches inner schema or alias - search only there
                 searched_tables.push(self.schema.name.clone());
                 if let Some(col_index) = self.schema.get_column_index(column) {

@@ -44,6 +44,35 @@ impl<'arena> ArenaParser<'arena> {
             self.expect_token(Token::RParen)?;
         }
 
+        // Parse optional alias: DELETE FROM t1 AS a WHERE ... or DELETE FROM t1 a WHERE ...
+        // SQLite 3.24+ extension for using a table alias in DELETE statements.
+        // Reserved words (WHERE, ORDER, LIMIT, OFFSET, RETURNING, etc.) tokenize as
+        // keywords, so the bare-alias branch never swallows a following clause keyword.
+        let alias = if self.try_consume_keyword(Keyword::As) {
+            // AS keyword present, alias required.
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Some(self.intern(&alias_name))
+                }
+                _ => return Err(ParseError { message: "Expected alias after AS".to_string() }),
+            }
+        } else if self.peek_delete_index_hint() {
+            // `INDEXED BY ...` / `NOT INDEXED` follows the table, not an alias.
+            // INDEXED is lexed as an identifier, so guard against it here.
+            None
+        } else {
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Some(self.intern(&alias_name))
+                }
+                _ => None,
+            }
+        };
+
         // Parse optional WHERE clause
         let where_clause = if self.try_consume_keyword(Keyword::Where) {
             // Check for WHERE CURRENT OF cursor_name
@@ -102,6 +131,7 @@ impl<'arena> ArenaParser<'arena> {
             only,
             table_name,
             quoted,
+            alias,
             where_clause,
             order_by,
             limit,
@@ -110,6 +140,21 @@ impl<'arena> ArenaParser<'arena> {
         };
 
         Ok(self.arena.alloc(stmt))
+    }
+
+    /// Whether the next tokens form an `INDEXED BY <name>` / `NOT INDEXED`
+    /// hint rather than a bare alias. INDEXED is lexed as an identifier, so the
+    /// bare-alias branch must skip it (mirrors `from_clause.rs::peek_index_hint`).
+    fn peek_delete_index_hint(&self) -> bool {
+        match self.peek() {
+            Token::Identifier(id) if id.eq_ignore_ascii_case("indexed") => {
+                self.peek_next_keyword(Keyword::By)
+            }
+            Token::Keyword { keyword: Keyword::Not, .. } => {
+                matches!(self.peek_next(), Token::Identifier(id) if id.eq_ignore_ascii_case("indexed"))
+            }
+            _ => false,
+        }
     }
 
     /// Parse the optional `ORDER BY ... LIMIT ... OFFSET ...` tail of a DELETE

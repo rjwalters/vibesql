@@ -243,6 +243,7 @@ fn test_not_in_delete_where() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "tab0".to_string(),
         where_clause: Some(vibesql_ast::WhereClause::Condition(vibesql_ast::Expression::UnaryOp {

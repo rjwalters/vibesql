@@ -185,6 +185,10 @@ impl Parser {
             self.advance(); // consume ')'
         }
 
+        // Parse optional alias: DELETE FROM t1 AS a WHERE ... or DELETE FROM t1 a WHERE ...
+        // SQLite 3.24+ extension for using a table alias in DELETE statements.
+        let alias = self.parse_delete_alias()?;
+
         // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
         // Syntax: DELETE FROM t1 INDEXED BY idx WHERE ...
         // Advisory only: VibeSQL's planner chooses indexes independently.
@@ -219,6 +223,7 @@ impl Parser {
             only,
             table_name,
             quoted,
+            alias,
             index_hint,
             where_clause,
             order_by,
@@ -258,6 +263,10 @@ impl Parser {
             self.advance();
         }
 
+        // Parse optional alias: DELETE FROM t1 AS a WHERE ... or DELETE FROM t1 a WHERE ...
+        // SQLite 3.24+ extension for using a table alias in DELETE statements.
+        let alias = self.parse_delete_alias()?;
+
         // Parse optional INDEXED BY / NOT INDEXED hint (SQLite extension).
         // Advisory only: VibeSQL's planner chooses indexes independently.
         let index_hint = self.parse_index_hint()?;
@@ -290,6 +299,7 @@ impl Parser {
             only,
             table_name,
             quoted,
+            alias,
             index_hint,
             where_clause,
             order_by,
@@ -297,5 +307,35 @@ impl Parser {
             offset,
             returning,
         })
+    }
+
+    /// Parse an optional table alias following the DELETE target table.
+    ///
+    /// Mirrors the UPDATE alias handling: `DELETE FROM t1 AS a WHERE ...` (AS
+    /// keyword present, alias required) and the bare form `DELETE FROM t1 a
+    /// WHERE ...`. SQLite 3.24+ allows an alias on the DELETE target.
+    ///
+    /// Most reserved words (WHERE, ORDER, LIMIT, OFFSET, RETURNING) tokenize as
+    /// `Token::Keyword`, so the bare-alias branch never swallows a following
+    /// clause keyword as an alias. INDEXED is lexed as an identifier, so the
+    /// bare-alias branch additionally skips an `INDEXED BY` / `NOT INDEXED`
+    /// hint (mirrors the UPDATE-alias precedent in `parser/update.rs`).
+    fn parse_delete_alias(&mut self) -> Result<Option<String>, ParseError> {
+        if self.try_consume_keyword(Keyword::As) {
+            // AS keyword present, alias required.
+            Ok(Some(self.parse_identifier()?))
+        } else if self.peek_index_hint() {
+            // `INDEXED BY ...` / `NOT INDEXED` follows the table, not an alias.
+            Ok(None)
+        } else {
+            match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let alias_name = name.clone();
+                    self.advance();
+                    Ok(Some(alias_name))
+                }
+                _ => Ok(None),
+            }
+        }
     }
 }

@@ -80,6 +80,7 @@ impl DeleteExecutor {
     ///     only: false,
     ///     table_name: "users".to_string(),
     ///     quoted: false,
+    ///     alias: None,
     ///     index_hint: None,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
     ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
@@ -338,6 +339,13 @@ impl DeleteExecutor {
         } else {
             ExpressionEvaluator::with_database(&schema, database)
         };
+
+        // Set table alias if present (SQLite 3.24+ extension: DELETE FROM t1 AS a WHERE a.x=1).
+        // The evaluator then resolves `a.col` against the target table and rejects the
+        // original (un-aliased) table name as a qualifier, matching SQLite scoping.
+        if let Some(ref alias) = stmt.alias {
+            evaluator.set_table_alias(alias.clone());
+        }
 
         // Check once if any DELETE triggers exist for this table (used for fast-path checks)
         let has_delete_triggers = database

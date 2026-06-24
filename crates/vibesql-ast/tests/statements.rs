@@ -90,6 +90,7 @@ fn test_create_delete_statement() {
         only: false,
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         where_clause: None,
         order_by: None,
         limit: None,

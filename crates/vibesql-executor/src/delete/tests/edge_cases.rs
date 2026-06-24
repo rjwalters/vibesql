@@ -18,6 +18,7 @@ fn test_delete_table_not_found() {
         only: false,
         table_name: "nonexistent".to_string(),
         quoted: false,
+        alias: None,
         where_clause: None,
         order_by: None,
         limit: None,
@@ -40,6 +41,7 @@ fn test_delete_no_matching_rows() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -81,6 +83,7 @@ fn test_delete_from_empty_table() {
         only: false,
         table_name: "empty_users".to_string(),
         quoted: false,
+        alias: None,
         where_clause: None,
         order_by: None,
         limit: None,
@@ -102,6 +105,7 @@ fn test_delete_column_not_found() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
