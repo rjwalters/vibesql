@@ -10,6 +10,13 @@
 //!   TPCC_WARMUP_SECS   - Warmup duration in seconds (default: 10)
 //!   TPCC_CLIENTS       - Number of parallel clients (default: 1)
 //!                        Set to 0 or "auto" for memory-aware auto-scaling
+//!   TPCC_WRITE_FAITHFUL - When 1/true, New-Order/Payment/Delivery issue real
+//!                        INSERT/UPDATE/DELETE so write-path costs (delete compaction, index
+//!                        maintenance, WAL flush) become measurable (default: off). This path
+//!                        is serial-only (forces TPCC_CLIENTS=1) because the VibeSQL DML
+//!                        executors require `&mut Database`. Order-Status/Stock-Level remain
+//!                        read-only. Run with ENGINE_FILTER=vibesql,sqlite for same-run
+//!                        per-transaction VibeSQL/SQLite ratios.
 //!   ENGINE_FILTER      - Comma-separated list of engines to run (default: vibesql,sqlite,duckdb)
 //!                        Note: MySQL excluded by default (use server benchmarks for MySQL)
 //!
@@ -300,6 +307,153 @@ fn aggregate_results(client_results: &[TPCCBenchmarkResults]) -> TPCCBenchmarkRe
 /// that contained nearly identical code.
 fn run_benchmark<E: TPCCExecutor>(
     executor: &E,
+    transaction_type: TransactionType,
+    num_warehouses: i32,
+    duration: Duration,
+    warmup: Duration,
+    print_phases: bool,
+) -> TPCCBenchmarkResults {
+    let mut workload = TPCCWorkload::new(42, num_warehouses);
+
+    let mut results = TPCCBenchmarkResults::new();
+    let mut new_order_times: Vec<u64> = Vec::new();
+    let mut payment_times: Vec<u64> = Vec::new();
+    let mut order_status_times: Vec<u64> = Vec::new();
+    let mut delivery_times: Vec<u64> = Vec::new();
+    let mut stock_level_times: Vec<u64> = Vec::new();
+
+    // Warmup phase
+    if print_phases {
+        eprintln!("Warmup phase ({:?})...", warmup);
+    }
+    let warmup_start = Instant::now();
+    while warmup_start.elapsed() < warmup {
+        let txn_type = match transaction_type {
+            TransactionType::Mixed => workload.next_transaction_type(),
+            TransactionType::NewOrder => 0,
+            TransactionType::Payment => 1,
+            TransactionType::OrderStatus => 2,
+            TransactionType::Delivery => 3,
+            TransactionType::StockLevel => 4,
+        };
+
+        match txn_type {
+            0 => {
+                let _ = executor.new_order(&workload.generate_new_order());
+            }
+            1 => {
+                let _ = executor.payment(&workload.generate_payment());
+            }
+            2 => {
+                let _ = executor.order_status(&workload.generate_order_status());
+            }
+            3 => {
+                let _ = executor.delivery(&workload.generate_delivery());
+            }
+            4 => {
+                let _ = executor.stock_level(&workload.generate_stock_level());
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // Measurement phase
+    if print_phases {
+        eprintln!("Measurement phase ({:?})...", duration);
+    }
+    let benchmark_start = Instant::now();
+    while benchmark_start.elapsed() < duration {
+        let txn_type = match transaction_type {
+            TransactionType::Mixed => workload.next_transaction_type(),
+            TransactionType::NewOrder => 0,
+            TransactionType::Payment => 1,
+            TransactionType::OrderStatus => 2,
+            TransactionType::Delivery => 3,
+            TransactionType::StockLevel => 4,
+        };
+
+        let result = match txn_type {
+            0 => {
+                let r = executor.new_order(&workload.generate_new_order());
+                new_order_times.push(r.duration_us);
+                r
+            }
+            1 => {
+                let r = executor.payment(&workload.generate_payment());
+                payment_times.push(r.duration_us);
+                r
+            }
+            2 => {
+                let r = executor.order_status(&workload.generate_order_status());
+                order_status_times.push(r.duration_us);
+                r
+            }
+            3 => {
+                let r = executor.delivery(&workload.generate_delivery());
+                delivery_times.push(r.duration_us);
+                r
+            }
+            4 => {
+                let r = executor.stock_level(&workload.generate_stock_level());
+                stock_level_times.push(r.duration_us);
+                r
+            }
+            _ => unreachable!(),
+        };
+
+        results.total_transactions += 1;
+        if result.success {
+            results.successful_transactions += 1;
+        } else {
+            results.failed_transactions += 1;
+        }
+    }
+
+    results.total_duration_ms = benchmark_start.elapsed().as_millis() as u64;
+    if results.total_duration_ms > 0 {
+        results.transactions_per_second =
+            results.total_transactions as f64 / (results.total_duration_ms as f64 / 1000.0);
+    }
+
+    // Calculate averages
+    if !new_order_times.is_empty() {
+        results.new_order_count = new_order_times.len() as u64;
+        results.new_order_avg_us =
+            new_order_times.iter().sum::<u64>() as f64 / new_order_times.len() as f64;
+    }
+    if !payment_times.is_empty() {
+        results.payment_count = payment_times.len() as u64;
+        results.payment_avg_us =
+            payment_times.iter().sum::<u64>() as f64 / payment_times.len() as f64;
+    }
+    if !order_status_times.is_empty() {
+        results.order_status_count = order_status_times.len() as u64;
+        results.order_status_avg_us =
+            order_status_times.iter().sum::<u64>() as f64 / order_status_times.len() as f64;
+    }
+    if !delivery_times.is_empty() {
+        results.delivery_count = delivery_times.len() as u64;
+        results.delivery_avg_us =
+            delivery_times.iter().sum::<u64>() as f64 / delivery_times.len() as f64;
+    }
+    if !stock_level_times.is_empty() {
+        results.stock_level_count = stock_level_times.len() as u64;
+        results.stock_level_avg_us =
+            stock_level_times.iter().sum::<u64>() as f64 / stock_level_times.len() as f64;
+    }
+
+    results
+}
+
+/// Run a write-faithful TPC-C benchmark (serial, single client).
+///
+/// This is the serial counterpart of [`run_benchmark`] for the `TPCC_WRITE_FAITHFUL=1` path.
+/// It takes a `&mut E: TPCCWriteExecutor` so the VibeSQL implementation can drive `&mut
+/// Database` DML (INSERT/UPDATE/DELETE). The write-faithful path is serial-only by design
+/// (see the concurrency-resolution note in `tpcc/transactions.rs`): parallel write clients
+/// would require per-client owned databases, which is deferred.
+fn run_write_benchmark<E: TPCCWriteExecutor>(
+    executor: &mut E,
     transaction_type: TransactionType,
     num_warehouses: i32,
     duration: Duration,
@@ -1322,6 +1476,14 @@ fn main() {
     let duration = Duration::from_secs(duration_secs);
     let warmup = Duration::from_secs(warmup_secs);
 
+    // Write-faithful mode: when set, New-Order / Payment / Delivery issue real
+    // INSERT/UPDATE/DELETE so write-path costs (delete compaction, index maintenance, WAL
+    // flush) become measurable. Default off, so existing read-only runs are unchanged.
+    // This path is serial-only (see below): the VibeSQL DML executors require `&mut Database`.
+    let write_faithful = std::env::var("TPCC_WRITE_FAITHFUL")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
     // Parse number of clients (0 or "auto" means auto-scale)
     let num_clients_env = env::var("TPCC_CLIENTS").ok();
     let num_clients_raw: Option<usize> = num_clients_env.as_ref().and_then(|s| {
@@ -1354,11 +1516,23 @@ fn main() {
     let is_micro_mode = scale_factor < 1.0;
 
     // Determine number of clients (after we know num_warehouses for auto-scaling)
-    let num_clients = match num_clients_raw {
+    let mut num_clients = match num_clients_raw {
         Some(0) => compute_parallelism(num_warehouses), // Auto-scale
         Some(n) => n.max(1),                            // User-specified
         None => 1,                                      // Default: single client
     };
+
+    // Write-faithful mode is serial-only: the VibeSQL DML executors need `&mut Database`,
+    // which a shared (`Sync`) executor cannot provide across parallel clients. Force a single
+    // client so both engines run the identical serial write workload from an identical fresh
+    // DB (per-engine reload happens below), keeping the per-type ratio reproducible.
+    if write_faithful && num_clients > 1 {
+        eprintln!(
+            "Note: TPCC_WRITE_FAITHFUL=1 forces serial execution (num_clients=1); requested {} ignored.",
+            num_clients
+        );
+        num_clients = 1;
+    }
 
     // Parse engine filter (defaults to embedded databases only - no MySQL)
     let engine_filter = EngineFilter::from_env_embedded();
@@ -1372,6 +1546,9 @@ fn main() {
     eprintln!("  Duration: {} seconds", duration_secs);
     eprintln!("  Warmup: {} seconds", warmup_secs);
     eprintln!("  Transaction type: {}", transaction_type.name());
+    if write_faithful {
+        eprintln!("  Write-faithful: ON (real INSERT/UPDATE/DELETE; serial-only)");
+    }
     eprintln!("  Engines: {}", engine_filter.enabled_list());
     if num_clients > 1 {
         eprintln!("  Clients: {} (parallel mode)", num_clients);
@@ -1386,31 +1563,16 @@ fn main() {
     if engine_filter.vibesql {
         eprintln!("\nLoading VibeSQL TPC-C database (SF {})...", scale_factor);
         let load_start = Instant::now();
-        let vibesql_db = load_vibesql(scale_factor);
+        let mut vibesql_db = load_vibesql(scale_factor);
         eprintln!("VibeSQL loaded in {:?}", load_start.elapsed());
 
-        // Run VibeSQL benchmark using SQL execution (fair comparison with other databases)
-        eprintln!("\n--- VibeSQL Benchmark ---");
-        tpcc::transactions::reset_profile_counters();
-        let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
-
-        vibesql_results = Some(if num_clients > 1 {
-            // Parallel multi-client execution
-            let (client_results, aggregate) = run_parallel_benchmark(
-                &vibesql_executor,
-                transaction_type,
-                num_warehouses,
-                num_clients,
-                duration,
-                warmup,
-                true,
-            );
-            print_parallel_results(&client_results, &aggregate, transaction_type);
-            aggregate
-        } else {
-            // Single-client execution (original behavior)
-            let results = run_benchmark(
-                &vibesql_executor,
+        if write_faithful {
+            // Write-faithful, serial path: owns `&mut Database` to drive real DML.
+            eprintln!("\n--- VibeSQL Benchmark (write-faithful) ---");
+            tpcc::transactions::reset_profile_counters();
+            let mut vibesql_executor = VibesqlWriteExecutor::new(&mut vibesql_db);
+            let results = run_write_benchmark(
+                &mut vibesql_executor,
                 transaction_type,
                 num_warehouses,
                 duration,
@@ -1418,24 +1580,69 @@ fn main() {
                 true,
             );
             print_results(&results, transaction_type);
-            results
-        });
+            tpcc::transactions::print_profile_summary();
 
-        tpcc::transactions::print_profile_summary();
+            let cache_stats = vibesql_executor.cache_stats();
+            eprintln!("\n--- Prepared Statement Cache ---");
+            eprintln!(
+                "Hits: {}  Misses: {}  Evictions: {}  Size: {}  Hit rate: {:.4}",
+                cache_stats.hits,
+                cache_stats.misses,
+                cache_stats.evictions,
+                cache_stats.size,
+                cache_stats.hit_rate
+            );
+            vibesql_results = Some(results);
+        } else {
+            // Run VibeSQL benchmark using SQL execution (fair comparison with other databases)
+            eprintln!("\n--- VibeSQL Benchmark ---");
+            tpcc::transactions::reset_profile_counters();
+            let vibesql_executor = VibesqlTransactionExecutor::new(&vibesql_db);
 
-        // Report prepared-statement cache effectiveness. With `?`-placeholder templates the
-        // cache key is the template, so misses are bounded by the number of distinct templates
-        // (a handful) and the hit rate approaches 1.0 — confirming the reparse was eliminated.
-        let cache_stats = vibesql_executor.cache_stats();
-        eprintln!("\n--- Prepared Statement Cache ---");
-        eprintln!(
-            "Hits: {}  Misses: {}  Evictions: {}  Size: {}  Hit rate: {:.4}",
-            cache_stats.hits,
-            cache_stats.misses,
-            cache_stats.evictions,
-            cache_stats.size,
-            cache_stats.hit_rate
-        );
+            vibesql_results = Some(if num_clients > 1 {
+                // Parallel multi-client execution
+                let (client_results, aggregate) = run_parallel_benchmark(
+                    &vibesql_executor,
+                    transaction_type,
+                    num_warehouses,
+                    num_clients,
+                    duration,
+                    warmup,
+                    true,
+                );
+                print_parallel_results(&client_results, &aggregate, transaction_type);
+                aggregate
+            } else {
+                // Single-client execution (original behavior)
+                let results = run_benchmark(
+                    &vibesql_executor,
+                    transaction_type,
+                    num_warehouses,
+                    duration,
+                    warmup,
+                    true,
+                );
+                print_results(&results, transaction_type);
+                results
+            });
+
+            tpcc::transactions::print_profile_summary();
+
+            // Report prepared-statement cache effectiveness. With `?`-placeholder templates
+            // the cache key is the template, so misses are bounded by the number of distinct
+            // templates (a handful) and the hit rate approaches 1.0 — confirming the reparse
+            // was eliminated.
+            let cache_stats = vibesql_executor.cache_stats();
+            eprintln!("\n--- Prepared Statement Cache ---");
+            eprintln!(
+                "Hits: {}  Misses: {}  Evictions: {}  Size: {}  Hit rate: {:.4}",
+                cache_stats.hits,
+                cache_stats.misses,
+                cache_stats.evictions,
+                cache_stats.size,
+                cache_stats.hit_rate
+            );
+        }
     } else {
         eprintln!("\nSkipping VibeSQL (filtered out by ENGINE_FILTER)");
     }
@@ -1447,7 +1654,26 @@ fn main() {
 
         // SQLite benchmark
         eprintln!("\n\n--- SQLite Benchmark ---");
-        Some(if num_clients > 1 {
+        Some(if write_faithful {
+            // Write-faithful, serial path: issues the same logical write set as VibeSQL
+            // against a fresh DB so the per-transaction ratio is apples-to-apples.
+            eprintln!("Loading SQLite database (write-faithful)...");
+            let sqlite_load_start = Instant::now();
+            let sqlite_conn = load_sqlite(scale_factor);
+            eprintln!("SQLite loaded in {:?}", sqlite_load_start.elapsed());
+
+            let mut sqlite_executor = SqliteWriteExecutor::new(&sqlite_conn);
+            let results = run_write_benchmark(
+                &mut sqlite_executor,
+                transaction_type,
+                num_warehouses,
+                duration,
+                warmup,
+                true,
+            );
+            print_results(&results, transaction_type);
+            results
+        } else if num_clients > 1 {
             // Parallel multi-client execution (each client gets its own DB)
             let (client_results, aggregate) = run_sqlite_parallel_benchmark(
                 scale_factor,
@@ -1656,6 +1882,67 @@ fn main() {
                 mysql_res.transactions_per_second,
                 compute_avg(mysql_res),
                 num_clients
+            );
+        }
+
+        // Per-transaction-type VibeSQL/SQLite ratio (same-run comparison). This is the
+        // headline comparative metric — absolute localhost TPS is NOT a success goal. A ratio
+        // > 1.0 means VibeSQL is slower than SQLite for that transaction type. Reads
+        // (Order-Status / Stock-Level) stay read-only in both engines; under
+        // TPCC_WRITE_FAITHFUL=1 the write txns (New-Order / Payment / Delivery) exercise the
+        // real write path, so comparing their ratio against the read ratio shows whether the
+        // write path opens a new relative gap.
+        if let (Some(ref v), Some(ref s)) = (&vibesql_results, &sqlite_results) {
+            let label = if write_faithful { "write-faithful" } else { "read-only" };
+            eprintln!("\n--- VibeSQL / SQLite avg-latency ratio per transaction type ({label}) ---");
+            eprintln!(
+                "(ratio > 1.0 => VibeSQL slower; same process, identical fresh DB per engine)"
+            );
+            eprintln!("{:<14} {:>14} {:>14} {:>10}", "Transaction", "VibeSQL (us)", "SQLite (us)", "Ratio");
+            eprintln!("{:-<14} {:->14} {:->14} {:->10}", "", "", "", "");
+
+            let print_ratio = |name: &str, v_avg: f64, v_cnt: u64, s_avg: f64, s_cnt: u64| {
+                if v_cnt == 0 || s_cnt == 0 {
+                    return;
+                }
+                let ratio = if s_avg > 0.0 { v_avg / s_avg } else { 0.0 };
+                eprintln!("{:<14} {:>14.2} {:>14.2} {:>10.2}", name, v_avg, s_avg, ratio);
+            };
+
+            print_ratio(
+                "New-Order",
+                v.new_order_avg_us,
+                v.new_order_count,
+                s.new_order_avg_us,
+                s.new_order_count,
+            );
+            print_ratio(
+                "Payment",
+                v.payment_avg_us,
+                v.payment_count,
+                s.payment_avg_us,
+                s.payment_count,
+            );
+            print_ratio(
+                "Order-Status",
+                v.order_status_avg_us,
+                v.order_status_count,
+                s.order_status_avg_us,
+                s.order_status_count,
+            );
+            print_ratio(
+                "Delivery",
+                v.delivery_avg_us,
+                v.delivery_count,
+                s.delivery_avg_us,
+                s.delivery_count,
+            );
+            print_ratio(
+                "Stock-Level",
+                v.stock_level_avg_us,
+                v.stock_level_count,
+                s.stock_level_avg_us,
+                s.stock_level_count,
             );
         }
     }

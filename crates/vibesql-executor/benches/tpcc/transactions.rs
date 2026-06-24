@@ -26,8 +26,15 @@
 
 use std::{sync::Arc, time::Instant};
 
-use vibesql_executor::{PreparedStatementCache, SelectExecutor};
+use vibesql_executor::{
+    DeleteExecutor, InsertExecutor, PreparedStatementCache, SelectExecutor, UpdateExecutor,
+};
 use vibesql_types::SqlValue;
+
+/// Fixed timestamp used for write-faithful row payloads (reproducible, matches loader).
+const WRITE_FAITHFUL_TS: &str = "2024-01-01 00:00:00";
+/// Fixed 24-char district-info string used for synthesized order_line rows.
+const WRITE_FAITHFUL_DIST_INFO: &str = "ABCDEFGHIJKLMNOPQRSTUVWX";
 
 // Import transaction types from shared crate
 pub use vibesql_bench_common::tpcc::{
@@ -149,6 +156,55 @@ fn execute_query_for_int(
         }
     }
     Err("No result returned".to_string())
+}
+
+/// Helper function to execute a templated DML statement (INSERT/UPDATE/DELETE).
+///
+/// This is the write-path sibling of [`execute_query`]. It binds the same stable
+/// `?`-placeholder template through the prepared-statement cache, but instead of routing the
+/// bound AST to `SelectExecutor` it dispatches on the DML variant to the real
+/// `InsertExecutor` / `UpdateExecutor` / `DeleteExecutor`. Because it goes through those
+/// executors against a `&mut Database`, it exercises the genuine write path: index
+/// maintenance, delete compaction (`should_compact()`), and WAL flush.
+///
+/// `execute_query`'s `match` only accepts `Statement::Select` (silently dropping DML), so the
+/// write-faithful variant must use this helper rather than reusing `execute_query`.
+///
+/// Returns the number of rows affected.
+fn execute_dml(
+    cache: &PreparedStatementCache,
+    db: &mut vibesql_storage::Database,
+    template: &str,
+    params: &[SqlValue],
+) -> Result<usize, String> {
+    let parse_start = Instant::now();
+
+    let prepared = cache.get_or_prepare(template).map_err(|e| format!("Prepare error: {}", e))?;
+    let stmt = prepared.bind(params).map_err(|e| format!("Bind error: {}", e))?;
+
+    let parse_time = parse_start.elapsed().as_micros() as u64;
+    PARSE_TIME_US.with(|t| t.set(t.get() + parse_time));
+
+    let execute_start = Instant::now();
+
+    let result = match stmt {
+        vibesql_ast::Statement::Insert(insert) => {
+            InsertExecutor::execute(db, &insert).map_err(|e| format!("Insert error: {}", e))
+        }
+        vibesql_ast::Statement::Update(update) => {
+            UpdateExecutor::execute(&update, db).map_err(|e| format!("Update error: {}", e))
+        }
+        vibesql_ast::Statement::Delete(delete) => {
+            DeleteExecutor::execute(&delete, db).map_err(|e| format!("Delete error: {}", e))
+        }
+        _ => Err("execute_dml expected INSERT/UPDATE/DELETE statement".to_string()),
+    };
+
+    let execute_time = execute_start.elapsed().as_micros() as u64;
+    EXECUTE_TIME_US.with(|t| t.set(t.get() + execute_time));
+    QUERY_COUNT.with(|c| c.set(c.get() + 1));
+
+    result
 }
 
 /// Print profiling summary (call at end of benchmark)
@@ -554,6 +610,442 @@ impl<'a> TPCCExecutor for VibesqlTransactionExecutor<'a> {
     }
 }
 
+// ============================================================================
+// Write-faithful TPC-C transactions (TPCC_WRITE_FAITHFUL=1)
+// ============================================================================
+//
+// The read-only executors above model the five transactions as SELECTs only, so write-path
+// costs (delete compaction, index maintenance, WAL flush) never surface. The write-faithful
+// path issues the real INSERT/UPDATE/DELETE statements for New-Order, Payment, and Delivery
+// (Order-Status and Stock-Level are read-only in real TPC-C and stay read-only here).
+//
+// CONCURRENCY RESOLUTION (serial-only, v1): the VibeSQL DML executors require
+// `db: &mut Database`, but the read-only `VibesqlTransactionExecutor` holds a shared
+// `&Database` and is `Sync` across parallel clients — a shared `&Database` cannot drive
+// `&mut`-requiring DML. Rather than introduce per-client owned databases (more code) or
+// unsafe aliasing, the write-faithful path runs SERIAL-ONLY: the bench forces
+// `num_clients = 1` and the executor owns a `&mut Database`. Comparative per-transaction
+// latency does not require parallelism. See `TPCCWriteExecutor` + `run_write_benchmark` in
+// `tpcc_benchmark.rs`.
+
+/// Trait for write-faithful TPC-C transaction executors.
+///
+/// Unlike [`TPCCExecutor`] (which takes `&self` and is shared across parallel clients), this
+/// trait takes `&mut self` so the VibeSQL implementation can drive `&mut Database` DML. It is
+/// driven by the serial `run_write_benchmark` runner.
+pub trait TPCCWriteExecutor {
+    fn new_order(&mut self, input: &NewOrderInput) -> TransactionResult;
+    fn payment(&mut self, input: &PaymentInput) -> TransactionResult;
+    fn order_status(&mut self, input: &OrderStatusInput) -> TransactionResult;
+    fn delivery(&mut self, input: &DeliveryInput) -> TransactionResult;
+    fn stock_level(&mut self, input: &StockLevelInput) -> TransactionResult;
+}
+
+/// Write-faithful TPC-C transaction executor for VibeSQL.
+///
+/// Owns a mutable borrow of the database so it can run real DML through
+/// `InsertExecutor`/`UpdateExecutor`/`DeleteExecutor` via [`execute_dml`]. Read-side lookups
+/// reuse [`execute_query`]/[`execute_query_for_int`] through a shared reborrow of the same
+/// database. Cache is a plain (non-`Arc`) instance since this path is single-threaded.
+pub struct VibesqlWriteExecutor<'a> {
+    pub db: &'a mut vibesql_storage::Database,
+    cache: PreparedStatementCache,
+}
+
+impl<'a> VibesqlWriteExecutor<'a> {
+    pub fn new(db: &'a mut vibesql_storage::Database) -> Self {
+        Self { db, cache: PreparedStatementCache::new(64) }
+    }
+
+    /// Write-faithful New-Order: reads warehouse/district/customer/item/stock, then writes
+    /// the order header, the new_order marker row, and one order_line per item, updating
+    /// stock and advancing the district's next-order-id (which also keeps the orders /
+    /// order_line / new_order primary keys unique across repeated transactions).
+    fn new_order_impl(&mut self, input: &NewOrderInput) -> Result<(), String> {
+        // Read warehouse tax (read-only lookup).
+        execute_query(
+            &self.cache,
+            &*self.db,
+            "SELECT w_tax FROM warehouse WHERE w_id = ?",
+            &[SqlValue::Integer(input.w_id as i64)],
+        )?;
+
+        // Read the district's next order id; this becomes the new order's o_id.
+        let o_id = execute_query_for_int(
+            &self.cache,
+            &*self.db,
+            "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        )?;
+
+        // Read customer info (read-only lookup).
+        execute_query(
+            &self.cache,
+            &*self.db,
+            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(input.c_id as i64),
+            ],
+        )?;
+
+        // Advance the district's next order id (write).
+        execute_dml(
+            &self.cache,
+            self.db,
+            "UPDATE district SET d_next_o_id = d_next_o_id + 1 WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        )?;
+
+        // Insert the order header (o_carrier_id is NULL until delivered).
+        execute_dml(
+            &self.cache,
+            self.db,
+            "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            &[
+                SqlValue::Integer(o_id),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.c_id as i64),
+                SqlValue::Varchar(arcstr::ArcStr::from(WRITE_FAITHFUL_TS)),
+                SqlValue::Null,
+                SqlValue::Integer(input.ol_cnt as i64),
+                SqlValue::Integer(1),
+            ],
+        )?;
+
+        // Insert the new_order marker row.
+        execute_dml(
+            &self.cache,
+            self.db,
+            "INSERT INTO new_order VALUES (?, ?, ?)",
+            &[
+                SqlValue::Integer(o_id),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(input.w_id as i64),
+            ],
+        )?;
+
+        // Per item: read item + stock, update stock, insert the order_line row.
+        for (idx, item) in input.items.iter().enumerate() {
+            execute_query(
+                &self.cache,
+                &*self.db,
+                "SELECT i_price, i_name, i_data FROM item WHERE i_id = ?",
+                &[SqlValue::Integer(item.ol_i_id as i64)],
+            )?;
+
+            execute_query(
+                &self.cache,
+                &*self.db,
+                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = ? AND s_w_id = ?",
+                &[
+                    SqlValue::Integer(item.ol_i_id as i64),
+                    SqlValue::Integer(item.ol_supply_w_id as i64),
+                ],
+            )?;
+
+            execute_dml(
+                &self.cache,
+                self.db,
+                "UPDATE stock SET s_ytd = s_ytd + ?, s_order_cnt = s_order_cnt + 1, \
+                 s_quantity = s_quantity - ? WHERE s_i_id = ? AND s_w_id = ?",
+                &[
+                    SqlValue::Integer(item.ol_quantity as i64),
+                    SqlValue::Integer(item.ol_quantity as i64),
+                    SqlValue::Integer(item.ol_i_id as i64),
+                    SqlValue::Integer(item.ol_supply_w_id as i64),
+                ],
+            )?;
+
+            execute_dml(
+                &self.cache,
+                self.db,
+                "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                &[
+                    SqlValue::Integer(o_id),
+                    SqlValue::Integer(input.d_id as i64),
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer((idx + 1) as i64),
+                    SqlValue::Integer(item.ol_i_id as i64),
+                    SqlValue::Integer(item.ol_supply_w_id as i64),
+                    SqlValue::Null,
+                    SqlValue::Integer(item.ol_quantity as i64),
+                    SqlValue::Numeric(item.ol_quantity as f64 * 10.0),
+                    SqlValue::Varchar(arcstr::ArcStr::from(WRITE_FAITHFUL_DIST_INFO)),
+                ],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Write-faithful Payment: updates warehouse / district / customer balances and inserts a
+    /// history row.
+    fn payment_impl(&mut self, input: &PaymentInput) -> Result<(), String> {
+        // Update warehouse YTD.
+        execute_dml(
+            &self.cache,
+            self.db,
+            "UPDATE warehouse SET w_ytd = w_ytd + ? WHERE w_id = ?",
+            &[SqlValue::Numeric(input.h_amount), SqlValue::Integer(input.w_id as i64)],
+        )?;
+
+        // Update district YTD.
+        execute_dml(
+            &self.cache,
+            self.db,
+            "UPDATE district SET d_ytd = d_ytd + ? WHERE d_w_id = ? AND d_id = ?",
+            &[
+                SqlValue::Numeric(input.h_amount),
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+            ],
+        )?;
+
+        // Resolve the customer id (by id, or by last name lookup).
+        let c_id = if let Some(c_id) = input.c_id {
+            c_id as i64
+        } else {
+            execute_query_for_int(
+                &self.cache,
+                &*self.db,
+                "SELECT c_id FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first LIMIT 1",
+                &[
+                    SqlValue::Integer(input.c_w_id as i64),
+                    SqlValue::Integer(input.c_d_id as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(input.c_last.as_ref().unwrap().as_str())),
+                ],
+            )?
+        };
+
+        // Update customer balance / ytd payment / payment count.
+        execute_dml(
+            &self.cache,
+            self.db,
+            "UPDATE customer SET c_balance = c_balance - ?, c_ytd_payment = c_ytd_payment + ?, \
+             c_payment_cnt = c_payment_cnt + 1 WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+            &[
+                SqlValue::Numeric(input.h_amount),
+                SqlValue::Numeric(input.h_amount),
+                SqlValue::Integer(input.c_w_id as i64),
+                SqlValue::Integer(input.c_d_id as i64),
+                SqlValue::Integer(c_id),
+            ],
+        )?;
+
+        // Insert the history row.
+        execute_dml(
+            &self.cache,
+            self.db,
+            "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            &[
+                SqlValue::Integer(c_id),
+                SqlValue::Integer(input.c_d_id as i64),
+                SqlValue::Integer(input.c_w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Varchar(arcstr::ArcStr::from(WRITE_FAITHFUL_TS)),
+                SqlValue::Numeric(input.h_amount),
+                SqlValue::Varchar(arcstr::ArcStr::from(WRITE_FAITHFUL_DIST_INFO)),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Write-faithful Delivery: for each district, find the oldest undelivered order, delete
+    /// its new_order row, and stamp the carrier id / delivery date on orders and order_line.
+    /// The `DELETE FROM new_order` is what exercises delete compaction and delete-time index
+    /// maintenance. Districts with no pending new_order are skipped (no panic).
+    fn delivery_impl(&mut self, input: &DeliveryInput) -> Result<(), String> {
+        for d_id in 1..=10 {
+            // Find the oldest new_order for this district (read).
+            let o_id = match execute_query_for_int(
+                &self.cache,
+                &*self.db,
+                "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
+                &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(d_id as i64)],
+            ) {
+                Ok(id) => id,
+                // No pending new order for this district — skip it (spec-faithful, no panic).
+                Err(_) => continue,
+            };
+
+            // Delete the new_order marker row (exercises compaction + index maintenance).
+            execute_dml(
+                &self.cache,
+                self.db,
+                "DELETE FROM new_order WHERE no_w_id = ? AND no_d_id = ? AND no_o_id = ?",
+                &[
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id),
+                ],
+            )?;
+
+            // Stamp the carrier id on the order header.
+            execute_dml(
+                &self.cache,
+                self.db,
+                "UPDATE orders SET o_carrier_id = ? WHERE o_w_id = ? AND o_d_id = ? AND o_id = ?",
+                &[
+                    SqlValue::Integer(input.o_carrier_id as i64),
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id),
+                ],
+            )?;
+
+            // Stamp the delivery date on the order's lines.
+            execute_dml(
+                &self.cache,
+                self.db,
+                "UPDATE order_line SET ol_delivery_d = ? WHERE ol_w_id = ? AND ol_d_id = ? AND ol_o_id = ?",
+                &[
+                    SqlValue::Varchar(arcstr::ArcStr::from(WRITE_FAITHFUL_TS)),
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(d_id as i64),
+                    SqlValue::Integer(o_id),
+                ],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Read-only Order-Status (unchanged from the read-only executor — Order-Status is a read
+    /// in real TPC-C).
+    fn order_status_impl(&self, input: &OrderStatusInput) -> Result<(), String> {
+        let c_id = if let Some(c_id) = input.c_id {
+            execute_query(
+                &self.cache,
+                &*self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                &[
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(input.d_id as i64),
+                    SqlValue::Integer(c_id as i64),
+                ],
+            )?;
+            c_id as i64
+        } else {
+            execute_query(
+                &self.cache,
+                &*self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+                &[
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(input.d_id as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(input.c_last.as_ref().unwrap().as_str())),
+                ],
+            )?;
+            1
+        };
+
+        execute_query(
+            &self.cache,
+            &*self.db,
+            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = ? AND o_d_id = ? AND o_c_id = ? ORDER BY o_id DESC LIMIT 1",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(c_id),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Read-only Stock-Level (unchanged — Stock-Level is a read in real TPC-C).
+    fn stock_level_impl(&self, input: &StockLevelInput) -> Result<(), String> {
+        let d_next_o_id = execute_query_for_int(
+            &self.cache,
+            &*self.db,
+            "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        )?;
+
+        let ol_o_id_min = d_next_o_id - 20;
+        execute_query(
+            &self.cache,
+            &*self.db,
+            "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
+             WHERE ol_w_id = ? AND ol_d_id = ? \
+             AND ol_o_id >= ? AND ol_o_id < ? \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(ol_o_id_min),
+                SqlValue::Integer(d_next_o_id),
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.threshold as i64),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Expose cache statistics for benchmark reporting.
+    pub fn cache_stats(&self) -> vibesql_executor::PreparedStatementCacheStats {
+        self.cache.stats()
+    }
+}
+
+impl<'a> TPCCWriteExecutor for VibesqlWriteExecutor<'a> {
+    fn new_order(&mut self, input: &NewOrderInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.new_order_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn payment(&mut self, input: &PaymentInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.payment_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn order_status(&mut self, input: &OrderStatusInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.order_status_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn delivery(&mut self, input: &DeliveryInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.delivery_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn stock_level(&mut self, input: &StockLevelInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.stock_level_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+}
+
 /// TPC-C transaction executor for SQLite
 #[cfg(feature = "sqlite")]
 pub struct SqliteTransactionExecutor<'a> {
@@ -783,6 +1275,311 @@ impl<'a> TPCCExecutor for SqliteTransactionExecutor<'a> {
 
     fn stock_level(&self, input: &StockLevelInput) -> TransactionResult {
         self.stock_level(input)
+    }
+}
+
+/// Write-faithful TPC-C transaction executor for SQLite.
+///
+/// Issues the SAME logical INSERT/UPDATE/DELETE write set as [`VibesqlWriteExecutor`] so the
+/// per-transaction VibeSQL/SQLite ratio reflects engine cost, not differing work
+/// (apples-to-apples). SQLite's `Connection` methods take `&self`, but this implements the
+/// `&mut self` [`TPCCWriteExecutor`] trait so both engines share the serial
+/// `run_write_benchmark` runner.
+#[cfg(feature = "sqlite")]
+pub struct SqliteWriteExecutor<'a> {
+    pub conn: &'a rusqlite::Connection,
+}
+
+#[cfg(feature = "sqlite")]
+impl<'a> SqliteWriteExecutor<'a> {
+    pub fn new(conn: &'a rusqlite::Connection) -> Self {
+        Self { conn }
+    }
+
+    fn new_order_impl(&self, input: &NewOrderInput) -> Result<(), String> {
+        let map = |e: rusqlite::Error| e.to_string();
+
+        // Read warehouse tax (read-only lookup).
+        let _: f64 = self
+            .conn
+            .query_row(
+                "SELECT w_tax FROM warehouse WHERE w_id = ?",
+                rusqlite::params![input.w_id],
+                |r| r.get(0),
+            )
+            .map_err(map)?;
+
+        // Read the district's next order id; this becomes the new order's o_id.
+        let o_id: i64 = self
+            .conn
+            .query_row(
+                "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+                rusqlite::params![input.w_id, input.d_id],
+                |r| r.get(0),
+            )
+            .map_err(map)?;
+
+        // Read customer info (read-only lookup).
+        let _: f64 = self
+            .conn
+            .query_row(
+                "SELECT c_discount FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                rusqlite::params![input.w_id, input.d_id, input.c_id],
+                |r| r.get(0),
+            )
+            .map_err(map)?;
+
+        // Advance the district's next order id (write).
+        self.conn
+            .execute(
+                "UPDATE district SET d_next_o_id = d_next_o_id + 1 WHERE d_w_id = ? AND d_id = ?",
+                rusqlite::params![input.w_id, input.d_id],
+            )
+            .map_err(map)?;
+
+        // Insert order header (o_carrier_id NULL until delivered).
+        self.conn
+            .execute(
+                "INSERT INTO orders VALUES (?, ?, ?, ?, ?, NULL, ?, 1)",
+                rusqlite::params![
+                    o_id,
+                    input.d_id,
+                    input.w_id,
+                    input.c_id,
+                    WRITE_FAITHFUL_TS,
+                    input.ol_cnt
+                ],
+            )
+            .map_err(map)?;
+
+        // Insert new_order marker row.
+        self.conn
+            .execute(
+                "INSERT INTO new_order VALUES (?, ?, ?)",
+                rusqlite::params![o_id, input.d_id, input.w_id],
+            )
+            .map_err(map)?;
+
+        for (idx, item) in input.items.iter().enumerate() {
+            // Read item + stock (read-only lookups).
+            let _: f64 = self
+                .conn
+                .query_row(
+                    "SELECT i_price FROM item WHERE i_id = ?",
+                    rusqlite::params![item.ol_i_id],
+                    |r| r.get(0),
+                )
+                .map_err(map)?;
+            let _: i64 = self
+                .conn
+                .query_row(
+                    "SELECT s_quantity FROM stock WHERE s_i_id = ? AND s_w_id = ?",
+                    rusqlite::params![item.ol_i_id, item.ol_supply_w_id],
+                    |r| r.get(0),
+                )
+                .map_err(map)?;
+
+            self.conn
+                .execute(
+                    "UPDATE stock SET s_ytd = s_ytd + ?, s_order_cnt = s_order_cnt + 1, \
+                     s_quantity = s_quantity - ? WHERE s_i_id = ? AND s_w_id = ?",
+                    rusqlite::params![
+                        item.ol_quantity,
+                        item.ol_quantity,
+                        item.ol_i_id,
+                        item.ol_supply_w_id
+                    ],
+                )
+                .map_err(map)?;
+
+            self.conn
+                .execute(
+                    "INSERT INTO order_line VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+                    rusqlite::params![
+                        o_id,
+                        input.d_id,
+                        input.w_id,
+                        (idx + 1) as i64,
+                        item.ol_i_id,
+                        item.ol_supply_w_id,
+                        item.ol_quantity,
+                        item.ol_quantity as f64 * 10.0,
+                        WRITE_FAITHFUL_DIST_INFO
+                    ],
+                )
+                .map_err(map)?;
+        }
+
+        Ok(())
+    }
+
+    fn payment_impl(&self, input: &PaymentInput) -> Result<(), String> {
+        let map = |e: rusqlite::Error| e.to_string();
+
+        self.conn
+            .execute(
+                "UPDATE warehouse SET w_ytd = w_ytd + ? WHERE w_id = ?",
+                rusqlite::params![input.h_amount, input.w_id],
+            )
+            .map_err(map)?;
+
+        self.conn
+            .execute(
+                "UPDATE district SET d_ytd = d_ytd + ? WHERE d_w_id = ? AND d_id = ?",
+                rusqlite::params![input.h_amount, input.w_id, input.d_id],
+            )
+            .map_err(map)?;
+
+        let c_id: i64 = if let Some(c_id) = input.c_id {
+            c_id as i64
+        } else {
+            self.conn
+                .query_row(
+                    "SELECT c_id FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first LIMIT 1",
+                    rusqlite::params![input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()],
+                    |r| r.get(0),
+                )
+                .map_err(map)?
+        };
+
+        self.conn
+            .execute(
+                "UPDATE customer SET c_balance = c_balance - ?, c_ytd_payment = c_ytd_payment + ?, \
+                 c_payment_cnt = c_payment_cnt + 1 WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                rusqlite::params![input.h_amount, input.h_amount, input.c_w_id, input.c_d_id, c_id],
+            )
+            .map_err(map)?;
+
+        self.conn
+            .execute(
+                "INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    c_id,
+                    input.c_d_id,
+                    input.c_w_id,
+                    input.d_id,
+                    input.w_id,
+                    WRITE_FAITHFUL_TS,
+                    input.h_amount,
+                    WRITE_FAITHFUL_DIST_INFO
+                ],
+            )
+            .map_err(map)?;
+
+        Ok(())
+    }
+
+    fn delivery_impl(&self, input: &DeliveryInput) -> Result<(), String> {
+        let map = |e: rusqlite::Error| e.to_string();
+
+        for d_id in 1..=10 {
+            let o_id: i64 = match self.conn.query_row(
+                "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
+                rusqlite::params![input.w_id, d_id],
+                |r| r.get(0),
+            ) {
+                Ok(id) => id,
+                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                Err(e) => return Err(map(e)),
+            };
+
+            self.conn
+                .execute(
+                    "DELETE FROM new_order WHERE no_w_id = ? AND no_d_id = ? AND no_o_id = ?",
+                    rusqlite::params![input.w_id, d_id, o_id],
+                )
+                .map_err(map)?;
+
+            self.conn
+                .execute(
+                    "UPDATE orders SET o_carrier_id = ? WHERE o_w_id = ? AND o_d_id = ? AND o_id = ?",
+                    rusqlite::params![input.o_carrier_id, input.w_id, d_id, o_id],
+                )
+                .map_err(map)?;
+
+            self.conn
+                .execute(
+                    "UPDATE order_line SET ol_delivery_d = ? WHERE ol_w_id = ? AND ol_d_id = ? AND ol_o_id = ?",
+                    rusqlite::params![WRITE_FAITHFUL_TS, input.w_id, d_id, o_id],
+                )
+                .map_err(map)?;
+        }
+
+        Ok(())
+    }
+
+    fn order_status_impl(&self, input: &OrderStatusInput) -> Result<(), String> {
+        // Read-only — reuse the read-only SQLite executor's behavior.
+        let exec = SqliteTransactionExecutor::new(self.conn);
+        let r = exec.order_status(input);
+        if r.success {
+            Ok(())
+        } else {
+            Err(r.error.unwrap_or_default())
+        }
+    }
+
+    fn stock_level_impl(&self, input: &StockLevelInput) -> Result<(), String> {
+        let exec = SqliteTransactionExecutor::new(self.conn);
+        let r = exec.stock_level(input);
+        if r.success {
+            Ok(())
+        } else {
+            Err(r.error.unwrap_or_default())
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl<'a> TPCCWriteExecutor for SqliteWriteExecutor<'a> {
+    fn new_order(&mut self, input: &NewOrderInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.new_order_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn payment(&mut self, input: &PaymentInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.payment_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn order_status(&mut self, input: &OrderStatusInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.order_status_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn delivery(&mut self, input: &DeliveryInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.delivery_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
+    }
+
+    fn stock_level(&mut self, input: &StockLevelInput) -> TransactionResult {
+        let start = Instant::now();
+        let result = self.stock_level_impl(input);
+        TransactionResult {
+            success: result.is_ok(),
+            duration_us: start.elapsed().as_micros() as u64,
+            error: result.err(),
+        }
     }
 }
 
