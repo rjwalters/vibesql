@@ -35,12 +35,25 @@ pub struct WalEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WalOp {
     // DML Operations
+    //
+    // As of WAL format version 2, DML ops carry the fully-qualified
+    // `table_name` so recovery can route the mutation back to the correct
+    // table during replay. The numeric `table_id` is a hash of the name and is
+    // retained for diagnostics/compat, but it is NOT sufficient to resolve a
+    // table during recovery: it lives in a different id space than the
+    // monotonic `table_id` stored in `CreateTable`.
     /// Insert a row into a table
-    Insert { table_id: u32, row_id: u64, values: Vec<SqlValue> },
+    Insert { table_id: u32, table_name: String, row_id: u64, values: Vec<SqlValue> },
     /// Update a row in a table
-    Update { table_id: u32, row_id: u64, old_values: Vec<SqlValue>, new_values: Vec<SqlValue> },
+    Update {
+        table_id: u32,
+        table_name: String,
+        row_id: u64,
+        old_values: Vec<SqlValue>,
+        new_values: Vec<SqlValue>,
+    },
     /// Delete a row from a table
-    Delete { table_id: u32, row_id: u64, old_values: Vec<SqlValue> },
+    Delete { table_id: u32, table_name: String, row_id: u64, old_values: Vec<SqlValue> },
 
     // DDL Operations
     /// Create a new table
@@ -130,11 +143,23 @@ impl WalEntry {
         Ok(())
     }
 
-    /// Deserialize an entry from bytes
+    /// Deserialize an entry from bytes (current WAL format version).
     pub fn deserialize<R: Read>(reader: &mut R) -> Result<Self, StorageError> {
+        Self::deserialize_versioned(reader, crate::wal::format::WAL_VERSION)
+    }
+
+    /// Deserialize an entry from bytes for a specific WAL format `version`.
+    ///
+    /// DML ops gained an inline `table_name` in version 2; pass the version
+    /// read from the WAL header so older logs (version 1) are parsed with the
+    /// legacy layout.
+    pub fn deserialize_versioned<R: Read>(
+        reader: &mut R,
+        version: u32,
+    ) -> Result<Self, StorageError> {
         let lsn = read_u64(reader)?;
         let timestamp_ms = read_u64(reader)?;
-        let op = WalOp::deserialize(reader)?;
+        let op = WalOp::deserialize_versioned(reader, version)?;
         Ok(Self { lsn, timestamp_ms, op })
     }
 }
@@ -143,28 +168,31 @@ impl WalOp {
     /// Serialize the operation to bytes
     pub fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), StorageError> {
         match self {
-            WalOp::Insert { table_id, row_id, values } => {
+            WalOp::Insert { table_id, table_name, row_id, values } => {
                 writer
                     .write_all(&[WalOpTag::Insert as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_u32(writer, *table_id)?;
+                write_string(writer, table_name)?;
                 write_u64(writer, *row_id)?;
                 write_sql_values(writer, values)?;
             }
-            WalOp::Update { table_id, row_id, old_values, new_values } => {
+            WalOp::Update { table_id, table_name, row_id, old_values, new_values } => {
                 writer
                     .write_all(&[WalOpTag::Update as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_u32(writer, *table_id)?;
+                write_string(writer, table_name)?;
                 write_u64(writer, *row_id)?;
                 write_sql_values(writer, old_values)?;
                 write_sql_values(writer, new_values)?;
             }
-            WalOp::Delete { table_id, row_id, old_values } => {
+            WalOp::Delete { table_id, table_name, row_id, old_values } => {
                 writer
                     .write_all(&[WalOpTag::Delete as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_u32(writer, *table_id)?;
+                write_string(writer, table_name)?;
                 write_u64(writer, *row_id)?;
                 write_sql_values(writer, old_values)?;
             }
@@ -238,31 +266,53 @@ impl WalOp {
         Ok(())
     }
 
-    /// Deserialize an operation from bytes
+    /// Deserialize an operation from bytes (current WAL format version).
     pub fn deserialize<R: Read>(reader: &mut R) -> Result<Self, StorageError> {
+        Self::deserialize_versioned(reader, crate::wal::format::WAL_VERSION)
+    }
+
+    /// Deserialize an operation from bytes for a specific WAL format `version`.
+    ///
+    /// Version 2 added an inline `table_name` to the Insert/Update/Delete DML
+    /// ops. For version 1 logs the field is absent on disk, so we synthesize an
+    /// empty name (recovery treats an empty DML table name as unroutable and
+    /// skips it — version-1 DML replay was never functional anyway).
+    pub fn deserialize_versioned<R: Read>(
+        reader: &mut R,
+        version: u32,
+    ) -> Result<Self, StorageError> {
         let mut tag_buf = [0u8; 1];
         reader.read_exact(&mut tag_buf).map_err(|e| StorageError::IoError(e.to_string()))?;
         let tag = WalOpTag::from_u8(tag_buf[0])?;
 
+        // DML ops carry an inline table_name starting at WAL format version 2.
+        let dml_has_table_name = version >= 2;
+
         match tag {
             WalOpTag::Insert => {
                 let table_id = read_u32(reader)?;
+                let table_name =
+                    if dml_has_table_name { read_string(reader)? } else { String::new() };
                 let row_id = read_u64(reader)?;
                 let values = read_sql_values(reader)?;
-                Ok(WalOp::Insert { table_id, row_id, values })
+                Ok(WalOp::Insert { table_id, table_name, row_id, values })
             }
             WalOpTag::Update => {
                 let table_id = read_u32(reader)?;
+                let table_name =
+                    if dml_has_table_name { read_string(reader)? } else { String::new() };
                 let row_id = read_u64(reader)?;
                 let old_values = read_sql_values(reader)?;
                 let new_values = read_sql_values(reader)?;
-                Ok(WalOp::Update { table_id, row_id, old_values, new_values })
+                Ok(WalOp::Update { table_id, table_name, row_id, old_values, new_values })
             }
             WalOpTag::Delete => {
                 let table_id = read_u32(reader)?;
+                let table_name =
+                    if dml_has_table_name { read_string(reader)? } else { String::new() };
                 let row_id = read_u64(reader)?;
                 let old_values = read_sql_values(reader)?;
-                Ok(WalOp::Delete { table_id, row_id, old_values })
+                Ok(WalOp::Delete { table_id, table_name, row_id, old_values })
             }
             WalOpTag::CreateTable => {
                 let table_id = read_u32(reader)?;
@@ -372,6 +422,7 @@ mod tests {
             1234567890,
             WalOp::Insert {
                 table_id: 42,
+                table_name: "main.users".to_string(),
                 row_id: 100,
                 values: vec![
                     SqlValue::Integer(1),
@@ -397,6 +448,7 @@ mod tests {
             1234567891,
             WalOp::Update {
                 table_id: 42,
+                table_name: "main.users".to_string(),
                 row_id: 100,
                 old_values: vec![
                     SqlValue::Integer(1),
@@ -425,6 +477,7 @@ mod tests {
             1234567892,
             WalOp::Delete {
                 table_id: 42,
+                table_name: "main.users".to_string(),
                 row_id: 100,
                 old_values: vec![SqlValue::Integer(1), SqlValue::Null],
             },

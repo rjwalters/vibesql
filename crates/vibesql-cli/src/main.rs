@@ -50,7 +50,7 @@ CONFIGURATION:
     [database]
     default_path = \"~/data.db\"    # Default database file
     auto_save = true               # Auto-save on exit
-    wal = false                    # Opt-in Write-Ahead Log durability (default off)
+    wal = true                     # Write-Ahead Log durability (default on; set false to opt out)
 
     [history]
     file = \"~/.vibesql_history\"   # Command history file
@@ -59,20 +59,20 @@ CONFIGURATION:
     [query]
     timeout_seconds = 0            # Query timeout (0 = no limit)
 
-WRITE-AHEAD LOG (WAL) DURABILITY (opt-in):
-  Set [database] wal = true to enable WAL persistence for a file-backed
-  database. When active for 'mydata.vbsql', the CLI maintains two sibling
-  files next to the database:
+WRITE-AHEAD LOG (WAL) DURABILITY (on by default):
+  For a file-backed database the CLI keeps a Write-Ahead Log so committed
+  changes survive an unclean shutdown (crash, SIGKILL, power loss). When
+  active for 'mydata.vbsql', it maintains two sibling files next to the
+  database:
     mydata.wal              # active write-ahead log
     mydata-checkpoints/     # checkpoint archive (checkpoint_*.vchk)
   On open the CLI recovers from the latest checkpoint and replays the WAL;
   on \\save / clean exit it writes a checkpoint and truncates the WAL.
 
-  Phase 1 status: table schemas (DDL) survive an unclean shutdown, and
-  committed row data is durable as of the last checkpoint. Replay of row
-  changes (DML) written after the last checkpoint is not yet implemented,
-  so a crash between writes and the next checkpoint may lose those rows.
-  Default is wal = false, which preserves the snapshot-on-exit behavior.
+  Both table schemas (DDL) and committed row data (DML inserts, updates,
+  and deletes) are restored on recovery; uncommitted transactions at crash
+  time are discarded. Set [database] wal = false to opt out and use the
+  snapshot-only path instead (no WAL sibling files).
 
 EXAMPLES:
   # Start interactive REPL with in-memory database
@@ -248,8 +248,9 @@ fn main() -> anyhow::Result<()> {
     // Use command-line database if provided, otherwise use config default
     let database = database_arg.or(config.database.default_path.clone());
 
-    // Opt-in WAL durability ([database] wal = true). Default false leaves the
-    // existing snapshot-on-exit behavior untouched.
+    // WAL durability ([database] wal = true, the default). Committed DDL + DML
+    // survive an unclean shutdown for file-backed databases. Set wal = false to
+    // opt out and fall back to the snapshot-only path.
     let wal = config.database.wal;
 
     if let Some(cmd) = args.command {

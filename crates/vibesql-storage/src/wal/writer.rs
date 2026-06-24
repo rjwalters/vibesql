@@ -196,7 +196,12 @@ mod tests {
         let entry = WalEntry::new(
             1,
             1234567890,
-            WalOp::Insert { table_id: 1, row_id: 100, values: vec![SqlValue::Integer(42)] },
+            WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 100,
+                values: vec![SqlValue::Integer(42)],
+            },
         );
 
         let lsn = writer.append(&entry).unwrap();
@@ -216,7 +221,12 @@ mod tests {
             let entry = WalEntry::new(
                 i,
                 1234567890 + i,
-                WalOp::Insert { table_id: 1, row_id: i, values: vec![SqlValue::Integer(i as i64)] },
+                WalOp::Insert {
+                    table_id: 1,
+                    table_name: "main.t".to_string(),
+                    row_id: i,
+                    values: vec![SqlValue::Integer(i as i64)],
+                },
             );
             let lsn = writer.append(&entry).unwrap();
             assert_eq!(lsn, i);
@@ -236,6 +246,7 @@ mod tests {
         let lsn = writer
             .append_op(WalOp::Insert {
                 table_id: 1,
+                table_name: "main.t".to_string(),
                 row_id: 100,
                 values: vec![SqlValue::Varchar(arcstr::ArcStr::from("test"))],
             })

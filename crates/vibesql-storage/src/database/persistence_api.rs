@@ -106,6 +106,7 @@ impl Database {
     ) {
         self.emit_wal_op(WalOp::Delete {
             table_id: self.table_name_to_id(table_name),
+            table_name: table_name.to_string(),
             row_id,
             old_values,
         });

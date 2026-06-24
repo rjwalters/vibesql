@@ -433,29 +433,92 @@ impl RecoveryManager {
         stats: &mut RecoveryStats,
     ) -> Result<(), StorageError> {
         match op {
-            WalOp::Insert { table_id: _, row_id: _, values } => {
-                // For recovery, we need to determine the table name from the table_id
-                // This is a simplified approach - in practice we'd maintain a table_id -> name
-                // mapping For now, we'll use a different approach: replay through
-                // the existing database APIs Since the table should already exist
-                // (created during checkpoint or earlier WAL replay)
-
-                // Note: This is a simplified implementation. A full implementation would:
-                // 1. Maintain a table_id -> table_name mapping during recovery
-                // 2. Or store table_name in the WAL entry itself
-
-                // For the demo, we'll skip the actual insert since we don't have the table name
-                // A real implementation would need to resolve table_id to table_name
-                stats.inserts_applied += 1;
-                log::trace!("Applied insert: {:?}", values);
+            WalOp::Insert { table_id: _, table_name, row_id, values } => {
+                // WAL format v2+ carries the fully-qualified table_name so the
+                // mutation can be routed to the correct table during replay.
+                // (v1 logs serialize an empty name; such DML is unroutable and
+                // is skipped — v1 DML replay was never functional.)
+                if table_name.is_empty() {
+                    log::warn!(
+                        "Skipping Insert during recovery: WAL entry has no table_name \
+                         (legacy v1 format, row_id={})",
+                        row_id
+                    );
+                    return Ok(());
+                }
+                match db.get_table_mut(&table_name) {
+                    Some(table) => {
+                        let row = crate::row::Row::new(values);
+                        match table.insert(row) {
+                            Ok(()) => stats.inserts_applied += 1,
+                            Err(e) => log::warn!(
+                                "Failed to apply Insert to {} during recovery: {}",
+                                table_name,
+                                e
+                            ),
+                        }
+                    }
+                    None => log::warn!(
+                        "Skipping Insert during recovery: table {} not found",
+                        table_name
+                    ),
+                }
             }
-            WalOp::Update { table_id: _, row_id: _, old_values: _, new_values } => {
-                stats.updates_applied += 1;
-                log::trace!("Applied update: {:?}", new_values);
+            WalOp::Update { table_id: _, table_name, row_id, old_values: _, new_values } => {
+                if table_name.is_empty() {
+                    log::warn!(
+                        "Skipping Update during recovery: WAL entry has no table_name \
+                         (legacy v1 format, row_id={})",
+                        row_id
+                    );
+                    return Ok(());
+                }
+                match db.get_table_mut(&table_name) {
+                    Some(table) => {
+                        let row = crate::row::Row::new(new_values);
+                        match table.update_row(row_id as usize, row) {
+                            Ok(()) => stats.updates_applied += 1,
+                            Err(e) => log::warn!(
+                                "Failed to apply Update to {} (row {}) during recovery: {}",
+                                table_name,
+                                row_id,
+                                e
+                            ),
+                        }
+                    }
+                    None => log::warn!(
+                        "Skipping Update during recovery: table {} not found",
+                        table_name
+                    ),
+                }
             }
-            WalOp::Delete { table_id: _, row_id: _, old_values: _ } => {
-                stats.deletes_applied += 1;
-                log::trace!("Applied delete");
+            WalOp::Delete { table_id: _, table_name, row_id, old_values: _ } => {
+                if table_name.is_empty() {
+                    log::warn!(
+                        "Skipping Delete during recovery: WAL entry has no table_name \
+                         (legacy v1 format, row_id={})",
+                        row_id
+                    );
+                    return Ok(());
+                }
+                match db.get_table_mut(&table_name) {
+                    Some(table) => {
+                        if table.mark_deleted_inplace(row_id as usize) {
+                            stats.deletes_applied += 1;
+                        } else {
+                            log::warn!(
+                                "Delete during recovery did not mark a row in {} (row {} \
+                                 missing or already deleted)",
+                                table_name,
+                                row_id
+                            );
+                        }
+                    }
+                    None => log::warn!(
+                        "Skipping Delete during recovery: table {} not found",
+                        table_name
+                    ),
+                }
             }
             WalOp::CreateTable { table_id: _, table_name, schema_data } => {
                 // Deserialize schema and create table
@@ -853,7 +916,12 @@ mod tests {
         tracker.buffer_op(
             1,
             10,
-            WalOp::Insert { table_id: 1, row_id: 0, values: vec![SqlValue::Integer(42)] },
+            WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 0,
+                values: vec![SqlValue::Integer(42)],
+            },
         );
 
         // Commit
@@ -870,7 +938,12 @@ mod tests {
         tracker.buffer_op(
             1,
             10,
-            WalOp::Insert { table_id: 1, row_id: 0, values: vec![SqlValue::Integer(42)] },
+            WalOp::Insert {
+                table_id: 1,
+                table_name: "main.t".to_string(),
+                row_id: 0,
+                values: vec![SqlValue::Integer(42)],
+            },
         );
 
         // Rollback discards operations
@@ -982,5 +1055,364 @@ mod tests {
         assert_eq!(stats.transactions_committed, 0);
         assert_eq!(stats.transactions_rolled_back, 0);
         assert!(!stats.corruption_detected);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2 (#5698): DML replay during recovery
+    // ------------------------------------------------------------------
+    //
+    // These tests drive a real `Database` with the persistence engine
+    // enabled so the WAL is populated with genuine ops (carrying the
+    // qualified `table_name` introduced in WAL format v2), then recover
+    // from the on-disk WAL and assert that row *data* — not just schema —
+    // is restored.
+
+    use crate::wal::{PersistenceConfig, PersistenceEngine};
+    use crate::Database;
+
+    /// Build a simple `id INTEGER, name VARCHAR` schema.
+    fn simple_schema(name: &str) -> TableSchema {
+        TableSchema::new(
+            name.to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new(
+                    "name".to_string(),
+                    DataType::Varchar { max_length: Some(50) },
+                    true,
+                ),
+            ],
+        )
+    }
+
+    /// Count live rows in a recovered table by qualified name.
+    fn live_row_count(db: &Database, qualified: &str) -> usize {
+        db.get_table(qualified).map(|t| t.scan_live().count()).unwrap_or(0)
+    }
+
+    /// Serialize a schema into the WAL `CreateTable.schema_data` layout that
+    /// `deserialize_table_schema` (in this module) expects. Mirrors the
+    /// production `serialize_table_schema` helper, kept local to avoid reaching
+    /// into the private `database::table_api` module from a test.
+    fn serialize_schema_for_test(schema: &TableSchema) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(schema.name.as_bytes());
+        data.push(0);
+        data.extend_from_slice(&(schema.columns.len() as u32).to_le_bytes());
+        for col in &schema.columns {
+            data.extend_from_slice(col.name.as_bytes());
+            data.push(0);
+            let type_str = format!("{:?}", col.data_type);
+            data.extend_from_slice(type_str.as_bytes());
+            data.push(0);
+            data.push(if col.nullable { 1 } else { 0 });
+        }
+        data
+    }
+
+    #[test]
+    fn test_recovery_replays_dml_inserts() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        // 1. Write a table + rows through a persistence-enabled Database so the
+        //    WAL captures real CreateTable + Insert ops.
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("people")).unwrap();
+            db.insert_row(
+                "main.people",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("alice")),
+                ]),
+            )
+            .unwrap();
+            db.insert_row(
+                "main.people",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("bob")),
+                ]),
+            )
+            .unwrap();
+
+            // Flush everything to the WAL, then simulate a crash by dropping the
+            // Database WITHOUT writing a checkpoint.
+            db.sync_persistence().unwrap();
+        }
+
+        // 2. Recover from the WAL alone (no checkpoint).
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+
+        assert_eq!(stats.tables_created, 1, "table schema should be replayed");
+        assert_eq!(stats.inserts_applied, 2, "both inserts should be applied");
+        assert_eq!(live_row_count(&db, "main.people"), 2, "both rows must survive recovery");
+
+        let table = db.get_table("main.people").expect("table exists after recovery");
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+        assert_eq!(rows[1].values[0], SqlValue::Integer(2));
+    }
+
+    #[test]
+    fn test_recovery_replays_update_and_delete() {
+        use crate::wal::entry::WalEntry;
+        use crate::wal::writer::WalWriter;
+
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        // Build the schema-serialized bytes for a CreateTable op using the same
+        // null-terminated layout `serialize_table_schema` / `deserialize_table_schema`
+        // agree on, so recovery can rebuild the table.
+        let schema = simple_schema("t");
+        let schema_data = serialize_schema_for_test(&schema);
+
+        // Hand-author a WAL: CreateTable, three Inserts, one Update (row 0), one
+        // Delete (row 1) — all as standalone (auto-commit) ops carrying the
+        // qualified table_name. This directly exercises apply_op's DML arms.
+        {
+            let file = std::fs::File::create(&wal_path).unwrap();
+            let mut writer = WalWriter::create(file).unwrap();
+            let mut lsn = 1u64;
+            let mut append = |writer: &mut WalWriter<std::fs::File>, op: WalOp, lsn: &mut u64| {
+                writer.append(&WalEntry::new(*lsn, 0, op)).unwrap();
+                *lsn += 1;
+            };
+
+            append(
+                &mut writer,
+                WalOp::CreateTable { table_id: 0, table_name: "main.t".into(), schema_data },
+                &mut lsn,
+            );
+            for i in 1..=3i64 {
+                append(
+                    &mut writer,
+                    WalOp::Insert {
+                        table_id: 0,
+                        table_name: "main.t".into(),
+                        row_id: (i - 1) as u64,
+                        values: vec![
+                            SqlValue::Integer(i),
+                            SqlValue::Varchar(arcstr::ArcStr::from(format!("v{i}"))),
+                        ],
+                    },
+                    &mut lsn,
+                );
+            }
+            append(
+                &mut writer,
+                WalOp::Update {
+                    table_id: 0,
+                    table_name: "main.t".into(),
+                    row_id: 0,
+                    old_values: vec![
+                        SqlValue::Integer(1),
+                        SqlValue::Varchar(arcstr::ArcStr::from("v1")),
+                    ],
+                    new_values: vec![
+                        SqlValue::Integer(1),
+                        SqlValue::Varchar(arcstr::ArcStr::from("updated")),
+                    ],
+                },
+                &mut lsn,
+            );
+            append(
+                &mut writer,
+                WalOp::Delete {
+                    table_id: 0,
+                    table_name: "main.t".into(),
+                    row_id: 1,
+                    old_values: vec![
+                        SqlValue::Integer(2),
+                        SqlValue::Varchar(arcstr::ArcStr::from("v2")),
+                    ],
+                },
+                &mut lsn,
+            );
+            writer.flush().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+
+        assert_eq!(stats.inserts_applied, 3);
+        assert_eq!(stats.updates_applied, 1);
+        assert_eq!(stats.deletes_applied, 1);
+
+        // 3 inserted, 1 deleted => 2 live rows.
+        assert_eq!(live_row_count(&db, "main.t"), 2);
+
+        let table = db.get_table("main.t").unwrap();
+        // Row 0 was updated.
+        assert_eq!(
+            table.get_row(0).unwrap().values[1],
+            SqlValue::Varchar(arcstr::ArcStr::from("updated"))
+        );
+        // Row 1 was deleted.
+        assert!(table.is_row_deleted(1));
+        // Row 2 untouched.
+        assert_eq!(table.get_row(2).unwrap().values[0], SqlValue::Integer(3));
+    }
+
+    #[test]
+    fn test_recovery_discards_uncommitted_transaction() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+            // One committed (auto-commit) insert.
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("committed")),
+                ]),
+            )
+            .unwrap();
+
+            // Begin an explicit transaction, insert, then crash WITHOUT
+            // committing. The TxnBegin op is emitted to the WAL; the buffered
+            // insert must NOT be applied on recovery.
+            db.begin_transaction().unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("uncommitted")),
+                ]),
+            )
+            .unwrap();
+
+            db.sync_persistence().unwrap();
+            // Drop without commit_transaction() => simulated crash mid-txn.
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+
+        // Only the committed row should survive.
+        assert_eq!(live_row_count(&db, "main.t"), 1, "uncommitted row must be discarded");
+        let table = db.get_table("main.t").unwrap();
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_recovery_tolerates_truncated_wal_tail() {
+        // A WAL whose final entry was only partially written (e.g. the process
+        // died mid-flush) must recover every complete entry before the
+        // truncation point and stop cleanly at the corruption — without losing
+        // the earlier committed rows.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        // 1. Write a valid WAL: CreateTable + two Inserts.
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("one")),
+                ]),
+            )
+            .unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("two")),
+                ]),
+            )
+            .unwrap();
+            db.sync_persistence().unwrap();
+        }
+
+        // 2. Simulate a torn final write by chopping the last byte off the WAL.
+        let original_len = std::fs::metadata(&wal_path).unwrap().len();
+        assert!(original_len > 1);
+        let file = std::fs::OpenOptions::new().write(true).open(&wal_path).unwrap();
+        file.set_len(original_len - 1).unwrap();
+        drop(file);
+
+        // 3. Recovery must tolerate the truncated tail: it detects corruption,
+        //    stops, and keeps the rows from the complete entries. The last
+        //    (now-torn) Insert is dropped, leaving exactly one row.
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+
+        assert!(stats.corruption_detected, "truncated tail should be flagged as corruption");
+        assert_eq!(
+            live_row_count(&db, "main.t"),
+            1,
+            "rows before the torn tail must survive; the torn entry is dropped"
+        );
+        let table = db.get_table("main.t").unwrap();
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_recovery_v1_dml_skipped_gracefully() {
+        // A WAL Insert serialized under format v1 (no inline table_name) must be
+        // parsed without error and skipped during replay rather than corrupting
+        // recovery. We hand-build a v1 op and deserialize it with version 1.
+        use crate::wal::entry::WalEntry;
+
+        // Serialize a current (v2) Insert, then re-read it as v1: the v1 reader
+        // stops before the table_name field, so we instead construct the raw v1
+        // byte layout directly: tag + table_id + row_id + values.
+        let mut buf = Vec::new();
+        // tag = Insert (0x01)
+        buf.push(0x01);
+        // table_id: u32 = 7
+        buf.extend_from_slice(&7u32.to_le_bytes());
+        // row_id: u64 = 0
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        // values: len=1, then one Integer
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        // Encode SqlValue::Integer(99) via the same value writer path.
+        let mut value_buf = Vec::new();
+        crate::persistence::binary::value::write_sql_value(&mut value_buf, &SqlValue::Integer(99))
+            .unwrap();
+        buf.extend_from_slice(&value_buf);
+
+        // Prepend lsn + timestamp for a full WalEntry (v1 entry layout is
+        // identical except the op body).
+        let mut entry_buf = Vec::new();
+        entry_buf.extend_from_slice(&1u64.to_le_bytes()); // lsn
+        entry_buf.extend_from_slice(&0u64.to_le_bytes()); // timestamp_ms
+        entry_buf.extend_from_slice(&buf);
+
+        let mut reader = &entry_buf[..];
+        let entry = WalEntry::deserialize_versioned(&mut reader, 1).unwrap();
+        match entry.op {
+            WalOp::Insert { table_id, table_name, row_id, values } => {
+                assert_eq!(table_id, 7);
+                assert!(table_name.is_empty(), "v1 op has no inline table_name");
+                assert_eq!(row_id, 0);
+                assert_eq!(values, vec![SqlValue::Integer(99)]);
+            }
+            other => panic!("expected Insert, got {:?}", other),
+        }
     }
 }

@@ -29,8 +29,15 @@ use crate::{
 /// Magic number for WAL files: "VWAL"
 pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 
-/// Current WAL format version
-pub const WAL_VERSION: u32 = 1;
+/// Current WAL format version.
+///
+/// - v1: original format; DML ops (`Insert`/`Update`/`Delete`) carried only a
+///   numeric `table_id`, so row data could not be routed to a table during
+///   crash recovery (DML replay was a no-op).
+/// - v2: DML ops carry an inline `table_name`, enabling correct DML replay.
+///   Older v1 logs are still readable (the table name is parsed as absent and
+///   such DML entries are skipped during replay).
+pub const WAL_VERSION: u32 = 2;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;

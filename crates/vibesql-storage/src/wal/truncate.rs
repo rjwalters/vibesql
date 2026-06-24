@@ -254,7 +254,12 @@ mod tests {
             let entry = WalEntry::new(
                 i,
                 1234567890 + i,
-                WalOp::Insert { table_id: 1, row_id: i, values: vec![SqlValue::Integer(i as i64)] },
+                WalOp::Insert {
+                    table_id: 1,
+                    table_name: "main.t".to_string(),
+                    row_id: i,
+                    values: vec![SqlValue::Integer(i as i64)],
+                },
             );
             wal_writer.append(&entry).unwrap();
         }
