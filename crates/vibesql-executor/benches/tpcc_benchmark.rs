@@ -1422,6 +1422,20 @@ fn main() {
         });
 
         tpcc::transactions::print_profile_summary();
+
+        // Report prepared-statement cache effectiveness. With `?`-placeholder templates the
+        // cache key is the template, so misses are bounded by the number of distinct templates
+        // (a handful) and the hit rate approaches 1.0 — confirming the reparse was eliminated.
+        let cache_stats = vibesql_executor.cache_stats();
+        eprintln!("\n--- Prepared Statement Cache ---");
+        eprintln!(
+            "Hits: {}  Misses: {}  Evictions: {}  Size: {}  Hit rate: {:.4}",
+            cache_stats.hits,
+            cache_stats.misses,
+            cache_stats.evictions,
+            cache_stats.size,
+            cache_stats.hit_rate
+        );
     } else {
         eprintln!("\nSkipping VibeSQL (filtered out by ENGINE_FILTER)");
     }

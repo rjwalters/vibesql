@@ -24,10 +24,10 @@
 //! 4. Delivery (4%): Batch process pending orders
 //! 5. Stock-Level (4%): Check low stock items
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
-use vibesql_executor::SelectExecutor;
-use vibesql_parser::Parser;
+use vibesql_executor::{PreparedStatementCache, SelectExecutor};
+use vibesql_types::SqlValue;
 
 // Import transaction types from shared crate
 pub use vibesql_bench_common::tpcc::{
@@ -62,14 +62,29 @@ thread_local! {
     static QUERY_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Helper function to execute a SQL query
-fn execute_query(db: &vibesql_storage::Database, sql: &str) -> Result<(), String> {
+/// Helper function to execute a templated SQL query through the prepared-statement cache.
+///
+/// `template` is a stable `?`-placeholder SQL string (e.g. `"SELECT w_tax FROM warehouse
+/// WHERE w_id = ?"`). The cache is keyed on that template, so repeated executions with
+/// different parameter values hit the cache and skip re-parsing entirely. The `parse_start`
+/// timer now measures cache lookup + AST-level parameter binding, which collapses toward zero
+/// once the template is cached.
+///
+/// Execution still goes through the real engine path (`SelectExecutor::execute`), so this only
+/// changes the parse/bind layer — not SELECT semantics.
+fn execute_query(
+    cache: &PreparedStatementCache,
+    db: &vibesql_storage::Database,
+    template: &str,
+    params: &[SqlValue],
+) -> Result<(), String> {
     let parse_start = Instant::now();
 
-    let stmt = match Parser::parse_sql(sql) {
+    let prepared = cache.get_or_prepare(template).map_err(|e| format!("Prepare error: {}", e))?;
+    let stmt = match prepared.bind(params) {
         Ok(vibesql_ast::Statement::Select(s)) => s,
         Ok(_) => return Ok(()), // Non-select statements are OK
-        Err(e) => return Err(format!("Parse error: {}", e)),
+        Err(e) => return Err(format!("Bind error: {}", e)),
     };
 
     let parse_time = parse_start.elapsed().as_micros() as u64;
@@ -90,16 +105,22 @@ fn execute_query(db: &vibesql_storage::Database, sql: &str) -> Result<(), String
     result
 }
 
-/// Helper function to execute a SQL query and return the first integer value
-fn execute_query_for_int(db: &vibesql_storage::Database, sql: &str) -> Result<i64, String> {
-    use vibesql_types::SqlValue;
-
+/// Helper function to execute a templated SQL query and return the first integer value.
+///
+/// See [`execute_query`] for how templating routes through the prepared-statement cache.
+fn execute_query_for_int(
+    cache: &PreparedStatementCache,
+    db: &vibesql_storage::Database,
+    template: &str,
+    params: &[SqlValue],
+) -> Result<i64, String> {
     let parse_start = Instant::now();
 
-    let stmt = match Parser::parse_sql(sql) {
+    let prepared = cache.get_or_prepare(template).map_err(|e| format!("Prepare error: {}", e))?;
+    let stmt = match prepared.bind(params) {
         Ok(vibesql_ast::Statement::Select(s)) => s,
         Ok(_) => return Err("Expected SELECT statement".to_string()),
-        Err(e) => return Err(format!("Parse error: {}", e)),
+        Err(e) => return Err(format!("Bind error: {}", e)),
     };
 
     let parse_time = parse_start.elapsed().as_micros() as u64;
@@ -158,13 +179,28 @@ pub fn reset_profile_counters() {
 }
 
 /// TPC-C transaction executor for VibeSQL
+///
+/// Holds a single prepared-statement cache that is reused across every transaction this
+/// executor runs. TPC-C queries are issued as stable `?`-placeholder templates, so the cache
+/// key is the template (a handful of distinct entries) rather than a freshly interpolated
+/// literal — which is what makes the cache hit instead of missing on every call.
+///
+/// The cache (`Arc<PreparedStatementCache>`) is thread-safe, so a single executor can be shared
+/// across parallel benchmark clients (the `TPCCExecutor + Sync` path).
 pub struct VibesqlTransactionExecutor<'a> {
     pub db: &'a vibesql_storage::Database,
+    cache: Arc<PreparedStatementCache>,
 }
 
 impl<'a> VibesqlTransactionExecutor<'a> {
     pub fn new(db: &'a vibesql_storage::Database) -> Self {
-        Self { db }
+        // A small cache is sufficient: TPC-C uses only a handful of distinct query templates.
+        Self { db, cache: Arc::new(PreparedStatementCache::new(64)) }
+    }
+
+    /// Expose cache statistics (hits/misses/hit_rate) for benchmark reporting.
+    pub fn cache_stats(&self) -> vibesql_executor::PreparedStatementCacheStats {
+        self.cache.stats()
     }
 
     /// Execute New-Order transaction (read-only simulation)
@@ -180,8 +216,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse tax rate
-        let w_query = format!("SELECT w_tax FROM warehouse WHERE w_id = {}", input.w_id);
-        if let Err(e) = execute_query(self.db, &w_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT w_tax FROM warehouse WHERE w_id = ?",
+            &[SqlValue::Integer(input.w_id as i64)],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -190,11 +230,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         }
 
         // Get district info
-        let d_query = format!(
-            "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
-            input.w_id, input.d_id
-        );
-        if let Err(e) = execute_query(self.db, &d_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT d_tax, d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -203,11 +244,16 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         }
 
         // Get customer info
-        let c_query = format!(
-            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
-            input.w_id, input.d_id, input.c_id
-        );
-        if let Err(e) = execute_query(self.db, &c_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT c_discount, c_last, c_credit FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(input.c_id as i64),
+            ],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -218,9 +264,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         // Process each order line - query item and stock info
         for item in &input.items {
             // Get item info
-            let i_query =
-                format!("SELECT i_price, i_name, i_data FROM item WHERE i_id = {}", item.ol_i_id);
-            if let Err(e) = execute_query(self.db, &i_query) {
+            if let Err(e) = execute_query(
+                &self.cache,
+                self.db,
+                "SELECT i_price, i_name, i_data FROM item WHERE i_id = ?",
+                &[SqlValue::Integer(item.ol_i_id as i64)],
+            ) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -229,11 +278,15 @@ impl<'a> VibesqlTransactionExecutor<'a> {
             }
 
             // Get stock info
-            let s_query = format!(
-                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = {} AND s_w_id = {}",
-                item.ol_i_id, item.ol_supply_w_id
-            );
-            if let Err(e) = execute_query(self.db, &s_query) {
+            if let Err(e) = execute_query(
+                &self.cache,
+                self.db,
+                "SELECT s_quantity, s_ytd, s_order_cnt FROM stock WHERE s_i_id = ? AND s_w_id = ?",
+                &[
+                    SqlValue::Integer(item.ol_i_id as i64),
+                    SqlValue::Integer(item.ol_supply_w_id as i64),
+                ],
+            ) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -259,11 +312,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get warehouse info
-        let w_query = format!(
-            "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = {}",
-            input.w_id
-        );
-        if let Err(e) = execute_query(self.db, &w_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT w_street_1, w_street_2, w_city, w_state, w_zip, w_name FROM warehouse WHERE w_id = ?",
+            &[SqlValue::Integer(input.w_id as i64)],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -272,11 +326,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         }
 
         // Get district info
-        let d_query = format!(
-            "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = {} AND d_id = {}",
-            input.w_id, input.d_id
-        );
-        if let Err(e) = execute_query(self.db, &d_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT d_street_1, d_street_2, d_city, d_state, d_zip, d_name FROM district WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -285,18 +340,30 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         }
 
         // Get customer (by ID or last name)
-        let c_query = if let Some(c_id) = input.c_id {
-            format!(
-                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
-                input.c_w_id, input.c_d_id, c_id
+        let customer_result = if let Some(c_id) = input.c_id {
+            execute_query(
+                &self.cache,
+                self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                &[
+                    SqlValue::Integer(input.c_w_id as i64),
+                    SqlValue::Integer(input.c_d_id as i64),
+                    SqlValue::Integer(c_id as i64),
+                ],
             )
         } else {
-            format!(
-                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
-                input.c_w_id, input.c_d_id, input.c_last.as_ref().unwrap()
+            execute_query(
+                &self.cache,
+                self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+                &[
+                    SqlValue::Integer(input.c_w_id as i64),
+                    SqlValue::Integer(input.c_d_id as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(input.c_last.as_ref().unwrap().as_str())),
+                ],
             )
         };
-        if let Err(e) = execute_query(self.db, &c_query) {
+        if let Err(e) = customer_result {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -316,18 +383,30 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get customer (by ID or last name)
-        let c_query = if let Some(c_id) = input.c_id {
-            format!(
-                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_id = {}",
-                input.w_id, input.d_id, c_id
+        let customer_result = if let Some(c_id) = input.c_id {
+            execute_query(
+                &self.cache,
+                self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_id = ?",
+                &[
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(input.d_id as i64),
+                    SqlValue::Integer(c_id as i64),
+                ],
             )
         } else {
-            format!(
-                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = {} AND c_d_id = {} AND c_last = '{}' ORDER BY c_first",
-                input.w_id, input.d_id, input.c_last.as_ref().unwrap()
+            execute_query(
+                &self.cache,
+                self.db,
+                "SELECT c_id, c_first, c_middle, c_last, c_balance FROM customer WHERE c_w_id = ? AND c_d_id = ? AND c_last = ? ORDER BY c_first",
+                &[
+                    SqlValue::Integer(input.w_id as i64),
+                    SqlValue::Integer(input.d_id as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(input.c_last.as_ref().unwrap().as_str())),
+                ],
             )
         };
-        if let Err(e) = execute_query(self.db, &c_query) {
+        if let Err(e) = customer_result {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -337,11 +416,16 @@ impl<'a> VibesqlTransactionExecutor<'a> {
 
         // Get last order for customer
         let c_id = input.c_id.unwrap_or(1);
-        let o_query = format!(
-            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = {} AND o_d_id = {} AND o_c_id = {} ORDER BY o_id DESC LIMIT 1",
-            input.w_id, input.d_id, c_id
-        );
-        if let Err(e) = execute_query(self.db, &o_query) {
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
+            "SELECT o_id, o_entry_d, o_carrier_id FROM orders WHERE o_w_id = ? AND o_d_id = ? AND o_c_id = ? ORDER BY o_id DESC LIMIT 1",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(c_id as i64),
+            ],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
@@ -365,11 +449,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
 
         // Process each district - query for oldest new order
         for d_id in 1..=10 {
-            let query = format!(
-                "SELECT no_o_id FROM new_order WHERE no_w_id = {} AND no_d_id = {} ORDER BY no_o_id LIMIT 1",
-                input.w_id, d_id
-            );
-            if let Err(e) = execute_query(self.db, &query) {
+            if let Err(e) = execute_query(
+                &self.cache,
+                self.db,
+                "SELECT no_o_id FROM new_order WHERE no_w_id = ? AND no_d_id = ? ORDER BY no_o_id LIMIT 1",
+                &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(d_id as i64)],
+            ) {
                 return TransactionResult {
                     success: false,
                     duration_us: start.elapsed().as_micros() as u64,
@@ -397,11 +482,12 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         let start = Instant::now();
 
         // Get district next order ID
-        let d_query = format!(
-            "SELECT d_next_o_id FROM district WHERE d_w_id = {} AND d_id = {}",
-            input.w_id, input.d_id
-        );
-        let d_next_o_id = match execute_query_for_int(self.db, &d_query) {
+        let d_next_o_id = match execute_query_for_int(
+            &self.cache,
+            self.db,
+            "SELECT d_next_o_id FROM district WHERE d_w_id = ? AND d_id = ?",
+            &[SqlValue::Integer(input.w_id as i64), SqlValue::Integer(input.d_id as i64)],
+        ) {
             Ok(id) => id,
             Err(e) => {
                 return TransactionResult {
@@ -415,14 +501,22 @@ impl<'a> VibesqlTransactionExecutor<'a> {
         // Count low stock items for the last 20 orders (per TPC-C spec 2.8)
         // Use subquery approach matching SQLite/DuckDB/MySQL implementations
         let ol_o_id_min = d_next_o_id - 20;
-        let stock_query = format!(
+        if let Err(e) = execute_query(
+            &self.cache,
+            self.db,
             "SELECT COUNT(DISTINCT ol_i_id) FROM order_line \
-             WHERE ol_w_id = {} AND ol_d_id = {} \
-             AND ol_o_id >= {} AND ol_o_id < {} \
-             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = {} AND s_quantity < {})",
-            input.w_id, input.d_id, ol_o_id_min, d_next_o_id, input.w_id, input.threshold
-        );
-        if let Err(e) = execute_query(self.db, &stock_query) {
+             WHERE ol_w_id = ? AND ol_d_id = ? \
+             AND ol_o_id >= ? AND ol_o_id < ? \
+             AND ol_i_id IN (SELECT s_i_id FROM stock WHERE s_w_id = ? AND s_quantity < ?)",
+            &[
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.d_id as i64),
+                SqlValue::Integer(ol_o_id_min),
+                SqlValue::Integer(d_next_o_id),
+                SqlValue::Integer(input.w_id as i64),
+                SqlValue::Integer(input.threshold as i64),
+            ],
+        ) {
             return TransactionResult {
                 success: false,
                 duration_us: start.elapsed().as_micros() as u64,
