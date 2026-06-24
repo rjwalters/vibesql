@@ -175,6 +175,7 @@ fn bind_delete(stmt: &DeleteStmt, params: &[SqlValue]) -> DeleteStmt {
     DeleteStmt {
         with_clause: None,
         quoted: false,
+        alias: None,
         only: stmt.only,
         table_name: stmt.table_name.clone(),
         index_hint: stmt.index_hint.clone(),

@@ -3471,9 +3471,6 @@ array set vibesql_skip_tests {
 
     instr-2.3 "INSTR function behavior differs"
 
-    wherelimit-0.4 "DELETE table alias (DELETE FROM t1 AS a) not yet parsed — deferred to #5752"
-    wherelimit-0.5.2 "Alias-active original-table-name qualifier not rejected — deferred to #5752"
-
     wherelimit2-1.1 "WHERE LIMIT optimization differs"
     wherelimit2-1.2 "WHERE LIMIT optimization differs"
     wherelimit2-1.3 "WHERE LIMIT optimization differs"

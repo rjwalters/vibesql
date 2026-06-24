@@ -19,6 +19,7 @@ fn test_delete_all_rows() {
         only: false,
         table_name: "users".to_string(),
         quoted: false,
+        alias: None,
         where_clause: None,
         order_by: None,
         limit: None,
@@ -34,6 +35,41 @@ fn test_delete_all_rows() {
 }
 
 #[test]
+fn test_delete_with_alias_qualified_where() {
+    // SQLite 3.24+ DELETE target alias (issue #5752, wherelimit-0.4):
+    // DELETE FROM users AS a WHERE a.id = 2; — the alias resolves as the
+    // target-table qualifier in the WHERE clause.
+    let mut db = Database::new();
+    setup_test_table(&mut db);
+
+    let stmt = DeleteStmt {
+        index_hint: None,
+        with_clause: None,
+        quoted: false,
+        alias: Some("a".to_string()),
+        only: false,
+        table_name: "users".to_string(),
+        where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::table_column(
+                "a", "id",
+            ))),
+            op: BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(2))),
+        })),
+        order_by: None,
+        limit: None,
+        offset: None,
+        returning: None,
+    };
+
+    let deleted = DeleteExecutor::execute(&stmt, &mut db).unwrap();
+    assert_eq!(deleted, 1, "alias-qualified DELETE should delete the matching row");
+
+    let table = db.get_table("users").unwrap();
+    assert_eq!(table.row_count(), 2);
+}
+
+#[test]
 fn test_delete_with_simple_where() {
     let mut db = Database::new();
     setup_test_table(&mut db);
@@ -43,6 +79,7 @@ fn test_delete_with_simple_where() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -86,6 +123,7 @@ fn test_delete_with_boolean_where() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -127,6 +165,7 @@ fn test_delete_multiple_rows() {
         index_hint: None,
         with_clause: None,
         quoted: false,
+        alias: None,
         only: false,
         table_name: "users".to_string(),
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {

@@ -229,6 +229,17 @@ pub(super) fn execute_internal(
         validate_set_expressions(schema, &stmt.assignments, database)?;
     }
 
+    // When an alias is active, SQLite hides the original (un-aliased) table name as a
+    // column qualifier: `UPDATE t1 AS a SET y=1 WHERE t1.x=1` must raise
+    // `no such column: t1.x` even on an empty table (validated at prepare time).
+    // The row-by-row evaluator already enforces this, but it never runs when no rows
+    // match, so reject the original-name qualifier up front here.
+    if let Some(ref alias) = stmt.alias {
+        if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+            validate_alias_scoped_qualifiers(where_expr, &stmt.table_name, alias)?;
+        }
+    }
+
     // Step 3.6: Handle UPDATE FROM (multi-table UPDATE) if FROM clause is present
     // This uses a completely different code path that builds a synthetic SELECT
     // to join tables and compute SET values in the joined context.
@@ -1078,6 +1089,68 @@ fn validate_non_uniqueness_constraints(
 /// This validation walks each assignment's value expression and checks that:
 /// - All column references exist in the table schema
 /// - All function calls refer to valid functions
+/// Reject column qualifiers that name the original (un-aliased) table while an
+/// alias is active. SQLite scoping: `UPDATE t1 AS a SET ... WHERE t1.x=1` raises
+/// `no such column: t1.x` because the alias `a` is the only valid qualifier for
+/// the target table. The alias itself (and unqualified columns) still resolve.
+///
+/// This runs at prepare time so the error is raised even when no rows match the
+/// WHERE clause (e.g. an empty table), matching SQLite. The row-by-row evaluator
+/// enforces the same rule in `eval.rs` for the rows-present case.
+fn validate_alias_scoped_qualifiers(
+    expr: &Expression,
+    table_name: &str,
+    alias: &str,
+) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::ColumnRef(col_id) => {
+            if let Some(qualifier) = col_id.table_canonical() {
+                if qualifier.eq_ignore_ascii_case(table_name)
+                    && !qualifier.eq_ignore_ascii_case(alias)
+                {
+                    return Err(ExecutorError::NoSuchColumn {
+                        column_ref: format!(
+                            "{}.{}",
+                            col_id.table_display().unwrap_or(qualifier),
+                            col_id.column_display()
+                        ),
+                    });
+                }
+            }
+            Ok(())
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            validate_alias_scoped_qualifiers(left, table_name, alias)?;
+            validate_alias_scoped_qualifiers(right, table_name, alias)
+        }
+        Expression::UnaryOp { expr, .. } => {
+            validate_alias_scoped_qualifiers(expr, table_name, alias)
+        }
+        Expression::IsNull { expr, .. } => {
+            validate_alias_scoped_qualifiers(expr, table_name, alias)
+        }
+        Expression::Between { expr, low, high, .. } => {
+            validate_alias_scoped_qualifiers(expr, table_name, alias)?;
+            validate_alias_scoped_qualifiers(low, table_name, alias)?;
+            validate_alias_scoped_qualifiers(high, table_name, alias)
+        }
+        Expression::InList { expr, values, .. } => {
+            validate_alias_scoped_qualifiers(expr, table_name, alias)?;
+            for item in values {
+                validate_alias_scoped_qualifiers(item, table_name, alias)?;
+            }
+            Ok(())
+        }
+        Expression::Function { args, .. } => {
+            for arg in args {
+                validate_alias_scoped_qualifiers(arg, table_name, alias)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_set_expressions(
     schema: &vibesql_catalog::TableSchema,
     assignments: &[vibesql_ast::Assignment],
@@ -2301,4 +2374,53 @@ fn apply_order_by_and_limit(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod alias_scope_tests {
+    use super::validate_alias_scoped_qualifiers;
+    use crate::errors::ExecutorError;
+    use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+    use vibesql_types::SqlValue;
+
+    fn qualified_eq(table: &str, column: &str) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::table_column(table, column))),
+            op: BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }
+    }
+
+    fn unqualified_eq(column: &str) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple(column, false))),
+            op: BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Integer(1))),
+        }
+    }
+
+    #[test]
+    fn original_table_name_qualifier_is_rejected_when_alias_active() {
+        // UPDATE t1 AS a SET ... WHERE t1.x=1 -> `no such column: t1.x` (wherelimit-0.5.2).
+        let expr = qualified_eq("t1", "x");
+        let err = validate_alias_scoped_qualifiers(&expr, "t1", "a").unwrap_err();
+        match err {
+            ExecutorError::NoSuchColumn { column_ref } => assert_eq!(column_ref, "t1.x"),
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn alias_qualifier_is_accepted() {
+        // UPDATE t1 AS a SET ... WHERE a.x=1 still resolves.
+        let expr = qualified_eq("a", "x");
+        assert!(validate_alias_scoped_qualifiers(&expr, "t1", "a").is_ok());
+    }
+
+    #[test]
+    fn unqualified_column_is_accepted() {
+        // UPDATE t1 AS a SET ... WHERE x=1 still resolves (wherelimit-0.5.1).
+        let expr = unqualified_eq("x");
+        assert!(validate_alias_scoped_qualifiers(&expr, "t1", "a").is_ok());
+    }
 }

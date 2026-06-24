@@ -204,6 +204,8 @@ pub struct DeleteStmt<'arena> {
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
+    /// Optional table alias (SQLite 3.24+ extension: DELETE FROM t1 AS xyz WHERE ...)
+    pub alias: Option<Symbol>,
     pub where_clause: Option<WhereClause<'arena>>,
     /// Optional ORDER BY clause (SQLite extension for DELETE)
     /// When present with LIMIT, deletes rows in the specified order

@@ -234,6 +234,8 @@ pub struct DeleteStmt {
     /// Whether the table name was quoted (delimited) in the original SQL.
     /// Per SQL:1999, quoted identifiers are case-sensitive.
     pub quoted: bool,
+    /// Optional table alias (SQLite 3.24+ extension: DELETE FROM t1 AS xyz WHERE ...)
+    pub alias: Option<String>,
     /// Optional index hint (SQLite extension: DELETE FROM t1 INDEXED BY idx ... / NOT INDEXED).
     /// Advisory only; VibeSQL's planner chooses indexes independently, so the hint is
     /// parsed for SQLite compatibility but has no effect on plan selection.

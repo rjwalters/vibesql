@@ -20,6 +20,55 @@ fn test_parse_delete_basic() {
 }
 
 #[test]
+fn test_parse_delete_alias_with_as() {
+    // SQLite 3.24+ allows an AS alias on a DELETE target (issue #5752, wherelimit-0.4).
+    let result = Parser::parse_sql("DELETE FROM t1 AS a WHERE a.x = 1;");
+    assert!(result.is_ok(), "DELETE ... AS alias should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert_eq!(delete.table_name, "t1");
+            assert_eq!(delete.alias, Some("a".to_string()));
+            assert!(delete.where_clause.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_bare_alias() {
+    // Bare-alias form: DELETE FROM t1 a WHERE ... (no AS keyword).
+    let result = Parser::parse_sql("DELETE FROM t1 a WHERE a.x = 1;");
+    assert!(result.is_ok(), "DELETE with bare alias should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert_eq!(delete.table_name, "t1");
+            assert_eq!(delete.alias, Some("a".to_string()));
+            assert!(delete.where_clause.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
+fn test_parse_delete_no_alias() {
+    // Without an alias, the alias field stays None and a following WHERE keyword
+    // is not swallowed as an alias.
+    let result = Parser::parse_sql("DELETE FROM t1 WHERE x = 1;");
+    assert!(result.is_ok(), "DELETE without alias should parse: {result:?}");
+
+    match result.unwrap() {
+        vibesql_ast::Statement::Delete(delete) => {
+            assert_eq!(delete.table_name, "t1");
+            assert_eq!(delete.alias, None);
+            assert!(delete.where_clause.is_some());
+        }
+        _ => panic!("Expected DELETE statement"),
+    }
+}
+
+#[test]
 fn test_parse_delete_indexed_by() {
     // SQLite INDEXED BY hint on DELETE (issue #5734, where9-6.8.x).
     let result = Parser::parse_sql("DELETE FROM t1 INDEXED BY t1b WHERE a = 1;");

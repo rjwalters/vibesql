@@ -52,6 +52,31 @@ fn test_arena_parse_delete_with_only() {
 }
 
 #[test]
+fn test_arena_parse_delete_with_alias() {
+    // SQLite 3.24+ DELETE target alias (issue #5752). Arena parser parity with
+    // the string parser for both `AS alias` and bare-alias forms.
+    let arena = Bump::new();
+    let (stmt, interner) =
+        ArenaParser::parse_delete_with_interner("DELETE FROM t1 AS a WHERE a.x = 1", &arena)
+            .expect("DELETE ... AS alias should parse");
+    assert_eq!(interner.resolve(stmt.table_name), "t1");
+    assert_eq!(stmt.alias.map(|s| interner.resolve(s)), Some("a"));
+
+    let arena2 = Bump::new();
+    let (bare, interner2) =
+        ArenaParser::parse_delete_with_interner("DELETE FROM t1 a WHERE a.x = 1", &arena2)
+            .expect("DELETE bare alias should parse");
+    assert_eq!(bare.alias.map(|s| interner2.resolve(s)), Some("a"));
+
+    // No alias: a following WHERE keyword must not be consumed as an alias.
+    let arena3 = Bump::new();
+    let (no_alias, _) =
+        ArenaParser::parse_delete_with_interner("DELETE FROM t1 WHERE x = 1", &arena3)
+            .expect("DELETE without alias should parse");
+    assert_eq!(no_alias.alias, None);
+}
+
+#[test]
 fn test_arena_parse_delete_convert_to_standard() {
     let arena = Bump::new();
     let sql = "DELETE FROM users WHERE id = 1";
