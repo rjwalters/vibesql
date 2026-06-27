@@ -822,7 +822,7 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
 TCL_DETAIL_PREFIX = "##TCLTEST## "
 
 
-def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 60.0) -> tuple[int, int, int, list[str], list[TestResult]]:
+def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 1200.0) -> tuple[int, int, int, list[str], list[TestResult]]:
     """
     Run a TCL test file using the native tclsh interpreter with our VibeSQL shim.
 
@@ -917,8 +917,22 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
         return passed, failed, skipped, failed_tests, per_test_results
 
     except subprocess.TimeoutExpired:
-        print(f"Timeout running {test_file}")
-        return 0, 0, 0, ["TIMEOUT"], []
+        print(f"Timeout running {test_file} (exceeded {timeout:.0f}s)")
+        # Surface the timeout as a visible non-pass result instead of silently
+        # dropping the file from the totals. We emit one synthetic failed detail
+        # row so the file still appears in tcl_test_results and counts toward the
+        # summary's failed total, keeping the summary and detail tables
+        # reconciled (see CLAUDE.md). Without this a timed-out file contributed
+        # zero rows and vanished from the measured suite.
+        timeout_result = TestResult(
+            test_name=f"TIMEOUT (exceeded {timeout:.0f}s)",
+            file_path=test_file,
+            test_type="native-tcl",
+            status="failed",
+            sql="",
+            error_message=f"Test file timed out after {timeout:.0f}s",
+        )
+        return 0, 1, 0, ["TIMEOUT"], [timeout_result]
     except Exception as e:
         print(f"Error running {test_file}: {e}")
         return 0, 0, 0, [str(e)], []
@@ -933,7 +947,7 @@ def main():
     parser.add_argument("--output", "-o", help="Output JSON file")
     parser.add_argument("--parallel", action="store_true", help="Run tests in parallel")
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--timeout", type=float, default=None, help="Per-test timeout in seconds (default: 5 for static mode, 300 for native TCL)")
+    parser.add_argument("--timeout", type=float, default=None, help="Per-file timeout in seconds (default: 5 for static mode, 1200 for native TCL)")
     parser.add_argument("--native-tcl", action="store_true",
                         help="Run tests using native tclsh instead of parsing (for files with TCL loops)")
     parser.add_argument("--tcl-shim", default=None,
@@ -948,7 +962,11 @@ def main():
     # Set appropriate timeout defaults based on mode
     if args.timeout is None:
         if args.native_tcl:
-            args.timeout = 300.0  # 5 minutes for native TCL (handles heavy INSERT tests)
+            # 20 minutes for native TCL. The per-statement-process shim makes
+            # large auto-generated files (e.g. the Bloom-filter join suite
+            # joinB/C/D/E.test, ~1,974 tests) slow; the prior 300s default timed
+            # them out and silently dropped ~80% of the suite from the totals.
+            args.timeout = 1200.0
         else:
             args.timeout = 5.0   # 5 seconds for static parsing mode
 

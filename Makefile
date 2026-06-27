@@ -276,16 +276,18 @@ test-sqllogictest-halting:
 # Run SQLite TCL test suite (Priority 1 - core SQL tests)
 # This is the canonical SQLite conformance test suite
 # Uses errors-only mode by default. Add --verbose for full output.
+# Override the per-file timeout with TCL_TIMEOUT=<seconds> (default: 1200).
+TCL_TIMEOUT ?= 1200
 test-tcl:
 	@echo "Running SQLite TCL test suite (Priority 1 - core SQL)..."
 	@echo "Tests: select, insert, update, delete, where, join, aggregate, func"
-	./scripts/tcltest run --priority 1
+	./scripts/tcltest run --priority 1 --timeout $(TCL_TIMEOUT)
 
 # Run all SQLite TCL tests (all priorities)
 # Uses errors-only mode by default. Add --verbose for full output.
 test-tcl-all:
 	@echo "Running full SQLite TCL test suite (all 1174 files)..."
-	./scripts/tcltest run
+	./scripts/tcltest run --timeout $(TCL_TIMEOUT)
 
 # Run specific TCL test file
 test-tcl-file:
@@ -293,7 +295,7 @@ test-tcl-file:
 		echo "Usage: make test-tcl-file FILE=select1.test"; \
 		exit 1; \
 	fi
-	./scripts/tcltest test $(FILE)
+	./scripts/tcltest test $(FILE) --timeout $(TCL_TIMEOUT)
 
 # Show TCL test status
 test-tcl-status:
