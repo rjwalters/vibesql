@@ -193,9 +193,11 @@ Options for 'run':
   --parallel               Run tests in parallel
   --verbose                Show detailed output
   --no-native-tcl          Use static parsing instead of native tclsh
+  --timeout SECONDS        Per-file timeout (default: 1200 native, 5 static)
 
 Options for 'test':
   --no-native-tcl          Use static parsing instead of native tclsh
+  --timeout SECONDS        Per-file timeout (default: 1200 native, 5 static)
 
 Note: Native tclsh mode is used by default. This correctly handles TCL constructs
 like loops that cannot be statically parsed.
@@ -284,6 +286,7 @@ EOF
 cmd_test() {
     local native_tcl=true  # Default to native TCL mode
     local verbose=false
+    local timeout=""
     local test_file=""
 
     # Parse arguments
@@ -303,11 +306,13 @@ Options:
   --native-tcl       Use native tclsh (default, handles TCL loops)
   --no-native-tcl    Use static parsing instead of native tclsh
   --verbose          Show detailed output including expected vs actual
+  --timeout SECONDS  Per-file timeout (default: 1200 native, 5 static)
 
 Examples:
   ./scripts/tcltest test select1.test
   ./scripts/tcltest test select1.test --verbose
   ./scripts/tcltest test select1.test --no-native-tcl
+  ./scripts/tcltest test joinB.test --timeout 1800
 EOF
                 exit 0
                 ;;
@@ -322,6 +327,10 @@ EOF
             --verbose)
                 verbose=true
                 shift
+                ;;
+            --timeout)
+                timeout="$2"
+                shift 2
                 ;;
             *)
                 if [ -z "$test_file" ]; then
@@ -375,6 +384,10 @@ EOF
         py_args+=("--verbose")
     fi
 
+    if [ -n "$timeout" ]; then
+        py_args+=("--timeout" "$timeout")
+    fi
+
     python3 "${py_args[@]}"
 }
 
@@ -386,6 +399,7 @@ cmd_run() {
     local parallel=false
     local verbose=false
     local native_tcl=true  # Default to native TCL mode
+    local timeout=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -405,6 +419,7 @@ Options:
   --verbose                Show detailed output
   --native-tcl             Use native tclsh (default, handles TCL loops)
   --no-native-tcl          Use static parsing instead of native tclsh
+  --timeout SECONDS        Per-file timeout (default: 1200 native, 5 static)
 
 Examples:
   # Run Priority 1 tests (core SQL)
@@ -448,6 +463,10 @@ EOF
             --no-native-tcl)
                 native_tcl=false
                 shift
+                ;;
+            --timeout)
+                timeout="$2"
+                shift 2
                 ;;
             *)
                 print_error "Unknown option: $1"
@@ -525,6 +544,10 @@ EOF
 
     if $native_tcl; then
         py_args+=("--native-tcl")
+    fi
+
+    if [ -n "$timeout" ]; then
+        py_args+=("--timeout" "$timeout")
     fi
 
     # Add files
