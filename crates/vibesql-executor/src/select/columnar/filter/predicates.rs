@@ -398,6 +398,20 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
         // Boolean and Boolean vs numeric compare faithfully in both paths
         // (booleans coerce to 0/1).
         Some(DataType::Boolean) => matches!(value, SqlValue::Boolean(_)) || is_numeric_value(value),
+        // Issue #5765: TEXT-affinity column compared against a numeric literal.
+        // SQLite applies TEXT affinity to the literal (renders the number as
+        // text) and compares as strings, so `'2' = 2` is true but `'2.0' = 2`
+        // is false. The columnar comparators instead coerce the stored text to
+        // a number and compare numerically (`2.0 == 2` -> true), wrongly
+        // matching both rows. There is no faithful columnar arm, so decline
+        // pushdown and let the evaluator's `apply_affinity_for_comparison`
+        // Case 1 handle it. NUMERIC/REAL/INTEGER columns keep numeric
+        // comparison and are unaffected.
+        Some(other)
+            if other.sqlite_affinity() == TypeAffinity::Text && is_numeric_value(value) =>
+        {
+            false
+        }
         Some(other) => match value {
             // Temporal literal against a non-temporal column: only string
             // columns have comparator support (parse-first for Date, TEXT

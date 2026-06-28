@@ -10,7 +10,11 @@ use crate::errors::ExecutorError;
 /// SQLite ensures floats always have a decimal point when converted to text.
 /// For example, 10.0 becomes "10.0", not "10". This is important for type
 /// affinity comparisons where TEXT '10' should not equal REAL 10.0.
-fn format_float_for_text_comparison(n: f64) -> String {
+///
+/// Shared with the compiled fast path (`evaluator::compiled`) so that compiled
+/// and interpreted comparisons render numeric literals identically when applying
+/// TEXT affinity (issue #5765).
+pub(crate) fn format_float_for_text_comparison(n: f64) -> String {
     if n.is_nan() {
         return "NaN".to_string();
     }

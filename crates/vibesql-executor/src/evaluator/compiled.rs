@@ -14,6 +14,7 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
+use super::expressions::eval::format_float_for_text_comparison;
 use crate::schema::CombinedSchema;
 
 /// A compiled predicate that can be evaluated efficiently without expression traversal
@@ -204,7 +205,8 @@ impl CompiledPredicate {
             if !Self::literal_supported_for_column(schema, col_idx, value) {
                 return None;
             }
-            return Self::compile_comparison_with_idx(col_idx, op, value.clone(), false);
+            let value = Self::coerce_literal_for_column(schema, col_idx, value.clone());
+            return Self::compile_comparison_with_idx(col_idx, op, value, false);
         }
 
         // Try literal <op> col (reverse the operator)
@@ -214,10 +216,68 @@ impl CompiledPredicate {
             if !Self::literal_supported_for_column(schema, col_idx, value) {
                 return None;
             }
-            return Self::compile_comparison_with_idx(col_idx, op, value.clone(), true);
+            let value = Self::coerce_literal_for_column(schema, col_idx, value.clone());
+            return Self::compile_comparison_with_idx(col_idx, op, value, true);
         }
 
         None
+    }
+
+    /// Issue #5765: apply the column's TEXT affinity to a numeric literal at
+    /// compile time so the compiled fast path matches the interpreted
+    /// evaluator's `apply_affinity_for_comparison` Case 1
+    /// (`evaluator/expressions/eval.rs`).
+    ///
+    /// SQLite rule: comparing a TEXT-affinity column against a numeric literal
+    /// applies TEXT affinity to the literal (renders the number as text) and
+    /// performs a string comparison — so `'2' = 2` is true but `'2.0' = 2` is
+    /// false (`'2.0' != '2'`). Without this, `values_equal` would parse the
+    /// stored text as a number and compare numerically (`2.0 == 2` -> true),
+    /// wrongly matching both rows.
+    ///
+    /// The numeric->text rendering mirrors Case 1 exactly: integers via
+    /// `to_string()`, floating-point via `format_float_for_text_comparison`
+    /// (which preserves the decimal point, so TEXT `'10'` does NOT equal REAL
+    /// `10.0`). Returns the literal unchanged for non-TEXT columns (NUMERIC /
+    /// REAL / INTEGER affinity keep numeric comparison) and for non-numeric
+    /// literals.
+    fn coerce_literal_for_column(
+        schema: &CombinedSchema,
+        col_idx: usize,
+        value: SqlValue,
+    ) -> SqlValue {
+        use vibesql_types::TypeAffinity;
+
+        // Only TEXT-affinity columns coerce the literal. Bare columns (no
+        // declared type) have NONE affinity and use type ordering instead, so
+        // leave them alone — matching the evaluator, which restricts Case 1 to
+        // `TypeAffinity::Text`.
+        match schema.get_column_type_by_index(col_idx) {
+            Some(col_type) if col_type.sqlite_affinity() == TypeAffinity::Text => {}
+            _ => return value,
+        }
+
+        match value {
+            SqlValue::Integer(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            SqlValue::Smallint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            SqlValue::Bigint(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            SqlValue::Unsigned(n) => SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())),
+            SqlValue::Float(n) => SqlValue::Varchar(arcstr::ArcStr::from(
+                format_float_for_text_comparison(f64::from(n)),
+            )),
+            SqlValue::Real(n) => {
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(n)))
+            }
+            SqlValue::Double(n) => {
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(n)))
+            }
+            SqlValue::Numeric(n) => {
+                SqlValue::Varchar(arcstr::ArcStr::from(format_float_for_text_comparison(n)))
+            }
+            // Non-numeric literals (already text, temporal, blob, etc.) are
+            // unaffected by TEXT affinity coercion.
+            other => other,
+        }
     }
 
     /// Issue #5335: decide whether `values_equal` / `compare_range` can
@@ -999,6 +1059,146 @@ mod tests {
             SqlValue::Varchar(arcstr::ArcStr::from("test")),
         ]);
         assert_eq!(compiled.evaluate(&row), Some(false));
+    }
+
+    /// Schema with a single TEXT-affinity column `a` (matches `indexA.test`'s
+    /// `CREATE TABLE x1(a TEXT, ...)`).
+    fn create_text_col_schema() -> CombinedSchema {
+        let columns = vec![ColumnSchema::new(
+            "a".to_string(),
+            DataType::Varchar { max_length: None },
+            true,
+        )];
+        let schema = TableSchema::new("x1".to_string(), columns);
+        CombinedSchema::from_table("x1".to_string(), schema)
+    }
+
+    /// Schema with a single NUMERIC-affinity column `a`
+    /// (matches `indexA.test`'s `CREATE TABLE x2(a NUMERIC, ...)`).
+    fn create_numeric_col_schema() -> CombinedSchema {
+        let columns = vec![ColumnSchema::new(
+            "a".to_string(),
+            DataType::Numeric { precision: 10, scale: 0 },
+            true,
+        )];
+        let schema = TableSchema::new("x2".to_string(), columns);
+        CombinedSchema::from_table("x2".to_string(), schema)
+    }
+
+    fn col_op_lit(op: BinaryOperator, lit: SqlValue) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("a", false),
+            )),
+            op,
+            right: Box::new(Expression::Literal(lit)),
+        }
+    }
+
+    fn lit_op_col(lit: SqlValue, op: BinaryOperator) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::Literal(lit)),
+            op,
+            right: Box::new(Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple("a", false),
+            )),
+        }
+    }
+
+    fn text_row(s: &str) -> Row {
+        Row::from_vec(vec![SqlValue::Varchar(arcstr::ArcStr::from(s))])
+    }
+
+    /// Issue #5765: a TEXT-affinity column compared to a numeric literal must
+    /// apply TEXT affinity to the literal and compare as strings, so the
+    /// compiled fast path matches `apply_affinity_for_comparison` Case 1 and
+    /// the SQLite `indexA.test` expectations (`SELECT ... WHERE a=2` on a TEXT
+    /// column returns only the `'2'` row, not `'2.0'`).
+    #[test]
+    fn test_text_col_vs_numeric_literal_affinity() {
+        let schema = create_text_col_schema();
+
+        // a = 2 (INTEGER literal) -> coerce literal to '2', string compare.
+        let expr = col_op_lit(BinaryOperator::Equal, SqlValue::Integer(2));
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        assert!(
+            compiled.is_fully_compiled(),
+            "TEXT col = INTEGER must stay on the compiled fast path"
+        );
+        // The literal must have been rendered to text at compile time.
+        if let CompiledPredicate::Equals { value, .. } = &compiled {
+            assert_eq!(*value, SqlValue::Varchar(arcstr::ArcStr::from("2")));
+        } else {
+            panic!("expected Equals predicate");
+        }
+        assert_eq!(compiled.evaluate(&text_row("2")), Some(true), "'2' = 2 -> true");
+        assert_eq!(compiled.evaluate(&text_row("2.0")), Some(false), "'2.0' = 2 -> false");
+
+        // a = 2.0 (REAL literal) -> coerce literal to '2.0', string compare.
+        let expr = col_op_lit(BinaryOperator::Equal, SqlValue::Real(2.0));
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        if let CompiledPredicate::Equals { value, .. } = &compiled {
+            assert_eq!(*value, SqlValue::Varchar(arcstr::ArcStr::from("2.0")));
+        } else {
+            panic!("expected Equals predicate");
+        }
+        assert_eq!(compiled.evaluate(&text_row("2")), Some(false), "'2' = 2.0 -> false");
+        assert_eq!(compiled.evaluate(&text_row("2.0")), Some(true), "'2.0' = 2.0 -> true");
+    }
+
+    /// Symmetric form: numeric literal on the left (`2 = a`) must coerce the
+    /// same way as `a = 2`.
+    #[test]
+    fn test_text_col_vs_numeric_literal_symmetric() {
+        let schema = create_text_col_schema();
+
+        let expr = lit_op_col(SqlValue::Integer(2), BinaryOperator::Equal);
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        assert!(compiled.is_fully_compiled());
+        assert_eq!(compiled.evaluate(&text_row("2")), Some(true), "2 = '2' -> true");
+        assert_eq!(compiled.evaluate(&text_row("2.0")), Some(false), "2 = '2.0' -> false");
+    }
+
+    /// NotEqual must be the logical negation of Equal under TEXT affinity.
+    #[test]
+    fn test_text_col_vs_numeric_literal_not_equal() {
+        let schema = create_text_col_schema();
+
+        let expr = col_op_lit(BinaryOperator::NotEqual, SqlValue::Integer(2));
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        assert!(compiled.is_fully_compiled());
+        assert_eq!(compiled.evaluate(&text_row("2")), Some(false), "'2' <> 2 -> false");
+        assert_eq!(compiled.evaluate(&text_row("2.0")), Some(true), "'2.0' <> 2 -> true");
+    }
+
+    /// Float text representation must be preserved: TEXT '10' does NOT equal
+    /// REAL 10.0 (rendered as '10.0'), but TEXT '10.0' does.
+    #[test]
+    fn test_text_col_vs_real_preserves_decimal_point() {
+        let schema = create_text_col_schema();
+
+        let expr = col_op_lit(BinaryOperator::Equal, SqlValue::Real(10.0));
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        if let CompiledPredicate::Equals { value, .. } = &compiled {
+            assert_eq!(*value, SqlValue::Varchar(arcstr::ArcStr::from("10.0")));
+        } else {
+            panic!("expected Equals predicate");
+        }
+        assert_eq!(compiled.evaluate(&text_row("10")), Some(false), "'10' = 10.0 -> false");
+        assert_eq!(compiled.evaluate(&text_row("10.0")), Some(true), "'10.0' = 10.0 -> true");
+    }
+
+    /// Regression guard: NUMERIC-affinity columns must NOT have the literal
+    /// coerced to text — they keep numeric comparison semantics (so `'2.0' = 2`
+    /// matches numerically, matching `indexA.test` x2 expectations).
+    #[test]
+    fn test_numeric_col_literal_not_coerced() {
+        let schema = create_numeric_col_schema();
+        let value = CompiledPredicate::coerce_literal_for_column(&schema, 0, SqlValue::Integer(2));
+        assert_eq!(value, SqlValue::Integer(2), "NUMERIC column literal must stay numeric");
+
+        let value = CompiledPredicate::coerce_literal_for_column(&schema, 0, SqlValue::Real(2.0));
+        assert_eq!(value, SqlValue::Real(2.0), "NUMERIC column REAL literal must stay numeric");
     }
 
     #[test]
