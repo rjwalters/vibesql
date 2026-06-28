@@ -76,6 +76,13 @@ impl Default for RecoveryConfig {
 pub struct RecoveryStats {
     /// Checkpoint LSN that was loaded (0 if no checkpoint)
     pub checkpoint_lsn: Lsn,
+    /// Highest LSN observed anywhere during recovery — the loaded checkpoint LSN
+    /// or any WAL entry read (including entries at/below the checkpoint LSN).
+    ///
+    /// Callers resume the live WAL's LSN counter at `last_lsn + 1` so that new
+    /// entries — and the checkpoints stamped from them — keep advancing
+    /// monotonically across process restarts (issue #5766).
+    pub last_lsn: Lsn,
     /// Number of WAL entries replayed
     pub entries_replayed: u64,
     /// Number of entries skipped (before checkpoint LSN)
@@ -216,6 +223,7 @@ impl RecoveryManager {
         // Step 1: Find and load the latest valid checkpoint
         let (mut db, checkpoint_lsn) = self.load_latest_checkpoint(&mut stats)?;
         stats.checkpoint_lsn = checkpoint_lsn;
+        stats.last_lsn = stats.last_lsn.max(checkpoint_lsn);
 
         // Step 2: Replay WAL entries after the checkpoint LSN
         if let Some(ref wal_path) = self.wal_path {
@@ -320,6 +328,10 @@ impl RecoveryManager {
         loop {
             match wal_reader.read_entry()? {
                 ReadResult::Entry(entry) => {
+                    // Track the highest LSN seen so callers can resume the live
+                    // WAL counter past it (even for entries we skip below).
+                    stats.last_lsn = stats.last_lsn.max(entry.lsn);
+
                     // Skip entries at or before checkpoint LSN
                     if entry.lsn <= start_lsn {
                         stats.entries_skipped += 1;
@@ -1260,6 +1272,98 @@ mod tests {
         assert!(table.is_row_deleted(1));
         // Row 2 untouched.
         assert_eq!(table.get_row(2).unwrap().values[0], SqlValue::Integer(3));
+    }
+
+    #[test]
+    fn test_committed_dml_survives_cross_restart_via_resumed_lsn() {
+        // Regression for #5766. This mirrors what the CLI's `WalState` does across
+        // *separate process invocations* against a file-backed DB: each "process"
+        // recovers, resumes the live WAL LSN counter past everything recovery saw
+        // (`last_lsn + 1`), applies a committed mutation, writes a checkpoint at
+        // `next_lsn - 1`, and exits.
+        //
+        // Before the fix the LSN counter reset to 1 every open, so a later
+        // process's checkpoint could carry a *lower* LSN than an earlier one.
+        // Recovery selects the highest-LSN checkpoint, so it resurrected the stale
+        // pre-mutation state and silently dropped the newest committed write.
+        // Resuming the LSN keeps checkpoint LSNs monotonic so the newest state wins.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        // Mirror of `WalState::checkpoint`: stamp a checkpoint at next_lsn - 1.
+        fn write_checkpoint(db: &Database, dir: &Path) {
+            db.sync_persistence().unwrap();
+            let lsn = db.persistence_next_lsn().unwrap_or(1).saturating_sub(1);
+            let data = db.to_uncompressed_bytes().unwrap();
+            let mut writer = CheckpointWriter::new(dir).unwrap();
+            writer.create_checkpoint(lsn, &data, db.list_tables().len() as u32).unwrap();
+        }
+
+        // Mirror of `WalState::open`: recover, then resume the LSN at last_lsn + 1.
+        fn open(dir: &Path, wal: &Path) -> Database {
+            let manager = RecoveryManager::new(dir).with_wal(wal);
+            let (mut db, stats) = manager.recover().unwrap();
+            let resume = stats.last_lsn.saturating_add(1);
+            let engine =
+                PersistenceEngine::open_with_start_lsn(wal, PersistenceConfig::default(), resume)
+                    .unwrap();
+            db.enable_persistence(engine);
+            db
+        }
+
+        let row = |id: i64, name: &str| {
+            crate::row::Row::new(vec![
+                SqlValue::Integer(id),
+                SqlValue::Varchar(arcstr::ArcStr::from(name)),
+            ])
+        };
+
+        // --- Cycle 1: create table + insert 3 committed rows, checkpoint, exit.
+        {
+            let mut db = open(&checkpoint_dir, &wal_path);
+            db.create_table(simple_schema("t")).unwrap();
+            db.insert_row("main.t", row(1, "a")).unwrap();
+            db.insert_row("main.t", row(2, "b")).unwrap();
+            db.insert_row("main.t", row(3, "c")).unwrap();
+            write_checkpoint(&db, &checkpoint_dir);
+        }
+
+        // --- Cycle 2: reopen, delete row 0 (a committed mutation that *advances*
+        // the LSN), checkpoint, exit. This is the post-delete state that must win.
+        {
+            let mut db = open(&checkpoint_dir, &wal_path);
+            assert_eq!(live_row_count(&db, "main.t"), 3, "cycle 2 must see all 3 rows");
+            // Emit a WAL delete (advances the engine LSN, exactly like the DELETE
+            // executor) and mark the row deleted so the checkpoint captures it.
+            db.emit_wal_delete("main.t", 0, vec![SqlValue::Integer(1)]);
+            db.get_table_mut("main.t").unwrap().mark_deleted_inplace(0);
+            write_checkpoint(&db, &checkpoint_dir);
+        }
+
+        // --- Cycle 3: reopen and assert the delete persisted (2 live rows), i.e.
+        // recovery picked the post-delete checkpoint, not the stale 3-row one.
+        {
+            let db = open(&checkpoint_dir, &wal_path);
+            assert_eq!(
+                live_row_count(&db, "main.t"),
+                2,
+                "committed DELETE must survive the restart; recovery must not resurrect \
+                 the pre-delete checkpoint (#5766)"
+            );
+        }
+
+        // The checkpoint LSNs must be strictly monotonic across the two cycles so
+        // that highest-LSN selection lands on the newest state.
+        let writer = CheckpointWriter::new(&checkpoint_dir).unwrap();
+        let checkpoints = writer.list_checkpoints().unwrap();
+        assert_eq!(checkpoints.len(), 2, "one checkpoint per write cycle");
+        assert!(
+            checkpoints[1].lsn > checkpoints[0].lsn,
+            "later checkpoint must carry a higher LSN (got {} then {})",
+            checkpoints[0].lsn,
+            checkpoints[1].lsn
+        );
     }
 
     #[test]

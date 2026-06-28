@@ -158,7 +158,7 @@ pub enum WalMessage {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::{
-        fs::OpenOptions,
+        fs::{self, OpenOptions},
         io::{BufWriter, Seek, Write},
         path::Path,
         sync::{
@@ -170,6 +170,8 @@ mod native {
     };
 
     use parking_lot::Mutex;
+
+    use crate::wal::format::WAL_HEADER_SIZE;
 
     use super::*;
 
@@ -308,37 +310,97 @@ mod native {
     }
 
     impl PersistenceEngine {
-        /// Create a new persistence engine writing to a file
+        /// Create a new persistence engine writing to a file.
+        ///
+        /// LSN numbering starts at 1. For an existing WAL that is being reopened
+        /// after recovery, use [`PersistenceEngine::open_with_start_lsn`] so that
+        /// LSNs (and the checkpoints stamped from them) continue to advance
+        /// monotonically across process restarts.
         pub fn new<P: AsRef<Path>>(
             path: P,
             config: PersistenceConfig,
         ) -> Result<Self, StorageError> {
+            Self::open_with_start_lsn(path, config, 1)
+        }
+
+        /// Open (or create) a file-backed persistence engine, resuming LSN
+        /// numbering at `start_lsn`.
+        ///
+        /// This is the constructor the CLI uses after recovery: it passes
+        /// `recovered_lsn + 1` so that the first WAL entry — and therefore the
+        /// next checkpoint stamped from `next_lsn` — has a strictly higher LSN
+        /// than anything already persisted. Without this, every process restart
+        /// reset the LSN to 1, successive checkpoints collided on (or regressed
+        /// below) earlier LSNs, and recovery's "highest LSN wins" selection
+        /// resurrected stale pre-mutation state (issue #5766).
+        ///
+        /// If the WAL file already contains a header, this appends to it rather
+        /// than writing a second header (which would corrupt the log and break
+        /// post-restart WAL replay).
+        pub fn open_with_start_lsn<P: AsRef<Path>>(
+            path: P,
+            config: PersistenceConfig,
+            start_lsn: Lsn,
+        ) -> Result<Self, StorageError> {
+            // Does a valid (header-bearing) WAL already exist? If so we must NOT
+            // write a fresh header on top of it.
+            let has_header = fs::metadata(path.as_ref())
+                .map(|m| m.len() >= WAL_HEADER_SIZE as u64)
+                .unwrap_or(false);
+
             let file = OpenOptions::new()
                 .create(true)
+                .read(true)
                 .append(true)
                 .open(path.as_ref())
                 .map_err(|e| StorageError::IoError(e.to_string()))?;
 
             let writer = BufWriter::new(file);
-            Self::with_writer(writer, config)
+            Self::with_writer_opts(writer, config, start_lsn, !has_header)
         }
 
-        /// Create a new persistence engine with a custom writer
+        /// Create a new persistence engine with a custom writer.
+        ///
+        /// Writes a fresh WAL header and starts LSN numbering at 1.
         pub fn with_writer<W: Write + Seek + Send + 'static>(
             writer: W,
             config: PersistenceConfig,
         ) -> Result<Self, StorageError> {
+            Self::with_writer_opts(writer, config, 1, true)
+        }
+
+        /// Create a persistence engine over a custom writer with explicit
+        /// starting LSN and header-writing behavior.
+        ///
+        /// * `start_lsn` — the first LSN this engine will assign.
+        /// * `write_header` — when `true`, write a fresh WAL header (new file);
+        ///   when `false`, append to an existing header-bearing WAL.
+        fn with_writer_opts<W: Write + Seek + Send + 'static>(
+            writer: W,
+            config: PersistenceConfig,
+            start_lsn: Lsn,
+            write_header: bool,
+        ) -> Result<Self, StorageError> {
             let (sender, receiver) = mpsc::sync_channel(config.channel_capacity);
             let stats = Arc::new(Mutex::new(PersistenceStats::default()));
-            let next_lsn = Arc::new(Mutex::new(1u64));
+            let next_lsn = Arc::new(Mutex::new(start_lsn.max(1)));
             let shutdown = Arc::new(Mutex::new(false));
 
             let stats_clone = stats.clone();
             let flush_interval = Duration::from_millis(config.flush_interval_ms);
             let flush_count = config.flush_count;
+            let resume_lsn = start_lsn.max(1);
 
             let handle = thread::spawn(move || {
-                Self::writer_loop(writer, receiver, stats_clone, flush_interval, flush_count);
+                Self::writer_loop(
+                    writer,
+                    receiver,
+                    stats_clone,
+                    flush_interval,
+                    flush_count,
+                    write_header,
+                    resume_lsn,
+                );
             });
 
             Ok(Self { sender, handle: Some(handle), stats, next_lsn, shutdown, config })
@@ -351,8 +413,17 @@ mod native {
             stats: Arc<Mutex<PersistenceStats>>,
             flush_interval: Duration,
             flush_count: usize,
+            write_header: bool,
+            resume_lsn: Lsn,
         ) {
-            let mut wal_writer = match WalWriter::create(writer) {
+            // For a brand-new WAL we write a header (`create`); for an existing
+            // header-bearing WAL we append without a second header (`open`).
+            let wal_writer_result = if write_header {
+                WalWriter::create(writer)
+            } else {
+                WalWriter::open(writer, resume_lsn)
+            };
+            let mut wal_writer = match wal_writer_result {
                 Ok(w) => w,
                 Err(e) => {
                     log::error!("Failed to create WAL writer: {}", e);

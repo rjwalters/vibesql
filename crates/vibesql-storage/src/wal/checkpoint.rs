@@ -136,6 +136,13 @@ impl CheckpointHeader {
 pub struct CheckpointInfo {
     /// Path to the checkpoint file
     pub path: PathBuf,
+    /// Monotonic checkpoint id parsed from the `checkpoint_<id>.vchk` filename.
+    ///
+    /// Ids strictly increase in creation order, so they break ties when two
+    /// checkpoints share an LSN — recovery can then deterministically pick the
+    /// most recently written one instead of relying on directory iteration
+    /// order (issue #5766).
+    pub id: u64,
     /// LSN at which the checkpoint was taken
     pub lsn: Lsn,
     /// Timestamp when the checkpoint was created
@@ -176,15 +183,8 @@ impl CheckpointWriter {
 
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if let Some(id_str) =
-                        name.strip_prefix("checkpoint_").and_then(|s| s.strip_suffix(".vchk"))
-                    {
-                        if let Ok(id) = id_str.parse::<u64>() {
-                            max_id = max_id.max(id);
-                        }
-                    }
+                if let Some(id) = checkpoint_id_from_path(&entry.path()) {
+                    max_id = max_id.max(id);
                 }
             }
         }
@@ -250,7 +250,14 @@ impl CheckpointWriter {
             file_size
         );
 
-        Ok(CheckpointInfo { path: final_path, lsn, timestamp_ms, num_tables, file_size })
+        Ok(CheckpointInfo {
+            path: final_path,
+            id: checkpoint_id,
+            lsn,
+            timestamp_ms,
+            num_tables,
+            file_size,
+        })
     }
 
     /// Get the path to the checkpoint directory
@@ -273,8 +280,13 @@ impl CheckpointWriter {
             }
         }
 
-        // Sort by LSN
-        checkpoints.sort_by_key(|c| c.lsn);
+        // Sort by LSN, then by checkpoint id as a deterministic tie-break so that
+        // when two checkpoints share an LSN the most recently written one (higher
+        // id) sorts last and "wins" newest-first selection during recovery
+        // (issue #5766). Without the id tie-break, equal-LSN checkpoints were
+        // ordered by directory-iteration order and recovery could load stale
+        // state.
+        checkpoints.sort_by(|a, b| a.lsn.cmp(&b.lsn).then(a.id.cmp(&b.id)));
         Ok(checkpoints)
     }
 
@@ -290,8 +302,11 @@ impl CheckpointWriter {
             .map_err(|e| StorageError::IoError(format!("Failed to get checkpoint size: {}", e)))?
             .len();
 
+        let id = checkpoint_id_from_path(path).unwrap_or(0);
+
         Ok(CheckpointInfo {
             path: path.to_path_buf(),
+            id,
             lsn: header.lsn,
             timestamp_ms: header.timestamp_ms,
             num_tables: header.num_tables,
@@ -322,6 +337,14 @@ impl CheckpointWriter {
 
         Ok(removed)
     }
+}
+
+/// Parse the monotonic checkpoint id from a `checkpoint_<id>.vchk` path.
+///
+/// Returns `None` for paths that don't match the naming scheme.
+fn checkpoint_id_from_path(path: &Path) -> Option<u64> {
+    let name = path.file_name().and_then(|n| n.to_str())?;
+    name.strip_prefix("checkpoint_").and_then(|s| s.strip_suffix(".vchk"))?.parse::<u64>().ok()
 }
 
 /// Read checkpoint data (excluding header) from a checkpoint file
@@ -496,6 +519,49 @@ mod tests {
         let remaining = writer.list_checkpoints().unwrap();
         assert_eq!(remaining[0].lsn, 40);
         assert_eq!(remaining[1].lsn, 50);
+    }
+
+    #[test]
+    fn test_equal_lsn_checkpoints_tiebreak_by_id() {
+        // Regression for #5766: when two checkpoints share an LSN, recovery must
+        // deterministically prefer the most recently written one. `list_checkpoints`
+        // sorts by (lsn, id) and `latest_checkpoint` returns the last, so the
+        // higher-id checkpoint at the same LSN must win — regardless of the order
+        // the filesystem happens to enumerate the directory.
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        // Three checkpoints, all stamped at the SAME LSN (the pre-fix failure
+        // mode where the LSN counter reset each restart). The last one written
+        // (highest id) carries the newest state.
+        let _c1 = writer.create_checkpoint(5, b"oldest", 1).unwrap();
+        let _c2 = writer.create_checkpoint(5, b"middle", 1).unwrap();
+        let c3 = writer.create_checkpoint(5, b"newest-state", 1).unwrap();
+
+        let checkpoints = writer.list_checkpoints().unwrap();
+        assert_eq!(checkpoints.len(), 3);
+        // Sorted ascending by id when LSNs tie.
+        assert!(checkpoints[0].id < checkpoints[1].id);
+        assert!(checkpoints[1].id < checkpoints[2].id);
+
+        let latest = writer.latest_checkpoint().unwrap().unwrap();
+        assert_eq!(latest.id, c3.id, "highest-id checkpoint must win an LSN tie");
+
+        let (_, data) = read_checkpoint_data(&latest.path).unwrap();
+        assert_eq!(data, b"newest-state", "recovery must load the newest equal-LSN checkpoint");
+    }
+
+    #[test]
+    fn test_checkpoint_info_carries_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        let info = writer.create_checkpoint(10, b"data", 1).unwrap();
+        assert_eq!(info.id, 1);
+
+        // The id round-trips through a fresh read of the directory.
+        let listed = writer.list_checkpoints().unwrap();
+        assert_eq!(listed[0].id, 1);
     }
 
     #[test]
