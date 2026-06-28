@@ -8,7 +8,7 @@
 //! - `operators` - Operator evaluation (unary +/-)
 //! - `fulltext` - Full-text search evaluation (MATCH...AGAINST)
 
-mod eval;
+pub(crate) mod eval;
 pub(crate) mod fulltext;
 pub(crate) mod operators;
 mod predicates;
