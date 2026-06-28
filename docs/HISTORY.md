@@ -90,3 +90,11 @@ A timeline of major milestones in the development of VibeSQL.
 - v0.2.0 release-window TPC-C dashboard captured all three engines (VibeSQL, SQLite, DuckDB) at ~1/3 of their v0.1.4 throughput, the signature of host-level contention rather than a code regression (see [docs/performance/tpcc_regression.md](performance/tpcc_regression.md))
 - Same-host re-measurement on `feature/issue-5643` (head `9e1ac205`, descended from the v0.2.0 release commit `ec54522d1`) recovered VibeSQL TPC-C to **9,276 TPS** (vs the 5,307 TPS dashboard number, vs the 10,758 TPS v0.1.4 README baseline); SQLite recovered to 2,813 TPS and DuckDB to 450 TPS
 - Re-measurement was itself taken under sweep-concurrency contention; a truly idle re-run is still warranted before refreshing the website dashboard or filing a bisect
+
+### June 2026: WAL-default durability + SQLite TCL frontier correction
+
+- **WAL became the default CLI durability path** — file-backed databases now recover automatically from an unclean shutdown via checkpoint + WAL replay (DDL and committed DML), opt out with `[database] wal = false`. Shipped across #5698 Phases 1-2 (#5706, #5760), with LSN resume across CLI restarts so committed DML survives reopen (#5770)
+- **The SQLite TCL Priority-1 frontier collapsed** after analysis confirmed the join suite (joinB/C/D/E) passes 100% (1,974 tests, 0 failures), retiring the earlier "join/index/where optimizer-plan parity" framing
+  - `indexA.test` was a TEXT-affinity comparison bug (numeric literals vs TEXT columns), not a missing partial-index feature — fixed in #5769
+  - `wherelimit.test` was a WAL durability regression (committed DML lost on reopen), not a DML LIMIT/OFFSET gap — fixed in #5770; the last 2 failures trace to views not yet serialized in the checkpoint format (#5771, open)
+- **`tcltest` now forwards `--timeout`** (native per-file default raised to 1200s) so slow files are no longer silently dropped, making conformance numbers trustworthy (#5768)
