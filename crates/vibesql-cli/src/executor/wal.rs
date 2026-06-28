@@ -87,12 +87,26 @@ impl WalState {
         let paths = WalPaths::derive(db_path);
 
         // Step 1: recover from the last checkpoint + replay post-checkpoint WAL.
-        // (Phase 1: DDL is replayed; DML replay is a Phase 2 stub — see module docs.)
         let manager = RecoveryManager::new(&paths.checkpoint_dir).with_wal(&paths.wal_path);
-        let (mut db, _stats) = manager.recover()?;
+        let (mut db, stats) = manager.recover()?;
 
         // Step 2: attach the live persistence engine so new ops hit the WAL.
-        let engine = PersistenceEngine::new(&paths.wal_path, PersistenceConfig::default())?;
+        //
+        // Crucially, resume LSN numbering *past* everything recovery saw
+        // (`last_lsn` covers the loaded checkpoint and every WAL entry). Each new
+        // checkpoint is stamped from `persistence_next_lsn`, and recovery selects
+        // the checkpoint with the highest LSN. If we restarted LSNs at 1 on every
+        // open (the pre-#5766 behavior), a later process's checkpoint could carry
+        // a *lower* LSN than an earlier one and recovery would resurrect stale,
+        // pre-mutation state — silently losing committed DELETE/UPDATE/INSERT data
+        // across CLI restarts. Resuming at `last_lsn + 1` keeps checkpoint LSNs
+        // monotonic so the newest committed state always wins.
+        let resume_lsn = stats.last_lsn.saturating_add(1);
+        let engine = PersistenceEngine::open_with_start_lsn(
+            &paths.wal_path,
+            PersistenceConfig::default(),
+            resume_lsn,
+        )?;
         db.enable_persistence(engine);
 
         let checkpoint_writer = CheckpointWriter::new(&paths.checkpoint_dir)?;

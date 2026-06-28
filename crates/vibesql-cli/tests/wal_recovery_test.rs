@@ -363,3 +363,95 @@ fn test_subprocess_committed_rows_survive_sigkill() {
         );
     }
 }
+
+/// Run a one-shot `vibesql <db> < script` invocation to completion (clean exit).
+#[cfg(unix)]
+fn run_script(binary: &str, db: &Path, home: &Path, script: &str) -> String {
+    use std::io::Write;
+
+    let mut child = Command::new(binary)
+        .arg(db)
+        .env("HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn vibesql");
+    {
+        let mut stdin = child.stdin.take().expect("child stdin");
+        stdin.write_all(script.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+        // Drop stdin (EOF) → script mode runs to completion and exits cleanly,
+        // writing a checkpoint + truncating the WAL on the way out.
+    }
+    let out = child.wait_with_output().expect("vibesql did not exit");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// End-to-end regression for #5766: committed DML written by one CLI *process*
+/// must survive when a *subsequent* process re-opens the same file-backed DB
+/// under the default (WAL-on) config.
+///
+/// This is the exact shape of the bug: separate `vibesql <db> < stmt`
+/// invocations (which is how the TCL shim drives `execsql`). Before the fix the
+/// LSN counter reset to 1 each open, so the post-DELETE checkpoint carried a
+/// lower LSN than the pre-DELETE one and recovery resurrected the pre-delete
+/// state — the final `SELECT count(*)` returned 3 instead of 2.
+#[cfg(unix)]
+#[test]
+fn test_committed_delete_survives_separate_process_reopen() {
+    let home = tempfile::tempdir().unwrap();
+    // Default config (WAL on). No ~/.vibesqlrc needed.
+    let db_path = home.path().join("crossproc.vbsql");
+    let bin = vibesql_binary();
+
+    // Process 1: create + insert 3 rows inside an explicit transaction.
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE t(x);\nBEGIN;\nINSERT INTO t VALUES(1);\n\
+         INSERT INTO t VALUES(2);\nINSERT INTO t VALUES(3);\nCOMMIT;\n",
+    );
+
+    // Process 2: delete one committed row.
+    run_script(bin, &db_path, home.path(), "DELETE FROM t WHERE x=1;\n");
+
+    // Process 3: the deletion must be visible — count is 2, not 3.
+    let out = run_script(bin, &db_path, home.path(), "SELECT count(*) AS n FROM t;\n");
+    assert!(
+        out.contains('2') && !out.contains('3'),
+        "committed DELETE must persist across separate process re-opens with WAL on \
+         by default (expected count 2); got output:\n{out}"
+    );
+}
+
+/// Companion to the DELETE case: two bare auto-commit INSERTs issued by two
+/// separate processes must *accumulate* (final count 2), and a third process's
+/// UPDATE must also persist. Exercises the auto-commit path and UPDATE/INSERT
+/// (not just DELETE) across re-opens.
+#[cfg(unix)]
+#[test]
+fn test_autocommit_writes_accumulate_across_separate_processes() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("accumulate.vbsql");
+    let bin = vibesql_binary();
+
+    run_script(bin, &db_path, home.path(), "CREATE TABLE t(x, y);\n");
+    run_script(bin, &db_path, home.path(), "INSERT INTO t VALUES(1, 10);\n");
+    run_script(bin, &db_path, home.path(), "INSERT INTO t VALUES(2, 20);\n");
+
+    let count = run_script(bin, &db_path, home.path(), "SELECT count(*) AS n FROM t;\n");
+    assert!(
+        count.contains('2'),
+        "auto-commit INSERTs from separate processes must accumulate (expected 2); got:\n{count}"
+    );
+
+    // An UPDATE from yet another process must persist too.
+    run_script(bin, &db_path, home.path(), "UPDATE t SET y=99 WHERE x=1;\n");
+    let updated = run_script(bin, &db_path, home.path(), "SELECT y FROM t WHERE x=1;\n");
+    assert!(
+        updated.contains("99"),
+        "committed UPDATE must persist across a process re-open; got:\n{updated}"
+    );
+}
