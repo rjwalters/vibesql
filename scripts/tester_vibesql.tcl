@@ -2282,6 +2282,9 @@ array set vibesql_skip_files {
     update2 "Audited #5745: the file injects repeat() via `db func repeat [list string repeat]` and every test calls repeat(str,n) to build large UPDATE payloads. VibeSQL does NOT implement a repeat() scalar function, and REPEAT is a reserved keyword (stored-procedure REPEAT/UNTIL loops), so `SELECT repeat('ab',3)` is a parse error — the test extension cannot be substituted by a native function. All tests depend on repeat(), so the file is skipped. (The original 'SQLite test extension' note was misleading: repeat() is a standard string function elsewhere, just unimplemented + keyword-shadowed here.)"
     func4 "Entire file tests tointeger()/toreal() provided only by the static `totype` test extension (load_static_extension db totype). VibeSQL implements neither function, so 120+ of the 200 tests fail purely because the functions are missing. The load_static_extension shim stub now prevents the crash-abort (the file previously aborted at file scope), but a documented file skip is clearer than 120 visible function-missing failures. Tracked: tointeger()/toreal() are out-of-scope SQLite test extensions."
     trigger6 "Entire file is built around a custom counter() TCL function (db function counter ...) used to verify INSERT/UPDATE expressions are evaluated exactly once; the tables and triggers are created in 6-1.1 alongside the function registration, so once 6-1.1 is auto-skipped (custom function) every later test cascade-fails with 'no such table: log/t1' (#5470)"
+    capi2 "Pure C-API file: every test asserts sqlite3_prepare/sqlite3_step/sqlite3_column_*/sqlite3_data_count statement-handle behavior. The `execsql` calls only build setup tables; the assertions themselves are all C-API and unreachable from the SQL CLI. No do_execsql_test coverage. (Audit #5788: 144 tests, 60 failed purely on C-API emulation gaps before this skip.)"
+    capi3b "Pure C-API file: tests sqlite3_prepare/sqlite3_step/sqlite3_finalize handle lifecycle and UTF16 column metadata via the C API. `execsql` is setup only; no do_execsql_test SQL-CLI-reachable assertions. (Audit #5788.)"
+    capi3e "Pure C-API file: every test opens a raw connection handle via sqlite3_open/sqlite3_open16 and checks sqlite3_errcode/sqlite3_close plus `file isfile` filesystem assertions on the file that handle created — semantics of the C open API, not SQL reachable from the CLI. No do_execsql_test coverage. (The per-test sqlite3_open*/sqlite3_close detector also skips these, but a file-level entry documents intent.)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
     incrblob "Uses incrblob - SQLite incremental blob I/O API"
@@ -4192,6 +4195,16 @@ proc uses_sqlite_internals {script} {
     if {[regexp {sqlite3_finalize} $script]} {
         return [list 1 "uses sqlite3_finalize (SQLite C API)"]
     }
+    # sqlite3_open / sqlite3_open16 / sqlite3_open_v2 — low-level connection
+    # handles created by the C library, distinct from the `sqlite3 db ...` TCL
+    # command. Tests that open a raw C handle (e.g. capi3e file-creation checks)
+    # are not reachable from the SQL CLI.
+    if {[regexp {sqlite3_open} $script]} {
+        return [list 1 "uses sqlite3_open* (SQLite C API)"]
+    }
+    if {[regexp {sqlite3_close} $script]} {
+        return [list 1 "uses sqlite3_close (SQLite C API)"]
+    }
     if {[regexp {sqlite3_column_} $script]} {
         return [list 1 "uses sqlite3_column_* (SQLite C API)"]
     }
@@ -4318,6 +4331,19 @@ proc uses_sqlite_internals {script} {
     }
     if {[regexp {test_isolation[[:space:]]*\(} $script]} {
         return [list 1 "uses test_isolation() (SQLite test function)"]
+    }
+    # real2hex()/hex2real() expose the raw IEEE-754 bit pattern of a REAL value.
+    # They are registered only in SQLite's C test harness (test_func.c) via
+    # sqlite3_create_function and are unreachable from the SQL CLI. atof1.test
+    # uses them to bit-compare sqlite3AtoF() conversions (~40k generated tests);
+    # VibeSQL's user-facing float formatting is correct (SELECT 1.0e300, 0.1,
+    # 2.0/3.0 => 1.0e+300, 0.1, 0.666666666666667 — matching SQLite), so these
+    # are harness artifacts, the same class as the skipped intreal() tests.
+    if {[regexp {real2hex[[:space:]]*\(} $script]} {
+        return [list 1 "uses real2hex() (SQLite test function, test_func.c)"]
+    }
+    if {[regexp {hex2real[[:space:]]*\(} $script]} {
+        return [list 1 "uses hex2real() (SQLite test function, test_func.c)"]
     }
 
     # SQLite test function registration via db func command
