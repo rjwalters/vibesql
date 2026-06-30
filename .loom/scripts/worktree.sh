@@ -385,6 +385,7 @@ Usage:
   pnpm worktree <issue-number> <branch>                 Create worktree with custom branch
   pnpm worktree <issue-number> --sparse <paths...>      Cone-mode sparse checkout
   pnpm worktree <issue-number> --full                   Convert sparse worktree to full
+  pnpm worktree <issue-number> --all-submodules         Init ALL submodules (incl. heavy ones)
   pnpm worktree --check                                 Check if in a worktree
   pnpm worktree --json <issue-number>                   Machine-readable JSON output
   pnpm worktree --return-to <dir> <issue-number>        Store return directory
@@ -407,6 +408,11 @@ Examples:
   pnpm worktree 42 --full
     Converts an existing sparse worktree back to a full checkout
     (no-op on an already-full worktree).
+
+  pnpm worktree 42 --all-submodules
+    Initializes every submodule, including heavy ones that are skipped by
+    default (e.g. third_party/sqllogictest, ~1.1G). Same as
+    LOOM_WORKTREE_SUBMODULES=all.
 
   pnpm worktree --check
     Shows current worktree status
@@ -439,10 +445,21 @@ Safety Features:
   ✓ Repo-global lock serializes concurrent invocations (issue #3380)
   ✓ Recovers from stale .git/worktrees/issue-N/index.lock files
   ✓ Recovers from half-created .loom/worktrees/issue-N/ dirs
+  ✓ Skips heavy submodules by default (e.g. third_party/sqllogictest, ~1.1G)
+  ✓ Free-space guard skips submodule clones when the disk is low
 
 Environment Variables:
   LOOM_WORKTREE_ALWAYS_INCLUDE      Extra sparse-mode safety paths (space-sep)
   LOOM_SUBMODULE_TIMEOUT            Per-submodule init timeout (default 300s)
+  LOOM_WORKTREE_SUBMODULE_SKIP      Space-separated submodule paths to skip on
+                                    init (default "third_party/sqllogictest").
+                                    Set to "" to init everything by default.
+  LOOM_WORKTREE_SUBMODULES          Set to "all" to force initializing every
+                                    submodule (same as --all-submodules).
+  LOOM_WORKTREE_MIN_FREE_MB         Skip a submodule clone when free space on the
+                                    worktree volume is below this many MB
+                                    (default 2048). Prevents disk-exhaustion
+                                    deadlocks during large clones.
   LOOM_WORKTREE_LOCK_TIMEOUT        Lock acquisition timeout in seconds
                                     (default 600 — sized to cover worst-case
                                     cold-clone submodule init)
@@ -533,6 +550,7 @@ fi
 #   --full
 SPARSE_MODE=false
 FULL_MODE=false
+ALL_SUBMODULES=false
 SPARSE_PATHS=()
 CUSTOM_BRANCH=""
 
@@ -549,6 +567,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --full)
             FULL_MODE=true
+            shift
+            ;;
+        --all-submodules)
+            # Opt in to initializing every submodule, overriding the default
+            # skip-list (which excludes heavy submodules like sqllogictest).
+            ALL_SUBMODULES=true
             shift
             ;;
         --*)
@@ -1051,6 +1075,23 @@ EOF
     UNINIT_SUBMODULES=$(cd "$ABS_WORKTREE_PATH" && git submodule status 2>/dev/null | grep '^-' | wc -l | tr -d ' ')
     SUBMODULE_TIMEOUT="${LOOM_SUBMODULE_TIMEOUT:-300}"
 
+    # Selective submodule init (issue #5773):
+    #   By default we skip heavy submodules (e.g. the 1.1G third_party/sqllogictest)
+    #   that most tasks never need, to avoid wasting time and — on a near-full
+    #   disk — exhausting the volume mid-clone. The consuming scripts already
+    #   degrade gracefully and print on-demand init guidance when a skipped
+    #   submodule is actually needed (scripts/sqllogictest, scripts/tcltest).
+    #   Override the skip-list with LOOM_WORKTREE_SUBMODULE_SKIP, or force a full
+    #   init with --all-submodules / LOOM_WORKTREE_SUBMODULES=all.
+    SUBMODULE_SKIP_LIST="${LOOM_WORKTREE_SUBMODULE_SKIP-third_party/sqllogictest}"
+    if [[ "$ALL_SUBMODULES" == "true" || "$LOOM_WORKTREE_SUBMODULES" == "all" ]]; then
+        SUBMODULE_SKIP_LIST=""
+    fi
+    # Pre-flight free-space guard: never start a clone that could drive the
+    # worktree volume to 0 bytes. Below this threshold (MB) clones are skipped
+    # with a warning rather than attempted. Override via LOOM_WORKTREE_MIN_FREE_MB.
+    SUBMODULE_MIN_FREE_MB="${LOOM_WORKTREE_MIN_FREE_MB:-2048}"
+
     if [[ "$UNINIT_SUBMODULES" -gt 0 ]]; then
         if [[ "$JSON_OUTPUT" != "true" ]]; then
             print_info "Initializing $UNINIT_SUBMODULES submodule(s) with shared objects..."
@@ -1060,6 +1101,35 @@ EOF
 
         # Process each uninitialized submodule
         git submodule status | grep '^-' | awk '{print $2}' | while read -r submod_path; do
+            # Skip-list: don't clone submodules the default task doesn't need.
+            skip_this_submod=false
+            for skip_path in $SUBMODULE_SKIP_LIST; do
+                if [[ "$submod_path" == "$skip_path" ]]; then
+                    skip_this_submod=true
+                    break
+                fi
+            done
+            if [[ "$skip_this_submod" == "true" ]]; then
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    print_info "Skipping submodule $submod_path (opt in with --all-submodules or LOOM_WORKTREE_SUBMODULES=all)"
+                fi
+                continue
+            fi
+
+            # Free-space guard: skip (don't attempt) the clone when the volume
+            # is already low, rather than risk filling it mid-download.
+            avail_kb=$(df -Pk "$ABS_WORKTREE_PATH" 2>/dev/null | awk 'NR==2{print $4}')
+            if [[ -n "$avail_kb" ]]; then
+                avail_mb=$(( avail_kb / 1024 ))
+                if [[ "$avail_mb" -lt "$SUBMODULE_MIN_FREE_MB" ]]; then
+                    if [[ "$JSON_OUTPUT" != "true" ]]; then
+                        print_warning "Low disk space (${avail_mb}MB < ${SUBMODULE_MIN_FREE_MB}MB): skipping clone of $submod_path"
+                        print_info "Free space and re-run, or lower LOOM_WORKTREE_MIN_FREE_MB, then: git submodule update --init --recursive -- $submod_path"
+                    fi
+                    continue
+                fi
+            fi
+
             ref_path="$MAIN_GIT_DIR/modules/$submod_path"
 
             if [[ -d "$ref_path" ]]; then
