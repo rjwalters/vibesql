@@ -1,6 +1,6 @@
-pytest>=9.1.0
+pytest>=9.1.1
 pytest-benchmark>=5.2.3
 pytest-json-report>=1.5.0
 psutil>=7.2.2
-duckdb>=1.5.3
+duckdb>=1.5.4
 vibesql
