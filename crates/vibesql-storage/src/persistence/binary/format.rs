@@ -32,7 +32,15 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///       `sqlite_master.sql`). v8 and earlier files remain readable: the read
 ///       path treats the absent field as `sql_source = None`, falling back to
 ///       the reconstructed CREATE TABLE text. Issue #5619.
-pub const VERSION: u8 = 9;
+/// - v10: Added view persistence. The catalog serializer now emits a views
+///        section (name, schema, optional column list, with_check_option, the
+///        defining SELECT as SQL text, and the verbatim `sql_definition`) just
+///        before the triggers section, so view-dependent INSTEAD OF triggers
+///        resolve during recovery. v9 and earlier files remain readable: the
+///        read path is gated on `version >= 10` and treats absence as "zero
+///        views." A v10 file opened by a v9 binary is rejected cleanly by
+///        `read_header` (version > VERSION). Issue #5771.
+pub const VERSION: u8 = 10;
 
 /// Type tags for binary serialization
 #[repr(u8)]

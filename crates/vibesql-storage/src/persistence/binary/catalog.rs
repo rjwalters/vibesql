@@ -188,6 +188,69 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         }
     }
 
+    // Write views (v10+, issue #5771).
+    //
+    // Written BEFORE triggers so that, on load, a view-dependent INSTEAD OF
+    // trigger resolves against an already-present view during recovery. The
+    // defining SELECT is serialized as SQL text (via `ToSql`) and re-parsed on
+    // load, mirroring how expression indexes store/re-parse their SQL and how
+    // triggers store `RawSql`. The verbatim `sql_definition` (the original
+    // `CREATE VIEW` text) is persisted too so `sqlite_master.sql` renders the
+    // user's exact formatting; when absent, load falls back to the
+    // `ToSql`-reconstructed SELECT.
+    let view_names = db.catalog.list_views();
+    write_u32(writer, view_names.len() as u32)?;
+
+    for view_name in view_names {
+        if let Some(view) = db.catalog.get_view(&view_name) {
+            // 1. name
+            write_string(writer, &view.name)?;
+
+            // 2. schema (present-flag + string) — preserves temp tagging
+            match &view.schema {
+                Some(schema) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, schema)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
+
+            // 3. columns (present-flag + count + strings)
+            match &view.columns {
+                Some(cols) => {
+                    write_bool(writer, true)?;
+                    write_u32(writer, cols.len() as u32)?;
+                    for col in cols {
+                        write_string(writer, col)?;
+                    }
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
+
+            // 4. with_check_option
+            write_bool(writer, view.with_check_option)?;
+
+            // 5. defining SELECT as SQL text
+            use vibesql_ast::pretty_print::ToSql;
+            write_string(writer, &view.query.to_sql())?;
+
+            // 6. sql_definition (present-flag + string)
+            match &view.sql_definition {
+                Some(def) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, def)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
+        }
+    }
+
     // Write triggers
     let trigger_names = db.catalog.list_triggers();
     write_u32(writer, trigger_names.len() as u32)?;
@@ -601,6 +664,73 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         }
     }
 
+    // Read views (v10+, issue #5771). v9-and-earlier files do not include a
+    // views section, so the read is gated on `version >= 10`; absence is
+    // treated as "zero views." Views are read BEFORE triggers so that a
+    // view-dependent INSTEAD OF trigger resolves against an already-present
+    // view during recovery.
+    if version >= 10 {
+        let view_count = read_u32(reader)?;
+        for _ in 0..view_count {
+            // 1. name
+            let name = read_string(reader)?;
+
+            // 2. schema (present-flag + string)
+            let has_schema = read_bool(reader)?;
+            let schema = if has_schema { Some(read_string(reader)?) } else { None };
+
+            // 3. columns (present-flag + count + strings)
+            let has_columns = read_bool(reader)?;
+            let columns = if has_columns {
+                let col_count = read_u32(reader)?;
+                let mut cols = Vec::with_capacity(col_count as usize);
+                for _ in 0..col_count {
+                    cols.push(read_string(reader)?);
+                }
+                Some(cols)
+            } else {
+                None
+            };
+
+            // 4. with_check_option
+            let with_check_option = read_bool(reader)?;
+
+            // 5. defining SELECT as SQL text — re-parse into a SelectStmt
+            let query_sql = read_string(reader)?;
+            let query =
+                vibesql_parser::arena_parser::parse_select_to_owned(&query_sql).map_err(|e| {
+                    StorageError::NotImplemented(format!(
+                        "Failed to parse view '{}' SELECT '{}': {}",
+                        name, query_sql, e
+                    ))
+                })?;
+
+            // 6. sql_definition (present-flag + string)
+            let has_sql_def = read_bool(reader)?;
+            let sql_definition = if has_sql_def { Some(read_string(reader)?) } else { None };
+
+            // Reconstruct the view definition. Prefer the verbatim
+            // sql_definition; fall back to the ToSql-reconstructed SELECT.
+            let view_def = match sql_definition {
+                Some(def) => vibesql_catalog::ViewDefinition::new_with_sql(
+                    name,
+                    columns,
+                    query,
+                    with_check_option,
+                    def,
+                ),
+                None => {
+                    vibesql_catalog::ViewDefinition::new(name, columns, query, with_check_option)
+                }
+            }
+            .with_schema(schema);
+
+            db.catalog.create_view(view_def).map_err(|e| {
+                StorageError::NotImplemented(format!("Failed to create view: {}", e))
+            })?;
+        }
+    }
+
     // Read triggers
     let trigger_count = read_u32(reader)?;
 
@@ -907,5 +1037,157 @@ mod tests {
 
         let table = reloaded.get_table("t2").expect("t2 must survive the round-trip");
         assert_eq!(table.schema.sql_source, None);
+    }
+
+    /// Issue #5771: views must survive a binary catalog round-trip. Before v10
+    /// the serializer had no views section at all, so every `CREATE VIEW` was
+    /// silently dropped when a file-backed DB reopened from a checkpoint under
+    /// the default `wal = true` config.
+    ///
+    /// Covers: a plain view, a view with an explicit column list, a view with
+    /// `WITH CHECK OPTION`, and a temp view — asserting name/schema/columns/
+    /// with_check_option/query SQL all survive.
+    #[test]
+    fn test_binary_catalog_round_trips_views() {
+        use vibesql_ast::pretty_print::ToSql;
+
+        let mut db = Database::new();
+
+        // Backing table so the defining SELECTs reference something real.
+        let schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "a".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t1", false))
+            .unwrap();
+
+        let parse = |sql: &str| vibesql_parser::arena_parser::parse_select_to_owned(sql).unwrap();
+
+        // 1. Plain view, with a verbatim sql_definition.
+        let plain = vibesql_catalog::ViewDefinition::new_with_sql(
+            "v_plain".to_string(),
+            None,
+            parse("SELECT a FROM t1"),
+            false,
+            "CREATE VIEW v_plain AS SELECT a FROM t1".to_string(),
+        );
+        db.catalog.create_view(plain).unwrap();
+
+        // 2. View with an explicit column list (the wherelimit shape: tv(r,a)).
+        let with_cols = vibesql_catalog::ViewDefinition::new(
+            "v_cols".to_string(),
+            Some(vec!["r".to_string(), "a".to_string()]),
+            parse("SELECT rowid, a FROM t1"),
+            false,
+        );
+        db.catalog.create_view(with_cols).unwrap();
+
+        // 3. View WITH CHECK OPTION.
+        let with_check = vibesql_catalog::ViewDefinition::new(
+            "v_check".to_string(),
+            None,
+            parse("SELECT a FROM t1 WHERE a > 0"),
+            true,
+        );
+        db.catalog.create_view(with_check).unwrap();
+
+        // 4. Temp view (schema = Some("temp")), no sql_definition.
+        let temp = vibesql_catalog::ViewDefinition::new(
+            "v_temp".to_string(),
+            None,
+            parse("SELECT a FROM t1"),
+            false,
+        )
+        .with_schema(Some("temp".to_string()));
+        db.catalog.create_view(temp).unwrap();
+
+        // Round-trip the catalog at the current version.
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        // Plain view.
+        let v = reloaded.catalog.get_view("v_plain").expect("v_plain must survive");
+        assert_eq!(v.name, "v_plain");
+        assert_eq!(v.schema, None);
+        assert_eq!(v.columns, None);
+        assert!(!v.with_check_option);
+        assert_eq!(v.sql_definition.as_deref(), Some("CREATE VIEW v_plain AS SELECT a FROM t1"));
+        assert_eq!(v.query.to_sql(), parse("SELECT a FROM t1").to_sql());
+
+        // Explicit column list.
+        let v = reloaded.catalog.get_view("v_cols").expect("v_cols must survive");
+        assert_eq!(v.columns.as_deref(), Some(&["r".to_string(), "a".to_string()][..]));
+        assert_eq!(v.query.to_sql(), parse("SELECT rowid, a FROM t1").to_sql());
+
+        // WITH CHECK OPTION.
+        let v = reloaded.catalog.get_view("v_check").expect("v_check must survive");
+        assert!(v.with_check_option);
+        assert_eq!(v.query.to_sql(), parse("SELECT a FROM t1 WHERE a > 0").to_sql());
+
+        // Temp view.
+        let v = reloaded.catalog.get_view("v_temp").expect("v_temp must survive");
+        assert_eq!(v.schema.as_deref(), Some("temp"));
+        assert!(v.is_temp());
+    }
+
+    /// Issue #5771 backward compat: a v9 (pre-views) file must load cleanly
+    /// under the new (v10) reader, yielding zero views rather than an error.
+    ///
+    /// The only on-disk difference between v9 and v10 is the views section
+    /// inserted between the indexes and triggers sections. For a catalog with
+    /// no views, the v10 views section is just a single `u32` count of `0`, so
+    /// the v10 serialization of a zero-view catalog is byte-identical to a
+    /// genuine v9 file except for that extra trailing `[0]` count (which a v9
+    /// reader, stopping after triggers, never reaches). Reading such a buffer
+    /// with an explicit `version = 9` exercises exactly the path a real v9 file
+    /// takes through the v10 binary: the `version >= 10` gate is skipped, no
+    /// view bytes are consumed, and the catalog loads as zero views.
+    #[test]
+    fn test_v9_reader_treats_absent_views_as_zero() {
+        let mut db = Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "a".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t1", false))
+            .unwrap();
+        // No views and no triggers: the trailing v10 view-count(0) and
+        // trigger-count(0) leave the v9 read path perfectly aligned.
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+
+        // v9 reader: the views section is gated off, treated as zero views.
+        let reloaded = read_catalog_v(&mut &buf[..], 9).unwrap();
+        assert!(
+            reloaded.catalog.list_views().is_empty(),
+            "a v9 reader must treat the absent views section as zero views"
+        );
+        assert!(
+            reloaded.get_table("t1").is_some(),
+            "the table must still load under the v9 reader"
+        );
+
+        // v10 reader of the same zero-view catalog: also zero views, no error.
+        let reloaded_v10 = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+        assert!(reloaded_v10.catalog.list_views().is_empty());
+        assert!(reloaded_v10.get_table("t1").is_some());
     }
 }
