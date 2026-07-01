@@ -171,4 +171,32 @@ mod tests {
         assert_eq!(p.wal_path, PathBuf::from("/tmp/mydata.wal"));
         assert_eq!(p.checkpoint_dir, PathBuf::from("/tmp/mydata-checkpoints"));
     }
+
+    /// Regression for #5785: the very first checkpoint on a freshly-opened
+    /// WAL-backed database must succeed even when no WAL entries have been
+    /// written yet (e.g. the opening statement is a no-op `DROP TABLE IF EXISTS`
+    /// that produces zero WAL ops). Before the fix, the WAL header was buffered
+    /// but never flushed, so the on-disk WAL was 0 bytes and `truncate_wal`
+    /// failed its header read with "failed to fill whole buffer", surfacing as a
+    /// leaked auto-save warning.
+    #[test]
+    fn test_checkpoint_on_fresh_wal_with_no_entries_succeeds() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("fresh.vbsql");
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let (db, mut wal_state) = WalState::open(&db_path_str).unwrap();
+
+        // No writes performed — this mirrors an opening no-op DDL. The checkpoint
+        // must not error.
+        wal_state.checkpoint(&db).expect("checkpoint on empty fresh WAL must succeed");
+
+        // A second checkpoint (already-checkpointed / still empty) must also be a
+        // clean no-op.
+        wal_state.checkpoint(&db).expect("repeat checkpoint must succeed");
+
+        // The WAL on disk must now be a valid header-bearing (or empty) file that
+        // recovery can reopen without error.
+        let (_db2, _stats) = WalState::open(&db_path_str).expect("reopen after checkpoint");
+    }
 }
