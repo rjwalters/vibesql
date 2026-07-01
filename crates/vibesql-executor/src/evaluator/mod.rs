@@ -20,6 +20,7 @@ pub(crate) mod parallel;
 mod parallel;
 pub(crate) mod pattern;
 pub(crate) mod raise;
+pub(crate) mod row_value;
 mod schema_context;
 mod single;
 mod subqueries_shared;
