@@ -1235,6 +1235,59 @@ proc track_pragma_setting {sql} {
     return $found
 }
 
+# -- WAL-inclusive database copy helpers (#5782) -----------------------------
+#
+# WAL is on by default (#5760). For a database file `<root>.vbsql`, committed
+# state lives in sibling paths derived by `crates/vibesql-cli/src/executor/wal.rs`:
+#
+#   <root>.wal            — active write-ahead log   (path.with_extension("wal"))
+#   <root>-checkpoints/   — checkpoint archive dir   (<stem>-checkpoints/)
+#
+# A piped CLI invocation may write committed rows ONLY to these siblings and
+# not to the `.vbsql` snapshot at all (the snapshot is written on checkpoint /
+# clean exit). Any construct that copies the database with a bare
+# `file copy -force <root>.vbsql <dst>` therefore loses the committed state and
+# produces an empty destination. `copy_db_with_wal` copies the snapshot plus
+# both siblings so the destination sees the full committed database.
+
+proc wal_sibling_paths {db_path} {
+    # Mirror WalPaths::derive: <root>.wal and <root>-checkpoints/.
+    # `file rootname` strips the final extension, matching Rust's
+    # `with_extension("wal")` / `file_stem` + "-checkpoints".
+    set root [file rootname $db_path]
+    return [list "${root}.wal" "${root}-checkpoints"]
+}
+
+proc copy_db_with_wal {from to} {
+    # Copy a VibeSQL database file together with its WAL siblings so the
+    # destination reflects committed state that may live outside the .vbsql
+    # snapshot. Safe when the snapshot or siblings are absent.
+    lassign [wal_sibling_paths $from] from_wal from_ckpt
+    lassign [wal_sibling_paths $to]   to_wal   to_ckpt
+
+    # Clear any stale destination siblings so we never mix old WAL state in.
+    catch {file delete -force $to_wal}
+    catch {file delete -force $to_ckpt}
+
+    if {[file exists $from]} {
+        catch {file copy -force $from $to}
+    }
+    if {[file exists $from_wal]} {
+        catch {file copy -force $from_wal $to_wal}
+    }
+    if {[file exists $from_ckpt]} {
+        catch {file copy -force $from_ckpt $to_ckpt}
+    }
+}
+
+proc delete_db_with_wal {db_path} {
+    # Delete a database file and its WAL siblings (trial-db teardown).
+    lassign [wal_sibling_paths $db_path] wal ckpt
+    catch {file delete -force $db_path}
+    catch {file delete -force $wal}
+    catch {file delete -force $ckpt}
+}
+
 proc trial_check_in_transaction {new_sql} {
     # Trial-execute the cumulative transaction batch (existing $::sql_batch
     # plus $new_sql) with an appended ROLLBACK, so that errors from $new_sql
@@ -1304,11 +1357,15 @@ proc trial_check_in_transaction {new_sql} {
         catch {exec $::vibesql_path < $tmpfile 2>@1} result
     } else {
         set trial_db "/tmp/vibesql_trialdb_[pid]_[clock microseconds].vbsql"
-        if {[file exists $::db_file]} {
-            file copy -force $::db_file $trial_db
-        }
+        # Copy the FULL database — snapshot plus WAL siblings — so the trial
+        # sees committed state. With WAL on by default (#5760) the committed
+        # rows can live only in <root>.wal / <root>-checkpoints/ (the .vbsql
+        # snapshot may not exist yet), so a snapshot-only copy would yield an
+        # empty trial db and spuriously fail every in-transaction statement,
+        # rolling back the real inserts (#5782).
+        copy_db_with_wal $::db_file $trial_db
         catch {exec $::vibesql_path $trial_db < $tmpfile 2>@1} result
-        file delete -force $trial_db
+        delete_db_with_wal $trial_db
     }
     file delete -force $tmpfile
 
@@ -5521,14 +5578,19 @@ proc copy_file {from to} {
     # file open, so a plain filesystem copy is the right behavior. Defined
     # here (#5460) so triggerA.test's malloc-test snapshot step doesn't abort
     # the whole file with "invalid command name".
-    catch {file copy -force $from $to}
+    #
+    # WAL-inclusive (#5782): with WAL on by default committed state may live in
+    # the <root>.wal / <root>-checkpoints/ siblings rather than the snapshot,
+    # so a bare snapshot copy would restore an empty database.
+    copy_db_with_wal $from $to
 }
 
 proc forcecopy {from to} {
     # Force-copy variant (deletes destination first). Same rationale as
-    # copy_file above (#5460).
+    # copy_file above (#5460); WAL-inclusive per #5782 (copy_db_with_wal
+    # already clears stale destination siblings before copying).
     catch {file delete -force $to}
-    catch {file copy -force $from $to}
+    copy_db_with_wal $from $to
 }
 
 proc sqlite3_extended_result_codes {db onoff} {
