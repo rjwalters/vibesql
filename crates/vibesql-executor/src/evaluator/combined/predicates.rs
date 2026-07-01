@@ -588,6 +588,33 @@ impl CombinedExpressionEvaluator<'_> {
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Row-value IS / IS NOT: `(a, b) IS (c, d)` and the subquery form
+        // `(a, b, c) IS (SELECT a, b, c FROM ...)`. NULL-safe, element-wise.
+        match (left, right) {
+            (
+                vibesql_ast::Expression::RowValueConstructor(left_exprs),
+                vibesql_ast::Expression::RowValueConstructor(right_exprs),
+            ) => {
+                return self.eval_row_value_is_distinct(left_exprs, right_exprs, negated, row);
+            }
+            (
+                vibesql_ast::Expression::RowValueConstructor(tuple_exprs),
+                vibesql_ast::Expression::ScalarSubquery(subquery),
+            )
+            | (
+                vibesql_ast::Expression::ScalarSubquery(subquery),
+                vibesql_ast::Expression::RowValueConstructor(tuple_exprs),
+            ) => {
+                return self.eval_row_value_is_distinct_subquery(
+                    tuple_exprs,
+                    subquery,
+                    negated,
+                    row,
+                );
+            }
+            _ => {}
+        }
+
         let left_val = self.eval(left, row)?;
         let right_val = self.eval(right, row)?;
 

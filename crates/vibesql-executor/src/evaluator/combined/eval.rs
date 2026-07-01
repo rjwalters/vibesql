@@ -884,19 +884,54 @@ impl CombinedExpressionEvaluator<'_> {
 
                         // Handle row value constructor comparisons
                         // SQL:1999 Section 7.1: Row value constructor comparison
-                        // (a, b) op (c, d) uses lexicographic ordering
+                        // (a, b) op (c, d) uses lexicographic ordering. The
+                        // right-hand side may also be a scalar subquery that
+                        // returns a row of the same arity, e.g.
+                        // (a, b, c) > (SELECT a, b, c FROM t WHERE ...).
                         if is_comparison {
-                            if let (
-                                vibesql_ast::Expression::RowValueConstructor(left_values),
-                                vibesql_ast::Expression::RowValueConstructor(right_values),
-                            ) = (left.as_ref(), right.as_ref())
-                            {
-                                return self.eval_row_value_comparison(
-                                    left_values,
-                                    op,
-                                    right_values,
-                                    row,
-                                );
+                            match (left.as_ref(), right.as_ref()) {
+                                (
+                                    vibesql_ast::Expression::RowValueConstructor(left_values),
+                                    vibesql_ast::Expression::RowValueConstructor(right_values),
+                                ) => {
+                                    return self.eval_row_value_comparison(
+                                        left_values,
+                                        op,
+                                        right_values,
+                                        row,
+                                    );
+                                }
+                                (
+                                    vibesql_ast::Expression::RowValueConstructor(tuple_exprs),
+                                    vibesql_ast::Expression::ScalarSubquery(subquery),
+                                ) => {
+                                    return self.eval_row_value_subquery_comparison(
+                                        tuple_exprs, op, subquery, true, row,
+                                    );
+                                }
+                                (
+                                    vibesql_ast::Expression::ScalarSubquery(subquery),
+                                    vibesql_ast::Expression::RowValueConstructor(tuple_exprs),
+                                ) => {
+                                    return self.eval_row_value_subquery_comparison(
+                                        tuple_exprs, op, subquery, false, row,
+                                    );
+                                }
+                                (
+                                    vibesql_ast::Expression::ScalarSubquery(left_sub),
+                                    vibesql_ast::Expression::ScalarSubquery(right_sub),
+                                ) => {
+                                    // Two multi-column subqueries compared as row
+                                    // values, e.g. (SELECT a,b)==(SELECT x,y). When
+                                    // both are single-column this returns None and
+                                    // we fall through to scalar comparison.
+                                    if let Some(result) = self
+                                        .eval_two_subquery_row_comparison(left_sub, op, right_sub, row)?
+                                    {
+                                        return Ok(result);
+                                    }
+                                }
+                                _ => {}
                             }
                         }
 
@@ -1389,165 +1424,212 @@ impl CombinedExpressionEvaluator<'_> {
             ));
         }
 
-        // Evaluate all elements
+        // Evaluate each element pair and apply per-column SQLite type affinity,
+        // mirroring the scalar comparison path so that mixed TEXT/NUMERIC tuples
+        // compare per SQLite rules instead of by raw storage class.
         let mut left_values = Vec::with_capacity(left_exprs.len());
         let mut right_values = Vec::with_capacity(right_exprs.len());
 
         for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
-            left_values.push(self.eval(left_expr, row)?);
-            right_values.push(self.eval(right_expr, row)?);
+            let left_val = self.eval(left_expr, row)?;
+            let right_val = self.eval(right_expr, row)?;
+            let (left_val, right_val) =
+                self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
+            left_values.push(left_val);
+            right_values.push(right_val);
         }
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
-        // Perform comparison based on operator
-        match op {
-            vibesql_ast::BinaryOperator::Equal => {
-                // (a, b) = (c, d) → a = c AND b = d
-                let mut has_null = false;
-                for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
-                    let cmp_result = ExpressionEvaluator::eval_binary_op_static(
-                        left_val,
-                        op,
-                        right_val,
-                        sql_mode.clone(),
-                    )?;
-                    match cmp_result {
-                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
-                        SqlValue::Null => has_null = true,
-                        SqlValue::Boolean(true) => {}
-                        _ => {
-                            return Err(ExecutorError::TypeError(format!(
-                                "Comparison returned non-boolean: {:?}",
-                                cmp_result
-                            )))
-                        }
-                    }
-                }
-                if has_null {
-                    Ok(SqlValue::Null)
-                } else {
-                    Ok(SqlValue::Boolean(true))
-                }
-            }
-
-            vibesql_ast::BinaryOperator::NotEqual => {
-                // (a, b) <> (c, d) → a <> c OR b <> d
-                let mut has_null = false;
-                for (left_val, right_val) in left_values.iter().zip(right_values.iter()) {
-                    let eq_result = ExpressionEvaluator::eval_binary_op_static(
-                        left_val,
-                        &vibesql_ast::BinaryOperator::Equal,
-                        right_val,
-                        sql_mode.clone(),
-                    )?;
-                    match eq_result {
-                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(true)),
-                        SqlValue::Null => has_null = true,
-                        SqlValue::Boolean(true) => {}
-                        _ => {
-                            return Err(ExecutorError::TypeError(format!(
-                                "Comparison returned non-boolean: {:?}",
-                                eq_result
-                            )))
-                        }
-                    }
-                }
-                if has_null {
-                    Ok(SqlValue::Null)
-                } else {
-                    Ok(SqlValue::Boolean(false))
-                }
-            }
-
-            vibesql_ast::BinaryOperator::LessThan
-            | vibesql_ast::BinaryOperator::LessThanOrEqual
-            | vibesql_ast::BinaryOperator::GreaterThan
-            | vibesql_ast::BinaryOperator::GreaterThanOrEqual => {
-                self.eval_row_value_ordering(&left_values, op, &right_values, sql_mode)
-            }
-
-            _ => Err(ExecutorError::UnsupportedExpression(format!(
-                "Unsupported operator for row value comparison: {:?}",
-                op
-            ))),
-        }
+        crate::evaluator::row_value::compare_row_values(
+            &left_values,
+            op,
+            &right_values,
+            |l, o, r| ExpressionEvaluator::eval_binary_op_static(l, o, r, sql_mode.clone()),
+        )
     }
 
-    /// Helper for lexicographic ordering comparison of row values
-    fn eval_row_value_ordering(
+    /// Compare a row-value tuple against a scalar subquery that yields a single
+    /// row of the same arity, e.g. `(a, b, c) > (SELECT a, b, c FROM t WHERE ...)`.
+    ///
+    /// `tuple_on_left` is true when the tuple is the left-hand operand; when the
+    /// subquery is on the left the operator is flipped so the lexicographic
+    /// comparison is always evaluated tuple-on-left.
+    pub(in crate::evaluator) fn eval_row_value_subquery_comparison(
         &self,
-        left_values: &[SqlValue],
+        tuple_exprs: &[vibesql_ast::Expression],
         op: &vibesql_ast::BinaryOperator,
-        right_values: &[SqlValue],
-        sql_mode: vibesql_types::SqlMode,
+        subquery: &vibesql_ast::SelectStmt,
+        tuple_on_left: bool,
+        row: &vibesql_storage::Row,
     ) -> Result<SqlValue, ExecutorError> {
-        let is_less = matches!(
-            op,
-            vibesql_ast::BinaryOperator::LessThan | vibesql_ast::BinaryOperator::LessThanOrEqual
-        );
-        let is_or_equal = matches!(
-            op,
-            vibesql_ast::BinaryOperator::LessThanOrEqual
-                | vibesql_ast::BinaryOperator::GreaterThanOrEqual
-        );
+        if tuple_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
 
-        let strict_op = if is_less {
-            vibesql_ast::BinaryOperator::LessThan
+        let (tuple_values, subquery_values) =
+            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row)?;
+
+        // Always evaluate with the tuple on the left. `subquery OP tuple` is
+        // equivalent to `tuple flip(OP) subquery`, so only the operator flips.
+        let effective_op = if tuple_on_left {
+            *op
         } else {
-            vibesql_ast::BinaryOperator::GreaterThan
+            crate::evaluator::row_value::flip_comparison_operator(op)
         };
 
-        let eq_op = vibesql_ast::BinaryOperator::Equal;
-        let mut has_null = false;
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
-        for i in 0..left_values.len() {
-            let left_val = &left_values[i];
-            let right_val = &right_values[i];
+        crate::evaluator::row_value::compare_row_values(
+            &tuple_values,
+            &effective_op,
+            &subquery_values,
+            |l, o, r| ExpressionEvaluator::eval_binary_op_static(l, o, r, sql_mode.clone()),
+        )
+    }
 
-            let strict_result = ExpressionEvaluator::eval_binary_op_static(
-                left_val,
-                &strict_op,
-                right_val,
-                sql_mode.clone(),
-            )?;
-            match strict_result {
-                SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
-                SqlValue::Null => has_null = true,
-                SqlValue::Boolean(false) => {
-                    let eq_result = ExpressionEvaluator::eval_binary_op_static(
-                        left_val,
-                        &eq_op,
-                        right_val,
-                        sql_mode.clone(),
-                    )?;
-                    match eq_result {
-                        SqlValue::Boolean(true) => {}
-                        SqlValue::Boolean(false) => return Ok(SqlValue::Boolean(false)),
-                        SqlValue::Null => has_null = true,
-                        _ => {
-                            return Err(ExecutorError::TypeError(format!(
-                                "Comparison returned non-boolean: {:?}",
-                                eq_result
-                            )))
-                        }
-                    }
-                }
-                _ => {
-                    return Err(ExecutorError::TypeError(format!(
-                        "Comparison returned non-boolean: {:?}",
-                        strict_result
-                    )))
-                }
-            }
+    /// `(a, b) IS [NOT] (SELECT ...)` — NULL-safe row-value comparison against a
+    /// scalar subquery that yields a single row of the same arity.
+    pub(in crate::evaluator) fn eval_row_value_is_distinct_subquery(
+        &self,
+        tuple_exprs: &[vibesql_ast::Expression],
+        subquery: &vibesql_ast::SelectStmt,
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        if tuple_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
         }
 
-        if has_null {
-            Ok(SqlValue::Null)
-        } else if is_or_equal {
-            Ok(SqlValue::Boolean(true))
-        } else {
-            Ok(SqlValue::Boolean(false))
+        let (tuple_values, subquery_values) =
+            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row)?;
+
+        Ok(crate::evaluator::row_value::row_values_is_distinct(
+            &tuple_values,
+            &subquery_values,
+            negated,
+        ))
+    }
+
+    /// Shared helper for row-value-vs-subquery operators: evaluates the tuple
+    /// elements and the subquery row, applying per-element affinity (treating the
+    /// subquery columns as non-column values, like literals).
+    fn eval_row_value_tuple_and_subquery(
+        &self,
+        tuple_exprs: &[vibesql_ast::Expression],
+        subquery: &vibesql_ast::SelectStmt,
+        row: &vibesql_storage::Row,
+    ) -> Result<(Vec<SqlValue>, Vec<SqlValue>), ExecutorError> {
+        let arity = tuple_exprs.len();
+        let subquery_values = self.eval_scalar_subquery_as_row(subquery, row, arity)?;
+
+        let mut tuple_values = Vec::with_capacity(arity);
+        let mut other_values = Vec::with_capacity(arity);
+        for (tuple_expr, sub_val) in tuple_exprs.iter().zip(subquery_values) {
+            let tuple_val = self.eval(tuple_expr, row)?;
+            let synthetic = vibesql_ast::Expression::Literal(sub_val.clone());
+            let (tuple_val, sub_val) =
+                self.apply_affinity_for_comparison(tuple_expr, tuple_val, &synthetic, sub_val);
+            tuple_values.push(tuple_val);
+            other_values.push(sub_val);
         }
+        Ok((tuple_values, other_values))
+    }
+
+    /// Compare two scalar subqueries as row values, e.g.
+    /// `(SELECT a, b) == (SELECT x, y)`. Returns `Ok(None)` when both are
+    /// single-column (caller falls back to scalar comparison); `Ok(Some(result))`
+    /// for the multi-column row-value comparison. Mismatched arities error.
+    pub(in crate::evaluator) fn eval_two_subquery_row_comparison(
+        &self,
+        left_sub: &vibesql_ast::SelectStmt,
+        op: &vibesql_ast::BinaryOperator,
+        right_sub: &vibesql_ast::SelectStmt,
+        row: &vibesql_storage::Row,
+    ) -> Result<Option<SqlValue>, ExecutorError> {
+        if crate::evaluator::row_value::subquery_is_obviously_single_column(left_sub)
+            && crate::evaluator::row_value::subquery_is_obviously_single_column(right_sub)
+        {
+            return Ok(None);
+        }
+
+        let database = self.database.ok_or(ExecutorError::UnsupportedFeature(
+            "Subquery execution requires database reference".to_string(),
+        ))?;
+        let left_arity = super::subqueries::schema_utils::compute_select_list_column_count(
+            left_sub,
+            database,
+            self.cte_context,
+        )?;
+        let right_arity = super::subqueries::schema_utils::compute_select_list_column_count(
+            right_sub,
+            database,
+            self.cte_context,
+        )?;
+
+        if left_arity == 1 && right_arity == 1 {
+            return Ok(None);
+        }
+        if left_arity != right_arity {
+            return Err(ExecutorError::SubqueryColumnCountMismatch {
+                expected: left_arity,
+                actual: right_arity,
+            });
+        }
+
+        let left_values = self.eval_scalar_subquery_as_row(left_sub, row, left_arity)?;
+        let right_values = self.eval_scalar_subquery_as_row(right_sub, row, right_arity)?;
+
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        Ok(Some(crate::evaluator::row_value::compare_row_values(
+            &left_values,
+            op,
+            &right_values,
+            |l, o, r| ExpressionEvaluator::eval_binary_op_static(l, o, r, sql_mode.clone()),
+        )?))
+    }
+
+    /// `(a, b) IS [NOT] (c, d)` — NULL-safe element-wise row-value comparison.
+    /// SQLite applies the same per-column affinity to IS / IS NOT as to = / <>.
+    pub(in crate::evaluator) fn eval_row_value_is_distinct(
+        &self,
+        left_exprs: &[vibesql_ast::Expression],
+        right_exprs: &[vibesql_ast::Expression],
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<SqlValue, ExecutorError> {
+        if left_exprs.len() != right_exprs.len() {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "Row value constructor size mismatch: left has {} elements, right has {}",
+                left_exprs.len(),
+                right_exprs.len()
+            )));
+        }
+        if left_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        let mut left_values = Vec::with_capacity(left_exprs.len());
+        let mut right_values = Vec::with_capacity(right_exprs.len());
+        for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
+            let left_val = self.eval(left_expr, row)?;
+            let right_val = self.eval(right_expr, row)?;
+            let (left_val, right_val) =
+                self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
+            left_values.push(left_val);
+            right_values.push(right_val);
+        }
+
+        Ok(crate::evaluator::row_value::row_values_is_distinct(
+            &left_values,
+            &right_values,
+            negated,
+        ))
     }
 }

@@ -59,6 +59,59 @@ impl CombinedExpressionEvaluator<'_> {
         subquery: &vibesql_ast::SelectStmt,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let rows = self.execute_scalar_subquery_rows(subquery, row)?;
+        crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows)
+    }
+
+    /// Evaluate a scalar subquery as a row value of `expected` columns, for use
+    /// in row-value comparisons like `(a, b, c) > (SELECT a, b, c FROM ...)`.
+    ///
+    /// Returns the first result row's values (SQLite uses the first row when a
+    /// scalar subquery yields several). A subquery returning no rows behaves as a
+    /// row of NULLs. The column count is validated against `expected`.
+    pub(in crate::evaluator) fn eval_scalar_subquery_as_row(
+        &self,
+        subquery: &vibesql_ast::SelectStmt,
+        row: &vibesql_storage::Row,
+        expected: usize,
+    ) -> Result<Vec<vibesql_types::SqlValue>, ExecutorError> {
+        let rows = self.execute_scalar_subquery_rows(subquery, row)?;
+        if rows.is_empty() {
+            let database = self.database.ok_or(ExecutorError::UnsupportedFeature(
+                "Subquery execution requires database reference".to_string(),
+            ))?;
+            let column_count = super::schema_utils::compute_select_list_column_count(
+                subquery,
+                database,
+                self.cte_context,
+            )?;
+            if column_count != expected {
+                return Err(ExecutorError::SubqueryColumnCountMismatch {
+                    expected,
+                    actual: column_count,
+                });
+            }
+            return Ok(vec![vibesql_types::SqlValue::Null; expected]);
+        }
+
+        let first = &rows[0];
+        if first.values.len() != expected {
+            return Err(ExecutorError::SubqueryColumnCountMismatch {
+                expected,
+                actual: first.values.len(),
+            });
+        }
+        Ok(first.values.to_vec())
+    }
+
+    /// Execute a scalar subquery and return its result rows (without the
+    /// single-row / single-column reduction). Shared by `eval_scalar_subquery`
+    /// and `eval_scalar_subquery_as_row`.
+    pub(in crate::evaluator::combined) fn execute_scalar_subquery_rows(
+        &self,
+        subquery: &vibesql_ast::SelectStmt,
+        row: &vibesql_storage::Row,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Check depth limit to prevent stack overflow
         if self.depth >= crate::limits::MAX_EXPRESSION_DEPTH {
             return Err(ExecutorError::ExpressionDepthExceeded {
@@ -137,7 +190,7 @@ impl CombinedExpressionEvaluator<'_> {
                     )
                 };
                 let rows = select_executor.execute(subquery)?;
-                return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
+                return Ok(rows);
             }
         } else {
             // Has outer_schema but not in schema.table_schemas - still pass outer context!
@@ -183,7 +236,7 @@ impl CombinedExpressionEvaluator<'_> {
                 )
             };
             let rows = select_executor.execute(subquery)?;
-            return crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows);
+            return Ok(rows);
         };
 
         // Try cache lookup
@@ -252,7 +305,6 @@ impl CombinedExpressionEvaluator<'_> {
             executed_rows
         };
 
-        // Delegate to shared logic
-        crate::evaluator::subqueries_shared::eval_scalar_subquery_core(&rows)
+        Ok(rows)
     }
 }
