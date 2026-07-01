@@ -8,7 +8,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use super::{
     entry::{Lsn, WalEntry},
-    format::{WalHeader, WAL_HEADER_SIZE},
+    format::{WalHeader, WAL_HEADER_SIZE, WAL_VERSION},
     writer::verify_checksum,
 };
 use crate::{persistence::binary::io::read_u32, StorageError};
@@ -41,6 +41,29 @@ pub struct WalReader<R: Read + Seek> {
 impl<R: Read + Seek> WalReader<R> {
     /// Open a WAL file for reading
     pub fn open(mut reader: R) -> Result<Self, StorageError> {
+        // A completely empty (0-byte) WAL has no header yet — for example a file
+        // that was just created but whose buffered header has not been flushed,
+        // or a crash between file creation and the first header write. Treat it
+        // as a valid but empty WAL that yields immediate EOF, rather than failing
+        // the header `read_exact` with a confusing short read
+        // ("failed to fill whole buffer"). This keeps `truncate_wal` and
+        // recovery's `replay_wal` robust to a header-less WAL. See issue #5785.
+        let end =
+            reader.seek(SeekFrom::End(0)).map_err(|e| StorageError::IoError(e.to_string()))?;
+        reader.seek(SeekFrom::Start(0)).map_err(|e| StorageError::IoError(e.to_string()))?;
+        if end == 0 {
+            return Ok(Self {
+                reader,
+                // Synthetic header for an empty log; no entries will be read so
+                // the version only matters for deserialization that never runs.
+                header: WalHeader { version: WAL_VERSION, created_ms: 0 },
+                // No header on disk, so entry reads start at offset 0 and hit EOF.
+                position: 0,
+                entries_read: 0,
+                last_lsn: None,
+            });
+        }
+
         // Read and validate header
         let header = WalHeader::read(&mut reader)?;
 
@@ -348,6 +371,36 @@ mod tests {
 
         // Should detect corruption and report recovery point
         assert!(info.entry_count < 5);
+    }
+
+    #[test]
+    fn test_open_empty_wal_yields_no_entries() {
+        // Regression for #5785: a 0-byte WAL (header buffered but not yet
+        // flushed, or a crash before the first header write) must be treated as
+        // an empty log, not fail the header read with "failed to fill whole
+        // buffer".
+        let cursor = Cursor::new(Vec::new());
+        let mut reader = WalReader::open(cursor).expect("empty WAL must open cleanly");
+
+        let entries = reader.read_all().unwrap();
+        assert!(entries.is_empty(), "empty WAL must yield zero entries");
+
+        // A second read still reports clean EOF.
+        match reader.read_entry().unwrap() {
+            ReadResult::Eof => {}
+            other => panic!("expected Eof on empty WAL, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_find_recovery_point_empty_wal() {
+        // Recovery over a 0-byte WAL must succeed with no entries rather than
+        // erroring on the header short read (#5785).
+        let cursor = Cursor::new(Vec::new());
+        let info = find_recovery_point(cursor).unwrap();
+
+        assert_eq!(info.entry_count, 0);
+        assert_eq!(info.last_lsn, None);
     }
 
     #[test]

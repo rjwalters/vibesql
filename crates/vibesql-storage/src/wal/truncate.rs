@@ -291,6 +291,25 @@ mod tests {
     }
 
     #[test]
+    fn test_truncate_empty_wal_is_noop() {
+        // Regression for #5785: checkpoint auto-save calls `truncate_wal` on the
+        // active WAL. When the WAL was just created and its header is still
+        // buffered (0 bytes on disk), truncation must succeed as a no-op instead
+        // of failing the header read with "failed to fill whole buffer".
+        let temp_dir = TempDir::new().unwrap();
+        let wal_path = temp_dir.path().join("empty.wal");
+        File::create(&wal_path).unwrap(); // 0-byte file
+
+        assert_eq!(fs::metadata(&wal_path).unwrap().len(), 0);
+
+        let result = truncate_wal(&wal_path, 5, Some(0)).unwrap();
+        assert_eq!(result.entries_removed, 0);
+        assert_eq!(result.entries_kept, 0);
+        assert_eq!(result.oldest_lsn, None);
+        assert_eq!(result.newest_lsn, None);
+    }
+
+    #[test]
     fn test_truncate_wal_no_removal() {
         let temp_dir = TempDir::new().unwrap();
         let wal_path = create_test_wal(temp_dir.path(), 100);

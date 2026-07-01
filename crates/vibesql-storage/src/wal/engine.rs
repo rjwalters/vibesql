@@ -550,6 +550,20 @@ mod native {
                 // notifying waiters so the happens-before edge into the caller
                 // includes the counter update.
                 if is_explicit_flush {
+                    // Flush the underlying writer even though no entries are
+                    // pending. For a brand-new WAL the 32-byte header written by
+                    // `WalWriter::create` is still sitting in the BufWriter and
+                    // has not reached the OS file. Skipping the flush here left
+                    // the on-disk WAL at 0 bytes, so the very next checkpoint's
+                    // `truncate_wal` opened a header-less file and failed the
+                    // header `read_exact` with a confusing short read
+                    // ("failed to fill whole buffer"). An explicit sync promises
+                    // durability, so it must push buffered bytes (including the
+                    // header) to disk regardless of whether new entries were
+                    // batched. See issue #5785.
+                    if let Err(e) = writer.flush() {
+                        log::error!("Failed to flush WAL on empty explicit sync: {}", e);
+                    }
                     stats.lock().explicit_flushes += 1;
                 }
                 // Still notify waiters even if batch is empty
