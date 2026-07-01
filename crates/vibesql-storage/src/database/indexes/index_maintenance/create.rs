@@ -55,6 +55,39 @@ impl IndexManager {
             return Err(StorageError::IndexAlreadyExists(index_name));
         }
 
+        // Expression (functional) indexes cannot be rebuilt through this
+        // column-oriented path: an expression column has no single source
+        // column, so `expect_column_name()` on it would panic. This path is
+        // reached when a persisted expression index is reloaded from a binary
+        // or JSON snapshot (the executor's CREATE INDEX path uses
+        // `create_index_with_keys` after evaluating the expressions, and never
+        // calls this method for an expression index). Rather than panicking,
+        // register the index metadata with an empty body. The query planner
+        // excludes expression indexes from scan selection, so the empty body is
+        // never consulted for reads; keeping the metadata means the catalog and
+        // ALTER/DROP-column validations still see the index. A REINDEX through
+        // the executor rebuilds a functional body when one is needed. See the
+        // `alterdropcol` expression-index reload crash (issue #5784).
+        if columns.iter().any(|c| c.is_expression()) {
+            let metadata = IndexMetadata {
+                index_name: index_name.clone(),
+                table_name: table_name.clone(),
+                schema: schema.to_string(),
+                unique,
+                columns,
+                where_clause,
+            };
+            self.indexes.insert(normalized_name.clone(), metadata);
+            self.resource_tracker.register_index(
+                normalized_name.clone(),
+                0,
+                0,
+                crate::database::IndexBackend::InMemory,
+            );
+            self.index_data.insert(normalized_name, IndexData::InMemory { data: BTreeMap::new() });
+            return Ok(());
+        }
+
         // Get column indices in the table for all indexed columns
         let mut column_indices = Vec::new();
         for index_col in &columns {

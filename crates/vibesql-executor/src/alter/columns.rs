@@ -8,6 +8,14 @@ use vibesql_types::SqlValue;
 use super::validation::{convert_value, evaluate_simple_default, is_type_conversion_safe};
 use crate::errors::ExecutorError;
 
+/// Whether `name` is an implicit unique index auto-created for a PRIMARY KEY or
+/// UNIQUE constraint (SQLite names these `sqlite_autoindex_<table>_<n>`). Such
+/// indexes are reported through the PRIMARY KEY / UNIQUE drop-column messages,
+/// not the generic `error in index` path.
+fn is_auto_index(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("sqlite_autoindex_")
+}
+
 /// Execute ADD COLUMN
 pub(super) fn execute_add_column(
     stmt: &AddColumnStmt,
@@ -54,36 +62,97 @@ pub(super) fn execute_add_column(
     Ok(format!("Column '{}' added to table '{}'", stmt.column_def.name, stmt.table_name))
 }
 
-/// Execute DROP COLUMN
+/// Execute DROP COLUMN.
+///
+/// Validations run in SQLite's order so the same error surfaces as sqlite3
+/// (verified against `alterdropcol.test`, sqlite3 3.51.0). Every rejection uses
+/// SQLite's verbatim message via [`ExecutorError::Other`] so the TCL harness
+/// (which asserts exact error text) matches. See issue #5784.
 pub(super) fn execute_drop_column(
     stmt: &DropColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
-    let table = database
-        .get_table_mut(&stmt.table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+    let table_name = &stmt.table_name;
+    let col = &stmt.column_name;
 
-    // Check if column exists
-    if !stmt.if_exists && !table.schema.has_column(&stmt.column_name) {
-        return Err(ExecutorError::ColumnNotFound {
-            column_name: stmt.column_name.clone(),
-            table_name: stmt.table_name.clone(),
-            searched_tables: vec![stmt.table_name.clone()],
-            available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
+    // A view is not a table: SQLite rejects DROP COLUMN on a view with a
+    // view-specific message, before any table/column resolution.
+    if database.catalog.get_view(table_name).is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot drop column from view \"{}\"",
+            table_name
+        )));
+    }
+
+    // The schema table itself may not be altered.
+    if super::validation::is_sqlite_schema_table(table_name) {
+        return Err(ExecutorError::Other("table sqlite_master may not be altered".to_string()));
+    }
+
+    // Resolve the table. A missing table keeps `TableNotFound`, which the
+    // harness normalizes to SQLite's `no such table: <name>`.
+    let schema = match database.get_table(table_name) {
+        Some(table) => &table.schema,
+        None => return Err(ExecutorError::TableNotFound(table_name.clone())),
+    };
+
+    // Column existence. `IF EXISTS` makes a missing column a no-op.
+    if !schema.has_column(col) {
+        if stmt.if_exists {
+            return Ok(format!("Column '{}' does not exist in table '{}'", col, table_name));
+        }
+        return Err(ExecutorError::Other(format!("no such column: \"{}\"", col)));
+    }
+
+    // PRIMARY KEY / UNIQUE columns cannot be dropped (PRIMARY KEY wins when a
+    // column is both, matching SQLite).
+    if schema.is_column_in_primary_key(col)
+        || schema.get_integer_primary_key_index() == schema.get_column_index(col)
+    {
+        return Err(ExecutorError::Other(format!("cannot drop PRIMARY KEY column: \"{}\"", col)));
+    }
+
+    // A UNIQUE column cannot be dropped. VibeSQL records a column-level UNIQUE
+    // constraint as an implicit unique auto-index (`sqlite_autoindex_*`) rather
+    // than in `unique_constraints`, so check both representations. This must be
+    // decided before the generic index-reference check below, otherwise the
+    // auto-index would surface as `error in index sqlite_autoindex_...` instead
+    // of SQLite's `cannot drop UNIQUE column`.
+    let in_unique = super::validation::column_in_unique_constraint(schema, col)
+        || database.catalog.get_table_indexes(table_name).iter().any(|idx| {
+            idx.is_unique
+                && is_auto_index(&idx.name)
+                && super::validation::index_references_column(idx, col)
         });
+    if in_unique {
+        return Err(ExecutorError::Other(format!("cannot drop UNIQUE column: \"{}\"", col)));
     }
 
-    // Check if column is part of constraints
-    if table.schema.is_column_in_primary_key(&stmt.column_name) {
-        return Err(ExecutorError::CannotDropColumn("Column is part of PRIMARY KEY".to_string()));
+    // Cannot drop the only remaining column.
+    if schema.columns.len() <= 1 {
+        return Err(ExecutorError::Other(format!(
+            "cannot drop column \"{}\": no other columns exist",
+            col
+        )));
     }
 
-    // Check if this is the last column in the table
-    if table.schema.columns.len() <= 1 {
-        return Err(ExecutorError::CannotDropColumn(
-            "Cannot drop the last column in a table. Use DROP TABLE instead.".to_string(),
-        ));
+    // Dependent-object validation: dropping the column must not leave an
+    // explicit index (plain or expression/partial) dangling. SQLite re-parses
+    // the schema after the drop and rolls back with this message when an index
+    // still references the gone column. Implicit unique auto-indexes are handled
+    // by the UNIQUE check above and skipped here.
+    for index in database.catalog.get_table_indexes(table_name) {
+        if !is_auto_index(&index.name) && super::validation::index_references_column(index, col) {
+            return Err(ExecutorError::Other(format!(
+                "error in index {} after drop column: no such column: {}",
+                index.name, col
+            )));
+        }
     }
+
+    let table = database
+        .get_table_mut(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.clone()))?;
 
     // Get column index
     let col_index = table.schema.get_column_index(&stmt.column_name).ok_or_else(|| {

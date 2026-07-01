@@ -171,7 +171,10 @@ fn parse_drop_column(
     let if_exists =
         parser.try_consume_keyword(Keyword::If) && parser.try_consume_keyword(Keyword::Exists);
 
-    let column_name = parser.parse_identifier()?;
+    // Accept a reserved keyword as the column name (e.g. `DROP COLUMN sql`).
+    // SQLite permits keyword column names here; matching that lets validations
+    // such as the `sqlite_schema` guard run instead of failing at parse time.
+    let column_name = parser.parse_identifier_or_keyword()?;
 
     Ok(AlterTableStmt::DropColumn(DropColumnStmt { table_name, column_name, if_exists }))
 }
