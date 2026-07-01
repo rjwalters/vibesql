@@ -291,11 +291,19 @@ fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &Combine
         | ColumnPredicate::LessThanOrEqual { column_idx, value }
         | ColumnPredicate::Equal { column_idx, value }
         | ColumnPredicate::NotEqual { column_idx, value } => {
-            value_supported_for_column(schema.get_column_type_by_index(*column_idx), value)
+            // Issue #5792: comparisons on a non-BINARY-collated column (e.g.
+            // NOCASE) must apply the collation; the columnar comparators
+            // compare raw values, so decline pushdown and fall back to the
+            // collation-aware expression evaluator.
+            !schema.column_has_non_binary_collation(*column_idx)
+                && value_supported_for_column(schema.get_column_type_by_index(*column_idx), value)
         }
         ColumnPredicate::Between { column_idx, low, high } => {
             let col_type = schema.get_column_type_by_index(*column_idx);
-            value_supported_for_column(col_type, low) && value_supported_for_column(col_type, high)
+            // Issue #5792: see above — collated columns need the full evaluator.
+            !schema.column_has_non_binary_collation(*column_idx)
+                && value_supported_for_column(col_type, low)
+                && value_supported_for_column(col_type, high)
         }
         ColumnPredicate::InList { column_idx, values, .. } => {
             let col_type = schema.get_column_type_by_index(*column_idx);
@@ -304,10 +312,13 @@ fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &Combine
         // LIKE patterns are strings; existing comparator behavior applies
         ColumnPredicate::Like { .. } => true,
         ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
-            column_compare_supported(
-                schema.get_column_type_by_index(*left_column_idx),
-                schema.get_column_type_by_index(*right_column_idx),
-            )
+            // Issue #5792: see above — collated columns need the full evaluator.
+            !schema.column_has_non_binary_collation(*left_column_idx)
+                && !schema.column_has_non_binary_collation(*right_column_idx)
+                && column_compare_supported(
+                    schema.get_column_type_by_index(*left_column_idx),
+                    schema.get_column_type_by_index(*right_column_idx),
+                )
         }
     }
 }
@@ -407,9 +418,7 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
         // pushdown and let the evaluator's `apply_affinity_for_comparison`
         // Case 1 handle it. NUMERIC/REAL/INTEGER columns keep numeric
         // comparison and are unaffected.
-        Some(other)
-            if other.sqlite_affinity() == TypeAffinity::Text && is_numeric_value(value) =>
-        {
+        Some(other) if other.sqlite_affinity() == TypeAffinity::Text && is_numeric_value(value) => {
             false
         }
         Some(other) => match value {

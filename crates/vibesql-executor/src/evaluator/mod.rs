@@ -3,6 +3,7 @@ pub mod arena;
 pub(crate) mod caching;
 pub(crate) mod casting;
 pub mod coercion;
+pub(crate) mod collation;
 mod combined;
 mod combined_core;
 pub(crate) mod compiled;
