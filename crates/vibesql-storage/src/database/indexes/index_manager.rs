@@ -2,7 +2,11 @@
 // Index Manager - Core coordination and query methods
 // ============================================================================
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use vibesql_types::{DataType, SqlValue};
 
@@ -44,6 +48,14 @@ pub struct IndexManager {
     pub(super) database_path: Option<PathBuf>,
     /// Storage backend for file operations
     pub(super) storage: Arc<dyn StorageBackend>,
+    /// Expression indexes (normalized storage keys) that were reloaded from a
+    /// binary/JSON snapshot with an **empty body** and still need to be rebuilt
+    /// by the executor (which can evaluate the index expression). Until an index
+    /// is rebuilt, its body is not trustworthy for reads, so the query planner
+    /// declines to use it (falling back to a full-table scan → correct results)
+    /// and `rebuild_pending_expression_indexes` in the executor repopulates it.
+    /// See issue #5784.
+    pub(super) pending_expression_rebuilds: HashSet<String>,
 }
 
 impl std::fmt::Debug for IndexManager {
@@ -74,6 +86,7 @@ impl IndexManager {
             resource_tracker: ResourceTracker::new(),
             database_path: None,
             storage,
+            pending_expression_rebuilds: HashSet::new(),
         }
     }
 
@@ -91,6 +104,7 @@ impl IndexManager {
             resource_tracker: ResourceTracker::new(),
             database_path: None,
             storage,
+            pending_expression_rebuilds: HashSet::new(),
         }
     }
 
@@ -142,6 +156,7 @@ impl IndexManager {
         self.indexes.clear();
         self.index_data.clear();
         self.resource_tracker = ResourceTracker::new();
+        self.pending_expression_rebuilds.clear();
     }
 
     // ========================================================================
@@ -337,6 +352,71 @@ impl IndexManager {
         self.resource_tracker.record_access(&key);
 
         self.index_data.get(&key)
+    }
+
+    /// Whether `index_name` resolves to an expression index that was reloaded
+    /// from a snapshot with an empty body and still needs a rebuild before its
+    /// body can be trusted for reads (issue #5784). The query planner consults
+    /// this so it declines an unbuilt expression index and falls back to a
+    /// full-table scan (correct results) until the executor rebuilds it.
+    pub fn is_index_pending_rebuild(&self, index_name: &str) -> bool {
+        match self.resolve_index_key(index_name) {
+            Some(key) => self.pending_expression_rebuilds.contains(&key),
+            None => false,
+        }
+    }
+
+    /// List the expression indexes that were reloaded with an empty body and
+    /// still need rebuilding, as `(index_name, table_name)` pairs. The executor
+    /// iterates this to repopulate each index by evaluating its expression over
+    /// the table's rows (see `rebuild_pending_expression_indexes`).
+    pub fn pending_expression_rebuilds(&self) -> Vec<(String, String)> {
+        self.pending_expression_rebuilds
+            .iter()
+            .filter_map(|key| {
+                self.indexes
+                    .get(key)
+                    .map(|meta| (meta.index_name.clone(), meta.table_name.clone()))
+            })
+            .collect()
+    }
+
+    /// Repopulate the body of a reloaded expression index from executor-computed
+    /// `(key_values, row_idx)` pairs and clear its pending-rebuild flag. This is
+    /// the storage-side of `rebuild_pending_expression_indexes`: the executor
+    /// evaluates the index expression over the table rows and hands the keys back
+    /// here (storage cannot evaluate expressions itself). See issue #5784.
+    pub fn populate_expression_index(
+        &mut self,
+        index_name: &str,
+        keys: Vec<(Vec<SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        let key = self
+            .resolve_index_key(index_name)
+            .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
+
+        // Normalize + group entries into a fresh in-memory body.
+        let mut entries: Vec<(Vec<SqlValue>, usize)> = keys
+            .into_iter()
+            .map(|(key_values, row_idx)| {
+                let normalized: Vec<SqlValue> = key_values
+                    .iter()
+                    .map(crate::database::indexes::index_operations::normalize_for_comparison)
+                    .collect();
+                (normalized, row_idx)
+            })
+            .collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut index_data_map: std::collections::BTreeMap<Vec<SqlValue>, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (key_values, row_idx) in entries {
+            index_data_map.entry(key_values).or_default().push(row_idx);
+        }
+
+        self.index_data.insert(key.clone(), IndexData::InMemory { data: index_data_map });
+        self.pending_expression_rebuilds.remove(&key);
+        Ok(())
     }
 
     /// Check unique constraints for user-defined indexes before insert

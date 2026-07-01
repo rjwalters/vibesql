@@ -229,6 +229,85 @@ fn test_in_memory_index_for_small_tables() {
 }
 
 #[test]
+fn test_create_expression_index_does_not_panic() {
+    // Regression for issue #5784: rebuilding an expression (functional) index
+    // through the column-oriented `create_index` path (as the binary/JSON
+    // snapshot loaders do) must not panic via `expect_column_name()`. Instead
+    // the index is registered with an empty body. Previously this aborted the
+    // whole process with "Expression indexes are not supported in this context",
+    // which cascaded every statement after a persisted expression index reload.
+    use vibesql_ast::{Expression, OrderDirection};
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    use crate::Row;
+
+    let columns = vec![
+        ColumnSchema::new("r".to_string(), DataType::Integer, true),
+        ColumnSchema::new("s".to_string(), DataType::Integer, true),
+    ];
+    let table_schema = TableSchema::new("t3".to_string(), columns);
+    let table_rows: Vec<Row> =
+        vec![Row::from_vec(vec![SqlValue::Integer(1), SqlValue::Integer(2)])];
+
+    // Expression column `r + s` (an arbitrary non-column expression).
+    let expr = Expression::BinaryOp {
+        op: vibesql_ast::BinaryOperator::Plus,
+        left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("r", false))),
+        right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("s", false))),
+    };
+
+    let mut index_manager = IndexManager::new();
+    let result = index_manager.create_index(
+        "t3rs".to_string(),
+        "t3".to_string(),
+        "main",
+        &table_schema,
+        &table_rows,
+        false,
+        vec![vibesql_ast::IndexColumn::Expression {
+            expr: Box::new(expr),
+            direction: OrderDirection::Asc,
+        }],
+        None,
+        None,
+    );
+
+    assert!(result.is_ok(), "expression index create should not panic or error: {result:?}");
+    assert!(index_manager.index_exists("t3rs"), "expression index should be registered");
+
+    // The reload path registers an EMPTY body and flags the index pending
+    // rebuild so the planner declines it (a full scan is used until the executor
+    // repopulates the body). This is what prevents the empty body from silently
+    // returning zero rows. See issue #5784.
+    assert!(
+        index_manager.is_index_pending_rebuild("t3rs"),
+        "reloaded expression index must be flagged pending rebuild"
+    );
+    match index_manager.get_index_data("t3rs") {
+        Some(IndexData::InMemory { data }) => {
+            assert!(data.is_empty(), "reloaded expression index body should start empty");
+        }
+        other => panic!("expected empty in-memory body, got {other:?}"),
+    }
+
+    // Repopulating with executor-computed keys clears the flag and fills the body.
+    index_manager
+        .populate_expression_index("t3rs", vec![(vec![SqlValue::Integer(3)], 0)])
+        .expect("populate should succeed");
+    assert!(
+        !index_manager.is_index_pending_rebuild("t3rs"),
+        "flag should clear after populate"
+    );
+    match index_manager.get_index_data("t3rs") {
+        Some(IndexData::InMemory { data }) => {
+            assert_eq!(data.len(), 1, "populated body should hold the one key");
+        }
+        other => panic!("expected populated in-memory body, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_budget_enforcement_with_spill_policy() {
     // Test that memory budget is enforced with SpillToDisk policy
     use vibesql_ast::OrderDirection;

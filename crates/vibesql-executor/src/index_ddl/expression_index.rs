@@ -29,6 +29,42 @@ pub fn create_expression_index(
     unique: bool,
     where_clause: Option<&vibesql_ast::Expression>,
 ) -> Result<(), ExecutorError> {
+    let keys = compute_expression_index_keys(
+        database,
+        table_name,
+        index_name,
+        table_schema,
+        columns,
+        unique,
+        where_clause,
+    )?;
+
+    // Create the index in storage using the pre-computed keys
+    database.create_index_with_keys(
+        index_name.to_string(),
+        table_name.to_string(),
+        unique,
+        columns.to_vec(),
+        keys,
+    )?;
+
+    Ok(())
+}
+
+/// Evaluate an expression index's key expression(s) over every (matching) live
+/// row and return the `(key_values, row_idx)` pairs that make up the index body.
+///
+/// Shared by [`create_expression_index`] (CREATE INDEX) and
+/// [`rebuild_pending_expression_indexes`] (REINDEX-on-load, issue #5784).
+fn compute_expression_index_keys(
+    database: &Database,
+    table_name: &str,
+    index_name: &str,
+    table_schema: &TableSchema,
+    columns: &[IndexColumn],
+    unique: bool,
+    where_clause: Option<&vibesql_ast::Expression>,
+) -> Result<Vec<(Vec<SqlValue>, usize)>, ExecutorError> {
     // Get table for scanning
     let table = database
         .get_table(table_name)
@@ -113,14 +149,49 @@ pub fn create_expression_index(
         keys.push((key_values, row_idx));
     }
 
-    // Create the index in storage using the pre-computed keys
-    database.create_index_with_keys(
-        index_name.to_string(),
-        table_name.to_string(),
-        unique,
-        columns.to_vec(),
-        keys,
-    )?;
+    Ok(keys)
+}
 
+/// Rebuild the bodies of every expression index that was reloaded from a binary
+/// (or JSON) snapshot with an empty body (issue #5784).
+///
+/// The storage-layer snapshot loader re-registers a persisted expression index
+/// via `Database::create_index`, which cannot evaluate the index expression and
+/// therefore leaves the body empty and flagged pending-rebuild. Because
+/// expression indexes are a first-class selectable read path, an empty body
+/// would silently return zero rows; the planner avoids that by declining any
+/// pending-rebuild index. This function closes the loop: it evaluates each
+/// pending index's expression over the (post-load, post-WAL-replay) table rows
+/// and repopulates the body, so the index is once again fully functional and
+/// used for reads.
+///
+/// Call this after loading a database from a snapshot (and after any WAL replay
+/// that mutated table rows). It is a no-op when there are no pending rebuilds.
+pub fn rebuild_pending_expression_indexes(database: &mut Database) -> Result<(), ExecutorError> {
+    let pending = database.pending_expression_rebuilds();
+    for (index_name, table_name) in pending {
+        // Resolve the metadata we need to re-evaluate the expression.
+        let (columns, unique, where_clause) = match database.get_index(&index_name) {
+            Some(meta) => (meta.columns.clone(), meta.unique, meta.where_clause.clone()),
+            None => continue,
+        };
+
+        let table_schema = match database.get_table(&table_name) {
+            Some(table) => table.schema.clone(),
+            None => continue,
+        };
+
+        let keys = compute_expression_index_keys(
+            database,
+            &table_name,
+            &index_name,
+            &table_schema,
+            &columns,
+            unique,
+            where_clause.as_deref(),
+        )?;
+
+        database.populate_expression_index(&index_name, keys)?;
+    }
     Ok(())
 }

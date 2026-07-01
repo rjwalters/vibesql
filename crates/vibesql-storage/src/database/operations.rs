@@ -608,6 +608,26 @@ impl Operations {
         self.index_manager.get_index_data(index_name)
     }
 
+    /// Whether the index needs an expression-index rebuild after a snapshot
+    /// reload (issue #5784).
+    pub fn is_index_pending_rebuild(&self, index_name: &str) -> bool {
+        self.index_manager.is_index_pending_rebuild(index_name)
+    }
+
+    /// List reloaded expression indexes needing rebuild as `(index, table)`.
+    pub fn pending_expression_rebuilds(&self) -> Vec<(String, String)> {
+        self.index_manager.pending_expression_rebuilds()
+    }
+
+    /// Repopulate a reloaded expression index body from executor-computed keys.
+    pub fn populate_expression_index(
+        &mut self,
+        index_name: &str,
+        keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        self.index_manager.populate_expression_index(index_name, keys)
+    }
+
     /// Update user-defined indexes for update operation
     ///
     /// # Arguments

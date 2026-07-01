@@ -494,6 +494,15 @@ impl<'a> IndexPlanner<'a> {
             None => return false,
         };
 
+        // An expression index reloaded from a snapshot with an empty,
+        // not-yet-rebuilt body must not be used for reads — it would silently
+        // return zero rows. Decline it here so callers fall back to a full-table
+        // scan until `rebuild_pending_expression_indexes` repopulates the body.
+        // See issue #5784.
+        if self.database.is_index_pending_rebuild(index_name) {
+            return false;
+        }
+
         // Partial indexes are usable only when the query WHERE clause
         // structurally implies the index predicate. See
         // `select::scan::index_scan::selection` for the rationale. The

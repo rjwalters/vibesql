@@ -182,6 +182,14 @@ pub(crate) fn should_use_index_scan(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Expression indexes reloaded from a snapshot with an empty,
+            // not-yet-rebuilt body must not be consulted for reads (they would
+            // silently return zero rows). Decline them so we fall back to a
+            // full-table scan until the executor rebuilds the body. See #5784.
+            if database.is_index_pending_rebuild(index_name) {
+                continue;
+            }
+
             // Partial indexes (CREATE INDEX ... WHERE expr) only cover the
             // subset of rows for which the predicate evaluates to TRUE. They
             // are usable only when the query's WHERE clause structurally
@@ -1020,6 +1028,11 @@ pub(crate) fn eqp_ordering_index(
     let indexes = database.list_indexes_for_table(table_name);
     for index_name in &indexes {
         let Some(index_metadata) = database.get_index(index_name) else { continue };
+        // An expression index reloaded with an empty, not-yet-rebuilt body
+        // cannot satisfy ORDER BY either — skip it until it is rebuilt (#5784).
+        if database.is_index_pending_rebuild(index_name) {
+            continue;
+        }
         // Partial indexes participate in the EQP exemption only when the
         // query's WHERE clause structurally implies the index predicate —
         // otherwise the index cannot be relied on to satisfy ORDER BY.
@@ -1611,6 +1624,22 @@ pub(crate) fn cost_based_index_selection(
 
     for index_name in &indexes {
         if let Some(index_metadata) = database.get_index(index_name) {
+            // Expression indexes reloaded from a snapshot with an empty,
+            // not-yet-rebuilt body must not be consulted for reads — their body
+            // would silently return zero rows. Decline them here so selection
+            // falls back to a full-table scan (correct results). The executor's
+            // `rebuild_pending_expression_indexes` repopulates the body on load,
+            // after which this guard no longer trips. See issue #5784.
+            if database.is_index_pending_rebuild(index_name) {
+                if std::env::var("INDEX_SELECT_DEBUG").is_ok() {
+                    eprintln!(
+                        "[INDEX_SELECT] skipping {} - expression index pending rebuild after reload",
+                        index_name
+                    );
+                }
+                continue;
+            }
+
             // Partial indexes are usable only when the query WHERE clause
             // structurally implies the index predicate — see
             // `should_use_index_scan` for the full rationale.
@@ -2104,6 +2133,12 @@ fn best_single_index_cost(
 
     for index_name in &indexes {
         let Some(index_metadata) = database.get_index(index_name) else { continue };
+
+        // Skip expression indexes reloaded with an empty, not-yet-rebuilt body
+        // (they would silently return zero rows). See issue #5784.
+        if database.is_index_pending_rebuild(index_name) {
+            continue;
+        }
 
         if !crate::optimizer::predicate_implication::partial_index_usable(
             database,

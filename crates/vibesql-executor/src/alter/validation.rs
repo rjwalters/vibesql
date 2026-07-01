@@ -1,9 +1,92 @@
 //! Validation and conversion utilities for ALTER TABLE operations
 
 use vibesql_ast::Expression;
+use vibesql_catalog::{IndexMetadata, TableSchema};
 use vibesql_types::{DataType, SqlValue};
 
 use crate::errors::ExecutorError;
+
+/// Whether `name` refers to SQLite's schema table (`sqlite_master` /
+/// `sqlite_schema`, and the temp variants), which may not be altered. Matched
+/// case-insensitively, mirroring SQLite's identifier folding.
+pub(super) fn is_sqlite_schema_table(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(
+        n.as_str(),
+        "sqlite_master" | "sqlite_schema" | "sqlite_temp_master" | "sqlite_temp_schema"
+    )
+}
+
+/// Whether `column` participates in any UNIQUE constraint of `schema`
+/// (case-insensitive). Used to reject `DROP COLUMN` of a UNIQUE column, matching
+/// SQLite's `cannot drop UNIQUE column` rejection.
+pub(super) fn column_in_unique_constraint(schema: &TableSchema, column: &str) -> bool {
+    schema
+        .unique_constraints
+        .iter()
+        .any(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(column)))
+}
+
+/// Whether `index` references `column` — either directly (a plain indexed
+/// column) or transitively through an expression (functional) index. Used to
+/// reject a `DROP COLUMN` that would leave an index dangling, matching SQLite's
+/// `error in index <name> after drop column: no such column: <col>`.
+pub(super) fn index_references_column(index: &IndexMetadata, column: &str) -> bool {
+    let referenced_in_columns = index.columns.iter().any(|ic| {
+        if let Some(name) = ic.column_name() {
+            name.eq_ignore_ascii_case(column)
+        } else if let Some(expr) = ic.get_expression() {
+            expression_references_column(expr, column)
+        } else {
+            false
+        }
+    });
+    if referenced_in_columns {
+        return true;
+    }
+    // A partial-index predicate can also reference the column.
+    index
+        .where_clause
+        .as_ref()
+        .is_some_and(|expr| expression_references_column(expr, column))
+}
+
+/// Recursively test whether `expr` contains a reference to the (unqualified)
+/// column `column`, comparing case-insensitively. Conservative: expression
+/// shapes not enumerated here return `false` (they cannot reference the column
+/// through a form this checker understands).
+pub(super) fn expression_references_column(expr: &Expression, column: &str) -> bool {
+    match expr {
+        Expression::ColumnRef(col_id) => col_id.column_canonical().eq_ignore_ascii_case(column),
+        Expression::BinaryOp { left, right, .. }
+        | Expression::IsDistinctFrom { left, right, .. } => {
+            expression_references_column(left, column)
+                || expression_references_column(right, column)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children.iter().any(|c| expression_references_column(c, column))
+        }
+        Expression::UnaryOp { expr, .. }
+        | Expression::IsNull { expr, .. }
+        | Expression::IsTruthValue { expr, .. } => expression_references_column(expr, column),
+        Expression::Function { args, .. } => {
+            args.iter().any(|a| expression_references_column(a, column))
+        }
+        Expression::AggregateFunction { args, filter, .. } => {
+            args.iter().any(|a| expression_references_column(a, column))
+                || filter.as_ref().is_some_and(|f| expression_references_column(f, column))
+        }
+        Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|o| expression_references_column(o, column))
+                || when_clauses.iter().any(|w| {
+                    w.conditions.iter().any(|c| expression_references_column(c, column))
+                        || expression_references_column(&w.result, column)
+                })
+                || else_result.as_ref().is_some_and(|e| expression_references_column(e, column))
+        }
+        _ => false,
+    }
+}
 
 /// Evaluate a simple default expression (literals and basic expressions)
 /// For more complex expressions, this would need full evaluation context

@@ -159,8 +159,19 @@ impl SqlExecutor {
         // attach to) — consistent with the issue's documented edge case.
         if wal {
             if let Some(ref db_path) = database {
-                let (db, wal_state) = wal::WalState::open(db_path).map_err(|e| {
+                let (mut db, wal_state) = wal::WalState::open(db_path).map_err(|e| {
                     anyhow::anyhow!("Failed to open WAL-backed database at {}: {}", db_path, e)
+                })?;
+                // Rebuild expression-index bodies that the snapshot loader left
+                // empty (it cannot evaluate index expressions). Without this an
+                // expression index would silently return zero rows after reopen.
+                // See issue #5784.
+                vibesql_executor::rebuild_pending_expression_indexes(&mut db).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to rebuild expression indexes after loading {}: {}",
+                        db_path,
+                        e
+                    )
                 })?;
                 return Ok(SqlExecutor {
                     db,
@@ -172,7 +183,7 @@ impl SqlExecutor {
         }
 
         // Load database from file if provided, otherwise create new in-memory database
-        let db = if let Some(db_path) = database {
+        let mut db = if let Some(db_path) = database {
             // Check if file exists
             if std::path::Path::new(&db_path).exists() {
                 // Try auto-detecting format first (handles binary, compressed, JSON)
@@ -214,6 +225,11 @@ impl SqlExecutor {
             // No database file specified, use in-memory database
             Database::new()
         };
+
+        // Rebuild expression-index bodies left empty by the snapshot loader
+        // (binary/JSON reload path). Harmless no-op when there are none. #5784.
+        vibesql_executor::rebuild_pending_expression_indexes(&mut db)
+            .map_err(|e| anyhow::anyhow!("Failed to rebuild expression indexes: {}", e))?;
 
         Ok(SqlExecutor { db, timing_enabled: false, count_changes: false, wal_state: None })
     }

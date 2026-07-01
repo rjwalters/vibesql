@@ -84,7 +84,8 @@ pub use evaluator::{clear_in_subquery_cache, ExpressionEvaluator};
 pub use explain::{ExplainExecutor, ExplainResult, PlanNode, SqliteVmOutput, VmInstruction};
 pub use grant::GrantExecutor;
 pub use index_ddl::{
-    AnalyzeExecutor, CreateIndexExecutor, DropIndexExecutor, IndexExecutor, ReindexExecutor,
+    expression_index::rebuild_pending_expression_indexes, AnalyzeExecutor, CreateIndexExecutor,
+    DropIndexExecutor, IndexExecutor, ReindexExecutor,
 };
 // `evaluate_default_expression` is re-exported so the Raft replication
 // freeze pass (`vibesql-consensus::freeze`, #5381) can evaluate a

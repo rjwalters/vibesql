@@ -5544,9 +5544,14 @@ proc omit_test {name reason {append 0}} {
 }
 
 proc reset_db {} {
-    # Reset the database to a clean state
-    if {$::db_file ne "" && [file exists $::db_file]} {
-        catch {file delete -force $::db_file}
+    # Reset the database to a clean state. The snapshot file alone is not
+    # enough: with the WAL on by default, committed schema/data can live in the
+    # sibling .wal + -checkpoints/ that survive deleting only the .vbsql
+    # snapshot, so the next open would recover the *old* schema (observed as
+    # spurious "table ... already exists" after reset_db). Delete the WAL
+    # siblings too so reset_db is a true reset.
+    if {$::db_file ne ""} {
+        delete_db_with_wal $::db_file
     }
     # Clear the opened_dbs tracking so next sqlite3 call will create fresh db
     if {[info exists ::opened_dbs]} {

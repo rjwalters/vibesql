@@ -21,7 +21,7 @@ pub mod analyze;
 mod btree_index;
 pub mod create_index;
 pub mod drop_index;
-mod expression_index;
+pub mod expression_index;
 pub mod reindex;
 mod spatial_index;
 mod validation;

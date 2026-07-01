@@ -229,6 +229,33 @@ impl Database {
         self.operations.get_index_data(index_name)
     }
 
+    /// Whether `index_name` is an expression index reloaded from a snapshot with
+    /// an empty body that still needs rebuilding before it can be trusted for
+    /// reads. The query planner uses this to decline the index and fall back to
+    /// a full-table scan until `rebuild_pending_expression_indexes` (executor)
+    /// repopulates it. See issue #5784.
+    pub fn is_index_pending_rebuild(&self, index_name: &str) -> bool {
+        self.operations.is_index_pending_rebuild(index_name)
+    }
+
+    /// List reloaded expression indexes still needing rebuild, as
+    /// `(index_name, table_name)` pairs (issue #5784).
+    pub fn pending_expression_rebuilds(&self) -> Vec<(String, String)> {
+        self.operations.pending_expression_rebuilds()
+    }
+
+    /// Repopulate a reloaded expression index body from executor-computed
+    /// `(key_values, row_idx)` pairs, clearing its pending-rebuild flag. The
+    /// executor evaluates the index expression (storage cannot) and hands the
+    /// keys back here. See issue #5784.
+    pub fn populate_expression_index(
+        &mut self,
+        index_name: &str,
+        keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        self.operations.populate_expression_index(index_name, keys)
+    }
+
     /// Update user-defined indexes for update operation
     ///
     /// # Arguments
