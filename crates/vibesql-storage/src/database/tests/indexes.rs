@@ -275,6 +275,36 @@ fn test_create_expression_index_does_not_panic() {
 
     assert!(result.is_ok(), "expression index create should not panic or error: {result:?}");
     assert!(index_manager.index_exists("t3rs"), "expression index should be registered");
+
+    // The reload path registers an EMPTY body and flags the index pending
+    // rebuild so the planner declines it (a full scan is used until the executor
+    // repopulates the body). This is what prevents the empty body from silently
+    // returning zero rows. See issue #5784.
+    assert!(
+        index_manager.is_index_pending_rebuild("t3rs"),
+        "reloaded expression index must be flagged pending rebuild"
+    );
+    match index_manager.get_index_data("t3rs") {
+        Some(IndexData::InMemory { data }) => {
+            assert!(data.is_empty(), "reloaded expression index body should start empty");
+        }
+        other => panic!("expected empty in-memory body, got {other:?}"),
+    }
+
+    // Repopulating with executor-computed keys clears the flag and fills the body.
+    index_manager
+        .populate_expression_index("t3rs", vec![(vec![SqlValue::Integer(3)], 0)])
+        .expect("populate should succeed");
+    assert!(
+        !index_manager.is_index_pending_rebuild("t3rs"),
+        "flag should clear after populate"
+    );
+    match index_manager.get_index_data("t3rs") {
+        Some(IndexData::InMemory { data }) => {
+            assert_eq!(data.len(), 1, "populated body should hold the one key");
+        }
+        other => panic!("expected populated in-memory body, got {other:?}"),
+    }
 }
 
 #[test]

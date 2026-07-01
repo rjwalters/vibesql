@@ -295,3 +295,111 @@ fn test_expression_index_between() {
         "lower(email) BETWEEN ... should match index on lower(email)"
     );
 }
+
+/// Regression for issue #5784: an expression index must remain FUNCTIONAL after
+/// a binary-snapshot reload, not silently return zero rows.
+///
+/// Before the fix, the snapshot loader re-registered the expression index with
+/// an empty body (to avoid a rebuild panic), and the query planner happily used
+/// that empty body — so `WHERE r+s = X` returned 0 rows with no error. This test
+/// fails on that old behavior (the post-reload query would return 0 rows and the
+/// index would be reported as usable) and passes with the rebuild-on-load fix.
+#[test]
+fn test_expression_index_functional_after_binary_reload() {
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+
+    use crate::index_ddl::expression_index::{
+        create_expression_index, rebuild_pending_expression_indexes,
+    };
+    use crate::optimizer::index_planner::IndexPlanner;
+
+    // Build a table t3(r, s) with a few rows.
+    let mut db = Database::new();
+    db.catalog.set_case_sensitive_identifiers(false);
+    let schema = TableSchema::new(
+        "t3".to_string(),
+        vec![
+            ColumnSchema::new("r".to_string(), DataType::Integer, true),
+            ColumnSchema::new("s".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(schema.clone()).unwrap();
+    // Rows: (1,2)->3, (10,20)->30, (4,4)->8, (2,1)->3  (two rows sum to 3)
+    for (r, s) in [(1, 2), (10, 20), (4, 4), (2, 1)] {
+        db.insert_row("t3", Row::new(vec![SqlValue::Integer(r), SqlValue::Integer(s)])).unwrap();
+    }
+
+    // Create an expression index on (r + s) through the executor so the body is
+    // populated with real evaluated keys at CREATE time.
+    let expr = parse_index_expression("r + s");
+    let columns = vec![IndexColumn::Expression {
+        expr: Box::new(expr),
+        direction: OrderDirection::Asc,
+    }];
+    create_expression_index(&mut db, "t3", "t3rs", &schema, &columns, false, None).unwrap();
+
+    // Sanity: the index answers WHERE r+s = 3 with the two matching rows.
+    let where_expr = parse_where_expression("r + s = 3");
+    assert!(
+        IndexPlanner::new(&db).can_use_index("t3rs", Some(&where_expr), None),
+        "freshly-built expression index should be usable"
+    );
+
+    // Persist to a binary snapshot and reload it — this is the reopen path where
+    // the loader re-registers the expression index with an empty body.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t3.vbsql");
+    db.save_binary(&path).unwrap();
+    let mut reloaded = Database::load_binary(&path).unwrap();
+
+    // The reloaded index is registered but pending rebuild (empty body). The
+    // planner must DECLINE it so reads fall back to a full scan (never silently
+    // wrong).
+    assert!(reloaded.index_exists("t3rs"), "expression index should survive reload");
+    assert!(
+        reloaded.is_index_pending_rebuild("t3rs"),
+        "reloaded expression index should be flagged pending rebuild"
+    );
+    assert!(
+        !IndexPlanner::new(&reloaded).can_use_index("t3rs", Some(&where_expr), None),
+        "an unbuilt expression index must NOT be used for reads"
+    );
+
+    // Even before an explicit rebuild, the query returns CORRECT rows via the
+    // full-scan fallback (this is the anti-silent-wrong-answer guarantee).
+    let correct_rows = run_r_plus_s_eq_3(&reloaded);
+    assert_eq!(
+        correct_rows, 2,
+        "fallback scan must return the 2 rows where r+s=3, got {correct_rows}"
+    );
+
+    // Now perform the REINDEX-on-load and confirm the index becomes functional
+    // AND is actually selected for the query.
+    rebuild_pending_expression_indexes(&mut reloaded).unwrap();
+    assert!(
+        !reloaded.is_index_pending_rebuild("t3rs"),
+        "pending-rebuild flag should clear after rebuild"
+    );
+    assert!(
+        IndexPlanner::new(&reloaded).can_use_index("t3rs", Some(&where_expr), None),
+        "rebuilt expression index should be usable (and selected) again"
+    );
+
+    // And the query still returns the correct rows, now via the populated index.
+    let rebuilt_rows = run_r_plus_s_eq_3(&reloaded);
+    assert_eq!(
+        rebuilt_rows, 2,
+        "after rebuild the index must return the 2 rows where r+s=3, got {rebuilt_rows}"
+    );
+}
+
+/// Run `SELECT r, s FROM t3 WHERE r + s = 3` and return the row count.
+#[cfg(test)]
+fn run_r_plus_s_eq_3(db: &Database) -> usize {
+    let executor = SelectExecutor::new(db);
+    let stmt = Parser::parse_sql("SELECT r, s FROM t3 WHERE r + s = 3").unwrap();
+    match stmt {
+        vibesql_ast::Statement::Select(select_stmt) => executor.execute(&select_stmt).unwrap().len(),
+        _ => panic!("Expected SELECT statement"),
+    }
+}

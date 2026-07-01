@@ -62,12 +62,27 @@ impl IndexManager {
         // or JSON snapshot (the executor's CREATE INDEX path uses
         // `create_index_with_keys` after evaluating the expressions, and never
         // calls this method for an expression index). Rather than panicking,
-        // register the index metadata with an empty body. The query planner
-        // excludes expression indexes from scan selection, so the empty body is
-        // never consulted for reads; keeping the metadata means the catalog and
-        // ALTER/DROP-column validations still see the index. A REINDEX through
-        // the executor rebuilds a functional body when one is needed. See the
-        // `alterdropcol` expression-index reload crash (issue #5784).
+        // register the index metadata with an **empty body** and mark it
+        // pending-rebuild.
+        //
+        // The empty body is NOT correct for reads (the binary format persists
+        // table rows only, not index bodies — see `persistence/binary/data.rs`
+        // — so nothing repopulates it on load). Expression indexes ARE a
+        // first-class selectable read path (`select/scan/index_scan`,
+        // `optimizer/index_planner::can_use_index`), so consulting an empty
+        // body would silently return zero rows. To prevent that:
+        //   1. The index is recorded in `pending_expression_rebuilds`, and the
+        //      query planner declines any index for which
+        //      `is_index_pending_rebuild` is true — falling back to a
+        //      full-table scan (correct results, just slower).
+        //   2. `rebuild_pending_expression_indexes` in the executor evaluates
+        //      the index expression over the table rows and repopulates the
+        //      body via `populate_expression_index`, clearing the flag so the
+        //      index becomes a fully functional (and used) read path again.
+        // The CLI open path runs the rebuild after every snapshot load, so a
+        // reopened database keeps its expression indexes functional. Keeping the
+        // metadata also means the catalog and ALTER/DROP-column validations
+        // still see the index. See issue #5784.
         if columns.iter().any(|c| c.is_expression()) {
             let metadata = IndexMetadata {
                 index_name: index_name.clone(),
@@ -84,7 +99,9 @@ impl IndexManager {
                 0,
                 crate::database::IndexBackend::InMemory,
             );
-            self.index_data.insert(normalized_name, IndexData::InMemory { data: BTreeMap::new() });
+            self.index_data
+                .insert(normalized_name.clone(), IndexData::InMemory { data: BTreeMap::new() });
+            self.pending_expression_rebuilds.insert(normalized_name);
             return Ok(());
         }
 
@@ -833,6 +850,7 @@ impl IndexManager {
         }
         // Also remove the index data
         self.index_data.remove(&normalized);
+        self.pending_expression_rebuilds.remove(&normalized);
 
         // Unregister from resource tracker
         self.resource_tracker.unregister_index(&normalized);
@@ -883,6 +901,7 @@ impl IndexManager {
         for index_name in &indexes_to_drop {
             self.indexes.remove(index_name);
             self.index_data.remove(index_name);
+            self.pending_expression_rebuilds.remove(index_name);
 
             // Unregister from resource tracker
             self.resource_tracker.unregister_index(index_name);
