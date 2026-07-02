@@ -12,8 +12,9 @@ use super::join_helpers::{
     build_combined_schema, expression_has_is_null, extract_equijoin_conditions,
     extract_join_conditions, extract_non_join_predicates, flatten_join_tree_simple,
     flatten_join_tree_with_types, has_cross_join_with_on_condition, has_outer_join,
-    is_columnar_supported_join, is_column_in_table, is_column_in_tables,
-    join_tree_has_residual_on_conjuncts, resolve_join_column_indices, EquiJoinCondition,
+    is_column_in_table, is_column_in_tables, is_columnar_supported_join,
+    join_tree_has_residual_on_conjuncts, resolve_join_column_indices, where_clause_fully_covered,
+    EquiJoinCondition,
 };
 use crate::{
     errors::ExecutorError,
@@ -21,7 +22,10 @@ use crate::{
     optimizer::optimize_expression,
     schema::CombinedSchema,
     select::{
-        columnar, cte::CteResult, executor::builder::SelectExecutor, helpers::apply_distinct,
+        columnar,
+        cte::CteResult,
+        executor::builder::SelectExecutor,
+        helpers::apply_distinct,
         join::hash_join::columnar as columnar_join,
         order::{apply_order_by, RowWithSortKeys},
         projection::project_row_combined,
@@ -297,18 +301,22 @@ impl SelectExecutor<'_> {
         let combined_schema = build_combined_schema(&batches);
 
         // Execute joins in sequence, building up the result batch
-        let joined_batch =
-            match self.execute_columnar_join_chain(&batches, &join_conditions, &combined_schema, &join_types) {
-                Ok(Some(batch)) => batch,
-                Ok(None) => {
-                    log::debug!("Columnar join: join chain execution returned None");
-                    return Ok(None);
-                }
-                Err(e) => {
-                    log::debug!("Columnar join: join chain execution failed: {:?}", e);
-                    return Ok(None);
-                }
-            };
+        let joined_batch = match self.execute_columnar_join_chain(
+            &batches,
+            &join_conditions,
+            &combined_schema,
+            &join_types,
+        ) {
+            Ok(Some(batch)) => batch,
+            Ok(None) => {
+                log::debug!("Columnar join: join chain execution returned None");
+                return Ok(None);
+            }
+            Err(e) => {
+                log::debug!("Columnar join: join chain execution failed: {:?}", e);
+                return Ok(None);
+            }
+        };
 
         // Apply remaining WHERE predicates (non-join conditions) using SIMD filtering
         // First, constant-fold the WHERE clause to handle expressions like `BETWEEN 1 AND 1+2`
@@ -337,11 +345,33 @@ impl SelectExecutor<'_> {
                 );
                 return Ok(None);
             }
+
+            // Verify every WHERE conjunct is fully consumed by the columnar
+            // pipeline (as a hash-join key or an extractable column predicate).
+            // Otherwise the unhandled conjunct would be silently dropped —
+            // e.g. `(x == a) AND (+zY == iB)` used to lose the unary-plus
+            // comparison entirely. Fall back to row-oriented execution.
+            if !where_clause_fully_covered(
+                where_expr,
+                &combined_schema,
+                self.database.case_sensitive_like(),
+            ) {
+                log::debug!(
+                    "Columnar join: WHERE clause has conjuncts the columnar path cannot consume, falling back"
+                );
+                return Ok(None);
+            }
         }
 
         let predicates = folded_where
             .as_ref()
-            .and_then(|where_expr| extract_non_join_predicates(where_expr, &combined_schema, self.database.case_sensitive_like()))
+            .and_then(|where_expr| {
+                extract_non_join_predicates(
+                    where_expr,
+                    &combined_schema,
+                    self.database.case_sensitive_like(),
+                )
+            })
             .unwrap_or_default();
 
         let filtered_batch = if predicates.is_empty() {
@@ -358,12 +388,18 @@ impl SelectExecutor<'_> {
 
         if has_group_by {
             // Execute GROUP BY aggregation
-            let result = self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema);
+            let result =
+                self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema);
 
             // Apply ORDER BY to GROUP BY results if needed (#5033)
             if let Ok(Some(rows)) = result {
                 if let Some(order_by) = &stmt.order_by {
-                    let sorted = self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?;
+                    let sorted = self.apply_columnar_join_order_by(
+                        rows,
+                        order_by,
+                        &stmt.select_list,
+                        &combined_schema,
+                    )?;
                     Ok(Some(sorted))
                 } else {
                     Ok(Some(rows))
@@ -405,7 +441,12 @@ impl SelectExecutor<'_> {
 
                 // Apply ORDER BY if present (#5033)
                 let final_rows = if let Some(order_by) = &stmt.order_by {
-                    self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?
+                    self.apply_columnar_join_order_by(
+                        rows,
+                        order_by,
+                        &stmt.select_list,
+                        &combined_schema,
+                    )?
                 } else {
                     rows
                 };
@@ -448,7 +489,12 @@ impl SelectExecutor<'_> {
                 // bounds" errors when ORDER BY referenced columns dropped by the
                 // projection.
                 let sorted_rows = if let Some(order_by) = &stmt.order_by {
-                    self.apply_columnar_join_order_by(rows, order_by, &stmt.select_list, &combined_schema)?
+                    self.apply_columnar_join_order_by(
+                        rows,
+                        order_by,
+                        &stmt.select_list,
+                        &combined_schema,
+                    )?
                 } else {
                     rows
                 };
@@ -511,10 +557,7 @@ impl SelectExecutor<'_> {
             let table_ref = alias.as_deref().unwrap_or(table_name.as_str());
 
             // Get the join type for this table (default to Inner for backward compatibility)
-            let jt = join_types
-                .get(i)
-                .and_then(|jt| jt.clone())
-                .unwrap_or(JoinType::Inner);
+            let jt = join_types.get(i).and_then(|jt| jt.clone()).unwrap_or(JoinType::Inner);
 
             // Find a join condition that connects this table to already-joined tables
             let join_cond = join_conditions.iter().find(|cond| {
@@ -589,30 +632,24 @@ impl SelectExecutor<'_> {
 
             // Execute the hash join based on join type
             current_batch = match jt {
-                JoinType::Inner | JoinType::Cross => {
-                    columnar_join::columnar_hash_join_inner(
-                        &current_batch,
-                        batch,
-                        left_col_idx,
-                        right_col_idx,
-                    )?
-                }
-                JoinType::LeftOuter => {
-                    columnar_join::columnar_hash_join_left_outer(
-                        &current_batch,
-                        batch,
-                        left_col_idx,
-                        right_col_idx,
-                    )?
-                }
-                JoinType::RightOuter => {
-                    columnar_join::columnar_hash_join_right_outer(
-                        &current_batch,
-                        batch,
-                        left_col_idx,
-                        right_col_idx,
-                    )?
-                }
+                JoinType::Inner | JoinType::Cross => columnar_join::columnar_hash_join_inner(
+                    &current_batch,
+                    batch,
+                    left_col_idx,
+                    right_col_idx,
+                )?,
+                JoinType::LeftOuter => columnar_join::columnar_hash_join_left_outer(
+                    &current_batch,
+                    batch,
+                    left_col_idx,
+                    right_col_idx,
+                )?,
+                JoinType::RightOuter => columnar_join::columnar_hash_join_right_outer(
+                    &current_batch,
+                    batch,
+                    left_col_idx,
+                    right_col_idx,
+                )?,
                 _ => {
                     // FullOuter, Semi, Anti - not supported, fall back
                     log::debug!(
@@ -646,21 +683,15 @@ impl SelectExecutor<'_> {
             return Ok(rows);
         }
 
-        log::debug!(
-            "Columnar join: applying ORDER BY to {} rows",
-            rows.len()
-        );
+        log::debug!("Columnar join: applying ORDER BY to {} rows", rows.len());
 
         // Wrap rows as RowWithSortKeys (with None sort keys - apply_order_by will compute them)
-        let rows_with_keys: Vec<RowWithSortKeys> =
-            rows.into_iter().map(|r| (r, None)).collect();
+        let rows_with_keys: Vec<RowWithSortKeys> = rows.into_iter().map(|r| (r, None)).collect();
 
         // Create evaluator for ORDER BY expression evaluation
         // SAFETY: combined_schema lives for the duration of this function call
-        let schema_ref: &'static CombinedSchema =
-            unsafe { std::mem::transmute(combined_schema) };
-        let evaluator =
-            CombinedExpressionEvaluator::with_database(schema_ref, self.database);
+        let schema_ref: &'static CombinedSchema = unsafe { std::mem::transmute(combined_schema) };
+        let evaluator = CombinedExpressionEvaluator::with_database(schema_ref, self.database);
 
         // Apply ORDER BY sorting
         let sorted = apply_order_by(rows_with_keys, order_by, &evaluator, select_list)?;
@@ -847,8 +878,8 @@ fn check_expr_for_unsupported_agg(expr: &vibesql_ast::Expression) -> bool {
             }
             if args.len() == 1 {
                 match &args[0] {
-                    vibesql_ast::Expression::Wildcard => false,        // COUNT(*)
-                    vibesql_ast::Expression::ColumnRef(_) => false,    // SUM(col)
+                    vibesql_ast::Expression::Wildcard => false, // COUNT(*)
+                    vibesql_ast::Expression::ColumnRef(_) => false, // SUM(col)
                     // Everything else (BinaryOp, CASE, Function, etc.) will be
                     // rejected by the join GROUP BY path, either as an
                     // unsupported arg type or as AggregateSource::Expression.
@@ -865,11 +896,7 @@ fn check_expr_for_unsupported_agg(expr: &vibesql_ast::Expression) -> bool {
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => check_expr_for_unsupported_agg(expr),
         vibesql_ast::Expression::Cast { expr, .. } => check_expr_for_unsupported_agg(expr),
-        vibesql_ast::Expression::Case {
-            operand,
-            when_clauses,
-            else_result,
-        } => {
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             if operand.as_ref().is_some_and(|e| check_expr_for_unsupported_agg(e)) {
                 return true;
             }

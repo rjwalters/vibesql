@@ -118,6 +118,14 @@ pub fn compute_select_list_column_count(
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
+    // VALUES statements (e.g. `IN (VALUES(1, 2))`) carry no select list; the
+    // column count is the arity of the value rows.
+    if let Some(values) = &stmt.values {
+        if stmt.select_list.is_empty() {
+            return Ok(values.first().map_or(0, |row| row.len()));
+        }
+    }
+
     let left_count =
         compute_single_select_column_count(&stmt.select_list, &stmt.from, database, cte_results)?;
 

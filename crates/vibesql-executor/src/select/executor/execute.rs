@@ -113,6 +113,35 @@ impl SelectExecutor<'_> {
             }
         }
 
+        // Row-value misuse validation (SQLite: "row value misused" at prepare
+        // time, even for empty tables). A row value is only legal in the
+        // comparison / IS / BETWEEN / IN / simple-CASE positions; anywhere else
+        // (bare in a SELECT list, compared against a scalar, ORDER BY /
+        // GROUP BY expression) is an error.
+        for item in &stmt.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                super::validation::validate_row_value_usage(expr)?;
+            }
+        }
+        if let Some(where_expr) = &stmt.where_clause {
+            super::validation::validate_row_value_usage(where_expr)?;
+        }
+        if let Some(having_expr) = &stmt.having {
+            super::validation::validate_row_value_usage(having_expr)?;
+        }
+        if let Some(order_by) = stmt.order_by.as_deref() {
+            for item in order_by {
+                super::validation::validate_row_value_usage(&item.expr)?;
+            }
+        }
+        if let Some(group_by) = &stmt.group_by {
+            if let Some(exprs) = group_by.as_simple() {
+                for expr in exprs {
+                    super::validation::validate_row_value_usage(expr)?;
+                }
+            }
+        }
+
         // Validate GROUP BY clauses across this statement and all nested
         // subqueries for window-function misuse, including positional
         // (`GROUP BY 1`) and alias references that resolve to a window

@@ -40,10 +40,8 @@ pub(super) fn has_outer_join(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
         FromClause::Join { left, right, join_type, .. } => {
-            matches!(
-                join_type,
-                JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter
-            ) || has_outer_join(left)
+            matches!(join_type, JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter)
+                || has_outer_join(left)
                 || has_outer_join(right)
         }
     }
@@ -301,6 +299,50 @@ pub(super) fn extract_equijoin_conditions(
     }
 }
 
+/// Check that every top-level AND conjunct of the WHERE clause is fully
+/// consumed by the columnar join pipeline: either a pure equi-join condition
+/// (`col = col`, which becomes a hash-join key) or a conjunct that
+/// `extract_column_predicates` can represent columnarly.
+///
+/// Any other conjunct (e.g. a comparison wrapped in a unary operator like
+/// `+zY == iB`, an OR, a row-value comparison, ...) would be *silently
+/// dropped* by the extraction in `extract_non_join_predicates`, producing
+/// over-returned rows. When this returns `false` the caller must fall back to
+/// row-oriented execution, which evaluates the full WHERE expression per row.
+pub(super) fn where_clause_fully_covered(
+    expr: &Expression,
+    schema: &CombinedSchema,
+    case_sensitive_like: bool,
+) -> bool {
+    match expr {
+        Expression::BinaryOp { left, op: BinaryOperator::And, right } => {
+            where_clause_fully_covered(left, schema, case_sensitive_like)
+                && where_clause_fully_covered(right, schema, case_sensitive_like)
+        }
+        Expression::Conjunction(children) => children
+            .iter()
+            .all(|child| where_clause_fully_covered(child, schema, case_sensitive_like)),
+        // Pure equi-join conjunct: consumed as a hash-join key (mirrors the
+        // extraction rule in extract_equijoin_conditions, including the
+        // unqualified-schema requirement — a schema-qualified col = col is
+        // neither extracted as a join key nor kept as a filter, so it must
+        // trigger the fallback).
+        Expression::BinaryOp { left, op: BinaryOperator::Equal, right } => {
+            if let (Expression::ColumnRef(left_col_id), Expression::ColumnRef(right_col_id)) =
+                (left.as_ref(), right.as_ref())
+            {
+                left_col_id.schema_canonical().is_none()
+                    && right_col_id.schema_canonical().is_none()
+            } else {
+                columnar::extract_column_predicates(expr, schema, case_sensitive_like).is_some()
+            }
+        }
+        // A constant-folded always-true WHERE needs no filtering.
+        Expression::Literal(vibesql_types::SqlValue::Boolean(true)) => true,
+        _ => columnar::extract_column_predicates(expr, schema, case_sensitive_like).is_some(),
+    }
+}
+
 /// Extract non-join predicates (conditions that aren't col1 = col2)
 pub(super) fn extract_non_join_predicates(
     expr: &Expression,
@@ -335,13 +377,17 @@ fn extract_non_join_predicates_recursive(
                 return;
             }
             // Try to extract as column predicate
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema, case_sensitive_like) {
+            if let Some(pred) =
+                columnar::extract_column_predicates(expr, schema, case_sensitive_like)
+            {
                 predicates.extend(pred);
             }
         }
         _ => {
             // Try to extract other predicates
-            if let Some(pred) = columnar::extract_column_predicates(expr, schema, case_sensitive_like) {
+            if let Some(pred) =
+                columnar::extract_column_predicates(expr, schema, case_sensitive_like)
+            {
                 predicates.extend(pred);
             }
         }
@@ -527,8 +573,7 @@ mod residual_on_conjunct_tests {
     /// A multi-table chain of pure equi-joins stays columnar.
     #[test]
     fn nested_pure_equijoins_have_no_residual() {
-        let from =
-            from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x JOIN t3 ON t2.y = t3.z");
+        let from = from_clause_of("SELECT * FROM t1 JOIN t2 ON t1.b = t2.x JOIN t3 ON t2.y = t3.z");
         assert!(!join_tree_has_residual_on_conjuncts(&from));
     }
 }

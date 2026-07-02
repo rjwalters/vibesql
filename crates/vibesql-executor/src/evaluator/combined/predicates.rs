@@ -32,6 +32,46 @@ impl CombinedExpressionEvaluator<'_> {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         use vibesql_types::SqlValue;
 
+        // Handle row value constructor BETWEEN
+        // (a, b) BETWEEN (low_a, low_b) AND (high_a, high_b)
+        // is equivalent to: (a, b) >= (low_a, low_b) AND (a, b) <= (high_a, high_b)
+        if let (
+            vibesql_ast::Expression::RowValueConstructor(expr_exprs),
+            vibesql_ast::Expression::RowValueConstructor(low_exprs),
+            vibesql_ast::Expression::RowValueConstructor(high_exprs),
+        ) = (expr, low, high)
+        {
+            return self.eval_row_value_between(
+                expr_exprs, low_exprs, high_exprs, negated, symmetric, row,
+            );
+        }
+
+        // Scalar-subquery operand with row-value bounds:
+        // `(SELECT 2,2) BETWEEN (1,1) AND (3,3)` — evaluate the subquery to a
+        // row of the bounds' arity and reuse the row-value BETWEEN logic.
+        if let (
+            vibesql_ast::Expression::ScalarSubquery(subquery),
+            vibesql_ast::Expression::RowValueConstructor(low_exprs),
+            vibesql_ast::Expression::RowValueConstructor(high_exprs),
+        ) = (expr, low, high)
+        {
+            if low_exprs.len() > 1 && low_exprs.len() == high_exprs.len() {
+                let sub_values =
+                    self.eval_scalar_subquery_as_row(subquery, row, low_exprs.len())?;
+                let sub_exprs: Vec<vibesql_ast::Expression> =
+                    sub_values.into_iter().map(vibesql_ast::Expression::Literal).collect();
+                return self.eval_row_value_between(
+                    &sub_exprs, low_exprs, high_exprs, negated, symmetric, row,
+                );
+            }
+        }
+
+        // A row value mixed with scalar operands in BETWEEN is a misuse.
+        let is_multi_row_value = |e: &vibesql_ast::Expression| matches!(e, vibesql_ast::Expression::RowValueConstructor(elems) if elems.len() > 1);
+        if is_multi_row_value(expr) || is_multi_row_value(low) || is_multi_row_value(high) {
+            return Err(ExecutorError::RowValueMisused);
+        }
+
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
         // Get effective collation: explicit COLLATE or column-level collation
@@ -433,6 +473,164 @@ impl CombinedExpressionEvaluator<'_> {
         Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(result)))
     }
 
+    /// Evaluate row value BETWEEN predicate
+    ///
+    /// `(a, b) BETWEEN (low_a, low_b) AND (high_a, high_b)`
+    /// is equivalent to: `(a, b) >= (low_a, low_b) AND (a, b) <= (high_a, high_b)`
+    ///
+    /// NULL handling follows the standard row value comparison semantics.
+    fn eval_row_value_between(
+        &self,
+        expr_exprs: &[vibesql_ast::Expression],
+        low_exprs: &[vibesql_ast::Expression],
+        high_exprs: &[vibesql_ast::Expression],
+        negated: bool,
+        symmetric: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
+        // Row values must have the same number of elements (SQLite reports a
+        // mismatched-arity BETWEEN as "row value misused").
+        if expr_exprs.len() != low_exprs.len() || expr_exprs.len() != high_exprs.len() {
+            return Err(ExecutorError::RowValueMisused);
+        }
+
+        if expr_exprs.is_empty() {
+            return Err(ExecutorError::UnsupportedExpression(
+                "Empty row value constructors are not allowed".to_string(),
+            ));
+        }
+
+        // Determine effective bounds (swap if symmetric and low > high)
+        let (effective_low, effective_high) = if symmetric {
+            let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
+            let low_gt_high = self.eval_row_value_comparison(low_exprs, &gt_op, high_exprs, row)?;
+
+            if matches!(low_gt_high, SqlValue::Boolean(true)) {
+                (high_exprs, low_exprs) // Swap
+            } else {
+                (low_exprs, high_exprs)
+            }
+        } else {
+            (low_exprs, high_exprs)
+        };
+
+        if negated {
+            // NOT BETWEEN: expr < low OR expr > high
+            let lt_op = vibesql_ast::BinaryOperator::LessThan;
+            let gt_op = vibesql_ast::BinaryOperator::GreaterThan;
+
+            let lt_low = self.eval_row_value_comparison(expr_exprs, &lt_op, effective_low, row)?;
+            let gt_high =
+                self.eval_row_value_comparison(expr_exprs, &gt_op, effective_high, row)?;
+
+            // OR logic with three-valued semantics
+            match (&lt_low, &gt_high) {
+                (SqlValue::Boolean(true), _) | (_, SqlValue::Boolean(true)) => {
+                    Ok(SqlValue::Boolean(true))
+                }
+                (SqlValue::Boolean(false), SqlValue::Boolean(false)) => {
+                    Ok(SqlValue::Boolean(false))
+                }
+                _ => Ok(SqlValue::Null),
+            }
+        } else {
+            // BETWEEN: expr >= low AND expr <= high
+            let ge_op = vibesql_ast::BinaryOperator::GreaterThanOrEqual;
+            let le_op = vibesql_ast::BinaryOperator::LessThanOrEqual;
+
+            let ge_low = self.eval_row_value_comparison(expr_exprs, &ge_op, effective_low, row)?;
+            let le_high =
+                self.eval_row_value_comparison(expr_exprs, &le_op, effective_high, row)?;
+
+            // AND logic with three-valued semantics
+            match (&ge_low, &le_high) {
+                (SqlValue::Boolean(true), SqlValue::Boolean(true)) => Ok(SqlValue::Boolean(true)),
+                (SqlValue::Boolean(false), _) | (_, SqlValue::Boolean(false)) => {
+                    Ok(SqlValue::Boolean(false))
+                }
+                _ => Ok(SqlValue::Null),
+            }
+        }
+    }
+
+    /// Evaluate a row-value IN list: `(a, b) IN ((1, 2), (3, 4))` and NOT IN.
+    ///
+    /// See the single-table `ExpressionEvaluator::eval_row_value_in_list` for the
+    /// three-valued semantics; this is the multi-table mirror.
+    fn eval_row_value_in_list(
+        &self,
+        elem_exprs: &[vibesql_ast::Expression],
+        values: &[vibesql_ast::Expression],
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
+        if values.is_empty() {
+            return Ok(SqlValue::Boolean(negated));
+        }
+
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        let arity = elem_exprs.len();
+
+        // Evaluate the left-hand tuple once.
+        let mut left_vals = Vec::with_capacity(arity);
+        for elem in elem_exprs {
+            left_vals.push(self.eval(elem, row)?);
+        }
+
+        let mut found_unknown = false;
+        for candidate in values {
+            let cand_exprs = match candidate {
+                vibesql_ast::Expression::RowValueConstructor(cand) => cand,
+                _ => return Err(ExecutorError::RowValueMisused),
+            };
+            if cand_exprs.len() != arity {
+                return Err(ExecutorError::RowValueMisused);
+            }
+
+            // Per-element collation and affinity, mirroring row-value `=`.
+            let mut l_vals = Vec::with_capacity(arity);
+            let mut r_vals = Vec::with_capacity(arity);
+            for ((l_expr, l_val), r_expr) in
+                elem_exprs.iter().zip(left_vals.iter()).zip(cand_exprs.iter())
+            {
+                let r_val = self.eval(r_expr, row)?;
+                let collation = self
+                    .get_expression_collation(l_expr)
+                    .or_else(|| self.get_expression_collation(r_expr));
+                let (l_val, r_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                    l_val.clone(),
+                    r_val,
+                    collation.as_deref(),
+                );
+                let (l_val, r_val) =
+                    self.apply_affinity_for_comparison(l_expr, l_val, r_expr, r_val);
+                l_vals.push(l_val);
+                r_vals.push(r_val);
+            }
+
+            match crate::evaluator::row_value::compare_row_values(
+                &l_vals,
+                &vibesql_ast::BinaryOperator::Equal,
+                &r_vals,
+                |l, o, r| ExpressionEvaluator::eval_binary_op_static(l, o, r, sql_mode.clone()),
+            )? {
+                SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(!negated)),
+                SqlValue::Null => found_unknown = true,
+                _ => {}
+            }
+        }
+
+        if found_unknown {
+            Ok(SqlValue::Null)
+        } else {
+            Ok(SqlValue::Boolean(negated))
+        }
+    }
+
     /// Evaluate IN operator with value list: expr IN (val1, val2, ...)
     /// SQL:1999 Section 8.4: IN predicate
     /// Returns TRUE if expr equals any value in the list
@@ -450,6 +648,13 @@ impl CombinedExpressionEvaluator<'_> {
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Row-value IN list: `(a, b) IN ((1, 2), (3, 4))`
+        if let vibesql_ast::Expression::RowValueConstructor(elem_exprs) = expr {
+            if elem_exprs.len() > 1 {
+                return self.eval_row_value_in_list(elem_exprs, values, negated, row);
+            }
+        }
+
         // Empty set optimization (SQLite behavior):
         // If the list is empty, return FALSE for IN, TRUE for NOT IN
         // This is true regardless of whether the left expression is NULL
@@ -611,6 +816,14 @@ impl CombinedExpressionEvaluator<'_> {
                     negated,
                     row,
                 );
+            }
+            // Row value IS'd against something that is neither a row value nor
+            // a scalar subquery (e.g. `(a, a) IS 1`) is a misuse per SQLite.
+            (vibesql_ast::Expression::RowValueConstructor(elems), _)
+            | (_, vibesql_ast::Expression::RowValueConstructor(elems))
+                if elems.len() > 1 =>
+            {
+                return Err(ExecutorError::RowValueMisused);
             }
             _ => {}
         }

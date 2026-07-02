@@ -126,6 +126,31 @@ impl CombinedExpressionEvaluator<'_> {
             );
         }
 
+        // Multi-column scalar subquery on the LHS of IN:
+        // `(SELECT a, b) IN (SELECT x, y FROM t)` — evaluate the LHS subquery
+        // to a row and reuse the row-value IN path.
+        if let vibesql_ast::Expression::ScalarSubquery(left_sub) = expr {
+            if !crate::evaluator::row_value::subquery_is_obviously_single_column(left_sub) {
+                let arity = super::schema_utils::compute_select_list_column_count(
+                    left_sub,
+                    database,
+                    self.cte_context,
+                )?;
+                if arity > 1 {
+                    let left_values = self.eval_scalar_subquery_as_row(left_sub, row, arity)?;
+                    let elem_exprs: Vec<vibesql_ast::Expression> =
+                        left_values.into_iter().map(vibesql_ast::Expression::Literal).collect();
+                    return self.eval_row_value_in_subquery(
+                        &elem_exprs,
+                        subquery,
+                        negated,
+                        row,
+                        database,
+                    );
+                }
+            }
+        }
+
         // Evaluate the left-hand expression
         let expr_val = self.eval(expr, row)?;
 
