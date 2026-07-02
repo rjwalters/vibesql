@@ -39,6 +39,15 @@ pub(super) fn validate_where_clause_subqueries(
             // Issue #3562: Pass CTE context so CTEs can be resolved
             let expected = match lhs.as_ref() {
                 Expression::RowValueConstructor(elements) => elements.len(),
+                // Multi-column scalar-subquery LHS (`(SELECT a, b) IN (...)`)
+                // expects its own column count.
+                Expression::ScalarSubquery(left_sub) => {
+                    match compute_select_list_column_count(left_sub, database, cte_results) {
+                        Ok(n) => n,
+                        // Cannot be determined statically — defer to runtime.
+                        Err(_) => return Ok(()),
+                    }
+                }
                 _ => 1,
             };
             let column_count = compute_select_list_column_count(subquery, database, cte_results)?;
@@ -113,6 +122,14 @@ pub(crate) fn compute_select_list_column_count(
     database: &vibesql_storage::Database,
     cte_results: Option<&HashMap<String, CteResult>>,
 ) -> Result<usize, ExecutorError> {
+    // VALUES statements (e.g. `IN (VALUES(1, 2))`) carry no select list; the
+    // column count is the arity of the value rows.
+    if let Some(values) = &stmt.values {
+        if stmt.select_list.is_empty() {
+            return Ok(values.first().map_or(0, |row| row.len()));
+        }
+    }
+
     let left_count = compute_single_select_column_count(stmt, database, cte_results)?;
 
     // Issue #4881: Validate set operation column counts

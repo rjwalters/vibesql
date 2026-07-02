@@ -15,6 +15,43 @@ impl ExpressionEvaluator<'_> {
         match operand {
             // Simple CASE: CASE operand WHEN value THEN result ...
             Some(operand_expr) => {
+                // Row-value operand or WHEN values (e.g.
+                // `CASE (2,2) WHEN (1,1) THEN ... END`): compare with row-value
+                // equality by delegating to the binary `=` dispatch, which
+                // handles tuple-vs-tuple and tuple-vs-subquery forms.
+                let row_value_case = matches!(
+                    operand_expr.as_ref(),
+                    vibesql_ast::Expression::RowValueConstructor(elems) if elems.len() > 1
+                ) || when_clauses.iter().any(|wc| {
+                    wc.conditions.iter().any(|c| {
+                        matches!(
+                            c,
+                            vibesql_ast::Expression::RowValueConstructor(elems) if elems.len() > 1
+                        )
+                    })
+                });
+                if row_value_case {
+                    for when_clause in when_clauses {
+                        for condition_expr in &when_clause.conditions {
+                            let eq_expr = vibesql_ast::Expression::BinaryOp {
+                                left: operand_expr.clone(),
+                                op: vibesql_ast::BinaryOperator::Equal,
+                                right: Box::new(condition_expr.clone()),
+                            };
+                            if matches!(
+                                self.eval(&eq_expr, row)?,
+                                vibesql_types::SqlValue::Boolean(true)
+                            ) {
+                                return self.eval(&when_clause.result, row);
+                            }
+                        }
+                    }
+                    return match else_result {
+                        Some(else_expr) => self.eval(else_expr, row),
+                        None => Ok(vibesql_types::SqlValue::Null),
+                    };
+                }
+
                 let operand_value = self.eval(operand_expr, row)?;
 
                 for when_clause in when_clauses {

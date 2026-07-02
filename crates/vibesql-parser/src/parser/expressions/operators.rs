@@ -290,7 +290,13 @@ impl Parser {
                             self.expect_token(Token::LParen)?;
                         }
 
-                        let subquery = self.parse_select_statement()?;
+                        // NOT IN (VALUES(...), ...) — a table value constructor
+                        // subquery (rowvalue.test 17.1 / 21.0).
+                        let subquery = if self.peek_keyword(Keyword::Values) {
+                            self.parse_embedded_select_statement()?
+                        } else {
+                            self.parse_select_statement()?
+                        };
 
                         // Consume matching closing parentheses
                         for _ in 0..extra_paren_depth {
@@ -508,7 +514,13 @@ impl Parser {
                         self.expect_token(Token::LParen)?;
                     }
 
-                    let subquery = self.parse_select_statement()?;
+                    // IN (VALUES(...), ...) — a table value constructor
+                    // subquery (rowvalue.test 17.1 / 21.0).
+                    let subquery = if self.peek_keyword(Keyword::Values) {
+                        self.parse_embedded_select_statement()?
+                    } else {
+                        self.parse_select_statement()?
+                    };
 
                     // Consume matching closing parentheses
                     for _ in 0..extra_paren_depth {

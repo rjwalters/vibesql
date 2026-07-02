@@ -27,6 +27,42 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
+/// Apply a collation transformation to both sides of a single element
+/// comparison inside a row-value, mirroring the scalar comparison path:
+/// NOCASE uppercases string values, RTRIM trims trailing whitespace, any other
+/// collation (BINARY, ...) leaves values unchanged.
+pub(crate) fn apply_collation_to_pair(
+    left: SqlValue,
+    right: SqlValue,
+    collation: Option<&str>,
+) -> (SqlValue, SqlValue) {
+    let Some(collation_name) = collation else {
+        return (left, right);
+    };
+
+    fn transform(val: SqlValue, collation_name: &str) -> SqlValue {
+        if collation_name.eq_ignore_ascii_case("nocase") {
+            match val {
+                SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.to_uppercase())),
+                SqlValue::Character(s) => {
+                    SqlValue::Character(arcstr::ArcStr::from(s.to_uppercase()))
+                }
+                other => other,
+            }
+        } else if collation_name.eq_ignore_ascii_case("rtrim") {
+            match val {
+                SqlValue::Varchar(s) => SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end())),
+                SqlValue::Character(s) => SqlValue::Character(arcstr::ArcStr::from(s.trim_end())),
+                other => other,
+            }
+        } else {
+            val
+        }
+    }
+
+    (transform(left, collation_name), transform(right, collation_name))
+}
+
 /// Compare two already-evaluated row values with a comparison operator.
 ///
 /// `eval_op` performs the scalar comparison for a single element pair and must

@@ -48,6 +48,33 @@ impl ExpressionEvaluator<'_> {
             );
         }
 
+        // Scalar-subquery operand with row-value bounds:
+        // `(SELECT 2,2) BETWEEN (1,1) AND (3,3)` — evaluate the subquery to a
+        // row of the bounds' arity and reuse the row-value BETWEEN logic.
+        if let (
+            vibesql_ast::Expression::ScalarSubquery(subquery),
+            vibesql_ast::Expression::RowValueConstructor(low_exprs),
+            vibesql_ast::Expression::RowValueConstructor(high_exprs),
+        ) = (expr, low, high)
+        {
+            if low_exprs.len() > 1 && low_exprs.len() == high_exprs.len() {
+                let sub_values =
+                    self.eval_scalar_subquery_as_row(subquery, row, low_exprs.len())?;
+                let sub_exprs: Vec<vibesql_ast::Expression> =
+                    sub_values.into_iter().map(vibesql_ast::Expression::Literal).collect();
+                return self.eval_row_value_between(
+                    &sub_exprs, low_exprs, high_exprs, negated, symmetric, row,
+                );
+            }
+        }
+
+        // A row value mixed with scalar operands in BETWEEN (e.g.
+        // `(1,2) BETWEEN 1 AND 2` or `1 BETWEEN (1,2) AND 2`) is a misuse.
+        let is_multi_row_value = |e: &vibesql_ast::Expression| matches!(e, vibesql_ast::Expression::RowValueConstructor(elems) if elems.len() > 1);
+        if is_multi_row_value(expr) || is_multi_row_value(low) || is_multi_row_value(high) {
+            return Err(ExecutorError::RowValueMisused);
+        }
+
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
         // Get effective collation: explicit COLLATE or column-level collation
@@ -644,6 +671,13 @@ impl ExpressionEvaluator<'_> {
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        // Row-value IN list: `(a, b) IN ((1, 2), (3, 4))`
+        if let vibesql_ast::Expression::RowValueConstructor(elem_exprs) = expr {
+            if elem_exprs.len() > 1 {
+                return self.eval_row_value_in_list(elem_exprs, values, negated, row);
+            }
+        }
+
         // Handle empty IN list: returns false for IN, true for NOT IN
         // This is per SQLite behavior (SQL:1999 extension, not standard SQL)
         if values.is_empty() {
@@ -744,6 +778,89 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Evaluate a row-value IN list: `(a, b) IN ((1, 2), (3, 4))` and NOT IN.
+    ///
+    /// SQLite three-valued semantics (mirroring the scalar IN):
+    /// - TRUE (or FALSE for NOT IN) as soon as one candidate tuple compares
+    ///   fully equal;
+    /// - if no candidate matches but at least one candidate comparison was
+    ///   UNKNOWN (a NULL element with all non-NULL elements equal), the result
+    ///   is NULL;
+    /// - otherwise FALSE (TRUE for NOT IN).
+    ///
+    /// Each candidate must itself be a row value of the same arity; anything
+    /// else is a misuse per SQLite ("row value misused").
+    fn eval_row_value_in_list(
+        &self,
+        elem_exprs: &[vibesql_ast::Expression],
+        values: &[vibesql_ast::Expression],
+        negated: bool,
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use vibesql_types::SqlValue;
+
+        if values.is_empty() {
+            return Ok(SqlValue::Boolean(negated));
+        }
+
+        let arity = elem_exprs.len();
+
+        // Evaluate the left-hand tuple once.
+        let mut left_vals = Vec::with_capacity(arity);
+        for elem in elem_exprs {
+            left_vals.push(self.eval(elem, row)?);
+        }
+
+        let mut found_unknown = false;
+        for candidate in values {
+            let cand_exprs = match candidate {
+                vibesql_ast::Expression::RowValueConstructor(cand) => cand,
+                _ => return Err(ExecutorError::RowValueMisused),
+            };
+            if cand_exprs.len() != arity {
+                return Err(ExecutorError::RowValueMisused);
+            }
+
+            // Per-element collation and affinity, mirroring row-value `=`.
+            let mut l_vals = Vec::with_capacity(arity);
+            let mut r_vals = Vec::with_capacity(arity);
+            for ((l_expr, l_val), r_expr) in
+                elem_exprs.iter().zip(left_vals.iter()).zip(cand_exprs.iter())
+            {
+                let r_val = self.eval(r_expr, row)?;
+                let collation = self
+                    .get_expression_collation(l_expr)
+                    .or_else(|| self.get_expression_collation(r_expr));
+                let (l_val, r_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                    l_val.clone(),
+                    r_val,
+                    collation.as_deref(),
+                );
+                let (l_val, r_val) =
+                    self.apply_affinity_for_comparison(l_expr, l_val, r_expr, r_val);
+                l_vals.push(l_val);
+                r_vals.push(r_val);
+            }
+
+            match crate::evaluator::row_value::compare_row_values(
+                &l_vals,
+                &vibesql_ast::BinaryOperator::Equal,
+                &r_vals,
+                |l, o, r| self.eval_binary_op(l, o, r),
+            )? {
+                SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(!negated)),
+                SqlValue::Null => found_unknown = true,
+                _ => {}
+            }
+        }
+
+        if found_unknown {
+            Ok(SqlValue::Null)
+        } else {
+            Ok(SqlValue::Boolean(negated))
+        }
+    }
+
     /// Evaluate row value BETWEEN predicate
     ///
     /// `(a, b) BETWEEN (low_a, low_b) AND (high_a, high_b)`
@@ -761,14 +878,10 @@ impl ExpressionEvaluator<'_> {
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         use vibesql_types::SqlValue;
 
-        // Row values must have the same number of elements
+        // Row values must have the same number of elements (SQLite reports a
+        // mismatched-arity BETWEEN as "row value misused").
         if expr_exprs.len() != low_exprs.len() || expr_exprs.len() != high_exprs.len() {
-            return Err(ExecutorError::UnsupportedExpression(format!(
-                "Row value constructor size mismatch in BETWEEN: expr has {} elements, low has {}, high has {}",
-                expr_exprs.len(),
-                low_exprs.len(),
-                high_exprs.len()
-            )));
+            return Err(ExecutorError::RowValueMisused);
         }
 
         if expr_exprs.is_empty() {

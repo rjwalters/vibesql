@@ -65,10 +65,21 @@ fn validate_expr(
 ) -> Result<(), ExecutorError> {
     match expr {
         Expression::In { expr: lhs, subquery, .. } => {
-            // Row-value LHS expects one subquery column per LHS element;
-            // any other LHS is scalar and expects exactly one column.
+            // Row-value LHS expects one subquery column per LHS element; a
+            // multi-column scalar-subquery LHS (`(SELECT a, b) IN (...)`)
+            // expects its own column count; any other LHS is scalar and
+            // expects exactly one column.
             let expected = match lhs.as_ref() {
                 Expression::RowValueConstructor(items) => items.len(),
+                Expression::ScalarSubquery(left_sub) => {
+                    match crate::evaluator::compute_select_list_column_count(
+                        left_sub, database, None,
+                    ) {
+                        Ok(n) => n,
+                        // Cannot be determined statically — defer to runtime.
+                        Err(_) => return validate_expr(lhs, database),
+                    }
+                }
                 _ => 1,
             };
 

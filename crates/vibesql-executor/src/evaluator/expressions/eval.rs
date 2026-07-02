@@ -131,8 +131,7 @@ impl ExpressionEvaluator<'_> {
                 if let Some(c) = explicit_collation_of(right) {
                     return Some(c);
                 }
-                self.get_expression_collation(left)
-                    .or_else(|| self.get_expression_collation(right))
+                self.get_expression_collation(left).or_else(|| self.get_expression_collation(right))
             }
             // Unary operator: inherit from operand.
             vibesql_ast::Expression::UnaryOp { expr, .. } => self.get_expression_collation(expr),
@@ -611,6 +610,16 @@ impl ExpressionEvaluator<'_> {
                                         return Ok(result);
                                     }
                                 }
+                                // A row value compared against anything that is
+                                // not a row value or a scalar subquery (e.g.
+                                // `(a, b) = 1` or `(a, b) = (SELECT ...) COLLATE x`)
+                                // is a misuse per SQLite.
+                                (vibesql_ast::Expression::RowValueConstructor(elems), _)
+                                | (_, vibesql_ast::Expression::RowValueConstructor(elems))
+                                    if elems.len() > 1 =>
+                                {
+                                    return Err(ExecutorError::RowValueMisused);
+                                }
                                 _ => {}
                             }
                         }
@@ -824,6 +833,15 @@ impl ExpressionEvaluator<'_> {
                             tuple_exprs, subquery, *negated, row,
                         );
                     }
+                    // Row value IS'd against something that is neither a row
+                    // value nor a scalar subquery (e.g. `(a, a) IS 1`) is a
+                    // misuse per SQLite.
+                    (vibesql_ast::Expression::RowValueConstructor(elems), _)
+                    | (_, vibesql_ast::Expression::RowValueConstructor(elems))
+                        if elems.len() > 1 =>
+                    {
+                        return Err(ExecutorError::RowValueMisused);
+                    }
                     _ => {}
                 }
 
@@ -1036,12 +1054,12 @@ impl ExpressionEvaluator<'_> {
                 Ok(result)
             }
 
-            // Row value constructor - evaluate to a vector of values
-            // This is only reached when a row value appears outside a comparison context
-            // (e.g., in SELECT list which is not supported)
-            vibesql_ast::Expression::RowValueConstructor(_) => Err(ExecutorError::UnsupportedExpression(
-                "Row value constructors are only supported in comparison expressions".to_string(),
-            )),
+            // Row value constructor - only reached when a row value appears in a
+            // scalar context (e.g. bare in a SELECT list, function argument,
+            // arithmetic operand). SQLite reports this as "row value misused".
+            vibesql_ast::Expression::RowValueConstructor(_) => {
+                Err(ExecutorError::RowValueMisused)
+            }
 
             // COLLATE expression - evaluate inner expression (collation affects string comparison)
             // TODO: Full collation support - for now just evaluate the inner expression
@@ -1391,13 +1409,10 @@ impl ExpressionEvaluator<'_> {
         right_exprs: &[vibesql_ast::Expression],
         row: &vibesql_storage::Row,
     ) -> Result<SqlValue, ExecutorError> {
-        // Row values must have the same number of elements
+        // Row values must have the same number of elements (SQLite reports a
+        // mismatched-arity comparison as "row value misused").
         if left_exprs.len() != right_exprs.len() {
-            return Err(ExecutorError::UnsupportedExpression(format!(
-                "Row value constructor size mismatch: left has {} elements, right has {}",
-                left_exprs.len(),
-                right_exprs.len()
-            )));
+            return Err(ExecutorError::RowValueMisused);
         }
 
         // Empty row values are not allowed
@@ -1417,6 +1432,17 @@ impl ExpressionEvaluator<'_> {
         for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
             let left_val = self.eval(left_expr, row)?;
             let right_val = self.eval(right_expr, row)?;
+            // Per-element collation, mirroring the scalar comparison path:
+            // explicit COLLATE or column-declared collation on either element
+            // (left side takes priority) applies to that element pair only.
+            let collation = self
+                .get_expression_collation(left_expr)
+                .or_else(|| self.get_expression_collation(right_expr));
+            let (left_val, right_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                left_val,
+                right_val,
+                collation.as_deref(),
+            );
             let (left_val, right_val) =
                 self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
             left_values.push(left_val);
@@ -1513,6 +1539,14 @@ impl ExpressionEvaluator<'_> {
         let mut other_values = Vec::with_capacity(arity);
         for (tuple_expr, sub_val) in tuple_exprs.iter().zip(subquery_values) {
             let tuple_val = self.eval(tuple_expr, row)?;
+            // Per-element collation from the tuple side (explicit COLLATE or
+            // column-declared collation), e.g. `(a COLLATE nocase, b) = (SELECT ...)`.
+            let collation = self.get_expression_collation(tuple_expr);
+            let (tuple_val, sub_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                tuple_val,
+                sub_val,
+                collation.as_deref(),
+            );
             // Treat the subquery result column as a non-column value so the same
             // affinity rules used for `tuple_col <op> <computed value>` apply.
             let synthetic = vibesql_ast::Expression::Literal(sub_val.clone());
@@ -1596,13 +1630,10 @@ impl ExpressionEvaluator<'_> {
         negated: bool,
         row: &vibesql_storage::Row,
     ) -> Result<SqlValue, ExecutorError> {
-        // Row values must have the same number of elements
+        // Row values must have the same number of elements (SQLite reports a
+        // mismatched-arity comparison as "row value misused").
         if left_exprs.len() != right_exprs.len() {
-            return Err(ExecutorError::UnsupportedExpression(format!(
-                "Row value constructor size mismatch: left has {} elements, right has {}",
-                left_exprs.len(),
-                right_exprs.len()
-            )));
+            return Err(ExecutorError::RowValueMisused);
         }
 
         // Empty row values are not allowed
@@ -1612,22 +1643,64 @@ impl ExpressionEvaluator<'_> {
             ));
         }
 
-        // Evaluate all elements with per-column affinity, then compare NULL-safely.
-        let mut left_values = Vec::with_capacity(left_exprs.len());
-        let mut right_values = Vec::with_capacity(right_exprs.len());
+        // Element-wise NULL-safe distinctness. Elements may themselves be row
+        // values (e.g. `(2,(2,0)) IS (2,(2,0))`), which recurse structurally.
+        let mut any_distinct = false;
         for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
-            let left_val = self.eval(left_expr, row)?;
-            let right_val = self.eval(right_expr, row)?;
-            let (left_val, right_val) =
-                self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
-            left_values.push(left_val);
-            right_values.push(right_val);
+            if self.row_value_element_is_distinct(left_expr, right_expr, row)? {
+                any_distinct = true;
+                break;
+            }
         }
 
-        Ok(crate::evaluator::row_value::row_values_is_distinct(
-            &left_values,
-            &right_values,
-            negated,
-        ))
+        // negated == true corresponds to IS (NULL-safe equality).
+        Ok(SqlValue::Boolean(if negated { !any_distinct } else { any_distinct }))
+    }
+
+    /// NULL-safe distinctness of a single row-value element pair.
+    ///
+    /// Nested row values on both sides recurse structurally; a row value paired
+    /// with a scalar (or mismatched nested arity) is a misuse per SQLite.
+    fn row_value_element_is_distinct(
+        &self,
+        left_expr: &vibesql_ast::Expression,
+        right_expr: &vibesql_ast::Expression,
+        row: &vibesql_storage::Row,
+    ) -> Result<bool, ExecutorError> {
+        match (left_expr, right_expr) {
+            (
+                vibesql_ast::Expression::RowValueConstructor(left_elems),
+                vibesql_ast::Expression::RowValueConstructor(right_elems),
+            ) => {
+                if left_elems.len() != right_elems.len() {
+                    return Err(ExecutorError::RowValueMisused);
+                }
+                for (l, r) in left_elems.iter().zip(right_elems.iter()) {
+                    if self.row_value_element_is_distinct(l, r, row)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            (vibesql_ast::Expression::RowValueConstructor(_), _)
+            | (_, vibesql_ast::Expression::RowValueConstructor(_)) => {
+                Err(ExecutorError::RowValueMisused)
+            }
+            _ => {
+                let left_val = self.eval(left_expr, row)?;
+                let right_val = self.eval(right_expr, row)?;
+                let collation = self
+                    .get_expression_collation(left_expr)
+                    .or_else(|| self.get_expression_collation(right_expr));
+                let (left_val, right_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                    left_val,
+                    right_val,
+                    collation.as_deref(),
+                );
+                let (left_val, right_val) =
+                    self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
+                Ok(super::super::core::values_are_distinct(&left_val, &right_val))
+            }
+        }
     }
 }
