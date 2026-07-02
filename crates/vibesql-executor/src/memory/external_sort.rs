@@ -167,27 +167,14 @@ impl SortKeyComparator {
 }
 
 /// Compare two SqlValue instances
+///
+/// Delegates to the shared SQLite-style total order (#5802). The previous
+/// hand-rolled version treated every cross-variant pair (even Integer vs
+/// Bigint) as Equal, which is not a total order and could panic inside
+/// `sort_unstable_by` for mixed-type sort keys. NULLs are handled by the
+/// caller ([`SortKeyComparator::compare`]) before this is invoked.
 fn compare_sql_values(a: &SqlValue, b: &SqlValue) -> Ordering {
-    use SqlValue::*;
-    match (a, b) {
-        (Integer(x), Integer(y)) => x.cmp(y),
-        (Smallint(x), Smallint(y)) => x.cmp(y),
-        (Bigint(x), Bigint(y)) => x.cmp(y),
-        (Unsigned(x), Unsigned(y)) => x.cmp(y),
-        (Float(x), Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Real(x), Real(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Double(x), Double(y)) | (Numeric(x), Numeric(y)) => {
-            x.partial_cmp(y).unwrap_or(Ordering::Equal)
-        }
-        (Character(x), Character(y)) | (Varchar(x), Varchar(y)) => x.cmp(y),
-        (Character(x), Varchar(y)) | (Varchar(x), Character(y)) => x.as_str().cmp(y.as_str()),
-        (Boolean(x), Boolean(y)) => x.cmp(y),
-        (Date(x), Date(y)) => x.cmp(y),
-        (Time(x), Time(y)) => x.cmp(y),
-        (Timestamp(x), Timestamp(y)) => x.cmp(y),
-        (Interval(x), Interval(y)) => x.cmp(y),
-        _ => Ordering::Equal, // Type mismatch - treat as equal
-    }
+    vibesql_types::total_order_cmp(a, b)
 }
 
 impl ExternalSort {
