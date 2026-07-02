@@ -314,3 +314,219 @@ fn test_parse_not_in_parenthesized_subquery() {
         }
     }
 }
+
+// ========================================================================
+// IN / NOT IN Composability Tests (issue #5801)
+//
+// Per SQLite, IN is an ordinary left-associative binary operator in the
+// comparison tier, and its right operand is syntactically closed (a
+// parenthesized list/subquery or a table name). So another comparison-tier
+// operator OR a tighter-binding operator (+, <<, *, ...) may follow an IN
+// node, taking the whole IN expression as its left operand.
+// All expected shapes below were verified against sqlite3.
+// ========================================================================
+
+/// Parse a `SELECT <expr>;` statement and return the first select-list expression.
+fn parse_select_expr(sql: &str) -> vibesql_ast::Expression {
+    let stmt = Parser::parse_sql(sql).unwrap_or_else(|e| panic!("should parse: {}: {:?}", sql, e));
+    if let vibesql_ast::Statement::Select(select) = stmt {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] {
+            return expr.clone();
+        }
+    }
+    panic!("expected SELECT with expression select list: {}", sql);
+}
+
+#[test]
+fn test_in_subquery_chained_not_in_subquery() {
+    // sqlite3: SELECT 1 IN (SELECT 1) NOT IN (SELECT 2); -- 1
+    let expr = parse_select_expr("SELECT 1 IN (SELECT 1) NOT IN (SELECT 2);");
+    if let vibesql_ast::Expression::In { expr: inner, negated, .. } = expr {
+        assert!(negated, "outer NOT IN should be negated");
+        assert!(
+            matches!(*inner, vibesql_ast::Expression::In { negated: false, .. }),
+            "left operand should be the inner (non-negated) IN node: {:?}",
+            inner
+        );
+    } else {
+        panic!("expected outer In expression");
+    }
+}
+
+#[test]
+fn test_in_subquery_followed_by_plus() {
+    // sqlite3: SELECT 1 IN (SELECT 1) + 1; -- 2
+    // + binds tighter than IN, but IN's right operand is closed, so the whole
+    // IN node becomes the left operand of +.
+    let expr = parse_select_expr("SELECT 1 IN (SELECT 1) + 1;");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr {
+        assert_eq!(op, vibesql_ast::BinaryOperator::Plus);
+        assert!(
+            matches!(*left, vibesql_ast::Expression::In { .. }),
+            "left operand of + should be the IN node: {:?}",
+            left
+        );
+    } else {
+        panic!("expected BinaryOp Plus at top level");
+    }
+}
+
+#[test]
+fn test_in_list_chained_not_in_subquery() {
+    // sqlite3: SELECT 1 IN (1,2) NOT IN (SELECT 2); -- 1
+    let expr = parse_select_expr("SELECT 1 IN (1,2) NOT IN (SELECT 2);");
+    if let vibesql_ast::Expression::In { expr: inner, negated, .. } = expr {
+        assert!(negated);
+        assert!(
+            matches!(*inner, vibesql_ast::Expression::InList { negated: false, .. }),
+            "left operand should be the inner IN list node: {:?}",
+            inner
+        );
+    } else {
+        panic!("expected outer In expression");
+    }
+}
+
+#[test]
+fn test_not_in_subquery_followed_by_shift() {
+    // sqlite3: SELECT 1 NOT IN (SELECT 1) << 2; -- 0
+    let expr = parse_select_expr("SELECT 1 NOT IN (SELECT 1) << 2;");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr {
+        assert_eq!(op, vibesql_ast::BinaryOperator::LeftShift);
+        assert!(
+            matches!(*left, vibesql_ast::Expression::In { negated: true, .. }),
+            "left operand of << should be the NOT IN node: {:?}",
+            left
+        );
+    } else {
+        panic!("expected BinaryOp LeftShift at top level");
+    }
+}
+
+#[test]
+fn test_not_in_shift_inside_function_call() {
+    // sqlite3: SELECT lower(1 NOT IN (SELECT 1) << 2); -- '0'
+    let result = Parser::parse_sql("SELECT lower(1 NOT IN (SELECT 1) << 2);");
+    assert!(
+        result.is_ok(),
+        "NOT IN followed by << inside function args should parse: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_parenthesized_in_chained_not_in_still_works() {
+    // sqlite3: SELECT (1 IN (SELECT 1)) NOT IN (SELECT 2); -- 1 (worked before the fix)
+    let expr = parse_select_expr("SELECT (1 IN (SELECT 1)) NOT IN (SELECT 2);");
+    if let vibesql_ast::Expression::In { expr: inner, negated, .. } = expr {
+        assert!(negated);
+        assert!(matches!(*inner, vibesql_ast::Expression::In { negated: false, .. }));
+    } else {
+        panic!("expected outer In expression");
+    }
+}
+
+#[test]
+fn test_in_lhs_precedence_preserved() {
+    // sqlite3: SELECT 1 + 2 IN (3); -- 1
+    // + binds tighter than IN on the LEFT side too: (1 + 2) IN (3).
+    let expr = parse_select_expr("SELECT 1 + 2 IN (3);");
+    if let vibesql_ast::Expression::InList { expr: inner, negated, .. } = expr {
+        assert!(!negated);
+        assert!(
+            matches!(
+                *inner,
+                vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::Plus, .. }
+            ),
+            "left operand of IN should be (1 + 2): {:?}",
+            inner
+        );
+    } else {
+        panic!("expected InList at top level");
+    }
+}
+
+#[test]
+fn test_chained_in_lists() {
+    // sqlite3: SELECT 1 IN (2) IN (0); -- 1, i.e. ((1 IN (2)) IN (0))
+    let expr = parse_select_expr("SELECT 1 IN (2) IN (0);");
+    if let vibesql_ast::Expression::InList { expr: inner, .. } = expr {
+        assert!(
+            matches!(*inner, vibesql_ast::Expression::InList { .. }),
+            "IN chains must be left-associative: {:?}",
+            inner
+        );
+    } else {
+        panic!("expected outer InList");
+    }
+}
+
+#[test]
+fn test_not_in_chained_not_in() {
+    // sqlite3: SELECT 1 NOT IN (SELECT 1) NOT IN (SELECT 0); -- 0
+    let expr = parse_select_expr("SELECT 1 NOT IN (SELECT 1) NOT IN (SELECT 0);");
+    if let vibesql_ast::Expression::In { expr: inner, negated, .. } = expr {
+        assert!(negated);
+        assert!(matches!(*inner, vibesql_ast::Expression::In { negated: true, .. }));
+    } else {
+        panic!("expected outer In expression");
+    }
+}
+
+#[test]
+fn test_in_followed_by_comparison() {
+    // sqlite3: SELECT 1 IN (1) = 1; -- 1, i.e. ((1 IN (1)) = 1)
+    let expr = parse_select_expr("SELECT 1 IN (1) = 1;");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr {
+        assert_eq!(op, vibesql_ast::BinaryOperator::Equal);
+        assert!(matches!(*left, vibesql_ast::Expression::InList { .. }));
+    } else {
+        panic!("expected BinaryOp Equal at top level");
+    }
+}
+
+#[test]
+fn test_in_followed_by_multiply() {
+    // sqlite3: SELECT 1 IN (1) * 3; -- 3
+    let expr = parse_select_expr("SELECT 1 IN (1) * 3;");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr {
+        assert_eq!(op, vibesql_ast::BinaryOperator::Multiply);
+        assert!(matches!(*left, vibesql_ast::Expression::InList { .. }));
+    } else {
+        panic!("expected BinaryOp Multiply at top level");
+    }
+}
+
+#[test]
+fn test_like_chained_with_in() {
+    // sqlite3: SELECT 'a' LIKE 'a' IN (1); -- 1, i.e. (('a' LIKE 'a') IN (1))
+    let expr = parse_select_expr("SELECT 'a' LIKE 'a' IN (1);");
+    if let vibesql_ast::Expression::InList { expr: inner, .. } = expr {
+        assert!(matches!(*inner, vibesql_ast::Expression::Like { .. }));
+    } else {
+        panic!("expected InList at top level");
+    }
+}
+
+#[test]
+fn test_between_chained_with_in() {
+    // sqlite3: SELECT 1 BETWEEN 0 AND 2 IN (1); -- 1, i.e. ((1 BETWEEN 0 AND 2) IN (1))
+    let expr = parse_select_expr("SELECT 1 BETWEEN 0 AND 2 IN (1);");
+    if let vibesql_ast::Expression::InList { expr: inner, .. } = expr {
+        assert!(matches!(*inner, vibesql_ast::Expression::Between { .. }));
+    } else {
+        panic!("expected InList at top level");
+    }
+}
+
+#[test]
+fn test_in_followed_by_isnull() {
+    // sqlite3: SELECT 1 IN (1) ISNULL; -- 0
+    let expr = parse_select_expr("SELECT 1 IN (1) ISNULL;");
+    if let vibesql_ast::Expression::IsNull { expr: inner, negated } = expr {
+        assert!(!negated);
+        assert!(matches!(*inner, vibesql_ast::Expression::InList { .. }));
+    } else {
+        panic!("expected IsNull at top level");
+    }
+}

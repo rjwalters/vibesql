@@ -92,19 +92,126 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse comparison expression.
+    ///
+    /// Per SQLite, all operators in this tier (=, <, >, IS, IN, BETWEEN, LIKE,
+    /// ISNULL, NOTNULL, ...) are left-associative and composable, so they chain:
+    /// `1 IN (1) NOT IN (SELECT 2)` parses as `(1 IN (1)) NOT IN (SELECT 2)`.
+    /// Additionally, IN's right operand is syntactically closed (a parenthesized
+    /// list/subquery), so a tighter-binding operator that follows an IN node takes
+    /// the whole IN expression as its left operand:
+    /// `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`.
     fn parse_comparison_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
         let mut left = self.parse_additive_expression()?;
 
-        // Check for IN, BETWEEN, LIKE operators
-        if self.peek_keyword(Keyword::Not) {
-            let saved_pos = self.position;
-            self.advance();
+        loop {
+            // Check for IN, BETWEEN, LIKE operators
+            if self.peek_keyword(Keyword::Not) {
+                let saved_pos = self.position;
+                self.advance();
 
-            if self.peek_keyword(Keyword::In) {
+                if self.peek_keyword(Keyword::In) {
+                    self.consume_keyword(Keyword::In)?;
+                    self.expect_token(Token::LParen)?;
+
+                    // Check for parenthesized subqueries like NOT IN ((SELECT ...))
+                    let (is_subquery_through_parens, extra_paren_depth) =
+                        self.peek_select_through_parens();
+
+                    if self.peek_keyword(Keyword::Select)
+                        || self.peek_keyword(Keyword::Values)
+                        || is_subquery_through_parens
+                    {
+                        // Consume any extra opening parentheses
+                        for _ in 0..extra_paren_depth {
+                            self.expect_token(Token::LParen)?;
+                        }
+
+                        let subquery = self.parse_select_statement()?;
+
+                        // Consume matching closing parentheses
+                        for _ in 0..extra_paren_depth {
+                            self.expect_token(Token::RParen)?;
+                        }
+                        self.expect_token(Token::RParen)?;
+                        let left_ref = self.arena.alloc(left);
+                        left = Expression::Extended(self.arena.alloc(ExtendedExpr::In {
+                            expr: left_ref,
+                            subquery,
+                            negated: true,
+                        }));
+                    } else {
+                        let values = self.parse_expression_list()?;
+                        self.expect_token(Token::RParen)?;
+                        let left_ref = self.arena.alloc(left);
+                        left = Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
+                            expr: left_ref,
+                            values,
+                            negated: true,
+                        }));
+                    }
+
+                    // IN's right operand is syntactically closed, so tighter-binding
+                    // operators that follow take the whole IN node as their left
+                    // operand (SQLite: `1 NOT IN (SELECT 1) + 1`).
+                    left = self.continue_higher_precedence_ops(left)?;
+                    continue;
+                } else if self.peek_keyword(Keyword::Between) {
+                    self.consume_keyword(Keyword::Between)?;
+                    let symmetric = self.try_consume_keyword(Keyword::Symmetric);
+                    if !symmetric {
+                        self.try_consume_keyword(Keyword::Asymmetric);
+                    }
+
+                    let low = self.parse_additive_expression()?;
+                    self.consume_keyword(Keyword::And)?;
+                    let high = self.parse_additive_expression()?;
+
+                    let left_ref = self.arena.alloc(left);
+                    let low_ref = self.arena.alloc(low);
+                    let high_ref = self.arena.alloc(high);
+
+                    left = Expression::Extended(self.arena.alloc(ExtendedExpr::Between {
+                        expr: left_ref,
+                        low: low_ref,
+                        high: high_ref,
+                        negated: true,
+                        symmetric,
+                    }));
+                    continue;
+                } else if self.peek_keyword(Keyword::Like) {
+                    self.consume_keyword(Keyword::Like)?;
+                    let pattern = self.parse_additive_expression()?;
+                    let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape)
+                    {
+                        self.consume_keyword(Keyword::Escape)?;
+                        Some(self.arena.alloc(self.parse_additive_expression()?))
+                    } else {
+                        None
+                    };
+                    let left_ref = self.arena.alloc(left);
+                    let pattern_ref = self.arena.alloc(pattern);
+                    left = Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
+                        expr: left_ref,
+                        pattern: pattern_ref,
+                        negated: true,
+                        escape,
+                    }));
+                    continue;
+                } else if self.peek_keyword(Keyword::Null) {
+                    // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
+                    self.consume_keyword(Keyword::Null)?;
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::IsNull { expr: left_ref, negated: true };
+                    continue;
+                } else {
+                    self.position = saved_pos;
+                    break;
+                }
+            } else if self.peek_keyword(Keyword::In) {
                 self.consume_keyword(Keyword::In)?;
                 self.expect_token(Token::LParen)?;
 
-                // Check for parenthesized subqueries like NOT IN ((SELECT ...))
+                // Check for parenthesized subqueries like IN ((SELECT ...))
                 let (is_subquery_through_parens, extra_paren_depth) =
                     self.peek_select_through_parens();
 
@@ -125,21 +232,27 @@ impl<'arena> ArenaParser<'arena> {
                     }
                     self.expect_token(Token::RParen)?;
                     let left_ref = self.arena.alloc(left);
-                    return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {
+                    left = Expression::Extended(self.arena.alloc(ExtendedExpr::In {
                         expr: left_ref,
                         subquery,
-                        negated: true,
-                    })));
+                        negated: false,
+                    }));
                 } else {
                     let values = self.parse_expression_list()?;
                     self.expect_token(Token::RParen)?;
                     let left_ref = self.arena.alloc(left);
-                    return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
+                    left = Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
                         expr: left_ref,
                         values,
-                        negated: true,
-                    })));
+                        negated: false,
+                    }));
                 }
+
+                // IN's right operand is syntactically closed, so tighter-binding
+                // operators that follow take the whole IN node as their left
+                // operand (SQLite: `1 IN (SELECT 1) + 1` = `(1 IN (SELECT 1)) + 1`).
+                left = self.continue_higher_precedence_ops(left)?;
+                continue;
             } else if self.peek_keyword(Keyword::Between) {
                 self.consume_keyword(Keyword::Between)?;
                 let symmetric = self.try_consume_keyword(Keyword::Symmetric);
@@ -155,13 +268,14 @@ impl<'arena> ArenaParser<'arena> {
                 let low_ref = self.arena.alloc(low);
                 let high_ref = self.arena.alloc(high);
 
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Between {
+                left = Expression::Extended(self.arena.alloc(ExtendedExpr::Between {
                     expr: left_ref,
                     low: low_ref,
                     high: high_ref,
-                    negated: true,
+                    negated: false,
                     symmetric,
-                })));
+                }));
+                continue;
             } else if self.peek_keyword(Keyword::Like) {
                 self.consume_keyword(Keyword::Like)?;
                 let pattern = self.parse_additive_expression()?;
@@ -173,249 +287,237 @@ impl<'arena> ArenaParser<'arena> {
                 };
                 let left_ref = self.arena.alloc(left);
                 let pattern_ref = self.arena.alloc(pattern);
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
+                left = Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
                     expr: left_ref,
                     pattern: pattern_ref,
-                    negated: true,
+                    negated: false,
                     escape,
-                })));
-            } else if self.peek_keyword(Keyword::Null) {
-                // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
-                self.consume_keyword(Keyword::Null)?;
-                let left_ref = self.arena.alloc(left);
-                return Ok(Expression::IsNull { expr: left_ref, negated: true });
-            } else {
-                self.position = saved_pos;
+                }));
+                continue;
             }
-        } else if self.peek_keyword(Keyword::In) {
-            self.consume_keyword(Keyword::In)?;
-            self.expect_token(Token::LParen)?;
 
-            // Check for parenthesized subqueries like IN ((SELECT ...))
-            let (is_subquery_through_parens, extra_paren_depth) = self.peek_select_through_parens();
+            // Check for comparison operators
+            let is_comparison = match self.peek() {
+                Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
+                Token::Operator(s) => matches!(
+                    s,
+                    MultiCharOperator::LessEqual
+                        | MultiCharOperator::GreaterEqual
+                        | MultiCharOperator::NotEqual
+                        | MultiCharOperator::NotEqualAlt
+                        | MultiCharOperator::DoubleEqual
+                        | MultiCharOperator::CosineDistance
+                        | MultiCharOperator::NegativeInnerProduct
+                        | MultiCharOperator::L2Distance
+                ),
+                _ => false,
+            };
 
-            if self.peek_keyword(Keyword::Select)
-                || self.peek_keyword(Keyword::Values)
-                || is_subquery_through_parens
-            {
-                // Consume any extra opening parentheses
-                for _ in 0..extra_paren_depth {
+            if is_comparison {
+                let op = match self.peek() {
+                    Token::Symbol('=') => BinaryOperator::Equal,
+                    Token::Symbol('<') => BinaryOperator::LessThan,
+                    Token::Symbol('>') => BinaryOperator::GreaterThan,
+                    Token::Operator(s) => match s {
+                        MultiCharOperator::LessEqual => BinaryOperator::LessThanOrEqual,
+                        MultiCharOperator::GreaterEqual => BinaryOperator::GreaterThanOrEqual,
+                        MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
+                            BinaryOperator::NotEqual
+                        }
+                        // SQLite compatibility: == is a synonym for =
+                        MultiCharOperator::DoubleEqual => BinaryOperator::Equal,
+                        // Vector distance operators (pgvector compatible)
+                        MultiCharOperator::CosineDistance => BinaryOperator::CosineDistance,
+                        MultiCharOperator::NegativeInnerProduct => {
+                            BinaryOperator::NegativeInnerProduct
+                        }
+                        MultiCharOperator::L2Distance => BinaryOperator::L2Distance,
+                        _ => {
+                            return Err(ParseError {
+                                message: "Unexpected || operator in comparison".to_string(),
+                            })
+                        }
+                    },
+                    _ => unreachable!(),
+                };
+                self.advance();
+
+                // Check for quantified comparison (ALL, ANY, SOME)
+                if self.peek_keyword(Keyword::All)
+                    || self.peek_keyword(Keyword::Any)
+                    || self.peek_keyword(Keyword::Some)
+                {
+                    let quantifier = if self.try_consume_keyword(Keyword::All) {
+                        Quantifier::All
+                    } else if self.try_consume_keyword(Keyword::Any) {
+                        Quantifier::Any
+                    } else {
+                        self.consume_keyword(Keyword::Some)?;
+                        Quantifier::Some
+                    };
+
                     self.expect_token(Token::LParen)?;
-                }
-
-                let subquery = self.parse_select_statement()?;
-
-                // Consume matching closing parentheses
-                for _ in 0..extra_paren_depth {
+                    let subquery = self.parse_select_statement()?;
                     self.expect_token(Token::RParen)?;
+
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::Extended(self.arena.alloc(
+                        ExtendedExpr::QuantifiedComparison {
+                            expr: left_ref,
+                            op,
+                            quantifier,
+                            subquery,
+                        },
+                    ));
+                    continue;
                 }
-                self.expect_token(Token::RParen)?;
+
+                let right = self.parse_additive_expression()?;
                 let left_ref = self.arena.alloc(left);
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::In {
-                    expr: left_ref,
-                    subquery,
-                    negated: false,
-                })));
-            } else {
-                let values = self.parse_expression_list()?;
-                self.expect_token(Token::RParen)?;
-                let left_ref = self.arena.alloc(left);
-                return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
-                    expr: left_ref,
-                    values,
-                    negated: false,
-                })));
-            }
-        } else if self.peek_keyword(Keyword::Between) {
-            self.consume_keyword(Keyword::Between)?;
-            let symmetric = self.try_consume_keyword(Keyword::Symmetric);
-            if !symmetric {
-                self.try_consume_keyword(Keyword::Asymmetric);
+                let right_ref = self.arena.alloc(right);
+                left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
+                continue;
             }
 
-            let low = self.parse_additive_expression()?;
-            self.consume_keyword(Keyword::And)?;
-            let high = self.parse_additive_expression()?;
+            // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
+            if self.peek_keyword(Keyword::Is) {
+                self.consume_keyword(Keyword::Is)?;
+                let negated = self.try_consume_keyword(Keyword::Not);
 
-            let left_ref = self.arena.alloc(left);
-            let low_ref = self.arena.alloc(low);
-            let high_ref = self.arena.alloc(high);
-
-            return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Between {
-                expr: left_ref,
-                low: low_ref,
-                high: high_ref,
-                negated: false,
-                symmetric,
-            })));
-        } else if self.peek_keyword(Keyword::Like) {
-            self.consume_keyword(Keyword::Like)?;
-            let pattern = self.parse_additive_expression()?;
-            let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape) {
-                self.consume_keyword(Keyword::Escape)?;
-                Some(self.arena.alloc(self.parse_additive_expression()?))
-            } else {
-                None
-            };
-            let left_ref = self.arena.alloc(left);
-            let pattern_ref = self.arena.alloc(pattern);
-            return Ok(Expression::Extended(self.arena.alloc(ExtendedExpr::Like {
-                expr: left_ref,
-                pattern: pattern_ref,
-                negated: false,
-                escape,
-            })));
-        }
-
-        // Check for comparison operators
-        let is_comparison = match self.peek() {
-            Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
-            Token::Operator(s) => matches!(
-                s,
-                MultiCharOperator::LessEqual
-                    | MultiCharOperator::GreaterEqual
-                    | MultiCharOperator::NotEqual
-                    | MultiCharOperator::NotEqualAlt
-                    | MultiCharOperator::DoubleEqual
-                    | MultiCharOperator::CosineDistance
-                    | MultiCharOperator::NegativeInnerProduct
-                    | MultiCharOperator::L2Distance
-            ),
-            _ => false,
-        };
-
-        if is_comparison {
-            let op = match self.peek() {
-                Token::Symbol('=') => BinaryOperator::Equal,
-                Token::Symbol('<') => BinaryOperator::LessThan,
-                Token::Symbol('>') => BinaryOperator::GreaterThan,
-                Token::Operator(s) => match s {
-                    MultiCharOperator::LessEqual => BinaryOperator::LessThanOrEqual,
-                    MultiCharOperator::GreaterEqual => BinaryOperator::GreaterThanOrEqual,
-                    MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
-                        BinaryOperator::NotEqual
-                    }
-                    // SQLite compatibility: == is a synonym for =
-                    MultiCharOperator::DoubleEqual => BinaryOperator::Equal,
-                    // Vector distance operators (pgvector compatible)
-                    MultiCharOperator::CosineDistance => BinaryOperator::CosineDistance,
-                    MultiCharOperator::NegativeInnerProduct => BinaryOperator::NegativeInnerProduct,
-                    MultiCharOperator::L2Distance => BinaryOperator::L2Distance,
-                    _ => {
-                        return Err(ParseError {
-                            message: "Unexpected || operator in comparison".to_string(),
-                        })
-                    }
-                },
-                _ => unreachable!(),
-            };
-            self.advance();
-
-            // Check for quantified comparison (ALL, ANY, SOME)
-            if self.peek_keyword(Keyword::All)
-                || self.peek_keyword(Keyword::Any)
-                || self.peek_keyword(Keyword::Some)
-            {
-                let quantifier = if self.try_consume_keyword(Keyword::All) {
-                    Quantifier::All
-                } else if self.try_consume_keyword(Keyword::Any) {
-                    Quantifier::Any
+                // Check for DISTINCT FROM (SQL:1999), NULL, TRUE, FALSE, or UNKNOWN
+                if self.peek_keyword(Keyword::Distinct) {
+                    self.consume_keyword(Keyword::Distinct)?;
+                    self.expect_keyword(Keyword::From)?;
+                    let right = self.parse_additive_expression()?;
+                    let left_ref = self.arena.alloc(left);
+                    let right_ref = self.arena.alloc(right);
+                    left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
+                } else if self.peek_keyword(Keyword::True) {
+                    self.consume_keyword(Keyword::True)?;
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::IsTruthValue {
+                        expr: left_ref,
+                        truth_value: TruthValue::True,
+                        negated,
+                    };
+                } else if self.peek_keyword(Keyword::False) {
+                    self.consume_keyword(Keyword::False)?;
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::IsTruthValue {
+                        expr: left_ref,
+                        truth_value: TruthValue::False,
+                        negated,
+                    };
+                } else if self.peek_keyword(Keyword::Unknown) {
+                    self.consume_keyword(Keyword::Unknown)?;
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::IsTruthValue {
+                        expr: left_ref,
+                        truth_value: TruthValue::Unknown,
+                        negated,
+                    };
+                } else if self.peek_keyword(Keyword::Null) {
+                    // IS NULL / IS NOT NULL
+                    self.consume_keyword(Keyword::Null)?;
+                    let left_ref = self.arena.alloc(left);
+                    left = Expression::IsNull { expr: left_ref, negated };
                 } else {
-                    self.consume_keyword(Keyword::Some)?;
-                    Quantifier::Some
-                };
-
-                self.expect_token(Token::LParen)?;
-                let subquery = self.parse_select_statement()?;
-                self.expect_token(Token::RParen)?;
-
-                let left_ref = self.arena.alloc(left);
-                return Ok(Expression::Extended(self.arena.alloc(
-                    ExtendedExpr::QuantifiedComparison { expr: left_ref, op, quantifier, subquery },
-                )));
+                    // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
+                    // This handles cases like `expr IS 0` or `expr IS 1`
+                    let right = self.parse_additive_expression()?;
+                    let left_ref = self.arena.alloc(left);
+                    let right_ref = self.arena.alloc(right);
+                    // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
+                    // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
+                    left = Expression::IsDistinctFrom {
+                        left: left_ref,
+                        right: right_ref,
+                        negated: !negated,
+                    };
+                }
+                continue;
             }
 
-            let right = self.parse_additive_expression()?;
-            let left_ref = self.arena.alloc(left);
-            let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
-        }
-
-        // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
-        if self.peek_keyword(Keyword::Is) {
-            self.consume_keyword(Keyword::Is)?;
-            let negated = self.try_consume_keyword(Keyword::Not);
-
-            // Check for DISTINCT FROM (SQL:1999), NULL, TRUE, FALSE, or UNKNOWN
-            if self.peek_keyword(Keyword::Distinct) {
-                self.consume_keyword(Keyword::Distinct)?;
-                self.expect_keyword(Keyword::From)?;
-                let right = self.parse_additive_expression()?;
-                let left_ref = self.arena.alloc(left);
-                let right_ref = self.arena.alloc(right);
-                left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
-            } else if self.peek_keyword(Keyword::True) {
-                self.consume_keyword(Keyword::True)?;
-                let left_ref = self.arena.alloc(left);
-                left = Expression::IsTruthValue {
-                    expr: left_ref,
-                    truth_value: TruthValue::True,
-                    negated,
-                };
-            } else if self.peek_keyword(Keyword::False) {
-                self.consume_keyword(Keyword::False)?;
-                let left_ref = self.arena.alloc(left);
-                left = Expression::IsTruthValue {
-                    expr: left_ref,
-                    truth_value: TruthValue::False,
-                    negated,
-                };
-            } else if self.peek_keyword(Keyword::Unknown) {
-                self.consume_keyword(Keyword::Unknown)?;
-                let left_ref = self.arena.alloc(left);
-                left = Expression::IsTruthValue {
-                    expr: left_ref,
-                    truth_value: TruthValue::Unknown,
-                    negated,
-                };
-            } else if self.peek_keyword(Keyword::Null) {
-                // IS NULL / IS NOT NULL
-                self.consume_keyword(Keyword::Null)?;
-                let left_ref = self.arena.alloc(left);
-                left = Expression::IsNull { expr: left_ref, negated };
-            } else {
-                // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
-                // This handles cases like `expr IS 0` or `expr IS 1`
-                let right = self.parse_additive_expression()?;
-                let left_ref = self.arena.alloc(left);
-                let right_ref = self.arena.alloc(right);
-                // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
-                // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
-                left = Expression::IsDistinctFrom {
-                    left: left_ref,
-                    right: right_ref,
-                    negated: !negated,
-                };
-            }
-        }
-
-        // SQLite compatibility: ISNULL and NOTNULL as postfix operators
-        // These are equivalent to IS NULL and IS NOT NULL respectively
-        // Loop to support chaining: `x NOTNULL NOTNULL` → `(x IS NOT NULL) IS NOT NULL`
-        loop {
+            // SQLite compatibility: ISNULL and NOTNULL as postfix operators
+            // These are equivalent to IS NULL and IS NOT NULL respectively
+            // The enclosing loop supports chaining: `x NOTNULL NOTNULL`
             if self.peek_keyword(Keyword::Isnull) {
                 self.consume_keyword(Keyword::Isnull)?;
                 let left_ref = self.arena.alloc(left);
                 left = Expression::IsNull { expr: left_ref, negated: false };
-            } else if self.peek_keyword(Keyword::Notnull) {
+                continue;
+            }
+            if self.peek_keyword(Keyword::Notnull) {
                 self.consume_keyword(Keyword::Notnull)?;
                 let left_ref = self.arena.alloc(left);
                 left = Expression::IsNull { expr: left_ref, negated: true };
-            } else {
-                break;
+                continue;
             }
+
+            // No more operators at this precedence tier
+            break;
         }
 
+        Ok(left)
+    }
+
+    /// Continue parsing tighter-binding binary operators (multiplicative, concat,
+    /// additive) with an already-parsed left operand.
+    ///
+    /// Used after an IN/NOT IN node: its right operand is syntactically closed
+    /// (a parenthesized list/subquery), so per SQLite a tighter-binding operator
+    /// that follows takes the entire IN expression as its left operand:
+    /// `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`.
+    ///
+    /// Each operator's right operand is parsed at the next-tighter tier, so
+    /// relative precedence among these operators is preserved
+    /// (e.g. `x IN (1) + 2 * 3` parses as `(x IN (1)) + (2 * 3)`).
+    ///
+    /// Note: the arena parser has no shift/bitwise tiers; expressions using
+    /// those operators fail here and fall back to the standard parser.
+    fn continue_higher_precedence_ops(
+        &mut self,
+        mut left: Expression<'arena>,
+    ) -> Result<Expression<'arena>, ParseError> {
+        loop {
+            let (op, right) = match self.peek() {
+                // Multiplicative tier: right operand at unary tier
+                Token::Symbol('*') => {
+                    self.advance();
+                    (BinaryOperator::Multiply, self.parse_unary_expression()?)
+                }
+                Token::Symbol('/') => {
+                    self.advance();
+                    (BinaryOperator::Divide, self.parse_unary_expression()?)
+                }
+                Token::Symbol('%') => {
+                    self.advance();
+                    (BinaryOperator::Modulo, self.parse_unary_expression()?)
+                }
+                Token::Keyword { keyword: Keyword::Div, .. } => {
+                    self.advance();
+                    (BinaryOperator::IntegerDivide, self.parse_unary_expression()?)
+                }
+                // Concat tier: right operand at multiplicative tier
+                Token::Operator(MultiCharOperator::Concat) => {
+                    self.advance();
+                    (BinaryOperator::Concat, self.parse_multiplicative_expression()?)
+                }
+                // Additive tier: right operand at concat tier
+                Token::Symbol('+') => {
+                    self.advance();
+                    (BinaryOperator::Plus, self.parse_concat_expression()?)
+                }
+                Token::Symbol('-') => {
+                    self.advance();
+                    (BinaryOperator::Minus, self.parse_concat_expression()?)
+                }
+                _ => break,
+            };
+            let left_ref = self.arena.alloc(left);
+            let right_ref = self.arena.alloc(right);
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
+        }
         Ok(left)
     }
 

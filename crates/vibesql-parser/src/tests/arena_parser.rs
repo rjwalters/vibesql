@@ -351,3 +351,184 @@ fn test_arena_parser_source_text_in_select_item() {
         panic!("Expected Expression select item");
     }
 }
+
+// ============================================================================
+// IN / NOT IN Composability Tests (issue #5801)
+//
+// Mirror of the standard-parser tests in tests/in_list.rs: the arena parser
+// must agree with the standard parser so the arena fast path never diverges
+// (parse_with_arena_fallback would otherwise silently fall back). Per SQLite,
+// IN is a left-associative comparison-tier operator with a syntactically
+// closed right operand, so both another comparison-tier operator and a
+// tighter-binding operator (+, *, ...) may follow an IN node.
+// ============================================================================
+
+/// Parse `SELECT <expr> ...` with the arena parser and pass the first
+/// select-list expression to the given assertion callback.
+fn with_arena_select_expr(sql: &str, check: impl FnOnce(&vibesql_ast::arena::Expression<'_>)) {
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner(sql, &arena);
+    assert!(result.is_ok(), "arena parser should parse {:?}: {:?}", sql, result.err());
+    let (stmt, _interner) = result.unwrap();
+    if let vibesql_ast::arena::SelectItem::Expression { expr, .. } = &stmt.select_list[0] {
+        check(expr);
+    } else {
+        panic!("expected Expression select item for {:?}", sql);
+    }
+}
+
+#[test]
+fn test_arena_in_subquery_chained_not_in_subquery() {
+    // sqlite3: SELECT 1 IN (SELECT 1) NOT IN (SELECT 2); -- 1
+    with_arena_select_expr("SELECT 1 IN (SELECT 1) NOT IN (SELECT 2)", |expr| {
+        let vibesql_ast::arena::Expression::Extended(ext) = expr else {
+            panic!("expected Extended expression, got {:?}", expr);
+        };
+        let vibesql_ast::arena::ExtendedExpr::In { expr: inner, negated, .. } = ext else {
+            panic!("expected outer In, got {:?}", ext);
+        };
+        assert!(*negated, "outer NOT IN should be negated");
+        assert!(
+            matches!(
+                inner,
+                vibesql_ast::arena::Expression::Extended(vibesql_ast::arena::ExtendedExpr::In {
+                    negated: false,
+                    ..
+                })
+            ),
+            "left operand should be the inner IN node: {:?}",
+            inner
+        );
+    });
+}
+
+#[test]
+fn test_arena_in_subquery_followed_by_plus() {
+    // sqlite3: SELECT 1 IN (SELECT 1) + 1; -- 2
+    with_arena_select_expr("SELECT 1 IN (SELECT 1) + 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::Extended(
+                    vibesql_ast::arena::ExtendedExpr::In { .. }
+                )
+            ),
+            "left operand of + should be the IN node: {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_in_list_chained_not_in_subquery() {
+    // sqlite3: SELECT 1 IN (1,2) NOT IN (SELECT 2); -- 1
+    with_arena_select_expr("SELECT 1 IN (1,2) NOT IN (SELECT 2)", |expr| {
+        let vibesql_ast::arena::Expression::Extended(ext) = expr else {
+            panic!("expected Extended expression, got {:?}", expr);
+        };
+        let vibesql_ast::arena::ExtendedExpr::In { expr: inner, negated, .. } = ext else {
+            panic!("expected outer In, got {:?}", ext);
+        };
+        assert!(*negated);
+        assert!(
+            matches!(
+                inner,
+                vibesql_ast::arena::Expression::Extended(
+                    vibesql_ast::arena::ExtendedExpr::InList { negated: false, .. }
+                )
+            ),
+            "left operand should be the inner IN list node: {:?}",
+            inner
+        );
+    });
+}
+
+#[test]
+fn test_arena_in_lhs_precedence_preserved() {
+    // sqlite3: SELECT 1 + 2 IN (3); -- 1, i.e. (1 + 2) IN (3)
+    with_arena_select_expr("SELECT 1 + 2 IN (3)", |expr| {
+        let vibesql_ast::arena::Expression::Extended(ext) = expr else {
+            panic!("expected Extended expression, got {:?}", expr);
+        };
+        let vibesql_ast::arena::ExtendedExpr::InList { expr: inner, negated, .. } = ext else {
+            panic!("expected InList at top level, got {:?}", ext);
+        };
+        assert!(!negated);
+        assert!(
+            matches!(
+                inner,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Plus,
+                    ..
+                }
+            ),
+            "left operand of IN should be (1 + 2): {:?}",
+            inner
+        );
+    });
+}
+
+#[test]
+fn test_arena_chained_in_lists() {
+    // sqlite3: SELECT 1 IN (2) IN (0); -- 1, i.e. ((1 IN (2)) IN (0))
+    with_arena_select_expr("SELECT 1 IN (2) IN (0)", |expr| {
+        let vibesql_ast::arena::Expression::Extended(ext) = expr else {
+            panic!("expected Extended expression, got {:?}", expr);
+        };
+        let vibesql_ast::arena::ExtendedExpr::InList { expr: inner, .. } = ext else {
+            panic!("expected outer InList, got {:?}", ext);
+        };
+        assert!(
+            matches!(
+                inner,
+                vibesql_ast::arena::Expression::Extended(
+                    vibesql_ast::arena::ExtendedExpr::InList { .. }
+                )
+            ),
+            "IN chains must be left-associative: {:?}",
+            inner
+        );
+    });
+}
+
+#[test]
+fn test_arena_in_followed_by_comparison() {
+    // sqlite3: SELECT 1 IN (1) = 1; -- 1
+    with_arena_select_expr("SELECT 1 IN (1) = 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Equal at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
+        assert!(matches!(
+            left,
+            vibesql_ast::arena::Expression::Extended(
+                vibesql_ast::arena::ExtendedExpr::InList { .. }
+            )
+        ));
+    });
+}
+
+#[test]
+fn test_arena_not_in_chained_not_in() {
+    // sqlite3: SELECT 1 NOT IN (SELECT 1) NOT IN (SELECT 0); -- 0
+    with_arena_select_expr("SELECT 1 NOT IN (SELECT 1) NOT IN (SELECT 0)", |expr| {
+        let vibesql_ast::arena::Expression::Extended(ext) = expr else {
+            panic!("expected Extended expression, got {:?}", expr);
+        };
+        let vibesql_ast::arena::ExtendedExpr::In { expr: inner, negated, .. } = ext else {
+            panic!("expected outer In, got {:?}", ext);
+        };
+        assert!(*negated);
+        assert!(matches!(
+            inner,
+            vibesql_ast::arena::Expression::Extended(vibesql_ast::arena::ExtendedExpr::In {
+                negated: true,
+                ..
+            })
+        ));
+    });
+}
