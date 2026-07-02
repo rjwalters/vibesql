@@ -615,6 +615,39 @@ impl CombinedSchema {
         None
     }
 
+    /// Get the declared collation for a column by its combined (absolute)
+    /// index
+    ///
+    /// Returns `None` if the column has no declared collation (default
+    /// BINARY) or the index does not fall inside any table at this schema
+    /// level. Used by the compiled/vectorized/columnar predicate fast paths
+    /// to decline compilation for columns whose comparisons must honor a
+    /// non-BINARY collation (issue #5792) — those fall back to the
+    /// collation-aware expression evaluator.
+    pub fn get_column_collation_by_index(&self, idx: usize) -> Option<&str> {
+        for (table_id, (start_index, schema)) in &self.table_schemas {
+            // Alias tables share start_index 0 with non-contiguous columns;
+            // skip them so we only match real, contiguous column ranges.
+            if self.alias_tables.contains(table_id) {
+                continue;
+            }
+            if idx >= *start_index && idx < start_index + schema.columns.len() {
+                return schema.columns[idx - start_index].collation.as_deref();
+            }
+        }
+        None
+    }
+
+    /// Whether the column at the given combined index has a declared
+    /// non-BINARY collation (e.g. NOCASE, RTRIM). Comparisons on such
+    /// columns cannot be evaluated by the raw-value fast paths.
+    pub fn column_has_non_binary_collation(&self, idx: usize) -> bool {
+        matches!(
+            self.get_column_collation_by_index(idx),
+            Some(c) if !c.eq_ignore_ascii_case("binary")
+        )
+    }
+
     /// Get the type affinity for a column by name
     ///
     /// Returns the SQLite type affinity for the column, which determines how
