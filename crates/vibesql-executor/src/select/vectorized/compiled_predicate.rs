@@ -401,6 +401,13 @@ impl CompiledWhereClause {
             return false;
         }
 
+        // Issue #5806: IN on a non-BINARY-collated column (e.g. NOCASE) must
+        // apply the LHS collation; fall back to the collation-aware
+        // expression evaluator (same gate as BETWEEN below, #5792).
+        if schema.column_has_non_binary_collation(column_idx) {
+            return false;
+        }
+
         predicates.push(CompiledPredicate::InList { column_idx, values: literal_values, negated });
 
         true

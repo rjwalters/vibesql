@@ -672,6 +672,13 @@ impl CombinedExpressionEvaluator<'_> {
             return Ok(vibesql_types::SqlValue::Null);
         }
 
+        // Issue #5806: per SQLite (datatype3.html §7.2), `x IN (y, z, ...)`
+        // uses the collating sequence of the LHS `x` (explicit COLLATE, or
+        // the column's declared collation); list-element collations are
+        // irrelevant. The NOCASE/RTRIM transform is applied to both sides
+        // AFTER affinity coercion so coerced strings are normalized too.
+        let collation = self.get_expression_collation(expr);
+
         // For small lists (≤3 items), use linear search to avoid HashSet overhead
         // For larger lists, use HashSet for O(1) lookup performance
         if values.len() <= 3 {
@@ -696,6 +703,14 @@ impl CombinedExpressionEvaluator<'_> {
                     value_expr,
                     value,
                 );
+
+                // Apply the LHS collation to both sides (issue #5806)
+                let (expr_coerced, value_coerced) =
+                    crate::evaluator::row_value::apply_collation_to_pair(
+                        expr_coerced,
+                        value_coerced,
+                        collation.as_deref(),
+                    );
 
                 // Compare using equality
                 let eq_result = ExpressionEvaluator::eval_binary_op_static(
@@ -722,7 +737,8 @@ impl CombinedExpressionEvaluator<'_> {
         } else {
             // HashSet optimization for larger lists
             // Evaluate each IN list value once (instead of per row) and collect into HashSet
-            // Apply affinity coercion before adding to the HashSet
+            // Apply affinity coercion (then the LHS collation transform, #5806)
+            // before adding to the HashSet
             let mut value_set = std::collections::HashSet::new();
             let mut found_null = false;
 
@@ -740,9 +756,18 @@ impl CombinedExpressionEvaluator<'_> {
                         value_expr,
                         value,
                     );
-                    value_set.insert(value_coerced);
+                    value_set.insert(crate::evaluator::row_value::apply_collation_to_value(
+                        value_coerced,
+                        collation.as_deref(),
+                    ));
                 }
             }
+
+            // Apply the LHS collation to the probe value as well (issue #5806)
+            let expr_val = crate::evaluator::row_value::apply_collation_to_value(
+                expr_val,
+                collation.as_deref(),
+            );
 
             // O(n) lookup with SQL type coercion (where n = unique values in list)
             // This preserves correctness while still benefiting from single evaluation of IN list

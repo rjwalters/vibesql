@@ -146,6 +146,28 @@ pub(crate) fn execute_index_scan(
         })
     };
 
+    // Issue #5806: an IN-list probe looks up the raw literal values in the
+    // index, but the index stores raw (BINARY-ordered) keys while IN on a
+    // non-BINARY-collated column (e.g. NOCASE) must match per the LHS
+    // collation ('XYZ' must find stored 'xyz'). Such a probe silently loses
+    // rows, and the WHERE post-filter can only remove rows, never restore
+    // missed ones. Decline the probe so we fall back to the
+    // full-index-scan + collation-aware WHERE-filter path below (correct,
+    // just slower). BINARY/undeclared collations keep the fast probe.
+    let index_predicate = if matches!(index_predicate, Some(IndexPredicate::In(_)))
+        && first_indexed_column
+            .and_then(|idx_col| idx_col.column_name())
+            .and_then(|col_name| {
+                table.schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name))
+            })
+            .and_then(|c| c.collation.as_deref())
+            .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+    {
+        None
+    } else {
+        index_predicate
+    };
+
     // Issue #5333: when the index stores temporal keys (e.g. an expression
     // index on date()/datetime(), or a plain TIMESTAMP column index) but the
     // WHERE clause supplies string bounds, coerce the bounds to the stored
