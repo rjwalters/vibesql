@@ -1261,10 +1261,12 @@ def main():
             json.dump(summary.to_dict(), f, indent=2)
         print(f"JSON output: {args.output}")
 
-    # Exit with error if there were failures
+    # Exit with error if there were failures. status='error' rows (parse
+    # errors and runner-error marker rows) also fail the run so a compromised
+    # static run exits non-zero, matching native mode (#5822 review note).
     if _SAVE_HAD_FATAL_INSERT_FAILURES:
         sys.exit(2)
-    if summary.failed > 0:
+    if summary.failed > 0 or summary.parse_errors > 0:
         sys.exit(1)
 
 

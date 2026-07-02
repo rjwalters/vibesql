@@ -6013,10 +6013,15 @@ proc run_test_file {filename} {
         puts "Skipping entire file: $filename"
         puts "  Reason: $reason"
         puts ""
-        # Count as skipped but don't run any tests
+        # Count as skipped but don't run any tests. Call finish_test (rather
+        # than a bare return) so the "Tests run:" summary trailer is printed:
+        # the runner treats a missing trailer as an incomplete/killed worker
+        # and would otherwise write a false 'incomplete' marker row for every
+        # legitimately skipped file (#5822 review). Invariant: trailer <=>
+        # shim completed, including the skip-entire-file path.
         incr ::nSkip
         emit_test_detail skipped "$basename (entire file)"
-        return
+        finish_test
     }
 
     # Reset cascade tracking for new test file
