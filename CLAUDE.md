@@ -57,6 +57,10 @@ Results are stored in two tables in `~/.vibesql/test_results/tcl_test_results.vb
 
 Both native-TCL mode (the default) and static-parsing mode now write per-test detail rows, so the summary and detail tables reconcile exactly.
 
+**Marker statuses**: a file that does not run to completion never silently vanishes from the universe. The runner writes a synthetic marker row per compromised file — `status='timeout'` (per-file timeout expired; any tests that completed before the kill are salvaged as normal rows), `status='incomplete'` (tclsh worker killed by a signal or the shim crashed before its summary trailer; partial rows are kept), or `status='error'` (runner-level failure). Marker rows count as failures in pass-rate math so a compromised run reads *worse*, never silently smaller. `make test-tcl-status` reports files-attempted vs files-with-results plus marker counts, and warns when the file universe shrinks vs the previous run.
+
+> **Quiet-machine guidance:** full canonical runs must be done on a quiet machine (no concurrent builds/benchmarks). A loaded machine produces timeout/incomplete markers, and a run containing any markers is not comparable to a clean-run baseline — rerun the affected files (or the whole suite) on a quiet machine.
+
 **Canonical "current pass rate" query** (run against `tcl_test_results`; its numbers match `make test-tcl-status` to within ±1 rounding):
 
 ```sql
@@ -66,9 +70,10 @@ SELECT
   SUM(CASE WHEN status='passed'  THEN 1 ELSE 0 END) AS passed,
   SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END) AS failed,
   SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped,
+  SUM(CASE WHEN status IN ('timeout','incomplete','error') THEN 1 ELSE 0 END) AS not_run_markers,
   ROUND(
     100.0 * SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END)
-      / NULLIF(SUM(CASE WHEN status IN ('passed','failed') THEN 1 ELSE 0 END), 0),
+      / NULLIF(SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END), 0),
     1
   ) AS pass_rate
 FROM tcl_test_results
@@ -82,11 +87,11 @@ Run it with:
 ./target/release/vibesql ~/.vibesql/test_results/tcl_test_results.vbsql -c "<query above>"
 ```
 
-**Per-file failure breakdown** (these per-file failure counts sum to the total-failed reported by `make test-tcl-status`):
+**Per-file failure breakdown** (these per-file failure counts sum to the total-failed reported by `make test-tcl-status`; timeout/incomplete/error marker rows are included because the summary table counts them as failures):
 
 ```sql
 SELECT file_path,
-  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
+  SUM(CASE WHEN status IN ('failed','timeout','incomplete','error') THEN 1 ELSE 0 END) AS failed
 FROM tcl_test_results
 WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results)
 GROUP BY file_path

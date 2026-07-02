@@ -642,6 +642,21 @@ class TclTestRunner:
                 elif result.status == "error":
                     summary.parse_errors += 1
 
+        def runner_error_marker(file_path: str, e: Exception) -> TestResult:
+            """Synthetic detail row for a file the runner failed to process.
+
+            Without this the file contributed zero detail rows and silently
+            vanished from the run universe (issue #5821).
+            """
+            return TestResult(
+                test_name="RUNNER ERROR",
+                file_path=file_path,
+                test_type="runner",
+                status="error",
+                sql="",
+                error_message=str(e)[:500],
+            )
+
         if parallel:
             # Parallel execution
             with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -652,8 +667,8 @@ class TclTestRunner:
                         results, file_setup_failed = future.result()
                         process_file_results(results, file_setup_failed)
                     except Exception as e:
-                        summary.parse_errors += 1
                         print(f"Error processing {file_path}: {e}")
+                        process_file_results([runner_error_marker(file_path, e)], False)
         else:
             # Sequential execution
             for i, file_path in enumerate(file_paths):
@@ -664,8 +679,8 @@ class TclTestRunner:
                     results, file_setup_failed = self.run_file(file_path)
                     process_file_results(results, file_setup_failed)
                 except Exception as e:
-                    summary.parse_errors += 1
                     print(f"Error processing {file_path}: {e}")
+                    process_file_results([runner_error_marker(file_path, e)], False)
 
         summary.completed_at = datetime.now().isoformat()
         return summary
@@ -821,6 +836,98 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
 # Format emitted by tester_vibesql.tcl: "##TCLTEST## <status>\t<name>"
 TCL_DETAIL_PREFIX = "##TCLTEST## "
 
+# Detail-row statuses used for synthetic "the file did not run to completion"
+# marker rows. These keep compromised files visible in the run universe so
+# per-run pass rates remain comparable (see issue #5821 / CLAUDE.md):
+#   timeout    - the per-file wall-clock timeout expired (subprocess killed)
+#   incomplete - the tclsh worker died early (killed by a signal, or the shim
+#                crashed before printing its "Tests run:" summary trailer)
+#   error      - the runner itself failed to launch/process the file
+MARKER_STATUSES = ("timeout", "incomplete", "error")
+
+
+def _parse_shim_output(output: str, test_file: str) -> tuple[int, int, int, list[str], list["TestResult"], str, bool]:
+    """
+    Parse tclsh shim output (possibly partial) into per-test results.
+
+    Returns:
+        (passed, failed, skipped, failed_test_names, per_test_results,
+         human_output, saw_summary)
+
+    `saw_summary` is True when the shim's "Tests run:" trailer is present,
+    i.e. the file ran to completion (finish_test was reached). Partial output
+    from a killed/crashed worker lacks the trailer.
+    """
+    passed = 0
+    failed = 0
+    skipped = 0
+    failed_tests: list[str] = []
+    per_test_results: list[TestResult] = []
+    human_lines: list[str] = []
+    saw_summary = False
+
+    for line in output.split('\n'):
+        # Machine-readable per-test detail line
+        if line.startswith(TCL_DETAIL_PREFIX):
+            payload = line[len(TCL_DETAIL_PREFIX):]
+            if '\t' in payload:
+                status, test_name = payload.split('\t', 1)
+            else:
+                status, test_name = payload, ""
+            status = status.strip()
+            test_name = test_name.strip()
+            per_test_results.append(TestResult(
+                test_name=test_name,
+                file_path=test_file,
+                test_type="native-tcl",
+                status=status,
+                sql="",
+            ))
+            continue
+
+        # Non-detail line: keep for human output and summary parsing
+        human_lines.append(line)
+
+        if 'Tests run:' in line:
+            saw_summary = True
+        elif 'Tests passed:' in line:
+            match = re.search(r'Tests passed:\s*(\d+)', line)
+            if match:
+                passed = int(match.group(1))
+        elif 'Tests failed:' in line:
+            match = re.search(r'Tests failed:\s*(\d+)', line)
+            if match:
+                failed = int(match.group(1))
+        elif 'Tests skipped:' in line:
+            match = re.search(r'Tests skipped:\s*(\d+)', line)
+            if match:
+                skipped = int(match.group(1))
+
+    # Extract failed test names if present
+    human_output = '\n'.join(human_lines)
+    if 'Failed tests:' in human_output:
+        in_failed_section = False
+        for line in human_lines:
+            if 'Failed tests:' in line:
+                in_failed_section = True
+                continue
+            if in_failed_section and line.strip().startswith('-'):
+                failed_tests.append(line.strip().lstrip('- '))
+
+    return passed, failed, skipped, failed_tests, per_test_results, human_output, saw_summary
+
+
+def _counts_from_details(per_test_results: list["TestResult"]) -> tuple[int, int, int]:
+    """Derive (passed, failed, skipped) counts from per-test detail rows.
+
+    Used when the shim's summary trailer is absent (worker killed/crashed),
+    so the trailer counts are missing or untrustworthy.
+    """
+    passed = sum(1 for r in per_test_results if r.status == "passed")
+    failed = sum(1 for r in per_test_results if r.status == "failed")
+    skipped = sum(1 for r in per_test_results if r.status == "skipped")
+    return passed, failed, skipped
+
 
 def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 1200.0) -> tuple[int, int, int, list[str], list[TestResult]]:
     """
@@ -833,6 +940,17 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
     "##TCLTEST## <status>\t<name>" line per test. We parse those into per-test
     TestResult rows so native-TCL runs populate the tcl_test_results detail
     table (not just the tcl_test_runs summary).
+
+    A file that does not run to completion never silently vanishes from the
+    universe (issue #5821). Three escape paths are covered:
+      1. Wall-clock timeout: partial output from e.stdout/e.stderr is salvaged
+         and a synthetic `timeout` marker row is appended.
+      2. Worker killed by a signal or shim crash (subprocess.run returns, but
+         returncode < 0 or the "Tests run:" trailer is missing): the partial
+         results are kept and an `incomplete` marker row is appended.
+      3. Runner-level exception: an `error` marker row is emitted.
+    Marker rows count toward the failed total so compromised runs exit
+    non-zero and their totals are visibly worse, never silently smaller.
 
     Returns: (passed, failed, skipped, failed_test_names, per_test_results)
     """
@@ -849,93 +967,102 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
         )
         output = result.stdout + result.stderr
 
-        # Parse the summary from output
-        # Expected format:
-        # Tests run:    N
-        # Tests passed: N
-        # Tests failed: N
-        # Tests skipped: N
-
-        passed = 0
-        failed = 0
-        skipped = 0
-        failed_tests = []
-        per_test_results: list[TestResult] = []
-        human_lines: list[str] = []
-
-        for line in output.split('\n'):
-            # Machine-readable per-test detail line
-            if line.startswith(TCL_DETAIL_PREFIX):
-                payload = line[len(TCL_DETAIL_PREFIX):]
-                if '\t' in payload:
-                    status, test_name = payload.split('\t', 1)
-                else:
-                    status, test_name = payload, ""
-                status = status.strip()
-                test_name = test_name.strip()
-                per_test_results.append(TestResult(
-                    test_name=test_name,
-                    file_path=test_file,
-                    test_type="native-tcl",
-                    status=status,
-                    sql="",
-                ))
-                continue
-
-            # Non-detail line: keep for human output and summary parsing
-            human_lines.append(line)
-
-            if 'Tests passed:' in line:
-                match = re.search(r'Tests passed:\s*(\d+)', line)
-                if match:
-                    passed = int(match.group(1))
-            elif 'Tests failed:' in line:
-                match = re.search(r'Tests failed:\s*(\d+)', line)
-                if match:
-                    failed = int(match.group(1))
-            elif 'Tests skipped:' in line:
-                match = re.search(r'Tests skipped:\s*(\d+)', line)
-                if match:
-                    skipped = int(match.group(1))
-
-        # Extract failed test names if present
-        human_output = '\n'.join(human_lines)
-        if 'Failed tests:' in human_output:
-            in_failed_section = False
-            for line in human_lines:
-                if 'Failed tests:' in line:
-                    in_failed_section = True
-                    continue
-                if in_failed_section and line.strip().startswith('-'):
-                    failed_tests.append(line.strip().lstrip('- '))
+        passed, failed, skipped, failed_tests, per_test_results, human_output, saw_summary = \
+            _parse_shim_output(output, test_file)
 
         # Print human-readable output only (detail markers are stripped so they
         # don't clutter the console).
         if human_output.strip():
             print(human_output)
 
+        # Detect an incomplete run: the worker was killed by a signal
+        # (returncode < 0, e.g. OOM-kill / SIGKILL under load) or the shim
+        # crashed before printing its summary trailer. Either way the partial
+        # ##TCLTEST## rows must NOT be treated as the file's complete result
+        # set: keep them, derive counts from them (the trailer is missing),
+        # and append an explicit `incomplete` marker row.
+        incomplete = (result.returncode is not None and result.returncode < 0) or not saw_summary
+        if incomplete:
+            if result.returncode is not None and result.returncode < 0:
+                reason = f"worker killed by signal {-result.returncode}"
+            else:
+                reason = f"worker exited (code {result.returncode}) without summary trailer"
+            passed, failed, skipped = _counts_from_details(per_test_results)
+            print(
+                f"WARNING: incomplete run for {test_file}: {reason}; "
+                f"kept {len(per_test_results)} partial result(s), writing 'incomplete' marker row"
+            )
+            per_test_results.append(TestResult(
+                test_name=f"INCOMPLETE ({reason})",
+                file_path=test_file,
+                test_type="native-tcl",
+                status="incomplete",
+                sql="",
+                error_message=f"File did not run to completion: {reason}. "
+                              f"{len(per_test_results)} partial result(s) salvaged.",
+            ))
+            failed_tests.append(f"INCOMPLETE: {reason}")
+            return passed, failed + 1, skipped, failed_tests, per_test_results
+
         return passed, failed, skipped, failed_tests, per_test_results
 
-    except subprocess.TimeoutExpired:
-        print(f"Timeout running {test_file} (exceeded {timeout:.0f}s)")
+    except subprocess.TimeoutExpired as e:
+        # Salvage whatever completed before the kill: subprocess.run captures
+        # the partial stdout/stderr on TimeoutExpired. Note: TimeoutExpired
+        # carries raw bytes even when text=True. The trailer is never present
+        # here, so derive counts from the salvaged detail rows.
+        def _to_text(data) -> str:
+            if data is None:
+                return ""
+            if isinstance(data, bytes):
+                return data.decode("utf-8", errors="replace")
+            return data
+
+        partial_output = _to_text(e.stdout) + _to_text(e.stderr)
+        _, _, _, failed_tests, per_test_results, human_output, _ = \
+            _parse_shim_output(partial_output, test_file)
+        passed, failed, skipped = _counts_from_details(per_test_results)
+
+        if human_output.strip():
+            print(human_output)
+        print(
+            f"Timeout running {test_file} (exceeded {timeout:.0f}s); "
+            f"salvaged {len(per_test_results)} partial result(s), writing 'timeout' marker row"
+        )
+
         # Surface the timeout as a visible non-pass result instead of silently
-        # dropping the file from the totals. We emit one synthetic failed detail
-        # row so the file still appears in tcl_test_results and counts toward the
-        # summary's failed total, keeping the summary and detail tables
-        # reconciled (see CLAUDE.md). Without this a timed-out file contributed
-        # zero rows and vanished from the measured suite.
-        timeout_result = TestResult(
+        # dropping the file from the totals. The synthetic `timeout` detail row
+        # keeps the file in tcl_test_results and counts toward the summary's
+        # failed total, keeping the summary and detail tables reconciled (see
+        # CLAUDE.md). Without this a timed-out file contributed zero rows and
+        # vanished from the measured suite.
+        per_test_results.append(TestResult(
             test_name=f"TIMEOUT (exceeded {timeout:.0f}s)",
             file_path=test_file,
             test_type="native-tcl",
-            status="failed",
+            status="timeout",
             sql="",
-            error_message=f"Test file timed out after {timeout:.0f}s",
-        )
-        return 0, 1, 0, ["TIMEOUT"], [timeout_result]
+            error_message=f"Test file timed out after {timeout:.0f}s. "
+                          f"{len(per_test_results)} partial result(s) salvaged.",
+        ))
+        failed_tests.append("TIMEOUT")
+        return passed, failed + 1, skipped, failed_tests, per_test_results
+
     except Exception as e:
+        # Runner-level failure (tclsh missing, OS error, ...). Emit an explicit
+        # `error` marker row so the file stays in the universe instead of
+        # contributing zero rows, and count it as a failure so the run exits
+        # non-zero.
         print(f"Error running {test_file}: {e}")
-        return 0, 0, 0, [str(e)], []
+        error_result = TestResult(
+            test_name="RUNNER ERROR",
+            file_path=test_file,
+            test_type="native-tcl",
+            status="error",
+            sql="",
+            error_message=str(e)[:500],
+        )
+        return 0, 1, 0, [f"RUNNER ERROR: {e}"], [error_result]
 
 
 def main():
@@ -994,6 +1121,13 @@ def main():
         total_skipped = 0
         all_failed_tests = []
         all_results: list[TestResult] = []
+        # Run-universe accounting (issue #5821): every attempted file must be
+        # visible in the summary, either via real results or a marker row.
+        files_attempted = len(file_paths)
+        files_with_results = 0
+        files_timeout = 0
+        files_incomplete = 0
+        files_error = 0
 
         for file_path in file_paths:
             if args.verbose:
@@ -1008,15 +1142,44 @@ def main():
             all_failed_tests.extend(failed_tests)
             all_results.extend(results)
 
+            statuses = {r.status for r in results}
+            if results:
+                files_with_results += 1
+            if "timeout" in statuses:
+                files_timeout += 1
+            if "incomplete" in statuses:
+                files_incomplete += 1
+            if "error" in statuses:
+                files_error += 1
+
         # Print summary
         total_tests = total_passed + total_failed + total_skipped
+        files_compromised = files_timeout + files_incomplete + files_error
         print()
         print("=" * 50)
         print(f"Total tests: {total_tests}")
         print(f"Passed:      {total_passed} ({total_passed/total_tests*100:.1f}%)" if total_tests > 0 else "Passed: 0")
         print(f"Failed:      {total_failed}")
         print(f"Skipped:     {total_skipped}")
+        print("-" * 50)
+        print(f"Files attempted:    {files_attempted}")
+        print(f"Files with results: {files_with_results}")
+        if files_timeout > 0:
+            print(f"Files timed out:    {files_timeout} (marked status='timeout')")
+        if files_incomplete > 0:
+            print(f"Files incomplete:   {files_incomplete} (worker died; marked status='incomplete')")
+        if files_error > 0:
+            print(f"Files runner-error: {files_error} (marked status='error')")
         print("=" * 50)
+
+        if files_compromised > 0 or files_with_results < files_attempted:
+            print(
+                f"\nWARNING: {files_compromised} of {files_attempted} attempted file(s) "
+                f"did not run to completion (timeout/kill/error markers written). "
+                f"Totals from this run are NOT comparable to a clean-run baseline. "
+                f"Re-run the affected files on a quiet machine.",
+                file=sys.stderr,
+            )
 
         if all_failed_tests:
             print("\nFailed tests:")
@@ -1074,7 +1237,18 @@ def main():
     print(f"Errors:      {summary.parse_errors}")
     if summary.setup_failures > 0:
         print(f"Setup failures: {summary.setup_failures} files")
+    print("-" * 50)
+    files_with_results = len({r.file_path for r in summary.results})
+    print(f"Files attempted:    {summary.total_files}")
+    print(f"Files with results: {files_with_results}")
     print("=" * 50)
+    if files_with_results < summary.total_files:
+        print(
+            f"\nWARNING: {summary.total_files - files_with_results} of "
+            f"{summary.total_files} attempted file(s) produced no detail rows. "
+            f"Totals from this run are NOT comparable to a clean-run baseline.",
+            file=sys.stderr,
+        )
 
     # Save to database if specified
     if args.results_db:
@@ -1087,10 +1261,12 @@ def main():
             json.dump(summary.to_dict(), f, indent=2)
         print(f"JSON output: {args.output}")
 
-    # Exit with error if there were failures
+    # Exit with error if there were failures. status='error' rows (parse
+    # errors and runner-error marker rows) also fail the run so a compromised
+    # static run exits non-zero, matching native mode (#5822 review note).
     if _SAVE_HAD_FATAL_INSERT_FAILURES:
         sys.exit(2)
-    if summary.failed > 0:
+    if summary.failed > 0 or summary.parse_errors > 0:
         sys.exit(1)
 
 

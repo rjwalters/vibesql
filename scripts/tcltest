@@ -591,6 +591,62 @@ cmd_status() {
         )
         LIMIT 1
     " 2>/dev/null || print_warning "No test runs yet. Run: ./scripts/tcltest run"
+
+    # Run-universe reconciliation (issue #5821): report files-attempted vs
+    # files-with-results plus timeout/incomplete/error marker counts, and warn
+    # loudly when the file universe shrank vs the previous run — a shrunken
+    # universe means the pass rate is NOT comparable across runs.
+    local run_id
+    run_id="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+        SELECT COALESCE((SELECT MAX(run_id) FROM tcl_test_results), 0)
+    " 2>/dev/null | tr -cd '0-9')" || run_id=""
+
+    if [ -n "$run_id" ] && [ "$run_id" != "0" ]; then
+        echo ""
+        echo "=== Run universe (run_id $run_id) ==="
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            SELECT
+                (SELECT total_files FROM tcl_test_runs WHERE run_id = $run_id) as files_attempted,
+                COUNT(DISTINCT file_path) as files_with_results,
+                SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) as timeout_markers,
+                SUM(CASE WHEN status = 'incomplete' THEN 1 ELSE 0 END) as incomplete_markers,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_markers
+            FROM tcl_test_results
+            WHERE run_id = $run_id
+        " 2>/dev/null || true
+
+        local attempted with_results markers prev_run prev_files
+        attempted="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COALESCE(total_files, 0) FROM tcl_test_runs WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || attempted=""
+        with_results="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COUNT(DISTINCT file_path) FROM tcl_test_results WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || with_results=""
+        markers="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COUNT(*) FROM tcl_test_results
+            WHERE run_id = $run_id AND status IN ('timeout', 'incomplete', 'error')
+        " 2>/dev/null | tr -cd '0-9')" || markers=""
+
+        if [ -n "$markers" ] && [ "$markers" -gt 0 ] 2>/dev/null; then
+            print_warning "$markers file(s) in run $run_id did not run to completion (timeout/incomplete/error markers). Pass rate is NOT comparable to a clean-run baseline. Re-run on a quiet machine."
+        fi
+        if [ -n "$attempted" ] && [ -n "$with_results" ] && [ "$with_results" -lt "$attempted" ] 2>/dev/null; then
+            print_warning "Run $run_id attempted $attempted file(s) but only $with_results produced detail rows — $((attempted - with_results)) file(s) are missing from the universe entirely."
+        fi
+
+        # Compare against the previous run's file universe
+        prev_run="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COALESCE(MAX(run_id), 0) FROM tcl_test_results WHERE run_id < $run_id
+        " 2>/dev/null | tr -cd '0-9')" || prev_run=""
+        if [ -n "$prev_run" ] && [ "$prev_run" != "0" ]; then
+            prev_files="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+                SELECT COUNT(DISTINCT file_path) FROM tcl_test_results WHERE run_id = $prev_run
+            " 2>/dev/null | tr -cd '0-9')" || prev_files=""
+            if [ -n "$prev_files" ] && [ -n "$with_results" ] && [ "$with_results" -lt "$prev_files" ] 2>/dev/null; then
+                print_warning "File universe SHRANK: run $run_id covers $with_results file(s) vs $prev_files in previous run $prev_run. Cross-run pass-rate comparison is invalid (different universes)."
+            fi
+        fi
+    fi
 }
 
 # Analyze command: failure pattern analysis
