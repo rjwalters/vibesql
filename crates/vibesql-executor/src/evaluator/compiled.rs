@@ -202,6 +202,13 @@ impl CompiledPredicate {
         if let (Expression::ColumnRef(col_id), Expression::Literal(value)) = (left, right) {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            // Issue #5792: comparisons against a non-BINARY-collated column
+            // (e.g. NOCASE) must apply the collation; the compiled fast path
+            // compares raw values, so decline and fall back to the
+            // collation-aware expression evaluator.
+            if schema.column_has_non_binary_collation(col_idx) {
+                return None;
+            }
             if !Self::literal_supported_for_column(schema, col_idx, value) {
                 return None;
             }
@@ -213,6 +220,10 @@ impl CompiledPredicate {
         if let (Expression::Literal(value), Expression::ColumnRef(col_id)) = (left, right) {
             let col_idx =
                 schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())?;
+            // Issue #5792: see above — collated columns need the full evaluator.
+            if schema.column_has_non_binary_collation(col_idx) {
+                return None;
+            }
             if !Self::literal_supported_for_column(schema, col_idx, value) {
                 return None;
             }
@@ -1033,6 +1044,69 @@ mod tests {
         }
     }
 
+    /// Schema mirroring `in4.test`'s t4a: `a` has default BINARY collation,
+    /// `b` is declared NOCASE (issue #5792).
+    fn create_collated_schema() -> CombinedSchema {
+        let columns = vec![
+            ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true),
+            ColumnSchema {
+                name: "b".to_string(),
+                data_type: DataType::Varchar { max_length: None },
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                is_exact_integer_type: false,
+                collation: Some("NOCASE".to_string()),
+            },
+        ];
+        let schema = TableSchema::new("t4a".to_string(), columns);
+        CombinedSchema::from_table("t4a".to_string(), schema)
+    }
+
+    #[test]
+    fn test_collated_column_comparison_declined() {
+        // Issue #5792: comparisons against a NOCASE column must not compile;
+        // the fast path compares raw values and would miss 'XYZ' = 'xyz'.
+        let schema = create_collated_schema();
+        for (left, right) in [
+            (
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
+                Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("xyz"))),
+            ),
+            (
+                Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("xyz"))),
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
+            ),
+        ] {
+            let expr = Expression::BinaryOp {
+                left: Box::new(left),
+                op: BinaryOperator::Equal,
+                right: Box::new(right),
+            };
+            let compiled = CompiledPredicate::compile(&expr, &schema);
+            assert!(
+                !compiled.is_fully_compiled(),
+                "NOCASE column comparison must fall back to the expression evaluator"
+            );
+        }
+    }
+
+    #[test]
+    fn test_binary_collated_column_still_compiles() {
+        // A column with no declared collation (default BINARY) keeps the
+        // fast path.
+        let schema = create_collated_schema();
+        let expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
+            op: BinaryOperator::Equal,
+            right: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("ABC")))),
+        };
+        let compiled = CompiledPredicate::compile(&expr, &schema);
+        assert!(compiled.is_fully_compiled());
+    }
+
     #[test]
     fn test_evaluate_equals() {
         let schema = create_test_schema();
@@ -1064,11 +1138,8 @@ mod tests {
     /// Schema with a single TEXT-affinity column `a` (matches `indexA.test`'s
     /// `CREATE TABLE x1(a TEXT, ...)`).
     fn create_text_col_schema() -> CombinedSchema {
-        let columns = vec![ColumnSchema::new(
-            "a".to_string(),
-            DataType::Varchar { max_length: None },
-            true,
-        )];
+        let columns =
+            vec![ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true)];
         let schema = TableSchema::new("x1".to_string(), columns);
         CombinedSchema::from_table("x1".to_string(), schema)
     }
@@ -1087,9 +1158,9 @@ mod tests {
 
     fn col_op_lit(op: BinaryOperator, lit: SqlValue) -> Expression {
         Expression::BinaryOp {
-            left: Box::new(Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::simple("a", false),
-            )),
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
             op,
             right: Box::new(Expression::Literal(lit)),
         }
@@ -1099,9 +1170,9 @@ mod tests {
         Expression::BinaryOp {
             left: Box::new(Expression::Literal(lit)),
             op,
-            right: Box::new(Expression::ColumnRef(
-                vibesql_ast::ColumnIdentifier::simple("a", false),
-            )),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
         }
     }
 

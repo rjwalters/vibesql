@@ -343,8 +343,9 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
     let schema_count = read_u32(reader)?;
     for _ in 0..schema_count {
         let schema_name = read_string(reader)?;
-        // Skip built-in schemas (main and all temp schemas) - they are already created by Database::new()
-        // This handles backward compatibility with databases saved before the write-side fix
+        // Skip built-in schemas (main and all temp schemas) - they are already created by
+        // Database::new() This handles backward compatibility with databases saved before
+        // the write-side fix
         if schema_name == vibesql_catalog::DEFAULT_SCHEMA
             || vibesql_catalog::Catalog::is_temp_schema(&schema_name)
         {
@@ -950,8 +951,7 @@ pub(super) fn parse_data_type(type_str: &str) -> Result<vibesql_types::DataType,
 
 #[cfg(test)]
 mod tests {
-    use super::super::format::VERSION;
-    use super::{read_catalog_v, write_catalog};
+    use super::{super::format::VERSION, read_catalog_v, write_catalog};
     use crate::Database;
 
     /// Issue #5619: the verbatim original `CREATE TABLE` source text
@@ -1109,6 +1109,18 @@ mod tests {
         .with_schema(Some("temp".to_string()));
         db.catalog.create_view(temp).unwrap();
 
+        // 5. Compound view: UNION with a trailing ORDER BY (issue #5798, window9.test §8). The
+        //    ORDER BY applies to the whole compound, so ToSql must render it AFTER the set
+        //    operation — otherwise the persisted SELECT text is invalid SQL and the view is dropped
+        //    on reload (checkpoint recovery falls back to an older/empty state).
+        let compound = vibesql_catalog::ViewDefinition::new(
+            "v_compound".to_string(),
+            None,
+            parse("SELECT 0 AS x UNION SELECT count() OVER() FROM (SELECT 0) ORDER BY 1"),
+            false,
+        );
+        db.catalog.create_view(compound).unwrap();
+
         // Round-trip the catalog at the current version.
         let mut buf = Vec::new();
         write_catalog(&mut buf, &db).unwrap();
@@ -1137,6 +1149,42 @@ mod tests {
         let v = reloaded.catalog.get_view("v_temp").expect("v_temp must survive");
         assert_eq!(v.schema.as_deref(), Some("temp"));
         assert!(v.is_temp());
+
+        // Compound view (UNION + ORDER BY, issue #5798): must survive the
+        // round-trip with the ORDER BY still applying to the whole compound.
+        // The parser assigns synthetic subquery aliases from a global counter
+        // (`(subquery-N)`), so normalize those before comparing.
+        let normalize = |sql: &str| -> String {
+            let mut out = String::with_capacity(sql.len());
+            let mut rest = sql;
+            while let Some(start) = rest.find("(subquery-") {
+                let after = &rest[start + "(subquery-".len()..];
+                let end = after.find(')').map(|i| start + "(subquery-".len() + i + 1);
+                match end {
+                    Some(end) => {
+                        out.push_str(&rest[..start]);
+                        out.push_str("(subquery-N)");
+                        rest = &rest[end..];
+                    }
+                    None => break,
+                }
+            }
+            out.push_str(rest);
+            out
+        };
+        let v = reloaded.catalog.get_view("v_compound").expect("v_compound must survive");
+        assert_eq!(
+            normalize(&v.query.to_sql()),
+            normalize(
+                &parse("SELECT 0 AS x UNION SELECT count() OVER() FROM (SELECT 0) ORDER BY 1")
+                    .to_sql()
+            )
+        );
+        assert!(
+            v.query.to_sql().find("UNION").unwrap() < v.query.to_sql().find("ORDER BY").unwrap(),
+            "ORDER BY must render after the set operation, got: {}",
+            v.query.to_sql()
+        );
     }
 
     /// Issue #5771 backward compat: a v9 (pre-views) file must load cleanly

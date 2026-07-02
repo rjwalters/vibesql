@@ -35,32 +35,6 @@ fn format_float_for_text_comparison(n: f64) -> String {
     }
 }
 
-/// Find an *explicit* COLLATE clause anywhere within the expression's
-/// "collation propagation tree".
-///
-/// SQLite's rule (datatype3 §7.1) is that an explicit `COLLATE` clause inside
-/// any operand of a binary operator beats the column-derived (inherited)
-/// collation of the other operand. We walk through compound expressions that
-/// propagate collation (BinaryOp, UnaryOp, single-arg Function/Aggregate)
-/// looking specifically for a `Collate` node — column-level collations are
-/// *not* considered explicit and are deliberately ignored here.
-pub(super) fn explicit_collation_of(expr: &vibesql_ast::Expression) -> Option<String> {
-    match expr {
-        vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
-        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-            explicit_collation_of(left).or_else(|| explicit_collation_of(right))
-        }
-        vibesql_ast::Expression::UnaryOp { expr, .. } => explicit_collation_of(expr),
-        vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
-            explicit_collation_of(&args[0])
-        }
-        vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
-            explicit_collation_of(&args[0])
-        }
-        _ => None,
-    }
-}
-
 impl CombinedExpressionEvaluator<'_> {
     /// Get the SQLite type affinity of an expression if it's a column reference.
     ///
@@ -109,74 +83,63 @@ impl CombinedExpressionEvaluator<'_> {
         }
     }
 
+    /// Look up a column's declared collation in the combined schema.
+    ///
+    /// Returns `None` when the column has no declared collation (default
+    /// BINARY) or cannot be resolved.
+    pub(super) fn column_collation_of(
+        &self,
+        col_id: &vibesql_ast::ColumnIdentifier,
+    ) -> Option<String> {
+        let table = col_id.table_canonical();
+        let column = col_id.column_canonical();
+
+        // Look up the column in the combined schema
+        for (_start_idx, table_schema) in self.schema.table_schemas.values() {
+            // If table qualifier is specified, check if this is the right table
+            if let Some(t) = table {
+                let table_name_lower = table_schema.name.to_lowercase();
+                if t.to_lowercase() != table_name_lower {
+                    continue;
+                }
+            }
+
+            // Look up the column in this table
+            if let Some(col_offset) = table_schema.get_column_index(column) {
+                return table_schema.columns[col_offset].collation.clone();
+            }
+        }
+        None
+    }
+
     /// Get the effective collation for an expression.
     ///
-    /// Implements SQLite's collation propagation rules
-    /// (see https://sqlite.org/datatype3.html#collation):
-    /// 1. Explicit COLLATE clause has highest priority and propagates outward
-    ///    through compound expressions.
-    /// 2. Column references inherit the column's declared collation.
-    /// 3. Binary operators (including `||`): if either operand has an *explicit*
-    ///    COLLATE, that wins. Otherwise the left operand's collation is used,
-    ///    falling back to the right operand's.
-    /// 4. Unary operators and single-argument functions / aggregates inherit
-    ///    collation from their operand.
-    /// 5. Otherwise, no collation (use default BINARY).
+    /// Implements SQLite's collation rules (datatype3.html §7.1) via the
+    /// shared resolver in `evaluator::collation`: explicit COLLATE
+    /// propagates out of compound expressions; a column's implicit collation
+    /// is carried only through unary `+` and CAST — it does NOT leak through
+    /// `||` or other operators/functions (issue #5792).
     pub(crate) fn get_expression_collation(
         &self,
         expr: &vibesql_ast::Expression,
     ) -> Option<String> {
-        match expr {
-            // Explicit COLLATE has highest priority
-            vibesql_ast::Expression::Collate { collation, .. } => Some(collation.clone()),
-            // Column reference - look up column's declared collation
-            vibesql_ast::Expression::ColumnRef(col_id) => {
-                let table = col_id.table_canonical();
-                let column = col_id.column_canonical();
+        crate::evaluator::collation::resolve_expression_collation(expr, &|col_id| {
+            self.column_collation_of(col_id)
+        })
+    }
 
-                // Look up the column in the combined schema
-                for (_start_idx, table_schema) in self.schema.table_schemas.values() {
-                    // If table qualifier is specified, check if this is the right table
-                    if let Some(t) = table {
-                        let table_name_lower = table_schema.name.to_lowercase();
-                        if t.to_lowercase() != table_name_lower {
-                            continue;
-                        }
-                    }
-
-                    // Look up the column in this table
-                    if let Some(col_offset) = table_schema.get_column_index(column) {
-                        return table_schema.columns[col_offset].collation.clone();
-                    }
-                }
-                None
-            }
-            // Binary operator: explicit COLLATE on either operand wins, else
-            // inherit from the left operand (SQLite rule).
-            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-                if let Some(c) = explicit_collation_of(left) {
-                    return Some(c);
-                }
-                if let Some(c) = explicit_collation_of(right) {
-                    return Some(c);
-                }
-                self.get_expression_collation(left).or_else(|| self.get_expression_collation(right))
-            }
-            // Unary operator: inherit from operand.
-            vibesql_ast::Expression::UnaryOp { expr, .. } => self.get_expression_collation(expr),
-            // Aggregate function with a single argument: inherit from argument.
-            // (Multi-arg aggregates have no well-defined inherited collation.)
-            vibesql_ast::Expression::AggregateFunction { args, .. } if args.len() == 1 => {
-                self.get_expression_collation(&args[0])
-            }
-            // Scalar function with a single argument: inherit from argument.
-            // (Multi-arg functions have no well-defined inherited collation.)
-            vibesql_ast::Expression::Function { args, .. } if args.len() == 1 => {
-                self.get_expression_collation(&args[0])
-            }
-            // Other expressions don't have intrinsic collation
-            _ => None,
-        }
+    /// Resolve the collating sequence for a binary comparison `left <op>
+    /// right` per SQLite datatype3 §7.1 (explicit COLLATE on either side
+    /// first, then left column's collation — including its default BINARY —
+    /// then right column's). `None` means BINARY.
+    pub(super) fn comparison_collation(
+        &self,
+        left: &vibesql_ast::Expression,
+        right: &vibesql_ast::Expression,
+    ) -> Option<String> {
+        crate::evaluator::collation::comparison_collation(left, right, &|col_id| {
+            self.column_collation_of(col_id)
+        })
     }
 
     /// Check if an expression is a numeric literal (INTEGER or REAL).
@@ -951,11 +914,12 @@ impl CombinedExpressionEvaluator<'_> {
                             }
                         }
 
-                        // Get effective collation from either side
-                        // Priority: explicit COLLATE > column-level collation
+                        // Get effective collation per SQLite datatype3 §7.1:
+                        // explicit COLLATE (left, then right) > left column's
+                        // collation (its default BINARY blocks the right's) >
+                        // right column's collation > BINARY.
                         let collation = if is_comparison {
-                            self.get_expression_collation(left)
-                                .or_else(|| self.get_expression_collation(right))
+                            self.comparison_collation(left, right)
                         } else {
                             None
                         };

@@ -446,6 +446,13 @@ impl CompiledWhereClause {
             return false;
         }
 
+        // Issue #5792: BETWEEN on a non-BINARY-collated column (e.g. NOCASE)
+        // must apply the collation; fall back to the collation-aware
+        // expression evaluator.
+        if schema.column_has_non_binary_collation(column_idx) {
+            return false;
+        }
+
         predicates.push(CompiledPredicate::Between { column_idx, low, high, negated, symmetric });
 
         true
@@ -513,6 +520,15 @@ impl CompiledWhereClause {
         if let (Some(left_idx), Some(right_idx)) =
             (Self::try_extract_column(left, schema), Self::try_extract_column(right, schema))
         {
+            // Issue #5792: comparisons involving a non-BINARY-collated column
+            // (e.g. NOCASE) must apply the collation; this fast path compares
+            // raw values, so decline and fall back to the collation-aware
+            // expression evaluator.
+            if schema.column_has_non_binary_collation(left_idx)
+                || schema.column_has_non_binary_collation(right_idx)
+            {
+                return false;
+            }
             predicates.push(CompiledPredicate::ColumnColumn { left_idx, right_idx, op: comp_op });
             return true;
         }
@@ -521,6 +537,10 @@ impl CompiledWhereClause {
         if let (Some(column_idx), Some(literal)) =
             (Self::try_extract_column(left, schema), Self::try_extract_literal(right))
         {
+            // Issue #5792: see above — collated columns need the full evaluator.
+            if schema.column_has_non_binary_collation(column_idx) {
+                return false;
+            }
             predicates.push(CompiledPredicate::ColumnLiteral { column_idx, op: comp_op, literal });
             return true;
         }
@@ -529,6 +549,10 @@ impl CompiledWhereClause {
         if let (Some(literal), Some(column_idx)) =
             (Self::try_extract_literal(left), Self::try_extract_column(right, schema))
         {
+            // Issue #5792: see above — collated columns need the full evaluator.
+            if schema.column_has_non_binary_collation(column_idx) {
+                return false;
+            }
             let flipped_op = Self::flip_operator(comp_op);
             predicates.push(CompiledPredicate::ColumnLiteral {
                 column_idx,
@@ -1284,6 +1308,115 @@ mod tests {
             compiled.is_some(),
             "Column-to-column inequality should compile into a ColumnColumn predicate"
         );
+        assert_eq!(compiled.unwrap().predicates.len(), 1);
+    }
+
+    /// Schema mirroring `in4.test`'s t4a: `a` has default BINARY collation,
+    /// `b` is declared NOCASE (issue #5792).
+    fn make_collated_schema() -> CombinedSchema {
+        let schema = TableSchema::new(
+            "t4a".to_string(),
+            vec![
+                ColumnSchema {
+                    name: "a".to_string(),
+                    data_type: DataType::Varchar { max_length: None },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
+                    collation: None,
+                },
+                ColumnSchema {
+                    name: "b".to_string(),
+                    data_type: DataType::Varchar { max_length: None },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    is_exact_integer_type: false,
+                    collation: Some("NOCASE".to_string()),
+                },
+            ],
+        );
+        CombinedSchema::from_table("t4a".to_string(), schema)
+    }
+
+    fn col_ref(name: &str) -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(name, false))
+    }
+
+    fn text_lit(s: &str) -> Expression {
+        Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(s)))
+    }
+
+    #[test]
+    fn test_collated_column_literal_comparison_declined() {
+        // Issue #5792: b = 'xyz' on a NOCASE column must not compile — the
+        // fast path compares raw values and would miss 'XYZ'.
+        let schema = make_collated_schema();
+        let expr = Expression::BinaryOp {
+            left: Box::new(col_ref("b")),
+            op: BinaryOperator::Equal,
+            right: Box::new(text_lit("xyz")),
+        };
+        assert!(
+            CompiledWhereClause::try_compile(&expr, &schema).is_none(),
+            "comparison on a NOCASE column must fall back to the expression evaluator"
+        );
+
+        // Literal-on-left likewise.
+        let expr = Expression::BinaryOp {
+            left: Box::new(text_lit("xyz")),
+            op: BinaryOperator::Equal,
+            right: Box::new(col_ref("b")),
+        };
+        assert!(CompiledWhereClause::try_compile(&expr, &schema).is_none());
+    }
+
+    #[test]
+    fn test_collated_column_column_comparison_declined() {
+        // Issue #5792: b = a (either side NOCASE) must not compile.
+        let schema = make_collated_schema();
+        for (l, r) in [("b", "a"), ("a", "b")] {
+            let expr = Expression::BinaryOp {
+                left: Box::new(col_ref(l)),
+                op: BinaryOperator::Equal,
+                right: Box::new(col_ref(r)),
+            };
+            assert!(
+                CompiledWhereClause::try_compile(&expr, &schema).is_none(),
+                "{}={} involves a NOCASE column and must fall back",
+                l,
+                r
+            );
+        }
+    }
+
+    #[test]
+    fn test_collated_column_between_declined() {
+        // Issue #5792: BETWEEN on a NOCASE column must not compile.
+        let schema = make_collated_schema();
+        let expr = Expression::Between {
+            expr: Box::new(col_ref("b")),
+            low: Box::new(text_lit("XYZ")),
+            high: Box::new(text_lit("XYZ")),
+            negated: false,
+            symmetric: false,
+        };
+        assert!(CompiledWhereClause::try_compile(&expr, &schema).is_none());
+    }
+
+    #[test]
+    fn test_binary_collated_column_still_compiles() {
+        // A column with no declared collation (default BINARY) keeps the
+        // fast path.
+        let schema = make_collated_schema();
+        let expr = Expression::BinaryOp {
+            left: Box::new(col_ref("a")),
+            op: BinaryOperator::Equal,
+            right: Box::new(text_lit("ABC")),
+        };
+        let compiled = CompiledWhereClause::try_compile(&expr, &schema);
+        assert!(compiled.is_some(), "BINARY-collated column should still compile");
         assert_eq!(compiled.unwrap().predicates.len(), 1);
     }
 }
