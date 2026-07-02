@@ -1075,16 +1075,19 @@ pub fn compare_sql_values_with_collation(
 
 /// Compare two SqlValues for ordering purposes (SQL ORDER BY semantics)
 ///
-/// Implements SQLite type affinity ordering for MIN/MAX aggregates:
-/// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC)
-/// - Numbers (all integer and float types) < text < other types
-/// - Within the same type class, uses natural ordering
+/// Implements SQLite type-class ordering as a genuine total order (#5802):
+/// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC; this is
+///   the contract MIN/MAX aggregates rely on)
+/// - numeric (all integer and float variants, inter-comparable and compared
+///   exactly — never through lossy `as f64` casts) < text < blob < other
+///   types in deterministic slots
+///
+/// See [`vibesql_types::total_order_cmp`] for the full ordering definition
+/// and its totality/transitivity guarantees.
 ///
 /// Note: For ORDER BY with direction-dependent NULL handling (SQLite behavior),
 /// use the NULL ordering logic in apply_order_by() in order.rs instead.
 pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlValue) -> Ordering {
-    use vibesql_types::SqlValue;
-
     match (a.is_null(), b.is_null()) {
         // Both NULL - equal
         (true, true) => Ordering::Equal,
@@ -1092,63 +1095,8 @@ pub fn compare_sql_values(a: &vibesql_types::SqlValue, b: &vibesql_types::SqlVal
         (true, false) => Ordering::Greater,
         // Second is NULL - first sorts first (less)
         (false, true) => Ordering::Less,
-        // Neither NULL - compare by type affinity then value
-        (false, false) => {
-            // Helper to determine type class for SQLite affinity ordering
-            // 0 = numeric (integers/reals), 1 = text, 2 = other
-            fn type_class(v: &SqlValue) -> u8 {
-                match v {
-                    SqlValue::Integer(_)
-                    | SqlValue::Bigint(_)
-                    | SqlValue::Smallint(_)
-                    | SqlValue::Unsigned(_)
-                    | SqlValue::Float(_)
-                    | SqlValue::Double(_)
-                    | SqlValue::Numeric(_)
-                    | SqlValue::Real(_) => 0,
-                    SqlValue::Character(_) | SqlValue::Varchar(_) => 1,
-                    _ => 2,
-                }
-            }
-
-            // Helper to convert numeric SqlValue to f64 for cross-type comparison
-            fn to_f64(v: &SqlValue) -> Option<f64> {
-                match v {
-                    SqlValue::Integer(i) => Some(*i as f64),
-                    SqlValue::Bigint(i) => Some(*i as f64),
-                    SqlValue::Smallint(i) => Some(*i as f64),
-                    SqlValue::Unsigned(u) => Some(*u as f64),
-                    SqlValue::Float(f) => Some(*f as f64),
-                    SqlValue::Double(d) => Some(*d),
-                    SqlValue::Numeric(n) => Some(*n),
-                    SqlValue::Real(r) => Some(*r as f64),
-                    _ => None,
-                }
-            }
-
-            let class_a = type_class(a);
-            let class_b = type_class(b);
-
-            if class_a != class_b {
-                // Different type classes - use SQLite affinity ordering
-                class_a.cmp(&class_b)
-            } else if class_a == 0 {
-                // Both numeric - try direct comparison first, then cross-type numeric comparison
-                if let Some(ordering) = PartialOrd::partial_cmp(a, b) {
-                    ordering
-                } else if let (Some(fa), Some(fb)) = (to_f64(a), to_f64(b)) {
-                    // Cross-type numeric comparison (e.g., Integer vs Real)
-                    fa.partial_cmp(&fb).unwrap_or(Ordering::Equal)
-                } else {
-                    Ordering::Equal
-                }
-            } else {
-                // Same type class (non-numeric) - use natural ordering
-                // partial_cmp returns None for incomparable values (NaN)
-                // Default to Equal to maintain sort stability
-                PartialOrd::partial_cmp(a, b).unwrap_or(Ordering::Equal)
-            }
-        }
+        // Neither NULL - delegate to the shared total order
+        (false, false) => vibesql_types::total_order_cmp(a, b),
     }
 }
 
@@ -1592,5 +1540,121 @@ mod tests {
             compare_sql_values(&SqlValue::Integer(2), &SqlValue::Real(2.0)),
             Ordering::Equal
         );
+    }
+
+    /// Regression test for #5802: the mixed-type comparator must be a genuine
+    /// total order. Before the fix, cross-variant numeric pairs (e.g. Integer
+    /// vs Bigint, Bigint vs Double) fell back to lossy `as f64` casts while
+    /// same-variant pairs compared exactly, producing a non-transitive triple:
+    ///
+    ///   a = Bigint(2^53), b = Bigint(2^53 + 1), c = Double(2^53 as f64)
+    ///   a < b (exact i64), but a == c and b == c (2^53 + 1 rounds to 2^53)
+    ///
+    /// which made `sort_by` panic with "user-provided comparison function
+    /// does not correctly implement a total order".
+    #[test]
+    fn test_compare_sql_values_transitive_at_f64_precision_boundary() {
+        use std::cmp::Ordering;
+
+        let a = SqlValue::Bigint(9_007_199_254_740_992); // 2^53
+        let b = SqlValue::Bigint(9_007_199_254_740_993); // 2^53 + 1
+        let c = SqlValue::Double(9_007_199_254_740_992.0); // 2^53 exactly
+
+        assert_eq!(compare_sql_values(&a, &b), Ordering::Less);
+        assert_eq!(compare_sql_values(&a, &c), Ordering::Equal);
+        // Pre-fix this returned Equal (lossy f64 cast), violating transitivity.
+        assert_eq!(compare_sql_values(&b, &c), Ordering::Greater);
+
+        // Integer vs Bigint is cross-variant but both are exact integers; the
+        // comparison must be exact, not routed through f64.
+        assert_eq!(
+            compare_sql_values(
+                &SqlValue::Integer(9_007_199_254_740_992),
+                &SqlValue::Bigint(9_007_199_254_740_993)
+            ),
+            Ordering::Less
+        );
+
+        // NaN must occupy a fixed position in the total order (not collapse to
+        // Equal against every numeric).
+        let nan = SqlValue::Double(f64::NAN);
+        assert_eq!(compare_sql_values(&nan, &nan), Ordering::Equal);
+        let one = SqlValue::Integer(1);
+        let cmp_nan_one = compare_sql_values(&nan, &one);
+        assert_ne!(cmp_nan_one, Ordering::Equal);
+        assert_eq!(compare_sql_values(&one, &nan), cmp_nan_one.reverse());
+    }
+
+    /// Regression test for #5802: sorting >= 100 mixed-type values (integers,
+    /// bigints, doubles at the f64 precision boundary, NaN, text, blobs,
+    /// booleans, NULLs) must not panic and must produce SQLite class ordering
+    /// (numeric < text < blob) with NULLs last (compare_sql_values contract).
+    #[test]
+    fn test_compare_sql_values_total_order_mixed_types_sort() {
+        use std::cmp::Ordering;
+
+        use vibesql_types::StringValue;
+
+        let mut values = Vec::new();
+        for i in 0..8i64 {
+            let base = 9_007_199_254_740_992i64; // 2^53
+            values.push(SqlValue::Bigint(base));
+            values.push(SqlValue::Bigint(base + 1));
+            values.push(SqlValue::Integer(base));
+            values.push(SqlValue::Integer(base + 1));
+            values.push(SqlValue::Double(9_007_199_254_740_992.0));
+            values.push(SqlValue::Double(9.007_199_254_740_993e15));
+            values.push(SqlValue::Double(f64::NAN));
+            values.push(SqlValue::Numeric(1.5));
+            values.push(SqlValue::Real(-2.5));
+            values.push(SqlValue::Integer(i));
+            values.push(SqlValue::Unsigned(u64::MAX));
+            values.push(SqlValue::Varchar(StringValue::from(format!("t{i}"))));
+            values.push(SqlValue::Blob(vec![i as u8, 0x80]));
+            values.push(SqlValue::Boolean(i % 2 == 0));
+            values.push(SqlValue::Null);
+        }
+        assert!(values.len() >= 100, "need >= 100 rows to reproduce the fuzz panic");
+
+        // Pre-fix this panicked: "user-provided comparison function does not
+        // correctly implement a total order" (issue #5802 / fuzz.test).
+        values.sort_by(compare_sql_values);
+
+        // Class ordering: numeric(0) < text(1) < blob/boolean/other(2+) < NULL(last)
+        fn class_of(v: &SqlValue) -> u8 {
+            match v {
+                SqlValue::Integer(_)
+                | SqlValue::Bigint(_)
+                | SqlValue::Smallint(_)
+                | SqlValue::Unsigned(_)
+                | SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_) => 0,
+                SqlValue::Character(_) | SqlValue::Varchar(_) => 1,
+                SqlValue::Blob(_) => 2,
+                SqlValue::Null => 4,
+                _ => 3,
+            }
+        }
+        let classes: Vec<u8> = values.iter().map(class_of).collect();
+        let mut sorted_classes = classes.clone();
+        sorted_classes.sort_unstable();
+        assert_eq!(
+            classes, sorted_classes,
+            "sorted output must group classes as numeric < text < blob < other < NULL"
+        );
+
+        // The sort result must be consistent with the comparator on every
+        // adjacent pair (sanity check that the order is well-formed).
+        for pair in values.windows(2) {
+            assert_ne!(
+                compare_sql_values(&pair[0], &pair[1]),
+                Ordering::Greater,
+                "adjacent pair out of order: {:?} > {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
     }
 }

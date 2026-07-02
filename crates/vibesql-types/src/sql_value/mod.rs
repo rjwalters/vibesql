@@ -3,6 +3,9 @@
 mod comparison;
 mod display;
 mod hash;
+mod total_order;
+
+pub use total_order::total_order_cmp;
 
 use crate::{
     temporal::{Date, Interval, IntervalField, Time, Timestamp},
