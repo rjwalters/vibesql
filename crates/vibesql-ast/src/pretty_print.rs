@@ -5,8 +5,7 @@
 //! # Example
 //!
 //! ```
-//! use vibesql_ast::pretty_print::ToSql;
-//! use vibesql_ast::{BinaryOperator, Expression};
+//! use vibesql_ast::{pretty_print::ToSql, BinaryOperator, Expression};
 //! use vibesql_types::SqlValue;
 //!
 //! // Convert operators to SQL
@@ -927,6 +926,17 @@ impl ToSql for SelectStmt {
             }
         }
 
+        // Set operation (UNION, INTERSECT, EXCEPT) must be rendered BEFORE
+        // ORDER BY / LIMIT / OFFSET: the parser attaches those clauses to the
+        // outermost (leftmost) SelectStmt of a compound query, where they apply
+        // to the entire set-operation result. Emitting them before the set
+        // operation would produce invalid SQL like
+        // `SELECT 0 ORDER BY 1 UNION SELECT 1`, which fails to re-parse when a
+        // persisted view definition is reloaded (issue #5798).
+        if let Some(set_op) = &self.set_operation {
+            result.push_str(&format!(" {}", set_op.to_sql()));
+        }
+
         // ORDER BY (applies to both SELECT and VALUES)
         if let Some(order_by) = &self.order_by {
             let items: Vec<String> = order_by.iter().map(|o| o.to_sql()).collect();
@@ -941,11 +951,6 @@ impl ToSql for SelectStmt {
         // OFFSET
         if let Some(offset) = &self.offset {
             result.push_str(&format!(" OFFSET {}", offset.to_sql()));
-        }
-
-        // Set operation
-        if let Some(set_op) = &self.set_operation {
-            result.push_str(&format!(" {}", set_op.to_sql()));
         }
 
         result
@@ -1372,6 +1377,66 @@ mod tests {
             values: None,
         };
         assert_eq!(stmt.to_sql(), "SELECT DISTINCT name FROM users ORDER BY name ASC LIMIT 10");
+    }
+
+    /// Issue #5798: in a compound query the parser attaches ORDER BY / LIMIT /
+    /// OFFSET to the outermost SelectStmt where they apply to the entire set
+    /// operation, so ToSql must render them AFTER the set operation. Rendering
+    /// them before produced invalid SQL (`SELECT 0 ORDER BY 1 UNION SELECT 1`)
+    /// that failed to re-parse when persisted view definitions were reloaded.
+    #[test]
+    fn test_union_with_order_by_renders_order_by_after_set_operation() {
+        let right = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(1)),
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        };
+        let stmt = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::Literal(SqlValue::Integer(0)),
+                alias: Some("x".to_string()),
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: Some(vec![OrderByItem {
+                expr: Expression::Literal(SqlValue::Integer(1)),
+                direction: OrderDirection::Asc,
+                nulls_order: None,
+            }]),
+            limit: Some(Expression::Literal(SqlValue::Integer(10))),
+            offset: None,
+            set_operation: Some(SetOperation {
+                op: SetOperator::Union,
+                all: false,
+                right: Box::new(right),
+            }),
+            values: None,
+        };
+        assert_eq!(stmt.to_sql(), "SELECT 0 AS x UNION SELECT 1 ORDER BY 1 ASC LIMIT 10");
     }
 
     #[test]
