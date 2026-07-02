@@ -84,6 +84,15 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 if let Some(coll) = &col.collation {
                     write_string(writer, coll)?;
                 }
+                // Write generated-column expression (v11+, issue #5794).
+                // Mirrors the default_value encoding: present-flag bool +
+                // expression. Without this, a reloaded schema forgets the
+                // `c AS (a+b)` expression and post-reload INSERTs store NULL
+                // for the generated column.
+                write_bool(writer, col.generated_expr.is_some())?;
+                if let Some(gen_expr) = &col.generated_expr {
+                    super::expression::write_expression(writer, gen_expr)?;
+                }
             }
 
             // Write primary key columns (v3+)
@@ -442,12 +451,26 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                 None
             };
 
+            // Read generated-column expression (v11+, issue #5794).
+            // v10-and-earlier files do not include this field; absence means
+            // "not a generated column" (None), which matches prior behavior.
+            let generated_expr = if version >= 11 {
+                let has_generated = read_bool(reader)?;
+                if has_generated {
+                    Some(super::expression::read_expression(reader)?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             columns.push(vibesql_catalog::ColumnSchema {
                 name: col_name,
                 data_type,
                 nullable,
                 default_value,
-                generated_expr: None,
+                generated_expr,
                 collation,
                 // Default to false for backward compatibility with existing databases
                 // New tables will have this set correctly at creation time
@@ -1237,5 +1260,130 @@ mod tests {
         let reloaded_v10 = read_catalog_v(&mut &buf[..], VERSION).unwrap();
         assert!(reloaded_v10.catalog.list_views().is_empty());
         assert!(reloaded_v10.get_table("t1").is_some());
+    }
+
+    /// Issue #5794: a generated-column expression (`c AS (a+b)`) must survive
+    /// a binary catalog round-trip.
+    ///
+    /// Generated values are materialized at INSERT time, so rows written
+    /// before a save always reload correctly — the failure mode is that a
+    /// reloaded schema without `generated_expr` computes NULL for every
+    /// *subsequent* INSERT. This is the cross-process reload guarantee the
+    /// TCL shim relies on (each `do_execsql_test` batch runs in a fresh CLI
+    /// process against a shared `.vbsql` file), and why `alterdropcol.test`
+    /// section 4 failed before v11.
+    #[test]
+    fn test_binary_catalog_round_trips_generated_column_expr() {
+        let gen_expr = vibesql_parser::arena_parser::parse_expression_to_owned("a + b").unwrap();
+
+        let mut db = Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "mt".to_string(),
+            vec![
+                vibesql_catalog::ColumnSchema {
+                    name: "a".to_string(),
+                    data_type: vibesql_types::DataType::Integer,
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: true,
+                },
+                vibesql_catalog::ColumnSchema {
+                    name: "b".to_string(),
+                    data_type: vibesql_types::DataType::Integer,
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: true,
+                },
+                vibesql_catalog::ColumnSchema {
+                    name: "c".to_string(),
+                    data_type: vibesql_types::DataType::Integer,
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: Some(gen_expr.clone()),
+                    collation: None,
+                    is_exact_integer_type: true,
+                },
+                vibesql_catalog::ColumnSchema {
+                    name: "d".to_string(),
+                    data_type: vibesql_types::DataType::Varchar { max_length: None },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: false,
+                },
+            ],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("mt", false))
+            .unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let table = reloaded.get_table("mt").expect("mt must survive the round-trip");
+        assert_eq!(
+            table.schema.columns[2].generated_expr,
+            Some(gen_expr),
+            "generated-column expression must survive binary persistence (issue #5794)"
+        );
+        // Non-generated columns must stay non-generated.
+        assert_eq!(table.schema.columns[0].generated_expr, None);
+        assert_eq!(table.schema.columns[1].generated_expr, None);
+        assert_eq!(table.schema.columns[3].generated_expr, None);
+    }
+
+    /// Issue #5794 backward compat: a v10 (pre-generated-expr) file must load
+    /// cleanly under the v11 reader, yielding `generated_expr: None` rather
+    /// than an error.
+    ///
+    /// Unlike the v9→v10 views case (where the new section trails the old
+    /// layout), the generated-expr field sits *inside* each per-column record,
+    /// so a v11-written buffer is NOT byte-compatible with a v10 read. This
+    /// test therefore hand-encodes a genuine v10 catalog byte stream — column
+    /// records ending at the collation flag — and reads it with
+    /// `version = 10`, exercising exactly the path a real v10 file takes
+    /// through the v11 binary: the `version >= 11` gate is skipped, no
+    /// generated-expr bytes are consumed, and every column loads with
+    /// `generated_expr: None`.
+    #[test]
+    fn test_v10_file_loads_generated_expr_as_none() {
+        use super::super::io::{write_bool, write_string, write_u32};
+
+        // Hand-encode a v10 catalog: one table `t1` with one column `a`.
+        let mut buf: Vec<u8> = Vec::new();
+        write_u32(&mut buf, 0).unwrap(); // schemas: none
+        write_u32(&mut buf, 0).unwrap(); // roles: none
+        write_u32(&mut buf, 0).unwrap(); // sequences: none (v2+)
+        write_u32(&mut buf, 1).unwrap(); // tables: one
+        write_string(&mut buf, "t1").unwrap();
+        write_u32(&mut buf, 1).unwrap(); // columns: one
+        write_string(&mut buf, "a").unwrap(); // column name
+        write_string(&mut buf, "INTEGER").unwrap(); // data type
+        write_bool(&mut buf, true).unwrap(); // nullable
+        write_bool(&mut buf, false).unwrap(); // no default_value (v2+)
+        write_bool(&mut buf, false).unwrap(); // no collation (v5+)
+                                              // (v10 column records END here: no generated-expr field)
+        write_bool(&mut buf, false).unwrap(); // no primary key (v3+)
+        write_bool(&mut buf, false).unwrap(); // unquoted identifier (v4+)
+        write_bool(&mut buf, false).unwrap(); // no sql_source (v9+)
+        write_u32(&mut buf, 0).unwrap(); // indexes: none
+        write_u32(&mut buf, 0).unwrap(); // views: none (v10+)
+        write_u32(&mut buf, 0).unwrap(); // triggers: none
+
+        let reloaded = read_catalog_v(&mut &buf[..], 10).unwrap();
+        let table =
+            reloaded.get_table("t1").expect("a v10 table must still load under the v11 binary");
+        assert_eq!(table.schema.columns.len(), 1);
+        assert_eq!(
+            table.schema.columns[0].generated_expr, None,
+            "a v10 file has no generated-expr field; the v11 reader must default it to None"
+        );
+        assert_eq!(table.schema.columns[0].collation, None);
+        assert!(table.schema.columns[0].nullable);
     }
 }

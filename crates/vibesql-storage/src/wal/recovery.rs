@@ -1366,6 +1366,67 @@ mod tests {
         );
     }
 
+    /// Issue #5794: a generated-column expression must survive WAL checkpoint
+    /// recovery. `RecoveryManager::load_checkpoint` parses the checkpoint body
+    /// with `read_catalog_v`, so the binary-format v11 field is the same fix —
+    /// this test pins the recovery path specifically: checkpoint a schema with
+    /// `c AS (a+b)`, recover from it, and assert the expression is intact so a
+    /// post-recovery INSERT can compute the generated value instead of NULL.
+    #[test]
+    fn test_checkpoint_recovery_preserves_generated_column_expr() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+
+        let gen_expr = vibesql_parser::arena_parser::parse_expression_to_owned("a + b").unwrap();
+
+        // Build a DB whose table has a generated column, plus one materialized
+        // row (as INSERT-time evaluation would have stored it).
+        let db_bytes = {
+            let mut db = Database::new();
+            let mut col_c = ColumnSchema::new("c".to_string(), DataType::Integer, true);
+            col_c.generated_expr = Some(gen_expr.clone());
+            db.create_table(TableSchema::new(
+                "mt".to_string(),
+                vec![
+                    ColumnSchema::new("a".to_string(), DataType::Integer, true),
+                    ColumnSchema::new("b".to_string(), DataType::Integer, true),
+                    col_c,
+                ],
+            ))
+            .unwrap();
+            db.insert_row(
+                "main.mt",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(2),
+                    SqlValue::Integer(3),
+                ]),
+            )
+            .unwrap();
+            db.to_uncompressed_bytes().unwrap()
+        };
+
+        // Write the checkpoint (what the CLI's `\save` / clean exit does),
+        // then recover from it (what a fresh process does on open).
+        let mut writer = CheckpointWriter::new(&checkpoint_dir).unwrap();
+        writer.create_checkpoint(1, &db_bytes, 1).unwrap();
+
+        let manager = RecoveryManager::new(&checkpoint_dir);
+        let (recovered, stats) = manager.recover().unwrap();
+        assert_eq!(stats.checkpoint_lsn, 1, "recovery must load the checkpoint");
+
+        let table = recovered.get_table("main.mt").expect("mt must survive recovery");
+        assert_eq!(
+            table.schema.columns[2].generated_expr,
+            Some(gen_expr),
+            "generated-column expression must survive checkpoint recovery (issue #5794)"
+        );
+        // The materialized row data must survive too.
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values[2], SqlValue::Integer(3));
+    }
+
     #[test]
     fn test_recovery_discards_uncommitted_transaction() {
         let temp_dir = TempDir::new().unwrap();

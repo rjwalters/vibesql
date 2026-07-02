@@ -40,7 +40,17 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        read path is gated on `version >= 10` and treats absence as "zero
 ///        views." A v10 file opened by a v9 binary is rejected cleanly by
 ///        `read_header` (version > VERSION). Issue #5771.
-pub const VERSION: u8 = 10;
+/// - v11: Added generated-column expression persistence per column
+///        (`ColumnSchema::generated_expr`, the `c AS (a+b)` in `CREATE TABLE`).
+///        Generated values are materialized at INSERT time, so rows written
+///        before a save always reload correctly — but without the expression
+///        the reloaded schema is amnesiac and post-reload INSERTs store NULL
+///        for the generated column. Encoded like `default_value`:
+///        present-flag bool + expression, after the collation field. v10 and
+///        earlier files remain readable: the read path is gated on
+///        `version >= 11` and treats absence as `generated_expr = None`
+///        (prior behavior). Issue #5794.
+pub const VERSION: u8 = 11;
 
 /// Type tags for binary serialization
 #[repr(u8)]
