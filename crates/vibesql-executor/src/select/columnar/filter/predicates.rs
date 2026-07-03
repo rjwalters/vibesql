@@ -307,7 +307,12 @@ fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &Combine
         }
         ColumnPredicate::InList { column_idx, values, .. } => {
             let col_type = schema.get_column_type_by_index(*column_idx);
-            values.iter().all(|v| value_supported_for_column(col_type, v))
+            // Issue #5806: IN on a non-BINARY-collated column (e.g. NOCASE)
+            // must apply the LHS collation; the columnar comparators compare
+            // raw values, so decline pushdown and fall back to the
+            // collation-aware expression evaluator.
+            !schema.column_has_non_binary_collation(*column_idx)
+                && values.iter().all(|v| value_supported_for_column(col_type, v))
         }
         // LIKE patterns are strings; existing comparator behavior applies
         ColumnPredicate::Like { .. } => true,
