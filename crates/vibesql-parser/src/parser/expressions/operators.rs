@@ -587,9 +587,12 @@ impl Parser {
                 };
 
                 // Parse low AND high
-                let low = self.parse_additive_expression()?;
+                // Bounds parse at the shift tier (same as NOT BETWEEN): everything
+                // tighter than the comparison tier is allowed; only the boolean AND
+                // separating low/high must not be consumed.
+                let low = self.parse_shift_expression()?;
                 self.consume_keyword(Keyword::And)?;
-                let high = self.parse_additive_expression()?;
+                let high = self.parse_shift_expression()?;
 
                 left = vibesql_ast::Expression::Between {
                     expr: Box::new(left),
@@ -603,13 +606,13 @@ impl Parser {
                 // It's LIKE (not negated)
                 self.consume_keyword(Keyword::Like)?;
 
-                // Parse pattern expression
-                let pattern = self.parse_additive_expression()?;
+                // Parse pattern expression at the shift tier (same as NOT LIKE)
+                let pattern = self.parse_shift_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_additive_expression()?))
+                    Some(Box::new(self.parse_shift_expression()?))
                 } else {
                     None
                 };
@@ -625,13 +628,13 @@ impl Parser {
                 // It's GLOB (SQLite) (not negated)
                 self.consume_keyword(Keyword::Glob)?;
 
-                // Parse pattern expression
-                let pattern = self.parse_additive_expression()?;
+                // Parse pattern expression at the shift tier (same as NOT GLOB)
+                let pattern = self.parse_shift_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_additive_expression()?))
+                    Some(Box::new(self.parse_shift_expression()?))
                 } else {
                     None
                 };

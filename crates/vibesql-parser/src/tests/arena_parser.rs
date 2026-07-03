@@ -532,3 +532,89 @@ fn test_arena_not_in_chained_not_in() {
         ));
     });
 }
+
+// ============================================================================
+// BETWEEN/LIKE bounds with shift operators (issue #5813)
+//
+// The arena parser has no shift tier, so expressions with << / >> in BETWEEN
+// bounds or LIKE patterns must FAIL arena parsing (never silently truncate),
+// and parse_with_arena_fallback must route them to the standard parser,
+// which (post-#5813) accepts shift-tier operands in both the negated and
+// non-negated forms.
+// ============================================================================
+
+#[test]
+fn test_arena_between_shift_bound_fails_no_silent_truncation() {
+    // Must be a hard arena-parse error, NOT a successful parse of the
+    // truncated prefix "SELECT 1 BETWEEN 0 AND 1".
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 1 BETWEEN 0 AND 1<<2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; BETWEEN with << bound must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+}
+
+#[test]
+fn test_arena_like_shift_pattern_fails_no_silent_truncation() {
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 2 LIKE 1<<1", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; LIKE with << pattern must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+}
+
+#[test]
+fn test_arena_fallback_between_shift_bound() {
+    // sqlite3: SELECT 1 BETWEEN 0 AND 1<<2; -- 1
+    // End-to-end through the arena-with-fallback entry point: arena parse
+    // fails, standard parser (fixed by #5813) produces the Between node.
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 BETWEEN 0 AND 1<<2;")
+        .expect("fallback path should parse BETWEEN with shift bound");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::Between { high, negated, .. } = expr else {
+        panic!("expected Between expression, got {:?}", expr);
+    };
+    assert!(!negated);
+    assert!(
+        matches!(
+            **high,
+            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::LeftShift, .. }
+        ),
+        "high bound should be 1<<2, got {:?}",
+        high
+    );
+}
+
+#[test]
+fn test_arena_fallback_like_shift_pattern() {
+    // sqlite3: SELECT 2 LIKE 1<<1; -- 1
+    let stmt = crate::parse_with_arena_fallback("SELECT 2 LIKE 1<<1;")
+        .expect("fallback path should parse LIKE with shift pattern");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::Like { pattern, negated, .. } = expr else {
+        panic!("expected Like expression, got {:?}", expr);
+    };
+    assert!(!negated);
+    assert!(
+        matches!(
+            **pattern,
+            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::LeftShift, .. }
+        ),
+        "pattern should be 1<<1, got {:?}",
+        pattern
+    );
+}
