@@ -1445,6 +1445,11 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
             vibesql_storage::StorageError::NotImplemented(msg) => {
                 ExecutorError::StorageError(format!("Not implemented: {}", msg))
             }
+            err @ vibesql_storage::StorageError::UnsupportedFormatVersion { .. } => {
+                // Forward-incompatible file format (#5807): preserve the full
+                // "written by a newer version of VibeSQL" message.
+                ExecutorError::StorageError(err.to_string())
+            }
             vibesql_storage::StorageError::IoError(msg) => {
                 ExecutorError::StorageError(format!("I/O error: {}", msg))
             }

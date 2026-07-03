@@ -373,7 +373,10 @@ pub fn read_checkpoint_data(path: &Path) -> Result<(CheckpointHeader, Vec<u8>), 
 }
 
 /// CRC-32 implementation (same as in writer.rs for consistency)
-fn crc32(data: &[u8]) -> u32 {
+///
+/// `pub(crate)` so recovery tests can re-stamp a checkpoint envelope checksum
+/// after deliberately patching the payload (issue #5807 forward-version tests).
+pub(crate) fn crc32(data: &[u8]) -> u32 {
     const CRC32_TABLE: [u32; 256] = {
         let mut table = [0u32; 256];
         let mut i = 0;

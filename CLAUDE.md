@@ -134,7 +134,9 @@ mydata.wal              — active write-ahead log
 mydata-checkpoints/     — checkpoint archive directory (checkpoint_*.vchk)
 ```
 
-On open, the CLI recovers from the latest checkpoint and replays WAL entries written after it; on `\save` / clean exit it writes a fresh checkpoint and truncates the WAL. Recovery restores both table schemas (DDL) and committed row data (DML inserts, updates, deletes); uncommitted transactions at crash time are discarded, and a truncated WAL tail recovers up to the last complete, checksum-valid entry.
+On open, the CLI recovers from the latest checkpoint and replays WAL entries written after it; on `\save` / clean exit it writes a fresh checkpoint and truncates the WAL. Recovery restores both table schemas (DDL) and committed row data (DML inserts, updates, deletes); uncommitted transactions at crash time are discarded, and a truncated WAL tail recovers up to the last complete, checksum-valid entry. A legacy snapshot-only `.vbsql` (no checkpoint archive yet) is loaded as the recovery base on first WAL open.
+
+**Recovery failure policy (never silently empty):** a database written by a newer VibeSQL binary (forward format version) is a hard open error — "database written by a newer version of VibeSQL" — never an empty or stale database, and never masked by the SQL-dump fallback. An unreadable/corrupt newest checkpoint is also a hard error by default; pass `--recover-fallback` to explicitly opt into recovering from the newest readable older checkpoint (every skipped checkpoint file is reported on stderr). If a `.vbsql` mysteriously opens empty under an old binary, suspect format-version skew before assuming data loss — the checkpoint files are intact on disk.
 
 The engine lives in `crates/vibesql-storage/src/wal/` (writer, reader, checkpoint, truncate, recovery). DML WAL ops carry an inline `table_name` (WAL format version 2) so `RecoveryManager::apply_op` can route each row mutation back to its table during replay. Server-mode durability is separate (the replicated server routes writes through the Raft log + MVCC state machine).
 

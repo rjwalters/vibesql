@@ -124,44 +124,134 @@ fn format_sql_value(v: &SqlValue) -> String {
     }
 }
 
+/// Load an existing database file, auto-detecting its format.
+///
+/// Tries the native binary/compressed/JSON loader first, auto-imports SQLite
+/// files, and falls back to SQL-dump parsing for text files.
+///
+/// A `StorageError::UnsupportedFormatVersion` (file written by a newer VibeSQL
+/// binary) is a hard error and is deliberately NOT masked by the SQL-dump
+/// fallback: before issue #5807 the version mismatch fell through to a
+/// confusing dump-parse error (or, on the WAL path, a silently empty
+/// database).
+fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
+    match Database::load(db_path) {
+        Ok(db) => Ok(db),
+        Err(e @ vibesql_storage::StorageError::UnsupportedFormatVersion { .. }) => {
+            Err(anyhow::anyhow!("Failed to open database at {}: {}", db_path, e))
+        }
+        Err(ref e) if e.to_string().contains("SQLite database detected") => {
+            // Auto-import SQLite database
+            let result = crate::sqlite_io::import_sqlite(db_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to read binary SQLite database at {}: {}. \
+                     If this file is a VibeSQL SQL dump, rename it with a .sql extension \
+                     to load it in SQL dump format.",
+                    db_path,
+                    e
+                )
+            })?;
+            for warning in &result.warnings {
+                eprintln!("{}", warning);
+            }
+            eprintln!(
+                "Imported SQLite database: {} tables, {} rows",
+                result.tables_imported, result.rows_imported
+            );
+            Ok(result.database)
+        }
+        Err(_) => {
+            // Fall back to SQL dump loading (requires executor for parsing)
+            vibesql_executor::load_sql_dump(db_path)
+                .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))
+        }
+    }
+}
+
+/// Options controlling how the executor opens a database file.
+///
+/// Bundled into a struct so the `--recover-fallback` opt-in (issue #5807)
+/// threads through `Repl`/`ScriptExecutor` without growing a trail of bools.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DbOpenOptions {
+    /// Activate the WAL persistence path for file-backed databases
+    /// (`[database] wal`, on by default).
+    pub wal: bool,
+    /// Explicit opt-in (`--recover-fallback`): when the newest checkpoint is
+    /// unreadable, recover from the newest readable older checkpoint instead
+    /// of refusing to open. Skipped checkpoints are reported on stderr.
+    pub recover_fallback: bool,
+}
+
 impl SqlExecutor {
     /// Create an executor with WAL disabled (default snapshot persistence).
     ///
     /// Equivalent to `new_with_wal(database, false)`. Retained for callers and
     /// tests that do not opt into the WAL path. (The binary itself always goes
-    /// through `new_with_wal`; this wrapper is used by the in-crate tests.)
+    /// through `new_with_options`; this wrapper is used by the in-crate tests.)
     #[allow(dead_code)]
     pub fn new(database: Option<String>) -> anyhow::Result<Self> {
         Self::new_with_wal(database, false)
     }
 
+    /// Create an executor with the given WAL setting and default recovery
+    /// strictness (no checkpoint fallback).
+    pub fn new_with_wal(database: Option<String>, wal: bool) -> anyhow::Result<Self> {
+        Self::new_with_options(database, DbOpenOptions { wal, recover_fallback: false })
+    }
+
     /// Create an executor, optionally activating the opt-in WAL persistence path.
     ///
-    /// When `wal` is `true` AND `database` resolves to a real file path (not
-    /// `:memory:` and not `None`), the executor:
+    /// When `options.wal` is `true` AND `database` resolves to a real file path
+    /// (not `:memory:` and not `None`), the executor:
     ///   * recovers the database from `<stem>-checkpoints/` + `<stem>.wal` via
     ///     `RecoveryManager::recover()`,
     ///   * attaches a live `PersistenceEngine` so subsequent writes are logged,
     ///   * and routes `save_database` to checkpoint + WAL truncate.
     ///
-    /// When `wal` is `false` (the default), or for in-memory databases, behavior
-    /// is unchanged: snapshot load on open, full snapshot save on `\save`/exit.
+    /// When `options.wal` is `false`, or for in-memory databases, behavior is
+    /// unchanged: snapshot load on open, full snapshot save on `\save`/exit.
     ///
-    /// Phase 1 durability note: DDL survives an unclean shutdown via WAL replay;
-    /// committed row data is durable as of the last checkpoint. Post-checkpoint
-    /// DML replay is a Phase 2 stub (see `executor::wal` module docs and #5698).
-    pub fn new_with_wal(database: Option<String>, wal: bool) -> anyhow::Result<Self> {
+    /// Failure policy (issue #5807): a database file written by a newer VibeSQL
+    /// binary, or whose newest checkpoint is unreadable, is a hard open error —
+    /// the CLI must never silently present an empty (or stale) database.
+    /// `options.recover_fallback` opts into older-checkpoint recovery, loudly.
+    pub fn new_with_options(
+        database: Option<String>,
+        options: DbOpenOptions,
+    ) -> anyhow::Result<Self> {
         // Treat :memory: as an in-memory database (no file path)
         let database = database.filter(|p| !is_memory_database(p));
 
         // WAL-active path: only when explicitly opted in AND a file path exists.
         // For in-memory databases the WAL is silently disabled (no file to
         // attach to) — consistent with the issue's documented edge case.
-        if wal {
+        if options.wal {
             if let Some(ref db_path) = database {
-                let (mut db, wal_state) = wal::WalState::open(db_path).map_err(|e| {
-                    anyhow::anyhow!("Failed to open WAL-backed database at {}: {}", db_path, e)
-                })?;
+                // Legacy snapshot-only support (#5807): a `.vbsql` written
+                // before WAL mode has no checkpoint archive. Load the snapshot
+                // as the recovery base so its data is preserved (and captured
+                // by the first checkpoint) instead of being silently ignored.
+                // When any checkpoint exists, checkpoints are the newer truth
+                // and the base is skipped entirely.
+                let paths = wal::WalPaths::derive(db_path);
+                let base = if !paths.has_checkpoint_files()
+                    && std::fs::metadata(db_path).map(|m| m.len() > 0).unwrap_or(false)
+                {
+                    Some(load_database_file(db_path)?)
+                } else {
+                    None
+                };
+
+                let (mut db, wal_state) =
+                    wal::WalState::open_with_base(db_path, base, options.recover_fallback)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to open WAL-backed database at {}: {}",
+                                db_path,
+                                e
+                            )
+                        })?;
                 // Rebuild expression-index bodies that the snapshot loader left
                 // empty (it cannot evaluate index expressions). Without this an
                 // expression index would silently return zero rows after reopen.
@@ -186,36 +276,7 @@ impl SqlExecutor {
         let mut db = if let Some(db_path) = database {
             // Check if file exists
             if std::path::Path::new(&db_path).exists() {
-                // Try auto-detecting format first (handles binary, compressed, JSON)
-                // Fall back to SQL dump if that fails
-                match Database::load(&db_path) {
-                    Ok(db) => db,
-                    Err(ref e) if e.to_string().contains("SQLite database detected") => {
-                        // Auto-import SQLite database
-                        let result = crate::sqlite_io::import_sqlite(&db_path).map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed to read binary SQLite database at {}: {}. \
-                                 If this file is a VibeSQL SQL dump, rename it with a .sql extension \
-                                 to load it in SQL dump format.",
-                                db_path,
-                                e
-                            )
-                        })?;
-                        for warning in &result.warnings {
-                            eprintln!("{}", warning);
-                        }
-                        eprintln!(
-                            "Imported SQLite database: {} tables, {} rows",
-                            result.tables_imported, result.rows_imported
-                        );
-                        result.database
-                    }
-                    Err(_) => {
-                        // Fall back to SQL dump loading (requires executor for parsing)
-                        vibesql_executor::load_sql_dump(&db_path)
-                            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?
-                    }
-                }
+                load_database_file(&db_path)?
             } else {
                 // File doesn't exist, create new database
                 // (Will be saved when user uses \save or when modifications occur)

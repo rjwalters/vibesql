@@ -158,10 +158,14 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<u8, StorageError> {
         .map_err(|e| StorageError::NotImplemented(format!("Failed to read version: {}", e)))?;
 
     if version[0] > VERSION {
-        return Err(StorageError::NotImplemented(format!(
-            "Unsupported format version: {} (current version: {})",
-            version[0], VERSION
-        )));
+        // Typed forward-version error (issue #5807): callers (checkpoint
+        // recovery, CLI open) must treat this as fatal — never fall back to an
+        // older checkpoint or an empty database, and never mask it behind a
+        // SQL-dump reparse attempt.
+        return Err(StorageError::UnsupportedFormatVersion {
+            found: version[0],
+            supported: VERSION,
+        });
     }
 
     // Read flags (reserved for future use)
@@ -195,5 +199,24 @@ mod tests {
         let mut reader = &buf[..];
         let version = read_header(&mut reader).unwrap();
         assert_eq!(version, VERSION);
+    }
+
+    /// Issue #5807: a header claiming a format version newer than this binary
+    /// must surface as the typed `UnsupportedFormatVersion` error so open
+    /// paths can hard-error instead of silently falling back.
+    #[test]
+    fn test_read_header_forward_version_is_typed_error() {
+        let mut buf = Vec::new();
+        write_header(&mut buf).unwrap();
+        buf[5] = VERSION + 1;
+
+        let mut reader = &buf[..];
+        let err = read_header(&mut reader).unwrap_err();
+        assert_eq!(
+            err,
+            StorageError::UnsupportedFormatVersion { found: VERSION + 1, supported: VERSION }
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("newer version of VibeSQL"), "message was: {msg}");
     }
 }
