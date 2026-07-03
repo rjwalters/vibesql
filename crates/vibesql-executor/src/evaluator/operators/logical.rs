@@ -59,6 +59,10 @@ pub fn is_truthy(value: &SqlValue) -> bool {
         Numeric(f) => *f != 0.0,
         // String types: SQLite parses leading numeric portion
         Varchar(s) | Character(s) => is_truthy_string(s),
+        // BLOB: SQLite reads the bytes as text and applies the same
+        // leading-numeric coercion: X'31' ("1") is truthy, zeroblob(3)
+        // (NUL bytes) is falsy (#5803)
+        Blob(b) => is_truthy_string(&String::from_utf8_lossy(b)),
         // Other types are not truthy (conservative default)
         _ => false,
     }

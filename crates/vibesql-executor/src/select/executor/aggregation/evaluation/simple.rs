@@ -224,6 +224,10 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Boolean(b) => {
                     arcstr::ArcStr::from(if b { "1" } else { "0" })
                 }
+                // SQLite treats blob bytes as raw text for the LIKE pattern too
+                vibesql_types::SqlValue::Blob(ref b) => {
+                    arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
+                }
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: test_val,

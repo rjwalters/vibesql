@@ -6,8 +6,10 @@ use vibesql_types::SqlValue;
 
 use crate::{
     errors::ExecutorError,
-    evaluator::casting::{string_to_number, to_i64},
-    evaluator::operators::is_truthy_string,
+    evaluator::{
+        casting::{string_to_number, to_i64},
+        operators::is_truthy_string,
+    },
 };
 
 /// Evaluate a unary operation
@@ -105,6 +107,12 @@ pub(crate) fn eval_unary_op(
         (Not, SqlValue::Character(s)) | (Not, SqlValue::Varchar(s)) => {
             Ok(SqlValue::Boolean(!is_truthy_string(s)))
         }
+        // BLOB in boolean context - SQLite reads the bytes as text and applies
+        // the same leading-numeric truthiness: NOT zeroblob(10) → 1 (NUL bytes
+        // parse to 0 → falsy), NOT x'31' ("1") → 0
+        (Not, SqlValue::Blob(b)) => {
+            Ok(SqlValue::Boolean(!is_truthy_string(&String::from_utf8_lossy(b))))
+        }
         (Not, SqlValue::Date(_)) => Ok(SqlValue::Boolean(false)), // Date values are truthy
         (Not, SqlValue::Time(_)) => Ok(SqlValue::Boolean(false)), // Time values are truthy
         (Not, SqlValue::Timestamp(_)) => Ok(SqlValue::Boolean(false)), /* Timestamp values are */
@@ -113,6 +121,21 @@ pub(crate) fn eval_unary_op(
 
         // Bitwise NOT (~) - converts to integer and flips all bits
         (BitwiseNot, SqlValue::Null) => Ok(SqlValue::Null),
+        // Text: SQLite coerces via the leading-numeric prefix parse, truncating
+        // any fractional part toward zero, then applies ~ to the integer:
+        //   ~'fault' → ~0 = -1;  ~'12abc' → ~12 = -13;  ~'3.7' → ~3 = -4
+        // (string_to_number's i64 component already truncates toward zero.)
+        (BitwiseNot, SqlValue::Character(s)) | (BitwiseNot, SqlValue::Varchar(s)) => {
+            let (int_val, _, _) = string_to_number(s);
+            Ok(SqlValue::Integer(!int_val))
+        }
+        // BLOB: bytes → text → number, mirroring the unary-minus Blob arm above:
+        //   ~x'313233' ("123") → ~123 = -124
+        (BitwiseNot, SqlValue::Blob(b)) => {
+            let s = String::from_utf8_lossy(b);
+            let (int_val, _, _) = string_to_number(&s);
+            Ok(SqlValue::Integer(!int_val))
+        }
         (BitwiseNot, val) => Ok(SqlValue::Integer(!to_i64(val)?)),
 
         // Type errors
@@ -405,11 +428,7 @@ mod tests {
         let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
         match result {
             SqlValue::Real(f) => {
-                assert!(
-                    (f + 1e50).abs() / 1e50 < 1e-12,
-                    "Expected ~-1e50, got {}",
-                    f
-                );
+                assert!((f + 1e50).abs() / 1e50 < 1e-12, "Expected ~-1e50, got {}", f);
             }
             other => panic!("Expected Real, got {:?}", other),
         }
@@ -472,5 +491,94 @@ mod tests {
         let blob = SqlValue::Blob(b"-.5".to_vec());
         let result = eval_unary_op(&UnaryOperator::Minus, &blob).unwrap();
         assert_eq!(result, SqlValue::Real(0.5));
+    }
+
+    // Issue #5803: ~ and NOT must coerce text/blob operands like SQLite.
+
+    #[test]
+    fn bitwise_not_on_text() {
+        // ~'fault' → ~0 = -1 (non-numeric text coerces to 0)
+        assert_eq!(
+            eval_unary_op(
+                &UnaryOperator::BitwiseNot,
+                &SqlValue::Varchar(arcstr::ArcStr::from("fault"))
+            )
+            .unwrap(),
+            SqlValue::Integer(-1)
+        );
+        // ~'12abc' → ~12 = -13 (leading-numeric prefix parse)
+        assert_eq!(
+            eval_unary_op(
+                &UnaryOperator::BitwiseNot,
+                &SqlValue::Varchar(arcstr::ArcStr::from("12abc"))
+            )
+            .unwrap(),
+            SqlValue::Integer(-13)
+        );
+        // ~'3.7' → ~3 = -4 (fractional part truncates toward zero)
+        assert_eq!(
+            eval_unary_op(
+                &UnaryOperator::BitwiseNot,
+                &SqlValue::Character(arcstr::ArcStr::from("3.7"))
+            )
+            .unwrap(),
+            SqlValue::Integer(-4)
+        );
+        // ~'-2.5' → ~-2 = 1 (truncation toward zero for negatives too)
+        assert_eq!(
+            eval_unary_op(
+                &UnaryOperator::BitwiseNot,
+                &SqlValue::Varchar(arcstr::ArcStr::from("-2.5"))
+            )
+            .unwrap(),
+            SqlValue::Integer(1)
+        );
+    }
+
+    #[test]
+    fn bitwise_not_on_blob() {
+        // ~x'313233' → bytes "123" → ~123 = -124
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::BitwiseNot, &SqlValue::Blob(b"123".to_vec())).unwrap(),
+            SqlValue::Integer(-124)
+        );
+        // Non-numeric blob → 0 → -1
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::BitwiseNot, &SqlValue::Blob(b"abc".to_vec())).unwrap(),
+            SqlValue::Integer(-1)
+        );
+        // Invalid UTF-8 → replacement char → 0 → -1
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::BitwiseNot, &SqlValue::Blob(vec![0xFFu8])).unwrap(),
+            SqlValue::Integer(-1)
+        );
+    }
+
+    #[test]
+    fn bitwise_not_on_float_still_truncates() {
+        // ~3.7 → ~3 = -4 (pre-existing behavior via to_i64; do not regress)
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::BitwiseNot, &SqlValue::Double(3.7)).unwrap(),
+            SqlValue::Integer(-4)
+        );
+    }
+
+    #[test]
+    fn not_on_blob() {
+        // NOT zeroblob(10): NUL bytes read as text parse to 0 → falsy → 1
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Blob(vec![0u8; 10])).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // NOT x'31' ("1") → truthy → 0
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Blob(b"1".to_vec())).unwrap(),
+            SqlValue::Boolean(false)
+        );
+        // Empty blob → falsy → 1
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Not, &SqlValue::Blob(vec![])).unwrap(),
+            SqlValue::Boolean(true)
+        );
     }
 }

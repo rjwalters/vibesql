@@ -515,9 +515,7 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
-            vibesql_types::SqlValue::Boolean(b) => {
-                arcstr::ArcStr::from(if *b { "1" } else { "0" })
-            }
+            vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for LIKE comparison
             vibesql_types::SqlValue::Blob(b) => {
                 arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
@@ -543,8 +541,12 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
-            vibesql_types::SqlValue::Boolean(b) => {
-                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
+            // SQLite treats blob bytes as raw text for the LIKE pattern too:
+            // 'abc' LIKE X'ABCD' → 0 (invalid UTF-8 becomes replacement chars,
+            // which simply never match)
+            vibesql_types::SqlValue::Blob(b) => {
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -631,9 +633,7 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
-            vibesql_types::SqlValue::Boolean(b) => {
-                arcstr::ArcStr::from(if *b { "1" } else { "0" })
-            }
+            vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for GLOB comparison
             vibesql_types::SqlValue::Blob(b) => {
                 arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
@@ -659,8 +659,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
-            vibesql_types::SqlValue::Boolean(b) => {
-                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
+            // SQLite treats blob bytes as raw text for the GLOB pattern too
+            vibesql_types::SqlValue::Blob(b) => {
+                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
             }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
@@ -822,11 +824,9 @@ impl ExpressionEvaluator<'_> {
     /// Evaluate a row-value IN list: `(a, b) IN ((1, 2), (3, 4))` and NOT IN.
     ///
     /// SQLite three-valued semantics (mirroring the scalar IN):
-    /// - TRUE (or FALSE for NOT IN) as soon as one candidate tuple compares
-    ///   fully equal;
-    /// - if no candidate matches but at least one candidate comparison was
-    ///   UNKNOWN (a NULL element with all non-NULL elements equal), the result
-    ///   is NULL;
+    /// - TRUE (or FALSE for NOT IN) as soon as one candidate tuple compares fully equal;
+    /// - if no candidate matches but at least one candidate comparison was UNKNOWN (a NULL element
+    ///   with all non-NULL elements equal), the result is NULL;
     /// - otherwise FALSE (TRUE for NOT IN).
     ///
     /// Each candidate must itself be a row value of the same arity; anything

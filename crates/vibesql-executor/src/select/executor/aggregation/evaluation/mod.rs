@@ -284,8 +284,7 @@ impl SelectExecutor<'_> {
                 // `get_expression_collation`. (Column-declared collations on
                 // raw source columns referenced inside the ORDER BY would not
                 // be visible here, but those are unaffected by this fix.)
-                let order_collation =
-                    result_evaluator.get_expression_collation(&order_item.expr);
+                let order_collation = result_evaluator.get_expression_collation(&order_item.expr);
 
                 // Resolve ORDER BY expression to result schema column names
                 // For aggregates, we need ColumnRef expressions to look up computed values
@@ -318,8 +317,9 @@ impl SelectExecutor<'_> {
 
         // Sort using the sort keys with NULLS FIRST/LAST handling
         rows_with_keys.sort_by(|(_, keys_a), (_, keys_b)| {
-            use crate::select::grouping::compare_sql_values_with_collation;
             use vibesql_types::SqlValue;
+
+            use crate::select::grouping::compare_sql_values_with_collation;
 
             for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in
                 keys_a.iter().zip(keys_b.iter())
@@ -331,7 +331,8 @@ impl SelectExecutor<'_> {
                     if a_is_null && b_is_null {
                         continue; // Both null, consider equal for this key
                     }
-                    // Determine if nulls should sort first or last based on NULLS order and direction
+                    // Determine if nulls should sort first or last based on NULLS order and
+                    // direction
                     let nulls_first = match nulls_order {
                         Some(vibesql_ast::NullsOrder::First) => true,
                         Some(vibesql_ast::NullsOrder::Last) => false,
@@ -697,30 +698,18 @@ impl SelectExecutor<'_> {
     }
 
     /// Check if a SQL value is truthy (for HAVING clause evaluation)
+    ///
+    /// Delegates to the shared SQLite truthiness helper
+    /// (`crate::evaluator::operators::is_truthy`) so HAVING accepts any
+    /// expression like SQLite does — strings and blobs coerce via the
+    /// leading-numeric parse (`HAVING 'first'` → falsy, `HAVING '1'` →
+    /// truthy, `HAVING X'31'` → truthy, `HAVING zeroblob(3)` → falsy)
+    /// instead of erroring. This also unifies the row-based HAVING path
+    /// with the columnar one (columnar_execution/having.rs). (#5803)
     pub(in crate::select::executor) fn is_truthy(
         &self,
         value: &vibesql_types::SqlValue,
     ) -> Result<bool, ExecutorError> {
-        match value {
-            vibesql_types::SqlValue::Boolean(true) => Ok(true),
-            vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => Ok(false),
-            // SQLLogicTest compatibility: treat integers as truthy/falsy (C-like behavior)
-            vibesql_types::SqlValue::Integer(0) => Ok(false),
-            vibesql_types::SqlValue::Integer(_) => Ok(true),
-            vibesql_types::SqlValue::Smallint(0) => Ok(false),
-            vibesql_types::SqlValue::Smallint(_) => Ok(true),
-            vibesql_types::SqlValue::Bigint(0) => Ok(false),
-            vibesql_types::SqlValue::Bigint(_) => Ok(true),
-            vibesql_types::SqlValue::Float(0.0) => Ok(false),
-            vibesql_types::SqlValue::Float(_) => Ok(true),
-            vibesql_types::SqlValue::Real(0.0) => Ok(false),
-            vibesql_types::SqlValue::Real(_) => Ok(true),
-            vibesql_types::SqlValue::Double(0.0) => Ok(false),
-            vibesql_types::SqlValue::Double(_) => Ok(true),
-            other => Err(ExecutorError::InvalidWhereClause(format!(
-                "HAVING must evaluate to boolean, got: {:?}",
-                other
-            ))),
-        }
+        Ok(crate::evaluator::operators::is_truthy(value))
     }
 }
