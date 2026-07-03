@@ -2,6 +2,7 @@
 
 mod columns;
 mod constraints;
+mod drop_column_checks;
 mod table_options;
 mod validation;
 
