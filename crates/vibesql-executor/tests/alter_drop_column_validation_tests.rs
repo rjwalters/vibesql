@@ -16,7 +16,8 @@
 //! rewrites the verbatim `sqlite_master.sql` text in place.
 
 use vibesql_executor::{
-    AlterTableExecutor, CreateIndexExecutor, CreateTableExecutor, SelectExecutor, ViewExecutor,
+    AlterTableExecutor, CreateIndexExecutor, CreateTableExecutor, InsertExecutor, SelectExecutor,
+    TriggerExecutor, ViewExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -162,4 +163,210 @@ fn drop_unconstrained_column_succeeds_and_rewrites_schema_text() {
     // CREATE TABLE text in place, matching sqlite3 (whitespace preserved).
     try_alter(&mut db, "ALTER TABLE t1 DROP COLUMN b").expect("DROP COLUMN b");
     assert_eq!(table_sql(&db, "t1"), "CREATE TABLE t1(a, c)");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 (issue #5795): lax view creation + pre-/post-drop schema re-parse
+// (alterdropcol.test sections 3 and 5, sqlite3 3.51.0 verbatim messages).
+// ---------------------------------------------------------------------------
+
+fn create_trigger(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse CREATE TRIGGER");
+    let vibesql_ast::Statement::CreateTrigger(trigger) = stmt else {
+        panic!("expected CREATE TRIGGER");
+    };
+    TriggerExecutor::create_trigger(db, &trigger).expect("CREATE TRIGGER");
+}
+
+fn insert(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse INSERT");
+    let vibesql_ast::Statement::Insert(ins) = stmt else {
+        panic!("expected INSERT");
+    };
+    InsertExecutor::execute(db, &ins).expect("INSERT");
+}
+
+/// alterdropcol.test 5.2.1: SQLite defers view column resolution, so a view
+/// whose SELECT names a not-yet-resolvable column is still created.
+#[test]
+fn create_view_with_unresolvable_column_is_lax() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT d, e FROM p1");
+    assert!(db.catalog.get_view("v1").is_some(), "lax view v1 should exist");
+}
+
+/// alterdropcol.test 5.2.2: the pre-drop schema re-parse covers the *whole*
+/// schema — here the broken view selects from p1, unrelated to the altered
+/// table c1. No "after drop column" suffix (broken before the drop), and the
+/// inner column name is unquoted.
+#[test]
+fn precheck_rejects_drop_when_unrelated_view_is_broken() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT d, e FROM p1");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN x"),
+        "error in view v1: no such column: d"
+    );
+    // The failed ALTER must leave c1 untouched.
+    assert!(db.get_table("c1").unwrap().schema.has_column("x"));
+}
+
+/// alterdropcol.test 5.3.2: a view broken *by* the drop fails the post-check
+/// with the "after drop column" suffix, and the drop is not applied.
+#[test]
+fn postcheck_rejects_drop_that_breaks_dependent_view() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT x, y FROM c1");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN x"),
+        "error in view v1 after drop column: no such column: x"
+    );
+    assert!(db.get_table("c1").unwrap().schema.has_column("x"));
+}
+
+/// alterdropcol.test 5.4.2: a trigger referencing a nonexistent `new.<col>`
+/// was broken before the drop, so the pre-check reports it without the
+/// "after drop column" suffix — and with the `new.` qualifier in the message.
+#[test]
+fn precheck_rejects_drop_when_trigger_references_missing_new_column() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON c1 BEGIN \
+           INSERT INTO p1 VALUES(new.y, new.xyz); \
+         END",
+    );
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN y"),
+        "error in trigger tr: no such column: new.xyz"
+    );
+    assert!(db.get_table("c1").unwrap().schema.has_column("y"));
+}
+
+/// When both a pre-broken trigger and a would-break view exist, the pre-check
+/// wins (5.4.2 pattern: v1 references c1.y, which is being dropped, but the
+/// already-broken trigger is reported instead).
+#[test]
+fn precheck_wins_over_postcheck() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT x, y FROM c1");
+    create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON c1 BEGIN \
+           INSERT INTO p1 VALUES(new.y, new.xyz); \
+         END",
+    );
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN y"),
+        "error in trigger tr: no such column: new.xyz"
+    );
+}
+
+/// alterdropcol.test 3.1: a *table-level* CHECK referencing the dropped
+/// column survives the drop, so the post-check errors instead of silently
+/// stripping the constraint.
+#[test]
+fn postcheck_rejects_drop_that_breaks_table_level_check() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t12(a, b, c, CHECK(c>10))");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE t12 DROP COLUMN c"),
+        "error in table t12 after drop column: no such column: c"
+    );
+    assert!(db.get_table("t12").unwrap().schema.has_column("c"));
+    // The CHECK constraint must also survive the failed ALTER.
+    assert_eq!(db.get_table("t12").unwrap().schema.check_constraints.len(), 1);
+}
+
+/// alterdropcol.test 3.2 (positive control): a *column-level* CHECK attached
+/// to the dropped column is removed together with the column.
+#[test]
+fn drop_column_with_own_column_level_check_succeeds() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t13(a, b, c CHECK(c>10))");
+    try_alter(&mut db, "ALTER TABLE t13 DROP COLUMN c").expect("DROP COLUMN c");
+    let schema = &db.get_table("t13").unwrap().schema;
+    assert!(!schema.has_column("c"));
+    assert!(schema.check_constraints.is_empty(), "own CHECK dropped with the column");
+}
+
+/// A column-level CHECK on a *different* column referencing the dropped one
+/// survives the drop and must fail the post-check (SQLite re-parse
+/// semantics).
+#[test]
+fn postcheck_rejects_drop_referenced_by_other_columns_check() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t14(a, b CHECK(c>10), c)");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE t14 DROP COLUMN c"),
+        "error in table t14 after drop column: no such column: c"
+    );
+}
+
+/// Atomicity control: a failed post-check leaves schema text and row data
+/// untouched.
+#[test]
+fn failed_drop_leaves_schema_and_rows_untouched() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    insert(&mut db, "INSERT INTO c1 VALUES(1, 2)");
+    insert(&mut db, "INSERT INTO c1 VALUES(3, 4)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT x, y FROM c1");
+
+    drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN x");
+
+    assert_eq!(table_sql(&db, "c1"), "CREATE TABLE c1(x, y)");
+    let table = db.get_table("c1").unwrap();
+    assert_eq!(table.row_count(), 2);
+    assert_eq!(table.schema.columns.len(), 2);
+}
+
+/// `DROP COLUMN IF EXISTS` on a missing column is a no-op that skips the
+/// schema re-parse entirely (even with a broken view present).
+#[test]
+fn if_exists_noop_skips_schema_recheck() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT d, e FROM p1");
+    try_alter(&mut db, "ALTER TABLE c1 DROP COLUMN IF EXISTS nosuch")
+        .expect("IF EXISTS no-op should succeed despite broken view");
+}
+
+/// A view over `SELECT *` adapts to the drop and must not block it
+/// (alterdropcol.test 1.6.1 pattern).
+#[test]
+fn star_view_does_not_block_drop() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a, b, c)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT * FROM t1");
+    try_alter(&mut db, "ALTER TABLE t1 DROP COLUMN b").expect("DROP COLUMN b");
+    assert_eq!(table_sql(&db, "t1"), "CREATE TABLE t1(a, c)");
+}
+
+/// A trigger on the altered table whose `new.<col>` reference names the
+/// dropped column fails the post-check with the "after drop column" suffix.
+#[test]
+fn postcheck_rejects_drop_that_breaks_trigger_on_altered_table() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE p1(a PRIMARY KEY, b UNIQUE)");
+    create_table(&mut db, "CREATE TABLE c1(x, y)");
+    create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON c1 BEGIN \
+           INSERT INTO p1 VALUES(new.x, new.y); \
+         END",
+    );
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE c1 DROP COLUMN y"),
+        "error in trigger tr after drop column: no such column: new.y"
+    );
 }

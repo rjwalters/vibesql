@@ -67,13 +67,24 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
             // bare, matching SQLite's query-time messages.
             use crate::select::SelectExecutor;
             let executor = SelectExecutor::new(db);
-            let result = executor.execute_with_simple_columns(&stmt.query).map_err(|e| match e {
-                e @ ExecutorError::OrderByTermNotInResultSet { .. } => ExecutorError::SqliteCompatError(
-                    format!("error in view {}: {}", stmt.view_name, e),
-                ),
-                other => other,
-            })?;
-            Some(result.columns)
+            match executor.execute_with_simple_columns(&stmt.query) {
+                Ok(result) => Some(result.columns),
+                Err(e @ ExecutorError::OrderByTermNotInResultSet { .. }) => {
+                    return Err(ExecutorError::SqliteCompatError(format!(
+                        "error in view {}: {}",
+                        stmt.view_name, e
+                    )));
+                }
+                // Lax view creation (SQLite semantics, issue #5795 /
+                // alterdropcol.test 5.2.1): a view whose SELECT names a column
+                // that does not (yet) resolve is still created — SQLite defers
+                // column resolution to query time. The view is stored with no
+                // derived column list; querying it re-runs the SELECT and
+                // surfaces the resolution error then, and ALTER-time schema
+                // re-parses report it as `error in view <name>: ...`.
+                Err(ExecutorError::ColumnNotFound { .. }) => None,
+                Err(other) => return Err(other),
+            }
         }
     };
 

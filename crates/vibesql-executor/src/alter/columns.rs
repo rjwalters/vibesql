@@ -136,6 +136,12 @@ pub(super) fn execute_drop_column(
         )));
     }
 
+    // Pre-drop schema re-parse: a view or trigger that is *already* broken —
+    // even one unrelated to this table — aborts the ALTER before anything is
+    // touched, matching SQLite's first schema re-parse (no "after drop column"
+    // suffix; the object was broken before the drop). See issue #5795.
+    super::drop_column_checks::precheck_schema_objects(database)?;
+
     // Dependent-object validation: dropping the column must not leave an
     // explicit index (plain or expression/partial) dangling. SQLite re-parses
     // the schema after the drop and rolls back with this message when an index
@@ -149,6 +155,13 @@ pub(super) fn execute_drop_column(
             )));
         }
     }
+
+    // Post-drop schema re-parse: a table-level CHECK, dependent view, or
+    // trigger that would reference the gone column aborts the ALTER, matching
+    // SQLite's second schema re-parse (`error in <type> <name> after drop
+    // column: ...`). Validation runs against a simulated post-drop schema, so
+    // nothing has been mutated yet and no rollback is needed. See issue #5795.
+    super::drop_column_checks::postcheck_schema_objects(database, table_name, col)?;
 
     let table = database
         .get_table_mut(table_name)
