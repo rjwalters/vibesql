@@ -124,19 +124,69 @@ fn evaluate_limit_offset_expr_raw(
     // Evaluate the expression
     let value = evaluator.eval(expr, &empty_row)?;
 
-    // Convert to integer
-    match value {
-        vibesql_types::SqlValue::Integer(n) => Ok(n),
-        vibesql_types::SqlValue::Null => Err(crate::ExecutorError::InvalidLimitOffset {
-            clause: clause_name.to_string(),
-            value: "NULL".to_string(),
-            reason: "must be an integer".to_string(),
-        }),
-        other => Err(crate::ExecutorError::InvalidLimitOffset {
-            clause: clause_name.to_string(),
-            value: format!("{:?}", other),
-            reason: "must be an integer".to_string(),
-        }),
+    // Convert to integer using SQLite's LIMIT/OFFSET affinity rules
+    coerce_limit_offset_to_i64(value, clause_name)
+}
+
+/// Coerce an evaluated LIMIT/OFFSET value to i64 using SQLite semantics.
+///
+/// Shared by both LIMIT/OFFSET evaluation sites (this module and
+/// `select::executor::utils::eval_limit_offset_expr`). SQLite applies
+/// numeric affinity to LIMIT/OFFSET expressions:
+///
+/// - INTEGER values are used as-is
+/// - BOOLEAN → 0/1 (EXISTS/IN results behave as integers; #5803)
+/// - REAL values are accepted iff exactly integral: `LIMIT 2.0` → 2, `LIMIT 56.1` errors
+/// - TEXT is accepted iff the *whole* string (after trimming whitespace) is a numeric literal
+///   representing an integral value: `'2'`, `' 2 '`, `'+2'`, `'2.0'` are accepted; `'The'`,
+///   `'2abc'`, `'2.5'` error. Note this is deliberately NOT the leading-prefix parse used for
+///   truthiness — SQLite raises "datatype mismatch" for partial parses here
+/// - NULL, BLOB and everything else keep erroring (SQLite's "datatype mismatch" wording is tracked
+///   separately in #5804)
+pub(in crate::select) fn coerce_limit_offset_to_i64(
+    value: vibesql_types::SqlValue,
+    clause_name: &str,
+) -> Result<i64, crate::ExecutorError> {
+    use vibesql_types::SqlValue;
+
+    fn integral_f64(f: f64) -> Option<i64> {
+        if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+            Some(f as i64)
+        } else {
+            None
+        }
+    }
+
+    let err = |shown: String| crate::ExecutorError::InvalidLimitOffset {
+        clause: clause_name.to_string(),
+        value: shown,
+        reason: "must be an integer".to_string(),
+    };
+
+    match &value {
+        SqlValue::Integer(n) => Ok(*n),
+        SqlValue::Smallint(n) => Ok(*n as i64),
+        SqlValue::Bigint(n) => Ok(*n),
+        SqlValue::Unsigned(n) => i64::try_from(*n).map_err(|_| err(format!("{:?}", value))),
+        // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+        // e.g. SELECT 1 LIMIT EXISTS(SELECT 1) returns one row
+        SqlValue::Boolean(b) => Ok(i64::from(*b)),
+        SqlValue::Float(f) => integral_f64(*f as f64).ok_or_else(|| err(format!("{:?}", value))),
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+            integral_f64(*f).ok_or_else(|| err(format!("{:?}", value)))
+        }
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            let trimmed = s.trim();
+            if let Ok(n) = trimmed.parse::<i64>() {
+                Ok(n)
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                integral_f64(f).ok_or_else(|| err(format!("{:?}", value)))
+            } else {
+                Err(err(format!("{:?}", value)))
+            }
+        }
+        SqlValue::Null => Err(err("NULL".to_string())),
+        _ => Err(err(format!("{:?}", value))),
     }
 }
 
@@ -225,5 +275,70 @@ where
     match limit {
         Some(n) => iter.take(n).collect(),
         None => iter.collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_types::SqlValue;
+
+    use super::coerce_limit_offset_to_i64;
+
+    fn coerce(value: SqlValue) -> Result<i64, crate::ExecutorError> {
+        coerce_limit_offset_to_i64(value, "LIMIT")
+    }
+
+    fn text(s: &str) -> SqlValue {
+        SqlValue::Varchar(arcstr::ArcStr::from(s))
+    }
+
+    // Issue #5803 item 4: SQLite LIMIT/OFFSET numeric-affinity coercion.
+
+    #[test]
+    fn integers_and_booleans_accepted() {
+        assert_eq!(coerce(SqlValue::Integer(2)).unwrap(), 2);
+        assert_eq!(coerce(SqlValue::Integer(-1)).unwrap(), -1);
+        assert_eq!(coerce(SqlValue::Boolean(true)).unwrap(), 1);
+        assert_eq!(coerce(SqlValue::Boolean(false)).unwrap(), 0);
+        assert_eq!(coerce(SqlValue::Smallint(3)).unwrap(), 3);
+        assert_eq!(coerce(SqlValue::Bigint(4)).unwrap(), 4);
+    }
+
+    #[test]
+    fn integral_reals_accepted_fractional_rejected() {
+        assert_eq!(coerce(SqlValue::Double(2.0)).unwrap(), 2);
+        assert_eq!(coerce(SqlValue::Real(0.0)).unwrap(), 0);
+        assert!(coerce(SqlValue::Double(56.1)).is_err());
+        assert!(coerce(SqlValue::Real(2.5)).is_err());
+        assert!(coerce(SqlValue::Double(f64::NAN)).is_err());
+        assert!(coerce(SqlValue::Double(f64::INFINITY)).is_err());
+    }
+
+    #[test]
+    fn numeric_strings_accepted_full_string_parse() {
+        assert_eq!(coerce(text("2")).unwrap(), 2);
+        assert_eq!(coerce(text("2.0")).unwrap(), 2);
+        assert_eq!(coerce(text(" 2 ")).unwrap(), 2);
+        assert_eq!(coerce(text("+2")).unwrap(), 2);
+        assert_eq!(coerce(text("-3")).unwrap(), -3);
+    }
+
+    #[test]
+    fn non_numeric_and_partial_strings_rejected() {
+        // Full-string affinity parse, NOT the leading-prefix truthiness parse:
+        // SQLite raises "datatype mismatch" for these.
+        assert!(coerce(text("The")).is_err());
+        assert!(coerce(text("2abc")).is_err());
+        assert!(coerce(text("2.5")).is_err());
+        assert!(coerce(text("")).is_err());
+        assert!(coerce(text("inf")).is_err());
+        assert!(coerce(text("nan")).is_err());
+    }
+
+    #[test]
+    fn null_and_blob_rejected() {
+        assert!(coerce(SqlValue::Null).is_err());
+        // LIMIT X'32' keeps erroring (SQLite: datatype mismatch)
+        assert!(coerce(SqlValue::Blob(b"2".to_vec())).is_err());
     }
 }

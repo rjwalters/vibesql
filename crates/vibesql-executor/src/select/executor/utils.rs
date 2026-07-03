@@ -217,34 +217,22 @@ impl SelectExecutor<'_> {
         // Evaluate the expression
         let value = evaluator.eval(expr, &empty_row)?;
 
-        // Convert to integer
+        // Convert to integer using the shared SQLite LIMIT/OFFSET affinity
+        // rules (integers, booleans as 0/1, integral reals, full-string
+        // numeric text — see select::helpers::coerce_limit_offset_to_i64).
+        let n = crate::select::helpers::coerce_limit_offset_to_i64(value, clause_name)?;
+
         // SQLite compatibility: negative values have special meanings
-        match value {
-            vibesql_types::SqlValue::Integer(n) => {
-                if n < 0 {
-                    if clause_name == "OFFSET" {
-                        // Negative offset is treated as 0
-                        Ok(0)
-                    } else {
-                        // Negative limit means unlimited - return MAX
-                        Ok(usize::MAX)
-                    }
-                } else {
-                    Ok(n as usize)
-                }
+        if n < 0 {
+            if clause_name == "OFFSET" {
+                // Negative offset is treated as 0
+                Ok(0)
+            } else {
+                // Negative limit means unlimited - return MAX
+                Ok(usize::MAX)
             }
-            vibesql_types::SqlValue::Null => {
-                Err(crate::errors::ExecutorError::InvalidLimitOffset {
-                    clause: clause_name.to_string(),
-                    value: "NULL".to_string(),
-                    reason: "must be an integer".to_string(),
-                })
-            }
-            other => Err(crate::errors::ExecutorError::InvalidLimitOffset {
-                clause: clause_name.to_string(),
-                value: format!("{:?}", other),
-                reason: "must be an integer".to_string(),
-            }),
+        } else {
+            Ok(n as usize)
         }
     }
 }

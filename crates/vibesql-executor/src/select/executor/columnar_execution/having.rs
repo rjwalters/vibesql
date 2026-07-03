@@ -481,12 +481,11 @@ fn expressions_equal(a: &Expression, b: &Expression) -> bool {
 }
 
 /// Check if a SqlValue is truthy (evaluates to true in boolean context)
+///
+/// Delegates to the shared SQLite truthiness helper so the columnar HAVING
+/// path agrees with the row-based one: strings/blobs coerce via the
+/// leading-numeric parse (`'first'` → falsy, `'1'`/`X'31'` → truthy)
+/// rather than "any non-NULL value is truthy". (#5803)
 fn is_truthy(value: &SqlValue) -> Result<bool, ExecutorError> {
-    match value {
-        SqlValue::Boolean(b) => Ok(*b),
-        SqlValue::Integer(i) => Ok(*i != 0),
-        SqlValue::Float(f) => Ok(*f != 0.0),
-        SqlValue::Null => Ok(false),
-        _ => Ok(true), // Non-empty strings, etc. are truthy
-    }
+    Ok(crate::evaluator::operators::is_truthy(value))
 }

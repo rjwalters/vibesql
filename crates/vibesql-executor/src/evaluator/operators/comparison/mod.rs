@@ -13,9 +13,7 @@ use vibesql_types::SqlValue;
 
 use crate::{
     errors::ExecutorError,
-    evaluator::casting::{
-        boolean_to_i64, is_approximate_numeric, is_exact_numeric, to_f64, to_i64,
-    },
+    evaluator::casting::{is_approximate_numeric, is_exact_numeric, to_f64, to_i64},
 };
 
 /// Public API for comparison operations
@@ -85,52 +83,24 @@ where
     }
 
     // Boolean coercion for comparisons
-    // If either operand is Boolean and the other is numeric, coerce boolean to i64
+    //
+    // SQLite has no BOOLEAN storage class: EXISTS/IN/comparison results are
+    // the integers 0/1. When a Boolean operand meets a non-Boolean operand
+    // (numeric, text, blob, ...), normalize the Boolean to Integer 0/1 and
+    // re-dispatch so the regular cross-type logic below applies (numeric
+    // coercion, SQLite type ordering: numeric < text < blob).
+    //
+    // Examples (matching SQLite):
+    //   EXISTS(SELECT 1) == 'experiments' → 1 = 'experiments' → 0
+    //   EXISTS(SELECT 1) <  'a'           → 1 < 'a'           → 1
+    //   1 IN (SELECT 1)  == 2             → 1 = 2             → 0
     match (left, right) {
-        // Boolean compared to any numeric type
-        (Boolean(_), right_val)
-            if is_exact_numeric(right_val)
-                || is_approximate_numeric(right_val)
-                || matches!(right_val, Numeric(_)) =>
-        {
-            let left_i64 = boolean_to_i64(left).unwrap(); // Safe: we know left is Boolean
-
-            // For exact numeric, compare as i64
-            if is_exact_numeric(right_val) {
-                let right_i64 = to_i64(right_val)?;
-                return Ok(Boolean(predicate(left_i64.cmp(&right_i64))));
-            }
-
-            // For approximate numeric or Numeric, compare as f64
-            let left_f64 = left_i64 as f64;
-            let right_f64 = to_f64(right_val)?;
-            return Ok(Boolean(predicate(
-                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
-            )));
+        (Boolean(b), other) if !matches!(other, Boolean(_)) => {
+            return compare(&Integer(i64::from(*b)), other, predicate, op_str);
         }
-
-        // Numeric compared to Boolean (symmetric case)
-        (left_val, Boolean(_))
-            if is_exact_numeric(left_val)
-                || is_approximate_numeric(left_val)
-                || matches!(left_val, Numeric(_)) =>
-        {
-            let right_i64 = boolean_to_i64(right).unwrap(); // Safe: we know right is Boolean
-
-            // For exact numeric, compare as i64
-            if is_exact_numeric(left_val) {
-                let left_i64 = to_i64(left_val)?;
-                return Ok(Boolean(predicate(left_i64.cmp(&right_i64))));
-            }
-
-            // For approximate numeric or Numeric, compare as f64
-            let left_f64 = to_f64(left_val)?;
-            let right_f64 = right_i64 as f64;
-            return Ok(Boolean(predicate(
-                left_f64.partial_cmp(&right_f64).unwrap_or(std::cmp::Ordering::Equal),
-            )));
+        (other, Boolean(b)) if !matches!(other, Boolean(_)) => {
+            return compare(other, &Integer(i64::from(*b)), predicate, op_str);
         }
-
         _ => {} // Fall through to existing comparison logic
     }
 
@@ -489,4 +459,109 @@ fn compare_int_float(int_val: i64, float_val: f64) -> std::cmp::Ordering {
 #[inline]
 fn compare_float_int(float_val: f64, int_val: i64) -> std::cmp::Ordering {
     compare_int_float(int_val, float_val).reverse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(text: &str) -> SqlValue {
+        SqlValue::Varchar(arcstr::ArcStr::from(text))
+    }
+
+    // Issue #5803: Boolean operands normalize to Integer 0/1 before
+    // cross-type dispatch, so Boolean vs text/blob follows SQLite type
+    // ordering (numeric < text < blob) instead of raising a type mismatch.
+
+    #[test]
+    fn boolean_vs_text_all_six_ops() {
+        let t = SqlValue::Boolean(true);
+        // SQLite: SELECT 1 == 'experiments' → 0
+        assert_eq!(ComparisonOps::equal(&t, &s("experiments")).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(
+            ComparisonOps::not_equal(&t, &s("experiments")).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        // SQLite: SELECT 1 < 'a' → 1 (numeric < text)
+        assert_eq!(ComparisonOps::less_than(&t, &s("a")).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(
+            ComparisonOps::less_than_or_equal(&t, &s("a")).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(ComparisonOps::greater_than(&t, &s("a")).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(
+            ComparisonOps::greater_than_or_equal(&t, &s("a")).unwrap(),
+            SqlValue::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn text_vs_boolean_symmetric_order() {
+        let f = SqlValue::Boolean(false);
+        // text > numeric in SQLite type ordering
+        assert_eq!(ComparisonOps::greater_than(&s("a"), &f).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(ComparisonOps::less_than(&s("a"), &f).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(ComparisonOps::equal(&s("a"), &f).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(ComparisonOps::not_equal(&s("a"), &f).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(
+            ComparisonOps::greater_than_or_equal(&s("a"), &f).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            ComparisonOps::less_than_or_equal(&s("a"), &f).unwrap(),
+            SqlValue::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn boolean_vs_blob_type_ordering() {
+        let t = SqlValue::Boolean(true);
+        let blob = SqlValue::Blob(vec![0x00]);
+        // numeric < blob
+        assert_eq!(ComparisonOps::less_than(&t, &blob).unwrap(), SqlValue::Boolean(true));
+        assert_eq!(ComparisonOps::equal(&t, &blob).unwrap(), SqlValue::Boolean(false));
+        assert_eq!(ComparisonOps::greater_than(&blob, &t).unwrap(), SqlValue::Boolean(true));
+    }
+
+    #[test]
+    fn boolean_vs_numeric_regression_guard() {
+        // Pre-existing behavior (do not regress): 1 IN (SELECT 1) == 2 → 0
+        let t = SqlValue::Boolean(true);
+        assert_eq!(
+            ComparisonOps::equal(&t, &SqlValue::Integer(2)).unwrap(),
+            SqlValue::Boolean(false)
+        );
+        assert_eq!(
+            ComparisonOps::equal(&t, &SqlValue::Integer(1)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            ComparisonOps::less_than(&t, &SqlValue::Double(1.5)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            ComparisonOps::equal(&SqlValue::Double(0.0), &SqlValue::Boolean(false)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn boolean_vs_boolean_unchanged() {
+        assert_eq!(
+            ComparisonOps::equal(&SqlValue::Boolean(true), &SqlValue::Boolean(true)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+        assert_eq!(
+            ComparisonOps::less_than(&SqlValue::Boolean(false), &SqlValue::Boolean(true)).unwrap(),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn boolean_vs_null_returns_null() {
+        assert_eq!(
+            ComparisonOps::equal(&SqlValue::Boolean(true), &SqlValue::Null).unwrap(),
+            SqlValue::Null
+        );
+    }
 }
