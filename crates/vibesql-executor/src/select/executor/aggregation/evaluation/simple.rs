@@ -182,10 +182,26 @@ pub(super) fn evaluate(
                 executor.evaluate_with_aggregates(pattern, group_rows, group_key, evaluator)?;
 
             // Extract string values
+            // Extract string values, mirroring the coercion rules of the
+            // scalar evaluators (evaluator/expressions/predicates.rs):
+            // numerics render as text, booleans as 0/1, blob bytes as text.
             let text = match test_val {
                 vibesql_types::SqlValue::Varchar(ref s)
                 | vibesql_types::SqlValue::Character(ref s) => s.clone(),
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+                vibesql_types::SqlValue::Boolean(b) => {
+                    arcstr::ArcStr::from(if b { "1" } else { "0" })
+                }
+                // SQLite treats blob bytes as raw text for LIKE comparison
+                vibesql_types::SqlValue::Blob(ref b) => {
+                    arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
+                }
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: test_val,
@@ -199,6 +215,15 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Varchar(ref s)
                 | vibesql_types::SqlValue::Character(ref s) => s.clone(),
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+                vibesql_types::SqlValue::Boolean(b) => {
+                    arcstr::ArcStr::from(if b { "1" } else { "0" })
+                }
                 _ => {
                     return Err(ExecutorError::TypeMismatch {
                         left: test_val,

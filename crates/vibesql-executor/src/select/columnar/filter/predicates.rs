@@ -408,9 +408,12 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
             SqlValue::Varchar(s) | SqlValue::Character(s) => !string_coerces_to_numeric(s),
             _ => false,
         },
-        // Issue #5340: the expression evaluator raises a type-mismatch error
-        // for Boolean vs string/BLOB/temporal operands, and the columnar
-        // comparator has no error channel, so decline those. Boolean vs
+        // Issues #5340/#5803: the expression evaluator normalizes Boolean to
+        // Integer 0/1 and orders Boolean-vs-string with strict storage-class
+        // ordering (numeric < TEXT, no string parsing). The columnar
+        // numeric-vs-string arm instead coerces parseable strings to numbers,
+        // which would diverge (e.g. `flag = '1'`), so decline string/BLOB/
+        // temporal operands and let the evaluator handle them. Boolean vs
         // Boolean and Boolean vs numeric compare faithfully in both paths
         // (booleans coerce to 0/1).
         Some(DataType::Boolean) => matches!(value, SqlValue::Boolean(_)) || is_numeric_value(value),
@@ -438,9 +441,11 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
             // (they raise ColumnarTypeMismatch), so decline and let the
             // evaluator handle it.
             SqlValue::Blob(_) => is_blob_type(other),
-            // Issue #5340: Boolean literal vs string/BLOB column raises a
-            // type-mismatch error in the evaluator; decline (no error
-            // channel in the columnar path).
+            // Issues #5340/#5803: Boolean literal vs string/BLOB column —
+            // the evaluator normalizes Boolean to Integer 0/1 and applies
+            // strict storage-class ordering (no string parsing), while the
+            // columnar numeric-vs-string arm coerces parseable strings to
+            // numbers; decline so the evaluator's semantics win.
             SqlValue::Boolean(_) => !is_string_type(other) && !is_blob_type(other),
             // Everything else (including string/numeric literals against
             // BLOB columns, which compare_values orders via the #5340

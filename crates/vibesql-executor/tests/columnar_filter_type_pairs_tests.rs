@@ -209,8 +209,13 @@ fn null_blobs_excluded_from_all_predicates() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #5340: Boolean column vs string literal raises the evaluator's
-// type-mismatch error (pushdown declined; no columnar error channel)
+// Boolean column vs string literal: since issue #5803 the evaluator
+// normalizes Boolean to Integer 0/1 and applies SQLite storage-class
+// ordering (numeric < TEXT), so these predicates order instead of raising a
+// type-mismatch error. Pushdown remains declined for the pair (the columnar
+// numeric-vs-string arm coerces parseable strings to numbers, which would
+// diverge from the evaluator's strict type ordering), so the full-scan WHERE
+// path must agree with the evaluator via the projection cross-check.
 // ---------------------------------------------------------------------------
 
 fn boolean_db(rows: usize) -> Database {
@@ -233,20 +238,23 @@ fn boolean_db(rows: usize) -> Database {
 }
 
 #[test]
-fn boolean_column_vs_string_raises_type_mismatch() {
+fn boolean_column_vs_string_orders_by_storage_class() {
     for rows in [2usize, 600] {
         let db = boolean_db(rows);
-        // The expression evaluator raises a type-mismatch error for Boolean
-        // vs string; the full-scan WHERE path must match instead of silently
-        // excluding every row.
-        for pred in ["flag = 'true'", "flag != 'x'", "flag < 'zzz'"] {
-            let result = select_ints(&db, &format!("SELECT id FROM tf WHERE {pred}"));
-            assert!(
-                result.is_err(),
-                "Boolean vs string must raise the evaluator's type-mismatch error \
-                 ({rows} rows) for {pred}, got: {result:?}"
-            );
-        }
+        // Issue #5803: Boolean normalizes to Integer 0/1, then SQLite type
+        // ordering applies (numeric < TEXT). Verified against sqlite3 with a
+        // NUMERIC-affinity column holding 0/1:
+        //   flag = 'true'  -> 0 rows  (integer never equals text)
+        //   flag != 'x'    -> all rows
+        //   flag < 'zzz'   -> all rows (numeric < text)
+        let ids = assert_where_matches_projection(&db, "tf", "flag = 'true'");
+        assert!(ids.is_empty(), "flag = 'true' must match no rows ({rows} rows), got {ids:?}");
+
+        let ids = assert_where_matches_projection(&db, "tf", "flag != 'x'");
+        assert_eq!(ids.len(), rows, "flag != 'x' must match all rows ({rows} rows)");
+
+        let ids = assert_where_matches_projection(&db, "tf", "flag < 'zzz'");
+        assert_eq!(ids.len(), rows, "flag < 'zzz' must match all rows ({rows} rows)");
     }
 }
 
@@ -277,10 +285,7 @@ fn boolean_column_supported_pairs_still_filter() {
 /// `f` = v as a float, so TRUE/FALSE literals partition the rows in half.
 fn numeric_db(rows: usize) -> Database {
     let mut db = Database::new();
-    execute_sql(
-        &mut db,
-        "CREATE TABLE ti (id INTEGER PRIMARY KEY, v INTEGER, f DOUBLE PRECISION)",
-    );
+    execute_sql(&mut db, "CREATE TABLE ti (id INTEGER PRIMARY KEY, v INTEGER, f DOUBLE PRECISION)");
     let mut inserts = String::new();
     for id in 1..=rows {
         let v = id % 2;

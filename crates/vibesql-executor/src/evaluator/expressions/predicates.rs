@@ -514,6 +514,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+            vibesql_types::SqlValue::Boolean(b) => {
+                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            }
             // SQLite treats blob bytes as raw text for LIKE comparison
             vibesql_types::SqlValue::Blob(b) => {
                 arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
@@ -538,6 +542,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+            vibesql_types::SqlValue::Boolean(b) => {
+                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,
@@ -622,6 +630,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+            vibesql_types::SqlValue::Boolean(b) => {
+                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            }
             // SQLite treats blob bytes as raw text for GLOB comparison
             vibesql_types::SqlValue::Blob(b) => {
                 arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
@@ -646,6 +658,10 @@ impl ExpressionEvaluator<'_> {
             vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+            vibesql_types::SqlValue::Boolean(b) => {
+                arcstr::ArcStr::from(if *b { "1" } else { "0" })
+            }
             _ => {
                 return Err(ExecutorError::TypeMismatch {
                     left: expr_val,

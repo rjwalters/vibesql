@@ -127,6 +127,9 @@ fn evaluate_limit_offset_expr_raw(
     // Convert to integer
     match value {
         vibesql_types::SqlValue::Integer(n) => Ok(n),
+        // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
+        // e.g. SELECT 1 LIMIT EXISTS(SELECT 1) returns one row
+        vibesql_types::SqlValue::Boolean(b) => Ok(i64::from(b)),
         vibesql_types::SqlValue::Null => Err(crate::ExecutorError::InvalidLimitOffset {
             clause: clause_name.to_string(),
             value: "NULL".to_string(),
