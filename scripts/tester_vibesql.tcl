@@ -63,19 +63,38 @@ set ::total_changes 0
 set ::sql_batch {}
 set ::in_transaction 0
 
-# Maximum batch size for which we perform the per-statement in-transaction
-# "trial check" (see trial_check_in_transaction). The trial re-executes the
-# ENTIRE accumulated batch + the new statement + ROLLBACK on every statement
-# submitted inside a transaction, which is O(n^2) over the transaction length.
-# That is fine for the small transactions that actually need precise error
-# attribution (e.g. fkey6's BEGIN; UPDATE; ... COMMIT, 1-2 statements), but it
-# makes large stress transactions (e.g. table.test table-15: 2000 CREATE/DROP
-# statements inside one BEGIN/COMMIT) take O(n^2) time and blow past the
-# harness timeout. Once the batch exceeds this threshold we stop trial-checking
-# and simply accumulate; any error then surfaces at the eventual COMMIT/flush
-# (the pre-#5210 behavior), which is correct for these stress cases since they
-# do not assert per-statement error boundaries.
+# Maximum batch size for which we perform the FULL-REPLAY per-statement
+# in-transaction "trial check" (see trial_check_in_transaction). The full
+# trial re-executes the ENTIRE accumulated batch + the new statement +
+# ROLLBACK on every statement submitted inside a transaction, which is O(n^2)
+# over the transaction length. That is fine for the small transactions that
+# actually need precise error attribution (e.g. fkey6's BEGIN; UPDATE; ...
+# COMMIT, 1-2 statements), but it makes large stress transactions (e.g.
+# table.test table-15: 2000 CREATE/DROP statements inside one BEGIN/COMMIT)
+# take O(n^2) time and blow past the harness timeout.
+#
+# Once the batch reaches this threshold we switch to the INCREMENTAL trial
+# check (trial_check_incremental, #5820): a persistent per-transaction trial
+# database is seeded once with the accumulated batch, and each further
+# statement is executed singly against it — O(n) total instead of O(n^2).
+# Before #5820 the above-cap statements were not checked at all and silently
+# auto-"passed" (~9,900 statements across fuzz.test sections 5 and 7), so the
+# recorded results for large transactions were meaningless.
+#
+# TCLTEST_TRIAL_MAX_BATCH overrides the switch-over point (debugging aid,
+# following the TCLTEST_EMIT_DETAIL / DEBUG_FLUSH_BATCH env-var pattern).
 set ::trial_check_max_batch 50
+if {[info exists ::env(TCLTEST_TRIAL_MAX_BATCH)] &&
+    [string is integer -strict $::env(TCLTEST_TRIAL_MAX_BATCH)]} {
+    set ::trial_check_max_batch $::env(TCLTEST_TRIAL_MAX_BATCH)
+}
+
+# Path of the persistent per-transaction trial database used by the
+# incremental (above-cap) trial check; "" when inactive. Seeded lazily by
+# trial_check_incremental when a batched transaction first reaches
+# $::trial_check_max_batch, and torn down whenever the batched transaction
+# ends (flush, discard, or file exit). See teardown_txn_trial_db.
+set ::txn_trial_db ""
 
 # When an aborting RAISE (RAISE(ABORT) / RAISE(FAIL)) or an ordinary constraint
 # violation fires *inside* an open transaction, SQLite rolls back only the
@@ -1288,6 +1307,106 @@ proc delete_db_with_wal {db_path} {
     catch {file delete -force $ckpt}
 }
 
+proc teardown_txn_trial_db {} {
+    # Delete the persistent incremental trial database (if any) and mark the
+    # incremental trial-check mode inactive. Must be called whenever the
+    # batched transaction ends: on flush (COMMIT/ROLLBACK), when the batch is
+    # discarded, and at file exit. A stale trial DB left behind would make a
+    # later transaction's incremental checks run against the wrong state.
+    if {$::txn_trial_db ne ""} {
+        delete_db_with_wal $::txn_trial_db
+        set ::txn_trial_db ""
+    }
+}
+
+proc trial_check_incremental {new_sql} {
+    # Incremental (above-cap) variant of trial_check_in_transaction (#5820).
+    #
+    # Once a batched transaction grows past $::trial_check_max_batch, the
+    # full-replay trial becomes O(n^2) and intractable (fuzz.test sections 5
+    # and 7 each run 5,000 statements inside one BEGIN...COMMIT). Instead of
+    # skipping the check entirely (the pre-#5820 behavior, which silently
+    # auto-passed every above-cap statement), we:
+    #
+    #   1. SEED once: copy the shared database to a persistent per-transaction
+    #      trial DB and replay the accumulated batch with an appended COMMIT so
+    #      its effects persist there. (The batch's leading BEGIN is closed by
+    #      the appended COMMIT; any pre-BEGIN DDL auto-commits, as it does in
+    #      the real flush.)
+    #   2. Per statement: execute JUST the new statement against the trial DB
+    #      in autocommit. Error -> raise at the submitting test. Success -> the
+    #      caller appends it to the real batch as usual.
+    #
+    # Total cost is 1 copy + 1 batch replay + O(n) single-statement execs,
+    # versus O(n^2) replayed statements for the full trial.
+    #
+    # SEMANTICS CAVEAT: statement N sees the prior statements *committed* in
+    # the trial DB rather than uncommitted-inside-the-same-transaction. For
+    # error DETECTION this is equivalent (the fuzz harness only checks whether
+    # a statement errors and what the message is, never result rows), and no
+    # supported workload asserts isolation-sensitive errors above the cap.
+    #
+    # The below-cap path is untouched: small transactions keep the exact
+    # full-replay semantics that fkey6/select3 error attribution depends on.
+    if {$::txn_trial_db eq ""} {
+        set ::txn_trial_db "/tmp/vibesql_txntrial_[pid]_[clock microseconds].vbsql"
+        if {$::db_file ne ""} {
+            # Copy the FULL database — snapshot plus WAL siblings — so the
+            # trial sees committed state (see trial_check_in_transaction /
+            # #5782 for why a snapshot-only copy is wrong).
+            copy_db_with_wal $::db_file $::txn_trial_db
+        }
+        set seed_stmts {}
+        foreach stmt $::sql_batch {
+            set s [string trimright $stmt]
+            set s [string trimright $s ";"]
+            lappend seed_stmts $s
+        }
+        lappend seed_stmts "COMMIT"
+        set combined [join $seed_stmts ";\n"]
+        set pragma_prefix [build_pragma_prefix]
+        set combined "${pragma_prefix}${combined}"
+
+        set tmpfile "/tmp/vibesql_trialseed_[pid]_[clock microseconds].sql"
+        set f [open $tmpfile w]
+        puts $f $combined
+        close $f
+        # Errors during seeding are not raised: every below-cap statement in
+        # the batch was already trial-checked at its own submitting test, so
+        # any error line here is the re-occurrence of an already-attributed
+        # tolerated error (#5478) — the CLI rolls back only that statement and
+        # continues, exactly as the real flush replay does.
+        catch {exec $::vibesql_path $::txn_trial_db < $tmpfile 2>@1}
+        file delete -force $tmpfile
+    }
+
+    # Execute just the new statement against the persistent trial DB.
+    set new_clean [string trimright $new_sql]
+    set new_clean [string trimright $new_clean ";"]
+    set pragma_prefix [build_pragma_prefix]
+    set combined "${pragma_prefix}${new_clean}"
+
+    set tmpfile "/tmp/vibesql_trialinc_[pid]_[clock microseconds].sql"
+    set f [open $tmpfile w]
+    puts $f $combined
+    close $f
+    catch {exec $::vibesql_path $::txn_trial_db < $tmpfile 2>@1} result
+    file delete -force $tmpfile
+
+    if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
+        # A failed autocommit statement leaves the trial DB unchanged, which
+        # matches SQLite's statement-level ABORT semantics: the offending
+        # statement rolls back but the enclosing transaction stays OPEN
+        # (#5478). The fuzz generators emit plain INSERT/UPDATE/DELETE/SELECT
+        # (no RAISE(ROLLBACK) / ON CONFLICT ROLLBACK), so every error reaching
+        # here is a statement-level abort — report the transaction as having
+        # survived so the caller keeps the batch open, replays the statement
+        # at the eventual COMMIT, and tolerates the re-attributed error there.
+        set ::txn_survived_trial_error 1
+        error [translate_error_to_sqlite $result]
+    }
+}
+
 proc trial_check_in_transaction {new_sql} {
     # Trial-execute the cumulative transaction batch (existing $::sql_batch
     # plus $new_sql) with an appended ROLLBACK, so that errors from $new_sql
@@ -1313,13 +1432,15 @@ proc trial_check_in_transaction {new_sql} {
     #
     # PERFORMANCE GUARD: re-executing the whole accumulated batch on every
     # statement is O(n^2) over the transaction length. For large transactions
-    # (well beyond anything that asserts per-statement error attribution) this
-    # dominates runtime and can exceed the harness timeout (table.test
+    # this dominates runtime and can exceed the harness timeout (table.test
     # table-15: 2000 statements in one BEGIN/COMMIT). Once the batch is large,
-    # skip the trial and just accumulate; errors then surface at the eventual
-    # COMMIT/flush, which is the correct/expected behavior for such stress
-    # transactions. See $::trial_check_max_batch for the rationale.
+    # switch to the incremental trial check: a persistent trial DB seeded once
+    # with the accumulated batch, then one single-statement exec per new
+    # statement (O(n) total). Before #5820 above-cap statements were not
+    # checked at all, silently auto-passing ~9,900 fuzz.test statements. See
+    # $::trial_check_max_batch and trial_check_incremental for the rationale.
     if {[llength $::sql_batch] >= $::trial_check_max_batch} {
+        trial_check_incremental $new_sql
         return
     }
     set trial_stmts {}
@@ -1409,6 +1530,10 @@ proc flush_batch {{tolerate_attributed_error 0}} {
 
     set combined [join $cleaned_statements ";\n"]
     set ::sql_batch {}
+
+    # The batched transaction is being flushed (COMMIT/ROLLBACK): the
+    # incremental trial DB, if one was seeded for this transaction, is done.
+    teardown_txn_trial_db
 
     # Prepend PRAGMA/settings prefix for consistent session state
     set pragma_prefix [build_pragma_prefix]
@@ -1780,6 +1905,13 @@ proc execsql {sql {db ""}} {
         # replayed at the eventual COMMIT/ROLLBACK; the flush then tolerates the
         # re-raised, already-attributed error. A RAISE(ROLLBACK) (txn did NOT
         # survive) falls through to discard the transaction, as before.
+        #
+        # Defensive: a fresh transaction must never inherit a stale incremental
+        # trial DB from a previous one (every normal transaction-end path tears
+        # it down; this guards against any missed path).
+        if {!$::in_transaction} {
+            teardown_txn_trial_db
+        }
         set ::txn_survived_trial_error 0
         if {[catch {trial_check_in_transaction $sql} trial_err]} {
             if {$::txn_survived_trial_error} {
@@ -1852,6 +1984,7 @@ proc execsql {sql {db ""}} {
                 set ::in_transaction 0
                 set ::sql_batch {}
                 set ::txn_had_tolerated_error 0
+                teardown_txn_trial_db
             }
             error $trial_err
         }
@@ -4532,6 +4665,7 @@ proc reconcile_skipped_txn_state {script} {
         set ::sql_batch {}
         set ::in_transaction 0
         set ::txn_had_tolerated_error 0
+        teardown_txn_trial_db
     }
 }
 
@@ -5496,6 +5630,9 @@ proc finish_test {} {
     if {$::db_file ne "" && [file exists $::db_file]} {
         catch {file delete -force $::db_file}
     }
+    # Clean up the incremental trial DB if a batched transaction was still
+    # open at file exit.
+    teardown_txn_trial_db
     # Clean up any other opened databases
     if {[info exists ::opened_dbs]} {
         foreach dbf $::opened_dbs {
