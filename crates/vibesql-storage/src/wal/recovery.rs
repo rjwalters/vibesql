@@ -55,9 +55,24 @@ pub struct RecoveryConfig {
     /// Whether to stop on first WAL corruption or continue with partial recovery
     pub stop_on_corruption: bool,
     /// Maximum number of checkpoints to try if the latest is corrupted
+    /// (only relevant when `allow_checkpoint_fallback` is enabled)
     pub max_checkpoint_retries: usize,
     /// Progress callback interval (number of entries between callbacks)
     pub progress_interval: usize,
+    /// Whether recovery may fall back to an *older* checkpoint when the newest
+    /// one is unreadable (corrupt envelope, bad checksum, parse failure).
+    ///
+    /// Default is `false` (issue #5807): an unreadable newest checkpoint is a
+    /// hard error, because silently opening older state — or an empty database
+    /// — presents as data loss, and any subsequent save checkpoints that stale
+    /// state as the newest. The CLI exposes this as the explicit
+    /// `--recover-fallback` opt-in; every skipped checkpoint is then recorded
+    /// in [`RecoveryStats::skipped_checkpoints`] so callers can surface it.
+    ///
+    /// A checkpoint with a *newer format version* than this binary is always a
+    /// hard error, regardless of this flag: falling back past it would
+    /// resurrect stale state, which is also data loss.
+    pub allow_checkpoint_fallback: bool,
 }
 
 impl Default for RecoveryConfig {
@@ -67,8 +82,23 @@ impl Default for RecoveryConfig {
             stop_on_corruption: true,
             max_checkpoint_retries: 3,
             progress_interval: 10000,
+            allow_checkpoint_fallback: false,
         }
     }
+}
+
+/// A checkpoint file that recovery skipped because it could not be loaded.
+///
+/// Only produced when [`RecoveryConfig::allow_checkpoint_fallback`] is enabled;
+/// callers MUST surface these to the user (the CLI prints them to stderr —
+/// `log::warn!` is unconditionally discarded there because no log backend is
+/// installed).
+#[derive(Debug, Clone)]
+pub struct SkippedCheckpoint {
+    /// Path of the checkpoint file that failed to load.
+    pub path: PathBuf,
+    /// Human-readable description of the failure.
+    pub error: String,
 }
 
 /// Statistics about a recovery operation
@@ -105,6 +135,13 @@ pub struct RecoveryStats {
     pub corruption_detected: bool,
     /// Position where corruption was detected (if any)
     pub corruption_position: Option<u64>,
+    /// Checkpoint files that could not be loaded and were skipped in favor of
+    /// an older checkpoint (only non-empty when
+    /// [`RecoveryConfig::allow_checkpoint_fallback`] is enabled). Callers must
+    /// surface these prominently — the recovered state predates the skipped
+    /// checkpoints, so changes committed after the loaded checkpoint may be
+    /// missing.
+    pub skipped_checkpoints: Vec<SkippedCheckpoint>,
 }
 
 /// Transaction state during recovery
@@ -218,10 +255,26 @@ impl RecoveryManager {
 
     /// Perform full recovery and return the recovered database
     pub fn recover(&self) -> Result<(Database, RecoveryStats), StorageError> {
+        self.recover_with_base(None)
+    }
+
+    /// Perform full recovery, optionally seeding from a caller-provided base
+    /// database.
+    ///
+    /// `base` is used **only when no checkpoint files exist at all**: it lets
+    /// the CLI open a legacy snapshot-only `.vbsql` file (written before WAL
+    /// mode, so it has no `<stem>-checkpoints/` archive) with its data instead
+    /// of silently presenting an empty database (issue #5807). When any
+    /// checkpoint file exists — readable or not — checkpoints win and `base`
+    /// is ignored.
+    pub fn recover_with_base(
+        &self,
+        base: Option<Database>,
+    ) -> Result<(Database, RecoveryStats), StorageError> {
         let mut stats = RecoveryStats::default();
 
         // Step 1: Find and load the latest valid checkpoint
-        let (mut db, checkpoint_lsn) = self.load_latest_checkpoint(&mut stats)?;
+        let (mut db, checkpoint_lsn) = self.load_latest_checkpoint(&mut stats, base)?;
         stats.checkpoint_lsn = checkpoint_lsn;
         stats.last_lsn = stats.last_lsn.max(checkpoint_lsn);
 
@@ -235,29 +288,76 @@ impl RecoveryManager {
         Ok((db, stats))
     }
 
-    /// Find and load the latest valid checkpoint
+    /// Find and load the latest valid checkpoint.
+    ///
+    /// Failure policy (issue #5807 — opening must NEVER silently present an
+    /// empty or stale database):
+    /// * No checkpoint files at all → `base` (if provided) or a fresh empty database. This is the
+    ///   only legitimate empty-DB start.
+    /// * Newest checkpoint written by a newer binary (`UnsupportedFormatVersion`) → hard error,
+    ///   always. Falling back to an older checkpoint would silently resurrect stale state.
+    /// * Newest checkpoint unreadable for any other reason → hard error unless
+    ///   `allow_checkpoint_fallback` is set, in which case older checkpoints are tried and every
+    ///   skipped file is recorded in `stats.skipped_checkpoints` for the caller to surface.
+    /// * All checkpoints unreadable → hard error listing what failed.
     fn load_latest_checkpoint(
         &self,
         stats: &mut RecoveryStats,
+        base: Option<Database>,
     ) -> Result<(Database, Lsn), StorageError> {
-        // List all checkpoints
-        let checkpoints = self.list_checkpoints()?;
+        // Enumerate every `.vchk` file ourselves: `CheckpointWriter::list_checkpoints`
+        // silently drops files whose header cannot be read, which would let a
+        // header-corrupt newest checkpoint vanish from consideration entirely.
+        let (checkpoints, unreadable) = self.enumerate_checkpoints()?;
 
-        if checkpoints.is_empty() {
-            // No checkpoints found - start with empty database
+        if checkpoints.is_empty() && unreadable.is_empty() {
+            // No checkpoint files at all — a legitimately fresh (or legacy
+            // snapshot-only) database.
+            if let Some(base_db) = base {
+                log::info!("No checkpoints found, starting from provided base snapshot");
+                return Ok((base_db, 0));
+            }
             log::info!("No checkpoints found, starting with empty database");
             return Ok((Database::new(), 0));
         }
 
+        let fallback = self.config.allow_checkpoint_fallback;
+
+        // Checkpoint files whose envelope header cannot even be read: we cannot
+        // order them by LSN, so one of them may well be the newest state.
+        if !unreadable.is_empty() && !fallback {
+            let detail = unreadable
+                .iter()
+                .map(|s| format!("{}: {}", s.path.display(), s.error))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(StorageError::IoError(format!(
+                "refusing to open: {} checkpoint file(s) in {} are unreadable ({}). \
+                 The database was NOT modified. Re-run with --recover-fallback to skip \
+                 unreadable checkpoints and recover from the newest readable one \
+                 (changes committed after that checkpoint may be missing).",
+                unreadable.len(),
+                self.checkpoint_dir.display(),
+                detail
+            )));
+        }
+        if !unreadable.is_empty() {
+            stats.corruption_detected = true;
+            stats.skipped_checkpoints.extend(unreadable);
+        }
+
         // Try checkpoints from newest to oldest
         let mut retries = 0;
+        let mut failures: Vec<String> = Vec::new();
         for checkpoint in checkpoints.into_iter().rev() {
             if retries >= self.config.max_checkpoint_retries {
-                log::warn!(
-                    "Exceeded max checkpoint retries ({}), starting with empty database",
-                    self.config.max_checkpoint_retries
-                );
-                return Ok((Database::new(), 0));
+                return Err(StorageError::IoError(format!(
+                    "recovery gave up after {} unreadable checkpoint(s) in {} ({}); \
+                     refusing to open as an empty database",
+                    retries,
+                    self.checkpoint_dir.display(),
+                    failures.join("; ")
+                )));
             }
 
             match self.load_checkpoint(&checkpoint.path) {
@@ -265,27 +365,92 @@ impl RecoveryManager {
                     log::info!("Loaded checkpoint at LSN {} from {:?}", lsn, checkpoint.path);
                     return Ok((db, lsn));
                 }
+                Err(e @ StorageError::UnsupportedFormatVersion { .. }) => {
+                    // Forward-version is ALWAYS fatal — even with fallback
+                    // enabled. An older checkpoint would silently resurrect
+                    // stale state, and a subsequent save would checkpoint that
+                    // stale state as the newest (issue #5807).
+                    return Err(e);
+                }
                 Err(e) => {
+                    if !fallback {
+                        return Err(StorageError::IoError(format!(
+                            "refusing to open: newest checkpoint {} is unreadable ({}). \
+                             The database was NOT modified; older checkpoints were not tried. \
+                             Re-run with --recover-fallback to recover from an older checkpoint \
+                             (changes committed after it may be missing).",
+                            checkpoint.path.display(),
+                            e
+                        )));
+                    }
                     log::warn!("Failed to load checkpoint {:?}: {}", checkpoint.path, e);
                     retries += 1;
+                    failures.push(format!("{}: {}", checkpoint.path.display(), e));
                     stats.corruption_detected = true;
+                    stats.skipped_checkpoints.push(SkippedCheckpoint {
+                        path: checkpoint.path.clone(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        // All checkpoints failed - start with empty database
-        log::warn!("All checkpoints failed to load, starting with empty database");
-        Ok((Database::new(), 0))
+        // Checkpoint files exist but none could be loaded — never open empty.
+        Err(StorageError::IoError(format!(
+            "all checkpoint(s) in {} failed to load ({}); refusing to open as an \
+             empty database — the checkpoint files are intact on disk",
+            self.checkpoint_dir.display(),
+            if failures.is_empty() {
+                stats
+                    .skipped_checkpoints
+                    .iter()
+                    .map(|s| format!("{}: {}", s.path.display(), s.error))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            } else {
+                failures.join("; ")
+            }
+        )))
     }
 
-    /// List all checkpoint files sorted by LSN
-    fn list_checkpoints(&self) -> Result<Vec<CheckpointInfo>, StorageError> {
+    /// Enumerate all `.vchk` files in the checkpoint directory.
+    ///
+    /// Returns the readable checkpoints sorted by (LSN, id) ascending, plus the
+    /// files whose envelope header could not be read (and therefore cannot be
+    /// ordered).
+    fn enumerate_checkpoints(
+        &self,
+    ) -> Result<(Vec<CheckpointInfo>, Vec<SkippedCheckpoint>), StorageError> {
+        let mut checkpoints = Vec::new();
+        let mut unreadable = Vec::new();
+
         if !self.checkpoint_dir.exists() {
-            return Ok(Vec::new());
+            return Ok((checkpoints, unreadable));
         }
 
-        let checkpoint_writer = CheckpointWriter::new(&self.checkpoint_dir)?;
-        checkpoint_writer.list_checkpoints()
+        let entries = fs::read_dir(&self.checkpoint_dir).map_err(|e| {
+            StorageError::IoError(format!(
+                "Failed to read checkpoint dir {}: {}",
+                self.checkpoint_dir.display(),
+                e
+            ))
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "vchk") {
+                match CheckpointWriter::read_checkpoint_info(&path) {
+                    Ok(info) => checkpoints.push(info),
+                    Err(e) => {
+                        unreadable.push(SkippedCheckpoint { path, error: e.to_string() });
+                    }
+                }
+            }
+        }
+
+        // Same ordering contract as `CheckpointWriter::list_checkpoints`:
+        // (LSN, id) ascending so the newest state sorts last (issue #5766).
+        checkpoints.sort_by(|a, b| a.lsn.cmp(&b.lsn).then(a.id.cmp(&b.id)));
+        Ok((checkpoints, unreadable))
     }
 
     /// Load a specific checkpoint file and return the database and LSN
@@ -914,6 +1079,8 @@ mod tests {
         assert!(config.stop_on_corruption);
         assert_eq!(config.max_checkpoint_retries, 3);
         assert_eq!(config.progress_interval, 10000);
+        // #5807: silent fallback to an older checkpoint is opt-in only.
+        assert!(!config.allow_checkpoint_fallback);
     }
 
     #[test]
@@ -1579,5 +1746,203 @@ mod tests {
             }
             other => panic!("expected Insert, got {:?}", other),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #5807: recovery must never silently present an empty or stale
+    // database. Forward-version checkpoints are always fatal; corrupt
+    // checkpoints are fatal unless fallback is explicitly opted into, and
+    // then every skipped file is recorded in `RecoveryStats`.
+    // ------------------------------------------------------------------
+
+    use crate::wal::checkpoint::crc32;
+
+    /// Write a real checkpoint for `db` at `lsn` and return its path.
+    fn write_db_checkpoint(dir: &Path, lsn: Lsn, db: &Database) -> PathBuf {
+        let mut writer = CheckpointWriter::new(dir).unwrap();
+        let data = db.to_uncompressed_bytes().unwrap();
+        let info = writer.create_checkpoint(lsn, &data, db.list_tables().len() as u32).unwrap();
+        info.path
+    }
+
+    /// Build a database containing a single table named `table_name`.
+    fn db_with_table(table_name: &str) -> Database {
+        let mut db = Database::new();
+        db.create_table(simple_schema(table_name)).unwrap();
+        db
+    }
+
+    /// Patch a checkpoint's *embedded* VBSQL snapshot version byte to
+    /// `VERSION + 1` and re-stamp the envelope CRC so the envelope remains
+    /// fully valid — exactly what a checkpoint written by a newer binary looks
+    /// like to this reader (mirrors the issue's reproduction).
+    ///
+    /// Checkpoint file layout: 32-byte envelope header (magic "VCHK" ...,
+    /// payload CRC32 at bytes 28..32), then the binary snapshot payload
+    /// (magic "VBSQL" at 32..37, format version byte at 37).
+    fn bump_embedded_format_version(path: &Path) {
+        let mut bytes = fs::read(path).unwrap();
+        assert_eq!(&bytes[..4], b"VCHK", "not a checkpoint envelope");
+        assert_eq!(&bytes[32..37], b"VBSQL", "payload is not a binary snapshot");
+        bytes[37] = crate::persistence::binary::format::VERSION + 1;
+        let crc = crc32(&bytes[32..]);
+        bytes[28..32].copy_from_slice(&crc.to_le_bytes());
+        fs::write(path, bytes).unwrap();
+    }
+
+    /// Corrupt a checkpoint's payload *without* fixing the envelope CRC, so
+    /// `read_checkpoint_data` fails its checksum verification.
+    fn corrupt_payload(path: &Path) {
+        let mut bytes = fs::read(path).unwrap();
+        assert!(bytes.len() > 40);
+        bytes[40] ^= 0xFF;
+        fs::write(path, bytes).unwrap();
+    }
+
+    fn fallback_config() -> RecoveryConfig {
+        RecoveryConfig { allow_checkpoint_fallback: true, ..Default::default() }
+    }
+
+    /// Newest checkpoint written by a newer binary → hard error, never a
+    /// fallback to the older checkpoint — with or without fallback enabled.
+    #[test]
+    fn test_forward_version_newest_checkpoint_is_hard_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        write_db_checkpoint(&dir, 1, &db_with_table("older_state"));
+        let newest = write_db_checkpoint(&dir, 2, &db_with_table("newest_state"));
+        bump_embedded_format_version(&newest);
+
+        // Default config: hard error.
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        assert!(
+            matches!(err, StorageError::UnsupportedFormatVersion { .. }),
+            "expected UnsupportedFormatVersion, got: {err:?}"
+        );
+        assert!(err.to_string().contains("newer version of VibeSQL"), "message was: {err}");
+
+        // Even with fallback explicitly enabled: falling back past a
+        // forward-version checkpoint silently resurrects stale state.
+        let err = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap_err();
+        assert!(
+            matches!(err, StorageError::UnsupportedFormatVersion { .. }),
+            "fallback must not skip a forward-version checkpoint, got: {err:?}"
+        );
+    }
+
+    /// All checkpoints forward-version → hard error, never an empty database.
+    #[test]
+    fn test_all_forward_version_checkpoints_hard_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        let only = write_db_checkpoint(&dir, 1, &db_with_table("future_state"));
+        bump_embedded_format_version(&only);
+
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        assert!(matches!(err, StorageError::UnsupportedFormatVersion { .. }), "got: {err:?}");
+    }
+
+    /// Corrupt newest checkpoint with a valid older one: default is a hard
+    /// error naming the file; opting into fallback loads the older checkpoint
+    /// and records the skip in `RecoveryStats`.
+    #[test]
+    fn test_corrupt_newest_checkpoint_default_error_fallback_optin() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        write_db_checkpoint(&dir, 1, &db_with_table("older_state"));
+        let newest = write_db_checkpoint(&dir, 2, &db_with_table("newest_state"));
+        corrupt_payload(&newest);
+
+        // Default: refuse to open, naming the unreadable newest checkpoint.
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&newest.display().to_string()),
+            "error must name the unreadable checkpoint; was: {msg}"
+        );
+        assert!(msg.contains("recover-fallback"), "error must mention the opt-in; was: {msg}");
+
+        // Opt-in fallback: loads the older checkpoint and records the skip.
+        let (db, stats) = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap();
+        assert!(db.get_table("main.older_state").is_some(), "older state must be loaded");
+        assert!(db.get_table("main.newest_state").is_none());
+        assert!(stats.corruption_detected);
+        assert_eq!(stats.skipped_checkpoints.len(), 1);
+        assert_eq!(stats.skipped_checkpoints[0].path, newest);
+    }
+
+    /// Every checkpoint unreadable → hard error even with fallback enabled;
+    /// never an empty database when checkpoint files exist.
+    #[test]
+    fn test_all_checkpoints_corrupt_hard_error_even_with_fallback() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        let a = write_db_checkpoint(&dir, 1, &db_with_table("state_a"));
+        let b = write_db_checkpoint(&dir, 2, &db_with_table("state_b"));
+        corrupt_payload(&a);
+        corrupt_payload(&b);
+
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        assert!(err.to_string().contains(&b.display().to_string()), "was: {err}");
+
+        let err = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("refusing to open") || msg.contains("failed to load"),
+            "all-corrupt must never yield Ok(empty); was: {msg}"
+        );
+    }
+
+    /// A checkpoint file whose envelope header itself is unreadable (bad
+    /// magic) cannot be LSN-ordered — it may be the newest state. Default:
+    /// hard error. Fallback: proceed from readable checkpoints, recording it.
+    #[test]
+    fn test_header_unreadable_checkpoint_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        write_db_checkpoint(&dir, 1, &db_with_table("good_state"));
+        let garbage = dir.join("checkpoint_9.vchk");
+        fs::write(&garbage, b"not a checkpoint at all").unwrap();
+
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        assert!(
+            err.to_string().contains(&garbage.display().to_string()),
+            "error must name the unreadable file; was: {err}"
+        );
+
+        let (db, stats) = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap();
+        assert!(db.get_table("main.good_state").is_some());
+        assert!(stats.corruption_detected);
+        assert_eq!(stats.skipped_checkpoints.len(), 1);
+        assert_eq!(stats.skipped_checkpoints[0].path, garbage);
+    }
+
+    /// `recover_with_base` seeds from the provided base only when no
+    /// checkpoint files exist (legacy snapshot-only `.vbsql`); any existing
+    /// checkpoint takes precedence.
+    #[test]
+    fn test_recover_with_base_seeds_only_without_checkpoints() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        // No checkpoints: base wins.
+        let (db, stats) = RecoveryManager::new(&dir)
+            .recover_with_base(Some(db_with_table("legacy_snapshot")))
+            .unwrap();
+        assert!(db.get_table("main.legacy_snapshot").is_some());
+        assert_eq!(stats.checkpoint_lsn, 0);
+
+        // With a checkpoint present: checkpoint wins, base is ignored.
+        write_db_checkpoint(&dir, 1, &db_with_table("checkpointed"));
+        let (db, _stats) = RecoveryManager::new(&dir)
+            .recover_with_base(Some(db_with_table("legacy_snapshot")))
+            .unwrap();
+        assert!(db.get_table("main.checkpointed").is_some());
+        assert!(db.get_table("main.legacy_snapshot").is_none());
     }
 }

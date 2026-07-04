@@ -36,6 +36,15 @@ pub enum StorageError {
     UniqueConstraintViolation(String),
     InvalidIndexColumn(String),
     NotImplemented(String),
+    /// The file was written by a newer VibeSQL binary (forward-incompatible
+    /// binary format version). Typed so open/recovery paths can hard-error
+    /// instead of silently falling back to older or empty state (issue #5807).
+    UnsupportedFormatVersion {
+        /// Version byte found in the file header.
+        found: u8,
+        /// Highest version this binary supports (`persistence::binary::VERSION`).
+        supported: u8,
+    },
     IoError(String),
     InvalidPageSize {
         expected: usize,
@@ -131,6 +140,14 @@ impl std::fmt::Display for StorageError {
             }
             StorageError::NotImplemented(msg) => {
                 write!(f, "{}", vibe_msg!("storage-not-implemented", message = msg.as_str()))
+            }
+            StorageError::UnsupportedFormatVersion { found, supported } => {
+                write!(
+                    f,
+                    "database written by a newer version of VibeSQL (format v{}; this binary \
+                     supports up to v{}) — upgrade the vibesql binary; the data file is intact",
+                    found, supported
+                )
             }
             StorageError::IoError(msg) => {
                 write!(f, "{}", vibe_msg!("storage-io-error", message = msg.as_str()))

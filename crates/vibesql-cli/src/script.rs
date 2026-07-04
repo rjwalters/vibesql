@@ -7,7 +7,7 @@ use vibesql_l10n::vibe_msg;
 
 use crate::{
     commands::MetaCommand,
-    executor::SqlExecutor,
+    executor::{DbOpenOptions, SqlExecutor},
     formatter::{OutputFormat, ResultFormatter},
     util::is_memory_database,
 };
@@ -23,18 +23,19 @@ pub struct ScriptExecutor {
 impl ScriptExecutor {
     /// Construct a script executor.
     ///
-    /// `wal` activates the opt-in WAL persistence path for file-backed
-    /// databases (see `SqlExecutor::new_with_wal`); `false` preserves the
-    /// default snapshot-on-exit behavior.
+    /// `options.wal` activates the WAL persistence path for file-backed
+    /// databases (see `SqlExecutor::new_with_options`); `false` preserves the
+    /// snapshot-on-exit behavior. `options.recover_fallback` opts into
+    /// older-checkpoint recovery when the newest checkpoint is unreadable.
     pub fn new(
         database: Option<String>,
         verbose: bool,
         format: Option<OutputFormat>,
-        wal: bool,
+        options: DbOpenOptions,
     ) -> anyhow::Result<Self> {
         // Treat :memory: as an in-memory database (no file path for saving)
         let database_path = database.as_ref().filter(|p| !is_memory_database(p)).cloned();
-        let executor = SqlExecutor::new_with_wal(database, wal)?;
+        let executor = SqlExecutor::new_with_options(database, options)?;
         let mut formatter = ResultFormatter::new();
 
         if let Some(fmt) = format {

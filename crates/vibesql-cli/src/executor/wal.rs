@@ -13,7 +13,8 @@
 // paths from the file stem:
 //
 // ```text
-// mydata.vbsql          — binary snapshot (loaded on open if it exists)
+// mydata.vbsql          — binary snapshot (legacy; loaded as the recovery base
+//                         when no checkpoint archive exists yet — see #5807)
 // mydata.wal            — active write-ahead log
 // mydata-checkpoints/   — checkpoint archive directory (checkpoint_*.vchk)
 // ```
@@ -35,7 +36,10 @@
 use std::path::{Path, PathBuf};
 
 use vibesql_storage::{
-    wal::{truncate_wal, CheckpointWriter, PersistenceConfig, PersistenceEngine, RecoveryManager},
+    wal::{
+        truncate_wal, CheckpointWriter, PersistenceConfig, PersistenceEngine, RecoveryConfig,
+        RecoveryManager,
+    },
     Database, StorageError,
 };
 
@@ -65,6 +69,21 @@ impl WalPaths {
 
         WalPaths { wal_path, checkpoint_dir }
     }
+
+    /// True when the checkpoint archive directory contains at least one
+    /// `.vchk` file.
+    ///
+    /// Used to detect a legacy snapshot-only database (issue #5807): a
+    /// `.vbsql` file written before WAL mode has no checkpoint archive, and
+    /// its snapshot must be loaded as the recovery base instead of being
+    /// silently ignored.
+    pub fn has_checkpoint_files(&self) -> bool {
+        std::fs::read_dir(&self.checkpoint_dir)
+            .map(|entries| {
+                entries.flatten().any(|e| e.path().extension().is_some_and(|ext| ext == "vchk"))
+            })
+            .unwrap_or(false)
+    }
 }
 
 /// Active WAL state held by `SqlExecutor` when `[database] wal = true`.
@@ -83,12 +102,60 @@ impl WalState {
     ///
     /// Returns the recovered (and persistence-enabled) `Database` together with
     /// the `WalState` the executor must keep for checkpoint-on-save.
+    ///
+    /// (The binary itself goes through [`WalState::open_with_base`]; this
+    /// wrapper is used by the in-crate tests.)
+    #[allow(dead_code)]
     pub fn open(db_path: &str) -> Result<(Database, WalState), StorageError> {
+        Self::open_with_base(db_path, None, false)
+    }
+
+    /// Like [`WalState::open`], with two additions for issue #5807:
+    ///
+    /// * `base` — pre-loaded snapshot used **only when no checkpoint files exist** (legacy
+    ///   snapshot-only `.vbsql` databases), so their data is never silently ignored under
+    ///   WAL-default.
+    /// * `recover_fallback` — explicit opt-in (`--recover-fallback`) to recover from an older
+    ///   checkpoint when the newest is unreadable. Off (the default), an unreadable checkpoint is a
+    ///   hard open error. Every checkpoint skipped under the opt-in is reported loudly on stderr —
+    ///   the CLI installs no `log` backend, so `log::warn!` from the recovery engine would be
+    ///   silently discarded.
+    pub fn open_with_base(
+        db_path: &str,
+        base: Option<Database>,
+        recover_fallback: bool,
+    ) -> Result<(Database, WalState), StorageError> {
         let paths = WalPaths::derive(db_path);
 
         // Step 1: recover from the last checkpoint + replay post-checkpoint WAL.
-        let manager = RecoveryManager::new(&paths.checkpoint_dir).with_wal(&paths.wal_path);
-        let (mut db, stats) = manager.recover()?;
+        let config = RecoveryConfig {
+            allow_checkpoint_fallback: recover_fallback,
+            ..RecoveryConfig::default()
+        };
+        let manager =
+            RecoveryManager::with_config(&paths.checkpoint_dir, config).with_wal(&paths.wal_path);
+        let (mut db, stats) = manager.recover_with_base(base)?;
+
+        // Surface skipped checkpoints prominently (issue #5807). This can only
+        // be non-empty under the explicit --recover-fallback opt-in, but the
+        // consequence (opening state older than the newest checkpoint) must
+        // still be impossible to miss.
+        if !stats.skipped_checkpoints.is_empty() {
+            eprintln!(
+                "WARNING: recovery skipped {} unreadable checkpoint file(s) in {}:",
+                stats.skipped_checkpoints.len(),
+                paths.checkpoint_dir.display()
+            );
+            for skipped in &stats.skipped_checkpoints {
+                eprintln!("  {}: {}", skipped.path.display(), skipped.error);
+            }
+            eprintln!(
+                "WARNING: the database was opened from an OLDER checkpoint (LSN {}); \
+                 changes committed after it may be missing. The skipped files were \
+                 left on disk untouched.",
+                stats.checkpoint_lsn
+            );
+        }
 
         // Step 2: attach the live persistence engine so new ops hit the WAL.
         //

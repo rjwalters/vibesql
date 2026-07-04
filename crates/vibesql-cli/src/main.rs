@@ -134,6 +134,14 @@ struct Args {
     #[arg(long, value_name = "LOCALE", global = true)]
     lang: Option<String>,
 
+    /// If the newest checkpoint is unreadable, recover from the newest
+    /// readable older checkpoint instead of refusing to open. Skipped
+    /// checkpoints are reported on stderr; changes committed after the loaded
+    /// checkpoint may be missing. (Never applies to version mismatches: a
+    /// database written by a newer VibeSQL always requires a newer binary.)
+    #[arg(long)]
+    recover_fallback: bool,
+
     #[command(subcommand)]
     subcommand: Option<Commands>,
 }
@@ -250,21 +258,26 @@ fn main() -> anyhow::Result<()> {
 
     // WAL durability ([database] wal = true, the default). Committed DDL + DML
     // survive an unclean shutdown for file-backed databases. Set wal = false to
-    // opt out and fall back to the snapshot-only path.
-    let wal = config.database.wal;
+    // opt out and fall back to the snapshot-only path. --recover-fallback opts
+    // into older-checkpoint recovery when the newest checkpoint is unreadable
+    // (issue #5807: never a silent fallback).
+    let open_options = executor::DbOpenOptions {
+        wal: config.database.wal,
+        recover_fallback: args.recover_fallback,
+    };
 
     if let Some(cmd) = args.command {
         // Execute command mode
-        execute_command(&cmd, database, format, wal)?;
+        execute_command(&cmd, database, format, open_options)?;
     } else if let Some(file_path) = args.file {
         // Execute file mode
-        execute_file(&file_path, database, args.verbose, format, wal)?;
+        execute_file(&file_path, database, args.verbose, format, open_options)?;
     } else if args.stdin || is_stdin_piped() {
         // Execute from stdin
-        execute_stdin(database, args.verbose, format, wal)?;
+        execute_stdin(database, args.verbose, format, open_options)?;
     } else {
         // Interactive REPL mode
-        let mut repl = Repl::new(database, format, wal)?;
+        let mut repl = Repl::new(database, format, open_options)?;
         repl.run()?;
     }
 
@@ -305,11 +318,17 @@ fn run_import(input: &str, output: Option<&str>) -> anyhow::Result<()> {
 }
 
 fn run_export(input: &str, output: &str) -> anyhow::Result<()> {
-    // Load the VibeSQL database
-    let db = vibesql_storage::Database::load(input).or_else(|_| {
-        vibesql_executor::load_sql_dump(input)
-            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))
-    })?;
+    // Load the VibeSQL database. A forward-version error (file written by a
+    // newer VibeSQL binary) is fatal and must not be masked by the SQL-dump
+    // fallback (issue #5807).
+    let db = match vibesql_storage::Database::load(input) {
+        Ok(db) => db,
+        Err(e @ vibesql_storage::StorageError::UnsupportedFormatVersion { .. }) => {
+            return Err(anyhow::anyhow!("Failed to open database at {}: {}", input, e));
+        }
+        Err(_) => vibesql_executor::load_sql_dump(input)
+            .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))?,
+    };
 
     let result = sqlite_io::export_sqlite(&db, output)?;
 
@@ -395,9 +414,9 @@ fn execute_command(
     cmd: &str,
     database: Option<String>,
     format: Option<OutputFormat>,
-    wal: bool,
+    options: executor::DbOpenOptions,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, false, format, wal)?;
+    let mut executor = ScriptExecutor::new(database, false, format, options)?;
     executor.execute_script(cmd)?;
     Ok(())
 }
@@ -407,9 +426,9 @@ fn execute_file(
     database: Option<String>,
     verbose: bool,
     format: Option<OutputFormat>,
-    wal: bool,
+    options: executor::DbOpenOptions,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, verbose, format, wal)?;
+    let mut executor = ScriptExecutor::new(database, verbose, format, options)?;
     executor.execute_file(path)?;
     Ok(())
 }
@@ -418,9 +437,9 @@ fn execute_stdin(
     database: Option<String>,
     verbose: bool,
     format: Option<OutputFormat>,
-    wal: bool,
+    options: executor::DbOpenOptions,
 ) -> anyhow::Result<()> {
-    let mut executor = ScriptExecutor::new(database, verbose, format, wal)?;
+    let mut executor = ScriptExecutor::new(database, verbose, format, options)?;
     executor.execute_stdin()?;
     Ok(())
 }
