@@ -526,6 +526,16 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         table_schemas.push((table_name, columns, primary_key, quoted, sql_source, without_rowid));
     }
 
+    // Build a column-name lookup covering EVERY table in the file, so FK
+    // parent column indices can be resolved during rehydration regardless of
+    // the order tables appear in (a child may be stored before its parent).
+    let parent_lookup: super::constraints::ParentColumnLookup = table_schemas
+        .iter()
+        .map(|(name, columns, ..)| {
+            (name.to_lowercase(), columns.iter().map(|c| c.name.clone()).collect())
+        })
+        .collect();
+
     // Create tables
     for (table_name, columns, primary_key, quoted, sql_source, without_rowid) in table_schemas {
         let mut schema = if let Some(pk_cols) = primary_key {
@@ -543,6 +553,14 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
 
         // Restore the WITHOUT ROWID flag (v12+, issue #5796).
         schema.without_rowid = without_rowid;
+
+        // Rebuild CHECK and FOREIGN KEY constraint state from the persisted
+        // CREATE TABLE source (issue #5834). The binary format has no
+        // dedicated fields for these; without this re-parse every reloaded
+        // schema silently stopped enforcing them. Must run BEFORE
+        // create_table_with_identifier so both schema copies (catalog +
+        // storage Table) carry the constraints, matching CREATE TABLE.
+        super::constraints::rehydrate_constraints_from_sql_source(&mut schema, &parent_lookup)?;
 
         // Use TableIdentifier to preserve case-sensitivity semantics
         let identifier = vibesql_catalog::TableIdentifier::from_canonical(table_name, quoted);
