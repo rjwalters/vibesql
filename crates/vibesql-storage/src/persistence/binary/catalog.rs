@@ -578,15 +578,19 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                         }
                     }
                     1 => {
-                        // Expression index - parse the SQL expression
-                        let expr =
-                            vibesql_parser::arena_parser::parse_expression_to_owned(&content)
-                                .map_err(|e| {
-                                    StorageError::NotImplemented(format!(
-                                        "Failed to parse expression index '{}': {}",
-                                        content, e
-                                    ))
-                                })?;
+                        // Expression index - parse the SQL expression. Use the
+                        // full main-parser grammar: the arena parser rejects
+                        // forms the main parser accepted at CREATE INDEX time
+                        // (e.g. COLLATE), which would drop the index on reload
+                        // (issue #5833).
+                        let expr = vibesql_parser::Parser::parse_expression_sql(&content).map_err(
+                            |e| {
+                                StorageError::NotImplemented(format!(
+                                    "Failed to parse expression index '{}': {}",
+                                    content, e
+                                ))
+                            },
+                        )?;
                         vibesql_ast::IndexColumn::Expression { expr: Box::new(expr), direction }
                     }
                     _ => {
@@ -622,13 +626,14 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             let has_where = read_bool(reader)?;
             if has_where {
                 let sql = read_string(reader)?;
-                let parsed = vibesql_parser::arena_parser::parse_expression_to_owned(&sql)
-                    .map_err(|e| {
-                        StorageError::NotImplemented(format!(
-                            "Failed to parse partial-index WHERE expression '{}': {}",
-                            sql, e
-                        ))
-                    })?;
+                // Full main-parser grammar for the same reason as expression
+                // indexes above (issue #5833).
+                let parsed = vibesql_parser::Parser::parse_expression_sql(&sql).map_err(|e| {
+                    StorageError::NotImplemented(format!(
+                        "Failed to parse partial-index WHERE expression '{}': {}",
+                        sql, e
+                    ))
+                })?;
                 Some(parsed)
             } else {
                 None
@@ -719,15 +724,31 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             // 4. with_check_option
             let with_check_option = read_bool(reader)?;
 
-            // 5. defining SELECT as SQL text — re-parse into a SelectStmt
+            // 5. defining SELECT as SQL text — re-parse into a SelectStmt.
+            //
+            // Must use the full main-parser grammar (`Parser::parse_sql`), not
+            // the arena parser's `parse_select_to_owned`: the arena parser
+            // covers a smaller grammar and rejects forms the main parser
+            // accepted at CREATE VIEW time — bare `VALUES(...)` bodies and
+            // `COLLATE` in the select list among them. Under fail-closed
+            // recovery a single such view made every subsequent open of the
+            // checkpoint fail (issue #5833; join7/join9, tkt-a7debbe0).
             let query_sql = read_string(reader)?;
-            let query =
-                vibesql_parser::arena_parser::parse_select_to_owned(&query_sql).map_err(|e| {
-                    StorageError::NotImplemented(format!(
+            let query = match vibesql_parser::Parser::parse_sql(&query_sql) {
+                Ok(vibesql_ast::Statement::Select(stmt)) => *stmt,
+                Ok(_) => {
+                    return Err(StorageError::NotImplemented(format!(
+                        "Persisted defining query for view '{}' is not a SELECT: '{}'",
+                        name, query_sql
+                    )))
+                }
+                Err(e) => {
+                    return Err(StorageError::NotImplemented(format!(
                         "Failed to parse view '{}' SELECT '{}': {}",
                         name, query_sql, e
-                    ))
-                })?;
+                    )))
+                }
+            };
 
             // 6. sql_definition (present-flag + string)
             let has_sql_def = read_bool(reader)?;
@@ -1272,6 +1293,226 @@ mod tests {
             v.query.to_sql().find("UNION").unwrap() < v.query.to_sql().find("ORDER BY").unwrap(),
             "ORDER BY must render after the set operation, got: {}",
             v.query.to_sql()
+        );
+    }
+
+    /// Issue #5833: the reload path must re-parse everything the main parser
+    /// accepted at CREATE VIEW time. The reader used the arena parser's
+    /// `parse_select_to_owned`, whose grammar is a strict subset — it rejects
+    /// bare `VALUES(...)` bodies and `COLLATE` anywhere in an expression — so
+    /// such views poisoned the checkpoint: under fail-closed recovery every
+    /// subsequent open failed (join7/join9: `CREATE VIEW dual(dummy) AS
+    /// VALUES('x')`; tkt-a7debbe0: COLLATE in the select list).
+    ///
+    /// Covers: a VALUES-body view, a COLLATE select-list view, a CTE view, a
+    /// RECURSIVE CTE view (RECURSIVE keyword must survive the ToSql render),
+    /// and an EXCEPT/INTERSECT compound view.
+    #[test]
+    fn test_binary_catalog_round_trips_full_select_grammar_views() {
+        use vibesql_ast::pretty_print::ToSql;
+
+        let mut db = Database::new();
+
+        // Backing table so the defining SELECTs reference something real.
+        let schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "a".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t1", false))
+            .unwrap();
+
+        // Parse through the MAIN parser — the same grammar CREATE VIEW uses at
+        // runtime — so the test exercises exactly what the writer serializes.
+        let parse = |sql: &str| match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+            vibesql_ast::Statement::Select(s) => *s,
+            other => panic!("expected SELECT statement for '{}', got {:?}", sql, other),
+        };
+
+        // 1. Bare VALUES body (join7/join9's `dual` view).
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new_with_sql(
+                "dual".to_string(),
+                Some(vec!["dummy".to_string()]),
+                parse("VALUES('x')"),
+                false,
+                "CREATE VIEW dual(dummy) AS VALUES('x')".to_string(),
+            ))
+            .unwrap();
+
+        // 2. COLLATE in the select list (tkt-a7debbe0's v2).
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new(
+                "v_collate".to_string(),
+                Some(vec!["a".to_string(), "B".to_string()]),
+                parse("SELECT 'a', 'B' COLLATE NOCASE FROM t1"),
+                false,
+            ))
+            .unwrap();
+
+        // 3. CTE view.
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new(
+                "v_cte".to_string(),
+                None,
+                parse("WITH c AS (SELECT a FROM t1) SELECT * FROM c"),
+                false,
+            ))
+            .unwrap();
+
+        // 4. RECURSIVE CTE view — ToSql must render the RECURSIVE keyword so
+        //    the flag survives the text round-trip.
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new(
+                "v_rec".to_string(),
+                None,
+                parse(
+                    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<5) \
+                     SELECT x FROM c",
+                ),
+                false,
+            ))
+            .unwrap();
+
+        // 5. EXCEPT/INTERSECT compound view.
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new(
+                "v_compound2".to_string(),
+                None,
+                parse("SELECT a FROM t1 EXCEPT SELECT a FROM t1 INTERSECT SELECT a FROM t1"),
+                false,
+            ))
+            .unwrap();
+
+        // Round-trip the catalog at the current version.
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        // VALUES body.
+        let v = reloaded.catalog.get_view("dual").expect("VALUES-body view must survive");
+        assert_eq!(v.columns.as_deref(), Some(&["dummy".to_string()][..]));
+        assert_eq!(v.query.to_sql(), parse("VALUES('x')").to_sql());
+        assert!(v.query.values.is_some(), "reloaded view must still be a VALUES statement");
+
+        // COLLATE select list.
+        let v = reloaded.catalog.get_view("v_collate").expect("COLLATE view must survive");
+        assert_eq!(v.query.to_sql(), parse("SELECT 'a', 'B' COLLATE NOCASE FROM t1").to_sql());
+        assert!(
+            v.query.to_sql().contains("COLLATE NOCASE"),
+            "COLLATE must survive the round-trip, got: {}",
+            v.query.to_sql()
+        );
+
+        // CTE view.
+        let v = reloaded.catalog.get_view("v_cte").expect("CTE view must survive");
+        assert_eq!(
+            v.query.to_sql(),
+            parse("WITH c AS (SELECT a FROM t1) SELECT * FROM c").to_sql()
+        );
+
+        // RECURSIVE CTE view: the recursive flag must survive.
+        let v = reloaded.catalog.get_view("v_rec").expect("recursive CTE view must survive");
+        let ctes = v.query.with_clause.as_ref().expect("WITH clause must survive");
+        assert!(
+            ctes.iter().all(|c| c.recursive),
+            "RECURSIVE flag must survive the round-trip, got: {}",
+            v.query.to_sql()
+        );
+
+        // EXCEPT/INTERSECT compound view.
+        let v = reloaded.catalog.get_view("v_compound2").expect("compound view must survive");
+        assert_eq!(
+            v.query.to_sql(),
+            parse("SELECT a FROM t1 EXCEPT SELECT a FROM t1 INTERSECT SELECT a FROM t1").to_sql()
+        );
+    }
+
+    /// Issue #5833 (expression sites): expression indexes and partial-index
+    /// WHERE clauses are also persisted as ToSql text and re-parsed on load
+    /// via the arena expression parser, which rejects `COLLATE`. They must go
+    /// through the main parser's expression grammar instead.
+    #[test]
+    fn test_binary_catalog_round_trips_collate_in_index_expressions() {
+        use vibesql_ast::pretty_print::ToSql;
+
+        let mut db = Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "x".to_string(),
+                data_type: vibesql_types::DataType::Varchar { max_length: None },
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: false,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t1", false))
+            .unwrap();
+
+        // Expression index whose expression contains COLLATE.
+        let expr = vibesql_parser::Parser::parse_expression_sql("x COLLATE NOCASE").unwrap();
+        let columns = vec![vibesql_ast::IndexColumn::Expression {
+            expr: Box::new(expr),
+            direction: vibesql_ast::OrderDirection::Asc,
+        }];
+        db.create_index("i_collate".to_string(), "t1".to_string(), false, columns).unwrap();
+
+        // Partial index whose WHERE predicate contains COLLATE.
+        let where_expr =
+            vibesql_parser::Parser::parse_expression_sql("x COLLATE NOCASE = 'a'").unwrap();
+        let cols = vec![vibesql_ast::IndexColumn::new_column(
+            "x".to_string(),
+            vibesql_ast::OrderDirection::Asc,
+        )];
+        db.create_index("i_partial".to_string(), "t1".to_string(), false, cols).unwrap();
+        let catalog_meta = vibesql_catalog::IndexMetadata::new(
+            "i_partial".to_string(),
+            "t1".to_string(),
+            vibesql_catalog::IndexType::BTree,
+            vec![vibesql_catalog::IndexedColumn::new_column(
+                "x".to_string(),
+                vibesql_catalog::SortOrder::Ascending,
+            )],
+            false,
+        );
+        db.catalog.add_index(catalog_meta).unwrap();
+        assert!(db.catalog.set_index_where_clause("i_partial", Some(where_expr)));
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let meta = reloaded.get_index("i_collate").expect("COLLATE expression index must survive");
+        match &meta.columns[0] {
+            vibesql_ast::IndexColumn::Expression { expr, .. } => {
+                assert!(
+                    expr.to_sql().contains("COLLATE NOCASE"),
+                    "COLLATE must survive in the index expression, got: {}",
+                    expr.to_sql()
+                );
+            }
+            other => panic!("expected expression index column, got {:?}", other),
+        }
+
+        let meta = reloaded
+            .catalog
+            .find_index_by_name("i_partial")
+            .expect("partial index metadata must survive");
+        let where_clause = meta.where_clause.as_ref().expect("partial-index WHERE must survive");
+        assert!(
+            where_clause.to_sql().contains("COLLATE NOCASE"),
+            "COLLATE must survive in the partial-index WHERE, got: {}",
+            where_clause.to_sql()
         );
     }
 

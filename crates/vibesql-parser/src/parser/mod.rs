@@ -190,6 +190,39 @@ impl Parser {
         parser.parse_statement()
     }
 
+    /// Parse a standalone SQL expression using the full main-parser grammar.
+    ///
+    /// Reload paths (binary catalog expression indexes, partial-index WHERE
+    /// clauses) persist expressions as `ToSql`-rendered text and must re-parse
+    /// them on load. The arena parser's `parse_expression_to_owned` covers a
+    /// smaller grammar (e.g. it rejects `COLLATE`), so anything the main
+    /// parser accepted at DDL time — and therefore anything `ToSql` can render
+    /// — must be re-parsed through this entry point, not the arena one
+    /// (issue #5833).
+    ///
+    /// Trailing tokens after the expression are an error: a partially-consumed
+    /// input means the rendered text did not round-trip as a single
+    /// expression.
+    pub fn parse_expression_sql(input: &str) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut lexer = Lexer::new(input);
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
+
+        let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
+        let expr = parser.parse_expression()?;
+        match parser.peek() {
+            Token::Eof | Token::Semicolon => Ok(expr),
+            other => Err(ParseError {
+                message: format!(
+                    "Unexpected trailing token {:?} after expression in '{}'",
+                    other, input
+                ),
+            }),
+        }
+    }
+
     /// Parse a statement
     pub fn parse_statement(&mut self) -> Result<vibesql_ast::Statement, ParseError> {
         match self.peek() {

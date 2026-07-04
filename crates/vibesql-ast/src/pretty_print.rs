@@ -864,10 +864,14 @@ impl ToSql for SelectStmt {
     fn to_sql(&self) -> String {
         let mut result = String::new();
 
-        // WITH clause
+        // WITH clause. The RECURSIVE keyword is declared once after WITH and
+        // the parser marks every CTE in the list recursive, so render it when
+        // any CTE carries the flag — dropping it would silently downgrade a
+        // recursive-CTE view on a persistence round-trip (issue #5833).
         if let Some(ctes) = &self.with_clause {
+            let recursive = if ctes.iter().any(|c| c.recursive) { "RECURSIVE " } else { "" };
             let cte_strs: Vec<String> = ctes.iter().map(|c| c.to_sql()).collect();
-            result.push_str(&format!("WITH {} ", cte_strs.join(", ")));
+            result.push_str(&format!("WITH {}{} ", recursive, cte_strs.join(", ")));
         }
 
         // Check if this is a VALUES statement
