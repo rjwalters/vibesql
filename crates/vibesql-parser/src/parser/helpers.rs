@@ -156,6 +156,24 @@ impl Parser {
         }
     }
 
+    /// Parse an identifier, delimited identifier, or SQLite *fallback* keyword
+    /// as a name. Used for positions where SQLite demotes fallback keywords to
+    /// identifiers but keeps truly-reserved words rejected — e.g. index names
+    /// in `CREATE INDEX abort ON t1(a)` / `DROP INDEX abort` (keyword1.test).
+    ///
+    /// Keyword-derived names are lowercased, consistent with the lexer's
+    /// normalization of unquoted identifiers.
+    pub(super) fn parse_identifier_or_fallback_keyword(&mut self) -> Result<String, ParseError> {
+        match self.peek() {
+            Token::Keyword { keyword: kw, .. } if kw.is_sqlite_fallback_keyword() => {
+                let name = kw.to_string().to_lowercase();
+                self.advance();
+                Ok(name)
+            }
+            _ => self.parse_identifier(),
+        }
+    }
+
     /// Parse an identifier or keyword as an alias name.
     /// In SQL, keywords can be used as aliases after AS (e.g., `d_year AS year`).
     /// This is standard SQL behavior supported by most databases.

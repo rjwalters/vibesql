@@ -625,3 +625,84 @@ fn test_create_index_with_window_function_in_where_rejected_at_validation() {
         other => panic!("Expected CreateIndex, got: {:?}", other),
     }
 }
+
+// ========================================================================
+// SQLite fallback keywords as index names (keyword1.test, issue #5816)
+// ========================================================================
+
+#[test]
+fn test_create_index_with_fallback_keyword_name() {
+    // keyword1.test .2 shape: `CREATE INDEX abort ON t1(a)`. SQLite accepts
+    // any fallback keyword as an index name; the parsed name is lowercased
+    // like any unquoted identifier.
+    for kw in ["abort", "end", "view", "with", "temp", "cast", "current_date"] {
+        let sql = format!("CREATE INDEX {} ON t1(a)", kw);
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "CREATE INDEX {:?} must parse: {:?}", kw, result.err());
+        match result.unwrap() {
+            Statement::CreateIndex(stmt) => {
+                assert_eq!(stmt.index_name, *kw);
+                assert_eq!(stmt.table_name, "t1");
+            }
+            other => panic!("Expected CreateIndex, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_create_index_reserved_word_name_rejected() {
+    // Truly-reserved words are not fallback keywords and stay rejected,
+    // matching SQLite. Bare `if` is also rejected (consumed by the
+    // IF NOT EXISTS check) — keyword1.test quotes it as `"if"`.
+    for kw in ["primary", "select", "not", "if"] {
+        let sql = format!("CREATE INDEX {} ON t1(a)", kw);
+        assert!(
+            Parser::parse_sql(&sql).is_err(),
+            "CREATE INDEX {:?} must stay a parse error (SQLite parity)",
+            kw
+        );
+    }
+    // The quoted form works.
+    let result = Parser::parse_sql("CREATE INDEX \"if\" ON t1(a)");
+    assert!(result.is_ok(), "CREATE INDEX \"if\" must parse: {:?}", result.err());
+}
+
+#[test]
+fn test_drop_index_with_fallback_keyword_name() {
+    for kw in ["abort", "end", "view"] {
+        let sql = format!("DROP INDEX {}", kw);
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "DROP INDEX {:?} must parse: {:?}", kw, result.err());
+        match result.unwrap() {
+            Statement::DropIndex(stmt) => assert_eq!(stmt.index_name, *kw),
+            other => panic!("Expected DropIndex, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_indexed_by_with_fallback_keyword_name() {
+    // keyword1.test .2 shape: `SELECT b FROM t1 INDEXED BY abort WHERE a=2`,
+    // including bare `if` (which the test does NOT quote in this position).
+    for kw in ["abort", "if", "end", "with", "cast"] {
+        let sql = format!("SELECT b FROM t1 INDEXED BY {} WHERE a = 2", kw);
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "INDEXED BY {:?} must parse: {:?}", kw, result.err());
+        match result.unwrap() {
+            Statement::Select(stmt) => {
+                let from = stmt.from.expect("FROM clause expected");
+                match from {
+                    vibesql_ast::FromClause::Table { index_hint, .. } => {
+                        assert_eq!(
+                            index_hint,
+                            Some(vibesql_ast::IndexHint::IndexedBy(kw.to_string())),
+                            "hint name must be lowercased for catalog lookup"
+                        );
+                    }
+                    other => panic!("Expected Table from-clause, got: {:?}", other),
+                }
+            }
+            other => panic!("Expected Select, got: {:?}", other),
+        }
+    }
+}

@@ -429,19 +429,31 @@ impl Keyword {
     /// The denylist intentionally covers three categories of keyword:
     ///
     /// 1. **Operators** consumed by the expression precedence cascade in
-    ///    *operator* position (`AND`, `OR`, `NOT`, `IN`, `BETWEEN`, `LIKE`,
-    ///    `GLOB`, `ESCAPE`, `IS`, `ISNULL`, `NOTNULL`, `COLLATE`, `DIV`,
+    ///    *operator* position (`AND`, `OR`, `NOT`, `IN`, `BETWEEN`,
+    ///    `ESCAPE`, `IS`, `ISNULL`, `NOTNULL`, `COLLATE`, `DIV`,
     ///    `ALL`/`ANY`/`SOME`, `AS`). These must never be reinterpreted as a
-    ///    column when an operand is expected.
+    ///    column when an operand is expected. Note that `LIKE`/`GLOB` are
+    ///    *not* denied: at operand start they can only be a column reference
+    ///    (or a `like(...)`/`glob(...)` function call, which the function-call
+    ///    parser claims first); their operator role only arises in operator
+    ///    position, which this predicate never governs (keyword1.test).
     /// 2. **Statement / clause structure** keywords that terminate or introduce
     ///    a clause and which the expression caller relies on to STOP parsing
-    ///    (`SELECT`, `FROM`, `WHERE`, `GROUP`, `BY`, `HAVING`, `ORDER`,
-    ///    `LIMIT`, `OFFSET`, `WINDOW`, `UNION`, `INTERSECT`, `EXCEPT`, `INTO`,
+    ///    (`SELECT`, `FROM`, `WHERE`, `GROUP`, `HAVING`, `ORDER`,
+    ///    `LIMIT`, `WINDOW`, `UNION`, `INTERSECT`, `EXCEPT`, `INTO`,
     ///    `VALUES`, `SET`, `ON`, `USING`, `JOIN` and its modifiers, the DML/DDL
-    ///    verbs, etc.).
+    ///    verbs, etc.). Words that only structure a clause *after* another
+    ///    keyword has been consumed (`BY`, `OFFSET`, `WITH`, `RECURSIVE`,
+    ///    `REPLACE`, `PRAGMA`) are NOT denied: at operand start they are
+    ///    unambiguous column references, matching SQLite's fallback rules
+    ///    (`SELECT by FROM t ORDER BY by`, keyword1.test).
     /// 3. **Special primary forms / literals** that have dedicated parsing
-    ///    (`CASE`/`WHEN`/`THEN`/`ELSE`/`END`, `CAST`, `EXISTS`, `NULL`, `TRUE`,
-    ///    `FALSE`, `UNKNOWN`, the `CURRENT_*` constants, `DISTINCT`).
+    ///    (`CASE`/`WHEN`/`THEN`/`ELSE`, `CAST`, `EXISTS`, `NULL`, `TRUE`,
+    ///    `FALSE`, `UNKNOWN`, the `CURRENT_*` constants, `DISTINCT`). `END` is
+    ///    NOT denied: it is only meaningful *after* a complete CASE body, where
+    ///    the CASE parser consumes it at clause level before expression
+    ///    parsing resumes; at operand start SQLite treats it as a column
+    ///    (`ORDER BY end`, keyword1.test).
     ///
     /// Everything else — including otherwise-reserved column-name words like
     /// `RELEASE`, `SAVEPOINT`, `KEY`, `ASC`, `DESC`, `BEGIN`, `COMMIT`,
@@ -464,8 +476,6 @@ impl Keyword {
                 | Keyword::Between
                 | Keyword::Asymmetric
                 | Keyword::Symmetric
-                | Keyword::Like
-                | Keyword::Glob
                 | Keyword::Escape
                 | Keyword::Is
                 | Keyword::Isnull
@@ -481,11 +491,9 @@ impl Keyword {
                 | Keyword::From
                 | Keyword::Where
                 | Keyword::Group
-                | Keyword::By
                 | Keyword::Having
                 | Keyword::Order
                 | Keyword::Limit
-                | Keyword::Offset
                 | Keyword::Into
                 | Keyword::Values
                 | Keyword::Set
@@ -495,8 +503,6 @@ impl Keyword {
                 | Keyword::Union
                 | Keyword::Intersect
                 | Keyword::Except
-                | Keyword::With
-                | Keyword::Recursive
                 | Keyword::Insert
                 | Keyword::Update
                 | Keyword::Delete
@@ -504,14 +510,11 @@ impl Keyword {
                 | Keyword::Drop
                 | Keyword::Alter
                 | Keyword::Truncate
-                | Keyword::Replace
-                | Keyword::Pragma
                 // --- Category 3: special primary forms / literals ---
                 | Keyword::Case
                 | Keyword::When
                 | Keyword::Then
                 | Keyword::Else
-                | Keyword::End
                 | Keyword::Cast
                 | Keyword::Exists
                 | Keyword::Null
@@ -522,6 +525,121 @@ impl Keyword {
                 | Keyword::CurrentDate
                 | Keyword::CurrentTime
                 | Keyword::CurrentTimestamp
+        )
+    }
+
+    /// Returns true if this keyword may be used as an unquoted *table name*
+    /// (e.g. after `FROM`, in `INSERT INTO`, `DROP TABLE`).
+    ///
+    /// This is the expression-position set plus the special primary forms
+    /// `CAST` and `CURRENT_DATE`/`CURRENT_TIME`/`CURRENT_TIMESTAMP`: in
+    /// expression position those words must keep their dedicated parsing
+    /// (`CAST(x AS t)`, the datetime literals), but in table-name position no
+    /// such form can occur, so SQLite's fallback rules accept them as plain
+    /// names (`SELECT * FROM cast`, keyword1.test).
+    pub fn can_be_identifier_in_table_position(&self) -> bool {
+        self.can_be_identifier_in_expression()
+            || matches!(
+                self,
+                Keyword::Cast
+                    | Keyword::CurrentDate
+                    | Keyword::CurrentTime
+                    | Keyword::CurrentTimestamp
+            )
+    }
+
+    /// Returns true if this keyword is in SQLite's `%fallback ID` set — the
+    /// keywords that SQLite's parser demotes to plain identifiers whenever the
+    /// keyword reading does not fit the grammar (see `parse.y` in the SQLite
+    /// sources, and keyword1.test which exercises them as table, column, type,
+    /// and index names).
+    ///
+    /// VibeSQL uses this predicate for positions where SQLite accepts any
+    /// fallback keyword as a name but truly-reserved words (`PRIMARY`, `NOT`,
+    /// `CROSS`, `SELECT`, ...) must stay rejected:
+    ///
+    /// - column *type* names (`CREATE TABLE abort(abort abort)` is legal;
+    ///   `CREATE TABLE t(x primary)` is not)
+    /// - index names in `CREATE INDEX` / `DROP INDEX`
+    /// - index names after `INDEXED BY`
+    ///
+    /// Two members of SQLite's fallback set are deliberately omitted:
+    /// `GENERATED` and `ALWAYS`. VibeSQL parses `ADD COLUMN x GENERATED ALWAYS
+    /// AS (...)` by consuming `GENERATED` before the type, so demoting it here
+    /// would swallow generated-column syntax in ALTER TABLE.
+    pub fn is_sqlite_fallback_keyword(&self) -> bool {
+        matches!(
+            self,
+            Keyword::Abort
+                | Keyword::Action
+                | Keyword::After
+                | Keyword::Analyze
+                | Keyword::Asc
+                | Keyword::Before
+                | Keyword::Begin
+                | Keyword::By
+                | Keyword::Cascade
+                | Keyword::Cast
+                | Keyword::Column
+                | Keyword::Conflict
+                | Keyword::Current
+                | Keyword::CurrentDate
+                | Keyword::CurrentTime
+                | Keyword::CurrentTimestamp
+                | Keyword::Deferred
+                | Keyword::Desc
+                | Keyword::Do
+                | Keyword::Each
+                | Keyword::End
+                | Keyword::Exclude
+                | Keyword::Explain
+                | Keyword::Fail
+                | Keyword::First
+                | Keyword::Following
+                | Keyword::For
+                | Keyword::Glob
+                | Keyword::Groups
+                | Keyword::If
+                | Keyword::Ignore
+                | Keyword::Immediate
+                | Keyword::Initially
+                | Keyword::Instead
+                | Keyword::Key
+                | Keyword::Last
+                | Keyword::Like
+                | Keyword::Match
+                | Keyword::Materialized
+                | Keyword::No
+                | Keyword::Nulls
+                | Keyword::Of
+                | Keyword::Offset
+                | Keyword::Others
+                | Keyword::Partition
+                | Keyword::Plan
+                | Keyword::Pragma
+                | Keyword::Preceding
+                | Keyword::Query
+                | Keyword::Range
+                | Keyword::Recursive
+                | Keyword::Reindex
+                | Keyword::Release
+                | Keyword::Rename
+                | Keyword::Replace
+                | Keyword::Restrict
+                | Keyword::Rollback
+                | Keyword::Row
+                | Keyword::Rows
+                | Keyword::Savepoint
+                | Keyword::Temp
+                | Keyword::Temporary
+                | Keyword::Ties
+                | Keyword::Trigger
+                | Keyword::Unbounded
+                | Keyword::Vacuum
+                | Keyword::View
+                | Keyword::Virtual
+                | Keyword::With
+                | Keyword::Without
         )
     }
 }

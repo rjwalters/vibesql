@@ -968,7 +968,15 @@ pub(super) fn parse_data_type(type_str: &str) -> Result<vibesql_types::DataType,
         }
         // Null type
         "NULL" => Ok(DataType::Null),
-        _ => Err(StorageError::NotImplemented(format!("Unsupported data type: {}", type_str))),
+        // Any other name is a SQLite-style user-defined type. The save side
+        // (`data_type_to_sql`) writes `UserDefined` type names verbatim, so an
+        // unknown name here is the round-trip of a type like
+        // `CREATE TABLE t(x banana)` or a fallback keyword used as a type name
+        // (`CREATE TABLE attach(attach attach)`, keyword1.test). Storage is
+        // governed by affinity only, exactly as at first parse. Erroring here
+        // used to make such tables silently vanish on reopen (issue #5816;
+        // the error-swallow itself is tracked in #5855).
+        _ => Ok(DataType::UserDefined { type_name: type_str.to_string() }),
     }
 }
 
@@ -1031,6 +1039,63 @@ mod tests {
             table.schema.sql_source.as_deref(),
             Some(original_sql),
             "verbatim multi-line CREATE TABLE source must survive binary persistence (issue #5619)"
+        );
+    }
+
+    /// Issue #5816: `UserDefined` column types (any SQLite-style type name,
+    /// including fallback keywords like `attach` used as a type) must survive
+    /// a binary catalog round-trip. The save side writes the type name
+    /// verbatim; before this fix the read side had no `UserDefined` fallback,
+    /// so `CREATE TABLE t(x banana)` reloaded as "Unsupported data type" and
+    /// the table silently vanished on reopen (swallow tracked in #5855).
+    #[test]
+    fn test_binary_catalog_round_trips_user_defined_type() {
+        let mut db = Database::new();
+
+        let schema = vibesql_catalog::TableSchema::new(
+            "t3".to_string(),
+            vec![
+                vibesql_catalog::ColumnSchema {
+                    name: "x".to_string(),
+                    data_type: vibesql_types::DataType::UserDefined {
+                        type_name: "banana".to_string(),
+                    },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: false,
+                },
+                vibesql_catalog::ColumnSchema {
+                    name: "attach".to_string(),
+                    data_type: vibesql_types::DataType::UserDefined {
+                        type_name: "attach".to_string(),
+                    },
+                    nullable: true,
+                    default_value: None,
+                    generated_expr: None,
+                    collation: None,
+                    is_exact_integer_type: false,
+                },
+            ],
+        );
+        let identifier = vibesql_catalog::TableIdentifier::new("t3", false);
+        db.create_table_with_identifier(schema, identifier).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let table = reloaded.get_table("t3").expect("t3 must survive the round-trip");
+        assert_eq!(
+            table.schema.columns[0].data_type,
+            vibesql_types::DataType::UserDefined { type_name: "banana".to_string() },
+            "UserDefined type name must survive binary persistence (issue #5816)"
+        );
+        assert_eq!(
+            table.schema.columns[1].data_type,
+            vibesql_types::DataType::UserDefined { type_name: "attach".to_string() },
+            "fallback-keyword type name must survive binary persistence (issue #5816)"
         );
     }
 
