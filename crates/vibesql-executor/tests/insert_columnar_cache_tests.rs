@@ -40,7 +40,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -190,7 +190,7 @@ fn test_multi_row_insert_invalidates_cache() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -256,7 +256,7 @@ fn test_insert_select_invalidates_cache() {
                 vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
             ]]),
             conflict_clause: None,
-            on_conflict: None,
+            on_conflict: vec![],
             on_duplicate_key_update: None,
             returning: None,
         };
@@ -304,7 +304,7 @@ fn test_insert_select_invalidates_cache() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

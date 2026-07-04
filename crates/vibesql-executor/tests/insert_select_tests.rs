@@ -23,7 +23,7 @@ fn test_insert_from_select_basic() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -81,7 +81,7 @@ fn test_insert_from_select_basic() {
         columns: vec![], // No explicit columns, use all
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -121,7 +121,7 @@ fn test_insert_from_select_with_where() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -185,7 +185,7 @@ fn test_insert_from_select_with_where() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -217,7 +217,7 @@ fn test_insert_from_select_column_mismatch() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -280,7 +280,7 @@ fn test_insert_from_select_column_mismatch() {
         columns: vec![], // Should match all columns
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -331,7 +331,7 @@ fn test_insert_from_select_with_aggregates() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -410,7 +410,7 @@ fn test_insert_from_select_with_aggregates() {
         columns: vec![],
         source: vibesql_ast::InsertSource::Select(Box::new(select_stmt)),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

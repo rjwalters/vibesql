@@ -46,7 +46,7 @@ fn test_trigger_failure_causes_rollback() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -135,7 +135,7 @@ fn test_recursion_prevention() {
                     )),
                 ]]),
                 conflict_clause: None,
-                on_conflict: None,
+                on_conflict: vec![],
                 on_duplicate_key_update: None,
                 returning: None,
             };

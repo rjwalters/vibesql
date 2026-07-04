@@ -135,7 +135,7 @@ fn test_transaction_insert_commit() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -176,7 +176,7 @@ fn test_transaction_insert_rollback() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -213,7 +213,7 @@ fn test_transaction_multiple_operations_commit() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -236,7 +236,7 @@ fn test_transaction_multiple_operations_commit() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -272,7 +272,7 @@ fn test_transaction_multiple_operations_rollback() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -295,7 +295,7 @@ fn test_transaction_multiple_operations_rollback() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -339,7 +339,7 @@ fn test_transaction_isolation() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -386,7 +386,7 @@ fn test_transaction_nested_operations() {
                 )))),
             ]]),
             conflict_clause: None,
-            on_conflict: None,
+            on_conflict: vec![],
             on_duplicate_key_update: None,
             returning: None,
         };
@@ -423,7 +423,7 @@ fn test_transaction_empty_rollback() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -461,7 +461,7 @@ fn test_multiple_transactions() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -483,7 +483,7 @@ fn test_multiple_transactions() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

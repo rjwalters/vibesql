@@ -89,7 +89,7 @@ fn test_when_clause_filters_firing() {
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(50)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -111,7 +111,7 @@ fn test_when_clause_filters_firing() {
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(150)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

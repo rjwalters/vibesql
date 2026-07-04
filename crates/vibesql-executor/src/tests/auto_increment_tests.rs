@@ -68,7 +68,7 @@ fn test_auto_increment_basic_inserts() {
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -87,7 +87,7 @@ fn test_auto_increment_basic_inserts() {
             SqlValue::Varchar(arcstr::ArcStr::from("bob")),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -219,7 +219,7 @@ fn test_last_insert_rowid_basic() {
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -241,7 +241,7 @@ fn test_last_insert_rowid_basic() {
             SqlValue::Varchar(arcstr::ArcStr::from("bob")),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -320,7 +320,7 @@ fn test_last_insert_rowid_multi_row_insert() {
             )))],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -397,7 +397,7 @@ fn test_last_insert_rowid_no_auto_increment() {
             vibesql_ast::Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("test"))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -472,7 +472,7 @@ fn test_last_insert_rowid_via_select() {
             SqlValue::Varchar(arcstr::ArcStr::from("alice")),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

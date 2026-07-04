@@ -73,7 +73,7 @@ fn test_index_ordering() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

@@ -47,7 +47,7 @@ fn test_after_insert_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -110,7 +110,7 @@ fn test_after_insert_trigger_fires_for_each_row() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -159,7 +159,7 @@ fn test_before_insert_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -233,7 +233,7 @@ fn test_insert_trigger_body_semicolon_inside_string_literal_is_not_split() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -285,7 +285,7 @@ fn test_insert_trigger_body_escaped_quote_with_semicolon_is_intact() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -339,7 +339,7 @@ fn test_insert_trigger_multi_statement_body_with_semicolon_string() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

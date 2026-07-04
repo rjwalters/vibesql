@@ -669,3 +669,193 @@ fn test_targeted_do_nothing_other_plain_constraint_still_errors() {
         .expect_err("conflict on the non-targeted UNIQUE column must error");
     assert!(format!("{err:?}").contains("UNIQUE constraint failed"), "got: {err:?}");
 }
+
+// ========================================================================
+// Generalized UPSERT: multiple ON CONFLICT clauses (upsert5, issue #5817)
+// ========================================================================
+
+fn str_val(s: &str) -> SqlValue {
+    SqlValue::Varchar(arcstr::ArcStr::from(s))
+}
+
+/// upsert5 1.x.100: leftmost clause whose target matches a violated
+/// constraint fires (conflict on all of a,c,d,e; clause order a,c,d,e).
+#[test]
+fn test_multi_clause_leftmost_match_fires() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE, d UNIQUE, e UNIQUE)")
+        .unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c,d,e) VALUES(1,2,3,4,5)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c,d,e) VALUES(1,NULL,3,4,5) \
+         ON CONFLICT(a) DO UPDATE SET b='a' \
+         ON CONFLICT(c) DO UPDATE SET b='c' \
+         ON CONFLICT(d) DO UPDATE SET b='d' \
+         ON CONFLICT(e) DO UPDATE SET b='e'",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), str_val("a"), int(3), int(4), int(5)]]);
+}
+
+/// upsert5 1.x.203: clause order c,a,d,e with conflicts only on {a,e}:
+/// clause c does not fire (c not violated); clause a does.
+#[test]
+fn test_multi_clause_skips_non_violated_targets() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE, d UNIQUE, e UNIQUE)")
+        .unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c,d,e) VALUES(1,2,3,4,5)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c,d,e) VALUES(1,NULL,93,94,5) \
+         ON CONFLICT(c) DO UPDATE SET b='c' \
+         ON CONFLICT(a) DO UPDATE SET b='a' \
+         ON CONFLICT(d) DO UPDATE SET b='d' \
+         ON CONFLICT(e) DO UPDATE SET b='e'",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), str_val("a"), int(3), int(4), int(5)]]);
+}
+
+/// upsert5 1.x.300: duplicate targets fire the first occurrence.
+#[test]
+fn test_multi_clause_duplicate_targets_fire_first() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c) VALUES(1,2,3)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c) VALUES(1,NULL,93) \
+         ON CONFLICT(c) DO UPDATE SET b='c' \
+         ON CONFLICT(a) DO UPDATE SET b='a1' \
+         ON CONFLICT(a) DO UPDATE SET b='a2'",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), str_val("a1"), int(3)]]);
+}
+
+/// upsert5 1.x.400: a terminal target-less DO UPDATE is the catch-all for
+/// conflicts no earlier clause matched.
+#[test]
+fn test_multi_clause_targetless_catch_all() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE, d UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c,d) VALUES(1,2,3,4)").unwrap();
+    exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c,d) VALUES(1,NULL,93,94) \
+         ON CONFLICT(c) DO UPDATE SET b='c' \
+         ON CONFLICT(d) DO UPDATE SET b='d' \
+         ON CONFLICT DO UPDATE SET b='x'",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), str_val("x"), int(3), int(4)]]);
+}
+
+/// upsert5 1.x.422: a targeted DO NOTHING fires when its constraint is
+/// violated even if a later catch-all DO UPDATE exists.
+#[test]
+fn test_multi_clause_do_nothing_beats_later_catch_all() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE, d UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c,d) VALUES(1,2,3,4)").unwrap();
+    let n = exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c,d) VALUES(91,NULL,93,4) \
+         ON CONFLICT(c) DO NOTHING \
+         ON CONFLICT(d) DO NOTHING \
+         ON CONFLICT DO UPDATE SET b='x'",
+    )
+    .unwrap();
+    assert_eq!(n, 0, "DO NOTHING drops the row");
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), int(2), int(3), int(4)]]);
+}
+
+/// Multi-clause statement where the conflict matches no clause: the default
+/// ABORT resolution raises the UNIQUE error.
+#[test]
+fn test_multi_clause_unmatched_conflict_aborts() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c UNIQUE, d UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t1(a,b,c,d) VALUES(1,2,3,4)").unwrap();
+    let err = exec(
+        &mut db,
+        "INSERT INTO t1(a,b,c,d) VALUES(91,NULL,93,4) \
+         ON CONFLICT(c) DO UPDATE SET b='c'",
+    )
+    .expect_err("conflict on d does not match target c");
+    assert!(
+        format!("{err}").contains("UNIQUE constraint failed: t1.d"),
+        "expected UNIQUE error on t1.d, got: {err}"
+    );
+    assert_eq!(rows(&db, "t1"), vec![vec![int(1), int(2), int(3), int(4)]]);
+}
+
+/// upsert5 3.0/3.1 regression (curator finding on issue #5817): REPLACE INTO
+/// with an ON CONFLICT clause whose target does NOT match the violated
+/// constraint must still apply REPLACE resolution — previously the row was
+/// inserted with no enforcement at all, leaving two rows with the same
+/// INTEGER PRIMARY KEY.
+#[test]
+fn test_replace_fallback_when_clause_target_unmatched_single_clause() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(aa INTEGER PRIMARY KEY, bb INT)").unwrap();
+    exec(&mut db, "INSERT INTO t1 VALUES(11,22)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1bb ON t1(bb)").unwrap();
+    exec(&mut db, "REPLACE INTO t1 VALUES(11,33) ON CONFLICT(bb) DO UPDATE SET aa = 44").unwrap();
+    assert_eq!(
+        rows(&db, "t1"),
+        vec![vec![int(11), int(33)]],
+        "REPLACE must resolve the unmatched PK conflict (one row, not a duplicate PK)"
+    );
+}
+
+/// upsert5 3.0: same with redundant duplicate clauses.
+#[test]
+fn test_replace_fallback_with_redundant_clauses() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(aa INTEGER PRIMARY KEY, bb INT)").unwrap();
+    exec(&mut db, "INSERT INTO t1 VALUES(11,22)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1bb ON t1(bb)").unwrap();
+    exec(
+        &mut db,
+        "REPLACE INTO t1 VALUES(11,33) \
+         ON CONFLICT(bb) DO UPDATE SET aa = 44 \
+         ON CONFLICT(bb) DO UPDATE SET aa = 44",
+    )
+    .unwrap();
+    assert_eq!(rows(&db, "t1"), vec![vec![int(11), int(33)]]);
+}
+
+/// upsert5 3.3: three-row table, REPLACE with unmatched targets replaces the
+/// PK-conflicting row only.
+#[test]
+fn test_replace_fallback_three_rows() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(aa INTEGER PRIMARY KEY, bb INT, cc INT)").unwrap();
+    exec(&mut db, "INSERT INTO t1 VALUES(10,21,32),(11,22,33),(12,23,34)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1bb ON t1(bb)").unwrap();
+    exec(&mut db, "CREATE UNIQUE INDEX t1cc ON t1(cc)").unwrap();
+    exec(
+        &mut db,
+        "REPLACE INTO t1 VALUES(11,44,55) \
+         ON CONFLICT(bb) DO UPDATE SET aa = 99 \
+         ON CONFLICT(cc) DO UPDATE SET aa = 99 \
+         ON CONFLICT(bb) DO UPDATE SET aa = 99",
+    )
+    .unwrap();
+    let mut got = rows(&db, "t1");
+    got.sort_by_key(|r| match r[0] {
+        SqlValue::Integer(v) => v,
+        _ => 0,
+    });
+    assert_eq!(
+        got,
+        vec![
+            vec![int(10), int(21), int(32)],
+            vec![int(11), int(44), int(55)],
+            vec![int(12), int(23), int(34)],
+        ]
+    );
+}

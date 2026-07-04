@@ -189,7 +189,7 @@ fn execute_insert_internal(
     if let Some(view_def) = db.catalog.get_view(&stmt.table_name).cloned() {
         // SQLite: the upsert syntax cannot target a view, even when INSTEAD
         // OF INSERT triggers exist (upsert1-910).
-        if stmt.on_conflict.is_some() {
+        if !stmt.on_conflict.is_empty() {
             return Err(ExecutorError::SqliteCompatError("cannot UPSERT a view".to_string()));
         }
         return execute_insert_on_view(
@@ -245,12 +245,14 @@ fn execute_insert_internal(
     // which case firing falls back to the legacy schema-unaware match.
     let dml_schema: Option<String> = db.catalog.resolve_table_schema_name(&full_table_name);
 
-    // Validate an explicit ON CONFLICT (cols) target up front. SQLite does
-    // this at prepare time, even when no row actually conflicts: unknown
-    // columns raise "no such column" and known columns without a matching
-    // PRIMARY KEY / UNIQUE constraint / unique index raise the canonical
-    // "ON CONFLICT clause does not match..." error (upsert1-110/120/300).
-    if let Some(ref on_conflict) = stmt.on_conflict {
+    // Validate every explicit ON CONFLICT (cols) target up front. SQLite
+    // does this at prepare time, even when no row actually conflicts:
+    // unknown columns raise "no such column" and known columns without a
+    // matching PRIMARY KEY / UNIQUE constraint / unique index raise the
+    // canonical "ON CONFLICT clause does not match..." error
+    // (upsert1-110/120/300). With multiple clauses (generalized UPSERT,
+    // upsert5), each clause's target is validated in order.
+    for on_conflict in &stmt.on_conflict {
         // Targets the AST cannot represent exactly (currently non-BINARY
         // COLLATE) never match (upsert1-130; see issue #5269).
         if on_conflict.target_inexact {
@@ -421,15 +423,18 @@ fn execute_insert_internal(
     let mut batch_full_rows: Vec<Vec<vibesql_types::SqlValue>> = Vec::new();
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
-    // Also treat ON CONFLICT ... DO NOTHING as equivalent to IGNORE
+    // Also treat a single-clause ON CONFLICT ... DO NOTHING as equivalent to
+    // IGNORE. Multi-clause statements (generalized UPSERT, upsert5) resolve
+    // conflicts per row in the slow path instead, because clause selection
+    // depends on WHICH constraint each row violates.
     let or_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
     let use_ignore = or_ignore
         || matches!(
-            &stmt.on_conflict,
-            Some(vibesql_ast::OnConflictClause {
+            stmt.on_conflict.as_slice(),
+            [vibesql_ast::OnConflictClause {
                 action: vibesql_ast::OnConflictAction::DoNothing,
                 ..
-            })
+            }]
         );
 
     // `ON CONFLICT (cols) [WHERE ...] DO NOTHING` with an explicit target
@@ -440,15 +445,30 @@ fn execute_insert_internal(
     let do_nothing_target: Option<(
         &[vibesql_ast::ConflictTargetItem],
         Option<&vibesql_ast::Expression>,
-    )> = match &stmt.on_conflict {
-        Some(vibesql_ast::OnConflictClause {
+    )> = match stmt.on_conflict.as_slice() {
+        [vibesql_ast::OnConflictClause {
             conflict_target: Some(items),
             target_where,
             action: vibesql_ast::OnConflictAction::DoNothing,
             ..
-        }) if !or_ignore => Some((items.as_slice(), target_where.as_ref())),
+        }] if !or_ignore => Some((items.as_slice(), target_where.as_ref())),
         _ => None,
     };
+
+    // Statements whose ON CONFLICT clauses cannot be fully resolved in the
+    // validation loop below need per-row clause dispatch in the slow path:
+    // any DO UPDATE clause, and any multi-clause statement (leftmost-match
+    // clause selection against the violated constraint — upsert5). A single
+    // DO NOTHING clause is fully handled by use_ignore / do_nothing_target
+    // above and keeps the batch-insert fast path.
+    let on_conflict_needs_row_dispatch = !stmt.on_conflict.is_empty()
+        && !matches!(
+            stmt.on_conflict.as_slice(),
+            [vibesql_ast::OnConflictClause {
+                action: vibesql_ast::OnConflictAction::DoNothing,
+                ..
+            }]
+        );
 
     // Track the first auto-generated ID for LAST_INSERT_ROWID() support
     // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
@@ -711,7 +731,7 @@ fn execute_insert_internal(
             matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
                 || matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore))
                 || stmt.on_duplicate_key_update.is_some()
-                || (stmt.on_conflict.is_some() && do_nothing_target.is_none());
+                || (!stmt.on_conflict.is_empty() && do_nothing_target.is_none());
         let validator = super::row_validator::RowValidator::new(
             db,
             &schema,
@@ -844,13 +864,7 @@ fn execute_insert_internal(
 
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
-        && !matches!(
-            &stmt.on_conflict,
-            Some(vibesql_ast::OnConflictClause {
-                action: vibesql_ast::OnConflictAction::DoUpdate { .. },
-                ..
-            })
-        )
+        && !on_conflict_needs_row_dispatch
         && !has_insert_triggers;
 
     // Helper to create a Row with optional explicit rowid
@@ -985,27 +999,20 @@ fn execute_insert_internal(
                     continue;
                 }
                 // No conflict, fall through to insert
-            } else if let Some(vibesql_ast::OnConflictClause {
-                ref conflict_target,
-                ref target_where,
-                action:
-                    vibesql_ast::OnConflictAction::DoUpdate { ref assignments, ref where_clause },
-                ..
-            }) = stmt.on_conflict
-            {
-                // SQLite upsert: ON CONFLICT [(cols)] DO UPDATE SET ... [WHERE ...]
-                match super::on_conflict_update::handle_on_conflict_update(
+            } else if on_conflict_needs_row_dispatch {
+                // SQLite generalized upsert (upsert5): select the leftmost
+                // ON CONFLICT clause whose target matches a constraint this
+                // row actually violates (a target-less clause matches any),
+                // then apply that clause's DO NOTHING / DO UPDATE action.
+                match super::on_conflict_update::dispatch_on_conflict_clauses(
                     db,
                     table_name,
                     &schema,
                     &full_row_values,
-                    conflict_target.as_deref(),
-                    target_where.as_ref(),
-                    assignments,
-                    where_clause.as_ref(),
+                    &stmt.on_conflict,
                     cte_results.as_ref(),
                 )? {
-                    super::on_conflict_update::UpsertAction::Updated(updated_row_id) => {
+                    super::on_conflict_update::ClauseDispatch::Updated(updated_row_id) => {
                         // Row was updated, count it toward affected rows
                         rows_inserted += 1;
                         upsert_updated_rows += 1;
@@ -1022,98 +1029,47 @@ fn execute_insert_internal(
                         }
                         continue;
                     }
-                    super::on_conflict_update::UpsertAction::Skipped => {
-                        // DO UPDATE ... WHERE was false/NULL: the row is
-                        // neither inserted nor updated (SQLite semantics).
+                    super::on_conflict_update::ClauseDispatch::SkipRow => {
+                        // A DO NOTHING clause fired, or DO UPDATE ... WHERE
+                        // was false/NULL: the row is neither inserted nor
+                        // updated (SQLite semantics).
                         continue;
                     }
-                    super::on_conflict_update::UpsertAction::NoConflict => {
-                        // No conflict on the targeted constraint; fall through
-                        // to a normal insert. Conflicts on OTHER constraints
-                        // still surface as UNIQUE errors (upsert1-201).
+                    super::on_conflict_update::ClauseDispatch::NoConflict => {
+                        // No unique constraint violated; fall through to a
+                        // normal insert.
+                    }
+                    super::on_conflict_update::ClauseDispatch::UnmatchedConflict(message) => {
+                        // The row conflicts, but no clause's target matches
+                        // the violated constraint: the statement's conflict
+                        // resolution algorithm still applies (upsert5
+                        // section 3 — REPLACE must delete the conflicting
+                        // rows rather than insert a duplicate key).
+                        match stmt.conflict_clause {
+                            Some(vibesql_ast::ConflictClause::Replace) => {
+                                explicit_rowid = Some(resolve_replace_conflicts_for_row(
+                                    db,
+                                    table_name,
+                                    &storage_table_name,
+                                    &schema,
+                                    &full_row_values,
+                                    explicit_rowid,
+                                )?);
+                            }
+                            Some(vibesql_ast::ConflictClause::Ignore) => continue,
+                            _ => return Err(ExecutorError::ConstraintViolation(message)),
+                        }
                     }
                 }
             } else if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
-                // SQLite REPLACE semantics: allocate the rowid for the new row BEFORE firing
-                // BEFORE DELETE triggers. This ensures that any INSERT within those triggers
-                // that tries to allocate the same rowid will fail with a UNIQUE constraint
-                // violation on rowid.
-                //
-                // Compute the rowid for the new row and reserve it.
-                // Track whether the rowid is explicitly specified (INTEGER PRIMARY KEY)
-                // or auto-allocated, as this affects how conflicts are handled.
-                let is_explicit = explicit_rowid.is_some();
-                let reserved_rowid = if let Some(rowid) = explicit_rowid {
-                    rowid
-                } else {
-                    // Auto-allocate: next available rowid is physical row count + 1
-                    // (physical includes deleted rows since rowid is based on physical index)
-                    let current_physical = db
-                        .get_table(&storage_table_name)
-                        .map(|t| t.physical_row_count() as u64)
-                        .unwrap_or(0);
-                    current_physical + 1
-                };
-
-                // Reserve the rowid before firing triggers
-                db.reserve_rowid(&storage_table_name, reserved_rowid, is_explicit);
-
-                // If REPLACE conflict clause, delete conflicting rows first
-                // This also fires DELETE triggers which may create new constraints violations.
-                // handle_replace_conflicts() releases the reserved rowid after BEFORE DELETE
-                // triggers but before AFTER DELETE triggers.
-                let replace_result = super::replace::handle_replace_conflicts(
+                explicit_rowid = Some(resolve_replace_conflicts_for_row(
                     db,
                     table_name,
                     &storage_table_name,
                     &schema,
                     &full_row_values,
-                );
-
-                // On error, ensure the reserved rowid is released and propagate the error.
-                // Note: The reserved rowid may already be released if the error occurred
-                // after BEFORE DELETE triggers, but release_reserved_rowid is idempotent.
-                if let Err(e) = replace_result {
-                    db.release_reserved_rowid(&storage_table_name);
-                    return Err(e);
-                }
-
-                // After REPLACE conflict handling (which fires triggers), re-validate constraints.
-                // Triggers may have inserted new rows that conflict with the row we want to insert.
-                // Pass empty batch values since we're only checking against existing table data.
-                // Note: The reserved rowid has already been released by handle_replace_conflicts()
-                // after BEFORE DELETE triggers, so no need to release on error here.
-                super::constraints::enforce_primary_key_constraint(
-                    db,
-                    &schema,
-                    table_name,
-                    &full_row_values,
-                    &[], // No batch values to check against
-                )?;
-
-                super::constraints::enforce_unique_constraints(
-                    db,
-                    &schema,
-                    table_name,
-                    &full_row_values,
-                    &[], // No batch values to check against
-                )?;
-
-                super::constraints::enforce_unique_indexes(
-                    db,
-                    &schema,
-                    table_name,
-                    &full_row_values,
-                )?;
-
-                // Use the reserved rowid for the REPLACE INSERT to match SQLite semantics.
-                // This ensures the new row gets the rowid that was reserved before triggers fired.
-                explicit_rowid = Some(reserved_rowid);
-
-                // Release the reservation now that all delete triggers have fired.
-                // The REPLACE INSERT will use explicit_rowid which already has the reserved value.
-                // This prevents the REPLACE INSERT from failing on its own reservation.
-                db.release_reserved_rowid(&storage_table_name);
+                    explicit_rowid,
+                )?);
             }
 
             // Fire BEFORE INSERT triggers only if triggers exist.
@@ -1379,6 +1335,94 @@ fn execute_insert_internal(
         upsert_updated_rows,
         returning: returning_result,
     })
+}
+
+/// SQLite REPLACE conflict resolution for one candidate row.
+///
+/// Allocates and reserves the new row's rowid BEFORE firing BEFORE DELETE
+/// triggers (so a trigger INSERT that grabs the same rowid fails with a
+/// UNIQUE error), deletes the conflicting rows (firing DELETE triggers),
+/// re-validates constraints against post-trigger table state, and returns
+/// the reserved rowid the REPLACE insert must use as its explicit rowid.
+///
+/// Called from the plain `INSERT OR REPLACE` / `REPLACE INTO` path, and from
+/// the generalized-upsert fallback when a `REPLACE INTO ... ON CONFLICT ...`
+/// statement hits a conflict that no ON CONFLICT clause matches (upsert5
+/// section 3): REPLACE resolution still applies to unmatched conflicts.
+fn resolve_replace_conflicts_for_row(
+    db: &mut vibesql_storage::Database,
+    table_name: &str,
+    storage_table_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+    full_row_values: &[vibesql_types::SqlValue],
+    explicit_rowid: Option<u64>,
+) -> Result<u64, ExecutorError> {
+    // Compute the rowid for the new row and reserve it.
+    // Track whether the rowid is explicitly specified (INTEGER PRIMARY KEY)
+    // or auto-allocated, as this affects how conflicts are handled.
+    let is_explicit = explicit_rowid.is_some();
+    let reserved_rowid = if let Some(rowid) = explicit_rowid {
+        rowid
+    } else {
+        // Auto-allocate: next available rowid is physical row count + 1
+        // (physical includes deleted rows since rowid is based on physical index)
+        let current_physical =
+            db.get_table(storage_table_name).map(|t| t.physical_row_count() as u64).unwrap_or(0);
+        current_physical + 1
+    };
+
+    // Reserve the rowid before firing triggers
+    db.reserve_rowid(storage_table_name, reserved_rowid, is_explicit);
+
+    // Delete conflicting rows first. This also fires DELETE triggers which
+    // may create new constraint violations. handle_replace_conflicts()
+    // releases the reserved rowid after BEFORE DELETE triggers but before
+    // AFTER DELETE triggers.
+    let replace_result = super::replace::handle_replace_conflicts(
+        db,
+        table_name,
+        storage_table_name,
+        schema,
+        full_row_values,
+    );
+
+    // On error, ensure the reserved rowid is released and propagate the error.
+    // Note: The reserved rowid may already be released if the error occurred
+    // after BEFORE DELETE triggers, but release_reserved_rowid is idempotent.
+    if let Err(e) = replace_result {
+        db.release_reserved_rowid(storage_table_name);
+        return Err(e);
+    }
+
+    // After REPLACE conflict handling (which fires triggers), re-validate constraints.
+    // Triggers may have inserted new rows that conflict with the row we want to insert.
+    // Pass empty batch values since we're only checking against existing table data.
+    // Note: The reserved rowid has already been released by handle_replace_conflicts()
+    // after BEFORE DELETE triggers, so no need to release on error here.
+    super::constraints::enforce_primary_key_constraint(
+        db,
+        schema,
+        table_name,
+        full_row_values,
+        &[], // No batch values to check against
+    )?;
+
+    super::constraints::enforce_unique_constraints(
+        db,
+        schema,
+        table_name,
+        full_row_values,
+        &[], // No batch values to check against
+    )?;
+
+    super::constraints::enforce_unique_indexes(db, schema, table_name, full_row_values)?;
+
+    // Release the reservation now that all delete triggers have fired.
+    // The REPLACE INSERT uses the returned rowid as its explicit rowid, so it
+    // will not fail on its own reservation.
+    db.release_reserved_rowid(storage_table_name);
+
+    Ok(reserved_rowid)
 }
 
 /// Check if inserting a row would violate any constraints (for IGNORE conflict resolution)
