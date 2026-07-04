@@ -51,6 +51,15 @@ impl Parser {
             Token::Keyword { keyword: Keyword::Varying, .. } => "varying".to_string(),
             // SQLite ANY type - represents any type, stored with no affinity
             Token::Keyword { keyword: Keyword::Any, .. } => "any".to_string(),
+            // SQLite fallback keywords are legal type names (keyword1.test:
+            // `CREATE TABLE abort(abort abort)`). Truly-reserved words
+            // (PRIMARY, NOT, CROSS, ...) are not in the fallback set and still
+            // fail with "Expected data type", matching SQLite. The name is
+            // lowercased like any unquoted identifier and resolves through the
+            // affinity-based UserDefined catch-all below.
+            Token::Keyword { keyword, .. } if keyword.is_sqlite_fallback_keyword() => {
+                keyword.to_string().to_lowercase()
+            }
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();

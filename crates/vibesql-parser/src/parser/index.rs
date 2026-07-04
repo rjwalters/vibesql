@@ -73,8 +73,11 @@ impl Parser {
             false
         };
 
-        // Parse index name
-        let index_name = self.parse_identifier()?;
+        // Parse index name. SQLite fallback keywords are legal index names
+        // (keyword1.test: `CREATE INDEX abort ON t1(a)`). Bare `IF` is still
+        // consumed by the IF NOT EXISTS check above and errors, matching
+        // SQLite (the test quotes `"if"` here).
+        let index_name = self.parse_identifier_or_fallback_keyword()?;
 
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
@@ -678,8 +681,8 @@ impl Parser {
             false
         };
 
-        // Parse index name
-        let index_name = self.parse_identifier()?;
+        // Parse index name (SQLite fallback keywords allowed, keyword1.test)
+        let index_name = self.parse_identifier_or_fallback_keyword()?;
 
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
@@ -735,8 +738,8 @@ impl Parser {
             false
         };
 
-        // Parse index name
-        let index_name = self.parse_identifier()?;
+        // Parse index name (SQLite fallback keywords allowed, keyword1.test)
+        let index_name = self.parse_identifier_or_fallback_keyword()?;
 
         Ok(vibesql_ast::DropIndexStmt { if_exists, index_name })
     }

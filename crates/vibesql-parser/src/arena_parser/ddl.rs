@@ -154,7 +154,17 @@ impl<'arena> ArenaParser<'arena> {
             false
         };
 
-        let index_name = self.parse_arena_identifier()?;
+        // SQLite fallback keywords are legal index names (keyword1.test:
+        // `CREATE INDEX abort ON t1(a)`). Lowercased like any unquoted
+        // identifier.
+        let index_name = match self.peek() {
+            Token::Keyword { keyword: kw, .. } if kw.is_sqlite_fallback_keyword() => {
+                let name = kw.to_string().to_lowercase();
+                self.advance();
+                self.intern(&name)
+            }
+            _ => self.parse_arena_identifier()?,
+        };
 
         self.consume_keyword(Keyword::On)?;
         let table_name = self.parse_arena_identifier()?;

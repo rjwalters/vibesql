@@ -755,8 +755,14 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 Ok(Some(vibesql_ast::arena::IndexHint::IndexedBy(self.intern(&name))))
             }
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
-                let name = kw.to_string();
+            // SQLite fallback keywords are legal index names here too
+            // (keyword1.test: `SELECT b FROM t1 INDEXED BY abort WHERE a=2`).
+            // Lowercased like any unquoted identifier so catalog lookup matches
+            // the name stored by `CREATE INDEX abort ...`.
+            Token::Keyword { keyword: kw, .. }
+                if kw.can_be_identifier() || kw.is_sqlite_fallback_keyword() =>
+            {
+                let name = kw.to_string().to_lowercase();
                 self.advance();
                 Ok(Some(vibesql_ast::arena::IndexHint::IndexedBy(self.intern(&name))))
             }

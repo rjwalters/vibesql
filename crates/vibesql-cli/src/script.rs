@@ -389,6 +389,22 @@ fn parse_statements(script: &str) -> Vec<String> {
             let rest: String = chars.clone().take_while(|c| c.is_ascii_alphabetic()).collect();
             let word = format!("{}{}", ch, rest).to_uppercase();
             if word == "BEGIN" {
+                // A BEGIN can only open a multi-statement body inside a
+                // CREATE TRIGGER / PROCEDURE / FUNCTION statement. Anywhere
+                // else the word is a transaction BEGIN or a plain identifier —
+                // BEGIN is a SQLite *fallback* keyword, so `CREATE TABLE
+                // begin(begin begin)` and `INSERT INTO begin VALUES(99)` are
+                // legal (keyword1.test) — and must not suppress statement
+                // splitting. Without this gate, an identifier `begin` set
+                // begin_depth > 0 and glued every following statement into one.
+                let prefix_upper = current_statement[..current_statement.len() - 1].to_uppercase();
+                let in_body_context = prefix_upper
+                    .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .any(|w| matches!(w, "TRIGGER" | "PROCEDURE" | "FUNCTION"));
+                if !in_body_context {
+                    // Treat as a normal word (transaction BEGIN or identifier).
+                    continue;
+                }
                 // Consume the rest of the word
                 for _ in 0..(rest.len()) {
                     if let Some(c) = chars.next() {
@@ -647,6 +663,40 @@ INSERT INTO logs VALUES (2, 'Success');
         assert_eq!(stmts[0], ".mode json");
         assert_eq!(stmts[1], "SELECT * FROM users;");
         assert_eq!(stmts[2], ".tables");
+    }
+
+    #[test]
+    fn test_parse_begin_as_identifier_does_not_glue_statements() {
+        // Issue #5816 (keyword1.test): BEGIN is a SQLite fallback keyword, so
+        // `begin` is a legal table/column name. An identifier `begin` must not
+        // be mistaken for a trigger-body opener — that suppressed semicolon
+        // splitting and glued every following statement into one.
+        let script = "CREATE TABLE begin(begin begin);             INSERT INTO begin VALUES(99);             INSERT INTO begin SELECT a FROM t1;             SELECT * FROM begin ORDER BY begin ASC;";
+        let stmts = parse_statements(script);
+        assert_eq!(
+            stmts.len(),
+            4,
+            "identifier `begin` must not suppress statement splitting, got: {:?}",
+            stmts
+        );
+        assert_eq!(stmts[0], "CREATE TABLE begin(begin begin);");
+        assert_eq!(stmts[1], "INSERT INTO begin VALUES(99);");
+    }
+
+    #[test]
+    fn test_parse_transaction_begin_still_splits() {
+        // A transaction BEGIN (statement-position, not inside CREATE
+        // TRIGGER/PROCEDURE/FUNCTION) must not open a block either.
+        let script = "BEGIN; INSERT INTO t VALUES(1); COMMIT;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 3, "transaction BEGIN must split normally, got: {:?}", stmts);
+
+        // Bare BEGIN followed by a statement keyword (no semicolon glue).
+        let script = "BEGIN
+TRANSACTION;
+INSERT INTO t VALUES(1);";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 2, "BEGIN TRANSACTION must split normally, got: {:?}", stmts);
     }
 
     #[test]

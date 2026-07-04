@@ -394,8 +394,11 @@ impl Parser {
             // CREATE TABLE side (so `FROM savepoint` resolves the table created by
             // `CREATE TABLE savepoint(...)` — see table.test table-7.3). Clause and
             // operator keywords (WHERE, JOIN, ON, ...) are excluded by
-            // `can_be_identifier_in_expression()` and continue to terminate the clause.
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
+            // `can_be_identifier_in_table_position()` and continue to terminate the
+            // clause; unlike expression position, CAST and the CURRENT_* words are
+            // accepted here because no special primary form can start after FROM
+            // (keyword1.test: `SELECT * FROM cast`).
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_table_position() => {
                 let table = self.parse_table_ref()?;
 
                 // Check for optional alias
@@ -485,8 +488,14 @@ impl Parser {
                 self.advance();
                 Ok(Some(vibesql_ast::IndexHint::IndexedBy(name)))
             }
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
-                let name = kw.to_string();
+            // SQLite fallback keywords are legal index names here too
+            // (keyword1.test: `SELECT b FROM t1 INDEXED BY abort WHERE a=2`).
+            // Lowercased like any unquoted identifier so catalog lookup matches
+            // the name stored by `CREATE INDEX abort ...`.
+            Token::Keyword { keyword: kw, .. }
+                if kw.can_be_identifier() || kw.is_sqlite_fallback_keyword() =>
+            {
+                let name = kw.to_string().to_lowercase();
                 self.advance();
                 Ok(Some(vibesql_ast::IndexHint::IndexedBy(name)))
             }
