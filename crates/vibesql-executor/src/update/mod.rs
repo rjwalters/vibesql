@@ -23,7 +23,7 @@
 //! - Uses single-pass execution instead of two-phase
 //! - Minimizes allocations
 
-mod constraints;
+pub(crate) mod constraints;
 mod executor;
 mod fast_path;
 mod foreign_keys;

@@ -74,6 +74,11 @@ struct UniqueCandidate {
     parts: Vec<KeyPart>,
     /// Partial-index WHERE predicate; None for full indexes/constraints.
     predicate: Option<Expression>,
+    /// Name of the unique index this candidate came from; None for the
+    /// PRIMARY KEY and table-level UNIQUE constraints. Used for SQLite's
+    /// "UNIQUE constraint failed: index 'name'" message on expression
+    /// indexes.
+    index_name: Option<String>,
 }
 
 /// Collect every unique constraint/index that can act as an upsert conflict
@@ -90,6 +95,7 @@ fn collect_unique_candidates(
             candidates.push(UniqueCandidate {
                 parts: pk.into_iter().map(KeyPart::Column).collect(),
                 predicate: None,
+                index_name: None,
             });
         }
     }
@@ -99,6 +105,7 @@ fn collect_unique_candidates(
             candidates.push(UniqueCandidate {
                 parts: unique.into_iter().map(KeyPart::Column).collect(),
                 predicate: None,
+                index_name: None,
             });
         }
     }
@@ -133,8 +140,11 @@ fn collect_unique_candidates(
             }
         }
         if representable && !parts.is_empty() {
-            candidates
-                .push(UniqueCandidate { parts, predicate: meta.where_clause.as_deref().cloned() });
+            candidates.push(UniqueCandidate {
+                parts,
+                predicate: meta.where_clause.as_deref().cloned(),
+                index_name: Some(index_name.clone()),
+            });
         }
     }
 
@@ -335,6 +345,94 @@ fn find_conflicting_live_row(
     Ok(None)
 }
 
+/// SQLite-format violation message for a unique candidate: qualified column
+/// names for the PRIMARY KEY, table-level UNIQUE constraints, and plain
+/// column indexes (`UNIQUE constraint failed: t.x, t.y`); the index name for
+/// expression indexes (`UNIQUE constraint failed: index 'name'`).
+fn unique_violation_message(
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    candidate: &UniqueCandidate,
+) -> String {
+    let mut cols = Vec::with_capacity(candidate.parts.len());
+    for part in &candidate.parts {
+        match part {
+            KeyPart::Column(idx) => {
+                let name = schema.columns.get(*idx).map(|c| c.name.as_str()).unwrap_or("?");
+                cols.push(format!("{}.{}", table_name, name));
+            }
+            KeyPart::Expr(_) => {
+                // Expression components only occur for unique indexes.
+                return format!(
+                    "UNIQUE constraint failed: index '{}'",
+                    candidate.index_name.as_deref().unwrap_or("?")
+                );
+            }
+        }
+    }
+    format!("UNIQUE constraint failed: {}", cols.join(", "))
+}
+
+/// Enforce constraints on the row produced by the DO UPDATE arm — the same
+/// checks a normal UPDATE runs (issue #5836, upsert4 1.x.5):
+///
+/// - NOT NULL and CHECK constraints (per-row, via the shared UPDATE
+///   validator);
+/// - PRIMARY KEY / UNIQUE constraints / unique indexes, by scanning live
+///   rows directly. The scan excludes the row being updated (`row_id`) so a
+///   SET that leaves a key unchanged never conflicts with itself. Live-row
+///   scanning matches this module's conflict detection and does not depend
+///   on database-level index data, which the upsert arm does not maintain
+///   (issue #5269).
+///
+/// Errors use SQLite's exact wording, verified against sqlite3:
+/// `UNIQUE constraint failed: t.c` / `NOT NULL constraint failed: t.b` /
+/// `UNIQUE constraint failed: index 'name'` (expression indexes).
+fn validate_do_update_row(
+    db: &vibesql_storage::Database,
+    table_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+    row_id: usize,
+    new_row: &vibesql_storage::Row,
+) -> Result<(), ExecutorError> {
+    // NOT NULL and CHECK — the per-row half of normal UPDATE validation.
+    crate::update::constraints::ConstraintValidator::new(schema)
+        .validate_row_skip_uniqueness(table_name, new_row)?;
+
+    // PRIMARY KEY, UNIQUE constraints, and unique indexes (including
+    // expression and partial indexes) — all candidates, not just the
+    // conflict target: SQLite aborts the statement when the update arm
+    // would violate ANY uniqueness constraint (upsert4 1.x.5).
+    let table = db
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    for candidate in collect_unique_candidates(db, table_name, schema) {
+        let Some(new_key) = eval_candidate_key(&evaluator, &candidate, new_row) else {
+            continue;
+        };
+        if !row_in_candidate(&evaluator, &candidate, new_row) {
+            continue;
+        }
+        for (other_id, other_row) in table.scan_live() {
+            if other_id == row_id {
+                continue;
+            }
+            if !row_in_candidate(&evaluator, &candidate, other_row) {
+                continue;
+            }
+            if eval_candidate_key(&evaluator, &candidate, other_row).as_deref()
+                == Some(&new_key[..])
+            {
+                return Err(ExecutorError::ConstraintViolation(unique_violation_message(
+                    schema, table_name, &candidate,
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Would inserting `row_values` conflict on the explicit DO NOTHING conflict
 /// target? Used by the targeted `ON CONFLICT (cols) [WHERE ...] DO NOTHING`
 /// path: only conflicts on the *targeted* constraint are suppressed —
@@ -486,11 +584,18 @@ pub fn handle_on_conflict_update(
         new_values
     };
 
+    // Enforce constraints on the updated row BEFORE writing it back: the DO
+    // UPDATE arm runs the same checks as a normal UPDATE, so a SET that
+    // would duplicate a UNIQUE/PK key or null a NOT NULL column aborts the
+    // statement and leaves the table untouched (issue #5836, upsert4 1.x.5-6).
+    let new_row = vibesql_storage::Row::new(new_values);
+    validate_do_update_row(db, table_name, schema, row_id, &new_row)?;
+
     let table_mut = db
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
     table_mut
-        .update_row(row_id, vibesql_storage::Row::new(new_values))
+        .update_row(row_id, new_row)
         .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
 
     // NOTE: database-level index data is not rebuilt here, matching the
