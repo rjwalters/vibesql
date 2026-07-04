@@ -114,6 +114,15 @@ pub(crate) fn apply_table_local_predicates(
             _ => CombinedExpressionEvaluator::with_database(&schema, database),
         };
 
+        // Issue #5809: evaluate uncorrelated scalar subqueries exactly once and
+        // substitute their literal values before per-row filtering. The parallel
+        // path below creates a fresh thread-local evaluator (with an empty
+        // subquery cache) per row, which would otherwise re-execute the
+        // subquery's full scan for every row — an O(n²) blowup.
+        let combined_where = evaluator
+            .hoist_uncorrelated_scalar_subqueries(&combined_where)
+            .unwrap_or(combined_where);
+
         // Check if we should use parallel filtering
         #[cfg(feature = "parallel")]
         {

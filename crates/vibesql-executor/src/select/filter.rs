@@ -451,6 +451,18 @@ pub(crate) fn apply_where_filter_combined_auto<'a>(
         return Ok(rows);
     }
 
+    // Issue #5809: evaluate uncorrelated scalar subqueries exactly once and
+    // substitute their literal values before per-row filtering begins. The
+    // parallel paths below build fresh thread-local evaluators (with empty
+    // subquery caches) per row, so without this hoist an uncorrelated
+    // subquery like `WHERE x = (SELECT MAX(x) FROM t)` re-executes its full
+    // scan for every row — an O(n²) blowup.
+    let hoisted = where_expr.and_then(|expr| evaluator.hoist_uncorrelated_scalar_subqueries(expr));
+    let where_expr = match hoisted.as_ref() {
+        Some(rewritten) => Some(rewritten),
+        None => where_expr,
+    };
+
     // For very large datasets, use parallel execution
     #[cfg(feature = "parallel")]
     {
