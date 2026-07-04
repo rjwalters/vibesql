@@ -129,6 +129,11 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     write_bool(writer, false)?;
                 }
             }
+
+            // Write the WITHOUT ROWID flag (v12+, issue #5796). Reloaded
+            // schemas need it so sqlite_master keeps hiding the implicit
+            // PRIMARY KEY autoindex of a WITHOUT ROWID table across processes.
+            write_bool(writer, table.schema.without_rowid)?;
         }
     }
 
@@ -514,11 +519,15 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             None
         };
 
-        table_schemas.push((table_name, columns, primary_key, quoted, sql_source));
+        // Read the WITHOUT ROWID flag (v12+, issue #5796). v11-and-earlier
+        // files do not include it; default to false (prior behavior).
+        let without_rowid = if version >= 12 { read_bool(reader)? } else { false };
+
+        table_schemas.push((table_name, columns, primary_key, quoted, sql_source, without_rowid));
     }
 
     // Create tables
-    for (table_name, columns, primary_key, quoted, sql_source) in table_schemas {
+    for (table_name, columns, primary_key, quoted, sql_source, without_rowid) in table_schemas {
         let mut schema = if let Some(pk_cols) = primary_key {
             vibesql_catalog::TableSchema::with_primary_key(table_name.clone(), columns, pk_cols)
         } else {
@@ -531,6 +540,9 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         if let Some(src) = sql_source {
             schema.set_sql_source(src);
         }
+
+        // Restore the WITHOUT ROWID flag (v12+, issue #5796).
+        schema.without_rowid = without_rowid;
 
         // Use TableIdentifier to preserve case-sensitivity semantics
         let identifier = vibesql_catalog::TableIdentifier::from_canonical(table_name, quoted);
@@ -1146,6 +1158,61 @@ mod tests {
 
         let table = reloaded.get_table("t2").expect("t2 must survive the round-trip");
         assert_eq!(table.schema.sql_source, None);
+    }
+
+    /// Issue #5796 (v12): the WITHOUT ROWID flag must survive a binary catalog
+    /// round-trip. Before v12 the flag was not serialized, so a reloaded
+    /// WITHOUT ROWID table forgot it was rowid-less and `sqlite_master`
+    /// wrongly listed its implicit PRIMARY KEY autoindex across processes
+    /// (alterdropcol 7.2).
+    #[test]
+    fn test_binary_catalog_without_rowid_round_trip() {
+        let mut db = Database::new();
+        let make_col = |name: &str| vibesql_catalog::ColumnSchema {
+            name: name.to_string(),
+            data_type: vibesql_types::DataType::Integer,
+            nullable: true,
+            default_value: None,
+            generated_expr: None,
+            collation: None,
+            is_exact_integer_type: true,
+        };
+
+        let mut wr_schema = vibesql_catalog::TableSchema::with_primary_key(
+            "t_wr".to_string(),
+            vec![make_col("a"), make_col("b")],
+            vec!["a".to_string()],
+        );
+        wr_schema.without_rowid = true;
+        db.create_table_with_identifier(
+            wr_schema,
+            vibesql_catalog::TableIdentifier::new("t_wr", false),
+        )
+        .unwrap();
+
+        let rowid_schema = vibesql_catalog::TableSchema::with_primary_key(
+            "t_rowid".to_string(),
+            vec![make_col("a"), make_col("b")],
+            vec!["a".to_string()],
+        );
+        db.create_table_with_identifier(
+            rowid_schema,
+            vibesql_catalog::TableIdentifier::new("t_rowid", false),
+        )
+        .unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        assert!(
+            reloaded.get_table("t_wr").expect("t_wr must survive").schema.without_rowid,
+            "WITHOUT ROWID flag must survive binary persistence (issue #5796)"
+        );
+        assert!(
+            !reloaded.get_table("t_rowid").expect("t_rowid must survive").schema.without_rowid,
+            "rowid table must stay rowid after reload"
+        );
     }
 
     /// Issue #5771: views must survive a binary catalog round-trip. Before v10

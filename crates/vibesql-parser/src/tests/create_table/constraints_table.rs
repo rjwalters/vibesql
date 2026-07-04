@@ -610,3 +610,75 @@ fn test_parse_foreign_key_deferrable_with_actions() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+// ========================================================================
+// COLLATE inside table-level PRIMARY KEY / UNIQUE column lists (issue #5796)
+//
+// SQLite's grammar allows a per-column COLLATE (and ASC/DESC) inside the
+// table-constraint key column list, e.g.
+//   CREATE TABLE t1(a, b, c, PRIMARY KEY(a COLLATE nocase, a)) WITHOUT ROWID
+// (verified against sqlite3 3.51.0; exercised by alterdropcol 7.0-7.3).
+// ========================================================================
+
+#[test]
+fn test_parse_table_level_primary_key_with_collate() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE t1(a, b, c, PRIMARY KEY(a COLLATE nocase, a)) WITHOUT ROWID",
+    );
+    assert!(result.is_ok(), "Should parse PRIMARY KEY(a COLLATE nocase, a): {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_constraints.len(), 1);
+            match &create.table_constraints[0].kind {
+                vibesql_ast::TableConstraintKind::PrimaryKey { columns, .. } => {
+                    assert_eq!(columns.len(), 2);
+                    assert_eq!(columns[0].expect_column_name(), "a");
+                    assert_eq!(columns[1].expect_column_name(), "a");
+                }
+                _ => panic!("Expected PRIMARY KEY constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_table_level_primary_key_with_collate_and_direction() {
+    // COLLATE precedes ASC/DESC in SQLite's indexed-column grammar.
+    let result =
+        Parser::parse_sql("CREATE TABLE t1(a, b, PRIMARY KEY(a COLLATE nocase DESC, b ASC))");
+    assert!(result.is_ok(), "Should parse COLLATE followed by DESC: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::PrimaryKey { columns, .. } => {
+                assert_eq!(columns.len(), 2);
+                assert_eq!(columns[0].direction(), vibesql_ast::OrderDirection::Desc);
+                assert_eq!(columns[1].direction(), vibesql_ast::OrderDirection::Asc);
+            }
+            _ => panic!("Expected PRIMARY KEY constraint"),
+        },
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_table_level_unique_with_collate() {
+    // The same indexed-column grammar backs UNIQUE table constraints.
+    let result = Parser::parse_sql("CREATE TABLE t1(a, b, UNIQUE(a COLLATE rtrim))");
+    assert!(result.is_ok(), "Should parse UNIQUE(a COLLATE rtrim): {:?}", result.err());
+}
+
+#[test]
+fn test_parse_table_level_primary_key_collate_keyword_collation_name() {
+    // BINARY is a keyword but must be accepted as a collation name.
+    let result = Parser::parse_sql("CREATE TABLE t1(a, b, PRIMARY KEY(a COLLATE BINARY))");
+    assert!(result.is_ok(), "Should accept keyword collation name: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_table_level_primary_key_collate_missing_name_is_error() {
+    let result = Parser::parse_sql("CREATE TABLE t1(a, b, PRIMARY KEY(a COLLATE))");
+    assert!(result.is_err(), "COLLATE without a collation name must be a parse error");
+}

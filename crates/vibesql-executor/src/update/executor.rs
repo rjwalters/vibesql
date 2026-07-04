@@ -46,8 +46,14 @@ pub(super) fn execute_internal(
     procedural_context: Option<&crate::procedural::ExecutionContext>,
     trigger_context: Option<&crate::trigger_execution::TriggerContext>,
 ) -> Result<(usize, Option<crate::select::SelectResult>), ExecutorError> {
-    // Check if target is sqlite_master/sqlite_schema (read-only system table)
+    // Check if target is sqlite_master/sqlite_schema. Read-only by default;
+    // under PRAGMA writable_schema=ON, a supported subset of UPDATEs rewrites
+    // the stored CREATE TABLE source text (issue #5796; alterdropcol 8.x).
     if is_sqlite_schema_table(&stmt.table_name) {
+        if database.writable_schema() {
+            let matched = crate::sqlite_schema::execute_sqlite_schema_update(stmt, database)?;
+            return Ok((matched, None));
+        }
         return Err(ExecutorError::SqliteSystemTableReadOnly {
             table_name: stmt.table_name.clone(),
             operation: "modified".to_string(),
