@@ -264,6 +264,10 @@ fn main() -> anyhow::Result<()> {
     let open_options = executor::DbOpenOptions {
         wal: config.database.wal,
         recover_fallback: args.recover_fallback,
+        // Inter-process lock busy timeout (issue #5808): a second session on
+        // the same file-backed database waits up to this long, then fails
+        // with the SQLite-compatible `database is locked`.
+        lock_timeout_ms: config.database.lock_timeout_ms,
     };
 
     if let Some(cmd) = args.command {
