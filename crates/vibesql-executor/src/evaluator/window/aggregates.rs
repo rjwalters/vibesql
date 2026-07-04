@@ -502,6 +502,61 @@ where
     max_val.unwrap_or(SqlValue::Null)
 }
 
+/// Evaluate a PERCENTILE-family aggregate window function over a frame.
+///
+/// Handles median(Y), percentile(Y,P), percentile_cont(Y,F) and
+/// percentile_disc(Y,F) by recomputing the ordered aggregate over each frame
+/// (collect + sort + interpolate). SQLite's percentile.c keeps a sorted array
+/// and uses an inverse function; per-frame recomputation produces identical
+/// observable results and is acceptable for conformance.
+///
+/// `fraction_expr` is the second argument (None for median). `func_name` must
+/// be the canonical lowercase name for SQLite-exact error messages.
+/// Errors (invalid/inconsistent fraction, non-numeric or Inf input) surface
+/// as `ExecutorError::SqliteCompatError` with percentile.c's exact wording.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_percentile_window<F, I>(
+    partition: &Partition,
+    frame_indices: I,
+    arg_expr: &Expression,
+    fraction_expr: Option<&Expression>,
+    func_name: &str,
+    filter: Option<&Expression>,
+    eval_fn: F,
+) -> Result<SqlValue, crate::errors::ExecutorError>
+where
+    F: Fn(&Expression, &Row) -> Result<SqlValue, String>,
+    I: IntoIterator<Item = usize>,
+{
+    // Reuse the grouped-aggregate accumulator so the step/finalize semantics
+    // (validation, deferred errors, interpolation) live in exactly one place.
+    let mut acc = crate::select::grouping::AggregateAccumulator::new(func_name, false)?;
+
+    for idx in frame_indices {
+        if idx >= partition.len() {
+            continue;
+        }
+
+        let row = &partition.rows[idx];
+
+        // Check FILTER condition first
+        if !passes_filter(filter, row, &eval_fn) {
+            continue;
+        }
+
+        let fraction_value = match fraction_expr {
+            // An evaluation failure yields NULL, which the accumulator
+            // reports as an out-of-range fraction (matching SQLite).
+            Some(expr) => Some(eval_fn(expr, row).unwrap_or(SqlValue::Null)),
+            None => None,
+        };
+        let value = eval_fn(arg_expr, row).unwrap_or(SqlValue::Null);
+        acc.accumulate_percentile(&value, fraction_value.as_ref());
+    }
+
+    acc.finalize()
+}
+
 /// Evaluate GROUP_CONCAT aggregate window function over a frame
 ///
 /// Concatenates string values in the frame using the specified separator.
