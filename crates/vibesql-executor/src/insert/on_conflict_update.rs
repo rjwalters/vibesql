@@ -39,12 +39,141 @@
 use crate::errors::ExecutorError;
 use vibesql_ast::{
     visitor::{transform_expression, ExpressionMutVisitor, VisitResult},
-    Assignment, ConflictTargetItem, Expression, FromClause, SelectStmt,
+    Assignment, ConflictTargetItem, Expression, FromClause, OnConflictAction, OnConflictClause,
+    SelectStmt,
 };
 use vibesql_types::SqlValue;
 
 use crate::partial_index_maintenance::is_predicate_truthy;
 use crate::select::grouping::expressions_equal;
+
+/// Outcome of per-row clause selection across a statement's ON CONFLICT
+/// clauses (generalized UPSERT, upsert5).
+pub enum ClauseDispatch {
+    /// The row violates no unique constraint: insert normally.
+    NoConflict,
+    /// A clause fired and resolved to dropping the candidate row: a DO
+    /// NOTHING clause, or a DO UPDATE clause whose WHERE was false/NULL.
+    SkipRow,
+    /// A DO UPDATE clause fired and updated this physical row id.
+    Updated(usize),
+    /// The row conflicts, but no clause's target matches the violated
+    /// constraint. Carries the SQLite-format UNIQUE violation message; the
+    /// caller applies the statement's conflict resolution algorithm
+    /// (REPLACE / IGNORE / default ABORT — upsert5 section 3).
+    UnmatchedConflict(String),
+}
+
+/// Per-row clause selection for generalized UPSERT (multiple ON CONFLICT
+/// clauses, upsert5): compute which unique constraints the candidate row
+/// violates against live table rows, then fire the leftmost clause whose
+/// conflict target matches a violated constraint. A target-less clause
+/// matches any conflict (the parser guarantees it is the last clause);
+/// duplicate targets fire the first occurrence (upsert5 1.x.300).
+///
+/// Earlier rows of the same multi-row INSERT are already inserted when this
+/// runs (the slow path inserts row by row), so the live-row scan covers
+/// intra-batch conflicts.
+pub fn dispatch_on_conflict_clauses(
+    db: &mut vibesql_storage::Database,
+    table_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &[SqlValue],
+    clauses: &[OnConflictClause],
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
+) -> Result<ClauseDispatch, ExecutorError> {
+    let candidates = collect_unique_candidates(db, table_name, schema);
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+    let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+
+    // Which unique constraints does this row violate?
+    let violated: Vec<usize> = {
+        let table = db
+            .get_table(table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| {
+                let Some(new_key) = eval_candidate_key(&evaluator, candidate, &candidate_row)
+                else {
+                    return false;
+                };
+                if !row_in_candidate(&evaluator, candidate, &candidate_row) {
+                    return false;
+                }
+                table.scan_live().any(|(_, row)| {
+                    row_in_candidate(&evaluator, candidate, row)
+                        && eval_candidate_key(&evaluator, candidate, row).as_deref()
+                            == Some(&new_key[..])
+                })
+            })
+            .map(|(i, _)| i)
+            .collect()
+    };
+
+    if violated.is_empty() {
+        return Ok(ClauseDispatch::NoConflict);
+    }
+
+    // Leftmost-match clause selection (verified against sqlite3 3.51,
+    // upsert5 section 1).
+    for clause in clauses {
+        let fires = match &clause.conflict_target {
+            // A target-less clause is the catch-all.
+            None => true,
+            Some(target) => {
+                // Targets the AST cannot represent exactly never match
+                // (upsert1-130; see issue #5269).
+                !clause.target_inexact && {
+                    let resolved = resolve_target_items(schema, target)?;
+                    violated.iter().any(|&i| {
+                        candidate_matches_target(
+                            &candidates[i],
+                            &resolved,
+                            clause.target_where.as_ref(),
+                        )
+                    })
+                }
+            }
+        };
+        if !fires {
+            continue;
+        }
+        return match &clause.action {
+            OnConflictAction::DoNothing => Ok(ClauseDispatch::SkipRow),
+            OnConflictAction::DoUpdate { assignments, where_clause } => {
+                match handle_on_conflict_update(
+                    db,
+                    table_name,
+                    schema,
+                    row_values,
+                    clause.conflict_target.as_deref(),
+                    clause.target_where.as_ref(),
+                    assignments,
+                    where_clause.as_ref(),
+                    cte_results,
+                )? {
+                    UpsertAction::Updated(row_id) => Ok(ClauseDispatch::Updated(row_id)),
+                    UpsertAction::Skipped => Ok(ClauseDispatch::SkipRow),
+                    // Defensive: the violated-set computation above found a
+                    // conflict on this clause's constraint, so the update arm
+                    // should re-find it; fall back to a normal insert if not.
+                    UpsertAction::NoConflict => Ok(ClauseDispatch::NoConflict),
+                }
+            }
+        };
+    }
+
+    // The row conflicts but no clause matched the violated constraint(s):
+    // report the first violated constraint in SQLite's wording and let the
+    // caller apply the statement-level conflict resolution.
+    Ok(ClauseDispatch::UnmatchedConflict(unique_violation_message(
+        schema,
+        table_name,
+        &candidates[violated[0]],
+    )))
+}
 
 /// Outcome of attempting the DO UPDATE arm for one candidate row.
 pub enum UpsertAction {
@@ -259,6 +388,14 @@ pub fn validate_conflict_target(
     target: &[ConflictTargetItem],
     target_where: Option<&Expression>,
 ) -> Result<(), ExecutorError> {
+    // SQLite resolves names inside conflict-target expressions at prepare
+    // time: `ON CONFLICT((SELECT x FROM nosuchtable))` raises
+    // "no such table: nosuchtable" before target matching (upsert5 2.1).
+    for item in target {
+        if let ConflictTargetItem::Expression(expr) = item {
+            check_target_expression_tables(db, expr)?;
+        }
+    }
     let resolved = resolve_target_items(schema, target)?;
     let matched = collect_unique_candidates(db, table_name, schema)
         .iter()
@@ -270,6 +407,77 @@ pub fn validate_conflict_target(
         Err(ExecutorError::SqliteCompatError(
             "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint".to_string(),
         ))
+    }
+}
+
+/// Resolve table names referenced by subqueries inside a conflict-target
+/// expression (prepare-time name resolution, upsert5 2.1). Reports the
+/// SQLite error `no such table: <name>` for an unknown table.
+fn check_target_expression_tables(
+    db: &vibesql_storage::Database,
+    expr: &Expression,
+) -> Result<(), ExecutorError> {
+    let mut checker = TargetTableChecker { db, error: None };
+    // The transform visitor is used read-only here: the expression clone is
+    // discarded; only the collected error matters.
+    let _ = transform_expression(&mut checker, expr.clone());
+    match checker.error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
+/// Visitor that checks FROM-clause table names in subqueries against the
+/// catalog. Only base-table references are checked; derived tables recurse.
+struct TargetTableChecker<'a> {
+    db: &'a vibesql_storage::Database,
+    error: Option<ExecutorError>,
+}
+
+impl TargetTableChecker<'_> {
+    fn check_select(&mut self, select: &SelectStmt) {
+        if let Some(from) = &select.from {
+            self.check_from(from);
+        }
+    }
+
+    fn check_from(&mut self, from: &FromClause) {
+        if self.error.is_some() {
+            return;
+        }
+        match from {
+            FromClause::Table { name, .. } => {
+                if !self.db.catalog.table_exists(name) && self.db.catalog.get_view(name).is_none() {
+                    self.error =
+                        Some(ExecutorError::SqliteCompatError(format!("no such table: {}", name)));
+                }
+            }
+            FromClause::Join { left, right, .. } => {
+                self.check_from(left);
+                self.check_from(right);
+            }
+            FromClause::Subquery { query, .. } => self.check_select(query),
+            FromClause::Values { .. } => {}
+        }
+    }
+}
+
+impl ExpressionMutVisitor for TargetTableChecker<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.error.is_some() {
+            return VisitResult::Skip;
+        }
+        let subquery = match expr {
+            Expression::ScalarSubquery(select) => Some(select.as_ref()),
+            Expression::Exists { subquery, .. } => Some(subquery.as_ref()),
+            Expression::In { subquery, .. } => Some(subquery.as_ref()),
+            Expression::QuantifiedComparison { subquery, .. } => Some(subquery.as_ref()),
+            _ => None,
+        };
+        if let Some(select) = subquery {
+            self.check_select(select);
+        }
+        VisitResult::Continue
     }
 }
 

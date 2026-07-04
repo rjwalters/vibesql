@@ -40,7 +40,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(stock)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -62,7 +62,7 @@ fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(stock)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: Some(vec![
             vibesql_ast::Assignment {
                 column: "name".to_string(),
@@ -227,7 +227,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
                 vibesql_ast::Expression::Literal(SqlValue::Integer(score)),
             ]]),
             conflict_clause: None,
-            on_conflict: None,
+            on_conflict: vec![],
             on_duplicate_key_update: None,
             returning: None,
         };
@@ -254,7 +254,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(999)), // New score
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "score".to_string(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "score".to_string() },
@@ -341,7 +341,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(30)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
             value: vibesql_ast::Expression::BinaryOp {

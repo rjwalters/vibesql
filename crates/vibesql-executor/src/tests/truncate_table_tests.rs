@@ -418,7 +418,7 @@ fn test_truncate_resets_auto_increment() {
                 arcstr::ArcStr::from(val),
             ))]]),
             conflict_clause: None,
-            on_conflict: None,
+            on_conflict: vec![],
             on_duplicate_key_update: None,
             returning: None,
         };
@@ -452,7 +452,7 @@ fn test_truncate_resets_auto_increment() {
             arcstr::ArcStr::from("d"),
         ))]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -533,7 +533,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 i * 100,
             ))]]),
             conflict_clause: None,
-            on_conflict: None,
+            on_conflict: vec![],
             on_duplicate_key_update: None,
             returning: None,
         };
@@ -563,7 +563,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
         columns: vec!["value".to_string()],
         source: InsertSource::Values(vec![vec![Expression::Literal(SqlValue::Integer(9999))]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

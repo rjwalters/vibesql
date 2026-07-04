@@ -283,7 +283,7 @@ fn test_parse_insert_returning_after_on_conflict() {
     assert!(result.is_ok(), "RETURNING after ON CONFLICT should parse: {:?}", result.err());
     match result.unwrap() {
         vibesql_ast::Statement::Insert(insert) => {
-            assert!(insert.on_conflict.is_some());
+            assert_eq!(insert.on_conflict.len(), 1);
             let returning = insert.returning.expect("returning clause should be captured");
             assert_eq!(returning.len(), 1);
         }
@@ -440,4 +440,106 @@ fn test_parse_insert_compound_values_order_by() {
         },
         _ => panic!("Expected INSERT statement"),
     }
+}
+
+// ========================================================================
+// Generalized UPSERT: multiple ON CONFLICT clauses (upsert5, issue #5817)
+// ========================================================================
+
+/// Parse a statement and return the INSERT's ON CONFLICT clause list.
+fn parse_on_conflict_clauses(sql: &str) -> Vec<vibesql_ast::OnConflictClause> {
+    match Parser::parse_sql(sql) {
+        Ok(vibesql_ast::Statement::Insert(insert)) => insert.on_conflict,
+        Ok(other) => panic!("Expected INSERT statement, got {:?}", other),
+        Err(e) => panic!("Statement should parse: {:?}", e),
+    }
+}
+
+#[test]
+fn test_parse_insert_two_on_conflict_clauses() {
+    let clauses = parse_on_conflict_clauses(
+        "INSERT INTO t1(a,b) VALUES(1,2) \
+         ON CONFLICT(a) DO UPDATE SET b='a' \
+         ON CONFLICT(b) DO NOTHING;",
+    );
+    assert_eq!(clauses.len(), 2);
+    assert!(clauses[0].conflict_target.is_some());
+    assert!(matches!(clauses[0].action, vibesql_ast::OnConflictAction::DoUpdate { .. }));
+    assert!(clauses[1].conflict_target.is_some());
+    assert!(matches!(clauses[1].action, vibesql_ast::OnConflictAction::DoNothing));
+}
+
+#[test]
+fn test_parse_insert_many_on_conflict_clauses() {
+    let clauses = parse_on_conflict_clauses(
+        "INSERT INTO t1(a,b,c,d,e) VALUES(1,NULL,3,4,5) \
+         ON CONFLICT(a) DO UPDATE SET b='a' \
+         ON CONFLICT(c) DO UPDATE SET b='c' \
+         ON CONFLICT(d) DO UPDATE SET b='d' \
+         ON CONFLICT(e) DO UPDATE SET b='e';",
+    );
+    assert_eq!(clauses.len(), 4);
+    for clause in &clauses {
+        assert!(clause.conflict_target.is_some());
+        assert!(matches!(clause.action, vibesql_ast::OnConflictAction::DoUpdate { .. }));
+    }
+}
+
+#[test]
+fn test_parse_insert_targetless_terminal_clause_ok() {
+    // A target-less clause is the catch-all and is allowed in the terminal
+    // position (upsert5 1.x.400).
+    let clauses = parse_on_conflict_clauses(
+        "INSERT INTO t1(a,b) VALUES(1,2) \
+         ON CONFLICT(a) DO UPDATE SET b='a' \
+         ON CONFLICT DO UPDATE SET b='x';",
+    );
+    assert_eq!(clauses.len(), 2);
+    assert!(clauses[1].conflict_target.is_none());
+}
+
+#[test]
+fn test_parse_insert_targetless_non_terminal_clause_is_error() {
+    // sqlite3 3.51: a target-less ON CONFLICT clause must be the LAST
+    // clause; a following ON CONFLICT is a syntax error.
+    let result = Parser::parse_sql(
+        "INSERT INTO t1(a,b) VALUES(1,2) \
+         ON CONFLICT DO NOTHING \
+         ON CONFLICT(a) DO UPDATE SET b='a';",
+    );
+    let err = result.expect_err("non-terminal target-less clause must be a syntax error");
+    assert!(
+        err.message.contains("near \"ON\": syntax error"),
+        "expected SQLite's near-ON syntax error, got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_parse_replace_into_with_on_conflict_clauses() {
+    // upsert5 section 3: REPLACE INTO with (redundant) ON CONFLICT clauses.
+    let result = Parser::parse_sql(
+        "REPLACE INTO t1 VALUES(11,33) \
+         ON CONFLICT(bb) DO UPDATE SET aa = 44 \
+         ON CONFLICT(bb) DO UPDATE SET aa = 44;",
+    );
+    match result.expect("REPLACE INTO with ON CONFLICT clauses should parse") {
+        vibesql_ast::Statement::Insert(insert) => {
+            assert!(matches!(insert.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)));
+            assert_eq!(insert.on_conflict.len(), 2);
+        }
+        other => panic!("Expected INSERT statement, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_insert_on_conflict_then_on_duplicate_is_error() {
+    // MySQL's ON DUPLICATE KEY UPDATE cannot be mixed with SQLite ON
+    // CONFLICT clauses.
+    let result = Parser::parse_sql(
+        "INSERT INTO t1(a,b) VALUES(1,2) \
+         ON CONFLICT(a) DO NOTHING \
+         ON DUPLICATE KEY UPDATE b = 3;",
+    );
+    assert!(result.is_err(), "mixing ON CONFLICT and ON DUPLICATE KEY UPDATE must not parse");
 }

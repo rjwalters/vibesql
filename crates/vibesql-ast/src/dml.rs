@@ -145,9 +145,13 @@ pub struct InsertStmt {
     /// Conflict resolution strategy (None = fail on conflict)
     /// Used for INSERT OR REPLACE/IGNORE/etc. syntax
     pub conflict_clause: Option<ConflictClause>,
-    /// ON CONFLICT clause (SQLite upsert)
-    /// Used for INSERT ... ON CONFLICT (cols) DO NOTHING/UPDATE syntax
-    pub on_conflict: Option<OnConflictClause>,
+    /// ON CONFLICT clauses (SQLite upsert). Empty = no upsert.
+    ///
+    /// SQLite's generalized UPSERT allows multiple ON CONFLICT clauses
+    /// (upsert5.test): the leftmost clause whose conflict target matches the
+    /// actual conflict fires; a target-less clause matches any conflict and
+    /// must be the last clause (enforced by the parser).
+    pub on_conflict: Vec<OnConflictClause>,
     /// ON DUPLICATE KEY UPDATE clause (MySQL-style upsert)
     pub on_duplicate_key_update: Option<Vec<Assignment>>,
     /// Optional RETURNING clause (SQLite 3.35.0+)

@@ -23,7 +23,7 @@ fn test_basic_insert() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -64,7 +64,7 @@ fn test_multi_row_insert() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -96,7 +96,7 @@ fn test_insert_with_column_list() {
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -144,7 +144,7 @@ fn test_insert_null_value() {
             vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -180,7 +180,7 @@ fn test_insert_sqlite_type_affinity() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -208,7 +208,7 @@ fn test_insert_column_count_mismatch() {
             vibesql_types::SqlValue::Integer(1),
         )]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -236,7 +236,7 @@ fn test_insert_table_not_found() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -266,7 +266,7 @@ fn test_insert_column_not_found() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -298,7 +298,7 @@ fn test_insert_not_null_constraint_violation() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

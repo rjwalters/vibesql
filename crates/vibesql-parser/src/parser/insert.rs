@@ -381,19 +381,55 @@ impl Parser {
     }
 
     /// Parse ON clause for INSERT statements (handles both ON CONFLICT and ON DUPLICATE KEY UPDATE)
+    ///
+    /// SQLite's generalized UPSERT accepts multiple `ON CONFLICT` clauses
+    /// (upsert5.test). A target-less clause (`ON CONFLICT DO ...`) matches any
+    /// conflict, so it must be the *last* clause — a non-terminal target-less
+    /// clause is a syntax error (`near "ON": syntax error`, verified against
+    /// sqlite3 3.51).
     fn parse_on_clause_for_insert(
         &mut self,
     ) -> Result<
-        (Option<vibesql_ast::OnConflictClause>, Option<Vec<vibesql_ast::Assignment>>),
+        (Vec<vibesql_ast::OnConflictClause>, Option<Vec<vibesql_ast::Assignment>>),
         ParseError,
     > {
-        if !self.peek_keyword(Keyword::On) {
-            return Ok((None, None));
+        let mut clauses: Vec<vibesql_ast::OnConflictClause> = Vec::new();
+
+        while self.peek_keyword(Keyword::On) {
+            self.advance(); // consume ON
+
+            if self.peek_keyword(Keyword::Conflict) {
+                // A target-less clause is a catch-all: SQLite only allows it
+                // in the terminal position.
+                if clauses.last().is_some_and(|c| c.conflict_target.is_none()) {
+                    return Err(ParseError { message: "near \"ON\": syntax error".to_string() });
+                }
+                clauses.push(self.parse_one_on_conflict_clause()?);
+            } else if self.peek_keyword(Keyword::Duplicate) {
+                // MySQL: ON DUPLICATE KEY UPDATE ... (cannot be mixed with
+                // SQLite ON CONFLICT clauses).
+                if !clauses.is_empty() {
+                    return Err(ParseError { message: "near \"ON\": syntax error".to_string() });
+                }
+                let assignments = self.parse_on_duplicate_key_update_clause()?;
+                return Ok((clauses, Some(assignments)));
+            } else {
+                return Err(ParseError {
+                    message: "Expected CONFLICT or DUPLICATE after ON".to_string(),
+                });
+            }
         }
 
-        self.advance(); // consume ON
+        Ok((clauses, None))
+    }
 
-        if self.peek_keyword(Keyword::Conflict) {
+    /// Parse a single `ON CONFLICT [(target)] DO {NOTHING | UPDATE ...}`
+    /// clause. The leading `ON` keyword has already been consumed; the next
+    /// token is `CONFLICT`.
+    fn parse_one_on_conflict_clause(
+        &mut self,
+    ) -> Result<vibesql_ast::OnConflictClause, ParseError> {
+        {
             // SQLite/PostgreSQL: ON CONFLICT [(cols)] DO {NOTHING | UPDATE SET ...}
             self.advance(); // consume CONFLICT
 
@@ -503,17 +539,22 @@ impl Parser {
                 });
             };
 
-            Ok((
-                Some(vibesql_ast::OnConflictClause {
-                    conflict_target,
-                    target_where,
-                    target_inexact,
-                    action,
-                }),
-                None,
-            ))
-        } else if self.peek_keyword(Keyword::Duplicate) {
-            // MySQL: ON DUPLICATE KEY UPDATE ...
+            Ok(vibesql_ast::OnConflictClause {
+                conflict_target,
+                target_where,
+                target_inexact,
+                action,
+            })
+        }
+    }
+
+    /// Parse the MySQL-style `ON DUPLICATE KEY UPDATE ...` clause. The
+    /// leading `ON` keyword has already been consumed; the next token is
+    /// `DUPLICATE`.
+    fn parse_on_duplicate_key_update_clause(
+        &mut self,
+    ) -> Result<Vec<vibesql_ast::Assignment>, ParseError> {
+        {
             self.advance(); // consume DUPLICATE
             self.expect_keyword(Keyword::Key)?;
             self.expect_keyword(Keyword::Update)?;
@@ -545,9 +586,7 @@ impl Parser {
                     break;
                 }
             }
-            Ok((None, Some(assignments)))
-        } else {
-            Err(ParseError { message: "Expected CONFLICT or DUPLICATE after ON".to_string() })
+            Ok(assignments)
         }
     }
 

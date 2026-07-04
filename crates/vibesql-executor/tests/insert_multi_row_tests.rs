@@ -38,7 +38,7 @@ fn test_multi_row_insert_atomic_success() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -85,7 +85,7 @@ fn test_multi_row_insert_atomic_failure() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -133,7 +133,7 @@ fn test_multi_row_insert_with_column_list() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -179,7 +179,7 @@ fn test_multi_row_insert_sqlite_type_affinity() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -262,7 +262,7 @@ fn test_multi_row_insert_various_data_types() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -321,7 +321,7 @@ fn test_multi_row_insert_primary_key_violation() {
             ],
         ]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -361,7 +361,7 @@ fn test_single_row_insert_no_transaction() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

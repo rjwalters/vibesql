@@ -625,7 +625,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
             columns: stmt.columns.iter().map(|s| self.resolve(*s)).collect(),
             source: self.convert_insert_source(&stmt.source),
             conflict_clause: stmt.conflict_clause.map(ConflictClause::from),
-            on_conflict: stmt.on_conflict.as_ref().map(|c| self.convert_on_conflict_clause(c)),
+            on_conflict: stmt
+                .on_conflict
+                .iter()
+                .map(|c| self.convert_on_conflict_clause(c))
+                .collect(),
             on_duplicate_key_update: stmt.on_duplicate_key_update.as_ref().map(|assignments| {
                 assignments.iter().map(|a| self.convert_assignment(a)).collect()
             }),

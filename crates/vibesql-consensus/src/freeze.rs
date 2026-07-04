@@ -641,7 +641,7 @@ fn transform_insert_default_sites(
         }
     }
 
-    if let Some(on_conflict) = &mut stmt.on_conflict {
+    for on_conflict in &mut stmt.on_conflict {
         if let OnConflictAction::DoUpdate { assignments, .. } = &mut on_conflict.action {
             transform_assignment_default_sites(assignments, schema, mode)?;
         }
@@ -973,7 +973,7 @@ pub fn time_cast_violation(
     };
     match statement {
         Statement::Insert(stmt) => {
-            if let Some(on_conflict) = &stmt.on_conflict {
+            for on_conflict in &stmt.on_conflict {
                 if let OnConflictAction::DoUpdate { assignments, where_clause } =
                     &on_conflict.action
                 {
@@ -1891,7 +1891,7 @@ fn check_trigger_body_statement(statement: &Statement) -> Result<(), String> {
                 }
                 InsertSource::DefaultValues => {}
             }
-            if let Some(on_conflict) = &stmt.on_conflict {
+            for on_conflict in &stmt.on_conflict {
                 if let Some(items) = &on_conflict.conflict_target {
                     for item in items {
                         if let ConflictTargetItem::Expression(expr) = item {
@@ -1974,7 +1974,7 @@ fn validate_insert(stmt: &InsertStmt) -> Result<(), String> {
         InsertSource::Select(query) => check_query_volatile_free(query, "INSERT … SELECT")?,
         InsertSource::DefaultValues => {}
     }
-    if let Some(on_conflict) = &stmt.on_conflict {
+    for on_conflict in &stmt.on_conflict {
         // Conflict targets are matched *structurally* against index
         // definitions — they must never be rewritten, so volatile calls
         // there are rejected rather than frozen.
@@ -2331,16 +2331,21 @@ fn transform_statement_sites(statement: Statement, visitor: &mut SiteTransformer
                         .collect(),
                 );
             }
-            if let Some(mut on_conflict) = stmt.on_conflict.take() {
-                if let OnConflictAction::DoUpdate { assignments, where_clause } = on_conflict.action
-                {
-                    on_conflict.action = OnConflictAction::DoUpdate {
-                        assignments: transform_assignments(assignments, visitor),
-                        where_clause: where_clause.map(|e| transform_expression(visitor, e)),
-                    };
-                }
-                stmt.on_conflict = Some(on_conflict);
-            }
+            stmt.on_conflict = stmt
+                .on_conflict
+                .into_iter()
+                .map(|mut on_conflict| {
+                    if let OnConflictAction::DoUpdate { assignments, where_clause } =
+                        on_conflict.action
+                    {
+                        on_conflict.action = OnConflictAction::DoUpdate {
+                            assignments: transform_assignments(assignments, visitor),
+                            where_clause: where_clause.map(|e| transform_expression(visitor, e)),
+                        };
+                    }
+                    on_conflict
+                })
+                .collect();
             if let Some(assignments) = stmt.on_duplicate_key_update.take() {
                 stmt.on_duplicate_key_update = Some(transform_assignments(assignments, visitor));
             }

@@ -41,7 +41,7 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
             vibesql_ast::Expression::Literal(SqlValue::Integer(price)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -270,7 +270,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
             ))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -290,7 +290,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(500)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -309,7 +309,7 @@ fn test_truncate_cascade_invalidates_columnar_cache() {
             vibesql_ast::Expression::Literal(SqlValue::Integer(300)),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };

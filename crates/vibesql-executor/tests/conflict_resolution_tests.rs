@@ -46,7 +46,7 @@ fn insert_user(db: &mut Database, id: i64, email: &str, name: &str) {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from(name))),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -79,7 +79,7 @@ fn test_insert_or_ignore_primary_key_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Bob"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -117,7 +117,7 @@ fn test_insert_or_ignore_unique_constraint_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice 2"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -169,7 +169,7 @@ fn test_insert_or_ignore_multi_row() {
             ],
         ]),
         conflict_clause: Some(ConflictClause::Ignore),
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -201,7 +201,7 @@ fn test_insert_or_ignore_no_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -524,7 +524,7 @@ fn test_insert_or_ignore_not_null_violation() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -606,12 +606,12 @@ fn test_insert_on_conflict_do_nothing_primary_key() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Duplicate"))),
         ]]),
         conflict_clause: None,
-        on_conflict: Some(OnConflictClause {
+        on_conflict: vec![OnConflictClause {
             conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column("id".to_string())]),
             target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
-        }),
+        }],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -651,12 +651,12 @@ fn test_insert_on_conflict_do_nothing_without_target() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Dup"))),
         ]]),
         conflict_clause: None,
-        on_conflict: Some(OnConflictClause {
+        on_conflict: vec![OnConflictClause {
             conflict_target: None, // No specific conflict target
             target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
-        }),
+        }],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -690,12 +690,12 @@ fn test_insert_on_conflict_do_nothing_no_conflict() {
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
         ]]),
         conflict_clause: None,
-        on_conflict: Some(OnConflictClause {
+        on_conflict: vec![OnConflictClause {
             conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column("id".to_string())]),
             target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
-        }),
+        }],
         on_duplicate_key_update: None,
         returning: None,
     };

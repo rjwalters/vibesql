@@ -29,7 +29,7 @@ fn test_after_delete_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
@@ -104,7 +104,7 @@ fn test_before_delete_trigger_fires() {
             )),
         ]]),
         conflict_clause: None,
-        on_conflict: None,
+        on_conflict: vec![],
         on_duplicate_key_update: None,
         returning: None,
     };
