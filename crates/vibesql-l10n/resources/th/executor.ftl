@@ -85,7 +85,6 @@ executor-column-count-mismatch = Derived column list มี { $provided } คอ
 # =============================================================================
 
 executor-constraint-violation = ละเมิด Constraint: { $message }
-executor-multiple-primary-keys = ไม่อนุญาตให้มี PRIMARY KEY constraints หลายตัว
 executor-cannot-drop-column = ไม่สามารถลบคอลัมน์: { $message }
 executor-constraint-not-found = ไม่พบ Constraint '{ $constraint_name }' ในตาราง '{ $table_name }'
 

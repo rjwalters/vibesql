@@ -85,7 +85,6 @@ executor-column-count-mismatch = 파생 컬럼 목록에 { $provided }개의 컬
 # =============================================================================
 
 executor-constraint-violation = 제약 조건 위반: { $message }
-executor-multiple-primary-keys = 여러 PRIMARY KEY 제약 조건은 허용되지 않습니다
 executor-cannot-drop-column = 컬럼을 삭제할 수 없습니다: { $message }
 executor-constraint-not-found = 테이블 '{ $table_name }'에서 제약 조건 '{ $constraint_name }'을(를) 찾을 수 없습니다
 

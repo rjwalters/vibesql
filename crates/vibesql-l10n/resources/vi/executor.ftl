@@ -85,7 +85,6 @@ executor-column-count-mismatch = Danh sách cột dẫn xuất có { $provided }
 # =============================================================================
 
 executor-constraint-violation = Vi phạm ràng buộc: { $message }
-executor-multiple-primary-keys = Không cho phép nhiều ràng buộc PRIMARY KEY
 executor-cannot-drop-column = Không thể xóa cột: { $message }
 executor-constraint-not-found = Không tìm thấy ràng buộc '{ $constraint_name }' trong bảng '{ $table_name }'
 

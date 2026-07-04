@@ -2,150 +2,148 @@
 
 use super::builder::SelectExecutor;
 
-/// Check if an expression references a column (which requires FROM clause).
+/// Find the first column reference in an expression that would require a FROM
+/// clause to resolve, returning its display text (source case preserved) for
+/// use in SQLite-compatible `no such column: X` errors (#5804).
 ///
 /// `count_pseudo` controls whether NEW/OLD pseudo-variables (`NEW.x`, `OLD.x`)
 /// count as column references. They do for a plain from-less SELECT (which has
 /// no row to resolve them from), but inside a trigger body (#5445) the firing
 /// row's NEW/OLD context resolves them, so callers there pass `false`.
-fn expression_references_column_inner(expr: &vibesql_ast::Expression, count_pseudo: bool) -> bool {
-    let expression_references_column =
-        |e: &vibesql_ast::Expression| expression_references_column_inner(e, count_pseudo);
+///
+/// Returns `None` when the expression contains no such reference. Subqueries
+/// (scalar subqueries, EXISTS) have their own scope and are not descended into.
+fn find_from_less_column_ref(expr: &vibesql_ast::Expression, count_pseudo: bool) -> Option<String> {
+    let find = |e: &vibesql_ast::Expression| find_from_less_column_ref(e, count_pseudo);
     match expr {
-        vibesql_ast::Expression::ColumnRef(_) => true,
-        vibesql_ast::Expression::PseudoVariable { .. } => count_pseudo, /* Pseudo-variables */
-        // reference columns (OLD.x, NEW.x)
-        vibesql_ast::Expression::Default => false, // DEFAULT doesn't reference columns
-        vibesql_ast::Expression::DuplicateKeyValue { .. } => false, /* DuplicateKeyValue doesn't */
+        vibesql_ast::Expression::ColumnRef(col_id) => Some(col_id.display().to_string()),
+        vibesql_ast::Expression::PseudoVariable { pseudo_table, column } => {
+            // Pseudo-variables reference columns (OLD.x, NEW.x)
+            if count_pseudo {
+                use vibesql_ast::pretty_print::ToSql;
+                Some(format!("{}.{}", pseudo_table.to_sql(), column))
+            } else {
+                None
+            }
+        }
+        vibesql_ast::Expression::Default => None, // DEFAULT doesn't reference columns
+        vibesql_ast::Expression::DuplicateKeyValue { .. } => None, /* DuplicateKeyValue doesn't */
         // reference columns
-        vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-            expression_references_column(left) || expression_references_column(right)
-        }
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => find(left).or_else(|| find(right)),
 
-        vibesql_ast::Expression::UnaryOp { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::UnaryOp { expr, .. } => find(expr),
 
-        vibesql_ast::Expression::Function { args, .. } => {
-            args.iter().any(expression_references_column)
-        }
+        vibesql_ast::Expression::Function { args, .. } => args.iter().find_map(find),
 
-        vibesql_ast::Expression::AggregateFunction { args, .. } => {
-            args.iter().any(expression_references_column)
-        }
+        vibesql_ast::Expression::AggregateFunction { args, .. } => args.iter().find_map(find),
 
-        vibesql_ast::Expression::IsNull { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::IsNull { expr, .. } => find(expr),
 
         vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
-            expression_references_column(left) || expression_references_column(right)
+            find(left).or_else(|| find(right))
         }
 
-        vibesql_ast::Expression::IsTruthValue { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::IsTruthValue { expr, .. } => find(expr),
 
         vibesql_ast::Expression::InList { expr, values, .. } => {
-            expression_references_column(expr) || values.iter().any(expression_references_column)
+            find(expr).or_else(|| values.iter().find_map(find))
         }
 
         vibesql_ast::Expression::Between { expr, low, high, .. } => {
-            expression_references_column(expr)
-                || expression_references_column(low)
-                || expression_references_column(high)
+            find(expr).or_else(|| find(low)).or_else(|| find(high))
         }
 
-        vibesql_ast::Expression::Cast { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::Cast { expr, .. } => find(expr),
 
-        vibesql_ast::Expression::Interval { value, .. } => expression_references_column(value),
+        vibesql_ast::Expression::Interval { value, .. } => find(value),
 
         vibesql_ast::Expression::Position { substring, string, character_unit: _ } => {
-            expression_references_column(substring) || expression_references_column(string)
+            find(substring).or_else(|| find(string))
         }
 
         vibesql_ast::Expression::Trim { removal_char, string, .. } => {
-            removal_char.as_ref().is_some_and(|e| expression_references_column(e))
-                || expression_references_column(string)
+            removal_char.as_ref().and_then(|e| find(e)).or_else(|| find(string))
         }
 
-        vibesql_ast::Expression::Extract { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::Extract { expr, .. } => find(expr),
 
         vibesql_ast::Expression::Like { expr, pattern, .. }
         | vibesql_ast::Expression::Glob { expr, pattern, .. } => {
-            expression_references_column(expr) || expression_references_column(pattern)
+            find(expr).or_else(|| find(pattern))
         }
 
         vibesql_ast::Expression::In { expr, .. } => {
             // Note: subquery could reference outer columns but that's a different case
-            expression_references_column(expr)
+            find(expr)
         }
 
-        vibesql_ast::Expression::QuantifiedComparison { expr, .. } => {
-            expression_references_column(expr)
-        }
+        vibesql_ast::Expression::QuantifiedComparison { expr, .. } => find(expr),
 
-        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
-            operand.as_ref().is_some_and(|e| expression_references_column(e))
-                || when_clauses.iter().any(|when_clause| {
-                    when_clause.conditions.iter().any(expression_references_column)
-                        || expression_references_column(&when_clause.result)
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => operand
+            .as_ref()
+            .and_then(|e| find(e))
+            .or_else(|| {
+                when_clauses.iter().find_map(|when_clause| {
+                    when_clause
+                        .conditions
+                        .iter()
+                        .find_map(find)
+                        .or_else(|| find(&when_clause.result))
                 })
-                || else_result.as_ref().is_some_and(|e| expression_references_column(e))
-        }
+            })
+            .or_else(|| else_result.as_ref().and_then(|e| find(e))),
 
         vibesql_ast::Expression::WindowFunction { function, over } => {
             // Check window function arguments
-            let args_reference_column = match function {
+            let args_reference = match function {
                 vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
                 | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
-                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => {
-                    args.iter().any(expression_references_column)
-                }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args.iter().find_map(find),
             };
 
             // Check PARTITION BY and ORDER BY clauses
-            let partition_references = over
-                .partition_by
-                .as_ref()
-                .is_some_and(|exprs| exprs.iter().any(expression_references_column));
-
-            let order_references = over.order_by.as_ref().is_some_and(|items| {
-                items.iter().any(|item| expression_references_column(&item.expr))
-            });
-
-            args_reference_column || partition_references || order_references
+            args_reference
+                .or_else(|| {
+                    over.partition_by.as_ref().and_then(|exprs| exprs.iter().find_map(find))
+                })
+                .or_else(|| {
+                    over.order_by
+                        .as_ref()
+                        .and_then(|items| items.iter().find_map(|item| find(&item.expr)))
+                })
         }
 
         // These don't contain column references:
-        vibesql_ast::Expression::Literal(_) => false,
-        vibesql_ast::Expression::Wildcard => false,
-        vibesql_ast::Expression::ScalarSubquery(_) => false, // Subquery has its own scope
-        vibesql_ast::Expression::Exists { .. } => false,     // Subquery has its own scope
-        vibesql_ast::Expression::CurrentDate => false,
-        vibesql_ast::Expression::CurrentTime { .. } => false,
-        vibesql_ast::Expression::CurrentTimestamp { .. } => false,
-        vibesql_ast::Expression::NextValue { .. } => false, // Sequence reference, not column
-        vibesql_ast::Expression::SessionVariable { .. } => false, // Session variable, not column
+        vibesql_ast::Expression::Literal(_) => None,
+        vibesql_ast::Expression::Wildcard => None,
+        vibesql_ast::Expression::ScalarSubquery(_) => None, // Subquery has its own scope
+        vibesql_ast::Expression::Exists { .. } => None,     // Subquery has its own scope
+        vibesql_ast::Expression::CurrentDate => None,
+        vibesql_ast::Expression::CurrentTime { .. } => None,
+        vibesql_ast::Expression::CurrentTimestamp { .. } => None,
+        vibesql_ast::Expression::NextValue { .. } => None, // Sequence reference, not column
+        vibesql_ast::Expression::SessionVariable { .. } => None, // Session variable, not column
         vibesql_ast::Expression::MatchAgainst { columns, search_modifier, .. } => {
             // MATCH AGAINST references columns and the search term
-            !columns.is_empty() || expression_references_column(search_modifier)
+            columns.first().cloned().or_else(|| find(search_modifier))
         }
 
         // Placeholders don't reference columns (they're parameter markers)
         vibesql_ast::Expression::Placeholder(_)
         | vibesql_ast::Expression::NumberedPlaceholder(_)
-        | vibesql_ast::Expression::NamedPlaceholder(_) => false,
+        | vibesql_ast::Expression::NamedPlaceholder(_) => None,
 
         // Conjunction and Disjunction - check all children
         vibesql_ast::Expression::Conjunction(children)
-        | vibesql_ast::Expression::Disjunction(children) => {
-            children.iter().any(expression_references_column)
-        }
+        | vibesql_ast::Expression::Disjunction(children) => children.iter().find_map(find),
 
         // Row value constructor - check all values
-        vibesql_ast::Expression::RowValueConstructor(values) => {
-            values.iter().any(expression_references_column)
-        }
+        vibesql_ast::Expression::RowValueConstructor(values) => values.iter().find_map(find),
 
-        vibesql_ast::Expression::Collate { expr, .. } => expression_references_column(expr),
+        vibesql_ast::Expression::Collate { expr, .. } => find(expr),
 
         vibesql_ast::Expression::Raise { error_message, .. } => {
-            error_message.as_ref().is_some_and(|msg| expression_references_column(msg))
+            error_message.as_ref().and_then(|msg| find(msg))
         }
     }
 }
@@ -155,7 +153,7 @@ impl SelectExecutor<'_> {
     ///
     /// NEW/OLD pseudo-variables count as column references here.
     pub(super) fn expression_references_column(&self, expr: &vibesql_ast::Expression) -> bool {
-        expression_references_column_inner(expr, true)
+        find_from_less_column_ref(expr, true).is_some()
     }
 
     /// Check if an expression references a *non-pseudo* column (i.e. a real
@@ -168,7 +166,27 @@ impl SelectExecutor<'_> {
         &self,
         expr: &vibesql_ast::Expression,
     ) -> bool {
-        expression_references_column_inner(expr, false)
+        find_from_less_column_ref(expr, false).is_some()
+    }
+
+    /// Find the first column reference in an expression that a from-less
+    /// SELECT cannot resolve, returning its display text (source case
+    /// preserved) for SQLite's `no such column: X` error (#5804).
+    ///
+    /// NEW/OLD pseudo-variables count as unresolvable references here.
+    pub(super) fn find_column_ref(&self, expr: &vibesql_ast::Expression) -> Option<String> {
+        find_from_less_column_ref(expr, true)
+    }
+
+    /// Like [`Self::find_column_ref`], but ignores NEW/OLD pseudo-variables.
+    ///
+    /// Used inside a trigger body (#5445), where the firing row's NEW/OLD
+    /// context resolves pseudo-variables.
+    pub(super) fn find_non_pseudo_column_ref(
+        &self,
+        expr: &vibesql_ast::Expression,
+    ) -> Option<String> {
+        find_from_less_column_ref(expr, false)
     }
 
     /// Evaluate a LIMIT or OFFSET expression and convert to usize
@@ -220,7 +238,7 @@ impl SelectExecutor<'_> {
         // Convert to integer using the shared SQLite LIMIT/OFFSET affinity
         // rules (integers, booleans as 0/1, integral reals, full-string
         // numeric text — see select::helpers::coerce_limit_offset_to_i64).
-        let n = crate::select::helpers::coerce_limit_offset_to_i64(value, clause_name)?;
+        let n = crate::select::helpers::coerce_limit_offset_to_i64(value)?;
 
         // SQLite compatibility: negative values have special meanings
         if n < 0 {

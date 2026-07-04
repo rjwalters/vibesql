@@ -85,7 +85,6 @@ executor-column-count-mismatch = Производный список столб�
 # =============================================================================
 
 executor-constraint-violation = Нарушение ограничения: { $message }
-executor-multiple-primary-keys = Несколько ограничений PRIMARY KEY не допускается
 executor-cannot-drop-column = Невозможно удалить столбец: { $message }
 executor-constraint-not-found = Ограничение '{ $constraint_name }' не найдено в таблице '{ $table_name }'
 

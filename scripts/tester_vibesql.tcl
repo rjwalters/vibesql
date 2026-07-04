@@ -487,6 +487,15 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
     }
 
+    # Multiple PRIMARY KEY declarations (#5804): the engine emits SQLite's
+    # exact wording `table "X" has more than one primary key` (misc1-7.1/7.2,
+    # fuzz-8.1). Pass it through verbatim BEFORE the UNIQUE-constraint fallback
+    # below so that fallback can never mistranslate it into "UNIQUE constraint
+    # failed" again.
+    if {[regexp -nocase {has more than one primary key} $error_msg]} {
+        return $error_msg
+    }
+
     # Constraint violations - VibeSQL now outputs SQLite-compatible format directly
     # Format: "UNIQUE constraint failed: table.column" or "UNIQUE constraint failed: table.col1, table.col2"
     if {[regexp -nocase {UNIQUE constraint failed: (.+)$} $error_msg -> col_spec]} {
@@ -583,14 +592,10 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "datatype mismatch"
     }
 
-    # LIMIT/OFFSET value must be integer
-    # "LIMIT value ... must be an integer" -> "datatype mismatch"
-    if {[regexp -nocase {LIMIT value.*must be an integer} $error_msg]} {
-        return "datatype mismatch"
-    }
-    if {[regexp -nocase {OFFSET value.*must be an integer} $error_msg]} {
-        return "datatype mismatch"
-    }
+    # NOTE (#5804): the engine now emits SQLite's exact `datatype mismatch`
+    # wording for non-coercible LIMIT/OFFSET values, so the former
+    # "LIMIT/OFFSET value ... must be an integer" -> "datatype mismatch"
+    # translation rules were deleted; the engine message is load-bearing.
 
     # If no specific translation, return original (without prefix)
     return $error_msg
@@ -3827,8 +3832,6 @@ array set vibesql_skip_tests {
     misc1-5.1 "Parser accepts invalid syntax WHEREwww"
     misc1-5.2 "Cascades from misc1-5.1"
     misc1-6.1 "Parser accepts invalid syntax WHEREwww"
-    misc1-7.1 "Error message format differs - multiple primary key"
-    misc1-7.2 "Error message format differs - multiple primary key"
     misc1-8.2 "Error message format differs"
     misc-8.1 "Table not found after failed statement"
     misc-8.2 "Cascades from misc-8.1"

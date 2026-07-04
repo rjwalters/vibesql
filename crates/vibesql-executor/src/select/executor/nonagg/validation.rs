@@ -204,9 +204,9 @@ fn compute_single_select_column_count(
                 if let Some(from) = &stmt.from {
                     count += count_columns_in_from_clause(from, database, cte_results)?;
                 } else {
-                    // SELECT * without FROM is an error (should be caught earlier)
-                    return Err(ExecutorError::UnsupportedFeature(
-                        "SELECT * requires FROM clause".to_string(),
+                    // SELECT * without FROM: SQLite-exact wording (#5804)
+                    return Err(ExecutorError::SqliteCompatError(
+                        "no tables specified".to_string(),
                     ));
                 }
             }

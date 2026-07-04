@@ -46,6 +46,7 @@ impl ConstraintValidator {
     ///
     /// # Arguments
     ///
+    /// * `table_name` - The table name (used in SQLite-compatible error messages)
     /// * `columns` - The column definitions from the DDL statement
     /// * `table_constraints` - The table-level constraints
     ///
@@ -57,6 +58,7 @@ impl ConstraintValidator {
     ///
     /// Returns `ExecutorError::MultiplePrimaryKeys` if multiple PRIMARY KEY constraints are defined
     pub fn process_constraints(
+        table_name: &str,
         columns: &[ColumnDef],
         table_constraints: &[TableConstraint],
     ) -> Result<ConstraintResult, ExecutorError> {
@@ -71,10 +73,14 @@ impl ConstraintValidator {
                 match &constraint.kind {
                     ColumnConstraintKind::PrimaryKey { .. } => {
                         if has_column_level_pk {
-                            return Err(ExecutorError::MultiplePrimaryKeys);
+                            return Err(ExecutorError::MultiplePrimaryKeys {
+                                table_name: table_name.to_string(),
+                            });
                         }
                         if result.primary_key.is_some() {
-                            return Err(ExecutorError::MultiplePrimaryKeys);
+                            return Err(ExecutorError::MultiplePrimaryKeys {
+                                table_name: table_name.to_string(),
+                            });
                         }
                         result.primary_key = Some(vec![col_def.name.clone()]);
                         // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
@@ -127,7 +133,9 @@ impl ConstraintValidator {
                 TableConstraintKind::PrimaryKey { columns: pk_cols, .. } => {
                     // Only allow one PRIMARY KEY constraint total (column-level OR table-level)
                     if result.primary_key.is_some() {
-                        return Err(ExecutorError::MultiplePrimaryKeys);
+                        return Err(ExecutorError::MultiplePrimaryKeys {
+                            table_name: table_name.to_string(),
+                        });
                     }
                     // Extract column names from IndexColumn structs
                     let column_names: Vec<String> =
@@ -249,7 +257,7 @@ mod tests {
             "id",
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -277,7 +285,8 @@ mod tests {
             },
         }];
 
-        let result = ConstraintValidator::process_constraints(&columns, &constraints).unwrap();
+        let result =
+            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string(), "tenant_id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -302,8 +311,11 @@ mod tests {
             },
         }];
 
-        let result = ConstraintValidator::process_constraints(&columns, &constraints);
-        assert!(matches!(result, Err(ExecutorError::MultiplePrimaryKeys)));
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &constraints);
+        assert!(matches!(result, Err(ExecutorError::MultiplePrimaryKeys { .. })));
+        // SQLite-compatible wording (misc1-7.1/7.2, fuzz-8.1)
+        let err = result.err().expect("expected MultiplePrimaryKeys error");
+        assert_eq!(err.to_string(), "table \"test_table\" has more than one primary key");
     }
 
     #[test]
@@ -324,7 +336,8 @@ mod tests {
             },
         }];
 
-        let result = ConstraintValidator::process_constraints(&columns, &constraints).unwrap();
+        let result =
+            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.unique_constraints.len(), 2);
         assert!(result.unique_constraints.contains(&vec!["email".to_string()]));
@@ -348,7 +361,7 @@ mod tests {
             vec![ColumnConstraintKind::Check(Box::new(check_expr.clone()))],
         )];
 
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.check_constraints.len(), 1);
         assert_eq!(result.check_constraints[0].1, check_expr);
@@ -384,7 +397,7 @@ mod tests {
             DataType::Varchar { max_length: None },
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["name".to_string()]));
         // NOT NULL should NOT be added for non-INTEGER PRIMARY KEY
@@ -399,7 +412,7 @@ mod tests {
             DataType::Varchar { max_length: None },
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["c".to_string()]));
         assert!(!result.not_null_columns.contains(&"c".to_string()));
@@ -413,7 +426,7 @@ mod tests {
             DataType::Integer,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -445,7 +458,8 @@ mod tests {
             },
         }];
 
-        let result = ConstraintValidator::process_constraints(&columns, &constraints).unwrap();
+        let result =
+            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string(), "code".to_string()]));
         // Only the INTEGER column should have NOT NULL
@@ -461,7 +475,7 @@ mod tests {
             DataType::Real,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["value".to_string()]));
         assert!(!result.not_null_columns.contains(&"value".to_string()));
@@ -475,7 +489,7 @@ mod tests {
             DataType::Bigint,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints(&columns, &[]).unwrap();
+        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["big_id".to_string()]));
         // SQLite only treats INTEGER (not INT, BIGINT, etc.) specially

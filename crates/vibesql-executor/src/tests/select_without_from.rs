@@ -225,12 +225,8 @@ fn test_select_star_without_from_fails() {
 
     let result = executor.execute(&stmt);
     assert!(result.is_err());
-    match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("require FROM clause") || msg.contains("requires FROM clause"));
-        }
-        _ => panic!("Expected UnsupportedFeature error"),
-    }
+    // SQLite-exact wording for `SELECT *` without FROM (#5804)
+    assert_eq!(result.err().expect("expected error").to_string(), "no tables specified");
 }
 
 #[test]
@@ -266,10 +262,11 @@ fn test_column_reference_without_from_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: some_column`
+            assert_eq!(column_ref, "some_column");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
 }
 
@@ -308,10 +305,11 @@ fn test_is_null_with_column_reference_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: id`
+            assert_eq!(column_ref, "id");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
 }
 
@@ -357,10 +355,11 @@ fn test_between_with_column_reference_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: price`
+            assert_eq!(column_ref, "price");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
 }
 
@@ -399,10 +398,11 @@ fn test_cast_with_column_reference_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: id`
+            assert_eq!(column_ref, "id");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
 }
 
@@ -445,10 +445,11 @@ fn test_like_with_column_reference_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: name`
+            assert_eq!(column_ref, "name");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
 }
 
@@ -492,11 +493,47 @@ fn test_in_list_with_column_reference_fails() {
     let result = executor.execute(&stmt);
     assert!(result.is_err());
     match result {
-        Err(ExecutorError::UnsupportedFeature(msg)) => {
-            assert!(msg.contains("Column reference requires FROM clause"));
+        Err(ExecutorError::NoSuchColumn { column_ref }) => {
+            // SQLite-exact wording (#5804): `no such column: id`
+            assert_eq!(column_ref, "id");
         }
-        _ => panic!("Expected UnsupportedFeature error"),
+        other => panic!("Expected NoSuchColumn error, got {:?}", other),
     }
+}
+
+/// #5804: `SELECT X` (FROM-less bare column ref) must produce SQLite's exact
+/// `no such column: X` error with the reference's source case preserved.
+#[test]
+fn test_bare_column_ref_error_preserves_source_case() {
+    let db = vibesql_storage::Database::new();
+    let executor = SelectExecutor::new(&db);
+
+    let stmt = vibesql_ast::SelectStmt {
+        into_table: None,
+        into_variables: None,
+        with_clause: None,
+        set_operation: None,
+        values: None,
+        distinct: false,
+        select_list: vec![vibesql_ast::SelectItem::Expression {
+            expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "X", false,
+            )),
+            alias: None,
+            source_text: None,
+        }],
+        from: None,
+        where_clause: None,
+        group_by: None,
+        having: None,
+        window_definitions: None,
+        order_by: None,
+        limit: None,
+        offset: None,
+    };
+
+    let err = executor.execute(&stmt).expect_err("SELECT X without FROM must fail");
+    assert_eq!(err.to_string(), "no such column: X");
 }
 
 #[test]

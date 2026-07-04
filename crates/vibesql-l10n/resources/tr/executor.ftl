@@ -85,7 +85,6 @@ executor-column-count-mismatch = Türetilmiş sütun listesi { $provided } sütu
 # =============================================================================
 
 executor-constraint-violation = Kısıtlama ihlali: { $message }
-executor-multiple-primary-keys = Birden fazla PRIMARY KEY kısıtlamasına izin verilmez
 executor-cannot-drop-column = Sütun silinemez: { $message }
 executor-constraint-not-found = '{ $table_name }' tablosunda '{ $constraint_name }' kısıtlaması bulunamadı
 

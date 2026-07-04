@@ -85,7 +85,6 @@ executor-column-count-mismatch = व्युत्पन्न कॉलम स
 # =============================================================================
 
 executor-constraint-violation = कॉन्स्ट्रेंट उल्लंघन: { $message }
-executor-multiple-primary-keys = एकाधिक PRIMARY KEY कॉन्स्ट्रेंट की अनुमति नहीं है
 executor-cannot-drop-column = कॉलम हटाया नहीं जा सकता: { $message }
 executor-constraint-not-found = कॉन्स्ट्रेंट '{ $constraint_name }' टेबल '{ $table_name }' में नहीं मिला
 

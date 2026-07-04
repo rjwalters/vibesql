@@ -74,7 +74,7 @@ pub(crate) fn evaluate_limit_offset_expr(
     database: &vibesql_storage::Database,
     clause_name: &str,
 ) -> Result<usize, crate::ExecutorError> {
-    let raw = evaluate_limit_offset_expr_raw(expr, database, clause_name)?;
+    let raw = evaluate_limit_offset_expr_raw(expr, database)?;
     if clause_name == "OFFSET" {
         // Negative offset is treated as 0
         Ok(if raw < 0 { 0 } else { raw as usize })
@@ -92,7 +92,6 @@ pub(crate) fn evaluate_limit_offset_expr(
 fn evaluate_limit_offset_expr_raw(
     expr: &vibesql_ast::Expression,
     database: &vibesql_storage::Database,
-    clause_name: &str,
 ) -> Result<i64, crate::ExecutorError> {
     use crate::evaluator::ExpressionEvaluator;
 
@@ -125,7 +124,7 @@ fn evaluate_limit_offset_expr_raw(
     let value = evaluator.eval(expr, &empty_row)?;
 
     // Convert to integer using SQLite's LIMIT/OFFSET affinity rules
-    coerce_limit_offset_to_i64(value, clause_name)
+    coerce_limit_offset_to_i64(value)
 }
 
 /// Coerce an evaluated LIMIT/OFFSET value to i64 using SQLite semantics.
@@ -141,11 +140,9 @@ fn evaluate_limit_offset_expr_raw(
 ///   representing an integral value: `'2'`, `' 2 '`, `'+2'`, `'2.0'` are accepted; `'The'`,
 ///   `'2abc'`, `'2.5'` error. Note this is deliberately NOT the leading-prefix parse used for
 ///   truthiness — SQLite raises "datatype mismatch" for partial parses here
-/// - NULL, BLOB and everything else keep erroring (SQLite's "datatype mismatch" wording is tracked
-///   separately in #5804)
+/// - NULL, BLOB and everything else error with SQLite's exact wording `datatype mismatch` (#5804)
 pub(in crate::select) fn coerce_limit_offset_to_i64(
     value: vibesql_types::SqlValue,
-    clause_name: &str,
 ) -> Result<i64, crate::ExecutorError> {
     use vibesql_types::SqlValue;
 
@@ -157,36 +154,35 @@ pub(in crate::select) fn coerce_limit_offset_to_i64(
         }
     }
 
-    let err = |shown: String| crate::ExecutorError::InvalidLimitOffset {
-        clause: clause_name.to_string(),
-        value: shown,
-        reason: "must be an integer".to_string(),
-    };
+    // SQLite raises exactly `datatype mismatch` (SQLITE_MISMATCH) for a
+    // non-integral LIMIT/OFFSET value. SqliteCompatError renders verbatim,
+    // with no prefix (#5804).
+    let err = || crate::ExecutorError::SqliteCompatError("datatype mismatch".to_string());
 
     match &value {
         SqlValue::Integer(n) => Ok(*n),
         SqlValue::Smallint(n) => Ok(*n as i64),
         SqlValue::Bigint(n) => Ok(*n),
-        SqlValue::Unsigned(n) => i64::try_from(*n).map_err(|_| err(format!("{:?}", value))),
+        SqlValue::Unsigned(n) => i64::try_from(*n).map_err(|_| err()),
         // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
         // e.g. SELECT 1 LIMIT EXISTS(SELECT 1) returns one row
         SqlValue::Boolean(b) => Ok(i64::from(*b)),
-        SqlValue::Float(f) => integral_f64(*f as f64).ok_or_else(|| err(format!("{:?}", value))),
+        SqlValue::Float(f) => integral_f64(*f as f64).ok_or_else(err),
         SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
-            integral_f64(*f).ok_or_else(|| err(format!("{:?}", value)))
+            integral_f64(*f).ok_or_else(err)
         }
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             let trimmed = s.trim();
             if let Ok(n) = trimmed.parse::<i64>() {
                 Ok(n)
             } else if let Ok(f) = trimmed.parse::<f64>() {
-                integral_f64(f).ok_or_else(|| err(format!("{:?}", value)))
+                integral_f64(f).ok_or_else(err)
             } else {
-                Err(err(format!("{:?}", value)))
+                Err(err())
             }
         }
-        SqlValue::Null => Err(err("NULL".to_string())),
-        _ => Err(err(format!("{:?}", value))),
+        SqlValue::Null => Err(err()),
+        _ => Err(err()),
     }
 }
 
@@ -196,11 +192,7 @@ pub(super) fn evaluate_limit(
     limit: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<usize>, crate::ExecutorError> {
-    match limit
-        .as_ref()
-        .map(|e| evaluate_limit_offset_expr_raw(e, database, "LIMIT"))
-        .transpose()?
-    {
+    match limit.as_ref().map(|e| evaluate_limit_offset_expr_raw(e, database)).transpose()? {
         Some(n) if n < 0 => Ok(None), // Any negative value means unlimited
         Some(n) => Ok(Some(n as usize)),
         None => Ok(None),
@@ -213,11 +205,7 @@ pub(super) fn evaluate_offset(
     offset: &Option<vibesql_ast::Expression>,
     database: &vibesql_storage::Database,
 ) -> Result<Option<usize>, crate::ExecutorError> {
-    match offset
-        .as_ref()
-        .map(|e| evaluate_limit_offset_expr_raw(e, database, "OFFSET"))
-        .transpose()?
-    {
+    match offset.as_ref().map(|e| evaluate_limit_offset_expr_raw(e, database)).transpose()? {
         Some(n) if n < 0 => Ok(Some(0)), // Negative offset treated as 0
         Some(n) => Ok(Some(n as usize)),
         None => Ok(None),
@@ -285,7 +273,7 @@ mod tests {
     use super::coerce_limit_offset_to_i64;
 
     fn coerce(value: SqlValue) -> Result<i64, crate::ExecutorError> {
-        coerce_limit_offset_to_i64(value, "LIMIT")
+        coerce_limit_offset_to_i64(value)
     }
 
     fn text(s: &str) -> SqlValue {
@@ -340,5 +328,14 @@ mod tests {
         assert!(coerce(SqlValue::Null).is_err());
         // LIMIT X'32' keeps erroring (SQLite: datatype mismatch)
         assert!(coerce(SqlValue::Blob(b"2".to_vec())).is_err());
+    }
+
+    #[test]
+    fn rejection_uses_sqlite_exact_wording() {
+        // #5804: SQLite raises exactly `datatype mismatch` (no prefix) for a
+        // non-integral LIMIT/OFFSET value.
+        for v in [SqlValue::Double(56.1), text("The"), SqlValue::Null] {
+            assert_eq!(coerce(v).unwrap_err().to_string(), "datatype mismatch");
+        }
     }
 }

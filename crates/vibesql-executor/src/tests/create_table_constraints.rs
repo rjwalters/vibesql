@@ -157,7 +157,10 @@ fn test_create_table_with_multiple_primary_keys_fails() {
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
-    assert!(matches!(result, Err(ExecutorError::MultiplePrimaryKeys)));
+    assert!(matches!(result, Err(ExecutorError::MultiplePrimaryKeys { .. })));
+    // SQLite-exact wording (misc1-7.1/7.2, fuzz-8.1): table name quoted with
+    // double quotes, lowercase phrasing.
+    assert_eq!(result.unwrap_err().to_string(), "table \"users\" has more than one primary key");
 }
 
 #[test]

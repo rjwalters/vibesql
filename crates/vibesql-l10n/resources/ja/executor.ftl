@@ -85,7 +85,6 @@ executor-column-count-mismatch = 派生カラムリストには { $provided } �
 # =============================================================================
 
 executor-constraint-violation = 制約違反: { $message }
-executor-multiple-primary-keys = 複数のPRIMARY KEY制約は許可されていません
 executor-cannot-drop-column = カラムを削除できません: { $message }
 executor-constraint-not-found = テーブル '{ $table_name }' に制約 '{ $constraint_name }' が見つかりません
 

@@ -262,9 +262,7 @@ impl CreateTableExecutor {
         // sqlite3 still raises `there is already an index named X` (verified
         // against 3.51.0). IF NOT EXISTS only silences a same-type (table)
         // collision, handled above.
-        if database
-            .catalog
-            .index_name_exists_in_schema(&schema_name, identifier.table_canonical())
+        if database.catalog.index_name_exists_in_schema(&schema_name, identifier.table_canonical())
         {
             // Echo the name as the user spelled it (sqlite3 prints the bare
             // index name without schema qualification).
@@ -334,8 +332,11 @@ impl CreateTableExecutor {
             .collect();
 
         // Process constraints using the constraint validator
-        let constraint_result =
-            ConstraintValidator::process_constraints(&stmt.columns, &stmt.table_constraints)?;
+        let constraint_result = ConstraintValidator::process_constraints(
+            &table_name,
+            &stmt.columns,
+            &stmt.table_constraints,
+        )?;
 
         // Apply constraint results to columns (updates nullability)
         ConstraintValidator::apply_to_columns(&mut columns, &constraint_result);
@@ -781,10 +782,7 @@ impl CreateTableExecutor {
         // Cross-type namespace collision: a CTAS name already used by an index
         // must fail with `there is already an index named <name>`, just like the
         // bare CREATE TABLE path. Keeps the schema reloadable (issue #5613).
-        if database
-            .catalog
-            .index_name_exists_in_schema(schema_name, identifier.table_canonical())
-        {
+        if database.catalog.index_name_exists_in_schema(schema_name, identifier.table_canonical()) {
             return Err(ExecutorError::SqliteCompatError(format!(
                 "there is already an index named {}",
                 table_name

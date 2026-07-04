@@ -85,7 +85,6 @@ executor-column-count-mismatch = La lista de columnas derivadas tiene { $provide
 # =============================================================================
 
 executor-constraint-violation = Violación de restricción: { $message }
-executor-multiple-primary-keys = No se permiten múltiples restricciones PRIMARY KEY
 executor-cannot-drop-column = No se puede eliminar la columna: { $message }
 executor-constraint-not-found = Restricción '{ $constraint_name }' no encontrada en la tabla '{ $table_name }'
 

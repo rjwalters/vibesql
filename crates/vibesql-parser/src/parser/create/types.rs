@@ -60,6 +60,13 @@ impl Parser {
             Token::Keyword { keyword, .. } if keyword.is_sqlite_fallback_keyword() => {
                 keyword.to_string().to_lowercase()
             }
+            // SQLite accepts arbitrary type names, including the TYPE keyword
+            // itself (misc1-7.1: `CREATE TABLE error1(a TYPE PRIMARY KEY, ...)`).
+            // TYPE is a VibeSQL-only keyword (CREATE TYPE, GRANT) not in the
+            // SQLite fallback set above, so it needs its own arm; it falls
+            // through to the UserDefined catch-all below and is stored by
+            // affinity (#5804).
+            Token::Keyword { keyword: Keyword::Type, .. } => "type".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();
