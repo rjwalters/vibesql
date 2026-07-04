@@ -613,13 +613,39 @@ impl SelectExecutor<'_> {
             };
 
             // Determine which side of the condition refers to the current batch vs new table
-            let (left_col_idx, right_col_idx) = resolve_join_column_indices(
+            let (left_col_idx, right_col_idx) = match resolve_join_column_indices(
                 join_cond,
                 &joined_tables,
                 table_ref,
                 schema,
                 combined_schema,
-            )?;
+            ) {
+                Ok(indices) => indices,
+                Err(e) => {
+                    // Resolution failure (e.g. a qualifier that doesn't match the
+                    // expected side) means this chain can't safely run columnar.
+                    // Fall back to the row-oriented path instead of erroring.
+                    log::debug!(
+                        "Columnar join: failed to resolve join columns for '{}': {:?}, falling back",
+                        table_ref,
+                        e
+                    );
+                    return Ok(None);
+                }
+            };
+
+            // Sanity check (#5819): the joined-side index must lie within the
+            // current batch. An unqualified join column that resolves into a
+            // not-yet-joined table's slot in the full combined schema would
+            // otherwise index out of range (or into the wrong column).
+            if left_col_idx >= current_batch.columns.len() {
+                log::debug!(
+                    "Columnar join: resolved left column index {} exceeds current batch width {}, falling back",
+                    left_col_idx,
+                    current_batch.columns.len()
+                );
+                return Ok(None);
+            }
 
             log::debug!(
                 "Columnar join: {:?} joining '{}' (col {}) with '{}' (col {})",

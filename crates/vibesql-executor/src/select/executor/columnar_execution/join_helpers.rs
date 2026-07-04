@@ -446,26 +446,58 @@ pub(super) fn resolve_join_column_indices(
     // Determine which side refers to joined tables vs new table
     let left_in_joined = cond.left_table.as_deref().map_or_else(
         || is_column_in_tables(&cond.left_column, joined_tables, combined_schema),
-        |t| joined_tables.contains(&t),
+        |t| joined_tables.iter().any(|jt| jt.eq_ignore_ascii_case(t)),
     );
 
-    let (left_col, right_col) = if left_in_joined {
-        (&cond.left_column, &cond.right_column)
+    // Keep each column's table qualifier paired with it through the swap
+    let ((left_table, left_col), (right_table, right_col)) = if left_in_joined {
+        (
+            (cond.left_table.as_deref(), &cond.left_column),
+            (cond.right_table.as_deref(), &cond.right_column),
+        )
     } else {
-        (&cond.right_column, &cond.left_column)
+        (
+            (cond.right_table.as_deref(), &cond.right_column),
+            (cond.left_table.as_deref(), &cond.left_column),
+        )
     };
 
-    // Find left column index in the current (joined) batch
-    let left_idx = combined_schema.get_column_index(None, left_col).ok_or_else(|| {
+    // Find the joined-side column index in the combined schema.
+    //
+    // Issue #5819: the table qualifier MUST be passed through here. Dropping it
+    // (a `None` qualifier) made `get_column_index` fall back to leftmost-name
+    // matching, so a qualified ref like `b1.id` in a 3+-table join resolved to
+    // the FIRST table's `id` column whenever the first table shared the column
+    // name — silently joining on the wrong column (0 rows for inner joins,
+    // dropped matches for LEFT JOIN chains).
+    let left_idx = combined_schema.get_column_index(left_table, left_col).ok_or_else(|| {
         ExecutorError::ColumnNotFound {
             column_name: left_col.clone(),
-            table_name: String::new(),
+            table_name: left_table.unwrap_or("").to_string(),
             searched_tables: joined_tables.iter().map(|s| s.to_string()).collect(),
             available_columns: vec![],
         }
     })?;
 
-    // Find right column index in the new table
+    // Find right column index in the new table.
+    //
+    // When the right side carries a qualifier, it must actually refer to the
+    // new table; otherwise the condition was mis-classified (e.g. both sides
+    // belong to already-joined tables) and joining on it would be incorrect.
+    if let Some(rt) = right_table {
+        if !rt.eq_ignore_ascii_case(new_table) {
+            return Err(ExecutorError::ColumnNotFound {
+                column_name: right_col.clone(),
+                table_name: rt.to_string(),
+                searched_tables: vec![new_table.to_string()],
+                available_columns: new_table_schema
+                    .columns
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect(),
+            });
+        }
+    }
     let right_idx = new_table_schema
         .columns
         .iter()
