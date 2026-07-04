@@ -85,7 +85,6 @@ executor-column-count-mismatch = La liste de colonnes dérivées a { $provided }
 # =============================================================================
 
 executor-constraint-violation = Violation de contrainte : { $message }
-executor-multiple-primary-keys = Les contraintes PRIMARY KEY multiples ne sont pas autorisées
 executor-cannot-drop-column = Impossible de supprimer la colonne : { $message }
 executor-constraint-not-found = Contrainte '{ $constraint_name }' introuvable dans la table '{ $table_name }'
 

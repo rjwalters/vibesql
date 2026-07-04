@@ -85,7 +85,6 @@ executor-column-count-mismatch = Похідний список колонок м
 # =============================================================================
 
 executor-constraint-violation = Порушення обмеження: { $message }
-executor-multiple-primary-keys = Декілька обмежень PRIMARY KEY не дозволено
 executor-cannot-drop-column = Неможливо видалити колонку: { $message }
 executor-constraint-not-found = Обмеження '{ $constraint_name }' не знайдено в таблиці '{ $table_name }'
 

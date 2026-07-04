@@ -85,7 +85,6 @@ executor-column-count-mismatch = Lista kolumn pochodnych ma { $provided } kolumn
 # =============================================================================
 
 executor-constraint-violation = Naruszenie ograniczenia: { $message }
-executor-multiple-primary-keys = Wiele ograniczeń PRIMARY KEY jest niedozwolonych
 executor-cannot-drop-column = Nie można usunąć kolumny: { $message }
 executor-constraint-not-found = Nie znaleziono ograniczenia '{ $constraint_name }' w tabeli '{ $table_name }'
 

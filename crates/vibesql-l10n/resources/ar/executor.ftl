@@ -85,7 +85,6 @@ executor-column-count-mismatch = قائمة الأعمدة المشتقة تحت
 # =============================================================================
 
 executor-constraint-violation = انتهاك القيد: { $message }
-executor-multiple-primary-keys = لا يُسمح بقيود PRIMARY KEY متعددة
 executor-cannot-drop-column = لا يمكن حذف العمود: { $message }
 executor-constraint-not-found = القيد '{ $constraint_name }' غير موجود في الجدول '{ $table_name }'
 

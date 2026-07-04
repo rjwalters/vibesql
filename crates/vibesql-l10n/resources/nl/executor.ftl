@@ -85,7 +85,6 @@ executor-column-count-mismatch = Afgeleide kolommenlijst heeft { $provided } kol
 # =============================================================================
 
 executor-constraint-violation = Constraintschending: { $message }
-executor-multiple-primary-keys = Meerdere PRIMARY KEY-constraints zijn niet toegestaan
 executor-cannot-drop-column = Kan kolom niet verwijderen: { $message }
 executor-constraint-not-found = Constraint '{ $constraint_name }' niet gevonden in tabel '{ $table_name }'
 

@@ -85,7 +85,6 @@ executor-column-count-mismatch = Härledd kolumnlista har { $provided } kolumner
 # =============================================================================
 
 executor-constraint-violation = Villkorsöverträdelse: { $message }
-executor-multiple-primary-keys = Flera PRIMARY KEY-villkor är inte tillåtna
 executor-cannot-drop-column = Kan inte ta bort kolumn: { $message }
 executor-constraint-not-found = Villkoret '{ $constraint_name }' hittades inte i tabellen '{ $table_name }'
 

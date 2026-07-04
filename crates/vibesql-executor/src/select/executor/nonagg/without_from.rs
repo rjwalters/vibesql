@@ -171,8 +171,9 @@ impl SelectExecutor<'_> {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. }
                 | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
-                    return Err(ExecutorError::UnsupportedFeature(
-                        "SELECT * and qualified wildcards require FROM clause".to_string(),
+                    // SQLite-exact wording for `SELECT *` without FROM (#5804)
+                    return Err(ExecutorError::SqliteCompatError(
+                        "no tables specified".to_string(),
                     ));
                 }
                 vibesql_ast::SelectItem::Expression { expr, .. } => {
@@ -185,15 +186,17 @@ impl SelectExecutor<'_> {
                     // resolvable from the firing row's context, so they must not be
                     // rejected here. A plain (non-pseudo) column reference still
                     // requires a FROM clause — it has nothing to bind to.
-                    let column_check_fails = if self.trigger_context.is_some() {
-                        self.expression_references_non_pseudo_column(expr)
+                    // SQLite reports this as `no such column: X` (#5804), with
+                    // the reference's source case preserved.
+                    let unresolved_ref = if self.trigger_context.is_some() {
+                        self.find_non_pseudo_column_ref(expr)
                     } else {
-                        self.expression_references_column(expr)
+                        self.find_column_ref(expr)
                     };
-                    if !has_outer_context && column_check_fails {
-                        return Err(ExecutorError::UnsupportedFeature(
-                            "Column reference requires FROM clause".to_string(),
-                        ));
+                    if !has_outer_context {
+                        if let Some(column_ref) = unresolved_ref {
+                            return Err(ExecutorError::NoSuchColumn { column_ref });
+                        }
                     }
 
                     // Evaluate the expression
@@ -226,7 +229,9 @@ impl SelectExecutor<'_> {
                                 self.database,
                                 trigger_ctx,
                             ),
-                            None => ExpressionEvaluator::with_database(&empty_schema, self.database),
+                            None => {
+                                ExpressionEvaluator::with_database(&empty_schema, self.database)
+                            }
                         };
                         if let Some(cte) = cte_ctx {
                             evaluator = evaluator.with_cte_context(cte);
@@ -275,15 +280,15 @@ impl SelectExecutor<'_> {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. }
                 | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
-                    return Err(ExecutorError::UnsupportedFeature(
-                        "SELECT * and qualified wildcards require FROM clause".to_string(),
+                    // SQLite-exact wording for `SELECT *` without FROM (#5804)
+                    return Err(ExecutorError::SqliteCompatError(
+                        "no tables specified".to_string(),
                     ));
                 }
                 vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
-                    if self.expression_references_column(expr) {
-                        return Err(ExecutorError::UnsupportedFeature(
-                            "Column reference requires FROM clause".to_string(),
-                        ));
+                    if let Some(column_ref) = self.find_column_ref(expr) {
+                        // SQLite-exact wording (#5804), source case preserved
+                        return Err(ExecutorError::NoSuchColumn { column_ref });
                     }
                     let value = evaluator.eval(expr, &empty_row)?;
                     let column_name = alias.clone().unwrap_or_default();
@@ -389,8 +394,9 @@ impl SelectExecutor<'_> {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. }
                 | vibesql_ast::SelectItem::QualifiedWildcard { .. } => {
-                    return Err(ExecutorError::UnsupportedFeature(
-                        "SELECT * and qualified wildcards require FROM clause".to_string(),
+                    // SQLite-exact wording for `SELECT *` without FROM (#5804)
+                    return Err(ExecutorError::SqliteCompatError(
+                        "no tables specified".to_string(),
                     ));
                 }
                 vibesql_ast::SelectItem::Expression { expr, .. } => {

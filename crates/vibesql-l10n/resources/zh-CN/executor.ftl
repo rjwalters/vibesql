@@ -85,7 +85,6 @@ executor-column-count-mismatch = 派生列列表有 { $provided } 列，但查�
 # =============================================================================
 
 executor-constraint-violation = 违反约束：{ $message }
-executor-multiple-primary-keys = 不允许多个 PRIMARY KEY 约束
 executor-cannot-drop-column = 无法删除列：{ $message }
 executor-constraint-not-found = 在表 '{ $table_name }' 中未找到约束 '{ $constraint_name }'
 

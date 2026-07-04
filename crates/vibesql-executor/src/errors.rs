@@ -176,7 +176,11 @@ pub enum ExecutorError {
         child: String,
         parent: String,
     },
-    MultiplePrimaryKeys,
+    /// More than one PRIMARY KEY defined for a table (SQLite-compatible error).
+    /// Format: `table "<name>" has more than one primary key`
+    MultiplePrimaryKeys {
+        table_name: String,
+    },
     CannotDropColumn(String),
     ConstraintNotFound {
         constraint_name: String,
@@ -803,8 +807,11 @@ impl std::fmt::Display for ExecutorError {
                 // SQLite-compatible error format from fkey.c::sqlite3FkLocateIndex.
                 write!(f, "foreign key mismatch - \"{}\" referencing \"{}\"", child, parent)
             }
-            ExecutorError::MultiplePrimaryKeys => {
-                write!(f, "{}", vibe_msg!("executor-multiple-primary-keys"))
+            ExecutorError::MultiplePrimaryKeys { table_name } => {
+                // SQLite-compatible error format from build.c (misc1-7.1/7.2,
+                // fuzz-8.1). Hardcoded (not localized) to stay byte-identical
+                // to SQLite, matching InsertNoSuchColumn / ForeignKeyMismatch.
+                write!(f, "table \"{}\" has more than one primary key", table_name)
             }
             ExecutorError::CannotDropColumn(msg) => {
                 write!(f, "{}", vibe_msg!("executor-cannot-drop-column", message = msg.as_str()))
@@ -1578,7 +1585,9 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
                 ExecutorError::Other(format!("Translation '{}' not found", name))
             }
             vibesql_catalog::CatalogError::ViewAlreadyExists(name) => {
-                ExecutorError::Other(format!("View '{}' already exists", name))
+                // SQLite-compatible wording (view1.test, fuzz-8.1):
+                // `view v already exists` — lowercase, unquoted name.
+                ExecutorError::Other(format!("view {} already exists", name))
             }
             vibesql_catalog::CatalogError::ViewNotFound(name) => {
                 ExecutorError::Other(format!("View '{}' not found", name))

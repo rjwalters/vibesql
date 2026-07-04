@@ -385,7 +385,13 @@ impl SelectExecutor<'_> {
         expr: &vibesql_ast::arena::Expression,
     ) -> Result<i64, ExecutorError> {
         match expr {
-            vibesql_ast::arena::Expression::Literal(vibesql_types::SqlValue::Integer(n)) => Ok(*n),
+            // Literal values go through the shared SQLite LIMIT/OFFSET
+            // affinity coercion (integers, booleans as 0/1, integral reals,
+            // full-string numeric text); non-coercible values error with
+            // SQLite's exact `datatype mismatch` wording (#5804).
+            vibesql_ast::arena::Expression::Literal(value) => {
+                crate::select::helpers::coerce_limit_offset_to_i64(value.clone())
+            }
             _ => Err(ExecutorError::InvalidLimitOffset {
                 clause: "LIMIT/OFFSET".to_string(),
                 value: "<expression>".to_string(),

@@ -273,4 +273,29 @@ mod tests {
         assert!(db.catalog.get_view("ALL_USERS").is_none());
         assert!(db.catalog.get_view("active_users").is_none());
     }
+
+    #[test]
+    fn test_create_duplicate_view_uses_sqlite_exact_wording() {
+        // #5804: SQLite reports `view v already exists` (lowercase wrapper,
+        // unquoted name) for a duplicate CREATE VIEW without IF NOT EXISTS.
+        let mut db = create_test_db();
+
+        let sql = "CREATE VIEW v AS SELECT id FROM users";
+        let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
+        if let vibesql_ast::Statement::CreateView(view_stmt) = stmt {
+            advanced_objects::execute_create_view(&view_stmt, &mut db)
+                .expect("Failed to create view");
+        } else {
+            panic!("Expected CreateView statement");
+        }
+
+        let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
+        if let vibesql_ast::Statement::CreateView(view_stmt) = stmt {
+            let err = advanced_objects::execute_create_view(&view_stmt, &mut db)
+                .expect_err("Duplicate CREATE VIEW must fail");
+            assert_eq!(err.to_string(), "view v already exists");
+        } else {
+            panic!("Expected CreateView statement");
+        }
+    }
 }

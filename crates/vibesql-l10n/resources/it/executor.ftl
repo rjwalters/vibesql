@@ -85,7 +85,6 @@ executor-column-count-mismatch = La lista colonne derivata ha { $provided } colo
 # =============================================================================
 
 executor-constraint-violation = Violazione del vincolo: { $message }
-executor-multiple-primary-keys = Non sono ammessi vincoli PRIMARY KEY multipli
 executor-cannot-drop-column = Impossibile eliminare la colonna: { $message }
 executor-constraint-not-found = Vincolo '{ $constraint_name }' non trovato nella tabella '{ $table_name }'
 

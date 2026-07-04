@@ -85,7 +85,6 @@ executor-column-count-mismatch = Abgeleitete Spaltenliste hat { $provided } Spal
 # =============================================================================
 
 executor-constraint-violation = Constraint-Verletzung: { $message }
-executor-multiple-primary-keys = Mehrere PRIMARY KEY-Constraints sind nicht erlaubt
 executor-cannot-drop-column = Spalte kann nicht gelöscht werden: { $message }
 executor-constraint-not-found = Constraint '{ $constraint_name }' in Tabelle '{ $table_name }' nicht gefunden
 

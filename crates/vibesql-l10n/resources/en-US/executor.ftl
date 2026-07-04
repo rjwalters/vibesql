@@ -85,7 +85,6 @@ executor-column-count-mismatch = Derived column list has { $provided } columns b
 # =============================================================================
 
 executor-constraint-violation = Constraint violation: { $message }
-executor-multiple-primary-keys = Multiple PRIMARY KEY constraints are not allowed
 executor-cannot-drop-column = Cannot drop column: { $message }
 executor-constraint-not-found = Constraint '{ $constraint_name }' not found in table '{ $table_name }'
 

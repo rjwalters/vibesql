@@ -85,7 +85,6 @@ executor-column-count-mismatch = Daftar kolom turunan memiliki { $provided } kol
 # =============================================================================
 
 executor-constraint-violation = Pelanggaran batasan: { $message }
-executor-multiple-primary-keys = Batasan PRIMARY KEY ganda tidak diperbolehkan
 executor-cannot-drop-column = Tidak dapat menghapus kolom: { $message }
 executor-constraint-not-found = Batasan '{ $constraint_name }' tidak ditemukan dalam tabel '{ $table_name }'
 

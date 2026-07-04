@@ -208,8 +208,9 @@ impl SelectExecutor<'_> {
                             }
                         }
                     } else {
-                        return Err(ExecutorError::UnsupportedFeature(
-                            "SELECT * requires FROM clause".to_string(),
+                        // SELECT * without FROM: SQLite-exact wording (#5804)
+                        return Err(ExecutorError::SqliteCompatError(
+                            "no tables specified".to_string(),
                         ));
                     }
                 }
