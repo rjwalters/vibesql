@@ -68,6 +68,28 @@ pub enum AggregateAccumulator {
     },
     /// MD5SUM - Compute MD5 hash of concatenated values (SQLite TCL test compatible)
     Md5sum { values: Vec<String>, distinct: bool, seen: Option<HashSet<String>> },
+    /// PERCENTILE family - median(Y), percentile(Y,P), percentile_cont(Y,F),
+    /// percentile_disc(Y,F). Semantics match SQLite's percentile.c extension:
+    /// collect all non-NULL Y values, sort, then interpolate at
+    /// `fraction * (N-1)`. Errors (invalid/inconsistent fraction, non-numeric
+    /// or infinite Y) are deferred and raised at finalize time.
+    Percentile {
+        /// Collected Y values (non-NULL, finite)
+        values: Vec<f64>,
+        /// Normalized fraction (0.0..=1.0) captured from the first input row
+        fraction: Option<f64>,
+        /// Maximum raw fraction: 100.0 for percentile(), 1.0 for the others
+        mx_frac: f64,
+        /// True for percentile_disc() (no interpolation; picks a[floor(ix)])
+        discrete: bool,
+        /// True for median() (fixed fraction 0.5, no second argument)
+        is_median: bool,
+        /// Lowercase function name for SQLite-exact error messages
+        name: String,
+        /// First deferred error message (SQLite-exact), raised at finalize
+        error: Option<String>,
+        distinct: bool,
+    },
 }
 
 impl AggregateAccumulator {
@@ -120,6 +142,25 @@ impl AggregateAccumulator {
                 distinct,
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
+            "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+                let upper = function_name.to_uppercase();
+                let (mx_frac, discrete, is_median, name) = match upper.as_str() {
+                    "PERCENTILE" => (100.0, false, false, "percentile"),
+                    "PERCENTILE_CONT" => (1.0, false, false, "percentile_cont"),
+                    "PERCENTILE_DISC" => (1.0, true, false, "percentile_disc"),
+                    _ => (1.0, false, true, "median"),
+                };
+                Ok(AggregateAccumulator::Percentile {
+                    values: Vec::new(),
+                    fraction: None,
+                    mx_frac,
+                    discrete,
+                    is_median,
+                    name: name.to_string(),
+                    error: None,
+                    distinct,
+                })
+            }
             _ => Err(crate::errors::ExecutorError::UnsupportedExpression(format!(
                 "Unknown aggregate function: {}",
                 function_name
@@ -350,6 +391,12 @@ impl AggregateAccumulator {
                 }
             }
 
+            // PERCENTILE family - single-argument form (median). Two-argument
+            // forms thread the per-row fraction through accumulate_percentile.
+            AggregateAccumulator::Percentile { .. } => {
+                self.accumulate_percentile(value, None);
+            }
+
             // MD5SUM - collects string values for MD5 hashing (like GROUP_CONCAT)
             AggregateAccumulator::Md5sum { ref mut values, distinct, seen } => {
                 // Skip NULL values like GROUP_CONCAT
@@ -414,6 +461,103 @@ impl AggregateAccumulator {
         }
     }
 
+    /// Accumulate one row for the PERCENTILE family of aggregates.
+    ///
+    /// `fraction_arg` is the per-row second argument (P/F) for
+    /// percentile()/percentile_cont()/percentile_disc(); it is `None` for
+    /// median(), which uses a fixed fraction of 0.5.
+    ///
+    /// Mirrors percentStep() in SQLite's ext/misc/percentile.c:
+    /// 1. The fraction is validated per row (numeric, in `0..=mx_frac`).
+    /// 2. The normalized fraction may differ from the first row's by at most
+    ///    0.001, else "not the same for all input rows".
+    /// 3. NULL Y values are skipped (NaN is treated as NULL, matching SQLite
+    ///    which stores NaN as NULL).
+    /// 4. Non-NULL non-numeric Y is an error (by type - no text coercion).
+    /// 5. +/-Inf Y is an error.
+    ///
+    /// Errors are deferred (recorded in `error`) and raised at finalize.
+    pub fn accumulate_percentile(
+        &mut self,
+        value: &vibesql_types::SqlValue,
+        fraction_arg: Option<&vibesql_types::SqlValue>,
+    ) {
+        let AggregateAccumulator::Percentile {
+            ref mut values,
+            ref mut fraction,
+            mx_frac,
+            is_median,
+            name,
+            ref mut error,
+            ..
+        } = self
+        else {
+            return;
+        };
+
+        if error.is_some() {
+            return;
+        }
+
+        // Requirement 3: fraction must be numeric and within range (per row).
+        let rpct = if *is_median && fraction_arg.is_none() {
+            0.5
+        } else {
+            let coerced = fraction_arg.and_then(percentile_fraction_as_number);
+            match coerced {
+                Some(p) if (0.0..=*mx_frac).contains(&p) => p / *mx_frac,
+                _ => {
+                    *error = Some(format!(
+                        "the fraction argument to {}() is not between 0.0 and {:.1}",
+                        name, mx_frac
+                    ));
+                    return;
+                }
+            }
+        };
+
+        // Requirement 2: the normalized fraction must match the first row's
+        // stored value to within 0.001 (percentSameValue in percentile.c).
+        match fraction {
+            None => *fraction = Some(rpct),
+            Some(first) => {
+                let diff = *first - rpct;
+                if !(-0.001..=0.001).contains(&diff) {
+                    *error = Some(format!(
+                        "the fraction argument to {}() is not the same for all input rows",
+                        name
+                    ));
+                    return;
+                }
+            }
+        }
+
+        // Requirement: NULL Y values are ignored.
+        if value.is_null() {
+            return;
+        }
+
+        // Requirement 4: non-NULL Y must be numeric BY TYPE (no coercion -
+        // TEXT '50' and blobs are errors, unlike most SQLite functions).
+        let Some(y) = percentile_numeric_y(value) else {
+            *error = Some(format!("input to {}() is not numeric", name));
+            return;
+        };
+
+        // SQLite interprets NaN as NULL, so a NaN Y is skipped, not an error.
+        if y.is_nan() {
+            return;
+        }
+
+        // Requirement 5: infinity is an error.
+        if y.is_infinite() {
+            *error = Some(format!("Inf input to {}()", name));
+            return;
+        }
+
+        values.push(y);
+    }
+
     pub fn finalize(&self) -> Result<vibesql_types::SqlValue, crate::errors::ExecutorError> {
         match self {
             AggregateAccumulator::Count { count, .. } => {
@@ -474,6 +618,39 @@ impl AggregateAccumulator {
                 // Convert values to JSON array string
                 let json_array = sql_values_to_json_array(values);
                 Ok(vibesql_types::SqlValue::Varchar(json_array.into()))
+            }
+            AggregateAccumulator::Percentile { values, fraction, discrete, error, distinct, .. } => {
+                // Deferred step errors surface at finalize time with the
+                // SQLite-exact message (SqliteCompatError displays as-is).
+                if let Some(msg) = error {
+                    return Err(crate::errors::ExecutorError::SqliteCompatError(msg.clone()));
+                }
+                if values.is_empty() {
+                    return Ok(vibesql_types::SqlValue::Null);
+                }
+                let mut sorted = values.clone();
+                // No NaN can be present (skipped during accumulation), so
+                // total_cmp == partial order here.
+                sorted.sort_by(f64::total_cmp);
+                if *distinct {
+                    sorted.dedup();
+                }
+                // percentCompute() in percentile.c: ix = fraction * (N-1);
+                // disc -> a[floor(ix)]; cont -> linear interpolation between
+                // the two neighbors. Result is always REAL.
+                let frac = fraction.unwrap_or(0.5);
+                let n = sorted.len();
+                let ix = frac * (n - 1) as f64;
+                let i1 = ix as usize;
+                let vx = if *discrete {
+                    sorted[i1]
+                } else {
+                    let i2 = if ix == i1 as f64 || i1 == n - 1 { i1 } else { i1 + 1 };
+                    let v1 = sorted[i1];
+                    let v2 = sorted[i2];
+                    v1 + (v2 - v1) * (ix - i1 as f64)
+                };
+                Ok(vibesql_types::SqlValue::Double(vx))
             }
             AggregateAccumulator::Md5sum { values, .. } => {
                 use md5::{Digest, Md5};
@@ -754,6 +931,46 @@ impl AggregateAccumulator {
                 }
             }
 
+            // PERCENTILE family: merge value lists, propagate deferred errors,
+            // and enforce fraction consistency across the two halves.
+            (
+                AggregateAccumulator::Percentile {
+                    values: v1,
+                    fraction: f1,
+                    error: e1,
+                    name,
+                    ..
+                },
+                AggregateAccumulator::Percentile {
+                    values: v2, fraction: f2, error: e2, ..
+                },
+            ) => {
+                if e1.is_none() {
+                    if let Some(msg) = e2 {
+                        *e1 = Some(msg);
+                    }
+                }
+                if e1.is_some() {
+                    return Ok(());
+                }
+                if let Some(b) = f2 {
+                    match *f1 {
+                        None => *f1 = Some(b),
+                        Some(a) => {
+                            let diff = a - b;
+                            if !(-0.001..=0.001).contains(&diff) {
+                                *e1 = Some(format!(
+                                    "the fraction argument to {}() is not the same for all input rows",
+                                    name
+                                ));
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                v1.extend(v2);
+            }
+
             // MD5SUM: Merge value lists
             (
                 AggregateAccumulator::Md5sum { values: v1, distinct: d1, seen: seen1 },
@@ -831,6 +1048,46 @@ fn sql_value_to_f64(value: &vibesql_types::SqlValue) -> Option<f64> {
         vibesql_types::SqlValue::Float(x) => Some(*x as f64),
         vibesql_types::SqlValue::Real(x) => Some(*x as f64),
         vibesql_types::SqlValue::Double(x) => Some(*x),
+        _ => None,
+    }
+}
+
+/// Coerce the percentile fraction argument (P/F) to a number, mirroring
+/// sqlite3_value_numeric_type(): INTEGER/FLOAT pass through, TEXT converts
+/// only when it is a complete well-formed numeral, everything else (NULL,
+/// blob, non-numeric text) is invalid.
+fn percentile_fraction_as_number(value: &vibesql_types::SqlValue) -> Option<f64> {
+    use vibesql_types::SqlValue;
+    match value {
+        SqlValue::Integer(v) => Some(*v as f64),
+        SqlValue::Smallint(v) => Some(*v as f64),
+        SqlValue::Bigint(v) => Some(*v as f64),
+        SqlValue::Unsigned(v) => Some(*v as f64),
+        SqlValue::Float(v) => Some(*v as f64),
+        SqlValue::Real(v) => Some(*v as f64),
+        SqlValue::Double(v) => Some(*v),
+        SqlValue::Numeric(v) => Some(*v),
+        SqlValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Extract the percentile Y value as f64 when the value's TYPE is numeric.
+/// Unlike most SQLite aggregates, percentile does NOT coerce text/blob to a
+/// number - a non-NULL non-numeric Y is an error (percentile.c requirement 4).
+fn percentile_numeric_y(value: &vibesql_types::SqlValue) -> Option<f64> {
+    use vibesql_types::SqlValue;
+    match value {
+        SqlValue::Integer(v) => Some(*v as f64),
+        SqlValue::Smallint(v) => Some(*v as f64),
+        SqlValue::Bigint(v) => Some(*v as f64),
+        SqlValue::Unsigned(v) => Some(*v as f64),
+        SqlValue::Float(v) => Some(*v as f64),
+        SqlValue::Real(v) => Some(*v as f64),
+        SqlValue::Double(v) => Some(*v),
+        SqlValue::Numeric(v) => Some(*v),
+        SqlValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }
 }

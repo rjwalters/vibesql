@@ -17,8 +17,9 @@ use crate::{
         window::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
-            evaluate_sum_window, evaluate_total_window, partition_rows_with_collations,
-            sort_partition_with_collations, validate_frame, validate_range_order_by, Partition,
+            evaluate_percentile_window, evaluate_sum_window, evaluate_total_window,
+            partition_rows_with_collations, sort_partition_with_collations, validate_frame,
+            validate_range_order_by, Partition,
         },
         CombinedExpressionEvaluator,
     },
@@ -760,6 +761,25 @@ fn evaluate_window_function_for_partition(
                             filter,
                             agg_eval_fn,
                         )
+                    }
+                    "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+                        let fname = func_name.to_lowercase();
+                        let expected_args = if fname == "median" { 1 } else { 2 };
+                        if args.len() != expected_args {
+                            return Err(ExecutorError::WrongNumberOfArguments {
+                                function_name: fname,
+                            });
+                        }
+                        let fraction_expr = args.get(1);
+                        evaluate_percentile_window(
+                            partition,
+                            frame_indices,
+                            &args[0],
+                            fraction_expr,
+                            &fname,
+                            filter,
+                            agg_eval_fn,
+                        )?
                     }
                     "JSON_GROUP_ARRAY" => {
                         if args.is_empty() {

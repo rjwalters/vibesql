@@ -29,7 +29,7 @@ mod value;
 pub use aggregates::{
     evaluate_avg_window, evaluate_count_window, evaluate_group_concat_window,
     evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
-    evaluate_sum_window, evaluate_total_window,
+    evaluate_percentile_window, evaluate_sum_window, evaluate_total_window,
 };
 pub use frames::{calculate_frame, calculate_frame_with_exclusion, validate_frame, validate_range_order_by, FrameResult};
 pub use partitioning::{partition_rows, partition_rows_with_collations, Partition};

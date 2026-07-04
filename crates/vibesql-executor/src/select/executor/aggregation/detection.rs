@@ -421,7 +421,18 @@ fn expression_in_scope_chain_has_outer_correlated_aggregate(
         Expression::Function { name, args, .. }
             if matches!(
                 name.to_uppercase().as_str(),
-                "COUNT" | "SUM" | "AVG" | "TOTAL" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG"
+                "COUNT"
+                    | "SUM"
+                    | "AVG"
+                    | "TOTAL"
+                    | "MIN"
+                    | "MAX"
+                    | "GROUP_CONCAT"
+                    | "STRING_AGG"
+                    | "MEDIAN"
+                    | "PERCENTILE"
+                    | "PERCENTILE_CONT"
+                    | "PERCENTILE_DISC"
             ) =>
         {
             let upper = name.to_uppercase();
@@ -747,7 +758,18 @@ fn expr_has_column_referencing_aggregate(expr: &vibesql_ast::Expression) -> bool
         Expression::Function { name, args, .. }
             if matches!(
                 name.to_uppercase().as_str(),
-                "COUNT" | "SUM" | "AVG" | "TOTAL" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG"
+                "COUNT"
+                    | "SUM"
+                    | "AVG"
+                    | "TOTAL"
+                    | "MIN"
+                    | "MAX"
+                    | "GROUP_CONCAT"
+                    | "STRING_AGG"
+                    | "MEDIAN"
+                    | "PERCENTILE"
+                    | "PERCENTILE_CONT"
+                    | "PERCENTILE_DISC"
             ) =>
         {
             // Old Function variant aggregate. min/max with >1 args are scalar.
@@ -907,7 +929,8 @@ impl SelectExecutor<'_> {
                 // Check if this is an aggregate function name
                 let is_aggregate = match name_upper.as_str() {
                     "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG"
-                    | "JSON_GROUP_ARRAY" | "MD5SUM" => true,
+                    | "JSON_GROUP_ARRAY" | "MD5SUM" | "MEDIAN" | "PERCENTILE"
+                    | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
                     "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
                     _ => false,
                 };

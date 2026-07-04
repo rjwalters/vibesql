@@ -1164,7 +1164,18 @@ impl<'arena> ArenaParser<'arena> {
         // while MIN/MAX with a single argument are aggregate functions
         let might_be_aggregate = matches!(
             name_upper.as_str(),
-            "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "GROUP_CONCAT" | "STRING_AGG" | "TOTAL"
+            "COUNT"
+                | "SUM"
+                | "AVG"
+                | "MIN"
+                | "MAX"
+                | "GROUP_CONCAT"
+                | "STRING_AGG"
+                | "TOTAL"
+                | "MEDIAN"
+                | "PERCENTILE"
+                | "PERCENTILE_CONT"
+                | "PERCENTILE_DISC"
         );
 
         if might_be_aggregate {
@@ -1192,6 +1203,8 @@ impl<'arena> ArenaParser<'arena> {
             let is_aggregate = match name_upper.as_str() {
                 "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
                 "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
+                // percentile.c family - arg counts validated by the executor
+                "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
                 "MIN" | "MAX" => args.len() <= 1 && !distinct,
                 _ => false,
             };

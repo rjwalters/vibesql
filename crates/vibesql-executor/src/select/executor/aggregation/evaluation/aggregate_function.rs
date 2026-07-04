@@ -292,6 +292,24 @@ fn validate_aggregate_args(
             }
             Ok(())
         }
+        "MEDIAN" => {
+            // median(Y) requires exactly 1 argument (percentile.c)
+            if has_wildcard || arg_count != 1 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.display().to_string(),
+                });
+            }
+            Ok(())
+        }
+        "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+            // percentile(Y,P) family requires exactly 2 arguments (percentile.c)
+            if has_wildcard || arg_count != 2 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.display().to_string(),
+                });
+            }
+            Ok(())
+        }
         _ => {
             // Unknown aggregate functions require at least 1 argument
             if arg_count == 0 {
@@ -424,6 +442,36 @@ pub(super) fn evaluate(
     // GROUP_CONCAT(expr ORDER BY ...) - sorted concatenation
     // STRING_AGG is an alias for GROUP_CONCAT (SQLite 3.44+)
     let name_upper = name.to_uppercase();
+
+    // Handle the PERCENTILE family (median/percentile/percentile_cont/
+    // percentile_disc). The second argument (the fraction P/F) is evaluated
+    // per row and validated inside the accumulator, mirroring SQLite's
+    // percentile.c step function (same per-row threading as GROUP_CONCAT's
+    // separator argument).
+    if matches!(
+        name_upper.as_str(),
+        "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC"
+    ) {
+        let fraction_expr = args.get(1);
+        for row in group_rows {
+            evaluator.clear_cse_cache();
+            // Skip rows that don't pass the FILTER condition
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
+            let fraction_value = match fraction_expr {
+                Some(expr) => Some(evaluator.eval(expr, row)?),
+                None => None,
+            };
+            let value = evaluator.eval(&args[0], row)?;
+            acc.accumulate_percentile(&value, fraction_value.as_ref());
+        }
+
+        let result = acc.finalize()?;
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        return Ok(result);
+    }
+
     if name_upper == "GROUP_CONCAT" || name_upper == "STRING_AGG" {
         let separator = if args.len() == 2 {
             // Evaluate separator (second argument)

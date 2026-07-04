@@ -5072,7 +5072,15 @@ proc check_single_capability {cap} {
     # errors with `no such column: rowid` (#5492). Marking it unsupported makes
     # `ifcapable !allow_rowid_in_view` blocks (e.g. trigger9-4.2/4.3) take their
     # error-expecting branch, matching real sqlite3 with the option off.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress allow_rowid_in_view}
+    # `ordered_set_aggregates` is the SQLITE_ENABLE_ORDERED_SET_AGGREGATES
+    # compile-time option (percentile_cont(F) WITHIN GROUP (ORDER BY x)),
+    # which is OFF by default in SQLite. VibeSQL matches the default: the
+    # WITHIN GROUP syntax errors with `near "(": syntax error`, exactly like
+    # a stock sqlite3 build. Marking it unsupported makes percentile.test's
+    # `ifcapable ordered_set_aggregates` blocks (~89 tests) skip and its
+    # else-branch (expecting the syntax error) run (#5818, 2026-07-03).
+    # WITHIN GROUP parser support is tracked as a follow-up to #5818.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress allow_rowid_in_view ordered_set_aggregates}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -5131,10 +5139,19 @@ proc ifcapable {args} {
         return
     }
 
+    # Propagate exceptional return codes (break/continue/return) from the
+    # evaluated script to the caller's frame, exactly like SQLite's real
+    # tester.tcl. Without `return -code`, a body like
+    #   ifcapable !ordered_set_aggregates break
+    # inside a foreach loop (percentile.test line 449) raises
+    # `invoked "break" outside of a loop` inside this proc and aborts the
+    # whole file evaluation mid-run (#5818).
     if {$result} {
-        uplevel 1 $script
+        set rc [catch {uplevel 1 $script} msg]
+        return -code $rc $msg
     } elseif {$else_script ne ""} {
-        uplevel 1 $else_script
+        set rc [catch {uplevel 1 $else_script} msg]
+        return -code $rc $msg
     }
 }
 

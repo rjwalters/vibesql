@@ -22,9 +22,9 @@ use crate::{
             calculate_frame_with_exclusion, evaluate_avg_window, evaluate_count_window,
             evaluate_cume_dist, evaluate_dense_rank, evaluate_group_concat_window_with_expr,
             evaluate_lag, evaluate_lead, evaluate_max_window, evaluate_min_window, evaluate_ntile,
-            evaluate_percent_rank, evaluate_rank, evaluate_row_number, evaluate_sum_window,
-            evaluate_total_window, partition_rows, sort_partition, validate_frame,
-            validate_range_order_by,
+            evaluate_percent_rank, evaluate_percentile_window, evaluate_rank, evaluate_row_number,
+            evaluate_sum_window, evaluate_total_window, partition_rows, sort_partition,
+            validate_frame, validate_range_order_by,
         },
         CombinedExpressionEvaluator,
     },
@@ -776,6 +776,27 @@ pub(super) fn apply_window_functions_to_aggregates(
                                     None,
                                     inner_eval_fn,
                                 )
+                            }
+                            "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+                                let fname = win_func.func_name.to_lowercase();
+                                let expected_args = if fname == "median" { 1 } else { 2 };
+                                if win_func.args.len() != expected_args {
+                                    return Err(ExecutorError::WrongNumberOfArguments {
+                                        function_name: fname,
+                                    });
+                                }
+                                // Fraction expression (second arg) is evaluated
+                                // per row via the mapped result column
+                                let fraction_expr = mapped_args.get(1);
+                                evaluate_percentile_window(
+                                    partition,
+                                    frame_indices,
+                                    &arg_expr,
+                                    fraction_expr,
+                                    &fname,
+                                    None,
+                                    inner_eval_fn,
+                                )?
                             }
                             other => {
                                 return Err(ExecutorError::UnsupportedExpression(format!(

@@ -14,7 +14,20 @@ use crate::{errors::ExecutorError, schema::CombinedSchema};
 /// Check if a function name is an aggregate function
 pub fn is_aggregate_function(name: &str) -> bool {
     let upper = name.to_uppercase();
-    matches!(upper.as_str(), "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "TOTAL" | "GROUP_CONCAT")
+    matches!(
+        upper.as_str(),
+        "COUNT"
+            | "SUM"
+            | "AVG"
+            | "MIN"
+            | "MAX"
+            | "TOTAL"
+            | "GROUP_CONCAT"
+            | "MEDIAN"
+            | "PERCENTILE"
+            | "PERCENTILE_CONT"
+            | "PERCENTILE_DISC"
+    )
 }
 
 /// Action taken at each node during a generic expression walk.
@@ -211,6 +224,22 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                         None
                     }
                 }
+                "MEDIAN" => {
+                    // median(Y) takes exactly 1 argument (percentile.c)
+                    if has_wildcard || arg_count != 1 {
+                        Some(name.display().to_string())
+                    } else {
+                        None
+                    }
+                }
+                "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+                    // percentile family takes exactly 2 arguments (percentile.c)
+                    if has_wildcard || arg_count != 2 {
+                        Some(name.display().to_string())
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         }
@@ -256,6 +285,20 @@ pub fn check_aggregate_arg_count(expr: &Expression) -> Option<String> {
                     }
                     "GROUP_CONCAT" => {
                         if arg_count == 0 || arg_count > 2 {
+                            Some(name.display().to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    "MEDIAN" => {
+                        if has_wildcard || arg_count != 1 {
+                            Some(name.display().to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
+                        if has_wildcard || arg_count != 2 {
                             Some(name.display().to_string())
                         } else {
                             None

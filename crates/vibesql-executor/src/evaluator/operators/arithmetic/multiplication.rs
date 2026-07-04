@@ -34,9 +34,13 @@ impl Multiplication {
                 .checked_mul(b)
                 .map(Integer)
                 .unwrap_or_else(|| super::nan_to_null(Double(a as f64 * b as f64)))),
-            super::CoercedValues::ApproximateNumeric(a, b) => {
-                Ok(super::nan_to_null(Float((a * b) as f32)))
-            }
+            // ApproximateNumeric multiplication returns Real (f64) for SQLite
+            // compatibility. SQLite's REAL type is 8-byte IEEE floating point
+            // (f64), not 4-byte (f32) - squeezing the product through f32 loses
+            // precision that SQLite retains (e.g. 15*0.01 must be the f64
+            // product 0.15000000000000002, not f32's 0.15000000596). Mirrors
+            // the same fix in division.rs. (#5818)
+            super::CoercedValues::ApproximateNumeric(a, b) => Ok(super::nan_to_null(Real(a * b))),
             super::CoercedValues::Numeric(a, b) => Ok(super::nan_to_null(Numeric(a * b))),
         }
     }
