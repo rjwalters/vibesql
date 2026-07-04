@@ -16,6 +16,7 @@ pub mod schema_utils;
 
 // Evaluator modules (private - methods defined on CombinedExpressionEvaluator)
 mod exists;
+mod hoist;
 mod in_subquery;
 mod quantified;
 mod scalar;
