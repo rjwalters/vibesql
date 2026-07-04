@@ -4163,6 +4163,18 @@ variable vibesql_skip_patterns {
     {date4- "compares VibeSQL strftime against the C library strftime; shim only stubs the TCL strftime command via clock format, so expected values are computed by the stub rather than libc (harness limitation)"}
 }
 
+# Tests allowed through the blanket "modifies sqlite_schema" skip in
+# uses_sqlite_internals. VibeSQL supports a minimal PRAGMA writable_schema
+# subset (UPDATE sqlite_schema SET sql = '<CREATE TABLE text>' rewrites the
+# table's stored source text — issue #5796), which is exactly what these
+# tests exercise. The blanket skip stays in place for everything else because
+# most writable_schema tests inject corruption and assert recovery behavior
+# VibeSQL does not implement. Keyed by testprefix-qualified test name.
+variable vibesql_writable_schema_ok
+array set vibesql_writable_schema_ok {
+    alterdropcol-8.0 1
+}
+
 # Check if a test should be skipped based on VibeSQL-specific exclusions
 # Returns a list: {should_skip reason} where should_skip is 0/1
 proc vibesql_should_skip {name} {
@@ -4702,7 +4714,21 @@ proc do_test {name script expected} {
             [string match "*conflict resolution clause*" $reason]
             && [string trim $expected] eq ""
         }]
-        if {!$is_conflict_setup} {
+        # writable_schema allowlist: VibeSQL supports the minimal
+        # UPDATE-sqlite_schema-under-writable_schema subset these specific
+        # tests need (issue #5796), so let them run instead of skipping.
+        set is_writable_schema_ok 0
+        if {[string match "*modifies sqlite_schema*" $reason]} {
+            variable vibesql_writable_schema_ok
+            set ws_name $name
+            if {[info exists ::testprefix] && $::testprefix ne ""} {
+                set ws_name "${::testprefix}-${name}"
+            }
+            if {[info exists vibesql_writable_schema_ok($ws_name)]} {
+                set is_writable_schema_ok 1
+            }
+        }
+        if {!$is_conflict_setup && !$is_writable_schema_ok} {
             reconcile_skipped_txn_state $script
             omit_test $name $reason
             return

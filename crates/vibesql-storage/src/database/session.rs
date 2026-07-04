@@ -228,6 +228,28 @@ impl Database {
         );
     }
 
+    /// Get the writable_schema PRAGMA setting (SQLite compatibility).
+    ///
+    /// When ON, `UPDATE sqlite_master/sqlite_schema SET sql = ...` is allowed
+    /// to rewrite the stored `CREATE TABLE` source text of schema objects (see
+    /// `vibesql-executor::sqlite_schema::execute_sqlite_schema_update`).
+    /// Defaults to OFF, matching SQLite; when OFF, all writes to the schema
+    /// tables are rejected with "table sqlite_master may not be modified".
+    pub fn writable_schema(&self) -> bool {
+        match self.get_session_variable("WRITABLE_SCHEMA") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the writable_schema PRAGMA setting (SQLite compatibility).
+    pub fn set_writable_schema(&mut self, value: bool) {
+        self.set_session_variable(
+            "WRITABLE_SCHEMA",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Get the defer_foreign_keys PRAGMA setting (SQLite compatibility).
     ///
     /// When ON, enforcement of all foreign key constraints is delayed until

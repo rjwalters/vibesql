@@ -1299,6 +1299,20 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "WRITABLE_SCHEMA" => {
+                    // SQLite-compatible PRAGMA writable_schema: when ON,
+                    // UPDATE sqlite_master/sqlite_schema SET sql = ... may
+                    // rewrite the stored CREATE TABLE source text (issue
+                    // #5796; alterdropcol 8.x). Session-scoped, default OFF.
+                    self.db.set_writable_schema(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "DEFER_FOREIGN_KEYS" => {
                     // SQLite-compatible PRAGMA defer_foreign_keys.
                     // Phase C1 of #5085: store/read the flag and auto-reset
@@ -1405,6 +1419,18 @@ impl SqlExecutor {
                     let value = if self.db.recursive_triggers() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["recursive_triggers".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "WRITABLE_SCHEMA" => {
+                    // SQLite-compatible PRAGMA writable_schema read.
+                    // Defaults to 0 (OFF).
+                    let value = if self.db.writable_schema() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["writable_schema".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

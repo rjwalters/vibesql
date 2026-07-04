@@ -50,7 +50,15 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        earlier files remain readable: the read path is gated on
 ///        `version >= 11` and treats absence as `generated_expr = None`
 ///        (prior behavior). Issue #5794.
-pub const VERSION: u8 = 11;
+/// - v12: Added `TableSchema::without_rowid` persistence per table (one bool
+///        after `sql_source`). Without it, a reloaded WITHOUT ROWID table
+///        forgets it is rowid-less, so `sqlite_master` wrongly lists its
+///        implicit PRIMARY KEY autoindex (SQLite never lists a WITHOUT ROWID
+///        PK autoindex — the PK *is* the table b-tree; alterdropcol 7.2).
+///        v11 and earlier files remain readable: the read path is gated on
+///        `version >= 12` and treats absence as `without_rowid = false`
+///        (prior behavior). Issue #5796.
+pub const VERSION: u8 = 12;
 
 /// Type tags for binary serialization
 #[repr(u8)]

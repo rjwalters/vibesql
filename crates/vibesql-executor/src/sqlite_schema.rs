@@ -79,6 +79,43 @@ pub fn get_sqlite_schema_table_schema() -> TableSchema {
     )
 }
 
+/// Whether `index` is the implicit PRIMARY KEY autoindex of a WITHOUT ROWID
+/// table and must therefore be hidden from `sqlite_master` listings.
+///
+/// In SQLite, the PRIMARY KEY of a WITHOUT ROWID table *is* the table's B-tree
+/// — no separate `sqlite_autoindex_*` entry exists for it in `sqlite_master`
+/// (verified against sqlite3 3.51.0: `CREATE TABLE t(a, b, PRIMARY KEY(a))
+/// WITHOUT ROWID` yields only the `table` row; a `UNIQUE` constraint on the
+/// same table still gets its autoindex row). VibeSQL materializes a real
+/// unique index for the WITHOUT ROWID PK internally (uniqueness enforcement
+/// and planning), so we filter it out at listing time instead. Covers
+/// alterdropcol 7.2, where `SELECT sql FROM sqlite_schema` must return only
+/// the CREATE TABLE row.
+fn is_without_rowid_pk_autoindex(
+    catalog: &vibesql_catalog::Catalog,
+    index: &vibesql_catalog::IndexMetadata,
+) -> bool {
+    if !index.name.starts_with("sqlite_autoindex_") {
+        return false;
+    }
+    let Some(table) = catalog.get_table(&index.table_name) else {
+        return false;
+    };
+    if !table.without_rowid {
+        return false;
+    }
+    let Some(pk_cols) = &table.primary_key else {
+        return false;
+    };
+    // Match the index column list against the PK column list (a UNIQUE
+    // autoindex on the same WITHOUT ROWID table keeps its listing).
+    pk_cols.len() == index.columns.len()
+        && pk_cols
+            .iter()
+            .zip(index.columns.iter())
+            .all(|(pk, ic)| ic.column_name().is_some_and(|name| name.eq_ignore_ascii_case(pk)))
+}
+
 /// Build a single sqlite_master-format row.
 fn schema_row(obj_type: &str, name: &str, tbl_name: &str, sql: String) -> Row {
     Row::new(vec![
@@ -118,6 +155,9 @@ pub fn execute_sqlite_schema_query(
     // Add indexes owned by the main schema. Temp-table indexes are tagged with
     // their temp schema (#5513) and surface only via sqlite_temp_master.
     for index in catalog.get_schema_indexes(vibesql_catalog::DEFAULT_SCHEMA) {
+        if is_without_rowid_pk_autoindex(catalog, index) {
+            continue;
+        }
         let sql = generate_create_index_sql(index);
         rows.push(schema_row("index", &index.name, &index.table_name, sql));
     }
@@ -148,6 +188,135 @@ pub fn execute_sqlite_schema_query(
     }
 
     Ok(SelectResult { columns: column_names, rows })
+}
+
+/// SQLite WHERE-clause truthiness for schema-row selection: booleans as-is,
+/// non-zero numerics true, everything else (including NULL) false.
+fn schema_where_is_truthy(value: &SqlValue) -> bool {
+    match value {
+        SqlValue::Boolean(b) => *b,
+        SqlValue::Integer(n) => *n != 0,
+        SqlValue::Smallint(n) => *n != 0,
+        SqlValue::Bigint(n) => *n != 0,
+        SqlValue::Unsigned(n) => *n != 0,
+        SqlValue::Float(f) => *f != 0.0,
+        SqlValue::Real(f) => *f != 0.0,
+        SqlValue::Double(f) => *f != 0.0,
+        SqlValue::Numeric(f) => *f != 0.0,
+        _ => false,
+    }
+}
+
+/// Execute an `UPDATE sqlite_master` / `UPDATE sqlite_schema` statement under
+/// `PRAGMA writable_schema=ON`.
+///
+/// SQLite's writable_schema lets a connection rewrite `sqlite_master.sql`
+/// directly; the modified text becomes the object's schema on the next reload.
+/// VibeSQL implements the minimal subset the conformance suite exercises
+/// (alterdropcol 8.x, issue #5796):
+///
+/// - Only assignments to the `sql` column are supported, and the assigned
+///   value must evaluate to a string.
+/// - Only `table` rows are rewritten: the new text replaces the table's
+///   verbatim `sql_source`, which is what `SELECT sql FROM sqlite_schema`
+///   echoes and what ALTER TABLE's textual schema rewrites operate on. The
+///   structured (parsed) schema is NOT re-derived from the new text — like
+///   SQLite, writable_schema trades integrity checking for direct access, so
+///   callers can make the stored text diverge from the live schema.
+/// - Matching `index`/`view`/`trigger` rows are left untouched (their `sql`
+///   is reconstructed from catalog metadata, not stored verbatim).
+///
+/// The row count returned is the number of schema rows matched by the WHERE
+/// clause, mirroring SQLite's changes() semantics.
+pub fn execute_sqlite_schema_update(
+    stmt: &vibesql_ast::UpdateStmt,
+    database: &mut vibesql_storage::Database,
+) -> Result<usize, ExecutorError> {
+    if stmt.from_clause.is_some() {
+        return Err(ExecutorError::UnsupportedFeature(
+            "UPDATE ... FROM is not supported on sqlite_master".to_string(),
+        ));
+    }
+
+    // Only `SET sql = <expr>` is supported in the writable_schema subset.
+    for assignment in &stmt.assignments {
+        if !assignment.column.eq_ignore_ascii_case("sql") {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "writable_schema UPDATE supports only the sql column, not '{}'",
+                assignment.column
+            )));
+        }
+    }
+
+    let schema = get_sqlite_schema_table_schema();
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(&schema);
+    let current = execute_sqlite_schema_query(&database.catalog)?;
+
+    // Collect (table_name, new_sql) updates first, then apply: applying while
+    // iterating would alias the catalog borrow held by the row snapshot.
+    let mut matched = 0usize;
+    let mut table_updates: Vec<(String, String)> = Vec::new();
+    for row in &current.rows {
+        if let Some(where_clause) = &stmt.where_clause {
+            let matches = match where_clause {
+                vibesql_ast::WhereClause::Condition(expr) => {
+                    schema_where_is_truthy(&evaluator.eval(expr, row)?)
+                }
+                vibesql_ast::WhereClause::CurrentOf(_) => {
+                    return Err(ExecutorError::UnsupportedFeature(
+                        "WHERE CURRENT OF is not supported on sqlite_master".to_string(),
+                    ));
+                }
+            };
+            if !matches {
+                continue;
+            }
+        }
+        matched += 1;
+
+        let (SqlValue::Varchar(obj_type), SqlValue::Varchar(name)) =
+            (&row.values[0], &row.values[1])
+        else {
+            continue;
+        };
+        if obj_type.as_str() != "table" {
+            // Index/view/trigger sql is reconstructed from catalog metadata;
+            // rewriting it verbatim is outside the supported subset.
+            continue;
+        }
+
+        for assignment in &stmt.assignments {
+            let value = evaluator.eval(&assignment.value, row)?;
+            let new_sql = match value {
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                other => {
+                    return Err(ExecutorError::UnsupportedFeature(format!(
+                        "writable_schema UPDATE requires a string value for sql, got {:?}",
+                        other
+                    )));
+                }
+            };
+            table_updates.push((name.to_string(), new_sql));
+        }
+    }
+
+    for (table_name, new_sql) in table_updates {
+        // Update the storage-side schema, then mirror it into the catalog —
+        // the two hold separate copies that must stay identical (same pattern
+        // as ALTER TABLE's sync_catalog_schema_from_storage, issue #5625).
+        let synced = match database.get_table_mut(&table_name) {
+            Some(table) => {
+                table.schema_mut().set_sql_source(new_sql);
+                Some(table.schema.clone())
+            }
+            None => None,
+        };
+        if let Some(schema) = synced {
+            database.catalog.replace_table_schema(&table_name, schema);
+        }
+    }
+
+    Ok(matched)
 }
 
 /// Execute a `sqlite_temp_master` / `sqlite_temp_schema` query.
@@ -183,6 +352,9 @@ pub fn execute_sqlite_temp_schema_query(
 
     // Add indexes owned by the temp schema.
     for index in catalog.get_schema_indexes(temp_schema) {
+        if is_without_rowid_pk_autoindex(catalog, index) {
+            continue;
+        }
         let sql = generate_create_index_sql(index);
         rows.push(schema_row("index", &index.name, &index.table_name, sql));
     }
@@ -1019,5 +1191,189 @@ mod tests {
         assert!(sql.contains("CREATE VIEW test_view"));
         // With column list specified
         assert!(sql.contains("(col1)"));
+    }
+
+    /// Issue #5796 (alterdropcol 7.2): the implicit PRIMARY KEY autoindex of a
+    /// WITHOUT ROWID table must be hidden from sqlite_master (in SQLite the PK
+    /// *is* the table b-tree), while a UNIQUE-constraint autoindex on the same
+    /// table and a PK autoindex on an ordinary rowid table stay listed.
+    #[test]
+    fn test_without_rowid_pk_autoindex_hidden_from_sqlite_master() {
+        let mut catalog = Catalog::new();
+
+        let make_cols = || {
+            vec![
+                ColumnSchema::new("a".to_string(), DataType::Integer, true),
+                ColumnSchema::new("b".to_string(), DataType::Integer, true),
+            ]
+        };
+
+        // WITHOUT ROWID table with PK(a) and UNIQUE(b).
+        let mut wr =
+            TableSchema::with_primary_key("t_wr".to_string(), make_cols(), vec!["a".to_string()]);
+        wr.without_rowid = true;
+        catalog.create_table(wr).unwrap();
+        catalog
+            .add_index(IndexMetadata::new(
+                "sqlite_autoindex_t_wr_1".to_string(),
+                "t_wr".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
+                true,
+            ))
+            .unwrap();
+        catalog
+            .add_index(IndexMetadata::new(
+                "sqlite_autoindex_t_wr_2".to_string(),
+                "t_wr".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("b".to_string(), SortOrder::Ascending)],
+                true,
+            ))
+            .unwrap();
+
+        // Ordinary rowid table with a (non-INTEGER-PK-alias) PK autoindex.
+        let rowid = TableSchema::with_primary_key(
+            "t_rowid".to_string(),
+            make_cols(),
+            vec!["a".to_string()],
+        );
+        catalog.create_table(rowid).unwrap();
+        catalog
+            .add_index(IndexMetadata::new(
+                "sqlite_autoindex_t_rowid_1".to_string(),
+                "t_rowid".to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
+                true,
+            ))
+            .unwrap();
+
+        let result = execute_sqlite_schema_query(&catalog).unwrap();
+        let index_names: Vec<String> = result
+            .rows
+            .iter()
+            .filter(|r| matches!(&r.values[0], SqlValue::Varchar(s) if s.as_str() == "index"))
+            .map(|r| match &r.values[1] {
+                SqlValue::Varchar(s) => s.to_string(),
+                other => panic!("Expected VARCHAR index name, got {other:?}"),
+            })
+            .collect();
+
+        assert!(
+            !index_names.contains(&"sqlite_autoindex_t_wr_1".to_string()),
+            "WITHOUT ROWID PK autoindex must be hidden, got {index_names:?}"
+        );
+        assert!(
+            index_names.contains(&"sqlite_autoindex_t_wr_2".to_string()),
+            "UNIQUE autoindex on WITHOUT ROWID table must stay listed, got {index_names:?}"
+        );
+        assert!(
+            index_names.contains(&"sqlite_autoindex_t_rowid_1".to_string()),
+            "rowid-table PK autoindex must stay listed, got {index_names:?}"
+        );
+    }
+
+    fn parse_update(sql: &str) -> vibesql_ast::UpdateStmt {
+        match vibesql_parser::Parser::parse_sql(sql).unwrap() {
+            vibesql_ast::Statement::Update(stmt) => stmt,
+            other => panic!("Expected UPDATE statement, got {other:?}"),
+        }
+    }
+
+    fn writable_schema_test_db() -> vibesql_storage::Database {
+        let mut db = vibesql_storage::Database::new();
+        for name in ["t1", "t2"] {
+            let mut schema = TableSchema::new(
+                name.to_string(),
+                vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+            );
+            schema.set_sql_source(format!("CREATE TABLE {name}(a)"));
+            db.create_table_with_identifier(
+                schema,
+                vibesql_catalog::TableIdentifier::new(name, false),
+            )
+            .unwrap();
+        }
+        db
+    }
+
+    /// Issue #5796 (alterdropcol 8.x): under writable_schema, UPDATE
+    /// sqlite_schema SET sql = '...' rewrites the stored CREATE TABLE source
+    /// text of the matching table rows.
+    #[test]
+    fn test_writable_schema_update_rewrites_sql_source_with_where() {
+        let mut db = writable_schema_test_db();
+        let stmt = parse_update(
+            "UPDATE sqlite_schema SET sql = 'CREATE TABLE t2(a, b)' WHERE name = 't2'",
+        );
+
+        let matched = execute_sqlite_schema_update(&stmt, &mut db).unwrap();
+        assert_eq!(matched, 1);
+        assert_eq!(
+            db.catalog.get_table("t2").unwrap().sql_source.as_deref(),
+            Some("CREATE TABLE t2(a, b)")
+        );
+        // Non-matching row untouched.
+        assert_eq!(
+            db.catalog.get_table("t1").unwrap().sql_source.as_deref(),
+            Some("CREATE TABLE t1(a)")
+        );
+    }
+
+    /// A WHERE-less UPDATE (alterdropcol 8.0 form) matches every schema row.
+    #[test]
+    fn test_writable_schema_update_without_where_matches_all_tables() {
+        let mut db = writable_schema_test_db();
+        let stmt = parse_update("UPDATE sqlite_schema SET sql = 'CREATE TABLE x(a)'");
+
+        let matched = execute_sqlite_schema_update(&stmt, &mut db).unwrap();
+        assert_eq!(matched, 2);
+        for name in ["t1", "t2"] {
+            assert_eq!(
+                db.catalog.get_table(name).unwrap().sql_source.as_deref(),
+                Some("CREATE TABLE x(a)"),
+                "table {name} must be rewritten"
+            );
+        }
+    }
+
+    /// Assignments to columns other than `sql` are outside the supported
+    /// writable_schema subset and must be rejected, not silently ignored.
+    #[test]
+    fn test_writable_schema_update_rejects_non_sql_column() {
+        let mut db = writable_schema_test_db();
+        let stmt = parse_update("UPDATE sqlite_schema SET name = 'oops'");
+
+        let err = execute_sqlite_schema_update(&stmt, &mut db).unwrap_err();
+        assert!(matches!(err, ExecutorError::UnsupportedFeature(_)), "got {err:?}");
+    }
+
+    /// The UPDATE executor keeps rejecting schema-table writes when
+    /// writable_schema is OFF (the default) and routes them to the
+    /// writable_schema path when ON.
+    #[test]
+    fn test_update_executor_gates_sqlite_schema_on_writable_schema_pragma() {
+        let mut db = writable_schema_test_db();
+        let stmt = parse_update(
+            "UPDATE sqlite_schema SET sql = 'CREATE TABLE t1(a, b)' WHERE name = 't1'",
+        );
+
+        // Default: read-only error.
+        let err = crate::UpdateExecutor::execute(&stmt, &mut db).unwrap_err();
+        assert!(matches!(err, ExecutorError::SqliteSystemTableReadOnly { .. }), "got {err:?}");
+        assert_eq!(
+            db.catalog.get_table("t1").unwrap().sql_source.as_deref(),
+            Some("CREATE TABLE t1(a)")
+        );
+
+        // With PRAGMA writable_schema=ON: the rewrite goes through.
+        db.set_writable_schema(true);
+        let matched = crate::UpdateExecutor::execute(&stmt, &mut db).unwrap();
+        assert_eq!(matched, 1);
+        assert_eq!(
+            db.catalog.get_table("t1").unwrap().sql_source.as_deref(),
+            Some("CREATE TABLE t1(a, b)")
+        );
     }
 }

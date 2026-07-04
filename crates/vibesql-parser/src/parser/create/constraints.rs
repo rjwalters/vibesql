@@ -170,6 +170,34 @@ impl Parser {
             None
         };
 
+        // Optional COLLATE clause (SQLite grammar allows a per-column collation
+        // inside table-level PRIMARY KEY / UNIQUE column lists, e.g.
+        // `PRIMARY KEY(a COLLATE nocase, a)` — verified against sqlite3 3.51.0).
+        // Parsed and accepted for grammar compatibility; the collation is not
+        // yet carried into `IndexColumn`, matching the CREATE INDEX column-list
+        // behavior in `parser/index.rs` which also parses and discards it.
+        if self.peek_keyword(crate::keywords::Keyword::Collate) {
+            self.advance(); // consume COLLATE
+            let _collation = match self.peek() {
+                Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                    let name = name.clone();
+                    self.advance();
+                    name
+                }
+                Token::Keyword { keyword: kw, .. } => {
+                    // Allow keywords like BINARY, NOCASE, RTRIM as collation names
+                    let name = kw.to_string();
+                    self.advance();
+                    name
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected collation name after COLLATE".to_string(),
+                    })
+                }
+            };
+        }
+
         // Check for optional ASC/DESC
         let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
             self.advance();
