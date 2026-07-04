@@ -57,6 +57,14 @@ pub struct DatabaseConfig {
     /// path (in-memory + SQL-dump snapshot on save/exit, no WAL sibling files).
     #[serde(default = "default_true")]
     pub wal: bool,
+
+    /// Busy timeout (milliseconds) for the exclusive inter-process database
+    /// lock (issue #5808). While another CLI session holds the same
+    /// file-backed database open, a new session retries acquiring the
+    /// `<stem>.lock` sibling for up to this long before failing with the
+    /// SQLite-compatible error `database is locked`. `0` = fail immediately.
+    #[serde(default = "default_lock_timeout_ms")]
+    pub lock_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +110,10 @@ fn default_sql_mode() -> String {
     "mysql".to_string()
 }
 
+fn default_lock_timeout_ms() -> u64 {
+    5000
+}
+
 impl Default for DisplayConfig {
     fn default() -> Self {
         DisplayConfig { format: default_format() }
@@ -115,6 +127,7 @@ impl Default for DatabaseConfig {
             auto_save: default_true(),
             sql_mode: default_sql_mode(),
             wal: default_true(),
+            lock_timeout_ms: default_lock_timeout_ms(),
         }
     }
 }
@@ -199,6 +212,29 @@ auto_save = true
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.database.wal);
+    }
+
+    #[test]
+    fn test_lock_timeout_defaults_when_unspecified() {
+        // A config that omits `lock_timeout_ms` must parse with the 5000 ms
+        // default (issue #5808).
+        let toml_str = r#"
+[database]
+wal = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.database.lock_timeout_ms, 5000);
+        assert_eq!(Config::default().database.lock_timeout_ms, 5000);
+    }
+
+    #[test]
+    fn test_lock_timeout_override_parses() {
+        let toml_str = r#"
+[database]
+lock_timeout_ms = 250
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.database.lock_timeout_ms, 250);
     }
 
     #[test]

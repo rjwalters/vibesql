@@ -15,6 +15,10 @@ pub mod columnar_cache;
 pub mod database;
 pub mod error;
 pub mod index;
+// Inter-process advisory locking (flock/LockFileEx via std file locks) is
+// unavailable on wasm32 — cfg-gated so the WASM build keeps compiling.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod lock;
 pub mod mvcc;
 pub mod page;
 pub mod persistence;
@@ -47,6 +51,8 @@ pub use database::{
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};
+#[cfg(not(target_arch = "wasm32"))]
+pub use lock::{acquire_exclusive, cleanup_stale_temp_files, DatabaseLock};
 pub use mvcc::{mvcc_enabled, stamp_xmax_for_write, stamp_xmin_for_write, TxnSnapshot};
 pub use persistence::load::{parse_sql_statements, read_sql_dump};
 pub use query_buffer_pool::{

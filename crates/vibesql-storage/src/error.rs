@@ -46,6 +46,10 @@ pub enum StorageError {
         supported: u8,
     },
     IoError(String),
+    /// Another process holds the exclusive inter-process database lock
+    /// (issue #5808). Displays the exact SQLite-compatible wording
+    /// `database is locked` — contractual, do not change.
+    DatabaseLocked,
     InvalidPageSize {
         expected: usize,
         actual: usize,
@@ -151,6 +155,11 @@ impl std::fmt::Display for StorageError {
             }
             StorageError::IoError(msg) => {
                 write!(f, "{}", vibe_msg!("storage-io-error", message = msg.as_str()))
+            }
+            StorageError::DatabaseLocked => {
+                // Exact SQLite wording — deliberately not localized so scripts
+                // and the TCL shim can match on it (issue #5808).
+                write!(f, "database is locked")
             }
             StorageError::InvalidPageSize { expected, actual } => {
                 write!(

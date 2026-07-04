@@ -1453,6 +1453,11 @@ impl From<vibesql_storage::StorageError> for ExecutorError {
             vibesql_storage::StorageError::IoError(msg) => {
                 ExecutorError::StorageError(format!("I/O error: {}", msg))
             }
+            err @ vibesql_storage::StorageError::DatabaseLocked => {
+                // Exact SQLite wording ("database is locked") -- preserved
+                // verbatim so scripts can match on it (issue #5808).
+                ExecutorError::StorageError(err.to_string())
+            }
             vibesql_storage::StorageError::InvalidPageSize { expected, actual } => {
                 ExecutorError::StorageError(format!(
                     "Invalid page size: expected {}, got {}",

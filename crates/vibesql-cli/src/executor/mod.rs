@@ -25,6 +25,12 @@ pub struct SqlExecutor {
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
     /// writing a full snapshot. `None` preserves the default snapshot behavior.
     wal_state: Option<wal::WalState>,
+    /// Exclusive inter-process lock on the database (`<stem>.lock` sibling),
+    /// held for every file-backed session — WAL-active AND snapshot-only —
+    /// for the whole session (issue #5808). `None` for `:memory:` / no-path
+    /// sessions. Declared last so it drops AFTER `db` (and `wal_state`),
+    /// keeping the lock held through the exit-time checkpoint/save.
+    _db_lock: Option<vibesql_storage::DatabaseLock>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,7 +178,7 @@ fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
 ///
 /// Bundled into a struct so the `--recover-fallback` opt-in (issue #5807)
 /// threads through `Repl`/`ScriptExecutor` without growing a trail of bools.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct DbOpenOptions {
     /// Activate the WAL persistence path for file-backed databases
     /// (`[database] wal`, on by default).
@@ -181,6 +187,18 @@ pub struct DbOpenOptions {
     /// unreadable, recover from the newest readable older checkpoint instead
     /// of refusing to open. Skipped checkpoints are reported on stderr.
     pub recover_fallback: bool,
+    /// Busy timeout (milliseconds) for the exclusive inter-process database
+    /// lock (`[database] lock_timeout_ms`, default 5000). While another
+    /// session holds the same file-backed database, the open retries for up
+    /// to this long before failing with `database is locked`. `0` = fail
+    /// immediately.
+    pub lock_timeout_ms: u64,
+}
+
+impl Default for DbOpenOptions {
+    fn default() -> Self {
+        DbOpenOptions { wal: false, recover_fallback: false, lock_timeout_ms: 5000 }
+    }
 }
 
 impl SqlExecutor {
@@ -197,7 +215,7 @@ impl SqlExecutor {
     /// Create an executor with the given WAL setting and default recovery
     /// strictness (no checkpoint fallback).
     pub fn new_with_wal(database: Option<String>, wal: bool) -> anyhow::Result<Self> {
-        Self::new_with_options(database, DbOpenOptions { wal, recover_fallback: false })
+        Self::new_with_options(database, DbOpenOptions { wal, ..DbOpenOptions::default() })
     }
 
     /// Create an executor, optionally activating the opt-in WAL persistence path.
@@ -222,6 +240,41 @@ impl SqlExecutor {
     ) -> anyhow::Result<Self> {
         // Treat :memory: as an in-memory database (no file path)
         let database = database.filter(|p| !is_memory_database(p));
+
+        // Exclusive inter-process lock for EVERY file-backed session — WAL
+        // and snapshot-only alike (issue #5808). VibeSQL holds the whole
+        // database in memory and checkpoints/saves its own image, so two
+        // concurrent writers cannot be merged: the last save wins and
+        // clobbers the other session's committed writes. Acquired BEFORE any
+        // recovery/load so no other process can be mid-checkpoint while we
+        // read, and held (via `_db_lock`) until the executor drops — i.e.
+        // after the exit-time checkpoint/save.
+        //
+        // `:memory:` / no-path sessions take no lock and create no `.lock`
+        // file (`database` is already `None` for them here).
+        let db_lock = match database {
+            Some(ref db_path) => {
+                let lock = vibesql_storage::acquire_exclusive(
+                    std::path::Path::new(db_path),
+                    std::time::Duration::from_millis(options.lock_timeout_ms),
+                )
+                .map_err(|e| match e {
+                    // Exact SQLite CLI wording: `Error: database is locked`.
+                    vibesql_storage::StorageError::DatabaseLocked => anyhow::anyhow!("{}", e),
+                    other => anyhow::anyhow!("Failed to lock database at {}: {}", db_path, other),
+                })?;
+
+                // Safe only under the exclusive lock: remove stale temp stubs
+                // left by interrupted checkpoint/truncate writers
+                // (`checkpoint_*.tmp`, `<stem>.wal.tmp`). Completed `.vchk`
+                // files are never touched.
+                let paths = wal::WalPaths::derive(db_path);
+                vibesql_storage::cleanup_stale_temp_files(&paths.wal_path, &paths.checkpoint_dir);
+
+                Some(lock)
+            }
+            None => None,
+        };
 
         // WAL-active path: only when explicitly opted in AND a file path exists.
         // For in-memory databases the WAL is silently disabled (no file to
@@ -268,6 +321,7 @@ impl SqlExecutor {
                     timing_enabled: false,
                     count_changes: false,
                     wal_state: Some(wal_state),
+                    _db_lock: db_lock,
                 });
             }
         }
@@ -292,7 +346,13 @@ impl SqlExecutor {
         vibesql_executor::rebuild_pending_expression_indexes(&mut db)
             .map_err(|e| anyhow::anyhow!("Failed to rebuild expression indexes: {}", e))?;
 
-        Ok(SqlExecutor { db, timing_enabled: false, count_changes: false, wal_state: None })
+        Ok(SqlExecutor {
+            db,
+            timing_enabled: false,
+            count_changes: false,
+            wal_state: None,
+            _db_lock: db_lock,
+        })
     }
 
     /// Returns true if the WAL persistence path is active for this session.
