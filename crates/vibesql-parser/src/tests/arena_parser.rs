@@ -618,3 +618,214 @@ fn test_arena_fallback_like_shift_pattern() {
         pattern
     );
 }
+
+// ============================================================================
+// Mirrored chained-IN matrix (issue #5812)
+//
+// This matrix mirrors tests/in_list.rs (test_matrix_*): the arena parser must
+// produce ASTs equivalent to the standard parser for everything it accepts.
+// Shift-tier cases (<<) are outside the arena parser's grammar and must fail
+// arena parsing (never silently truncate) and succeed end-to-end through
+// parse_with_arena_fallback. All expected values were verified against sqlite3.
+// ============================================================================
+
+/// Assert the arena expression is `Extended(InList { .. })`.
+fn assert_arena_in_list(expr: &vibesql_ast::arena::Expression<'_>, context: &str) {
+    assert!(
+        matches!(
+            expr,
+            vibesql_ast::arena::Expression::Extended(
+                vibesql_ast::arena::ExtendedExpr::InList { .. }
+            )
+        ),
+        "{}: expected IN list node, got {:?}",
+        context,
+        expr
+    );
+}
+
+#[test]
+fn test_arena_matrix_in_list_plus_literal() {
+    // sqlite3: SELECT 1 IN (1) + 1; -- 2
+    with_arena_select_expr("SELECT 1 IN (1) + 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_in_list(left, "left operand of +");
+    });
+}
+
+#[test]
+fn test_arena_matrix_in_plus_then_multiply() {
+    // sqlite3: SELECT 1 IN (1) + 2 * 3; -- 7, i.e. (x IN (1)) + (2 * 3)
+    with_arena_select_expr("SELECT x IN (1) + 2 * 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, right } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_in_list(left, "left operand of +");
+        assert!(
+            matches!(
+                right,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Multiply,
+                    ..
+                }
+            ),
+            "right operand of + should be (2 * 3): {:?}",
+            right
+        );
+    });
+}
+
+#[test]
+fn test_arena_matrix_in_concat() {
+    // sqlite3: SELECT 1 IN (1) || 'x'; -- '1x'
+    with_arena_select_expr("SELECT 1 IN (1) || 'x'", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Concat at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Concat);
+        assert_arena_in_list(left, "left operand of ||");
+    });
+}
+
+#[test]
+fn test_arena_matrix_in_multiply_then_plus() {
+    // sqlite3: SELECT 1 IN (1) * 2 + 3; -- 5, i.e. ((1 IN (1)) * 2) + 3
+    with_arena_select_expr("SELECT 1 IN (1) * 2 + 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        let vibesql_ast::arena::Expression::BinaryOp { op: inner_op, left: inner_left, .. } = left
+        else {
+            panic!("left operand of + should be ((1 IN (1)) * 2): {:?}", left);
+        };
+        assert_eq!(*inner_op, vibesql_ast::BinaryOperator::Multiply);
+        assert_arena_in_list(inner_left, "innermost left");
+    });
+}
+
+#[test]
+fn test_arena_matrix_in_plus_minus_chain() {
+    // sqlite3: SELECT 5 IN (5) + 10 - 3; -- 8, i.e. ((5 IN (5)) + 10) - 3
+    with_arena_select_expr("SELECT 5 IN (5) + 10 - 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Minus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Minus);
+        let vibesql_ast::arena::Expression::BinaryOp { op: inner_op, left: inner_left, .. } = left
+        else {
+            panic!("left operand of - should be ((5 IN (5)) + 10): {:?}", left);
+        };
+        assert_eq!(*inner_op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_in_list(inner_left, "innermost left");
+    });
+}
+
+#[test]
+fn test_arena_matrix_not_in_subquery_shift_falls_back() {
+    // sqlite3: SELECT 1 NOT IN (SELECT 1) << 2; -- 0
+    // The arena parser has no shift tier: it must fail (never silently
+    // truncate to just the NOT IN node), and the fallback path must produce
+    // the standard parser's AST.
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 1 NOT IN (SELECT 1) << 2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; << after NOT IN must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 NOT IN (SELECT 1) << 2;")
+        .expect("fallback path should parse NOT IN followed by <<");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr else {
+        panic!("expected BinaryOp LeftShift at top level, got {:?}", expr);
+    };
+    assert_eq!(*op, vibesql_ast::BinaryOperator::LeftShift);
+    assert!(
+        matches!(**left, vibesql_ast::Expression::In { negated: true, .. }),
+        "left operand of << should be the NOT IN node: {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_arena_matrix_in_shift_falls_back() {
+    // sqlite3: SELECT 1 IN (1) << 2; -- 4
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 1 IN (1) << 2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; << after IN must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 IN (1) << 2;")
+        .expect("fallback path should parse IN followed by <<");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr else {
+        panic!("expected BinaryOp LeftShift at top level, got {:?}", expr);
+    };
+    assert_eq!(*op, vibesql_ast::BinaryOperator::LeftShift);
+    assert!(
+        matches!(**left, vibesql_ast::Expression::InList { .. }),
+        "left operand of << should be the IN list node: {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_arena_matrix_in_between_shift_bound_falls_back() {
+    // sqlite3: SELECT 1 IN (1) BETWEEN 0 AND 1<<2; -- 1
+    // Chained-IN with a shift-tier BETWEEN bound (post-#5813): the arena
+    // parser must fail on the << bound, and the fallback must produce
+    // Between { expr: InList, high: (1 << 2) }.
+    let arena = Bump::new();
+    let result =
+        ArenaParser::parse_select_with_interner("SELECT 1 IN (1) BETWEEN 0 AND 1<<2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; BETWEEN with << bound must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 IN (1) BETWEEN 0 AND 1<<2;")
+        .expect("fallback path should parse chained IN with shift BETWEEN bound");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::Between { expr: inner, high, negated, .. } = expr else {
+        panic!("expected Between at top level, got {:?}", expr);
+    };
+    assert!(!negated);
+    assert!(
+        matches!(**inner, vibesql_ast::Expression::InList { .. }),
+        "BETWEEN subject should be the IN list node: {:?}",
+        inner
+    );
+    assert!(
+        matches!(
+            **high,
+            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::LeftShift, .. }
+        ),
+        "high bound should be (1 << 2): {:?}",
+        high
+    );
+}

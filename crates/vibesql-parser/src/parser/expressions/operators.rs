@@ -111,10 +111,42 @@ impl Parser {
         Ok(left)
     }
 
+    // ------------------------------------------------------------------
+    // Arithmetic tier functions (shift -> additive -> concat -> multiplicative)
+    //
+    // Each tier comes in two forms:
+    // - `parse_<tier>_expression()` parses a fresh operand (starting at the
+    //   unary tier) and then climbs from that seed.
+    // - `parse_<tier>_expression_from(left)` takes an already-parsed left
+    //   operand, first runs it through all tighter tiers, then applies this
+    //   tier's operator loop. Each operator loop exists exactly once, in the
+    //   `_from` variant.
+    //
+    // Parallel-structure invariant (see arena_parser/expression.rs): the
+    // arena parser mirrors this decomposition minus the shift and bitwise
+    // tiers, which it deliberately lacks. The arena parser must produce ASTs
+    // equivalent to this parser for everything it accepts; anything it cannot
+    // express must fail arena parsing (triggering parse_with_arena_fallback),
+    // never silently truncate.
+    // ------------------------------------------------------------------
+
     /// Parse shift expression (handles <<, >>)
     /// Precedence: between comparison and additive
     pub(super) fn parse_shift_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_additive_expression()?;
+        let seed = self.parse_unary_expression()?;
+        self.parse_shift_expression_from(seed)
+    }
+
+    /// Shift tier (`<<`, `>>`) with an already-parsed left operand.
+    ///
+    /// The seed is first climbed through the tighter tiers
+    /// (multiplicative -> concat -> additive), so this doubles as the seeded
+    /// precedence-climbing entry point used by `continue_higher_precedence_ops`.
+    fn parse_shift_expression_from(
+        &mut self,
+        left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_additive_expression_from(left)?;
 
         loop {
             let op = match self.peek() {
@@ -144,7 +176,16 @@ impl Parser {
     pub(super) fn parse_additive_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_concat_expression()?;
+        let seed = self.parse_unary_expression()?;
+        self.parse_additive_expression_from(seed)
+    }
+
+    /// Additive tier (`+`, `-`) with an already-parsed left operand.
+    fn parse_additive_expression_from(
+        &mut self,
+        left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_concat_expression_from(left)?;
 
         loop {
             let op = match self.peek() {
@@ -170,7 +211,16 @@ impl Parser {
     pub(super) fn parse_concat_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_multiplicative_expression()?;
+        let seed = self.parse_unary_expression()?;
+        self.parse_concat_expression_from(seed)
+    }
+
+    /// Concat tier (`||`) with an already-parsed left operand.
+    fn parse_concat_expression_from(
+        &mut self,
+        left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_multiplicative_expression_from(left)?;
 
         while self.peek() == &Token::Operator(crate::token::MultiCharOperator::Concat) {
             self.advance();
@@ -189,8 +239,15 @@ impl Parser {
     pub(super) fn parse_multiplicative_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_unary_expression()?;
+        let seed = self.parse_unary_expression()?;
+        self.parse_multiplicative_expression_from(seed)
+    }
 
+    /// Multiplicative tier (`*`, `/`, `%`, `DIV`) with an already-parsed left operand.
+    fn parse_multiplicative_expression_from(
+        &mut self,
+        mut left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
         loop {
             let op = match self.peek() {
                 Token::Symbol('*') => vibesql_ast::BinaryOperator::Multiply,
@@ -838,62 +895,16 @@ impl Parser {
     /// Each operator's right operand is parsed at the next-tighter tier, so
     /// relative precedence among these operators is preserved
     /// (e.g. `x IN (1) + 2 * 3` parses as `(x IN (1)) + (2 * 3)`).
+    ///
+    /// Delegates to `parse_shift_expression_from`, which climbs the seeded
+    /// left operand through the multiplicative, concat, additive, and shift
+    /// tiers using the canonical per-tier operator loops. The arena parser
+    /// has the same helper (minus the shift tier) in arena_parser/expression.rs.
     fn continue_higher_precedence_ops(
         &mut self,
-        mut left: vibesql_ast::Expression,
+        left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        use crate::token::MultiCharOperator;
-        loop {
-            let (op, right) = match self.peek() {
-                // Multiplicative tier: right operand at unary tier
-                Token::Symbol('*') => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Multiply, self.parse_unary_expression()?)
-                }
-                Token::Symbol('/') => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Divide, self.parse_unary_expression()?)
-                }
-                Token::Symbol('%') => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Modulo, self.parse_unary_expression()?)
-                }
-                Token::Keyword { keyword: Keyword::Div, .. } => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::IntegerDivide, self.parse_unary_expression()?)
-                }
-                // Concat tier: right operand at multiplicative tier
-                Token::Operator(MultiCharOperator::Concat) => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Concat, self.parse_multiplicative_expression()?)
-                }
-                // Additive tier: right operand at concat tier
-                Token::Symbol('+') => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Plus, self.parse_concat_expression()?)
-                }
-                Token::Symbol('-') => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::Minus, self.parse_concat_expression()?)
-                }
-                // Shift tier: right operand at additive tier
-                Token::Operator(MultiCharOperator::LeftShift) => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::LeftShift, self.parse_additive_expression()?)
-                }
-                Token::Operator(MultiCharOperator::RightShift) => {
-                    self.advance();
-                    (vibesql_ast::BinaryOperator::RightShift, self.parse_additive_expression()?)
-                }
-                _ => break,
-            };
-            left = vibesql_ast::Expression::BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
+        self.parse_shift_expression_from(left)
     }
 
     /// Parse unary expression (handles unary +, -, ~ operators)
