@@ -492,6 +492,171 @@ fn test_rowid_alias_survives_separate_process_reopen() {
     );
 }
 
+/// Like `run_script`, but returns the full process `Output` (status + stderr)
+/// for sessions that are expected to fail.
+#[cfg(unix)]
+fn run_script_output(binary: &str, db: &Path, home: &Path, script: &str) -> std::process::Output {
+    use std::io::Write;
+
+    let mut child = Command::new(binary)
+        .arg(db)
+        .env("HOME", home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn vibesql");
+    {
+        let mut stdin = child.stdin.take().expect("child stdin");
+        stdin.write_all(script.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+    }
+    child.wait_with_output().expect("vibesql did not exit")
+}
+
+/// End-to-end regression for issue #5883: PK, FK (with ON DELETE CASCADE),
+/// CHECK, and rowid-alias semantics must survive crash recovery when the
+/// CREATE TABLE lives only in the WAL — i.e. it was logged AFTER the last
+/// checkpoint. Checkpoint-based recovery was fixed by #5878; this covers the
+/// log-replay path (`WalOp::CreateTable`).
+///
+/// The crash is injected deterministically: after a healthy session seeds
+/// the checkpoint archive, the checkpoint directory is made read-only so
+/// every subsequent checkpoint attempt fails while the WAL keeps absorbing
+/// the ops (the CLI flushes the WAL before attempting the checkpoint and
+/// never truncates it on failure — issue #5832). The resulting on-disk state
+/// is byte-for-byte what a SIGKILL between WAL append and checkpoint leaves
+/// behind, without the scheduling races of an actual kill.
+#[cfg(unix)]
+#[test]
+fn test_constraints_survive_crash_replay_of_create_table() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("constraints_crash.vbsql");
+    let bin = vibesql_binary();
+    let (wal_path, checkpoint_dir) = wal_paths(&db_path);
+
+    // --- Session 1 (healthy): seed the checkpoint archive so we can chmod it.
+    run_script(bin, &db_path, home.path(), "CREATE TABLE seed(a INTEGER);\n");
+    assert!(checkpoint_dir.is_dir(), "checkpoint dir should exist after session 1");
+
+    // Inject the "crash": checkpoint dir read-only.
+    let orig_perms = fs::metadata(&checkpoint_dir).unwrap().permissions();
+    fs::set_permissions(&checkpoint_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    // Skip when running as root (root bypasses permission checks).
+    if fs::File::create(checkpoint_dir.join(".probe")).is_ok() {
+        let _ = fs::remove_file(checkpoint_dir.join(".probe"));
+        fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+        eprintln!("skipping: running as root, cannot inject a permission failure");
+        return;
+    }
+
+    // --- Session 2: DDL with PK + FK + CHECK, plus committed rows. Every
+    // checkpoint attempt fails, so all of this lands ONLY in the WAL. The
+    // process exits non-zero (fail-closed persistence policy) — that is the
+    // simulated crash.
+    let output = run_script_output(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE crash_parent(px INTEGER PRIMARY KEY);\n\
+         CREATE TABLE crash_child(id INTEGER PRIMARY KEY, \
+         py INTEGER REFERENCES crash_parent(px) ON DELETE CASCADE, \
+         amount INTEGER CHECK(amount > 0));\n\
+         INSERT INTO crash_parent VALUES(1);\n\
+         INSERT INTO crash_child VALUES(10, 1, 5);\n",
+    );
+    assert!(
+        !output.status.success(),
+        "session 2 must exit non-zero on checkpoint failure (WAL-only state)"
+    );
+    assert!(wal_path.exists(), "the WAL must hold the un-checkpointed CreateTable ops");
+
+    // Clear the injected failure: from here on, reopening replays the
+    // CreateTable + Insert ops from the WAL (RecoveryManager log replay).
+    fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+
+    // --- Reopen A: FK metadata and rowid-alias reads on the crash-replayed
+    // state. Before the fix, foreign_key_list was empty and the schema had
+    // no PK.
+    let out = run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "PRAGMA foreign_key_list(crash_child);\n\
+         SELECT amount FROM crash_child WHERE rowid = 10;\n",
+    );
+    assert!(
+        out.contains("crash_parent") && out.contains("CASCADE"),
+        "PRAGMA foreign_key_list must show the FK (with CASCADE) after crash replay; got:\n{out}"
+    );
+    assert!(
+        out.contains('5'),
+        "rowid must alias the INTEGER PRIMARY KEY after crash replay; got:\n{out}"
+    );
+
+    // --- Reopen B: an FK-violating insert must FAIL and change nothing.
+    let output = run_script_output(
+        bin,
+        &db_path,
+        home.path(),
+        "PRAGMA foreign_keys=ON;\nINSERT INTO crash_child VALUES(11, 99, 5);\n",
+    );
+    assert!(
+        !output.status.success(),
+        "FK-violating insert must fail after crash replay; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // --- Reopen C: a CHECK-violating insert must FAIL.
+    let output = run_script_output(
+        bin,
+        &db_path,
+        home.path(),
+        "INSERT INTO crash_child VALUES(12, 1, -5);\n",
+    );
+    assert!(
+        !output.status.success(),
+        "CHECK-violating insert must fail after crash replay; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // --- Reopen D: a duplicate-PK insert must FAIL.
+    let output = run_script_output(
+        bin,
+        &db_path,
+        home.path(),
+        "INSERT INTO crash_child VALUES(10, 1, 7);\n",
+    );
+    assert!(
+        !output.status.success(),
+        "duplicate-PK insert must fail after crash replay; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // None of the violating inserts may have landed.
+    let out = run_script(bin, &db_path, home.path(), "SELECT count(*) AS n FROM crash_child;\n");
+    assert!(out.contains('1'), "exactly the one committed row must remain; got:\n{out}");
+
+    // --- Reopen E+F: ON DELETE CASCADE must actually fire.
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "PRAGMA foreign_keys=ON;\nDELETE FROM crash_parent WHERE px = 1;\n",
+    );
+    let out = run_script(bin, &db_path, home.path(), "SELECT count(*) AS n FROM crash_child;\n");
+    assert!(
+        out.contains('0'),
+        "ON DELETE CASCADE must remove the child row after crash replay; got:\n{out}"
+    );
+}
+
 /// End-to-end regression for issues #5835 / #5871: a plain REPLACE INTO must
 /// be durable across a cross-process reopen. Before the fix the REPLACE's
 /// conflict-delete emitted no WAL op (and REPLACE never triggered the

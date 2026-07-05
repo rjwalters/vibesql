@@ -733,9 +733,31 @@ impl Database {
 
 /// Serialize a TableSchema to bytes for WAL storage
 ///
-/// Uses a simple format: JSON serialization of the schema.
-/// This is for WAL recovery purposes and doesn't need to be maximally efficient.
-pub(super) fn serialize_table_schema(schema: &vibesql_catalog::TableSchema) -> Vec<u8> {
+/// Base layout: `table_name\0`, column count (u32 LE), then per column
+/// `name\0`, `Debug(data_type)\0`, nullable byte.
+///
+/// A constraint/durability **trailer** (issue #5883) follows the column list,
+/// carrying the same per-table durability fields the checkpoint catalog
+/// persists — primary key, WITHOUT ROWID flag, and the verbatim CREATE TABLE
+/// `sql_source`. Crash recovery (`wal::recovery::deserialize_table_schema`)
+/// restores these and then rebuilds CHECK/FK constraints and the INTEGER
+/// PRIMARY KEY rowid alias by re-parsing `sql_source`, exactly like the
+/// checkpoint load path (issue #5834 / PR #5878). Without the trailer, a
+/// table whose CREATE TABLE was logged after the last checkpoint came back
+/// from a crash with no PK, no constraints, and no rowid alias.
+///
+/// Trailer layout (versioned, append-only):
+///   `[trailer_version: u8 = 1]`
+///   `[has_pk: u8]` — if 1: `[pk_count: u32 LE]` then `pk_count ×  name\0`
+///   `[without_rowid: u8]`
+///   `[has_sql_source: u8]` — if 1: `[len: u32 LE][utf8 bytes]`
+///
+/// Compatibility: the blob is length-prefixed inside the WAL entry, and the
+/// legacy deserializer stops after the column list (ignoring trailing bytes),
+/// so old binaries read new blobs fine; new binaries treat a blob ending at
+/// the column list as trailer-absent (legacy) and fall back to the old
+/// behavior. No WAL format version bump is required.
+pub(crate) fn serialize_table_schema(schema: &vibesql_catalog::TableSchema) -> Vec<u8> {
     // Simple approach: serialize the table name and column info as text
     // Format: table_name\0col1_name\0col1_type\0nullable\0...
     let mut data = Vec::new();
@@ -760,6 +782,32 @@ pub(super) fn serialize_table_schema(schema: &vibesql_catalog::TableSchema) -> V
 
         // Nullable flag
         data.push(if col.nullable { 1 } else { 0 });
+    }
+
+    // ---- Constraint/durability trailer, version 1 (issue #5883) ----
+    data.push(1); // trailer version
+
+    match &schema.primary_key {
+        Some(pk_cols) => {
+            data.push(1);
+            data.extend_from_slice(&(pk_cols.len() as u32).to_le_bytes());
+            for col_name in pk_cols {
+                data.extend_from_slice(col_name.as_bytes());
+                data.push(0);
+            }
+        }
+        None => data.push(0),
+    }
+
+    data.push(if schema.without_rowid { 1 } else { 0 });
+
+    match &schema.sql_source {
+        Some(src) => {
+            data.push(1);
+            data.extend_from_slice(&(src.len() as u32).to_le_bytes());
+            data.extend_from_slice(src.as_bytes());
+        }
+        None => data.push(0),
     }
 
     data

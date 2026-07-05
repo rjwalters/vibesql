@@ -49,7 +49,10 @@ use crate::StorageError;
 /// Column-name lookup for every table present in the catalog being loaded,
 /// keyed by lowercased table name. Used to resolve FK parent column indices
 /// regardless of the (arbitrary) order tables appear in the file.
-pub(super) type ParentColumnLookup = HashMap<String, Vec<String>>;
+///
+/// `pub(crate)`: the WAL crash-recovery path (`wal::recovery`) routes replayed
+/// `CreateTable` ops through the same rehydration (issue #5883).
+pub(crate) type ParentColumnLookup = HashMap<String, Vec<String>>;
 
 /// Convert an AST referential action (optional; absent = NO ACTION) into the
 /// catalog representation. Mirrors `convert_action` in the executor's CREATE
@@ -114,7 +117,7 @@ fn resolve_parent_columns(
 /// source was invalidated by ALTER TABLE — those fall back to the previous
 /// behavior). Errors when the source no longer parses or disagrees with the
 /// stored column set, so constraint loss is never silent.
-pub(super) fn rehydrate_constraints_from_sql_source(
+pub(crate) fn rehydrate_constraints_from_sql_source(
     schema: &mut vibesql_catalog::TableSchema,
     parents: &ParentColumnLookup,
 ) -> Result<(), StorageError> {
