@@ -34,8 +34,32 @@ where
         &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
 {
-    // Use the memory-tracking version with a no-op memory check
-    execute_ctes_with_memory_check(ctes, database, executor, |_| Ok(()))
+    // Use the memory-tracking version with a no-op memory check.
+    // No root statement is provided, so every CTE in the list is executed
+    // eagerly (used by DML executors, where laziness is not required).
+    execute_ctes_with_memory_check(ctes, None, database, executor, |_| Ok(()))
+}
+
+/// Execute the CTEs of a SELECT statement, skipping CTEs that the statement
+/// never references (directly or transitively through other referenced CTEs).
+///
+/// SQLite expands CTEs lazily: a `WITH` entry that is never referenced by the
+/// main statement is never evaluated, so errors inside its body are never
+/// reported (with2.test 11.x/12.1). This entry point mirrors that behavior for
+/// paths that execute a statement's WITH clause (issue #5838).
+pub fn execute_ctes_for_stmt<F>(
+    ctes: &[vibesql_ast::CommonTableExpr],
+    root: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+    executor: F,
+) -> Result<HashMap<String, CteResult>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+{
+    execute_ctes_with_memory_check(ctes, Some(root), database, executor, |_| Ok(()))
 }
 
 /// Execute all CTEs with memory tracking
@@ -43,8 +67,12 @@ where
 /// CTEs are executed in order, allowing later CTEs to reference earlier ones.
 /// After each CTE is materialized, the memory_check callback is called with
 /// the estimated size of the CTE result to enforce memory limits.
+///
+/// When `root` is provided, only CTEs that are (transitively) referenced by the
+/// root statement are executed, matching SQLite's lazy CTE expansion.
 pub(super) fn execute_ctes_with_memory_check<F, M>(
     ctes: &[vibesql_ast::CommonTableExpr],
+    root: Option<&vibesql_ast::SelectStmt>,
     database: &vibesql_storage::Database,
     executor: F,
     memory_check: M,
@@ -56,35 +84,502 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
     M: Fn(usize) -> Result<(), ExecutorError>,
 {
-    let mut cte_results = HashMap::new();
+    let mut in_progress = Vec::new();
+    execute_cte_list(
+        ctes,
+        root,
+        &HashMap::new(),
+        &mut in_progress,
+        false,
+        database,
+        &executor,
+        &memory_check,
+    )
+}
 
-    // Execute each CTE in order
-    // CTEs can reference previously defined CTEs
-    for cte in ctes {
-        // Check if this is a recursive CTE
-        // SQLite compatibility: auto-detect recursive CTEs even without RECURSIVE keyword
-        // A CTE is recursive if it references itself in a UNION/UNION ALL set operation
-        let is_recursive = cte.recursive || is_cte_self_referential(cte);
-        let rows = if is_recursive {
-            // Recursive CTE: execute base term, then iteratively execute recursive term
-            execute_recursive_cte(cte, &cte_results, database, &executor, &memory_check)?
-        } else {
-            // Non-recursive CTE: execute query directly
-            executor(&cte.query, &cte_results)?
-        };
+/// Per-CTE execution state used for sibling dependency resolution and
+/// within-list cycle detection.
+#[derive(Clone, Copy, PartialEq)]
+enum CteState {
+    Pending,
+    InFlight,
+    Done,
+}
 
-        // Track memory for this CTE result before storing
-        let estimated_size = super::helpers::estimate_result_size(&rows);
-        memory_check(estimated_size)?;
+/// Execute a (possibly nested) WITH-clause CTE list.
+///
+/// - `root`: when provided, CTEs not (transitively) referenced by this
+///   statement are skipped entirely (SQLite lazy expansion).
+/// - `outer_ctes`: fully-materialized CTEs from enclosing scopes. Local names
+///   shadow outer names.
+/// - `in_progress`: names of enclosing CTE definitions currently being
+///   executed. A body reference that can only resolve to one of these is a
+///   circular reference (with2.test 3.5).
+/// - `nested`: true when this list is the WITH clause of a CTE body (as opposed
+///   to a statement's top-level WITH). Both kinds resolve sibling references
+///   regardless of declaration order (with1.test 2.5, with2.test 1.11); the
+///   flag is retained to distinguish the two scopes for future use.
+#[allow(clippy::too_many_arguments)]
+fn execute_cte_list<F, M>(
+    ctes: &[vibesql_ast::CommonTableExpr],
+    root: Option<&vibesql_ast::SelectStmt>,
+    outer_ctes: &HashMap<String, CteResult>,
+    in_progress: &mut Vec<String>,
+    nested: bool,
+    database: &vibesql_storage::Database,
+    executor: &F,
+    memory_check: &M,
+) -> Result<HashMap<String, CteResult>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    let needed = match root {
+        Some(stmt) => compute_needed_ctes(ctes, stmt),
+        None => vec![true; ctes.len()],
+    };
 
-        //  Determine the schema for this CTE
-        let schema = derive_cte_schema(cte, &rows, database, &cte_results)?;
+    let mut states = vec![CteState::Pending; ctes.len()];
+    let mut local = HashMap::new();
 
-        // Store the CTE result wrapped in Arc for efficient sharing
-        cte_results.insert(cte.name.clone(), (schema, Arc::new(rows)));
+    for idx in 0..ctes.len() {
+        if needed[idx] && states[idx] == CteState::Pending {
+            execute_cte_at(
+                idx,
+                ctes,
+                &mut states,
+                &mut local,
+                outer_ctes,
+                in_progress,
+                nested,
+                database,
+                executor,
+                memory_check,
+            )?;
+        }
     }
 
-    Ok(cte_results)
+    Ok(local)
+}
+
+/// Execute a single CTE from a list, resolving nested WITH clauses, sibling
+/// dependencies (nested lists only), and circular references.
+#[allow(clippy::too_many_arguments)]
+fn execute_cte_at<F, M>(
+    idx: usize,
+    ctes: &[vibesql_ast::CommonTableExpr],
+    states: &mut [CteState],
+    local: &mut HashMap<String, CteResult>,
+    outer_ctes: &HashMap<String, CteResult>,
+    in_progress: &mut Vec<String>,
+    nested: bool,
+    database: &vibesql_storage::Database,
+    executor: &F,
+    memory_check: &M,
+) -> Result<(), ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    match states[idx] {
+        CteState::Done => return Ok(()),
+        CteState::InFlight => {
+            // A sibling dependency chain looped back to a CTE we are already
+            // executing: mutual recursion is not supported.
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "circular reference: {}",
+                ctes[idx].name
+            )));
+        }
+        CteState::Pending => {}
+    }
+    states[idx] = CteState::InFlight;
+
+    let cte = &ctes[idx];
+    let name_lower = cte.name.to_ascii_lowercase();
+
+    // Table names the body references, with names defined by the body's own
+    // nested WITH clause (and deeper nesting) already shadowed out.
+    let mut body_refs = HashSet::new();
+    collect_stmt_table_refs(&cte.query, &HashSet::new(), false, false, &mut body_refs);
+
+    // A WITH clause brings all its member names into scope at once (SQLite), so
+    // a body may reference a sibling declared later in the list — at the top
+    // level (with1.test 2.5) as well as in nested lists (with2.test 1.11).
+    // Materialize referenced siblings first; a chain that loops back to a CTE
+    // still InFlight is reported as a circular reference by execute_cte_at.
+    for sib_idx in 0..ctes.len() {
+        if sib_idx != idx
+            && states[sib_idx] == CteState::Pending
+            && body_refs.contains(&ctes[sib_idx].name.to_ascii_lowercase())
+        {
+            execute_cte_at(
+                sib_idx,
+                ctes,
+                states,
+                local,
+                outer_ctes,
+                in_progress,
+                nested,
+                database,
+                executor,
+                memory_check,
+            )?;
+        }
+    }
+
+    // Circular reference detection through enclosing definitions: a body
+    // reference resolves to sibling names and completed outer CTEs first. If it
+    // can only resolve to an enclosing CTE whose definition is still being
+    // executed, the reference is circular (with2.test 3.5).
+    for enclosing in in_progress.iter() {
+        let enclosing_lower = enclosing.to_ascii_lowercase();
+        if enclosing_lower == name_lower || !body_refs.contains(&enclosing_lower) {
+            continue;
+        }
+        let shadowed_by_sibling = ctes.iter().any(|c| c.name.eq_ignore_ascii_case(enclosing));
+        let shadowed_by_outer = outer_ctes.keys().any(|k| k.eq_ignore_ascii_case(enclosing));
+        if !shadowed_by_sibling && !shadowed_by_outer {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "circular reference: {}",
+                enclosing
+            )));
+        }
+    }
+
+    // Names defined by the body's own nested WITH clause shadow the CTE's own
+    // name: `WITH RECURSIVE t(a,b) AS (WITH t(x) AS (...) SELECT ... FROM t)`
+    // is NOT recursive - the inner t wins (with1.test 21.1).
+    let inner_shadow: HashSet<String> = cte
+        .query
+        .with_clause
+        .as_ref()
+        .map(|list| list.iter().map(|c| c.name.to_ascii_lowercase()).collect())
+        .unwrap_or_default();
+    let shadowed_by_inner = inner_shadow.contains(&name_lower);
+
+    // Check if this is a recursive CTE.
+    //
+    // SQLite treats the RECURSIVE keyword as advisory, not mandatory: a CTE in
+    // a `WITH RECURSIVE` list that does not actually reference itself is run as
+    // an ordinary CTE (issue #5838, item 3). Classifying by self-reference
+    // alone lets non-self-referential members of a RECURSIVE list — e.g. the
+    // mandelbrot/sudoku showcase queries where only one CTE recurses — execute
+    // instead of hard-erroring "must use UNION ALL". `is_cte_self_referential`
+    // inspects the whole recursive term (including its subqueries), so genuine
+    // recursion is still detected without the parser's per-CTE `recursive` flag.
+    let is_recursive = !shadowed_by_inner && is_cte_self_referential(cte);
+
+    // A recursive CTE may only reference itself in the recursive term; a
+    // self-reference in the base term is circular (with1.test 17.3).
+    if is_recursive {
+        let mut base_refs = HashSet::new();
+        collect_stmt_table_refs(&cte.query, &inner_shadow, true, true, &mut base_refs);
+        if base_refs.contains(&name_lower) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "circular reference: {}",
+                cte.name
+            )));
+        }
+    }
+
+    // Build the visible CTE context for this body: enclosing scopes first,
+    // locally materialized siblings shadow them.
+    let mut visible = outer_ctes.clone();
+    for (name, result) in local.iter() {
+        visible.insert(name.clone(), result.clone());
+    }
+
+    // Execute the body with this CTE's name marked in-progress so nested WITH
+    // lists can detect circular references back to it.
+    in_progress.push(cte.name.clone());
+    let rows_result = execute_cte_body(
+        cte,
+        is_recursive,
+        &mut visible,
+        in_progress,
+        database,
+        executor,
+        memory_check,
+    );
+    in_progress.pop();
+    let rows = rows_result?;
+
+    // Track memory for this CTE result before storing
+    let estimated_size = super::helpers::estimate_result_size(&rows);
+    memory_check(estimated_size)?;
+
+    // Determine the schema for this CTE. Wildcards are expanded against the
+    // full visible context, including nested-WITH CTEs (with1.test 17.2).
+    let schema = derive_cte_schema(cte, &rows, database, &visible)?;
+
+    // Store the CTE result wrapped in Arc for efficient sharing
+    local.insert(cte.name.clone(), (schema, Arc::new(rows)));
+    states[idx] = CteState::Done;
+    Ok(())
+}
+
+/// Execute a CTE body: first materialize its own nested WITH clause (local
+/// names shadow outer names), then run the body itself.
+///
+/// This is the core fix for issue #5838 (PR A): previously a WITH clause
+/// nested inside a CTE body was silently ignored, so the body's references
+/// resolved to outer CTEs or real tables instead of the nested CTEs.
+fn execute_cte_body<F, M>(
+    cte: &vibesql_ast::CommonTableExpr,
+    is_recursive: bool,
+    visible: &mut HashMap<String, CteResult>,
+    in_progress: &mut Vec<String>,
+    database: &vibesql_storage::Database,
+    executor: &F,
+    memory_check: &M,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    if let Some(inner_list) = &cte.query.with_clause {
+        // The body is the reachability root for its own WITH list: nested CTEs
+        // the body never references are skipped (SQLite lazy expansion).
+        let snapshot = visible.clone();
+        let inner_results = execute_cte_list(
+            inner_list,
+            Some(&cte.query),
+            &snapshot,
+            in_progress,
+            true,
+            database,
+            executor,
+            memory_check,
+        )?;
+        // Nested CTEs shadow outer CTEs and previously executed siblings.
+        for (name, result) in inner_results {
+            visible.insert(name, result);
+        }
+    }
+
+    if is_recursive {
+        // Recursive CTE: execute base term, then iteratively execute recursive term
+        execute_recursive_cte(cte, visible, database, executor, memory_check)
+    } else {
+        // Non-recursive CTE: execute query directly
+        executor(&cte.query, visible)
+    }
+}
+
+/// Determine which CTEs in a list are (transitively) referenced by the root
+/// statement.
+///
+/// SQLite expands CTEs lazily, so a `WITH` entry the statement never uses is
+/// never evaluated (and errors inside it are never reported). The computation
+/// starts from the names the root statement references (ignoring the WITH
+/// clause itself) and follows references from the bodies of needed CTEs to a
+/// fixpoint. Shadowing by deeper WITH clauses is respected by the collector,
+/// so a reference to a name redefined in a nested scope does not mark the
+/// outer CTE as needed.
+fn compute_needed_ctes(
+    ctes: &[vibesql_ast::CommonTableExpr],
+    root: &vibesql_ast::SelectStmt,
+) -> Vec<bool> {
+    let names: Vec<String> = ctes.iter().map(|c| c.name.to_ascii_lowercase()).collect();
+
+    // Seed: names referenced by the root statement itself. `skip_with` is set
+    // because the root's WITH clause is the very list being filtered.
+    let mut refs = HashSet::new();
+    collect_stmt_table_refs(root, &HashSet::new(), true, false, &mut refs);
+
+    let mut needed = vec![false; ctes.len()];
+    loop {
+        let mut changed = false;
+        for (i, cte) in ctes.iter().enumerate() {
+            if !needed[i] && refs.contains(&names[i]) {
+                needed[i] = true;
+                changed = true;
+                // A needed CTE's body references contribute to reachability.
+                collect_stmt_table_refs(&cte.query, &HashSet::new(), false, false, &mut refs);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    needed
+}
+
+/// Collect (lowercased) table names referenced anywhere in a SELECT statement,
+/// respecting WITH-clause shadowing: a name defined by a (nested) WITH clause
+/// is not reported as a reference by the scopes it covers.
+///
+/// - `skip_with`: ignore the statement's own WITH clause entirely (used when
+///   the caller is processing that clause itself).
+/// - `skip_set_op`: ignore the statement's set operation (used to inspect only
+///   the base term of a recursive CTE).
+fn collect_stmt_table_refs(
+    stmt: &vibesql_ast::SelectStmt,
+    shadowed: &HashSet<String>,
+    skip_with: bool,
+    skip_set_op: bool,
+    out: &mut HashSet<String>,
+) {
+    let owned_shadow;
+    let shadow: &HashSet<String> = match (&stmt.with_clause, skip_with) {
+        (Some(ctes), false) => {
+            let mut extended = shadowed.clone();
+            for cte in ctes {
+                extended.insert(cte.name.to_ascii_lowercase());
+            }
+            // CTE bodies see all sibling names as shadowed (references between
+            // siblings resolve within the list, not to enclosing scopes).
+            for cte in ctes {
+                collect_stmt_table_refs(&cte.query, &extended, false, false, out);
+            }
+            owned_shadow = extended;
+            &owned_shadow
+        }
+        _ => shadowed,
+    };
+
+    if let Some(from) = &stmt.from {
+        collect_from_table_refs(from, shadow, out);
+    }
+    for item in &stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            collect_expr_table_refs(expr, shadow, out);
+        }
+    }
+    if let Some(where_clause) = &stmt.where_clause {
+        collect_expr_table_refs(where_clause, shadow, out);
+    }
+    if let Some(group_by) = &stmt.group_by {
+        for expr in group_by.all_expressions() {
+            collect_expr_table_refs(expr, shadow, out);
+        }
+    }
+    if let Some(having) = &stmt.having {
+        collect_expr_table_refs(having, shadow, out);
+    }
+    if let Some(windows) = &stmt.window_definitions {
+        for window in windows {
+            if let Some(partition_by) = &window.spec.partition_by {
+                for expr in partition_by {
+                    collect_expr_table_refs(expr, shadow, out);
+                }
+            }
+            if let Some(order_by) = &window.spec.order_by {
+                for item in order_by {
+                    collect_expr_table_refs(&item.expr, shadow, out);
+                }
+            }
+        }
+    }
+    if let Some(order_by) = &stmt.order_by {
+        for item in order_by {
+            collect_expr_table_refs(&item.expr, shadow, out);
+        }
+    }
+    if let Some(limit) = &stmt.limit {
+        collect_expr_table_refs(limit, shadow, out);
+    }
+    if let Some(offset) = &stmt.offset {
+        collect_expr_table_refs(offset, shadow, out);
+    }
+    if let Some(values_rows) = &stmt.values {
+        for row in values_rows {
+            for expr in row {
+                collect_expr_table_refs(expr, shadow, out);
+            }
+        }
+    }
+    if !skip_set_op {
+        if let Some(set_op) = &stmt.set_operation {
+            collect_stmt_table_refs(&set_op.right, shadow, false, false, out);
+        }
+    }
+}
+
+/// Collect table names referenced by a FROM clause (shadow-aware).
+fn collect_from_table_refs(
+    from: &vibesql_ast::FromClause,
+    shadowed: &HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    match from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            let lower = name.to_ascii_lowercase();
+            if !shadowed.contains(&lower) {
+                out.insert(lower);
+            }
+        }
+        vibesql_ast::FromClause::Subquery { query, .. } => {
+            collect_stmt_table_refs(query, shadowed, false, false, out);
+        }
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            collect_from_table_refs(left, shadowed, out);
+            collect_from_table_refs(right, shadowed, out);
+            if let Some(cond) = condition {
+                collect_expr_table_refs(cond, shadowed, out);
+            }
+        }
+        vibesql_ast::FromClause::Values { rows, .. } => {
+            for row in rows {
+                for expr in row {
+                    collect_expr_table_refs(expr, shadowed, out);
+                }
+            }
+        }
+    }
+}
+
+/// Collect table names referenced inside an expression's subqueries
+/// (shadow-aware). Subquery-bearing nodes are handled manually so their
+/// statements are traversed with the correct shadow set; the generic walker
+/// handles all other expression shapes.
+fn collect_expr_table_refs(
+    expr: &vibesql_ast::Expression,
+    shadowed: &HashSet<String>,
+    out: &mut HashSet<String>,
+) {
+    use vibesql_ast::visitor::{walk_expression, ExpressionVisitor, VisitResult};
+
+    struct Collector<'a> {
+        shadowed: &'a HashSet<String>,
+        out: &'a mut HashSet<String>,
+    }
+
+    impl ExpressionVisitor for Collector<'_> {
+        fn pre_visit_expression(&mut self, expr: &vibesql_ast::Expression) -> VisitResult {
+            match expr {
+                vibesql_ast::Expression::ScalarSubquery(query)
+                | vibesql_ast::Expression::Exists { subquery: query, .. } => {
+                    collect_stmt_table_refs(query, self.shadowed, false, false, self.out);
+                    // Skip so the generic walker does not descend into the
+                    // subquery with a stale shadow set.
+                    VisitResult::Skip
+                }
+                vibesql_ast::Expression::In { expr: operand, subquery, .. }
+                | vibesql_ast::Expression::QuantifiedComparison {
+                    expr: operand, subquery, ..
+                } => {
+                    walk_expression(self, operand);
+                    collect_stmt_table_refs(subquery, self.shadowed, false, false, self.out);
+                    VisitResult::Skip
+                }
+                _ => VisitResult::Continue,
+            }
+        }
+    }
+
+    let mut collector = Collector { shadowed, out };
+    walk_expression(&mut collector, expr);
 }
 
 /// Derive the schema for a CTE from its query and results
@@ -629,7 +1124,6 @@ where
 
     // Step 1: Execute base term to get initial rows
     let mut all_rows = executor(&base_query, cte_results)?;
-    let mut working_table = all_rows.clone();
 
     // Derive schema from base term result
     // Wildcards in the base term are expanded against database tables and
@@ -640,13 +1134,17 @@ where
     // For UNION ALL, we skip tracking to preserve all rows
     let mut seen_rows: Option<HashSet<vibesql_storage::RowValues>> = if !set_op.all {
         let mut seen = HashSet::with_capacity(all_rows.len());
-        for row in &all_rows {
-            seen.insert(row.values.clone());
-        }
+        // For plain UNION, SQLite also deduplicates the base term itself, not
+        // just recursive-term rows (issue #5838, item 7; with1.test 26.2).
+        // Drop duplicate seed rows so the result and the working table start
+        // deduplicated.
+        all_rows.retain(|row| seen.insert(row.values.clone()));
         Some(seen)
     } else {
         None
     };
+
+    let mut working_table = all_rows.clone();
 
     // Step 2: Iterative evaluation
     let mut depth = 0;
@@ -753,10 +1251,16 @@ fn count_stmt_columns(stmt: &vibesql_ast::SelectStmt) -> Option<usize> {
 /// references itself in a set operation. This function detects such cases
 /// by checking if the right side of a UNION/UNION ALL references the CTE name.
 fn is_cte_self_referential(cte: &vibesql_ast::CommonTableExpr) -> bool {
-    // Check if the CTE has a UNION/UNION ALL set operation
+    // A CTE is recursive only if it has a compound set operation whose right
+    // (recursive) term references the CTE itself. The specific operator is not
+    // checked here: a self-referential INTERSECT/EXCEPT is still classified
+    // recursive so `execute_recursive_cte` can report the precise "must use
+    // UNION or UNION ALL" error rather than a generic "table not found". A
+    // `WITH RECURSIVE` CTE with no set operation (issue #5838, item 3) is not
+    // self-referential and runs as an ordinary CTE.
     let set_op = match &cte.query.set_operation {
-        Some(op) if op.op == vibesql_ast::SetOperator::Union => op,
-        _ => return false,
+        Some(op) => op,
+        None => return false,
     };
 
     // Check if the recursive term references this CTE

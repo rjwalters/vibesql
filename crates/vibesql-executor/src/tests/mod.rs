@@ -110,6 +110,7 @@ mod procedures;
 mod quantified_comparison_tests;
 mod query_timeout_tests;
 mod raise_trigger_tests;
+mod nested_with_tests;
 mod recursive_cte_tests;
 mod trigger_case_body_tests;
 mod rowid_tests;
