@@ -49,10 +49,18 @@ impl SelectExecutor<'_> {
                     vec![vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Integer(
                         count as i64,
                     )])];
-                // Apply LIMIT/OFFSET even in fast path
-                let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
-                let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
-                return Ok(apply_limit_offset(result, limit, offset));
+                // Apply LIMIT/OFFSET even in fast path, but skip when this is the
+                // left branch of a compound query: LIMIT/OFFSET applies to the
+                // combined result and is applied later by the set-operation
+                // handler. Applying it here too double-counts OFFSET (issue #5847).
+                if stmt.set_operation.is_none() {
+                    let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
+                    let offset =
+                        crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
+                    return Ok(apply_limit_offset(result, limit, offset));
+                } else {
+                    return Ok(result);
+                }
             }
         }
 
