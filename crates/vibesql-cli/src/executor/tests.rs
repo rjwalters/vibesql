@@ -581,3 +581,50 @@ fn test_question_numbered_placeholder_upsert_inexact_target() {
         "unexpected error: {msg}"
     );
 }
+
+// Issue #5842 sub-item 4: PRAGMA gaps.
+
+#[test]
+fn test_pragma_journal_mode_echoes_wal() {
+    // PRAGMA journal_mode (query form) must return a single row reporting the
+    // active journaling mode. VibeSQL runs its own always-on WAL, so it reports
+    // "wal" instead of silently returning an empty result.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("PRAGMA journal_mode").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.columns, vec!["journal_mode".to_string()]);
+    assert_eq!(result.rows[0][0].as_deref(), Some("wal"));
+}
+
+#[test]
+fn test_pragma_journal_mode_set_is_accepted() {
+    // The SET form is a silently-accepted no-op (VibeSQL's WAL is always on).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    // Must not error.
+    executor.execute("PRAGMA journal_mode = WAL").unwrap();
+}
+
+#[test]
+fn test_pragma_integrity_check_no_argument() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("PRAGMA integrity_check").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+}
+
+#[test]
+fn test_pragma_integrity_check_with_table_argument() {
+    // The table-scoped form `PRAGMA integrity_check('t1')` previously fell into
+    // the SET branch and was silently ignored (empty result). It must report
+    // "ok" for any table argument.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t1(a INT)").unwrap();
+    let result = executor.execute("PRAGMA integrity_check('t1')").unwrap();
+    assert_eq!(result.row_count, 1, "integrity_check(table) should return one row");
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+
+    // Unquoted identifier argument form as well.
+    let result = executor.execute("PRAGMA integrity_check(t1)").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+}

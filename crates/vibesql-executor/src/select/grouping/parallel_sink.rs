@@ -134,7 +134,14 @@ pub fn parallel_group_aggregate<'a>(
                 let accumulators = state.groups.entry(key).or_insert_with(|| {
                     aggregate_infos
                         .iter()
-                        .map(|info| AggregateAccumulator::new(&info.function_name, info.distinct))
+                        .map(|info| {
+                            AggregateAccumulator::new(&info.function_name, info.distinct).map(
+                                |mut acc| {
+                                    acc.set_min_max_collation(info.collation.clone());
+                                    acc
+                                },
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()
                         .unwrap_or_default()
                 });
@@ -224,7 +231,12 @@ fn sequential_group_aggregate<'a>(
         let accumulators = groups.entry(key).or_insert_with(|| {
             aggregate_infos
                 .iter()
-                .map(|info| AggregateAccumulator::new(&info.function_name, info.distinct))
+                .map(|info| {
+                    AggregateAccumulator::new(&info.function_name, info.distinct).map(|mut acc| {
+                        acc.set_min_max_collation(info.collation.clone());
+                        acc
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap_or_default()
         });
@@ -259,13 +271,17 @@ pub struct AggregateInfo {
     pub expr: vibesql_ast::Expression,
     /// Whether DISTINCT modifier is applied
     pub distinct: bool,
+    /// Explicit COLLATE on the aggregate argument, if any (used by MIN/MAX so
+    /// `min(x COLLATE nocase)` orders by the requested collation).
+    pub collation: Option<String>,
 }
 
 #[allow(dead_code)] // WIP: Will be used when parallel aggregation is integrated
 impl AggregateInfo {
     /// Create a new AggregateInfo
     pub fn new(function_name: String, expr: vibesql_ast::Expression, distinct: bool) -> Self {
-        Self { function_name, expr, distinct }
+        let collation = crate::evaluator::collation::explicit_collation_of(&expr);
+        Self { function_name, expr, distinct, collation }
     }
 }
 

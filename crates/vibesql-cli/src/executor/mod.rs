@@ -1191,6 +1191,22 @@ impl SqlExecutor {
             "TABLE_INFO" => {
                 return self.execute_pragma_table_info(stmt);
             }
+            "INTEGRITY_CHECK" | "QUICK_CHECK" => {
+                // SQLite compatibility: `PRAGMA integrity_check` and the
+                // table-scoped form `PRAGMA integrity_check('t1')` both report
+                // "ok" when no corruption is found. The table-argument form
+                // arrives as `stmt.value = Some(...)`, which would otherwise be
+                // misrouted to the SET branch and silently ignored (returning an
+                // empty result). Handle both forms here, before the set/query
+                // split, so any argument is accepted and "ok" is returned.
+                return Ok(QueryResult {
+                    columns: vec![pragma_name.to_lowercase()],
+                    rows: vec![vec![Some("ok".to_string())]],
+                    row_count: 1,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
             _ => {}
         }
 
@@ -1391,13 +1407,14 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
-                "INTEGRITY_CHECK" => {
-                    // SQLite compatibility: Return "ok" if no corruption detected
-                    // Since we're in-memory and don't have B-tree corruption scenarios,
-                    // we always return "ok"
+                "JOURNAL_MODE" => {
+                    // SQLite compatibility: report the active journaling mode as a
+                    // single-row result. VibeSQL runs its own always-on WAL, so it
+                    // reports "wal" (the SET form, `PRAGMA journal_mode = X`, is a
+                    // silently-accepted no-op handled by the catch-all above).
                     Ok(QueryResult {
-                        columns: vec!["integrity_check".to_string()],
-                        rows: vec![vec![Some("ok".to_string())]],
+                        columns: vec!["journal_mode".to_string()],
+                        rows: vec![vec![Some("wal".to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,

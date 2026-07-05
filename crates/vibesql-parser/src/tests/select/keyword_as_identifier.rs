@@ -65,6 +65,47 @@ fn test_column_m_uppercase() {
     assert!(result.is_ok(), "Failed to parse SELECT M FROM t: {:?}", result);
 }
 
+/// Issue #5842 sub-item 3: an unquoted alias that happens to be a contextual
+/// keyword (`m`, the HNSW parameter) must preserve its original source-text
+/// case, not be canonicalized to the keyword's uppercase form. SQLite names the
+/// column exactly as written: `SELECT max(a) AS m` yields column `m`, not `M`
+/// (colname-6.11..6.19). Cover both the standard and arena parser paths since
+/// they have independent alias-parsing routines.
+fn alias_of_first_select_item(stmt: vibesql_ast::Statement) -> Option<String> {
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { alias, .. } => alias.clone(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn test_keyword_alias_preserves_case_standard_parser() {
+    let stmt = Parser::parse_sql("SELECT max(a) AS m FROM t").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("m"));
+
+    let stmt = Parser::parse_sql("SELECT 1 AS m").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("m"));
+
+    // Uppercase spelling is preserved as written too.
+    let stmt = Parser::parse_sql("SELECT 1 AS M").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("M"));
+}
+
+#[test]
+fn test_keyword_alias_preserves_case_arena_parser() {
+    let stmt = crate::parse_with_arena_fallback("SELECT max(a) AS m FROM t").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("m"));
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 AS m").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("m"));
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 AS M").unwrap();
+    assert_eq!(alias_of_first_select_item(stmt).as_deref(), Some("M"));
+}
+
 #[test]
 fn test_column_m_in_expression() {
     let result = Parser::parse_sql("SELECT m + 1 FROM t;");
@@ -189,15 +230,12 @@ fn test_reserved_keywords_in_operand_position_still_error() {
     // A reserved clause/operator keyword where an operand is expected must remain
     // a syntax error — it must NOT be silently accepted as a column reference.
     for sql in [
-        "SELECT FROM t;",       // FROM where a select item is expected
-        "SELECT a, FROM t;",    // trailing comma then FROM
-        "SELECT select FROM t;", // SELECT in operand position
-        "SELECT a FROM t WHERE and b;", // AND with no left operand
+        "SELECT FROM t;",                   // FROM where a select item is expected
+        "SELECT a, FROM t;",                // trailing comma then FROM
+        "SELECT select FROM t;",            // SELECT in operand position
+        "SELECT a FROM t WHERE and b;",     // AND with no left operand
         "SELECT a FROM t WHERE a = where;", // WHERE in operand position
     ] {
-        assert!(
-            Parser::parse_sql(sql).is_err(),
-            "expected a syntax error for: {sql}"
-        );
+        assert!(Parser::parse_sql(sql).is_err(), "expected a syntax error for: {sql}");
     }
 }
