@@ -69,3 +69,20 @@ fn test_tokenize_empty_string_not_confused_with_escaped_quote() {
 }
 
 // ============================================================================
+
+#[test]
+fn test_tokenize_blob_literal() {
+    let mut lexer = Lexer::new("x'4869'");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::BlobLiteral(vec![0x48, 0x69]));
+}
+
+#[test]
+fn test_unterminated_blob_literal_errors() {
+    // Missing closing quote (EOF reached first) must be an error, not a valid
+    // partial blob (SQLite: `unrecognized token: "x'4869"`).
+    for input in ["x'4869", "X'ABCD", "x'"] {
+        let mut lexer = Lexer::new(input);
+        assert!(lexer.tokenize().is_err(), "Expected error for input: {}", input);
+    }
+}

@@ -416,12 +416,31 @@ impl Parser {
                                     // This is a no-op - nullable is the default
                 }
                 Token::Keyword { keyword: Keyword::Not, .. } => {
-                    self.advance(); // consume NOT
-                    self.expect_keyword(Keyword::Null)?;
-                    constraints.push(vibesql_ast::ColumnConstraint {
-                        name,
-                        kind: vibesql_ast::ColumnConstraintKind::NotNull,
-                    });
+                    // Disambiguate NOT NULL from the `NOT DEFERRABLE` deferral
+                    // clause, which SQLite also permits as a standalone
+                    // column-level constraint (it is ignored for non-FK
+                    // columns but must parse without error).
+                    let next_is_deferrable = matches!(
+                        self.tokens.get(self.position + 1),
+                        Some(Token::Keyword { keyword: Keyword::Deferrable, .. })
+                    );
+                    if next_is_deferrable {
+                        // NOT DEFERRABLE [INITIALLY ...] — parsed and ignored.
+                        let _ = self.parse_constraint_deferral()?;
+                    } else {
+                        self.advance(); // consume NOT
+                        self.expect_keyword(Keyword::Null)?;
+                        constraints.push(vibesql_ast::ColumnConstraint {
+                            name,
+                            kind: vibesql_ast::ColumnConstraintKind::NotNull,
+                        });
+                    }
+                }
+                Token::Keyword { keyword: Keyword::Deferrable, .. } => {
+                    // Standalone column-level DEFERRABLE [INITIALLY DEFERRED |
+                    // IMMEDIATE]. SQLite ignores deferral on non-FK columns but
+                    // accepts the syntax; parse it and drop the result.
+                    let _ = self.parse_constraint_deferral()?;
                 }
                 Token::Keyword { keyword: Keyword::Primary, .. } => {
                     self.advance(); // consume PRIMARY

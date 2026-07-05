@@ -832,15 +832,27 @@ impl ExpressionEvaluator<'_> {
                         SqlValue::Integer(n) => *n != 0,
                         SqlValue::Bigint(n) => *n != 0,
                         SqlValue::Smallint(n) => *n != 0,
+                        // REAL/floating values are truthy when non-zero (and not
+                        // NaN), matching SQLite: `0.5 IS TRUE` -> 1, `0.0 IS
+                        // TRUE` -> 0.
+                        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+                            *f != 0.0 && !f.is_nan()
+                        }
+                        SqlValue::Float(f) => *f != 0.0 && !f.is_nan(),
                         _ => false,
                     },
-                    vibesql_ast::TruthValue::False => matches!(
-                        val,
+                    vibesql_ast::TruthValue::False => match &val {
                         SqlValue::Boolean(false)
-                            | SqlValue::Integer(0)
-                            | SqlValue::Bigint(0)
-                            | SqlValue::Smallint(0)
-                    ),
+                        | SqlValue::Integer(0)
+                        | SqlValue::Bigint(0)
+                        | SqlValue::Smallint(0) => true,
+                        // A floating value equal to zero is FALSE.
+                        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+                            *f == 0.0
+                        }
+                        SqlValue::Float(f) => *f == 0.0,
+                        _ => false,
+                    },
                     vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
                 };
                 let final_result = if *negated { !result } else { result };

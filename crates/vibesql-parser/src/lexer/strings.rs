@@ -10,10 +10,12 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip opening single quote
 
         let mut hex_chars = String::new();
+        let mut terminated = false;
         while !self.is_eof() {
             let ch = self.current_char();
             if ch == '\'' {
                 self.advance();
+                terminated = true;
                 break;
             } else if ch.is_ascii_hexdigit() {
                 hex_chars.push(ch);
@@ -28,6 +30,16 @@ impl<'a> Lexer<'a> {
                     near_token: Some(format!("x'{}", hex_chars)),
                 });
             }
+        }
+
+        // An unterminated blob literal (EOF before the closing quote, e.g.
+        // `x'4869`) is an error in SQLite, not a valid empty/partial blob.
+        if !terminated {
+            return Err(LexerError {
+                message: "unterminated blob literal".to_string(),
+                position: self.position(),
+                near_token: Some(format!("x'{}", hex_chars)),
+            });
         }
 
         // Check for even number of hex digits

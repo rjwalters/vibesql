@@ -607,6 +607,7 @@ impl Keyword {
                 | Keyword::Instead
                 | Keyword::Key
                 | Keyword::Last
+                | Keyword::Level
                 | Keyword::Like
                 | Keyword::Match
                 | Keyword::Materialized
@@ -636,6 +637,8 @@ impl Keyword {
                 | Keyword::Temporary
                 | Keyword::Ties
                 | Keyword::Trigger
+                | Keyword::True
+                | Keyword::False
                 | Keyword::Unbounded
                 | Keyword::Vacuum
                 | Keyword::View

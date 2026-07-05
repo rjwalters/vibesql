@@ -484,8 +484,11 @@ impl Parser {
                 self.advance();
                 name
             }
-            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as CTE names
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) and SQLite
+            // fallback keywords (like ROWS) as CTE names.
+            Token::Keyword { keyword: kw, .. }
+                if kw.can_be_identifier() || kw.is_sqlite_fallback_keyword() =>
+            {
                 let name = format!("{}", kw).to_lowercase();
                 self.advance();
                 name
@@ -670,8 +673,8 @@ impl Parser {
         // error with a bogus "near ORDER: syntax error" (issue #5714). The
         // nested set-operation right-side calls always pass
         // `validate_end_tokens=true`, so they are unaffected.
-        let allow_order_limit = allow_order_limit
-            || (!validate_end_tokens && set_operation.is_some());
+        let allow_order_limit =
+            allow_order_limit || (!validate_end_tokens && set_operation.is_some());
 
         // Parse ORDER BY (only if allowed)
         let order_by = if allow_order_limit && self.peek_keyword(Keyword::Order) {

@@ -1119,3 +1119,30 @@ fn test_name_source_backtick_quoted() {
     assert_eq!(name, "tr1");
     assert_eq!(source.as_deref(), Some("`tr1`"));
 }
+
+#[test]
+fn test_drop_trigger_single_quoted_name() {
+    // SQLite accepts a single-quoted string literal as the trigger name.
+    let sql = "DROP TRIGGER 'my_trigger';";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::DropTrigger(drop_trigger) => {
+            assert_eq!(drop_trigger.trigger_name, "my_trigger");
+        }
+        _ => panic!("Expected DropTrigger statement"),
+    }
+}
+
+#[test]
+fn test_drop_trigger_if_exists_single_quoted_name() {
+    let result = Parser::parse_sql("DROP TRIGGER IF EXISTS 'tr';");
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::DropTrigger(drop_trigger) => {
+            assert_eq!(drop_trigger.trigger_name, "tr");
+            assert!(drop_trigger.if_exists);
+        }
+        _ => panic!("Expected DropTrigger statement"),
+    }
+}

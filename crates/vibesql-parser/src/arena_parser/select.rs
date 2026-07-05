@@ -315,8 +315,11 @@ impl<'arena> ArenaParser<'arena> {
                 self.advance();
                 self.intern(&name)
             }
-            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) as CTE names
-            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+            // Allow unreserved keywords (like NULLS, TIMESTAMP, etc.) and SQLite
+            // fallback keywords (like ROWS) as CTE names.
+            Token::Keyword { keyword: kw, .. }
+                if kw.can_be_identifier() || kw.is_sqlite_fallback_keyword() =>
+            {
                 let name = format!("{}", kw).to_lowercase();
                 self.advance();
                 self.intern(&name)

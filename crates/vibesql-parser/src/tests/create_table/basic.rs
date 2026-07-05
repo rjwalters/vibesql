@@ -333,3 +333,22 @@ fn test_parse_create_table_number_precision_scale() {
         _ => panic!("Expected CREATE TABLE statement"),
     }
 }
+
+#[test]
+fn test_true_false_as_column_names() {
+    // SQLite treats TRUE/FALSE as fallback keywords usable as identifiers.
+    let result = Parser::parse_sql("CREATE TABLE t(\"true\" INTEGER, \"false\" INTEGER)");
+    assert!(result.is_ok(), "quoted true/false columns: {:?}", result);
+
+    let result = Parser::parse_sql("CREATE TABLE t(true INTEGER, false INTEGER)");
+    assert!(result.is_ok(), "bare true/false columns: {:?}", result);
+}
+
+#[test]
+fn test_true_false_level_as_table_names() {
+    for name in ["true", "false", "level"] {
+        let sql = format!("CREATE TABLE {name}(a INTEGER)");
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "{sql} should parse: {:?}", result);
+    }
+}

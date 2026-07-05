@@ -359,3 +359,55 @@ fn test_alter_table_add_column_keyword_still_works() {
         _ => panic!("Expected ALTER TABLE statement"),
     }
 }
+
+#[test]
+fn test_parse_alter_table_add_column_without_type() {
+    // SQLite allows a typeless column: ADD COLUMN x (BLOB/no affinity).
+    let result = Parser::parse_sql("ALTER TABLE t ADD COLUMN x;");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert_eq!(add.column_def.name, "x");
+            assert!(matches!(add.column_def.data_type, vibesql_types::DataType::BinaryLargeObject));
+            assert!(add.column_def.nullable);
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_column_without_type_with_constraint() {
+    // Typeless column followed directly by a constraint / default.
+    for sql in [
+        "ALTER TABLE t ADD COLUMN x NOT NULL",
+        "ALTER TABLE t ADD COLUMN x DEFAULT 0",
+        "ALTER TABLE t ADD COLUMN x UNIQUE",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} -> err: {:?}", result);
+        match result.unwrap() {
+            vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+                assert_eq!(add.column_def.name, "x");
+                assert!(matches!(
+                    add.column_def.data_type,
+                    vibesql_types::DataType::BinaryLargeObject
+                ));
+            }
+            other => panic!("{sql} -> Expected ADD COLUMN, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_column_bare_no_column_keyword_no_type() {
+    // ADD <name> without the COLUMN keyword and without a type.
+    let result = Parser::parse_sql("ALTER TABLE t ADD x");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert_eq!(add.column_def.name, "x");
+            assert!(matches!(add.column_def.data_type, vibesql_types::DataType::BinaryLargeObject));
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}

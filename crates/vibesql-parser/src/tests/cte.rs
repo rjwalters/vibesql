@@ -380,3 +380,16 @@ fn test_parse_with_values_missing_rows_errors() {
     let result = Parser::parse_sql("WITH c AS (SELECT 1) VALUES;");
     assert!(result.is_err(), "WITH ... VALUES without rows should not parse");
 }
+
+#[test]
+fn test_parse_cte_named_rows() {
+    // `ROWS` is a SQLite fallback keyword and must be usable as a CTE name.
+    let result = Parser::parse_sql("WITH rows AS (SELECT 1) SELECT * FROM rows;");
+    assert!(result.is_ok(), "CTE named `rows` should parse: {:?}", result);
+}
+
+#[test]
+fn test_parse_cte_named_level() {
+    let result = Parser::parse_sql("WITH level AS (SELECT 1) SELECT * FROM level;");
+    assert!(result.is_ok(), "CTE named `level` should parse: {:?}", result);
+}
