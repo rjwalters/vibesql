@@ -40,6 +40,13 @@ set ::nFail 0
 set ::nSkip 0
 set ::failList {}
 
+# Set to 1 once a whole-file marker/skip detail row has been emitted for the
+# current file (the mid-file 'incomplete' abort row, or the whole-file
+# 'skipped' row from the vibesql_skip_files path). finish_test consults this
+# to avoid double-emitting a synthetic zero-test 'skipped' row (#5845/#5887).
+# One test file is evaluated per tclsh process, so a top-level init suffices.
+set ::file_marker_emitted 0
+
 # Emit a structured per-test detail line consumed by tcl_runner.py.
 #
 # Format: "##TCLTEST## <status>\t<name>"
@@ -5930,6 +5937,20 @@ proc finish_test {} {
         }
     }
 
+    # If the file ran to completion but emitted zero detail rows of any kind
+    # (nTest==0 => no passed/failed rows, nSkip==0 => no skipped rows) and no
+    # whole-file marker was already emitted, synthesize a 'skipped' row so the
+    # file never vanishes from tcl_test_results (#5887). This is the capability
+    # self-skip case: `ifcapable !cap { finish_test; return }` at the top of a
+    # file exits cleanly with nothing run. The guards prevent double-emitting
+    # for the vibesql_skip_files whole-file skip (nSkip>0) and the mid-file
+    # abort path (file_marker_emitted==1), both of which already emitted a row.
+    if {$::nTest == 0 && $::nSkip == 0 && !$::file_marker_emitted} {
+        set self_skip_base [file rootname [file tail [lindex $::argv 0]]]
+        emit_test_detail skipped "$self_skip_base (capability self-skip)"
+        set ::file_marker_emitted 1
+    }
+
     # Print summary
     puts ""
     puts "======================================"
@@ -6493,6 +6514,7 @@ proc run_test_file {filename} {
         # shim completed, including the skip-entire-file path.
         incr ::nSkip
         emit_test_detail skipped "$basename (entire file)"
+        set ::file_marker_emitted 1
         finish_test
     }
 
@@ -6588,6 +6610,15 @@ proc run_test_file {filename} {
         # fake any passes: the aborting statement is reported below.
         puts "Setup error (file evaluation aborted mid-file): $err"
         puts "Error info: $::errorInfo"
+        # Emit an 'incomplete' marker so the runner sees the file was truncated
+        # (#5845). Without this the partial run looks clean to tcl_runner.py:
+        # finish_test still prints the "Tests run:" trailer and exits 0, so the
+        # runner's incomplete-detection (returncode<0 OR not saw_summary) never
+        # fires and the N tests that ran before the abort are silently treated
+        # as the file's complete result. The row keeps the tests that DID run
+        # (they are already emitted) and marks the file compromised in the DB.
+        emit_test_detail incomplete "ABORTED_MID_FILE: $err"
+        set ::file_marker_emitted 1
     }
 
     finish_test
