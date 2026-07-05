@@ -262,6 +262,27 @@ impl<'a> IndexPlanner<'a> {
                     continue;
                 }
 
+                // Issue #5823: skip-scan builds a raw equality/range probe for
+                // the skipped filter column and seeks raw prefix keys. A
+                // non-BINARY collation (e.g. NOCASE) on any of the index's key
+                // columns makes those raw probes silently lose rows, so decline
+                // skip-scan for such indexes and let the collation-aware scan
+                // path compute the result. BINARY/undeclared columns are
+                // unaffected.
+                let covers_nonbinary_collation =
+                    index_metadata.columns.iter().filter_map(|c| c.column_name()).any(|col_name| {
+                        table
+                            .schema
+                            .columns
+                            .iter()
+                            .find(|c| c.name.eq_ignore_ascii_case(col_name))
+                            .and_then(|c| c.collation.as_deref())
+                            .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+                    });
+                if covers_nonbinary_collation {
+                    continue;
+                }
+
                 let first_col = &index_metadata.columns[0];
 
                 // Check if WHERE clause filters on the first column

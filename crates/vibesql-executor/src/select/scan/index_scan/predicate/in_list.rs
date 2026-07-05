@@ -54,6 +54,16 @@ pub(crate) fn extract_index_predicate(
 
         // Check for range + IN combined predicates (e.g., col IN (64, 4) AND col > 75)
         // Filter IN values by the range predicate and return the filtered list
+        //
+        // Issue #5823: `value_satisfies_range` compares with BINARY ordering and
+        // is therefore NOT collation-aware. This is safe here because the result
+        // only ever *narrows* the IN-list used as an index-probe hint — it can
+        // drop the probe to a smaller/empty set but never fabricates rows. On a
+        // non-BINARY-collated column the raw probe is already declined upstream
+        // (execution.rs gates `IndexPredicate::In`/`Range`), so the query falls
+        // back to the collation-aware full-scan WHERE evaluator regardless of any
+        // over-filtering here. Do not treat this filtered list as a correct
+        // collation-aware result on its own.
         if let (Some(in_vals), Some(ref range)) = (&in_values, &range_pred) {
             let satisfying_values: Vec<SqlValue> =
                 in_vals.iter().filter(|v| value_satisfies_range(v, range)).cloned().collect();
