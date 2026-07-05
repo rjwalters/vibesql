@@ -25,85 +25,6 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
-/// JSON extraction helper
-/// Extracts a value from a JSON string using a key or path
-/// - as_text=false: returns JSON value (->)
-/// - as_text=true: returns text value (->>)
-fn json_extract(
-    left: &SqlValue,
-    right: &SqlValue,
-    as_text: bool,
-) -> Result<SqlValue, ExecutorError> {
-    // Get the JSON string from left operand
-    let json_str = match left {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-        SqlValue::Null => return Ok(SqlValue::Null),
-        _ => {
-            return Err(ExecutorError::TypeError(format!(
-                "JSON operator requires string, got {:?}",
-                left
-            )));
-        }
-    };
-
-    // Get the key/path from right operand
-    let key = match right {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str().to_string(),
-        SqlValue::Integer(i) => i.to_string(), // Array index
-        SqlValue::Null => return Ok(SqlValue::Null),
-        _ => {
-            return Err(ExecutorError::TypeError(format!(
-                "JSON key must be string or integer, got {:?}",
-                right
-            )));
-        }
-    };
-
-    // Parse JSON
-    let json_value: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(_) => return Ok(SqlValue::Null), // Invalid JSON returns NULL
-    };
-
-    // Extract the value
-    let extracted = if let Ok(index) = key.parse::<usize>() {
-        // Array index access
-        json_value.get(index)
-    } else {
-        // Object key access
-        json_value.get(&key)
-    };
-
-    match extracted {
-        Some(value) => {
-            if as_text {
-                // ->> returns text (unquoted for strings, serialized for others)
-                match value {
-                    serde_json::Value::Null => Ok(SqlValue::Null),
-                    serde_json::Value::String(s) => {
-                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(s.as_str())))
-                    }
-                    serde_json::Value::Number(n) => {
-                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(n.to_string())))
-                    }
-                    serde_json::Value::Bool(b) => {
-                        Ok(SqlValue::Varchar(arcstr::ArcStr::from(if *b {
-                            "true"
-                        } else {
-                            "false"
-                        })))
-                    }
-                    _ => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
-                }
-            } else {
-                // -> returns JSON (serialized)
-                Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string())))
-            }
-        }
-        None => Ok(SqlValue::Null), // Key not found returns NULL
-    }
-}
-
 /// Trait for binary operator evaluation
 #[allow(dead_code)]
 pub(crate) trait BinaryOperator {
@@ -173,9 +94,17 @@ impl OperatorRegistry {
             NegativeInnerProduct => VectorOps::negative_inner_product(left, right),
             L2Distance => VectorOps::l2_distance(left, right),
 
-            // JSON operators
-            JsonExtract => json_extract(left, right, false),
-            JsonExtractText => json_extract(left, right, true),
+            // JSON operators (-> returns JSON text, ->> returns SQL value)
+            JsonExtract => {
+                crate::evaluator::functions::sqlite_compat::json_funcs::eval_json_arrow(
+                    left, right, false,
+                )
+            }
+            JsonExtractText => {
+                crate::evaluator::functions::sqlite_compat::json_funcs::eval_json_arrow(
+                    left, right, true,
+                )
+            }
         }
     }
 }

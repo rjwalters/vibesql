@@ -18,7 +18,7 @@
 
 mod blob_funcs;
 mod conditional_funcs;
-mod json_funcs;
+pub(crate) mod json_funcs;
 mod math_funcs;
 mod pattern_funcs;
 mod string_funcs;
@@ -31,7 +31,7 @@ pub(super) use conditional_funcs::ifnull;
 // Re-export conditional functions
 pub(super) use conditional_funcs::iif;
 // Re-export JSON functions
-pub(super) use json_funcs::json;
+pub(super) use json_funcs::{json, json_extract, json_quote, json_type, json_valid};
 // Re-export math/hint functions
 pub(super) use math_funcs::likelihood;
 pub(super) use math_funcs::{likely, random, unlikely};

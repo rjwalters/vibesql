@@ -26,6 +26,7 @@ mod insert;
 mod introspection;
 mod isnull_postfix;
 mod joins;
+mod json_operators;
 mod lexer;
 mod like;
 mod limit;

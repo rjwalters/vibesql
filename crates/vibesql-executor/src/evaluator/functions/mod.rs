@@ -26,7 +26,7 @@ mod null_handling;
 mod numeric;
 #[cfg(feature = "spatial")]
 pub(crate) mod spatial;
-mod sqlite_compat;
+pub(crate) mod sqlite_compat;
 mod storage;
 pub(crate) mod string;
 mod system;
@@ -178,6 +178,10 @@ pub(super) fn eval_scalar_function(
 
         // JSON functions (SQLite JSON1 extension)
         "JSON" => sqlite_compat::json(args),
+        "JSON_VALID" => sqlite_compat::json_valid(args),
+        "JSON_EXTRACT" => sqlite_compat::json_extract(args),
+        "JSON_TYPE" => sqlite_compat::json_type(args),
+        "JSON_QUOTE" => sqlite_compat::json_quote(args),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
