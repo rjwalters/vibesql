@@ -1086,3 +1086,87 @@ fn test_arena_concat_chain_then_multiply() {
         );
     });
 }
+
+// ============================================================================
+// Bitwise operators in comparison / bounds (issues #5848, #5851 Part A)
+//
+// The arena parser has no bitwise tier (`| & << >>`), so any expression that
+// mixes those operators must FAIL arena parsing (never silently truncate) and
+// route through parse_with_arena_fallback to the standard parser, which (post
+// #5848) binds bitwise tighter than comparison and admits it in BETWEEN/LIKE
+// bounds. All expected results were verified against sqlite3 3.51.0.
+// ============================================================================
+
+#[test]
+fn test_arena_bitwise_vs_comparison_fails_no_silent_truncation() {
+    // Must be a hard arena-parse error, NOT a successful parse of the truncated
+    // prefix "SELECT 2 = 2".
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 2 = 2 & 2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no bitwise tier; `2 = 2 & 2` must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+}
+
+#[test]
+fn test_arena_between_bitwise_bound_fails_no_silent_truncation() {
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 2 BETWEEN 0 AND 3 & 1", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no bitwise tier; BETWEEN with `& 1` bound must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+}
+
+#[test]
+fn test_arena_fallback_bitwise_binds_tighter_than_comparison() {
+    // sqlite3: SELECT 2 = 2 & 2; -- 1, i.e. 2 = (2 & 2).
+    let stmt = crate::parse_with_arena_fallback("SELECT 2 = 2 & 2;")
+        .expect("fallback path should parse bitwise-vs-comparison expression");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::BinaryOp { op, right, .. } = expr else {
+        panic!("expected top-level BinaryOp, got {:?}", expr);
+    };
+    assert_eq!(*op, vibesql_ast::BinaryOperator::Equal, "top level should be =");
+    assert!(
+        matches!(
+            **right,
+            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::BitwiseAnd, .. }
+        ),
+        "RHS of = should be (2 & 2), got {:?}",
+        right
+    );
+}
+
+#[test]
+fn test_arena_fallback_between_bitwise_bound() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 & 1; -- 0  (high bound is 3 & 1 = 1).
+    let stmt = crate::parse_with_arena_fallback("SELECT 2 BETWEEN 0 AND 3 & 1;")
+        .expect("fallback path should parse BETWEEN with bitwise bound");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::Between { high, negated, .. } = expr else {
+        panic!("expected Between expression, got {:?}", expr);
+    };
+    assert!(!negated);
+    assert!(
+        matches!(
+            **high,
+            vibesql_ast::Expression::BinaryOp { op: vibesql_ast::BinaryOperator::BitwiseAnd, .. }
+        ),
+        "high bound should be 3 & 1, got {:?}",
+        high
+    );
+}

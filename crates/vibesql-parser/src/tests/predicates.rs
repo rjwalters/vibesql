@@ -328,13 +328,14 @@ fn test_not_between_asymmetric() {
 }
 
 // ============================================================================
-// BETWEEN/LIKE/GLOB operands parse at the shift tier (issue #5813)
+// BETWEEN/LIKE/GLOB operands parse at the bitwise tier (issues #5813, #5848)
 //
 // Per SQLite, everything tighter than the comparison tier is allowed in
 // BETWEEN bounds and LIKE/GLOB patterns; only the boolean AND separating
-// BETWEEN's low/high must not be consumed. The negated forms (NOT BETWEEN,
-// NOT LIKE, NOT GLOB) already parsed at the shift tier, so the non-negated
-// forms must match. All expected results below were verified against sqlite3.
+// BETWEEN's low/high must not be consumed. Since #5848 merged the shift and
+// bitwise tiers, `<<`/`>>` (below) and `&`/`|` (see the bitwise section) are
+// all admitted; the negated and non-negated forms must match. All expected
+// results below were verified against sqlite3.
 // ============================================================================
 
 /// Parse a `SELECT <expr>;` statement and return the first select-list expression.
@@ -576,5 +577,261 @@ fn test_between_shift_bound_does_not_consume_boolean_and() {
             );
         }
         other => panic!("expected boolean AND of two Between expressions, got {:?}", other),
+    }
+}
+
+// ============================================================================
+// Bitwise operators bind tighter than comparison (issues #5848, #5851 Part A)
+//
+// Per SQLite (https://sqlite.org/lang_expr.html#operators), `|`, `&`, `<<`,
+// `>>` form a single flat left-to-right tier that binds TIGHTER than the
+// comparison operators (`= < > <= >= != IS IN LIKE GLOB BETWEEN ...`). There
+// is no C-style sub-ordering: `5 | 3 & 1` parses as `((5|3)&1)`, not
+// `(5|(3&1))`. Every expected result below was verified against sqlite3 3.51.0.
+// ============================================================================
+
+fn bin_op(expr: &vibesql_ast::Expression) -> vibesql_ast::BinaryOperator {
+    match expr {
+        vibesql_ast::Expression::BinaryOp { op, .. } => *op,
+        other => panic!("expected BinaryOp, got {:?}", other),
+    }
+}
+
+/// Assert `expr` is `BinaryOp { op }` and return its (left, right) children.
+fn expect_bin<'a>(
+    expr: &'a vibesql_ast::Expression,
+    op: vibesql_ast::BinaryOperator,
+    ctx: &str,
+) -> (&'a vibesql_ast::Expression, &'a vibesql_ast::Expression) {
+    match expr {
+        vibesql_ast::Expression::BinaryOp { op: got, left, right } => {
+            assert_eq!(*got, op, "{}: expected {:?}, got {:?}", ctx, op, got);
+            (left, right)
+        }
+        other => panic!("{}: expected BinaryOp {:?}, got {:?}", ctx, op, other),
+    }
+}
+
+#[test]
+fn test_equal_binds_looser_than_bitwise_and_rhs() {
+    // sqlite3: SELECT 2 = 2 & 2; -- 1, i.e. 2 = (2 & 2)
+    let expr = parse_select_expr("SELECT 2 = 2 & 2;");
+    let (_, right) = expect_bin(&expr, vibesql_ast::BinaryOperator::Equal, "top");
+    assert_eq!(
+        bin_op(right),
+        vibesql_ast::BinaryOperator::BitwiseAnd,
+        "RHS of = should be (2 & 2), got {:?}",
+        right
+    );
+}
+
+#[test]
+fn test_equal_binds_looser_than_bitwise_or_lhs() {
+    // sqlite3: SELECT 2 | 3 = 3; -- 1, i.e. (2 | 3) = 3
+    let expr = parse_select_expr("SELECT 2 | 3 = 3;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::Equal, "top");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::BitwiseOr,
+        "LHS of = should be (2 | 3), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_less_than_binds_looser_than_bitwise_and() {
+    // sqlite3: SELECT 5 & 3 > 1; -- 0, i.e. (5 & 3) > 1
+    let expr = parse_select_expr("SELECT 5 & 3 > 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::GreaterThan, "top");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::BitwiseAnd,
+        "LHS of > should be (5 & 3), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_bitwise_or_and_are_flat_left_to_right() {
+    // sqlite3: SELECT 5 | 3 & 1; -- 1, i.e. ((5 | 3) & 1), NOT (5 | (3 & 1)).
+    let expr = parse_select_expr("SELECT 5 | 3 & 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::BitwiseAnd, "top");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::BitwiseOr,
+        "flat L-to-R: left of & should be (5 | 3), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_shift_is_same_tier_as_bitwise_and() {
+    // sqlite3: SELECT 5 & 3 << 1; -- 2, i.e. ((5 & 3) << 1) — shift NOT tighter than &.
+    let expr = parse_select_expr("SELECT 5 & 3 << 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::LeftShift, "top");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::BitwiseAnd,
+        "left of << should be (5 & 3), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_shift_is_same_tier_as_bitwise_or() {
+    // sqlite3: SELECT 5 | 3 << 1; -- 14, i.e. ((5 | 3) << 1).
+    let expr = parse_select_expr("SELECT 5 | 3 << 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::LeftShift, "top");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::BitwiseOr,
+        "left of << should be (5 | 3), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_multi_op_bitwise_chain_flat() {
+    // sqlite3: SELECT 1 | 6 & 4 << 1; -- 8, i.e. (((1 | 6) & 4) << 1).
+    let expr = parse_select_expr("SELECT 1 | 6 & 4 << 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::LeftShift, "top <<");
+    let (inner_left, _) = expect_bin(left, vibesql_ast::BinaryOperator::BitwiseAnd, "inner &");
+    assert_eq!(
+        bin_op(inner_left),
+        vibesql_ast::BinaryOperator::BitwiseOr,
+        "innermost should be (1 | 6), got {:?}",
+        inner_left
+    );
+}
+
+#[test]
+fn test_bitwise_binds_looser_than_additive() {
+    // sqlite3: SELECT 4 & 6 + 1; -- 4, i.e. (4 & (6 + 1)) — `+` tighter than `&`.
+    let expr = parse_select_expr("SELECT 4 & 6 + 1;");
+    let (_, right) = expect_bin(&expr, vibesql_ast::BinaryOperator::BitwiseAnd, "top &");
+    assert_eq!(
+        bin_op(right),
+        vibesql_ast::BinaryOperator::Plus,
+        "RHS of & should be (6 + 1), got {:?}",
+        right
+    );
+}
+
+#[test]
+fn test_bitwise_binds_looser_than_concat() {
+    // sqlite3: SELECT 1 | 2 || 3; -- '23', i.e. (1 | (2 || 3)) — `||` binds
+    // TIGHTER than `|` (concat tier is tighter than the bitwise tier), so the
+    // RHS of `|` is the concatenation `2 || 3` = '23', and `1 | 23` = 23.
+    let expr = parse_select_expr("SELECT 1 | 2 || 3;");
+    let (_, right) = expect_bin(&expr, vibesql_ast::BinaryOperator::BitwiseOr, "top |");
+    assert_eq!(
+        bin_op(right),
+        vibesql_ast::BinaryOperator::Concat,
+        "RHS of | should be (2 || 3), got {:?}",
+        right
+    );
+}
+
+#[test]
+fn test_in_list_followed_by_bitwise_and() {
+    // sqlite3: SELECT 1 IN (1) & 3; -- 1, i.e. (1 IN (1)) & 3.
+    // continue_higher_precedence_ops must climb the new bitwise tier.
+    let expr = parse_select_expr("SELECT 1 IN (1) & 3;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::BitwiseAnd, "top &");
+    assert!(
+        matches!(left, vibesql_ast::Expression::InList { .. }),
+        "LHS of & should be an IN list, got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_isnull_postfix_followed_by_bitwise_and() {
+    // sqlite3: SELECT 1 ISNULL & 3; -- 0, i.e. (1 ISNULL) & 3.
+    let expr = parse_select_expr("SELECT 1 ISNULL & 3;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::BitwiseAnd, "top &");
+    assert!(
+        matches!(left, vibesql_ast::Expression::IsNull { negated: false, .. }),
+        "LHS of & should be (1 ISNULL), got {:?}",
+        left
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Part A of #5851: `& | << >>` now admitted in BETWEEN bounds / LIKE-GLOB
+// patterns (bounds parse at the bitwise tier). Values verified against sqlite3.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_between_bitwise_and_in_high_bound() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 & 1; -- 0  (high bound is 3 & 1 = 1)
+    let expr = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 & 1;");
+    match expr {
+        vibesql_ast::Expression::Between { high, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&high),
+                vibesql_ast::BinaryOperator::BitwiseAnd,
+                "high bound should be (3 & 1), got {:?}",
+                high
+            );
+        }
+        other => panic!("expected Between expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_between_bitwise_or_in_low_bound() {
+    // sqlite3: SELECT 7 BETWEEN 5 | 2 AND 10; -- 1  (low bound is 5 | 2 = 7)
+    let expr = parse_select_expr("SELECT 7 BETWEEN 5 | 2 AND 10;");
+    match expr {
+        vibesql_ast::Expression::Between { low, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&low),
+                vibesql_ast::BinaryOperator::BitwiseOr,
+                "low bound should be (5 | 2), got {:?}",
+                low
+            );
+        }
+        other => panic!("expected Between expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_between_bitwise_bound_negated_symmetry() {
+    // The negated and non-negated forms must produce identically shaped bounds.
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 & 1;     -- 0
+    // sqlite3: SELECT 2 NOT BETWEEN 0 AND 3 & 1; -- 1
+    let plain = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 & 1;");
+    let negated = parse_select_expr("SELECT 2 NOT BETWEEN 0 AND 3 & 1;");
+    match (plain, negated) {
+        (
+            vibesql_ast::Expression::Between { high: h1, negated: n1, .. },
+            vibesql_ast::Expression::Between { high: h2, negated: n2, .. },
+        ) => {
+            assert!(!n1);
+            assert!(n2);
+            assert_eq!(h1, h2, "BETWEEN high bound must parse identically in both forms");
+        }
+        other => panic!("expected two Between expressions, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_like_bitwise_and_pattern() {
+    // sqlite3: SELECT 2 LIKE 1 & 3; -- 0  (pattern is 1 & 3 = 1)
+    let expr = parse_select_expr("SELECT 2 LIKE 1 & 3;");
+    match expr {
+        vibesql_ast::Expression::Like { pattern, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&pattern),
+                vibesql_ast::BinaryOperator::BitwiseAnd,
+                "LIKE pattern should be (1 & 3), got {:?}",
+                pattern
+            );
+        }
+        other => panic!("expected Like expression, got {:?}", other),
     }
 }
