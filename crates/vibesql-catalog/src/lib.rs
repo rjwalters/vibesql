@@ -40,7 +40,7 @@ pub use index::{IndexMetadata, IndexType, IndexedColumn, SortOrder, VectorDistan
 pub use privilege::PrivilegeGrant;
 pub use schema::Schema;
 pub use store::{Catalog, ViewDropBehavior};
-pub use table::{StorageFormat, TableSchema};
+pub use table::{StorageFormat, StrictType, TableSchema};
 pub use trigger::TriggerDefinition;
 pub use type_definition::{TypeAttribute, TypeDefinition, TypeDefinitionKind};
 pub use vibesql_ast::{ColumnIdentifier, Identifier, TableIdentifier};

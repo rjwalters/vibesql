@@ -25,6 +25,7 @@ fn test_truncate_single_table() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "NAME".to_string(),
@@ -35,6 +36,7 @@ fn test_truncate_single_table() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -43,6 +45,7 @@ fn test_truncate_single_table() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -95,6 +98,7 @@ fn test_truncate_multiple_tables() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -102,6 +106,7 @@ fn test_truncate_multiple_tables() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt1, &mut db).unwrap();
 
@@ -119,6 +124,7 @@ fn test_truncate_multiple_tables() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -126,6 +132,7 @@ fn test_truncate_multiple_tables() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt2, &mut db).unwrap();
 
@@ -143,6 +150,7 @@ fn test_truncate_multiple_tables() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -150,6 +158,7 @@ fn test_truncate_multiple_tables() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt3, &mut db).unwrap();
 
@@ -233,6 +242,7 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -240,6 +250,7 @@ fn test_truncate_multiple_tables_if_exists_mixed() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -281,6 +292,7 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -288,6 +300,7 @@ fn test_truncate_multiple_tables_all_or_nothing_validation() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -327,6 +340,7 @@ fn test_truncate_empty_table() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -334,6 +348,7 @@ fn test_truncate_empty_table() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -384,6 +399,7 @@ fn test_truncate_resets_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -394,6 +410,7 @@ fn test_truncate_resets_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -402,6 +419,7 @@ fn test_truncate_resets_auto_increment() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
@@ -499,6 +517,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "value".to_string(),
@@ -509,6 +528,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -517,6 +537,7 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, &mut db).unwrap();
 
@@ -598,6 +619,7 @@ fn test_truncate_without_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -608,6 +630,7 @@ fn test_truncate_without_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -616,6 +639,7 @@ fn test_truncate_without_auto_increment() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

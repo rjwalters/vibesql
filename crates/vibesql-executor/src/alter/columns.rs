@@ -30,6 +30,28 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::ColumnAlreadyExists(stmt.column_def.name.clone()));
     }
 
+    // STRICT tables (issue #5837) reject a non-strict datatype on the added
+    // column, wrapping the strict error with SQLite's ALTER-context prefix:
+    // `error in table <t> after add column: <strict error>`.
+    let added_strict_type = if table.schema.strict {
+        match crate::strict::classify_strict_column(
+            &stmt.table_name,
+            &stmt.column_def.name,
+            stmt.column_def.type_source.as_deref(),
+        ) {
+            Ok(st) => Some(st),
+            Err(ExecutorError::SqliteCompatError(msg)) => {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "error in table {} after add column: {}",
+                    stmt.table_name, msg
+                )));
+            }
+            Err(e) => return Err(e),
+        }
+    } else {
+        None
+    };
+
     // Add column to schema
     let mut new_column = ColumnSchema::new(
         stmt.column_def.name.clone(),
@@ -43,6 +65,11 @@ pub(super) fn execute_add_column(
     }
 
     table.schema_mut().add_column(new_column)?;
+
+    // Keep the parallel STRICT type vector aligned with the new column set.
+    if let Some(st) = added_strict_type {
+        table.schema_mut().strict_types.push(st);
+    }
 
     // Add default value (or NULL) to all existing rows
     let default_value = if let Some(ref default_expr) = stmt.column_def.default_value {

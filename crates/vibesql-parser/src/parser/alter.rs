@@ -86,7 +86,12 @@ fn parse_add_column(
     table_name: String,
 ) -> Result<AlterTableStmt, ParseError> {
     let column_name = parser.parse_identifier()?;
+    let type_start = parser.current_position();
     let (data_type, is_exact_integer_type) = parser.parse_data_type_with_integer_flag()?;
+    // Capture the verbatim declared type text for STRICT-table validation
+    // (issue #5837): ALTER TABLE <strict> ADD COLUMN must reject non-strict
+    // datatypes just like CREATE TABLE.
+    let type_source = parser.source_between(type_start, parser.current_position());
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -158,6 +163,7 @@ fn parse_add_column(
         comment: None,
         generated_expr: None,
         is_exact_integer_type,
+        type_source,
     };
 
     Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
@@ -386,6 +392,7 @@ fn parse_modify_column(
         comment: None,
         generated_expr: None,
         is_exact_integer_type,
+        type_source: None,
     };
 
     Ok(AlterTableStmt::ModifyColumn(ModifyColumnStmt { table_name, column_name, new_column_def }))
@@ -475,6 +482,7 @@ fn parse_change_column(
         comment: None,
         generated_expr: None,
         is_exact_integer_type,
+        type_source: None,
     };
 
     Ok(AlterTableStmt::ChangeColumn(ChangeColumnStmt {

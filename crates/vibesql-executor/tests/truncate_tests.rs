@@ -35,6 +35,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "data".to_string(),
@@ -45,6 +46,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -53,6 +55,7 @@ fn create_test_table(db: &mut Database, table_name: &str) {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, db).unwrap();
 }
@@ -516,6 +519,7 @@ fn test_truncate_preserves_table_structure() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -526,6 +530,7 @@ fn test_truncate_preserves_table_structure() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "age".to_string(),
@@ -536,6 +541,7 @@ fn test_truncate_preserves_table_structure() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -544,6 +550,7 @@ fn test_truncate_preserves_table_structure() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

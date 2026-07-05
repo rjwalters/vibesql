@@ -88,6 +88,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -98,6 +99,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -108,6 +110,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
             ],
             table_constraints: vec![],
@@ -116,6 +119,7 @@ mod tests {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();

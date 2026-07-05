@@ -71,6 +71,7 @@ impl Parser {
                 name_source,
                 as_query: Some(Box::new(select_stmt)),
                 without_rowid: false, // CREATE TABLE AS SELECT cannot be WITHOUT ROWID
+                strict: false,        // CREATE TABLE AS SELECT cannot be STRICT
             });
         }
 
@@ -123,7 +124,11 @@ impl Parser {
             // Parse data type (optional for SQLite compatibility)
             // SQLite allows typeless columns with BLOB affinity
             // Also check for generated column syntax: AS(expression) or GENERATED ALWAYS AS(expression)
-            let (data_type, is_exact_integer_type, mut generated_expr) =
+            // Record the token index at the start of the (optional) datatype so
+            // we can capture its verbatim source spelling for STRICT-table
+            // validation (`type_source`).
+            let type_start = self.current_position();
+            let (data_type, is_exact_integer_type, mut generated_expr, type_source) =
                 if self.peek_keyword(Keyword::As) {
                     // Generated column (short form): AS(expression)
                     self.advance(); // consume AS
@@ -136,13 +141,14 @@ impl Parser {
                     }
                     // Generated columns have the type inferred from the expression
                     // For now, use BLOB affinity (will be refined by type inference)
-                    (DataType::BinaryLargeObject, false, Some(Box::new(expr)))
+                    (DataType::BinaryLargeObject, false, Some(Box::new(expr)), None)
                 } else if self.is_column_constraint_or_separator() {
                     // No data type specified - use BLOB affinity (SQLite default)
-                    (DataType::BinaryLargeObject, false, None)
+                    (DataType::BinaryLargeObject, false, None, None)
                 } else {
                     let (dt, is_int) = self.parse_data_type_with_integer_flag()?;
-                    (dt, is_int, None)
+                    let src = self.source_between(type_start, self.current_position());
+                    (dt, is_int, None, src)
                 };
 
             // Check for GENERATED ALWAYS AS (expression) [STORED|VIRTUAL] after data type
@@ -228,6 +234,7 @@ impl Parser {
                 comment,
                 generated_expr,
                 is_exact_integer_type,
+                type_source,
             });
 
             if matches!(self.peek(), Token::Comma) {
@@ -242,23 +249,44 @@ impl Parser {
         // Parse optional table options (MySQL extensions)
         let table_options = self.parse_table_options()?;
 
-        // Parse optional WITH OIDS / WITHOUT OIDS clause (PostgreSQL)
-        // or WITHOUT ROWID clause (SQLite)
+        // Parse optional trailing table-option clauses:
+        //   WITH OIDS / WITHOUT OIDS (PostgreSQL), WITHOUT ROWID (SQLite),
+        //   and STRICT (SQLite). SQLite accepts STRICT and WITHOUT ROWID in
+        //   either order, separated by commas:
+        //     CREATE TABLE t(a INTEGER) STRICT;
+        //     CREATE TABLE t(a INTEGER) STRICT, WITHOUT ROWID;
+        //     CREATE TABLE t(a INTEGER) WITHOUT ROWID, STRICT;
         let mut without_rowid = false;
-        if self.peek_keyword(Keyword::With) {
-            self.advance(); // consume WITH
-            self.expect_keyword(Keyword::Oids)?;
-        } else if self.peek_keyword(Keyword::Without) {
-            self.advance(); // consume WITHOUT
-            if self.peek_keyword(Keyword::Oids) {
-                self.advance(); // consume OIDS
-            } else if self.peek_keyword(Keyword::Rowid) {
-                self.advance(); // consume ROWID (SQLite WITHOUT ROWID tables)
-                without_rowid = true;
+        let mut strict = false;
+        loop {
+            if self.peek_keyword(Keyword::With) {
+                self.advance(); // consume WITH
+                self.expect_keyword(Keyword::Oids)?;
+            } else if self.peek_keyword(Keyword::Without) {
+                self.advance(); // consume WITHOUT
+                if self.peek_keyword(Keyword::Oids) {
+                    self.advance(); // consume OIDS
+                } else if self.peek_keyword(Keyword::Rowid) {
+                    self.advance(); // consume ROWID (SQLite WITHOUT ROWID tables)
+                    without_rowid = true;
+                } else {
+                    return Err(ParseError {
+                        message: "Expected OIDS or ROWID after WITHOUT".to_string(),
+                    });
+                }
+            } else if self.peek_keyword(Keyword::Strict) {
+                self.advance(); // consume STRICT (SQLite STRICT tables)
+                strict = true;
             } else {
-                return Err(ParseError {
-                    message: "Expected OIDS or ROWID after WITHOUT".to_string(),
-                });
+                break;
+            }
+
+            // Table-option clauses are comma-separated; stop when the comma is
+            // absent so a trailing semicolon / EOF ends the statement.
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
             }
         }
 
@@ -278,6 +306,7 @@ impl Parser {
             name_source,
             as_query: None,
             without_rowid,
+            strict,
         })
     }
 

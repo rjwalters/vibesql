@@ -61,6 +61,7 @@ impl SelectIntoExecutor {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         };
 
         crate::CreateTableExecutor::execute(&create_stmt, database)?;
@@ -113,6 +114,7 @@ impl SelectIntoExecutor {
                         comment: None,
                         generated_expr: None,
                         is_exact_integer_type: false, // SELECT INTO doesn't preserve exact type
+                        type_source: None,
                     });
                 }
             }

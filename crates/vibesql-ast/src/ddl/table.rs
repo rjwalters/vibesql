@@ -176,6 +176,11 @@ pub struct CreateTableStmt {
     /// WITHOUT ROWID tables have no implicit rowid column and last_insert_rowid()
     /// is not updated when inserting into them.
     pub without_rowid: bool,
+    /// If true, table was created with the STRICT clause (SQLite compatibility).
+    /// STRICT tables require every column to declare one of the allowed datatypes
+    /// (INT, INTEGER, REAL, TEXT, BLOB, ANY) and enforce those types on
+    /// INSERT/UPDATE. See <https://sqlite.org/stricttables.html>.
+    pub strict: bool,
 }
 
 /// Column definition
@@ -196,6 +201,14 @@ pub struct ColumnDef {
     /// In SQLite, only `INTEGER PRIMARY KEY` is a rowid alias, not `INT PRIMARY KEY`.
     /// This distinguishes between INT and INTEGER which both parse to DataType::Integer.
     pub is_exact_integer_type: bool,
+    /// Verbatim source text of the column's declared datatype, exactly as written
+    /// (e.g. `"INT"`, `"INTEGER"`, `"TEXT(50)"`, `"DOUBLE PRECISION"`, `"BANJO"`).
+    /// `None` when the column has no declared type (typeless column) or when the
+    /// AST was built programmatically without source spans. Used by STRICT tables
+    /// to validate the datatype and echo it verbatim in error messages; the parsed
+    /// `data_type` alone is lossy (it discards `TEXT(50)`'s size and cannot
+    /// distinguish `ANY` from `BLOB`).
+    pub type_source: Option<String>,
 }
 
 /// Column-level constraint

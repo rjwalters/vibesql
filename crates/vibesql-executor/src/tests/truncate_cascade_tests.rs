@@ -33,6 +33,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![TableConstraint {
             name: None,
@@ -50,6 +51,7 @@ fn create_table_with_pk(db: &mut Database, table_name: &str, pk_column: &str) {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }
@@ -78,6 +80,7 @@ fn create_table_with_fk(
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: fk_column.to_string(),
@@ -88,6 +91,7 @@ fn create_table_with_fk(
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![
@@ -121,6 +125,7 @@ fn create_table_with_fk(
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, db).unwrap();
 }

@@ -33,6 +33,7 @@ fn test_auto_increment_basic_inserts() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -43,6 +44,7 @@ fn test_auto_increment_basic_inserts() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -51,6 +53,7 @@ fn test_auto_increment_basic_inserts() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -127,6 +130,7 @@ fn test_multiple_auto_increment_error() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "id2".to_string(),
@@ -140,6 +144,7 @@ fn test_multiple_auto_increment_error() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -148,6 +153,7 @@ fn test_multiple_auto_increment_error() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -181,6 +187,7 @@ fn test_last_insert_rowid_basic() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "username".to_string(),
@@ -191,6 +198,7 @@ fn test_last_insert_rowid_basic() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -199,6 +207,7 @@ fn test_last_insert_rowid_basic() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -277,6 +286,7 @@ fn test_last_insert_rowid_multi_row_insert() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -287,6 +297,7 @@ fn test_last_insert_rowid_multi_row_insert() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -295,6 +306,7 @@ fn test_last_insert_rowid_multi_row_insert() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -361,6 +373,7 @@ fn test_last_insert_rowid_no_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -371,6 +384,7 @@ fn test_last_insert_rowid_no_auto_increment() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -379,6 +393,7 @@ fn test_last_insert_rowid_no_auto_increment() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -437,6 +452,7 @@ fn test_last_insert_rowid_via_select() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -447,6 +463,7 @@ fn test_last_insert_rowid_via_select() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -455,6 +472,7 @@ fn test_last_insert_rowid_via_select() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

@@ -144,6 +144,7 @@ fn test_before_trigger_executes_first() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -151,6 +152,7 @@ fn test_before_trigger_executes_first() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&counter_stmt, &mut db).expect("Failed to create counter table");
 

@@ -376,9 +376,16 @@ impl Database {
                 write!(writer, ")")
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
-                // Add WITHOUT ROWID clause for SQLite compatibility (Issue #4803)
+                // Add WITHOUT ROWID / STRICT clauses for SQLite compatibility
+                // (Issue #4803, #5837). SQLite accepts both together, comma-
+                // separated: `) WITHOUT ROWID, STRICT`.
                 if schema.without_rowid {
                     write!(writer, " WITHOUT ROWID")
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+                if schema.strict {
+                    let sep = if schema.without_rowid { "," } else { "" };
+                    write!(writer, "{} STRICT", sep)
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
 

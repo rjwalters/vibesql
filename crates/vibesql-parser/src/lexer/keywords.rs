@@ -256,6 +256,7 @@ static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
     "GENERATED" => Keyword::Generated,
     "ALWAYS" => Keyword::Always,
     "STORED" => Keyword::Stored,
+    "STRICT" => Keyword::Strict,
     "VIRTUAL" => Keyword::Virtual,
     // CURSOR keywords
     "DECLARE" => Keyword::Declare,

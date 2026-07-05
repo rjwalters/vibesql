@@ -147,6 +147,37 @@ pub(super) fn rehydrate_constraints_from_sql_source(
         return Ok(());
     }
 
+    // ---- STRICT flag + per-column strict types (issue #5837) ----
+    // Neither `TableSchema::strict` nor `strict_types` is serialized as a
+    // dedicated binary field; both are rederived here from the re-parsed
+    // `sql_source`, exactly like CHECK/FK constraints below. This keeps STRICT
+    // enforcement alive across a process restart without a binary format bump.
+    // A column that no longer classifies (should be impossible for a table that
+    // was accepted at CREATE time) leaves the table non-strict rather than
+    // failing the load.
+    if create.strict {
+        let mut strict_types = Vec::with_capacity(schema.columns.len());
+        let mut all_classified = true;
+        for col in &schema.columns {
+            let declared = create
+                .columns
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(&col.name))
+                .and_then(|c| c.type_source.as_deref());
+            match declared.and_then(vibesql_catalog::StrictType::classify) {
+                Some(st) => strict_types.push(st),
+                None => {
+                    all_classified = false;
+                    break;
+                }
+            }
+        }
+        if all_classified {
+            schema.strict = true;
+            schema.strict_types = strict_types;
+        }
+    }
+
     // ---- INTEGER PRIMARY KEY rowid aliasing (issue #5835) ----
     // Neither `TableSchema::rowid_alias_column` nor
     // `ColumnSchema::is_exact_integer_type` is serialized as a dedicated
@@ -485,6 +516,40 @@ mod tests {
         assert_eq!(fk.parent_table, "t");
         assert_eq!(fk.column_indices, vec![1]);
         assert_eq!(fk.parent_column_indices, vec![0]);
+    }
+
+    #[test]
+    fn rehydrates_strict_flag_and_per_column_types() {
+        // A STRICT table's `strict` flag and per-column strict types are not
+        // serialized as binary fields — they are rederived from `sql_source`
+        // on load (issue #5837). ANY must be distinguished from BLOB.
+        let mut schema = schema_with_source(
+            "t",
+            vec![col("a"), col("b"), col("c"), col("d")],
+            "CREATE TABLE t(a INT, b TEXT, c BLOB, d ANY) STRICT",
+        );
+        assert!(!schema.strict, "precondition: not yet rehydrated");
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+
+        assert!(schema.strict);
+        assert_eq!(
+            schema.strict_types,
+            vec![
+                vibesql_catalog::StrictType::Int,
+                vibesql_catalog::StrictType::Text,
+                vibesql_catalog::StrictType::Blob,
+                vibesql_catalog::StrictType::Any,
+            ]
+        );
+    }
+
+    #[test]
+    fn non_strict_table_stays_non_strict_on_rehydrate() {
+        let mut schema =
+            schema_with_source("t", vec![col("a")], "CREATE TABLE t(a INTEGER)");
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+        assert!(!schema.strict);
+        assert!(schema.strict_types.is_empty());
     }
 
     #[test]
