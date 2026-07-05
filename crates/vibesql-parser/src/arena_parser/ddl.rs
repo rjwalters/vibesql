@@ -903,20 +903,42 @@ impl<'arena> ArenaParser<'arena> {
         Ok(columns)
     }
 
-    /// Parse referential actions (ON DELETE, ON UPDATE).
+    /// Parse the ON DELETE/UPDATE actions and MATCH clauses of a
+    /// foreign-key-clause.
+    ///
+    /// `ON DELETE/UPDATE action` and `MATCH name` clauses may appear in any
+    /// order and interleaved. MATCH clauses are parsed but ignored: every
+    /// SQLite foreign key behaves as if MATCH SIMPLE were specified (see
+    /// e_fkey-62). Rejecting MATCH as a syntax error made every schema that
+    /// spells one out fail to create.
     fn parse_referential_actions(
         &mut self,
     ) -> Result<(Option<ReferentialAction>, Option<ReferentialAction>), ParseError> {
         let mut on_delete = None;
         let mut on_update = None;
 
-        for _ in 0..2 {
+        loop {
             if self.try_consume_keyword(Keyword::On) {
                 if self.try_consume_keyword(Keyword::Delete) {
                     on_delete = Some(self.parse_referential_action()?);
                 } else if self.try_consume_keyword(Keyword::Update) {
                     on_update = Some(self.parse_referential_action()?);
                 }
+            } else if self.try_consume_keyword(Keyword::Match) {
+                // MATCH <name> (SIMPLE/FULL/PARTIAL/NONE or any identifier-like
+                // token) — parsed and ignored. FULL and NONE tokenize as
+                // keywords while SIMPLE and PARTIAL tokenize as identifiers, so
+                // accept both token classes.
+                match self.peek() {
+                    Token::Identifier(_) | Token::Keyword { .. } => {
+                        self.advance();
+                    }
+                    _ => {
+                        return Err(ParseError { message: "Expected name after MATCH".to_string() })
+                    }
+                }
+            } else {
+                break;
             }
         }
 

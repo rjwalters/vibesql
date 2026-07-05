@@ -682,3 +682,66 @@ fn test_parse_table_level_primary_key_collate_missing_name_is_error() {
     let result = Parser::parse_sql("CREATE TABLE t1(a, b, PRIMARY KEY(a COLLATE))");
     assert!(result.is_err(), "COLLATE without a collation name must be a parse error");
 }
+
+#[test]
+fn test_parse_foreign_key_match_clause_is_parsed_and_ignored() {
+    // SQLite parses MATCH clauses but treats every FK as MATCH SIMPLE
+    // (e_fkey-62). VibeSQL must accept SIMPLE/FULL/PARTIAL/NONE — FULL and
+    // NONE tokenize as keywords, SIMPLE and PARTIAL as identifiers — on both
+    // table-level and column-level foreign keys, in either casing.
+    for zmatch in ["SIMPLE", "PARTIAL", "FULL", "NONE", "Simple", "parTIAL", "FuLL"] {
+        let table_level =
+            format!("CREATE TABLE c(d, e, f, FOREIGN KEY(e, f) REFERENCES p MATCH {zmatch})");
+        assert!(
+            Parser::parse_sql(&table_level).is_ok(),
+            "table-level MATCH {zmatch} should parse: {:?}",
+            Parser::parse_sql(&table_level).err()
+        );
+
+        let column_level = format!("CREATE TABLE c(x REFERENCES p MATCH {zmatch})");
+        assert!(
+            Parser::parse_sql(&column_level).is_ok(),
+            "column-level MATCH {zmatch} should parse: {:?}",
+            Parser::parse_sql(&column_level).err()
+        );
+    }
+}
+
+#[test]
+fn test_parse_foreign_key_match_interleaved_with_actions() {
+    // MATCH and ON DELETE/UPDATE actions may appear in any order and
+    // interleaved; the actions are still captured, MATCH is ignored.
+    let result = Parser::parse_sql(
+        "CREATE TABLE child (
+            id INT PRIMARY KEY,
+            pid INT REFERENCES parent(id) MATCH FULL ON DELETE CASCADE ON UPDATE SET NULL
+        );",
+    );
+    assert!(result.is_ok(), "MATCH interleaved with actions should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => match &create.columns[1].constraints[0].kind
+        {
+            vibesql_ast::ColumnConstraintKind::References { on_delete, on_update, .. } => {
+                assert_eq!(on_delete, &Some(vibesql_ast::ReferentialAction::Cascade));
+                assert_eq!(on_update, &Some(vibesql_ast::ReferentialAction::SetNull));
+            }
+            _ => panic!("Expected REFERENCES constraint"),
+        },
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_foreign_key_match_with_deferrable() {
+    // MATCH precedes a trailing DEFERRABLE clause and must not swallow it.
+    let result = Parser::parse_sql(
+        "CREATE TABLE c(a, b, FOREIGN KEY(a, b) REFERENCES p MATCH SIMPLE DEFERRABLE INITIALLY DEFERRED)",
+    );
+    assert!(result.is_ok(), "MATCH before DEFERRABLE should parse: {:?}", result.err());
+}
+
+#[test]
+fn test_parse_foreign_key_match_missing_name_is_error() {
+    let result = Parser::parse_sql("CREATE TABLE c(a, FOREIGN KEY(a) REFERENCES p MATCH)");
+    assert!(result.is_err(), "MATCH without a name must be a parse error");
+}

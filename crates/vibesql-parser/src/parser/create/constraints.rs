@@ -215,7 +215,15 @@ impl Parser {
 
         Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length })
     }
-    /// Parse ON DELETE/UPDATE referential actions
+    /// Parse the ON DELETE/UPDATE actions and MATCH clauses of a
+    /// foreign-key-clause.
+    ///
+    /// SQLite's grammar allows `ON DELETE/UPDATE action` and `MATCH name`
+    /// clauses to appear in any order and interleaved, e.g.
+    /// `REFERENCES p MATCH SIMPLE ON DELETE CASCADE`. MATCH clauses are parsed
+    /// but ignored: every SQLite foreign key behaves as if MATCH SIMPLE were
+    /// specified (see e_fkey-62). Rejecting MATCH as a syntax error made every
+    /// schema that spells one out fail to create.
     fn parse_referential_actions(
         &mut self,
     ) -> Result<
@@ -225,39 +233,46 @@ impl Parser {
         let mut on_delete = None;
         let mut on_update = None;
 
-        // Parse optional ON DELETE clause
-        if self.peek_keyword(Keyword::On) {
-            self.advance(); // consume ON
-            if self.peek_keyword(Keyword::Delete) {
-                self.advance(); // consume DELETE
-                on_delete = Some(self.parse_referential_action()?);
-            } else if self.peek_keyword(Keyword::Update) {
-                self.advance(); // consume UPDATE
-                on_update = Some(self.parse_referential_action()?);
+        loop {
+            if self.peek_keyword(Keyword::On) {
+                self.advance(); // consume ON
+                if self.peek_keyword(Keyword::Delete) {
+                    self.advance(); // consume DELETE
+                    on_delete = Some(self.parse_referential_action()?);
+                } else if self.peek_keyword(Keyword::Update) {
+                    self.advance(); // consume UPDATE
+                    on_update = Some(self.parse_referential_action()?);
+                } else {
+                    return Err(ParseError {
+                        message: "Expected DELETE or UPDATE after ON".to_string(),
+                    });
+                }
+            } else if self.peek_keyword(Keyword::Match) {
+                self.advance(); // consume MATCH
+                self.consume_match_name()?; // MATCH <name> — parsed and ignored
             } else {
-                return Err(ParseError {
-                    message: "Expected DELETE or UPDATE after ON".to_string(),
-                });
-            }
-        }
-
-        // Parse optional second ON clause (if not already parsed above)
-        if self.peek_keyword(Keyword::On) {
-            self.advance(); // consume ON
-            if self.peek_keyword(Keyword::Delete) {
-                self.advance(); // consume DELETE
-                on_delete = Some(self.parse_referential_action()?);
-            } else if self.peek_keyword(Keyword::Update) {
-                self.advance(); // consume UPDATE
-                on_update = Some(self.parse_referential_action()?);
-            } else {
-                return Err(ParseError {
-                    message: "Expected DELETE or UPDATE after ON".to_string(),
-                });
+                break;
             }
         }
 
         Ok((on_delete, on_update))
+    }
+
+    /// Consume the name argument of a foreign-key `MATCH` clause and discard it.
+    ///
+    /// The name is one of SIMPLE / FULL / PARTIAL / NONE per the SQL standard,
+    /// but SQLite (and thus VibeSQL) accepts any identifier-like token here and
+    /// ignores it. FULL and NONE tokenize as keywords while SIMPLE and PARTIAL
+    /// tokenize as identifiers, so both token classes are accepted (mirroring
+    /// how a COLLATE name is consumed above).
+    fn consume_match_name(&mut self) -> Result<(), ParseError> {
+        match self.peek() {
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::Keyword { .. } => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err(ParseError { message: "Expected name after MATCH".to_string() }),
+        }
     }
 
     /// Parse constraint deferral mode: [NOT] DEFERRABLE [INITIALLY {DEFERRED | IMMEDIATE}]
