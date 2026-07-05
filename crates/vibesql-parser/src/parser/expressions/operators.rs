@@ -516,6 +516,11 @@ impl Parser {
                         // General case: expr NOT NULL is an operator
                         left =
                             vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true };
+                        // NOT NULL's right side is syntactically closed (NULL is part
+                        // of the operator token sequence), so tighter-binding operators
+                        // that follow take the whole node as their left operand
+                        // (SQLite: `1 NOT NULL + 1` = `(1 NOT NULL) + 1` = 2).
+                        left = self.continue_higher_precedence_ops(left)?;
                         continue;
                     }
                 } else {
@@ -865,14 +870,21 @@ impl Parser {
             // SQLite compatibility: ISNULL and NOTNULL as postfix operators
             // These are equivalent to IS NULL and IS NOT NULL respectively
             // The enclosing loop supports chaining: `x NOTNULL NOTNULL`
+            //
+            // Like IN, these postfix operators are syntactically closed (no right
+            // operand to consume), so a tighter-binding operator that follows takes
+            // the whole node as its left operand (SQLite: `1 ISNULL + 1` = 1, i.e.
+            // `(1 ISNULL) + 1`), hence continue_higher_precedence_ops.
             if self.peek_keyword(Keyword::Isnull) {
                 self.consume_keyword(Keyword::Isnull)?;
                 left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: false };
+                left = self.continue_higher_precedence_ops(left)?;
                 continue;
             }
             if self.peek_keyword(Keyword::Notnull) {
                 self.consume_keyword(Keyword::Notnull)?;
                 left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated: true };
+                left = self.continue_higher_precedence_ops(left)?;
                 continue;
             }
 
@@ -886,11 +898,17 @@ impl Parser {
     /// Continue parsing tighter-binding binary operators (multiplicative, concat,
     /// additive, shift) with an already-parsed left operand.
     ///
-    /// Used after an IN/NOT IN node: its right operand is syntactically closed
-    /// (a parenthesized list/subquery or a table name), so per SQLite a
-    /// tighter-binding operator that follows takes the entire IN expression as
-    /// its left operand: `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`
-    /// and `1 NOT IN (SELECT 1) << 2` as `(1 NOT IN (SELECT 1)) << 2`.
+    /// Used after a syntactically-closed comparison-tier node — IN/NOT IN
+    /// (right operand is a parenthesized list/subquery or a table name) and
+    /// the postfix null tests ISNULL / NOTNULL / NOT NULL (no right operand at
+    /// all). Per SQLite a tighter-binding operator that follows takes the
+    /// entire node as its left operand: `1 IN (SELECT 1) + 1` parses as
+    /// `(1 IN (SELECT 1)) + 1`, `1 NOT IN (SELECT 1) << 2` as
+    /// `(1 NOT IN (SELECT 1)) << 2`, and `1 ISNULL + 1` as `(1 ISNULL) + 1`.
+    ///
+    /// Note this does NOT apply to `IS NULL` / `IS [NOT] TRUE`: there SQLite
+    /// treats NULL/TRUE as an ordinary expression operand of IS, so
+    /// `1 IS NULL + 1` parses as `1 IS (NULL + 1)`.
     ///
     /// Each operator's right operand is parsed at the next-tighter tier, so
     /// relative precedence among these operators is preserved

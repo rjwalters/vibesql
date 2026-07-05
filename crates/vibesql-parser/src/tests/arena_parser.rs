@@ -829,3 +829,158 @@ fn test_arena_matrix_in_between_shift_bound_falls_back() {
         high
     );
 }
+
+// ============================================================================
+// ISNULL / NOTNULL / NOT NULL postfix composability (issue #5857)
+//
+// Mirrors tests/isnull_postfix.rs: the arena parser must produce ASTs
+// equivalent to the standard parser for everything it accepts. Shift-tier
+// cases (<<) are outside the arena parser's grammar and must fail arena
+// parsing (never silently truncate) and succeed end-to-end through
+// parse_with_arena_fallback. All expected values were verified against sqlite3.
+// ============================================================================
+
+/// Assert the arena expression is `IsNull` with the given polarity.
+fn assert_arena_is_null<'a>(
+    expr: &'a vibesql_ast::arena::Expression<'a>,
+    expected_negated: bool,
+    context: &str,
+) -> &'a vibesql_ast::arena::Expression<'a> {
+    if let vibesql_ast::arena::Expression::IsNull { expr: inner, negated } = expr {
+        assert_eq!(*negated, expected_negated, "{}: wrong IsNull polarity", context);
+        inner
+    } else {
+        panic!("{}: expected IsNull node, got {:?}", context, expr);
+    }
+}
+
+#[test]
+fn test_arena_isnull_followed_by_plus() {
+    // sqlite3: SELECT 1 ISNULL + 1; -- 1, i.e. ((1 ISNULL) + 1)
+    with_arena_select_expr("SELECT 1 ISNULL + 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_is_null(left, false, "left operand of +");
+    });
+}
+
+#[test]
+fn test_arena_notnull_followed_by_concat() {
+    // sqlite3: SELECT 4 NOTNULL || 'x'; -- '1x'
+    with_arena_select_expr("SELECT 4 NOTNULL || 'x'", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Concat at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Concat);
+        assert_arena_is_null(left, true, "left operand of ||");
+    });
+}
+
+#[test]
+fn test_arena_not_null_followed_by_plus() {
+    // sqlite3: SELECT 1 NOT NULL + 1; -- 2, i.e. ((1 NOT NULL) + 1)
+    with_arena_select_expr("SELECT 1 NOT NULL + 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_is_null(left, true, "left operand of +");
+    });
+}
+
+#[test]
+fn test_arena_notnull_plus_then_multiply() {
+    // sqlite3: SELECT 1 NOTNULL + 2 * 3; -- 7, i.e. (1 NOTNULL) + (2 * 3)
+    with_arena_select_expr("SELECT 1 NOTNULL + 2 * 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, right } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert_arena_is_null(left, true, "left operand of +");
+        assert!(
+            matches!(
+                right,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Multiply,
+                    ..
+                }
+            ),
+            "right operand of + should be (2 * 3): {:?}",
+            right
+        );
+    });
+}
+
+#[test]
+fn test_arena_isnull_chained_notnull() {
+    // sqlite3: SELECT 1 ISNULL NOTNULL; -- 1, i.e. ((1 ISNULL) NOTNULL)
+    with_arena_select_expr("SELECT 1 ISNULL NOTNULL", |expr| {
+        let inner = assert_arena_is_null(expr, true, "outer NOTNULL");
+        assert_arena_is_null(inner, false, "inner ISNULL");
+    });
+}
+
+#[test]
+fn test_arena_isnull_shift_falls_back() {
+    // sqlite3: SELECT 1 ISNULL << 2; -- 0
+    // The arena parser has no shift tier: it must fail (never silently
+    // truncate to just the ISNULL node), and the fallback path must produce
+    // the standard parser's AST.
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 1 ISNULL << 2", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; << after ISNULL must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 ISNULL << 2;")
+        .expect("fallback path should parse ISNULL followed by <<");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr else {
+        panic!("expected BinaryOp LeftShift at top level, got {:?}", expr);
+    };
+    assert_eq!(*op, vibesql_ast::BinaryOperator::LeftShift);
+    assert!(
+        matches!(**left, vibesql_ast::Expression::IsNull { negated: false, .. }),
+        "left operand of << should be the ISNULL node: {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_arena_not_null_shift_falls_back() {
+    // sqlite3: SELECT 1 NOT NULL << 3; -- 8
+    let arena = Bump::new();
+    let result = ArenaParser::parse_select_with_interner("SELECT 1 NOT NULL << 3", &arena);
+    assert!(
+        result.is_err(),
+        "arena parser has no shift tier; << after NOT NULL must fail arena parse, got: {:?}",
+        result.map(|(stmt, _)| format!("{:?}", stmt.select_list[0]))
+    );
+
+    let stmt = crate::parse_with_arena_fallback("SELECT 1 NOT NULL << 3;")
+        .expect("fallback path should parse NOT NULL followed by <<");
+    let vibesql_ast::Statement::Select(select) = stmt else {
+        panic!("expected SELECT statement");
+    };
+    let vibesql_ast::SelectItem::Expression { expr, .. } = &select.select_list[0] else {
+        panic!("expected expression select item");
+    };
+    let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr else {
+        panic!("expected BinaryOp LeftShift at top level, got {:?}", expr);
+    };
+    assert_eq!(*op, vibesql_ast::BinaryOperator::LeftShift);
+    assert!(
+        matches!(**left, vibesql_ast::Expression::IsNull { negated: true, .. }),
+        "left operand of << should be the NOT NULL node: {:?}",
+        left
+    );
+}
