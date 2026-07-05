@@ -157,6 +157,69 @@ mod catalog_tests {
         assert_eq!(tables, vec!["orders".to_string(), "users".to_string()]);
     }
 
+    /// `list_tables()` must enumerate tables in creation order (not hash or
+    /// sorted order) so `sqlite_schema` rows come out in rowid order. See #5826.
+    #[test]
+    fn test_list_tables_creation_order() {
+        let mut catalog = Catalog::new();
+        // Deliberately non-alphabetical creation order so a sort would reorder.
+        for name in ["zebra", "apple", "mango", "cherry"] {
+            let schema = TableSchema::new(
+                name.to_string(),
+                vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+            );
+            catalog.create_table(schema).unwrap();
+        }
+
+        assert_eq!(
+            catalog.list_tables(),
+            vec![
+                "zebra".to_string(),
+                "apple".to_string(),
+                "mango".to_string(),
+                "cherry".to_string()
+            ],
+            "list_tables() must preserve creation order, not sort or hash-order"
+        );
+    }
+
+    /// Dropping a table then re-creating it must place the re-created table at
+    /// the END of the enumeration (SQLite assigns a new, larger rowid), and the
+    /// surviving tables must keep their original relative order. This guards
+    /// against `IndexMap::swap_remove` (which would move the last table into the
+    /// dropped slot). See #5826.
+    #[test]
+    fn test_list_tables_order_after_drop_and_recreate() {
+        let mut catalog = Catalog::new();
+        for name in ["a", "b", "c", "d"] {
+            let schema = TableSchema::new(
+                name.to_string(),
+                vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+            );
+            catalog.create_table(schema).unwrap();
+        }
+
+        // Drop a middle table; survivors keep relative order.
+        catalog.drop_table("b").unwrap();
+        assert_eq!(
+            catalog.list_tables(),
+            vec!["a".to_string(), "c".to_string(), "d".to_string()],
+            "drop must not reorder surviving tables (shift_remove, not swap_remove)"
+        );
+
+        // Re-create the dropped table; it goes to the end (new rowid).
+        let schema = TableSchema::new(
+            "b".to_string(),
+            vec![ColumnSchema::new("id".to_string(), vibesql_types::DataType::Integer, false)],
+        );
+        catalog.create_table(schema).unwrap();
+        assert_eq!(
+            catalog.list_tables(),
+            vec!["a".to_string(), "c".to_string(), "d".to_string(), "b".to_string()],
+            "re-created table must enumerate last, matching SQLite rowid semantics"
+        );
+    }
+
     #[test]
     fn test_error_display_table_already_exists() {
         let error = CatalogError::TableAlreadyExists("customers".to_string());

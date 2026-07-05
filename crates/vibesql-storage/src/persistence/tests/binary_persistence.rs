@@ -48,6 +48,45 @@ fn test_quoted_table_identifier_roundtrip() {
     std::fs::remove_file(path).ok();
 }
 
+/// Issue #5826: table creation order must survive the binary save/load
+/// round-trip. The TCL shim runs each SQL batch in a fresh CLI process, so the
+/// `CREATE TABLE` order established in one process must be reconstructed when a
+/// later process opens the file and answers `SELECT ... FROM sqlite_schema`.
+/// `list_tables()` returns creation (insertion) order; the writer serializes in
+/// that order and the reader re-inserts in file order, so the order is
+/// preserved end-to-end.
+#[test]
+fn test_binary_roundtrip_preserves_table_creation_order() {
+    let mut db = Database::new();
+
+    // Non-alphabetical creation order so a sort or hash-order would differ.
+    let creation_order = ["zebra", "apple", "mango", "cherry", "delta"];
+    for name in creation_order {
+        let schema = TableSchema::new(
+            name.to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        );
+        db.create_table_with_identifier(schema, TableIdentifier::new(name, false)).unwrap();
+    }
+    assert_eq!(
+        db.catalog.list_tables(),
+        creation_order.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        "precondition: in-memory catalog enumerates in creation order"
+    );
+
+    let path = "/tmp/test_table_creation_order_roundtrip.vbsql";
+    db.save_binary(path).unwrap();
+    let loaded_db = Database::load_binary(path).unwrap();
+
+    assert_eq!(
+        loaded_db.catalog.list_tables(),
+        creation_order.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        "creation order must survive the binary save/load round-trip"
+    );
+
+    std::fs::remove_file(path).ok();
+}
+
 /// Issue #5619: the verbatim original `CREATE TABLE` source text must survive a
 /// full file-level `save_binary` → `load_binary` round-trip (header + catalog +
 /// data sections), not just the in-memory catalog encoder. This is the actual
