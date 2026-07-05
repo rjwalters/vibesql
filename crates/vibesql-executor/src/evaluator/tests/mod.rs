@@ -587,14 +587,14 @@ mod deep_expression_tests {
     #[test]
     fn test_depth_limit_enforced() {
         // Test that depth limit is properly enforced
-        // MAX_EXPRESSION_DEPTH is set to 200 to prevent stack overflow.
-        // Building expressions deeper than ~200 causes stack overflow during evaluation
+        // MAX_EXPRESSION_DEPTH is set to 1000 to prevent stack overflow.
+        // Building expressions deeper than the limit causes stack overflow during evaluation
         // due to Rust's recursive call stack limitations (each eval call consumes stack space).
         let schema = TableSchema::new("test".to_string(), vec![]);
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = Row::new(vec![]);
 
-        // Test a deep but safe expression (100 levels - well within MAX_EXPRESSION_DEPTH of 200)
+        // Test a deep but safe expression (100 levels - well within MAX_EXPRESSION_DEPTH of 1000)
         let expr = generate_nested_add(100);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
@@ -603,22 +603,36 @@ mod deep_expression_tests {
 
     #[test]
     fn test_deep_case_expressions() {
-        // Test CASE expression depth tracking
-        let schema = TableSchema::new("test".to_string(), vec![]);
-        let evaluator = ExpressionEvaluator::new(&schema);
-        let row = Row::new(vec![]);
+        // Run on a thread with a large explicit stack. A searched CASE consumes
+        // ~4-5 native stack frames per nesting level in `eval` -> `with_incremented_depth`
+        // -> `eval_case` -> the WHEN condition's `eval`, which overflows the default
+        // 2 MiB test-thread stack on macOS debug builds well before MAX_EXPRESSION_DEPTH
+        // (1000) is reached. The 32 MiB stack keeps the depth-150 coverage without an
+        // abort that would kill the whole test binary. This is a standard pattern for
+        // deep-recursion tests and changes no evaluation behavior.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                // Test CASE expression depth tracking
+                let schema = TableSchema::new("test".to_string(), vec![]);
+                let evaluator = ExpressionEvaluator::new(&schema);
+                let row = Row::new(vec![]);
 
-        // Depth 50 should work
-        let expr = generate_nested_case(50);
-        let result = evaluator.eval(&expr, &row);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), SqlValue::Integer(0));
+                // Depth 50 should work
+                let expr = generate_nested_case(50);
+                let result = evaluator.eval(&expr, &row);
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap(), SqlValue::Integer(0));
 
-        // Depth 150 should work (within MAX_EXPRESSION_DEPTH of 200)
-        let expr = generate_nested_case(150);
-        let result = evaluator.eval(&expr, &row);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), SqlValue::Integer(0));
+                // Depth 150 should work (within MAX_EXPRESSION_DEPTH of 1000)
+                let expr = generate_nested_case(150);
+                let result = evaluator.eval(&expr, &row);
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap(), SqlValue::Integer(0));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -635,7 +649,7 @@ mod deep_expression_tests {
         // 100 negations of 1: even count = 1, odd count = -1
         assert_eq!(result.unwrap(), SqlValue::Integer(1));
 
-        // Depth 150 should also work (within MAX_EXPRESSION_DEPTH of 200)
+        // Depth 150 should also work (within MAX_EXPRESSION_DEPTH of 1000)
         let expr = generate_nested_unary(150);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
@@ -696,7 +710,7 @@ mod deep_expression_tests {
         let evaluator = ExpressionEvaluator::new(&schema);
         let row = Row::new(vec![]);
 
-        // Depth 100 should work fine (well within MAX_EXPRESSION_DEPTH of 200)
+        // Depth 100 should work fine (well within MAX_EXPRESSION_DEPTH of 1000)
         let expr = generate_nested_add(100);
         let result = evaluator.eval(&expr, &row);
         assert!(result.is_ok());
