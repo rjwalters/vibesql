@@ -201,6 +201,56 @@ impl Catalog {
         }
     }
 
+    /// Propagate `ALTER TABLE <table> RENAME COLUMN old TO new` into the
+    /// metadata of every index on `table_name` (matched case-insensitively,
+    /// across schemas — index metadata rides with its table).
+    ///
+    /// Rewrites plain column-name entries, column references inside
+    /// expression-index ASTs, and partial-index WHERE predicates. Without
+    /// this, `sqlite_master` keeps rendering the old column name and the next
+    /// binary checkpoint persists index metadata that no longer resolves
+    /// against the renamed table, making the database unopenable (issue
+    /// #5877).
+    ///
+    /// Returns the number of indexes whose metadata changed.
+    pub fn rename_column_in_table_indexes(
+        &mut self,
+        table_name: &str,
+        old_column: &str,
+        new_column: &str,
+    ) -> usize {
+        use vibesql_ast::rename::rename_column_in_expression;
+
+        use crate::index::IndexedColumn;
+
+        let table_lc = table_name.to_lowercase();
+        let mut updated = 0;
+        for index in self.indexes.values_mut().filter(|i| i.table_name.to_lowercase() == table_lc)
+        {
+            let mut changed = false;
+            for col in index.columns.iter_mut() {
+                match col {
+                    IndexedColumn::Column { column_name, .. } => {
+                        if column_name.eq_ignore_ascii_case(old_column) {
+                            *column_name = new_column.to_string();
+                            changed = true;
+                        }
+                    }
+                    IndexedColumn::Expression { expr, .. } => {
+                        changed |= rename_column_in_expression(expr, old_column, new_column);
+                    }
+                }
+            }
+            if let Some(where_expr) = index.where_clause.as_deref_mut() {
+                changed |= rename_column_in_expression(where_expr, old_column, new_column);
+            }
+            if changed {
+                updated += 1;
+            }
+        }
+        updated
+    }
+
     /// List all indexes in the catalog
     pub fn list_all_indexes(&self) -> Vec<&IndexMetadata> {
         self.indexes.values().collect()

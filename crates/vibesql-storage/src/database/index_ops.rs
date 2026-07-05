@@ -328,6 +328,21 @@ impl Database {
         self.operations.set_index_where_clause(index_name, where_clause)
     }
 
+    /// Propagate `ALTER TABLE <table> RENAME COLUMN old TO new` into the
+    /// storage-side metadata of every index on `table_name`: plain column
+    /// names, expression-index ASTs, and partial-index WHERE predicates. The
+    /// index bodies are untouched (a rename does not change key values).
+    /// Returns the number of indexes whose metadata changed. See issue #5877.
+    pub fn rename_column_in_table_indexes(
+        &mut self,
+        table_name: &str,
+        old_column: &str,
+        new_column: &str,
+    ) -> usize {
+        self.snapshot_operations_for_mutation();
+        self.operations.rename_column_in_table_indexes(table_name, old_column, new_column)
+    }
+
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.operations.list_indexes()

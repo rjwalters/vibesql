@@ -546,6 +546,65 @@ impl IndexManager {
         }
     }
 
+    /// Propagate `ALTER TABLE <table> RENAME COLUMN old TO new` into the
+    /// storage-side metadata of every index on `table_name`.
+    ///
+    /// Rewrites plain column-name entries, column references inside
+    /// expression-index ASTs, and partial-index WHERE predicates. The index
+    /// *body* (stored keys) is untouched — a column rename does not change any
+    /// key values. Without this, index maintenance keeps resolving the old
+    /// column name and binary persistence writes stale metadata that fails
+    /// fail-closed validation on the next open (issue #5877).
+    ///
+    /// Table-name matching is case-insensitive and, like
+    /// [`Self::has_indexes_for_table`], compares the last component of a
+    /// possibly schema-qualified name. Returns the number of indexes whose
+    /// metadata changed.
+    pub fn rename_column_in_table_indexes(
+        &mut self,
+        table_name: &str,
+        old_column: &str,
+        new_column: &str,
+    ) -> usize {
+        use vibesql_ast::rename::rename_column_in_expression;
+        use vibesql_ast::IndexColumn;
+
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
+
+        let mut updated = 0;
+        for metadata in self.indexes.values_mut() {
+            let stored_name_lower = metadata.table_name.to_lowercase();
+            let stored_table_only =
+                stored_name_lower.rsplit('.').next().unwrap_or(&stored_name_lower);
+            if stored_table_only != search_table_only {
+                continue;
+            }
+
+            let mut changed = false;
+            for col in metadata.columns.iter_mut() {
+                match col {
+                    IndexColumn::Column { column_name, .. } => {
+                        if column_name.eq_ignore_ascii_case(old_column) {
+                            *column_name = new_column.to_string();
+                            changed = true;
+                        }
+                    }
+                    IndexColumn::Expression { expr, .. } => {
+                        changed |= rename_column_in_expression(expr, old_column, new_column);
+                    }
+                }
+            }
+            if let Some(where_expr) = metadata.where_clause.as_deref_mut() {
+                changed |= rename_column_in_expression(where_expr, old_column, new_column);
+            }
+            if changed {
+                updated += 1;
+            }
+        }
+        updated
+    }
+
     // ========================================================================
     // Resource Budget and Eviction Methods
     // ========================================================================

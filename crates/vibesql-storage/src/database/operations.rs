@@ -964,6 +964,19 @@ impl Operations {
         self.index_manager.set_index_where_clause(index_name, where_clause)
     }
 
+    /// Propagate a column rename into the storage-side metadata of every
+    /// index on `table_name`. See
+    /// `IndexManager::rename_column_in_table_indexes` for details (issue
+    /// #5877). Returns the number of indexes whose metadata changed.
+    pub fn rename_column_in_table_indexes(
+        &mut self,
+        table_name: &str,
+        old_column: &str,
+        new_column: &str,
+    ) -> usize {
+        self.index_manager.rename_column_in_table_indexes(table_name, old_column, new_column)
+    }
+
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.index_manager.list_indexes()
