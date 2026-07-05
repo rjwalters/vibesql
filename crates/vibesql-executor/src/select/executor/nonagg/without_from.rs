@@ -240,10 +240,18 @@ impl SelectExecutor<'_> {
         // Build result row
         let result = vec![vibesql_storage::Row::new(values)];
 
-        // Apply LIMIT and OFFSET (important for queries like SELECT 1 LIMIT 0)
-        let limit = evaluate_limit(&stmt.limit, self.database)?;
-        let offset = evaluate_offset(&stmt.offset, self.database)?;
-        Ok(apply_limit_offset(result, limit, offset))
+        // Apply LIMIT and OFFSET (important for queries like SELECT 1 LIMIT 0).
+        // Skip when this is the left branch of a compound (set-operation) query:
+        // LIMIT/OFFSET applies to the combined result and is applied later by the
+        // set-operation handler in execute_with_ctes. Applying it here as well
+        // double-counts OFFSET and drops rows (issue #5847).
+        if stmt.set_operation.is_none() {
+            let limit = evaluate_limit(&stmt.limit, self.database)?;
+            let offset = evaluate_offset(&stmt.offset, self.database)?;
+            Ok(apply_limit_offset(result, limit, offset))
+        } else {
+            Ok(result)
+        }
     }
 
     /// Execute a FROM-less SELECT whose WHERE clause references select-list
@@ -314,9 +322,15 @@ impl SelectExecutor<'_> {
         }
 
         let result = vec![result_row];
-        let limit = evaluate_limit(&stmt.limit, self.database)?;
-        let offset = evaluate_offset(&stmt.offset, self.database)?;
-        Ok(apply_limit_offset(result, limit, offset))
+        // Skip LIMIT/OFFSET for a compound left branch; applied later on the
+        // combined result by the set-operation handler (issue #5847).
+        if stmt.set_operation.is_none() {
+            let limit = evaluate_limit(&stmt.limit, self.database)?;
+            let offset = evaluate_offset(&stmt.offset, self.database)?;
+            Ok(apply_limit_offset(result, limit, offset))
+        } else {
+            Ok(result)
+        }
     }
 
     /// Execute SELECT without FROM clause that contains window functions
@@ -411,9 +425,14 @@ impl SelectExecutor<'_> {
         // Build result row
         let result = vec![vibesql_storage::Row::new(values)];
 
-        // Apply LIMIT and OFFSET
-        let limit = evaluate_limit(&stmt.limit, self.database)?;
-        let offset = evaluate_offset(&stmt.offset, self.database)?;
-        Ok(apply_limit_offset(result, limit, offset))
+        // Apply LIMIT and OFFSET. Skip for a compound left branch; applied later
+        // on the combined result by the set-operation handler (issue #5847).
+        if stmt.set_operation.is_none() {
+            let limit = evaluate_limit(&stmt.limit, self.database)?;
+            let offset = evaluate_offset(&stmt.offset, self.database)?;
+            Ok(apply_limit_offset(result, limit, offset))
+        } else {
+            Ok(result)
+        }
     }
 }
