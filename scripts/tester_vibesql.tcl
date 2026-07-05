@@ -129,7 +129,7 @@ set ::pragma_prefix_skip_count_changes 0 ;# Per-block: suppress count_changes pr
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
 set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
-set ::pragma_recursive_triggers 1        ;# Default: ON (VibeSQL default; #5535)
+set ::pragma_recursive_triggers 0        ;# Default: OFF (VibeSQL/SQLite default; #5535, #5840)
 set ::pragma_trigger_depth_limit 0       ;# 0 = default cap; >0 = per-connection SQLITE_LIMIT_TRIGGER_DEPTH (#5536)
 
 # DQS (Double-Quoted Strings) mode tracking
@@ -1122,12 +1122,12 @@ proc build_pragma_prefix {} {
     if {$::pragma_defer_foreign_keys != 0} {
         append prefix "PRAGMA defer_foreign_keys=$::pragma_defer_foreign_keys;\n"
     }
-    # Include recursive_triggers if it's been set to OFF. VibeSQL (like modern
-    # SQLite) defaults this pragma to ON, and the multi-process shim starts each
-    # CLI process at that default, so we only need to re-apply the non-default
-    # OFF state. Tests such as trigger3.test set it off for the whole file
-    # (#5535).
-    if {$::pragma_recursive_triggers != 1} {
+    # Include recursive_triggers if it's been set to ON. VibeSQL (like SQLite's
+    # pragma.c) defaults this pragma to OFF, and the multi-process shim starts
+    # each CLI process at that default, so we only need to re-apply the
+    # non-default ON state. Tests such as triggerC.test set it on for the whole
+    # file (#5535, #5840).
+    if {$::pragma_recursive_triggers != 0} {
         append prefix "PRAGMA recursive_triggers=$::pragma_recursive_triggers;\n"
     }
     # Carry the per-connection trigger-depth limit forward (#5536). SQLite sets

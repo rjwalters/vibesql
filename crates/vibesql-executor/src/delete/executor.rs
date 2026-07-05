@@ -1233,7 +1233,6 @@ fn execute_delete_on_view(
     // following the first-SkipRow-wins convention of the primary DML loops
     // (#5415). The common single-trigger case matches sqlite3 3.51 exactly —
     // the row's operation is skipped.
-    let rows_processed = rows_to_delete.len();
     for old_row in &rows_to_delete {
         for trigger in &triggers {
             if crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), None)?
@@ -1261,7 +1260,10 @@ fn execute_delete_on_view(
         None
     };
 
-    Ok((rows_processed, returning))
+    // changes() after a DELETE on a view is always zero — no physical table
+    // rows were modified by the statement itself (SQLite R-09813-48563;
+    // e_changes-4.4.2, #5840).
+    Ok((0, returning))
 }
 
 /// Build a pseudo TableSchema from a view definition

@@ -103,6 +103,10 @@ fn text_column(db: &Database, sql: &str) -> Vec<String> {
 #[test]
 fn after_delete_trigger_fires_for_or_replace_conflicts_without_rowid() {
     let mut db = Database::new();
+    // REPLACE conflict-resolution DELETE triggers fire only with
+    // recursive_triggers ON (SQLite lang_conflict.html; #5840). triggerF.test
+    // sets it on; match that here since these tests assert the trigger fires.
+    db.set_recursive_triggers(true);
     exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
     exec(&mut db, "CREATE TABLE log(t)");
     exec(
@@ -137,6 +141,7 @@ fn after_delete_trigger_fires_for_or_replace_conflicts_without_rowid() {
 #[test]
 fn before_delete_trigger_fires_for_or_replace_conflicts_without_rowid() {
     let mut db = Database::new();
+    db.set_recursive_triggers(true); // REPLACE conflict DELETE triggers fire only with recursion on (#5840)
     exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
     exec(&mut db, "CREATE TABLE log(t)");
     exec(
@@ -167,6 +172,7 @@ fn before_delete_trigger_fires_for_or_replace_conflicts_without_rowid() {
 #[test]
 fn update_or_replace_multi_unique_conflict_without_rowid() {
     let mut db = Database::new();
+    db.set_recursive_triggers(true); // REPLACE conflict DELETE triggers fire only with recursion on (#5840)
     exec(&mut db, "CREATE TABLE t(a INT PRIMARY KEY, b UNIQUE, c UNIQUE) WITHOUT ROWID");
     exec(&mut db, "CREATE TABLE log(t)");
     exec(
@@ -201,6 +207,7 @@ fn update_or_replace_multi_unique_conflict_without_rowid() {
 #[test]
 fn update_or_replace_rowid_table_still_resolves_and_fires_delete_trigger() {
     let mut db = Database::new();
+    db.set_recursive_triggers(true); // REPLACE conflict DELETE triggers fire only with recursion on (#5840)
     exec(&mut db, "CREATE TABLE t(a INTEGER PRIMARY KEY, b)");
     exec(&mut db, "CREATE TABLE log(t)");
     exec(
@@ -238,6 +245,7 @@ fn text(s: &str) -> SqlValue {
 #[test]
 fn update_or_replace_before_delete_ignore_raises_unique_and_leaves_table_unchanged() {
     let mut db = Database::new();
+    db.set_recursive_triggers(true); // REPLACE conflict DELETE triggers fire only with recursion on (#5840)
     exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
     // RAISE(IGNORE) only for the conflicting row (a=3), so the deletion that
     // UPDATE OR REPLACE wants to perform is abandoned.
@@ -269,6 +277,7 @@ fn update_or_replace_before_delete_ignore_raises_unique_and_leaves_table_unchang
 #[test]
 fn update_or_replace_from_before_delete_ignore_raises_unique_and_leaves_table_unchanged() {
     let mut db = Database::new();
+    db.set_recursive_triggers(true); // REPLACE conflict DELETE triggers fire only with recursion on (#5840)
     exec(&mut db, "CREATE TABLE t1(a INT PRIMARY KEY, b) WITHOUT ROWID");
     exec(
         &mut db,

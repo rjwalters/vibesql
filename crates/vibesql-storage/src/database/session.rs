@@ -146,13 +146,14 @@ impl Database {
 
     /// Get the recursive_triggers PRAGMA setting (SQLite compatibility).
     ///
-    /// When ON (VibeSQL default, matching modern SQLite's documented behavior),
-    /// a trigger's body may fire further triggers — including, indirectly,
-    /// itself — up to `MAX_TRIGGER_RECURSION_DEPTH`. When OFF, a trigger that is
-    /// already executing is not re-fired by DML performed within its own body
-    /// (directly- or mutually-recursive trigger firing is suppressed). This is
-    /// the historical SQLite behavior that pre-recursion tests such as
-    /// `trigger3.test` rely on (see #5535).
+    /// When ON, a trigger's body may fire further triggers — including,
+    /// indirectly, itself — up to `MAX_TRIGGER_RECURSION_DEPTH`. When OFF
+    /// (VibeSQL default, matching SQLite's `pragma.c` default of 0), a trigger
+    /// that is already executing is not re-fired by DML performed within its own
+    /// body (directly- or mutually-recursive trigger firing is suppressed). This
+    /// is the historical SQLite behavior that pre-recursion tests such as
+    /// `trigger1.test`, `triggerC.test`, and `trigger3.test` rely on (see #5535,
+    /// #5840).
     ///
     /// Suppression is *per trigger*: a nested DML statement still fires any
     /// trigger that is not already on the execution stack — only a re-entry into
@@ -161,7 +162,7 @@ impl Database {
     pub fn recursive_triggers(&self) -> bool {
         match self.get_session_variable("RECURSIVE_TRIGGERS") {
             Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
-            _ => true, // Default: ON (modern SQLite default; keeps recursive-trigger tests green)
+            _ => false, // Default: OFF (matches SQLite's pragma.c default of 0)
         }
     }
 

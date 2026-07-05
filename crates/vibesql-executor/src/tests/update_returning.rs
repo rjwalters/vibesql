@@ -93,7 +93,9 @@ fn test_instead_of_update_view_where_comparison_fires() {
     // Comparison results surface as Integer(1) in this evaluator context;
     // before the fix the trigger fired 0 times (Boolean-only match arm).
     let (count, _) = execute_update_returning(&mut db, "UPDATE v3 SET b=9 WHERE b=4");
-    assert_eq!(count, 1, "exactly one view row matches b=4");
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the single INSTEAD OF fire is verified via the log table below.
+    assert_eq!(count, 0, "changes() is 0 for a view UPDATE");
 
     let log = execute_sql(&mut db, "SELECT x FROM log");
     assert_eq!(log.len(), 1, "INSTEAD OF trigger should fire once for WHERE b=4");
@@ -121,7 +123,9 @@ fn test_instead_of_update_view_from_fires_per_join_match() {
     // SQLite fires the INSTEAD OF trigger once per join match (3 times).
     // The previous implementation deduped to one fire per view row.
     let (count, _) = execute_update_returning(&mut db, "UPDATE v2 SET c=99 FROM m WHERE b=4");
-    assert_eq!(count, 3, "one view row x three FROM rows = 3 trigger fires");
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the three per-join-match fires are verified via the log table below.
+    assert_eq!(count, 0, "changes() is 0 for a view UPDATE");
 
     let log = execute_sql(&mut db, "SELECT x FROM log");
     assert_eq!(log.len(), 3, "INSTEAD OF trigger should fire once per join match");
@@ -188,7 +192,9 @@ fn test_update_returning_through_instead_of_trigger() {
 
     let (count, returning) =
         execute_update_returning(&mut db, "UPDATE t2 SET c=99 WHERE b=4 RETURNING *");
-    assert_eq!(count, 3);
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the three fires are verified via the RETURNING rows below.
+    assert_eq!(count, 0);
     let returning = returning.expect("RETURNING clause should produce a result");
     assert_eq!(returning.columns, vec!["b".to_string(), "c".to_string()]);
     assert_eq!(int_rows(&returning), vec![vec![4, 99], vec![4, 99], vec![4, 99]]);
@@ -212,7 +218,9 @@ fn test_update_returning_through_instead_of_trigger_with_from() {
 
     let (count, returning) =
         execute_update_returning(&mut db, "UPDATE t2 SET c=15 FROM m WHERE b=4 RETURNING *");
-    assert_eq!(count, 3);
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the three per-join-match fires are verified via the RETURNING rows below.
+    assert_eq!(count, 0);
     let returning = returning.expect("RETURNING clause should produce a result");
     assert_eq!(int_rows(&returning), vec![vec![4, 15], vec![4, 15], vec![4, 15]]);
 }

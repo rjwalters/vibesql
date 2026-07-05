@@ -100,6 +100,10 @@ fn test_recursion_prevention() {
         .stack_size(96 * 1024 * 1024)
         .spawn(|| {
             let mut db = Database::new();
+            // Recursion only happens with recursive_triggers ON; the default is
+            // now OFF (SQLite default, #5840), which would suppress the re-entry
+            // and let the insert succeed. Enable it to exercise the depth cap.
+            db.set_recursive_triggers(true);
             create_users_table(&mut db);
 
             // Create trigger that inserts into the same table (infinite loop)
