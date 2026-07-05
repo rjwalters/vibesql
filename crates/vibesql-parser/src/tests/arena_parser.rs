@@ -984,3 +984,105 @@ fn test_arena_not_null_shift_falls_back() {
         left
     );
 }
+
+// ============================================================================
+// `||` (Concat) precedence tests (issue #5839)
+//
+// Mirror of the standard-parser tests in tests/json_operators.rs: the arena
+// parser must agree with the standard parser so the arena fast path never
+// diverges (parse_with_arena_fallback would otherwise silently fall back).
+// Per SQLite, `||` binds TIGHTER than `* / %` and `+ -`; the canonical
+// reproducer `SELECT 22||45*66` must parse as `(22||45)*66 = 148170`.
+// ============================================================================
+
+#[test]
+fn test_arena_concat_binds_tighter_than_multiply() {
+    // 22 || 45 * 66 parses as (22 || 45) * 66
+    with_arena_select_expr("SELECT 22 || 45 * 66", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Multiply at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Multiply);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Concat,
+                    ..
+                }
+            ),
+            "left operand of * should be the (22 || 45) concat node: {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_concat_binds_tighter_than_multiply_on_rhs() {
+    // 22 * 45 || 66 parses as 22 * (45 || 66)
+    with_arena_select_expr("SELECT 22 * 45 || 66", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, right, .. } = expr else {
+            panic!("expected BinaryOp Multiply at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Multiply);
+        assert!(
+            matches!(
+                right,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Concat,
+                    ..
+                }
+            ),
+            "right operand of * should be the (45 || 66) concat node: {:?}",
+            right
+        );
+    });
+}
+
+#[test]
+fn test_arena_concat_binds_tighter_than_plus() {
+    // 22 || 45 + 66 parses as (22 || 45) + 66
+    with_arena_select_expr("SELECT 22 || 45 + 66", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Plus at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Concat,
+                    ..
+                }
+            ),
+            "left operand of + should be the (22 || 45) concat node: {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_concat_chain_then_multiply() {
+    // 1 || 2 || 3 * 4 parses as ((1 || 2 || 3) * 4)
+    with_arena_select_expr("SELECT 1 || 2 || 3 * 4", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Multiply at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Multiply);
+        let vibesql_ast::arena::Expression::BinaryOp { op: cop, left: cleft, .. } = left else {
+            panic!("expected outer Concat as left operand of *, got {:?}", left);
+        };
+        assert_eq!(*cop, vibesql_ast::BinaryOperator::Concat);
+        assert!(
+            matches!(
+                cleft,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::Concat,
+                    ..
+                }
+            ),
+            "concat chain must be left-associative: {:?}",
+            cleft
+        );
+    });
+}

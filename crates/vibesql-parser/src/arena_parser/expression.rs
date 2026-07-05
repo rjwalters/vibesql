@@ -503,7 +503,11 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     // ------------------------------------------------------------------
-    // Arithmetic tier functions (additive -> concat -> multiplicative)
+    // Arithmetic tier functions, loosest -> tightest:
+    //   additive -> multiplicative -> concat -> unary
+    // Per the SQLite grammar `||` binds tighter than `* / %`. (The arena
+    // parser has no JSON-path tier; expressions using `->` / `->>` fall back
+    // to the standard parser, which places `||`/`->`/`->>` in one shared tier.)
     //
     // Each tier comes in two forms:
     // - `parse_<tier>_expression()` parses a fresh operand (starting at the
@@ -522,7 +526,8 @@ impl<'arena> ArenaParser<'arena> {
     // ------------------------------------------------------------------
 
     /// Parse additive expression (handles +, -).
-    /// Per SQLite, || has higher precedence than + and -, so it's handled in parse_concat_expression.
+    /// Per SQLite, `+` and `-` are the loosest arithmetic operators; `* / %`
+    /// and `||` all bind tighter and are handled in the tighter tiers.
     fn parse_additive_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
         let seed = self.parse_unary_expression()?;
         self.parse_additive_expression_from(seed)
@@ -537,12 +542,48 @@ impl<'arena> ArenaParser<'arena> {
         &mut self,
         left: Expression<'arena>,
     ) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_concat_expression_from(left)?;
+        let mut left = self.parse_multiplicative_expression_from(left)?;
 
         loop {
             let op = match self.peek() {
                 Token::Symbol('+') => BinaryOperator::Plus,
                 Token::Symbol('-') => BinaryOperator::Minus,
+                _ => break,
+            };
+            self.advance();
+
+            let right = self.parse_multiplicative_expression()?;
+            let left_ref = self.arena.alloc(left);
+            let right_ref = self.arena.alloc(right);
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse multiplicative expression.
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
+        let seed = self.parse_unary_expression()?;
+        self.parse_multiplicative_expression_from(seed)
+    }
+
+    /// Multiplicative tier (`*`, `/`, `%`, `DIV`) with an already-parsed left operand.
+    ///
+    /// The seed is first climbed through the tighter concat tier, and each RHS
+    /// operand is parsed at the concat tier, so `||` binds tighter than
+    /// `* / % DIV`.
+    fn parse_multiplicative_expression_from(
+        &mut self,
+        left: Expression<'arena>,
+    ) -> Result<Expression<'arena>, ParseError> {
+        let mut left = self.parse_concat_expression_from(left)?;
+
+        loop {
+            let op = match self.peek() {
+                Token::Symbol('*') => BinaryOperator::Multiply,
+                Token::Symbol('/') => BinaryOperator::Divide,
+                Token::Symbol('%') => BinaryOperator::Modulo,
+                Token::Keyword { keyword: Keyword::Div, .. } => BinaryOperator::IntegerDivide,
                 _ => break,
             };
             self.advance();
@@ -557,22 +598,22 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Parse string concatenation expression (handles ||).
-    /// Per SQLite, || has higher precedence than + and -, but lower than * / %.
+    /// Per SQLite, `||` binds tighter than `* / %` and `+ -`.
     fn parse_concat_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
         let seed = self.parse_unary_expression()?;
         self.parse_concat_expression_from(seed)
     }
 
-    /// Concat tier (`||`) with an already-parsed left operand.
+    /// Concat tier (`||`) with an already-parsed left operand. This is the
+    /// tightest binary tier in the arena parser, so operands are parsed at the
+    /// unary tier.
     fn parse_concat_expression_from(
         &mut self,
-        left: Expression<'arena>,
+        mut left: Expression<'arena>,
     ) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_multiplicative_expression_from(left)?;
-
         while self.peek() == &Token::Operator(MultiCharOperator::Concat) {
             self.advance();
-            let right = self.parse_multiplicative_expression()?;
+            let right = self.parse_unary_expression()?;
             let left_ref = self.arena.alloc(left);
             let right_ref = self.arena.alloc(right);
             left = Expression::BinaryOp {
@@ -580,36 +621,6 @@ impl<'arena> ArenaParser<'arena> {
                 left: left_ref,
                 right: right_ref,
             };
-        }
-
-        Ok(left)
-    }
-
-    /// Parse multiplicative expression.
-    fn parse_multiplicative_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
-        let seed = self.parse_unary_expression()?;
-        self.parse_multiplicative_expression_from(seed)
-    }
-
-    /// Multiplicative tier (`*`, `/`, `%`, `DIV`) with an already-parsed left operand.
-    fn parse_multiplicative_expression_from(
-        &mut self,
-        mut left: Expression<'arena>,
-    ) -> Result<Expression<'arena>, ParseError> {
-        loop {
-            let op = match self.peek() {
-                Token::Symbol('*') => BinaryOperator::Multiply,
-                Token::Symbol('/') => BinaryOperator::Divide,
-                Token::Symbol('%') => BinaryOperator::Modulo,
-                Token::Keyword { keyword: Keyword::Div, .. } => BinaryOperator::IntegerDivide,
-                _ => break,
-            };
-            self.advance();
-
-            let right = self.parse_unary_expression()?;
-            let left_ref = self.arena.alloc(left);
-            let right_ref = self.arena.alloc(right);
-            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
         }
 
         Ok(left)

@@ -112,7 +112,10 @@ impl Parser {
     }
 
     // ------------------------------------------------------------------
-    // Arithmetic tier functions (shift -> additive -> concat -> multiplicative)
+    // Arithmetic tier functions, loosest -> tightest:
+    //   shift -> additive -> multiplicative -> concat/JSON-path -> unary
+    // Per the SQLite grammar `||`, `->`, and `->>` share the tightest binary
+    // tier (tighter than `* / %`); they live in parse_concat_json_expression.
     //
     // Each tier comes in two forms:
     // - `parse_<tier>_expression()` parses a fresh operand (starting at the
@@ -140,8 +143,9 @@ impl Parser {
     /// Shift tier (`<<`, `>>`) with an already-parsed left operand.
     ///
     /// The seed is first climbed through the tighter tiers
-    /// (multiplicative -> concat -> additive), so this doubles as the seeded
-    /// precedence-climbing entry point used by `continue_higher_precedence_ops`.
+    /// (additive -> multiplicative -> concat/JSON-path), so this doubles as the
+    /// seeded precedence-climbing entry point used by
+    /// `continue_higher_precedence_ops`.
     fn parse_shift_expression_from(
         &mut self,
         left: vibesql_ast::Expression,
@@ -172,7 +176,8 @@ impl Parser {
     }
 
     /// Parse additive expression (handles +, -)
-    /// Per SQLite, || has higher precedence than + and -, so it's handled in parse_concat_expression
+    /// Per SQLite, `+` and `-` are the loosest arithmetic operators; `* / %`,
+    /// `||`, and `-> ->>` all bind tighter and are handled in the tighter tiers.
     pub(super) fn parse_additive_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
@@ -185,7 +190,7 @@ impl Parser {
         &mut self,
         left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_concat_expression_from(left)?;
+        let mut left = self.parse_multiplicative_expression_from(left)?;
 
         loop {
             let op = match self.peek() {
@@ -195,38 +200,9 @@ impl Parser {
             };
             self.advance();
 
-            let right = self.parse_concat_expression()?;
-            left = vibesql_ast::Expression::BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-
-        Ok(left)
-    }
-
-    /// Parse string concatenation expression (handles ||)
-    /// Per SQLite, || has higher precedence than + and -, but lower than * / %
-    pub(super) fn parse_concat_expression(
-        &mut self,
-    ) -> Result<vibesql_ast::Expression, ParseError> {
-        let seed = self.parse_unary_expression()?;
-        self.parse_concat_expression_from(seed)
-    }
-
-    /// Concat tier (`||`) with an already-parsed left operand.
-    fn parse_concat_expression_from(
-        &mut self,
-        left: vibesql_ast::Expression,
-    ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_multiplicative_expression_from(left)?;
-
-        while self.peek() == &Token::Operator(crate::token::MultiCharOperator::Concat) {
-            self.advance();
             let right = self.parse_multiplicative_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
-                op: vibesql_ast::BinaryOperator::Concat,
+                op,
                 left: Box::new(left),
                 right: Box::new(right),
             };
@@ -248,10 +224,10 @@ impl Parser {
         &mut self,
         left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        // The JSON `->` / `->>` operators bind tighter than `* / % DIV`
-        // (per the SQLite grammar), so every multiplicative operand is first
-        // parsed at the JSON-path tier.
-        let mut left = self.parse_json_path_expression_from(left)?;
+        // The `||`, `->`, and `->>` operators share a single tier that binds
+        // tighter than `* / % DIV` (per the SQLite grammar), so every
+        // multiplicative operand is first parsed at that concat/JSON-path tier.
+        let mut left = self.parse_concat_json_expression_from(left)?;
 
         loop {
             let op = match self.peek() {
@@ -265,7 +241,7 @@ impl Parser {
             };
             self.advance();
 
-            let right = self.parse_json_path_expression()?;
+            let right = self.parse_concat_json_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
                 op,
                 left: Box::new(left),
@@ -276,25 +252,31 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse a JSON path expression (handles the `->` and `->>` operators).
+    /// Parse a concat / JSON-path expression (handles `||`, `->`, and `->>`).
     ///
-    /// Per the SQLite grammar these bind one tier tighter than `* / % DIV`
-    /// and one tier looser than unary operators. They are left-associative,
-    /// so `a -> b -> c` parses as `(a -> b) -> c`.
-    pub(super) fn parse_json_path_expression(
+    /// Per the SQLite grammar these three operators share the tightest binary
+    /// tier: they bind tighter than `* / % DIV` and looser than unary
+    /// operators. They are left-associative and freely composable, so
+    /// `a || b -> c` parses as `(a || b) -> c` and `22 || 45 * 66` parses as
+    /// `(22 || 45) * 66`.
+    pub(super) fn parse_concat_json_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
         let seed = self.parse_unary_expression()?;
-        self.parse_json_path_expression_from(seed)
+        self.parse_concat_json_expression_from(seed)
     }
 
-    /// JSON path tier (`->`, `->>`) with an already-parsed left operand.
-    fn parse_json_path_expression_from(
+    /// Concat / JSON-path tier (`||`, `->`, `->>`) with an already-parsed left
+    /// operand.
+    fn parse_concat_json_expression_from(
         &mut self,
         mut left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
         loop {
             let op = match self.peek() {
+                Token::Operator(crate::token::MultiCharOperator::Concat) => {
+                    vibesql_ast::BinaryOperator::Concat
+                }
                 Token::Operator(crate::token::MultiCharOperator::JsonExtract) => {
                     vibesql_ast::BinaryOperator::JsonExtract
                 }
@@ -305,9 +287,10 @@ impl Parser {
             };
             self.advance();
 
-            // The right operand is a unary expression; SQLite additionally
-            // allows an integer literal here as array-index shorthand, which
-            // the unary tier already accepts as a numeric literal.
+            // The right operand is a unary expression; for `->` / `->>` SQLite
+            // additionally allows an integer literal here as array-index
+            // shorthand, which the unary tier already accepts as a numeric
+            // literal.
             let right = self.parse_unary_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
                 op,
