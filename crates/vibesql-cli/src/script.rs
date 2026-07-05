@@ -82,6 +82,11 @@ impl ScriptExecutor {
 
         let mut success_count = 0;
         let mut error_count = 0;
+        // Fail-closed persistence tracking (issue #5832): a checkpoint/save
+        // failure must never end in exit 0. A later *successful* save clears
+        // the flag because every checkpoint/snapshot captures the full
+        // database state, superseding the earlier failure.
+        let mut persist_failed = false;
 
         for (idx, stmt) in statements.iter().enumerate() {
             if self.verbose {
@@ -100,7 +105,15 @@ impl ScriptExecutor {
                 match self.handle_meta_command(meta_cmd) {
                     Ok(should_exit) => {
                         if should_exit {
-                            // .quit/.exit in script mode - stop processing
+                            // .quit/.exit in script mode - stop processing.
+                            // A pending persistence failure must still surface
+                            // as a non-zero exit (issue #5832).
+                            if persist_failed {
+                                return Err(anyhow::anyhow!(
+                                    "failed to persist database changes; \
+                                     see the ERROR output above"
+                                ));
+                            }
                             return Ok(());
                         }
                         success_count += 1;
@@ -150,11 +163,19 @@ impl ScriptExecutor {
                                 || upper.starts_with("ROLLBACK")
                                 || upper.starts_with("END"));
                         if should_save || is_txn_end {
-                            if let Err(e) = self.executor.save_database(path) {
-                                eprintln!(
-                                    "{}",
-                                    vibe_msg!("warning-auto-save-failed", error = e.to_string())
-                                );
+                            match self.executor.save_database(path) {
+                                Ok(()) => persist_failed = false,
+                                Err(e) => {
+                                    // Loud + fail-closed (issue #5832): the WAL
+                                    // is never truncated on a failed checkpoint,
+                                    // and the process must exit non-zero.
+                                    persist_failed = true;
+                                    crate::util::report_save_failure(
+                                        path,
+                                        self.executor.wal_active(),
+                                        &e,
+                                    );
+                                }
                             }
                         }
                     }
@@ -197,6 +218,11 @@ impl ScriptExecutor {
 
         if error_count > 0 {
             Err(anyhow::anyhow!("{}", vibe_msg!("script-failed-error", count = error_count as i64)))
+        } else if persist_failed {
+            // Issue #5832: a persistence failure must never exit 0, even when
+            // every statement itself succeeded. The detailed ERROR lines were
+            // already printed at failure time by `report_save_failure`.
+            Err(anyhow::anyhow!("failed to persist database changes; see the ERROR output above"))
         } else {
             Ok(())
         }

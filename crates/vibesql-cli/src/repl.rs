@@ -111,12 +111,15 @@ impl Repl {
                                     if should_save || is_txn_end {
                                         self.has_modifications = true;
                                         if let Err(e) = self.executor.save_database(path) {
-                                            eprintln!(
-                                                "{}",
-                                                vibe_msg!(
-                                                    "warning-auto-save-failed",
-                                                    error = e.to_string()
-                                                )
+                                            // Loud, fail-closed error (issue
+                                            // #5832). `has_modifications` stays
+                                            // true, so the exit-time save
+                                            // retries; if that also fails the
+                                            // REPL exits non-zero.
+                                            crate::util::report_save_failure(
+                                                path,
+                                                self.executor.wal_active(),
+                                                &e,
                                             );
                                         }
                                     } else if is_modification_statement(&line) {
@@ -148,14 +151,21 @@ impl Repl {
             }
         }
 
-        // Save database on exit if modifications occurred
+        // Save database on exit if modifications occurred.
+        //
+        // Fail-closed (issue #5832): a checkpoint/save failure at exit must
+        // never be a quiet warning + exit 0. `WalState::checkpoint` never
+        // truncates the WAL unless the checkpoint file was durably written, so
+        // committed changes are still recoverable — but the user must be told
+        // loudly and the process must exit non-zero.
         if self.has_modifications {
             if let Some(ref path) = self.database_path {
                 if let Err(e) = self.executor.save_database(path) {
-                    eprintln!(
-                        "{}",
-                        vibe_msg!("warning-save-on-exit-failed", error = e.to_string())
-                    );
+                    crate::util::report_save_failure(path, self.executor.wal_active(), &e);
+                    self.print_goodbye();
+                    return Err(anyhow::anyhow!(
+                        "failed to persist database on exit; see the ERROR output above"
+                    ));
                 }
             }
         }
