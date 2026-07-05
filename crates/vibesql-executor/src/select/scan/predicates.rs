@@ -159,12 +159,9 @@ pub(crate) fn apply_table_local_predicates(
                 vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                     string_to_truthy(&s)
                 }
-                other => {
-                    return Err(ExecutorError::InvalidWhereClause(format!(
-                        "WHERE clause must evaluate to boolean, got: {:?}",
-                        other
-                    )))
-                }
+                // Blob and any remaining scalar types: delegate to the shared
+                // helper so BLOBs coerce via their leading-numeric prefix (#5830).
+                other => crate::evaluator::operators::is_truthy(&other),
             };
 
             if include_row {
@@ -233,12 +230,9 @@ fn apply_predicates_parallel(
                 vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                     string_to_truthy(&s)
                 }
-                other => {
-                    return Err(ExecutorError::InvalidWhereClause(format!(
-                        "WHERE clause must evaluate to boolean, got: {:?}",
-                        other
-                    )))
-                }
+                // Blob and any remaining scalar types: delegate to the shared
+                // helper so BLOBs coerce via their leading-numeric prefix (#5830).
+                other => crate::evaluator::operators::is_truthy(&other),
             };
 
             if include_row {
@@ -399,12 +393,9 @@ pub(crate) fn filter_and_clone_rows(
             vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 string_to_truthy(&s)
             }
-            other => {
-                return Err(ExecutorError::InvalidWhereClause(format!(
-                    "WHERE clause must evaluate to boolean, got: {:?}",
-                    other
-                )))
-            }
+            // Blob and any remaining scalar types: delegate to the shared helper
+            // so BLOBs coerce via their leading-numeric prefix (#5830).
+            other => crate::evaluator::operators::is_truthy(&other),
         };
 
         if include_row {

@@ -264,10 +264,10 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
                     }
                     vibesql_types::SqlValue::Double(0.0) => Ok(false),
                     vibesql_types::SqlValue::Double(_) => Ok(true),
-                    other => Err(ExecutorError::InvalidWhereClause(format!(
-                        "Join condition must evaluate to boolean, got: {:?}",
-                        other
-                    ))),
+                    // String, blob, and any remaining scalar types: delegate to
+                    // the shared helper so text/BLOBs coerce via their
+                    // leading-numeric prefix, matching SQLite (#5830).
+                    ref other => Ok(crate::evaluator::operators::is_truthy(other)),
                 }
             }
         }

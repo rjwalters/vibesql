@@ -990,12 +990,9 @@ fn apply_where_filter_zerocopy<'a>(
             vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                 string_to_truthy(&s)
             }
-            other => {
-                return Err(ExecutorError::InvalidWhereClause(format!(
-                    "WHERE clause must evaluate to boolean, got: {:?}",
-                    other
-                )))
-            }
+            // Blob and any remaining scalar types: delegate to the shared helper
+            // so BLOBs coerce via their leading-numeric prefix (#5830).
+            other => crate::evaluator::operators::is_truthy(&other),
         };
 
         if include_row {
@@ -1101,12 +1098,9 @@ fn apply_where_filter_zerocopy_parallel<'a>(
                 vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                     string_to_truthy(&s)
                 }
-                other => {
-                    return Err(ExecutorError::InvalidWhereClause(format!(
-                        "WHERE clause must evaluate to boolean, got: {:?}",
-                        other
-                    )))
-                }
+                // Blob and any remaining scalar types: delegate to the shared
+                // helper so BLOBs coerce via their leading-numeric prefix (#5830).
+                other => crate::evaluator::operators::is_truthy(&other),
             };
 
             if include_row {

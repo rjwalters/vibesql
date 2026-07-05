@@ -98,11 +98,9 @@ fn is_truthy_combined(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorE
         // String types (SQLite coerces strings to numeric for boolean context)
         SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
 
-        // Error case (should be rare)
-        other => Err(ExecutorError::InvalidWhereClause(format!(
-            "WHERE clause must evaluate to boolean, got: {:?}",
-            other
-        ))),
+        // Blob and any remaining scalar types: delegate to the shared helper so
+        // BLOBs coerce via their leading-numeric prefix, matching SQLite (#5830).
+        other => Ok(crate::evaluator::operators::is_truthy(other)),
     }
 }
 
@@ -132,11 +130,9 @@ fn is_truthy_basic(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorErro
         // String types (SQLite coerces strings to numeric for boolean context)
         SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
 
-        // Error case (should be rare)
-        other => Err(ExecutorError::InvalidWhereClause(format!(
-            "WHERE must evaluate to boolean, got: {:?}",
-            other
-        ))),
+        // Blob and any remaining scalar types: delegate to the shared helper so
+        // BLOBs coerce via their leading-numeric prefix, matching SQLite (#5830).
+        other => Ok(crate::evaluator::operators::is_truthy(other)),
     }
 }
 
@@ -222,12 +218,9 @@ pub(super) fn apply_where_filter_combined<'a>(
                 // String types (SQLite coerces strings to numeric for boolean context)
                 vibesql_types::SqlValue::Varchar(ref s)
                 | vibesql_types::SqlValue::Character(ref s) => string_to_truthy(s),
-                other => {
-                    return Err(ExecutorError::InvalidWhereClause(format!(
-                        "WHERE clause must evaluate to boolean, got: {:?}",
-                        other
-                    )))
-                }
+                // Blob and any remaining scalar types: delegate to the shared
+                // helper so BLOBs coerce via their leading-numeric prefix (#5830).
+                ref other => crate::evaluator::operators::is_truthy(other),
             };
 
             if include_row {
