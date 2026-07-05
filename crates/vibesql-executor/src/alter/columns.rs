@@ -391,6 +391,27 @@ pub(super) fn execute_rename_column(
         return Err(err);
     }
 
+    // Propagate the rename into dependent index metadata, in BOTH copies:
+    // the catalog copy (drives sqlite_master rendering and planner/FK
+    // checks) and the storage copy (drives index maintenance and binary
+    // persistence). This covers plain column lists, expression-index ASTs,
+    // and partial-index WHERE predicates — SQLite rewrites all index
+    // references on RENAME COLUMN. Without this the next checkpoint
+    // persists index metadata naming a column that no longer exists in the
+    // table, and the fail-closed open policy makes the database unopenable
+    // (issue #5877). Runs after the trigger rewrite so a trigger-side abort
+    // leaves the index metadata untouched.
+    database.catalog.rename_column_in_table_indexes(
+        &stmt.table_name,
+        &stmt.old_column_name,
+        &stmt.new_column_name,
+    );
+    database.rename_column_in_table_indexes(
+        &stmt.table_name,
+        &stmt.old_column_name,
+        &stmt.new_column_name,
+    );
+
     Ok(format!(
         "Column '{}' renamed to '{}' in table '{}'",
         stmt.old_column_name, stmt.new_column_name, stmt.table_name

@@ -36,6 +36,7 @@
 
 pub mod arena;
 pub mod pretty_print;
+pub mod rename;
 pub mod visitor;
 pub mod volatility;
 
