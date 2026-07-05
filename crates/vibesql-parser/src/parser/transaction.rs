@@ -139,8 +139,9 @@ pub(super) fn parse_rollback_to_savepoint_statement(
     // Consume TO
     parser.consume_keyword(Keyword::To)?;
 
-    // Consume SAVEPOINT
-    parser.consume_keyword(Keyword::Savepoint)?;
+    // SAVEPOINT keyword is optional in SQLite: `ROLLBACK TO <name>` is
+    // equivalent to `ROLLBACK TO SAVEPOINT <name>`.
+    parser.try_consume_keyword(Keyword::Savepoint);
 
     // Parse savepoint name (identifier, normalized to uppercase if unquoted)
     let name = parse_savepoint_name(parser)?;
@@ -155,8 +156,9 @@ pub(super) fn parse_release_savepoint_statement(
     // Consume RELEASE
     parser.consume_keyword(Keyword::Release)?;
 
-    // Consume SAVEPOINT
-    parser.consume_keyword(Keyword::Savepoint)?;
+    // SAVEPOINT keyword is optional in SQLite: `RELEASE <name>` is
+    // equivalent to `RELEASE SAVEPOINT <name>`.
+    parser.try_consume_keyword(Keyword::Savepoint);
 
     // Parse savepoint name (identifier, normalized to uppercase if unquoted)
     let name = parse_savepoint_name(parser)?;

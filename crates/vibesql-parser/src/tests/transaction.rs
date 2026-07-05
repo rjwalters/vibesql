@@ -186,3 +186,46 @@ fn test_parse_begin_invalid_durability_mode() {
     let result = Parser::parse_sql("BEGIN WITH DURABILITY = INVALID");
     assert!(result.is_err());
 }
+
+#[test]
+fn test_parse_rollback_to_savepoint_keyword() {
+    // Full form with SAVEPOINT keyword.
+    let result = Parser::parse_sql("ROLLBACK TO SAVEPOINT sp1");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::RollbackToSavepoint(stmt) => assert_eq!(stmt.name, "sp1"),
+        other => panic!("Expected RollbackToSavepoint, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_rollback_to_without_savepoint_keyword() {
+    // SQLite shorthand: ROLLBACK TO <name> (SAVEPOINT keyword omitted).
+    let result = Parser::parse_sql("ROLLBACK TO sp1");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::RollbackToSavepoint(stmt) => assert_eq!(stmt.name, "sp1"),
+        other => panic!("Expected RollbackToSavepoint, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_release_with_savepoint_keyword() {
+    let result = Parser::parse_sql("RELEASE SAVEPOINT sp1");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::ReleaseSavepoint(stmt) => assert_eq!(stmt.name, "sp1"),
+        other => panic!("Expected ReleaseSavepoint, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_release_without_savepoint_keyword() {
+    // SQLite shorthand: RELEASE <name> (SAVEPOINT keyword omitted).
+    let result = Parser::parse_sql("RELEASE sp1");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::ReleaseSavepoint(stmt) => assert_eq!(stmt.name, "sp1"),
+        other => panic!("Expected ReleaseSavepoint, got {:?}", other),
+    }
+}

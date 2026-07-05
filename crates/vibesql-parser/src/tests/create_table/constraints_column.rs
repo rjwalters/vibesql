@@ -597,3 +597,19 @@ fn test_parse_default_double_rejected() {
     let result = Parser::parse_sql("CREATE TABLE t(c INT DEFAULT 0 UNIQUE DEFAULT 1)");
     assert!(result.is_err(), "Should reject two DEFAULT clauses on the same column");
 }
+
+#[test]
+fn test_parse_column_standalone_deferrable() {
+    // SQLite accepts a standalone column-level DEFERRABLE clause (ignored for
+    // non-FK columns, but must parse).
+    for sql in [
+        "CREATE TABLE t(a INTEGER DEFERRABLE)",
+        "CREATE TABLE t(a INTEGER DEFERRABLE INITIALLY DEFERRED)",
+        "CREATE TABLE t(a INTEGER DEFERRABLE INITIALLY IMMEDIATE)",
+        "CREATE TABLE t(a INTEGER NOT DEFERRABLE)",
+        "CREATE TABLE t(a INTEGER NOT NULL DEFERRABLE)",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} should parse: {:?}", result);
+    }
+}

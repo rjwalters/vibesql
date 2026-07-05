@@ -87,11 +87,21 @@ fn parse_add_column(
 ) -> Result<AlterTableStmt, ParseError> {
     let column_name = parser.parse_identifier()?;
     let type_start = parser.current_position();
-    let (data_type, is_exact_integer_type) = parser.parse_data_type_with_integer_flag()?;
-    // Capture the verbatim declared type text for STRICT-table validation
-    // (issue #5837): ALTER TABLE <strict> ADD COLUMN must reject non-strict
-    // datatypes just like CREATE TABLE.
-    let type_source = parser.source_between(type_start, parser.current_position());
+    // The data type is optional in SQLite: `ALTER TABLE t ADD COLUMN x` (no
+    // type) creates a column with BLOB/no-affinity, exactly like a typeless
+    // column in CREATE TABLE. When the token following the column name is a
+    // column constraint keyword, a DEFAULT clause, or end-of-statement, there
+    // is no type to parse — default to BLOB affinity.
+    let (data_type, is_exact_integer_type, type_source) = if is_add_column_type_absent(parser) {
+        (vibesql_types::DataType::BinaryLargeObject, false, None)
+    } else {
+        let (dt, is_int) = parser.parse_data_type_with_integer_flag()?;
+        // Capture the verbatim declared type text for STRICT-table validation
+        // (issue #5837): ALTER TABLE <strict> ADD COLUMN must reject non-strict
+        // datatypes just like CREATE TABLE.
+        let src = parser.source_between(type_start, parser.current_position());
+        (dt, is_int, src)
+    };
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -167,6 +177,35 @@ fn parse_add_column(
     };
 
     Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
+}
+
+/// Determine whether the token following an ADD COLUMN column name signals
+/// that no data type was declared. SQLite permits typeless columns (BLOB
+/// affinity), so `ALTER TABLE t ADD COLUMN x`, `... ADD COLUMN x NOT NULL`,
+/// `... ADD COLUMN x DEFAULT 0`, etc. are all valid with no explicit type.
+fn is_add_column_type_absent(parser: &crate::Parser) -> bool {
+    matches!(
+        parser.peek(),
+        // End of the statement — a bare `ADD COLUMN x`.
+        Token::Eof
+            | Token::Semicolon
+            | Token::Comma
+            | Token::RParen
+            // Column constraint / modifier keywords that follow the (absent) type.
+            | Token::Keyword { keyword: Keyword::Not, .. }
+            | Token::Keyword { keyword: Keyword::Null, .. }
+            | Token::Keyword { keyword: Keyword::Primary, .. }
+            | Token::Keyword { keyword: Keyword::Unique, .. }
+            | Token::Keyword { keyword: Keyword::Check, .. }
+            | Token::Keyword { keyword: Keyword::References, .. }
+            | Token::Keyword { keyword: Keyword::Default, .. }
+            | Token::Keyword { keyword: Keyword::Collate, .. }
+            | Token::Keyword { keyword: Keyword::Constraint, .. }
+            | Token::Keyword { keyword: Keyword::Key, .. }
+            | Token::Keyword { keyword: Keyword::AutoIncrement, .. }
+            | Token::Keyword { keyword: Keyword::Generated, .. }
+            | Token::Keyword { keyword: Keyword::As, .. }
+    )
 }
 
 /// Parse DROP COLUMN

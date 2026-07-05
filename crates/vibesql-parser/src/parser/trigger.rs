@@ -517,8 +517,16 @@ impl Parser {
             false
         };
 
-        // Parse trigger name
-        let trigger_name = self.parse_identifier()?;
+        // Parse trigger name. SQLite accepts a single-quoted string literal as
+        // the trigger name in DROP TRIGGER (e.g. `DROP TRIGGER 'tr'`), so accept
+        // a string token in addition to bare / delimited identifiers.
+        let trigger_name = if let Token::String(s) = self.peek() {
+            let name = s.clone();
+            self.advance();
+            name
+        } else {
+            self.parse_identifier()?
+        };
 
         // Parse optional CASCADE or RESTRICT
         let cascade = if self.try_consume_keyword(Keyword::Cascade) {

@@ -100,7 +100,8 @@ impl<'arena> ArenaParser<'arena> {
     ) -> Result<RollbackToSavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Rollback)?;
         self.consume_keyword(Keyword::To)?;
-        self.consume_keyword(Keyword::Savepoint)?;
+        // SAVEPOINT keyword is optional in SQLite: `ROLLBACK TO <name>`.
+        self.try_consume_keyword(Keyword::Savepoint);
         let name = self.parse_arena_identifier()?;
         Ok(RollbackToSavepointStmt { name })
     }
@@ -117,7 +118,8 @@ impl<'arena> ArenaParser<'arena> {
         &mut self,
     ) -> Result<ReleaseSavepointStmt, ParseError> {
         self.consume_keyword(Keyword::Release)?;
-        self.consume_keyword(Keyword::Savepoint)?;
+        // SAVEPOINT keyword is optional in SQLite: `RELEASE <name>`.
+        self.try_consume_keyword(Keyword::Savepoint);
         let name = self.parse_arena_identifier()?;
         Ok(ReleaseSavepointStmt { name })
     }
