@@ -34,6 +34,11 @@ tf_*.tcl
 test.db
 test*.db
 testdb
+# WAL-mode durability siblings left behind by TCL test runs (#5843):
+# <root>.wal, <root>.lock, <root>-checkpoints/ for test db files
+test*.wal
+test*.lock
+test*-checkpoints/
 out.db
 *.db.tmp*
 .*.tmp*

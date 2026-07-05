@@ -58,6 +58,16 @@ proc emit_test_detail {status name} {
 # Since each SQL execution is a separate process, we need to track changes ourselves
 set ::last_changes 0
 set ::total_changes 0
+# Track last_insert_rowid across process invocations (#5843): each SQL
+# execution is a separate process, so `SELECT last_insert_rowid()` in a fresh
+# process always returns 0. Instead, INSERT/REPLACE blocks in the direct
+# (non-transaction) execsql path append `SELECT last_insert_rowid()` in the
+# SAME process as the INSERT and stash the value here for `db last_insert_rowid`.
+# Limitation: INSERTs batched inside BEGIN...COMMIT do not update this (the
+# batch result stream is parsed by tolerant callers we must not perturb), so
+# the value may be stale inside an open transaction — previously it was
+# unconditionally 0, so this is strictly better.
+set ::last_insert_rowid 0
 
 # SQL statement accumulator for batching
 set ::sql_batch {}
@@ -2007,10 +2017,14 @@ proc execsql {sql {db ""}} {
     set pragma_prefix [build_pragma_prefix]
     set ::pragma_prefix_skip_count_changes 0
 
-    # Check if this is a data modification statement (INSERT/UPDATE/DELETE/REPLACE)
+    # Check if this is a data modification statement (INSERT/UPDATE/DELETE/REPLACE,
+    # including WITH ... INSERT/UPDATE/DELETE CTE-prefixed forms, #5843).
     # If so, append SELECT changes() to track the row count
     set sql_upper [string toupper [string trim $sql]]
-    set is_dml [regexp {^(INSERT|UPDATE|DELETE|REPLACE)\s} $sql_upper]
+    set is_dml [is_dml_statement $sql_upper]
+    # INSERT/REPLACE (possibly WITH-prefixed) also updates last_insert_rowid;
+    # capture it in the same process (see ::last_insert_rowid, #5843).
+    set is_insert [expr {$is_dml && [regexp {(^|[^A-Z_])(INSERT|REPLACE)[^A-Z_]} $sql_upper]}]
 
     # When PRAGMA count_changes=ON, the CLI emits the row count after EACH
     # modifying statement natively (matching SQLite), interleaved with any
@@ -2028,7 +2042,12 @@ proc execsql {sql {db ""}} {
         # Append SELECT changes() to capture row count in same execution
         # Remove trailing semicolon from sql if present to avoid double semicolon
         set trimmed_sql [string trimright $sql " \t\n;"]
-        set raw_sql ".mode raw\n${pragma_prefix}${trimmed_sql};\nSELECT changes();"
+        if {$is_insert} {
+            # Also capture last_insert_rowid() in the SAME process (#5843).
+            set raw_sql ".mode raw\n${pragma_prefix}${trimmed_sql};\nSELECT changes();\nSELECT last_insert_rowid();"
+        } else {
+            set raw_sql ".mode raw\n${pragma_prefix}${trimmed_sql};\nSELECT changes();"
+        }
     } else {
         set raw_sql ".mode raw\n${pragma_prefix}$sql"
     }
@@ -2056,6 +2075,13 @@ proc execsql {sql {db ""}} {
             set ::last_changes [lindex $parsed end]
             set ::total_changes [expr {$::total_changes + $::last_changes}]
         }
+    } elseif {$is_dml && $is_insert && [llength $parsed] >= 2} {
+        # The last value is last_insert_rowid(), the one before it changes()
+        set ::last_insert_rowid [lindex $parsed end]
+        set ::last_changes [lindex $parsed end-1]
+        set ::total_changes [expr {$::total_changes + $::last_changes}]
+        # Remove the two appended values from the result
+        set parsed [lrange $parsed 0 end-2]
     } elseif {$is_dml && [llength $parsed] > 0} {
         # The last value should be the changes() result
         set ::last_changes [lindex $parsed end]
@@ -2066,6 +2092,62 @@ proc execsql {sql {db ""}} {
 
     update_sqlite_counters $sql $parsed
     return $parsed
+}
+
+proc is_dml_statement {sql_upper} {
+    # Return 1 if the (uppercased, trimmed) SQL block starts with a data
+    # modification statement: INSERT/UPDATE/DELETE/REPLACE, including the
+    # CTE-prefixed WITH ... INSERT/UPDATE/DELETE forms (#5843). Only the FIRST
+    # statement's verb matters, mirroring the pre-existing behavior for
+    # non-WITH blocks.
+    if {[regexp {^(INSERT|UPDATE|DELETE|REPLACE)[^A-Z_]} $sql_upper]} {
+        return 1
+    }
+    if {![regexp {^WITH[^A-Z_]} $sql_upper]} {
+        return 0
+    }
+    # WITH-prefixed: CTE bodies are pure SELECTs and live inside parentheses,
+    # so the main statement verb is the first INSERT/UPDATE/DELETE/REPLACE/
+    # SELECT/VALUES keyword found at paren depth 0 outside quoted strings,
+    # quoted identifiers, and comments.
+    set depth 0
+    set i 0
+    set n [string length $sql_upper]
+    while {$i < $n} {
+        set c [string index $sql_upper $i]
+        if {$c eq "("} {
+            incr depth
+        } elseif {$c eq ")"} {
+            incr depth -1
+        } elseif {$c eq "'" || $c eq "\"" || $c eq "`"} {
+            # Skip quoted literal/identifier (a doubled quote reads as two
+            # adjacent quoted regions, which skips correctly anyway)
+            set j [string first $c $sql_upper [expr {$i + 1}]]
+            if {$j < 0} { return 0 }
+            set i $j
+        } elseif {$c eq "\["} {
+            set j [string first "\]" $sql_upper $i]
+            if {$j < 0} { return 0 }
+            set i $j
+        } elseif {$c eq "-" && [string index $sql_upper [expr {$i + 1}]] eq "-"} {
+            set j [string first "\n" $sql_upper $i]
+            if {$j < 0} { return 0 }
+            set i $j
+        } elseif {$c eq "/" && [string index $sql_upper [expr {$i + 1}]] eq "*"} {
+            set j [string first "*/" $sql_upper [expr {$i + 2}]]
+            if {$j < 0} { return 0 }
+            set i [expr {$j + 1}]
+        } elseif {$depth == 0 && [string match {[A-Z]} $c]} {
+            regexp -start $i {[A-Z_]+} $sql_upper word
+            switch -- $word {
+                INSERT - UPDATE - DELETE - REPLACE { return 1 }
+                SELECT - VALUES { return 0 }
+            }
+            incr i [expr {[string length $word] - 1}]
+        }
+        incr i
+    }
+    return 0
 }
 
 proc parse_raw_result {output} {
@@ -4293,26 +4375,11 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses EXPLAIN opcode checking (SQLite VDBE-specific)"]
     }
 
-    # UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict resolution - not fully supported.
-    #
-    # IMPORTANT: This filter must NOT match conflict clauses that appear inside
-    # CREATE TRIGGER bodies. The trigger body's SQL only fires when the outer
-    # statement triggers it (e.g., AFTER DELETE), and VibeSQL handles those
-    # nested INSERT/UPDATE OR REPLACE statements correctly. Matching trigger-body
-    # text caused false-positive skips that omitted whole test setup blocks and
-    # cascaded into "no such table" failures in dependent tests (e.g. fkey8-2.3.1
-    # depends on fkey8-2.3.0 setup whose trigger body uses INSERT OR REPLACE).
-    #
-    # Specific failing top-level conflict-clause cases are already triaged
-    # individually in vibesql_skip_tests (e.g. insert-6.3, insert-6.4,
-    # fkey5-7.1..7.3) — do not broaden this filter to compensate.
-    set script_outer $script
-    regsub -all -nocase \
-        {CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TRIGGER[^;]*?BEGIN\s+.*?END\s*;} \
-        $script_outer "" script_outer
-    if {[regexp -nocase {(?:UPDATE|INSERT)\s+OR\s+(?:REPLACE|IGNORE|ABORT|ROLLBACK|FAIL)\s} $script_outer]} {
-        return [list 1 "uses conflict resolution clause (not fully supported)"]
-    }
+    # NOTE (#5843): the blanket "UPDATE/INSERT OR REPLACE/IGNORE/ABORT conflict
+    # resolution not fully supported" skip rule that used to live here was
+    # removed — VibeSQL now runs conflict-clause statements. Specific failing
+    # top-level conflict-clause cases remain triaged individually in
+    # vibesql_skip_tests (e.g. insert-6.3, insert-6.4).
 
     # sqlite_schema/sqlite_master modifications - internal schema tables cannot be modified
     if {[regexp -nocase {(?:UPDATE|DELETE|INSERT)\s+(?:INTO\s+)?sqlite_(?:schema|master)\s} $script]} {
@@ -5109,7 +5176,14 @@ proc check_single_capability {cap} {
     # `ifcapable ordered_set_aggregates` blocks (~89 tests) skip and its
     # else-branch (expecting the syntax error) run (#5818, 2026-07-03).
     # WITHIN GROUP parser support is tracked as a follow-up to #5818.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 conflict hiddencolumns progress allow_rowid_in_view ordered_set_aggregates}
+    # `crashtest` gates SQLite's crash-recovery harness (crashsql + the
+    # crash-test child process machinery in test6.c). The shim has no crashsql,
+    # so crash*.test files must take their `ifcapable !crashtest { finish_test;
+    # return }` guard instead of running 900+ tests into a missing proc (#5843).
+    # `fts3_unicode` is the FTS3/4 unicode61 tokenizer compile-time option; FTS
+    # is unsupported in VibeSQL, so fts4unicode.test self-skips via its
+    # `ifcapable !fts3_unicode` guard (#5843).
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view ordered_set_aggregates crashtest}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -5247,6 +5321,105 @@ proc verify_ex_errcode {name expected {db db}} {
     omit_test $name "uses sqlite3_extended_errcode (SQLite C API; not in VibeSQL)"
 }
 
+proc sqlite3_complete {sql} {
+    # Pure-TCL port of sqlite3_complete() from SQLite's complete.c (#5843).
+    # Returns 1 iff $sql is one or more complete SQL statements: the last
+    # meaningful token is a semicolon, outside strings/comments/quoted
+    # identifiers, with special handling so that a semicolon inside a
+    # CREATE TRIGGER ... BEGIN ... END body does not count until the
+    # trigger's END is seen.
+    #
+    # State machine states (mirroring complete.c):
+    #   0 INVALID  1 START(complete)  2 NORMAL  3 EXPLAIN
+    #   4 CREATE   5 TRIGGER          6 SEMI    7 END
+    # Token classes: 0 SEMI, 1 WS, 2 OTHER, 3 EXPLAIN, 4 CREATE, 5 TEMP,
+    #   6 TRIGGER, 7 END
+    set trans {
+        {1 0 2 3 4 2 2 2}
+        {1 1 2 3 4 2 2 2}
+        {1 2 2 2 2 2 2 2}
+        {1 3 3 2 4 2 2 2}
+        {1 4 2 2 2 4 5 2}
+        {6 5 5 5 5 5 5 5}
+        {6 6 5 5 5 5 5 7}
+        {1 7 5 5 5 5 5 5}
+    }
+    set state 0
+    set i 0
+    set n [string length $sql]
+    while {$i < $n} {
+        set c [string index $sql $i]
+        switch -- $c {
+            ";" {
+                set token 0
+            }
+            " " - "\t" - "\n" - "\r" - "\f" {
+                set token 1
+            }
+            "/" {
+                if {[string index $sql [expr {$i + 1}]] eq "*"} {
+                    # C-style comment; unterminated -> not complete
+                    set j [string first "*/" $sql [expr {$i + 2}]]
+                    if {$j < 0} { return 0 }
+                    set i [expr {$j + 1}]
+                    set token 1
+                } else {
+                    set token 2
+                }
+            }
+            "-" {
+                if {[string index $sql [expr {$i + 1}]] eq "-"} {
+                    # SQL comment to end of line; if it runs to end of input,
+                    # completeness is decided by the state so far
+                    set j [string first "\n" $sql $i]
+                    if {$j < 0} { return [expr {$state == 1}] }
+                    set i $j
+                    set token 1
+                } else {
+                    set token 2
+                }
+            }
+            "\[" {
+                # Microsoft-style identifier in [...]
+                set j [string first "\]" $sql [expr {$i + 1}]]
+                if {$j < 0} { return 0 }
+                set i $j
+                set token 2
+            }
+            "'" - "\"" - "`" {
+                # String literal or quoted identifier; unterminated -> 0
+                set j [string first $c $sql [expr {$i + 1}]]
+                if {$j < 0} { return 0 }
+                set i $j
+                set token 2
+            }
+            default {
+                if {[string match {[A-Za-z_]} $c] || [scan $c %c] > 127} {
+                    # Identifier or keyword. Characters above 0x7f are
+                    # identifier characters (IdChar in SQLite), so e.g.
+                    # "trigger\u0080" lexes as ONE plain identifier token,
+                    # not the TRIGGER keyword (main-1.101).
+                    regexp -start $i {[A-Za-z_0-9\u0080-\uffff]+} $sql word
+                    switch -- [string toupper $word] {
+                        CREATE            { set token 4 }
+                        TEMP - TEMPORARY  { set token 5 }
+                        TRIGGER           { set token 6 }
+                        END               { set token 7 }
+                        EXPLAIN           { set token 3 }
+                        default           { set token 2 }
+                    }
+                    incr i [expr {[string length $word] - 1}]
+                } else {
+                    set token 2
+                }
+            }
+        }
+        set state [lindex $trans $state $token]
+        incr i
+    }
+    return [expr {$state == 1}]
+}
+
 proc sqlite3_connection_pointer {db} {
     # Stub for SQLite internal API - return dummy pointer
     return "0x12345678"
@@ -5256,16 +5429,38 @@ proc load_static_extension {db args} {
     # SQLite's test harness statically links a handful of test extensions
     # (totype, wholenumber, etc.) and loads them into a connection via
     # `load_static_extension db <name> ...`. VibeSQL does not load C
-    # extensions, so this command would otherwise abort the entire test
-    # file with "invalid command name load_static_extension" before any
-    # test runs (e.g. func4.test, which loads the `totype` extension at
-    # file scope to register tointeger()/toreal()). Provide a no-op stub so
-    # the rest of the file is still extracted and executed; individual tests
-    # that genuinely depend on an extension-provided function will fail (or
-    # be skipped) on their own, visibly, rather than masking the whole file
-    # as a silent 0/0/0 crash. Files whose *test data* depends on an
-    # extension vtable (index6/index7's `wholenumber`) are handled by
-    # explicit vibesql_skip_files entries instead.
+    # extensions.
+    #
+    # Two behaviors (#5843):
+    #
+    # 1. ERROR for extensions whose loading test files wrap the call in
+    #    `catch {load_static_extension db <ext>}` and cleanly self-skip when it
+    #    fails (decimal.test, fpconv1.test -> decimal; decimal.test -> ieee754;
+    #    basexx1.test -> basexx; zipfile*.test -> zipfile). Erroring makes those
+    #    files behave exactly like a SQLite build without the extension: they
+    #    print their own skip notice and finish_test, instead of running dozens
+    #    of tests into missing functions.
+    #
+    #    Exception: nan.test loads `decimal` UNGUARDED mid-file (~line 284) and
+    #    still has non-decimal tests after that point; erroring there would
+    #    abort the remainder of a file that otherwise runs. Keep the no-op for
+    #    that one file.
+    #
+    # 2. NO-OP for everything else. Several currently-running files load an
+    #    extension unguarded at file scope mid-file (join8.test loads `series`
+    #    at line ~86 with 100+ tests after it); raising an error there would
+    #    abort file evaluation and silently drop every subsequent test.
+    #    Individual tests that genuinely depend on an extension-provided
+    #    function fail (or are skipped) on their own, visibly. Files whose
+    #    *test data* depends on an extension vtable (index6/index7's
+    #    `wholenumber`) are handled by explicit vibesql_skip_files entries.
+    set ext [lindex $args 0]
+    set error_exts {decimal ieee754 basexx zipfile}
+    if {$ext in $error_exts \
+            && !([info exists ::current_test_file_basename] \
+                 && $::current_test_file_basename eq "nan")} {
+        error "extension $ext is not available (VibeSQL does not load C test extensions)"
+    }
     return ""
 }
 
@@ -5426,10 +5621,13 @@ proc sqlite3 {db args} {
     # This allows tests to do: sqlite3 db test.db; db close; sqlite3 db test.db
     # and expect data to persist.
     if {![info exists ::opened_dbs] || [lsearch -exact $::opened_dbs $new_file] < 0} {
-        # First time opening this database file in this test - clean it
-        if {[file exists $new_file]} {
-            catch {file delete -force $new_file}
-        }
+        # First time opening this database file in this test - clean it.
+        # Use forcedelete so stale WAL/checkpoint/lock siblings from a prior
+        # run are removed too; otherwise the fresh open would replay an old
+        # WAL and resurrect deleted data (#5843). Run it even when the main
+        # file itself is gone: a bare `file delete` elsewhere can leave
+        # orphaned siblings that would still be replayed on open.
+        forcedelete $new_file
         lappend ::opened_dbs $new_file
     }
 
@@ -5444,6 +5642,7 @@ proc sqlite3 {db args} {
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
+    set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
 
     # Create db command alias - if name is not "db" (which already exists)
     # create an alias to the global db proc
@@ -5563,12 +5762,17 @@ proc db {cmd args} {
             return [expr {[info exists ::null_string] ? $::null_string : ""}]
         }
         last_insert_rowid {
-            # Return the last inserted rowid
-            set result [execsql "SELECT last_insert_rowid()"]
-            if {[llength $result] > 0} {
-                return [lindex $result 0]
-            }
-            return 0
+            # Return the last inserted rowid. Running `SELECT
+            # last_insert_rowid()` here would spawn a FRESH process and always
+            # return 0; instead the direct-execution DML path captures
+            # last_insert_rowid() in the same process as each INSERT/REPLACE
+            # and stashes it in ::last_insert_rowid (#5843).
+            return $::last_insert_rowid
+        }
+        complete {
+            # Statement-completeness check (sqlite3_complete). Pure-TCL port
+            # of SQLite's complete.c state machine (#5843).
+            return [sqlite3_complete [lindex $args 0]]
         }
         changes {
             # Return number of rows changed by last statement
@@ -5750,12 +5954,43 @@ proc reset_db {} {
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0
+    set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
 }
 
 proc forcedelete {args} {
-    # Force delete files (SQLite test utility)
+    # Force delete files (SQLite test utility).
+    #
+    # When deleting a database file, also delete its VibeSQL durability
+    # siblings — <root>.wal, <root>-checkpoints/, <root>.lock (#5843; .lock
+    # added by #5858) — otherwise the next open of the same path replays the
+    # old WAL and the "deleted" database resurrects, poisoning later tests.
+    #
+    # Do NOT derive siblings when the target itself is an auxiliary file
+    # (e.g. `forcedelete test.db-journal` must not delete test.db's WAL:
+    # `file rootname test.db-journal` is "test", whose siblings belong to
+    # the still-live test.db).
     foreach f $args {
         catch {file delete -force $f}
+        if {[string match "*-journal" $f] || [string match "*-wal" $f] \
+                || [string match "*-shm" $f] || [string match "*-checkpoints" $f]} {
+            continue
+        }
+        set ext [file extension $f]
+        if {$ext eq ".wal" || $ext eq ".lock"} {
+            continue
+        }
+        set root [file rootname $f]
+        if {$root eq ""} {
+            continue
+        }
+        # NOTE: $root eq $f (extensionless target, e.g. `forcedelete testdb`
+        # in main.test) is a VALID database path whose siblings are
+        # testdb.wal / testdb.lock / testdb-checkpoints — the engine derives
+        # them via with_extension("wal") etc., so extensionless files must
+        # NOT be skipped here.
+        catch {file delete -force "${root}.wal"}
+        catch {file delete -force "${root}.lock"}
+        catch {file delete -force "${root}-checkpoints"}
     }
 }
 
@@ -5890,14 +6125,28 @@ proc sqlite3_db_config {args} {
 }
 
 proc sqlite3_exec {db sql} {
-    # SQLite sqlite3_exec API - execute SQL statement(s) directly
-    # Returns {result_code output}
-    # result_code: 0 = success, non-zero = error
-    # For our purposes, we just execute and return success
-    if {[catch {execsql $sql} err]} {
-        return [list 1 $err]
+    # SQLite sqlite3_exec API - execute SQL statement(s) directly.
+    # Returns {result_code output}; result_code: 0 = success, non-zero = error.
+    #
+    # Output mirrors test1.c's exec_printf_cb: on the FIRST result row the
+    # column names are appended, then the values of every row — e.g.
+    # `SELECT hex('a') AS x` -> {0 {x 61}}. Zero-row results (and non-SELECT
+    # statements) return {0 {}} because the callback never fires (#5843).
+    # NOTE: the shim executes against the single default connection; the $db
+    # argument is not honored (no multi-connection support).
+    if {[catch {execsql_with_headers $sql} raw_result]} {
+        return [list 1 $raw_result]
     }
-    return [list 0 {}]
+    set headers [lindex $raw_result 0]
+    set rows [lindex $raw_result 1]
+    if {[llength $rows] == 0} {
+        return [list 0 {}]
+    }
+    set out $headers
+    foreach row $rows {
+        set out [concat $out $row]
+    }
+    return [list 0 $out]
 }
 
 proc sqlite3_limit {db limit_name args} {
