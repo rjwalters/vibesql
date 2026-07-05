@@ -76,29 +76,11 @@ impl ExpressionEvaluator<'_> {
                     for condition_expr in &when_clause.conditions {
                         let condition_result = self.eval(condition_expr, row)?;
 
-                        // In SQLite, truthiness is:
-                        // - Boolean(true) => true
-                        // - Integer/Bigint non-zero => true
-                        // - Float/Real/Double/Numeric non-zero => true
-                        // - Strings: parse leading numeric, non-zero => true
-                        // - Null, zero => false
-                        let is_truthy = match &condition_result {
-                            vibesql_types::SqlValue::Boolean(b) => *b,
-                            vibesql_types::SqlValue::Integer(n) => *n != 0,
-                            vibesql_types::SqlValue::Bigint(n) => *n != 0,
-                            vibesql_types::SqlValue::Smallint(n) => *n != 0,
-                            vibesql_types::SqlValue::Unsigned(n) => *n != 0,
-                            vibesql_types::SqlValue::Double(n) => *n != 0.0,
-                            vibesql_types::SqlValue::Float(n) => *n != 0.0,
-                            vibesql_types::SqlValue::Real(n) => *n != 0.0,
-                            vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
-                            // SQLite parses leading numeric from strings
-                            vibesql_types::SqlValue::Varchar(s)
-                            | vibesql_types::SqlValue::Character(s) => {
-                                super::super::operators::is_truthy_string(s)
-                            }
-                            _ => false,
-                        };
+                        // Delegate to the shared SQLite truthiness helper
+                        // (numerics non-zero, strings/blobs via the
+                        // leading-numeric parse, NULL falsy). (#5856)
+                        let is_truthy =
+                            super::super::operators::is_truthy(&condition_result);
                         if is_truthy {
                             return self.eval(&when_clause.result, row);
                         }

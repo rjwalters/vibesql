@@ -587,14 +587,12 @@ impl SelectExecutor<'_> {
                                     grouping_context,
                                 )?;
 
-                                let is_true = match condition_value {
-                                    vibesql_types::SqlValue::Boolean(true) => true,
-                                    vibesql_types::SqlValue::Boolean(false)
-                                    | vibesql_types::SqlValue::Null => false,
-                                    vibesql_types::SqlValue::Integer(0) => false,
-                                    vibesql_types::SqlValue::Integer(_) => true,
-                                    _ => false,
-                                };
+                                // Delegate to the shared SQLite truthiness
+                                // helper (numerics non-zero, strings/blobs
+                                // via the leading-numeric parse, NULL
+                                // falsy). (#5856)
+                                let is_true =
+                                    crate::evaluator::operators::is_truthy(&condition_value);
 
                                 if is_true {
                                     return self.evaluate_with_aggregates_and_grouping(
