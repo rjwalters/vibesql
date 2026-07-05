@@ -1128,6 +1128,12 @@ def main():
         files_timeout = 0
         files_incomplete = 0
         files_error = 0
+        # Files that ran to completion but produced only skipped rows: a
+        # capability self-skip (`ifcapable !cap { finish_test; return }`) or a
+        # whole-file vibesql_skip_files skip. These are clean, intentional
+        # skips — NOT compromised runs — so they are reported separately and do
+        # not trigger the "did not run to completion" warning (#5887).
+        files_self_skipped = 0
 
         for file_path in file_paths:
             if args.verbose:
@@ -1151,6 +1157,11 @@ def main():
                 files_incomplete += 1
             if "error" in statuses:
                 files_error += 1
+            # A file whose only rows are 'skipped' ran cleanly to completion
+            # and intentionally skipped everything (capability self-skip or
+            # whole-file skip); count it separately from compromised files.
+            if results and statuses == {"skipped"}:
+                files_self_skipped += 1
 
         # Print summary
         total_tests = total_passed + total_failed + total_skipped
@@ -1164,6 +1175,8 @@ def main():
         print("-" * 50)
         print(f"Files attempted:    {files_attempted}")
         print(f"Files with results: {files_with_results}")
+        if files_self_skipped > 0:
+            print(f"Files self-skipped: {files_self_skipped} (capability/whole-file skip; marked status='skipped')")
         if files_timeout > 0:
             print(f"Files timed out:    {files_timeout} (marked status='timeout')")
         if files_incomplete > 0:
@@ -1172,12 +1185,28 @@ def main():
             print(f"Files runner-error: {files_error} (marked status='error')")
         print("=" * 50)
 
-        if files_compromised > 0 or files_with_results < files_attempted:
+        # Only warn about a compromised run when real marker rows were written
+        # (#5887). A clean capability self-skip leaves files_with_results <
+        # files_attempted historically; that alone must not read like a
+        # compromised run. After the shim's zero-test marker fix every completed
+        # file emits at least one row, so a genuine shortfall only happens with
+        # a marker (which sets files_compromised > 0).
+        if files_compromised > 0:
             print(
                 f"\nWARNING: {files_compromised} of {files_attempted} attempted file(s) "
                 f"did not run to completion (timeout/kill/error markers written). "
                 f"Totals from this run are NOT comparable to a clean-run baseline. "
                 f"Re-run the affected files on a quiet machine.",
+                file=sys.stderr,
+            )
+        elif files_with_results < files_attempted:
+            # No markers, yet some file produced zero rows — after the marker
+            # guarantee this should not happen; surface it distinctly rather
+            # than mislabeling it a compromised run.
+            print(
+                f"\nWARNING: {files_attempted - files_with_results} of {files_attempted} "
+                f"attempted file(s) produced no detail rows and no marker "
+                f"(unexpected — the shim should emit a row for every completed file).",
                 file=sys.stderr,
             )
 
