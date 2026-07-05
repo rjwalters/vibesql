@@ -45,7 +45,7 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false,
+    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
     ///         },
     ///         ColumnDef {
     ///             name: "name".to_string(),
@@ -54,14 +54,14 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false,
+    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
     ///         },
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
     ///     name_source: None,
-    ///     as_query: None, without_rowid: false,
+    ///     as_query: None, without_rowid: false, strict: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
