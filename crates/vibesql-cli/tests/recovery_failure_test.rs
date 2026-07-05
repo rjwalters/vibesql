@@ -25,7 +25,10 @@ use std::{
 };
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_storage::{wal::CheckpointWriter, Database, Row};
+use vibesql_storage::{
+    wal::{CheckpointHeader, CheckpointWriter},
+    Database, Row,
+};
 use vibesql_types::{DataType, SqlValue};
 
 fn vibesql_binary() -> &'static str {
@@ -67,34 +70,18 @@ fn write_checkpoint(db_path: &Path, lsn: u64, table_name: &str) -> PathBuf {
     writer.create_checkpoint(lsn, &data, 1).unwrap().path
 }
 
-/// CRC-32 (IEEE, same polynomial as the checkpoint writer) — reimplemented
-/// here because the storage-internal helper is `pub(crate)`.
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &byte in data {
-        crc ^= byte as u32;
-        for _ in 0..8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ 0xEDB8_8320;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    crc ^ 0xFFFF_FFFF
-}
-
 /// Patch a checkpoint's *embedded* VBSQL snapshot version byte (file offset
 /// 37, after the 32-byte envelope header + 5-byte "VBSQL" magic) to 255 and
-/// re-stamp the envelope CRC (bytes 28..32, over the payload) so the envelope
-/// is fully valid — exactly what a checkpoint written by a newer VibeSQL
-/// binary looks like to this one.
+/// re-stamp the envelope CRC (bytes 28..32; for v2 envelopes it covers the
+/// 28-byte header prefix + payload) so the envelope is fully valid — exactly
+/// what a checkpoint written by a newer VibeSQL binary looks like to this one.
 fn bump_embedded_format_version(path: &Path) {
     let mut bytes = fs::read(path).unwrap();
     assert_eq!(&bytes[..4], b"VCHK", "not a checkpoint envelope");
     assert_eq!(&bytes[32..37], b"VBSQL", "payload is not a binary snapshot");
     bytes[37] = 255;
-    let crc = crc32(&bytes[32..]);
+    let header = CheckpointHeader::read(&mut &bytes[..]).unwrap();
+    let crc = header.expected_checksum(&bytes[32..]);
     bytes[28..32].copy_from_slice(&crc.to_le_bytes());
     fs::write(path, bytes).unwrap();
 }
@@ -247,6 +234,143 @@ fn test_legacy_snapshot_only_file_opens_with_data() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success());
     assert!(stdout.contains("42"), "legacy data must survive reopen; stdout: {stdout}");
+}
+
+/// Issue #5855 gap 2: flipping ANY byte of the newest checkpoint — header
+/// fields (LSN at 8..16, timestamp at 16..24, num_tables at 24..28, checksum
+/// at 28..32) or body (catalog region, data region, tail) — must refuse to
+/// open by default. Before the v2 envelope checksum, header-field flips
+/// passed verification: a flipped LSN silently changed checkpoint selection
+/// and WAL replay with exit 0.
+#[test]
+fn test_checkpoint_byte_flip_sweep_refuses_to_open() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("flip.vbsql");
+
+    let checkpoint = write_checkpoint(&db_path, 5, "precious_data");
+    let original = fs::read(&checkpoint).unwrap();
+    assert!(original.len() > 64, "need a body to corrupt; got {} bytes", original.len());
+
+    // Sanity: the pristine checkpoint opens with its data.
+    let out = run_cli(home.path(), &db_path, &[], "SELECT id FROM precious_data");
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains('1'),
+        "pristine checkpoint must open; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Representative offsets: every header field + body start / middle / tail.
+    let offsets = [4usize, 8, 12, 16, 20, 24, 28, 32, 40, original.len() / 2, original.len() - 1];
+    for offset in offsets {
+        let mut corrupted = original.clone();
+        corrupted[offset] ^= 0xFF;
+        fs::write(&checkpoint, &corrupted).unwrap();
+
+        let out = run_cli(home.path(), &db_path, &[], "SELECT id FROM precious_data");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !out.status.success(),
+            "byte flip at offset {offset} must refuse to open; stdout: {stdout}"
+        );
+    }
+
+    // Restore: still opens (the sweep failures came from the flips alone).
+    fs::write(&checkpoint, &original).unwrap();
+    let out = run_cli(home.path(), &db_path, &[], "SELECT id FROM precious_data");
+    assert!(out.status.success(), "restored checkpoint must open again");
+}
+
+/// Issue #5855 gap 2 (stale-selection variant): flip the newest checkpoint's
+/// header LSN so a STALE checkpoint sorts newest. The corrupt file itself is
+/// never the one loaded, so only the creation-order guard stands between the
+/// user and a silent stale open. Default: hard error naming the suspect
+/// file; `--recover-fallback`: opens the older state loudly.
+#[test]
+fn test_header_lsn_flip_stale_selection_default_error_fallback_loud() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("lsnflip.vbsql");
+
+    write_checkpoint(&db_path, 10, "older_state");
+    let newest = write_checkpoint(&db_path, 20, "newest_state");
+
+    // Zero the newest checkpoint's header LSN (bytes 8..16) so it sorts as
+    // the oldest; everything else, including the stored checksum, is intact.
+    let mut bytes = fs::read(&newest).unwrap();
+    bytes[8..16].copy_from_slice(&0u64.to_le_bytes());
+    fs::write(&newest, &bytes).unwrap();
+
+    // Default: refuse to open, naming the suspect checkpoint.
+    let out = run_cli(home.path(), &db_path, &[], "SELECT name FROM sqlite_master");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "LSN-flipped newest checkpoint must refuse to open by default; stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        stderr.contains(&newest.display().to_string()),
+        "stderr must name the suspect checkpoint; was: {stderr}"
+    );
+    assert!(stderr.contains("recover-fallback"), "must mention the opt-in; was: {stderr}");
+
+    // Opt-in: opens the older state, loudly naming the suspect file.
+    let out =
+        run_cli(home.path(), &db_path, &["--recover-fallback"], "SELECT name FROM sqlite_master");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "opt-in fallback must open; stderr: {stderr}");
+    assert!(stdout.contains("older_state"), "older state must be visible; stdout: {stdout}");
+    assert!(
+        stderr.contains("WARNING") && stderr.contains(&newest.display().to_string()),
+        "fallback must be loud and name the suspect checkpoint; was: {stderr}"
+    );
+}
+
+/// Issue #5855 gap 1 (regression): SQLite-style user-defined column type
+/// names (`banana`, quoted names, parameterized forms, fallback keywords)
+/// must round-trip through save + reopen. The reload used to error on the
+/// unknown name and the open path swallowed it, presenting an empty database
+/// with exit 0.
+#[test]
+fn test_userdefined_column_types_roundtrip_on_reopen() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("udt.vbsql");
+
+    let out = run_cli(
+        home.path(),
+        &db_path,
+        &[],
+        "CREATE TABLE t(a banana, b \"my weird type\", c fruit(8), d nvarchar(70), \
+         e counter(+5,-6), f attach); \
+         INSERT INTO t VALUES (1,'x',2.5,'y',9,'z');",
+    );
+    assert!(
+        out.status.success(),
+        "create must succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Reopen in a fresh process: the table (and its rows) must still exist.
+    let out = run_cli(home.path(), &db_path, &[], "SELECT a, f FROM t");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "reopen must not error; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains('1') && stdout.contains('z'),
+        "row data must survive reopen; stdout: {stdout}"
+    );
+
+    // The verbatim CREATE source must survive too.
+    let out = run_cli(home.path(), &db_path, &[], "SELECT sql FROM sqlite_master WHERE name='t'");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success());
+    assert!(
+        stdout.contains("banana") && stdout.contains("my weird type"),
+        "original type names must survive reopen; stdout: {stdout}"
+    );
 }
 
 /// A fresh, nonexistent database file still opens as an empty database — the

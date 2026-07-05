@@ -23,6 +23,20 @@
 //
 // The checkpoint file reuses the existing binary format (.vbsql) for table
 // data serialization, prefixed with a checkpoint-specific header.
+//
+// ## Checksum coverage (issue #5855)
+//
+// * **Version 2 (current)**: the CRC32 at bytes 28..32 covers the first 28
+//   header bytes (magic, version, LSN, timestamp, num_tables) followed by the
+//   entire payload. Flipping ANY bit in the file — header field or body —
+//   fails verification. This matters because the header LSN drives both
+//   checkpoint selection (newest-by-LSN) and WAL replay (entries at or below
+//   the checkpoint LSN are skipped): an unprotected LSN flip could silently
+//   open stale state or silently drop committed WAL entries.
+// * **Version 1 (legacy, read-only)**: the CRC covers only the payload; the
+//   header fields are NOT integrity-protected. Existing v1 files remain
+//   readable; the cross-file creation-order guard in `recovery.rs` limits the
+//   stale-selection blast radius for them.
 
 use std::{
     fs::{self, File},
@@ -32,18 +46,26 @@ use std::{
 
 use crate::{
     persistence::binary::io::{read_u32, read_u64, write_u32, write_u64},
-    wal::{entry::Lsn, writer::verify_checksum},
+    wal::entry::Lsn,
     StorageError,
 };
 
 /// Magic number for checkpoint files: "VCHK"
 pub const CHECKPOINT_MAGIC: &[u8; 4] = b"VCHK";
 
-/// Current checkpoint format version
-pub const CHECKPOINT_VERSION: u32 = 1;
+/// Current checkpoint format version.
+///
+/// * v1: CRC32 covers the payload only (header fields unprotected).
+/// * v2: CRC32 covers the first 28 header bytes + payload (issue #5855).
+pub const CHECKPOINT_VERSION: u32 = 2;
 
 /// Size of the checkpoint header in bytes
 pub const CHECKPOINT_HEADER_SIZE: usize = 32;
+
+/// Number of leading header bytes covered by the v2 checksum (everything
+/// before the checksum field itself: magic, version, LSN, timestamp,
+/// num_tables).
+pub const CHECKSUMMED_HEADER_PREFIX_SIZE: usize = 28;
 
 /// Checkpoint file header
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +111,37 @@ impl CheckpointHeader {
         write_u32(writer, self.checksum)?;
 
         Ok(())
+    }
+
+    /// Serialize the CRC-covered header prefix (bytes 0..28: magic, version,
+    /// LSN, timestamp, num_tables) exactly as `write` lays them out on disk.
+    ///
+    /// Used to compute/verify the v2 checksum, which covers this prefix
+    /// followed by the payload (issue #5855).
+    pub fn checksummed_prefix(&self) -> [u8; CHECKSUMMED_HEADER_PREFIX_SIZE] {
+        let mut prefix = [0u8; CHECKSUMMED_HEADER_PREFIX_SIZE];
+        prefix[0..4].copy_from_slice(CHECKPOINT_MAGIC);
+        prefix[4..8].copy_from_slice(&self.version.to_le_bytes());
+        prefix[8..16].copy_from_slice(&self.lsn.to_le_bytes());
+        prefix[16..24].copy_from_slice(&self.timestamp_ms.to_le_bytes());
+        prefix[24..28].copy_from_slice(&self.num_tables.to_le_bytes());
+        prefix
+    }
+
+    /// Compute the checksum this header *should* carry for `data`, per the
+    /// header's own format version:
+    ///
+    /// * v1 (legacy): CRC32 of the payload only.
+    /// * v2+: CRC32 of the 28-byte header prefix followed by the payload.
+    pub fn expected_checksum(&self, data: &[u8]) -> u32 {
+        if self.version >= 2 {
+            let mut hasher = Crc32::new();
+            hasher.update(&self.checksummed_prefix());
+            hasher.update(data);
+            hasher.finalize()
+        } else {
+            crc32(data)
+        }
     }
 
     /// Read and validate checkpoint header from a reader
@@ -206,7 +259,13 @@ impl CheckpointWriter {
         self.next_checkpoint_id += 1;
 
         let timestamp_ms = current_timestamp_ms();
-        let checksum = crc32(data);
+
+        // v2 checksum: covers the 28-byte header prefix + the payload, so a
+        // bit flip anywhere in the file (header LSN included) fails
+        // verification on read (issue #5855). Computed in one streaming pass;
+        // the payload is never re-read or copied.
+        let mut header = CheckpointHeader::new(lsn, timestamp_ms, num_tables, 0);
+        header.checksum = header.expected_checksum(data);
 
         // Create temp file path
         let temp_path = self.checkpoint_dir.join(format!("checkpoint_{}.tmp", checkpoint_id));
@@ -220,7 +279,6 @@ impl CheckpointWriter {
             let mut writer = BufWriter::new(file);
 
             // Write header
-            let header = CheckpointHeader::new(lsn, timestamp_ms, num_tables, checksum);
             header.write(&mut writer)?;
 
             // Write data
@@ -362,14 +420,64 @@ pub fn read_checkpoint_data(path: &Path) -> Result<(CheckpointHeader, Vec<u8>), 
         .read_to_end(&mut data)
         .map_err(|e| StorageError::IoError(format!("Failed to read checkpoint data: {}", e)))?;
 
-    // Verify checksum
-    if !verify_checksum(&data, header.checksum) {
+    // Verify checksum per the header's format version:
+    //   v1 (legacy): payload only — header fields are unprotected.
+    //   v2+: header prefix + payload — any bit flip in the file fails here
+    //        (issue #5855).
+    if header.expected_checksum(&data) != header.checksum {
         return Err(StorageError::IoError(
-            "Checkpoint data checksum mismatch - file may be corrupted".to_string(),
+            "Checkpoint checksum mismatch - header or data corrupted".to_string(),
         ));
     }
 
     Ok((header, data))
+}
+
+const CRC32_TABLE: [u32; 256] = {
+    let mut table = [0u32; 256];
+    let mut i = 0;
+    while i < 256 {
+        let mut crc = i as u32;
+        let mut j = 0;
+        while j < 8 {
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ 0xEDB88320;
+            } else {
+                crc >>= 1;
+            }
+            j += 1;
+        }
+        table[i] = crc;
+        i += 1;
+    }
+    table
+};
+
+/// Incremental CRC-32 (IEEE) hasher — same polynomial/table as `crc32` and
+/// `writer.rs`, but streamable so the v2 checkpoint checksum can cover the
+/// header prefix followed by the payload in a single pass without
+/// concatenating them into a temporary buffer (issue #5855).
+pub(crate) struct Crc32 {
+    state: u32,
+}
+
+impl Crc32 {
+    pub(crate) fn new() -> Self {
+        Self { state: 0xFFFFFFFF }
+    }
+
+    pub(crate) fn update(&mut self, data: &[u8]) {
+        let mut crc = self.state;
+        for &byte in data {
+            let index = ((crc ^ byte as u32) & 0xFF) as usize;
+            crc = (crc >> 8) ^ CRC32_TABLE[index];
+        }
+        self.state = crc;
+    }
+
+    pub(crate) fn finalize(self) -> u32 {
+        self.state ^ 0xFFFFFFFF
+    }
 }
 
 /// CRC-32 implementation (same as in writer.rs for consistency)
@@ -377,32 +485,9 @@ pub fn read_checkpoint_data(path: &Path) -> Result<(CheckpointHeader, Vec<u8>), 
 /// `pub(crate)` so recovery tests can re-stamp a checkpoint envelope checksum
 /// after deliberately patching the payload (issue #5807 forward-version tests).
 pub(crate) fn crc32(data: &[u8]) -> u32 {
-    const CRC32_TABLE: [u32; 256] = {
-        let mut table = [0u32; 256];
-        let mut i = 0;
-        while i < 256 {
-            let mut crc = i as u32;
-            let mut j = 0;
-            while j < 8 {
-                if crc & 1 != 0 {
-                    crc = (crc >> 1) ^ 0xEDB88320;
-                } else {
-                    crc >>= 1;
-                }
-                j += 1;
-            }
-            table[i] = crc;
-            i += 1;
-        }
-        table
-    };
-
-    let mut crc = 0xFFFFFFFF;
-    for &byte in data {
-        let index = ((crc ^ byte as u32) & 0xFF) as usize;
-        crc = (crc >> 8) ^ CRC32_TABLE[index];
-    }
-    crc ^ 0xFFFFFFFF
+    let mut hasher = Crc32::new();
+    hasher.update(data);
+    hasher.finalize()
 }
 
 /// Get current timestamp in milliseconds since epoch
@@ -587,5 +672,147 @@ mod tests {
         // Test vectors
         assert_eq!(crc32(b"123456789"), 0xCBF43926);
         assert_eq!(crc32(b""), 0x00000000);
+    }
+
+    #[test]
+    fn test_crc32_incremental_matches_oneshot() {
+        let data = b"the quick brown fox jumps over the lazy dog";
+        let mut hasher = Crc32::new();
+        hasher.update(&data[..10]);
+        hasher.update(&data[10..]);
+        assert_eq!(hasher.finalize(), crc32(data));
+    }
+
+    /// Issue #5855: flipping ANY byte of a checkpoint file — header fields
+    /// (version, LSN, timestamp, num_tables, checksum) or payload — must fail
+    /// verification. Before v2 the CRC covered only the payload, so a bit
+    /// flip in the header LSN silently changed checkpoint selection and WAL
+    /// replay while the file still "verified".
+    #[test]
+    fn test_any_byte_flip_fails_checksum() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        let data = b"payload bytes that stand in for a binary snapshot";
+        let info = writer.create_checkpoint(42, data, 3).unwrap();
+        let original = fs::read(&info.path).unwrap();
+
+        // Sanity: pristine file verifies.
+        read_checkpoint_data(&info.path).unwrap();
+
+        for offset in 0..original.len() {
+            let mut corrupted = original.clone();
+            corrupted[offset] ^= 0xFF;
+            fs::write(&info.path, &corrupted).unwrap();
+
+            assert!(
+                read_checkpoint_data(&info.path).is_err(),
+                "byte flip at offset {} must fail verification",
+                offset
+            );
+        }
+
+        // Restore and confirm it verifies again (the loop's failures came
+        // from the flips, not from the write cycle).
+        fs::write(&info.path, &original).unwrap();
+        read_checkpoint_data(&info.path).unwrap();
+    }
+
+    /// Legacy v1 checkpoints (checksum over payload only) must remain
+    /// readable: existing databases carry them and a hard error on every
+    /// pre-upgrade checkpoint would brick every existing DB.
+    #[test]
+    fn test_v1_legacy_checkpoint_still_reads() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("checkpoint_1.vchk");
+
+        let data = b"legacy v1 payload";
+        // Hand-write a v1 envelope: checksum = crc32(payload) only.
+        let header = CheckpointHeader {
+            version: 1,
+            lsn: 7,
+            timestamp_ms: 123,
+            num_tables: 1,
+            checksum: crc32(data),
+        };
+        let mut bytes = Vec::new();
+        header.write(&mut bytes).unwrap();
+        bytes.extend_from_slice(data);
+        fs::write(&path, &bytes).unwrap();
+
+        let (read_header, read_data) = read_checkpoint_data(&path).unwrap();
+        assert_eq!(read_header.version, 1);
+        assert_eq!(read_header.lsn, 7);
+        assert_eq!(read_data, data);
+
+        // v1 payload corruption is still caught.
+        let mut corrupted = bytes.clone();
+        *corrupted.last_mut().unwrap() ^= 0xFF;
+        fs::write(&path, &corrupted).unwrap();
+        assert!(read_checkpoint_data(&path).is_err(), "v1 payload flip must fail");
+    }
+
+    /// A v2 checkpoint whose version byte is rolled back to 1 must not verify
+    /// under the (weaker) v1 rule: the stored checksum was computed over
+    /// prefix+payload, so the v1 payload-only check fails. No downgrade path
+    /// re-opens the header-unprotected hole.
+    #[test]
+    fn test_version_rollback_flip_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+        let info = writer.create_checkpoint(42, b"some payload", 1).unwrap();
+
+        let mut bytes = fs::read(&info.path).unwrap();
+        bytes[4..8].copy_from_slice(&1u32.to_le_bytes());
+        fs::write(&info.path, &bytes).unwrap();
+
+        assert!(read_checkpoint_data(&info.path).is_err());
+    }
+
+    /// Perf sanity for the v2 checksum (issue #5855): write + read a ~50MB
+    /// checkpoint and print timings. The v2 change adds only 28 extra bytes
+    /// to the CRC input, so the delta vs v1 must be noise. Run with:
+    /// `cargo test -p vibesql-storage --release bench_checkpoint_50mb -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_checkpoint_50mb_write_read() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        // ~50MB of non-trivial bytes.
+        let data: Vec<u8> =
+            (0..50_000_000usize).map(|i| (i.wrapping_mul(2654435761) >> 16) as u8).collect();
+
+        let t0 = std::time::Instant::now();
+        let info = writer.create_checkpoint(1, &data, 10).unwrap();
+        let write_elapsed = t0.elapsed();
+
+        let t1 = std::time::Instant::now();
+        let (_, read_back) = read_checkpoint_data(&info.path).unwrap();
+        let read_elapsed = t1.elapsed();
+
+        assert_eq!(read_back.len(), data.len());
+        println!(
+            "checkpoint 50MB: write {:?} (checksum+IO), read {:?} (IO+verify)",
+            write_elapsed, read_elapsed
+        );
+    }
+
+    /// Forward envelope versions stay a hard error (fail closed, #5807).
+    #[test]
+    fn test_forward_envelope_version_is_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+        let info = writer.create_checkpoint(42, b"some payload", 1).unwrap();
+
+        let mut bytes = fs::read(&info.path).unwrap();
+        bytes[4..8].copy_from_slice(&(CHECKPOINT_VERSION + 1).to_le_bytes());
+        fs::write(&info.path, &bytes).unwrap();
+
+        let err = read_checkpoint_data(&info.path).unwrap_err();
+        assert!(
+            err.to_string().contains("Unsupported checkpoint version"),
+            "expected version error, got: {err}"
+        );
     }
 }
