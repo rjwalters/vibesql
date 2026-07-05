@@ -21,6 +21,7 @@ use crate::{Database, StorageError};
 
 // Public submodules
 pub mod catalog;
+pub(crate) mod constraints;
 pub mod data;
 pub mod expression;
 pub mod format;
