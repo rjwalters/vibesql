@@ -246,8 +246,13 @@ impl Parser {
     /// Multiplicative tier (`*`, `/`, `%`, `DIV`) with an already-parsed left operand.
     fn parse_multiplicative_expression_from(
         &mut self,
-        mut left: vibesql_ast::Expression,
+        left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
+        // The JSON `->` / `->>` operators bind tighter than `* / % DIV`
+        // (per the SQLite grammar), so every multiplicative operand is first
+        // parsed at the JSON-path tier.
+        let mut left = self.parse_json_path_expression_from(left)?;
+
         loop {
             let op = match self.peek() {
                 Token::Symbol('*') => vibesql_ast::BinaryOperator::Multiply,
@@ -260,6 +265,49 @@ impl Parser {
             };
             self.advance();
 
+            let right = self.parse_json_path_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse a JSON path expression (handles the `->` and `->>` operators).
+    ///
+    /// Per the SQLite grammar these bind one tier tighter than `* / % DIV`
+    /// and one tier looser than unary operators. They are left-associative,
+    /// so `a -> b -> c` parses as `(a -> b) -> c`.
+    pub(super) fn parse_json_path_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let seed = self.parse_unary_expression()?;
+        self.parse_json_path_expression_from(seed)
+    }
+
+    /// JSON path tier (`->`, `->>`) with an already-parsed left operand.
+    fn parse_json_path_expression_from(
+        &mut self,
+        mut left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        loop {
+            let op = match self.peek() {
+                Token::Operator(crate::token::MultiCharOperator::JsonExtract) => {
+                    vibesql_ast::BinaryOperator::JsonExtract
+                }
+                Token::Operator(crate::token::MultiCharOperator::JsonExtractText) => {
+                    vibesql_ast::BinaryOperator::JsonExtractText
+                }
+                _ => break,
+            };
+            self.advance();
+
+            // The right operand is a unary expression; SQLite additionally
+            // allows an integer literal here as array-index shorthand, which
+            // the unary tier already accepts as a numeric literal.
             let right = self.parse_unary_expression()?;
             left = vibesql_ast::Expression::BinaryOp {
                 op,
@@ -747,6 +795,11 @@ impl Parser {
                             MultiCharOperator::L2Distance => {
                                 vibesql_ast::BinaryOperator::L2Distance
                             }
+                            // These operators bind tighter than comparison and
+                            // are consumed at lower tiers (Concat at the concat
+                            // tier, shifts at the shift tier, and `->`/`->>` at
+                            // the JSON-path tier), so reaching here means a
+                            // genuinely misplaced operator.
                             MultiCharOperator::Concat
                             | MultiCharOperator::LeftShift
                             | MultiCharOperator::RightShift
