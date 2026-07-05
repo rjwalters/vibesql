@@ -656,19 +656,40 @@ impl TriggerFirer {
         // Create trigger context for OLD/NEW pseudo-variable resolution
         let trigger_context = TriggerContext { old_row, new_row, table_schema: &schema, is_view };
 
+        // changes() save/restore around the trigger program (SQLite
+        // R-32918-61474, #5840): before entering a trigger body the value
+        // returned by changes() is saved, and after the body finishes the
+        // original value is restored. Within the body, each INSERT/UPDATE/DELETE
+        // sets changes() to the rows *it* modified (handled in
+        // `execute_statement`), so the first body statement sees the caller's
+        // value and later statements see the previous nested statement's value.
+        // Restoring afterward keeps a sub-trigger's nested DML from leaking into
+        // the changes() the calling statement observes (e_changes-5.2/6.x/7.x).
+        let saved_changes = db.last_changes_count();
+
         // Execute each statement in the trigger body with trigger context.
         // A RAISE(IGNORE) inside any statement abandons the rest of this
         // trigger's action for the current row and asks the caller to skip the
         // row (SQLite semantics), without raising a user-visible error.
+        let mut outcome = TriggerOutcome::Proceed;
         for statement in statements {
             match Self::execute_statement(db, &statement, &trigger_context) {
                 Ok(()) => {}
-                Err(ExecutorError::RaiseIgnore) => return Ok(TriggerOutcome::SkipRow),
-                Err(e) => return Err(e),
+                Err(ExecutorError::RaiseIgnore) => {
+                    outcome = TriggerOutcome::SkipRow;
+                    break;
+                }
+                Err(e) => {
+                    // Restore before propagating so a failed trigger body does
+                    // not corrupt the caller's changes() value.
+                    db.set_last_changes_count(saved_changes);
+                    return Err(e);
+                }
             }
         }
 
-        Ok(TriggerOutcome::Proceed)
+        db.set_last_changes_count(saved_changes);
+        Ok(outcome)
     }
 
     /// Resolve the schema used for OLD/NEW column resolution when a trigger fires.
@@ -783,32 +804,44 @@ impl TriggerFirer {
     ) -> Result<(), ExecutorError> {
         use vibesql_ast::Statement;
 
+        // Each INSERT/UPDATE/DELETE inside a trigger body sets changes() to the
+        // number of rows *it* directly modified, upon completion, exactly as a
+        // top-level statement does (SQLite R-17146-37073, #5840). This makes
+        // changes() observable to later statements in the same trigger body.
+        // The enclosing trigger program (`execute_trigger_action`) saves and
+        // restores changes() so these nested updates do not leak to the caller.
         match statement {
             Statement::Insert(insert_stmt) => {
                 // Execute INSERT with trigger context support
-                crate::insert::execute_insert_with_trigger_context(
+                let count = crate::insert::execute_insert_with_trigger_context(
                     db,
                     insert_stmt,
                     trigger_context,
                 )?;
+                db.set_last_changes_count(count);
+                db.increment_total_changes_count(count);
                 Ok(())
             }
             Statement::Update(update_stmt) => {
                 // Execute UPDATE with trigger context support
-                crate::update::execute_update_with_trigger_context(
+                let count = crate::update::execute_update_with_trigger_context(
                     db,
                     update_stmt,
                     trigger_context,
                 )?;
+                db.set_last_changes_count(count);
+                db.increment_total_changes_count(count);
                 Ok(())
             }
             Statement::Delete(delete_stmt) => {
                 // Execute DELETE with trigger context support
-                crate::delete::execute_delete_with_trigger_context(
+                let count = crate::delete::execute_delete_with_trigger_context(
                     db,
                     delete_stmt,
                     trigger_context,
                 )?;
+                db.set_last_changes_count(count);
+                db.increment_total_changes_count(count);
                 Ok(())
             }
             Statement::Select(select_stmt) => {

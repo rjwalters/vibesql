@@ -93,6 +93,10 @@ fn count_rows(db: &Database, table: &str) -> usize {
 /// producing rows `start..=0`, unless it first hits the recursion cap.
 fn run_countdown(start: i64) -> (Database, Result<(), vibesql_executor::ExecutorError>) {
     let mut db = Database::new();
+    // These tests exercise deep native trigger recursion, which requires
+    // recursive_triggers ON. The default is now OFF (SQLite default, #5840),
+    // which would suppress the self-re-entry after one level, so enable it here.
+    db.set_recursive_triggers(true);
     exec(&mut db, "CREATE TABLE t2(a INTEGER PRIMARY KEY)").unwrap();
     exec(
         &mut db,

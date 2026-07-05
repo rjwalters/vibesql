@@ -103,7 +103,6 @@ pub(super) fn execute_update_on_view(
     // same row after an earlier one IGNOREs, but that multi-trigger-per-view
     // case is rare; the common single-trigger case matches sqlite3 exactly —
     // the row's operation is skipped.)
-    let rows_processed = updates.len();
     for (old_row, new_row) in &updates {
         for trigger in &triggers {
             if crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), Some(new_row))?
@@ -130,7 +129,10 @@ pub(super) fn execute_update_on_view(
         None
     };
 
-    Ok((rows_processed, returning))
+    // changes() after an UPDATE on a view is always zero — no physical table
+    // rows were modified by the statement itself (SQLite R-09813-48563;
+    // e_changes-4.3.2, #5840).
+    Ok((0, returning))
 }
 
 /// Build (old_row, new_row) update pairs for an UPDATE on a view WITHOUT a FROM

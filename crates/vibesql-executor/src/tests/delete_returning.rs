@@ -219,7 +219,9 @@ fn test_delete_returning_through_instead_of_trigger() {
 
     let (count, returning) =
         execute_delete_returning(&mut db, "DELETE FROM v1 WHERE b=4 RETURNING *");
-    assert_eq!(count, 2);
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the INSTEAD OF trigger's fire count is still verified via RETURNING below.
+    assert_eq!(count, 0);
     let returning = returning.expect("RETURNING clause should produce a result");
     assert_eq!(returning.columns, vec!["b".to_string(), "c".to_string()]);
     assert_eq!(int_rows(&returning), vec![vec![4, 8], vec![4, 9]]);

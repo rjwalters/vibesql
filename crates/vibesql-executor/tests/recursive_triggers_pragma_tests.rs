@@ -4,9 +4,9 @@
 //! not re-fired by DML performed within its own body — directly- and
 //! mutually-recursive trigger firing is suppressed. A *different* trigger
 //! reached via nested DML still fires, and a trigger fired at the top level
-//! still fires (it is not yet on the stack). With `recursive_triggers = ON`
-//! (VibeSQL's default, matching modern SQLite), triggers recurse up to the depth
-//! cap (#5479).
+//! still fires (it is not yet on the stack). With `recursive_triggers = ON`,
+//! triggers recurse up to the depth cap (#5479). OFF is the default, matching
+//! SQLite's `pragma.c` (#5840).
 //!
 //! Every expectation below was verified against sqlite3 3.51.0. The headline
 //! case (`off_suppresses_self_refiring_trigger3_6_shape`) reproduces the exact
@@ -176,8 +176,9 @@ fn off_suppresses_mutual_recursion() {
 #[test]
 fn on_recurses_to_completion() {
     let mut db = Database::new();
-    // Default is ON; assert that and do not change it.
-    assert!(db.recursive_triggers(), "recursive_triggers must default to ON");
+    // Default is OFF (matches SQLite); enable recursion explicitly for this case.
+    db.set_recursive_triggers(true);
+    assert!(db.recursive_triggers(), "recursive_triggers explicitly enabled");
 
     exec(&mut db, "CREATE TABLE t(a INTEGER PRIMARY KEY)");
     exec(
@@ -221,8 +222,9 @@ fn toggle_mid_session_takes_effect() {
          INSERT INTO t VALUES(new.a - 1); END",
     );
 
-    // ON (default): inserting 5 recurses to 5,4,3,2,1 = 5 rows.
-    assert!(db.recursive_triggers(), "recursive_triggers must default to ON");
+    // ON (explicitly enabled): inserting 5 recurses to 5,4,3,2,1 = 5 rows.
+    db.set_recursive_triggers(true);
+    assert!(db.recursive_triggers(), "recursive_triggers explicitly enabled");
     exec(&mut db, "INSERT INTO t VALUES(5)");
     assert_eq!(query(&db, "SELECT a FROM t").len(), 5, "ON: 5,4,3,2,1");
 

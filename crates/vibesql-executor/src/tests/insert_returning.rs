@@ -309,7 +309,9 @@ fn test_insert_returning_through_instead_of_trigger() {
         &mut db,
         "INSERT INTO v1 VALUES (1, 'x'), (2, 'y') RETURNING a, b",
     );
-    assert_eq!(count, 2);
+    // changes() after DML on a view is always 0 (SQLite R-09813-48563, #5840);
+    // the two INSTEAD OF trigger fires are verified via RETURNING below.
+    assert_eq!(count, 0);
     let returning = returning.expect("RETURNING clause should produce a result");
     assert_eq!(returning.columns, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(returning.rows.len(), 2, "one RETURNING row per INSTEAD OF trigger fire");

@@ -591,17 +591,24 @@ pub(super) fn execute_internal(
             // (`insert/replace.rs`). Without this, a WITHOUT ROWID `UPDATE OR
             // REPLACE` that resolves a PRIMARY KEY conflict silently dropped the
             // replaced row's DELETE trigger (triggerF.test 1.2/1.3/1.4).
-            let has_delete_triggers = database
+            //
+            // These conflict-deletes are gated on `recursive_triggers`: SQLite
+            // fires REPLACE conflict-resolution DELETE triggers "if and only if
+            // recursive triggers are enabled" (lang_conflict.html). The row is
+            // still removed either way; only the trigger firing is suppressed
+            // when recursive_triggers is OFF (triggerC-5.3, #5840).
+            let fire_delete_triggers = database
                 .catalog
                 .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
                 .next()
-                .is_some();
+                .is_some()
+                && database.recursive_triggers();
 
             // Fire BEFORE DELETE triggers for each conflicting row before it is
             // removed. A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that
             // row's deletion (#5418 parity): drop it from the to-delete set so
             // the conflicting row survives.
-            if has_delete_triggers {
+            if fire_delete_triggers {
                 let mut kept = Vec::with_capacity(rows_for_index.len());
                 // Rows whose deletion was abandoned by a BEFORE DELETE
                 // RAISE(IGNORE) — they stay live and may still collide with the
@@ -714,7 +721,7 @@ pub(super) fn execute_internal(
             // `(SELECT count(*) FROM t1)` — matching sqlite3. A RAISE(IGNORE)
             // here cannot un-delete the row (sqlite3 3.51 keeps it deleted), so
             // the outcome is a no-op.
-            if has_delete_triggers {
+            if fire_delete_triggers {
                 for (_, row) in &rows_for_index {
                     let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                         database,
@@ -1849,14 +1856,18 @@ fn execute_update_from(
                 // Issue #5490: UPDATE OR REPLACE ... FROM removes the conflicting
                 // row(s) too, so fire the replaced row's DELETE triggers (BEFORE
                 // before removal, AFTER once gone) — matching the non-FROM path
-                // above and INSERT OR REPLACE.
-                let has_delete_triggers = database
+                // above and INSERT OR REPLACE. Gated on `recursive_triggers`:
+                // REPLACE conflict-resolution DELETE triggers fire only when
+                // recursive triggers are enabled (lang_conflict.html;
+                // triggerC-5.3, #5840). The row is removed regardless.
+                let fire_delete_triggers = database
                     .catalog
                     .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
                     .next()
-                    .is_some();
+                    .is_some()
+                    && database.recursive_triggers();
 
-                if has_delete_triggers {
+                if fire_delete_triggers {
                     let mut kept = Vec::with_capacity(rows_for_index.len());
                     // Conflict rows whose deletion was abandoned by a BEFORE
                     // DELETE RAISE(IGNORE) — they stay live.
@@ -1956,7 +1967,7 @@ fn execute_update_from(
 
                 // Fire AFTER DELETE triggers now that the conflicting rows are
                 // gone (issue #5490).
-                if has_delete_triggers {
+                if fire_delete_triggers {
                     for (_, row) in &rows_for_index {
                         let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                             database,

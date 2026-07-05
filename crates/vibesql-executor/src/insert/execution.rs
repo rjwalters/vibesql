@@ -1796,7 +1796,6 @@ fn execute_insert_on_view(
     // following the first-SkipRow-wins convention of the primary DML loops
     // (#5415). Verified against sqlite3 3.51: a RAISE(IGNORE) before the body's
     // `INSERT INTO base` skips that base insert while later rows proceed.
-    let rows_processed = new_rows.len();
     for row in new_rows {
         for trigger in &triggers {
             if crate::TriggerFirer::execute_trigger(db, trigger, None, Some(&row))?
@@ -1807,7 +1806,12 @@ fn execute_insert_on_view(
         }
     }
 
-    Ok((rows_processed, returning_result))
+    // changes() after an INSERT/UPDATE/DELETE on a view is always zero: no
+    // physical table rows were modified by the statement itself (only the
+    // INSTEAD OF trigger body touches real tables, and those changes are
+    // saved/restored around the trigger program). SQLite evidence
+    // R-09813-48563; e_changes-4.2.2 (#5840).
+    Ok((0, returning_result))
 }
 
 /// Build a pseudo TableSchema from a view definition

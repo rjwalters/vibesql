@@ -122,6 +122,11 @@ fn default_limit_allows_recursion_blocked_by_a_low_runtime_limit() {
 #[test]
 fn runtime_limit_above_cap_does_not_raise_the_stack_safe_cap() {
     let mut db = Database::new();
+    // This test relies on unbounded self-recursion reaching the compile-time
+    // cap; the default recursive_triggers is now OFF (SQLite default, #5840),
+    // which would suppress the self-re-entry after one level. Enable recursion
+    // so the depth cap — not the suppression — is what stops the loop.
+    db.set_recursive_triggers(true);
     db.set_trigger_depth_limit(100_000);
 
     // Recursion still aborts at the compile-time cap, not at 100_000 — proven by

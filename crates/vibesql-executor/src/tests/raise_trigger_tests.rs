@@ -669,6 +669,10 @@ fn raise_abort_in_insert_trigger_aborts() {
 #[test]
 fn raise_ignore_in_before_delete_blocks_replace_conflict() {
     let mut db = vibesql_storage::Database::new();
+    // REPLACE fires conflict-delete triggers only with recursive_triggers ON
+    // (SQLite lang_conflict.html; default is now OFF, #5840). Enable it so the
+    // BEFORE DELETE trigger runs and its RAISE(IGNORE) can block the conflict.
+    db.set_recursive_triggers(true);
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (2, 20)");
@@ -1093,6 +1097,9 @@ fn replace_with_when_false_before_delete_trigger_leaves_one_row() {
 #[test]
 fn replace_with_non_raise_before_delete_trigger_fires_once_and_replaces() {
     let mut db = vibesql_storage::Database::new();
+    // REPLACE fires conflict-delete triggers only with recursive_triggers ON
+    // (SQLite lang_conflict.html; default is now OFF, #5840).
+    db.set_recursive_triggers(true);
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
     exec_ok(&mut db, "CREATE TABLE log (n INTEGER)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
@@ -1197,6 +1204,9 @@ fn replace_without_trigger_leaves_one_row() {
 #[test]
 fn replace_with_raise_ignore_before_delete_errors_and_leaves_table_unchanged() {
     let mut db = vibesql_storage::Database::new();
+    // REPLACE fires conflict-delete triggers only with recursive_triggers ON
+    // (SQLite lang_conflict.html; default is now OFF, #5840).
+    db.set_recursive_triggers(true);
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
     exec_ok(&mut db, "CREATE TRIGGER bd BEFORE DELETE ON t BEGIN SELECT raise(IGNORE); END");
@@ -1221,6 +1231,9 @@ fn replace_with_raise_ignore_before_delete_errors_and_leaves_table_unchanged() {
 #[test]
 fn replace_with_raise_abort_before_delete_aborts() {
     let mut db = vibesql_storage::Database::new();
+    // REPLACE fires conflict-delete triggers only with recursive_triggers ON
+    // (SQLite lang_conflict.html; default is now OFF, #5840).
+    db.set_recursive_triggers(true);
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10), (2, 20)");
     exec_ok(

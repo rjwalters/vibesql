@@ -158,12 +158,21 @@ pub fn handle_replace_conflicts(
         return Ok(());
     }
 
-    // Check if any DELETE triggers exist for this table
-    let has_delete_triggers = db
+    // Check if any DELETE triggers exist for this table.
+    //
+    // SQLite rule (lang_conflict.html): "When the REPLACE conflict resolution
+    // strategy deletes rows in order to satisfy a constraint, delete triggers
+    // fire if and only if recursive triggers are enabled." A plain `DELETE`
+    // statement always fires its triggers, but the *implicit* deletes REPLACE
+    // performs to clear a PK/UNIQUE conflict are gated on `recursive_triggers`.
+    // With the default (OFF), these conflict-deletes are silent (triggerC-5.3,
+    // #5840).
+    let fire_delete_triggers = db
         .catalog
         .get_triggers_for_table(table_name, Some(vibesql_ast::TriggerEvent::Delete))
         .next()
-        .is_some();
+        .is_some()
+        && db.recursive_triggers();
 
     // Fire BEFORE DELETE triggers for each conflicting row
     // This must happen BEFORE actual deletion (SQLite semantics)
@@ -178,7 +187,7 @@ pub fn handle_replace_conflicts(
     // 3.51 with `recursive_triggers=ON`, where a BEFORE DELETE RAISE(IGNORE)
     // during REPLACE leaves the row in place and the subsequent insert fails
     // with "UNIQUE constraint failed".
-    if has_delete_triggers {
+    if fire_delete_triggers {
         let mut kept = Vec::with_capacity(rows_to_delete.len());
         for (idx, row) in rows_to_delete {
             let outcome = TriggerFirer::execute_before_triggers(
@@ -289,7 +298,7 @@ pub fn handle_replace_conflicts(
 
     // Fire AFTER DELETE triggers for each deleted row
     // This must happen AFTER actual deletion (SQLite semantics)
-    if has_delete_triggers {
+    if fire_delete_triggers {
         for (_, row) in &rows_to_delete {
             // AFTER DELETE fires once the row is already gone. A RAISE(IGNORE)
             // here cannot un-delete it (sqlite3 3.51 leaves the row deleted),

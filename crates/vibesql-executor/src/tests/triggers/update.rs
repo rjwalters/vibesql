@@ -353,8 +353,9 @@ fn test_update_from_on_view_with_instead_of_trigger() {
         .expect("UPDATE v1 SET a=map.v FROM map WHERE v1.k=map.k should succeed");
 
     // Two view rows match (k='b' and k='d'), so two INSTEAD OF triggers
-    // should fire.
-    assert_eq!(row_count, 2, "Expected 2 rows processed (k='b' and k='d')");
+    // should fire — but changes() after DML on a view is always 0 (SQLite
+    // R-09813-48563, #5840). The two fires are verified via the log table below.
+    assert_eq!(row_count, 0, "changes() is 0 for a view UPDATE");
 
     // Verify the log table received the expected entries.
     let select_log = "SELECT x FROM log ORDER BY x";
