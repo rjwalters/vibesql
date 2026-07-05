@@ -189,6 +189,14 @@ impl WalState {
     ///   2. Serializes the in-memory database to uncompressed binary bytes.
     ///   3. Writes a checkpoint at the engine's current LSN.
     ///   4. Truncates the WAL up to that LSN.
+    ///
+    /// **Fail-safe invariant (issue #5832):** the WAL is truncated in step 4
+    /// only after steps 1–3 all succeed. Any failure — serialization error,
+    /// unwritable checkpoint directory, I/O error — propagates immediately and
+    /// leaves the WAL untouched, so committed changes are always recoverable
+    /// on the next open. Callers must surface the error loudly and exit
+    /// non-zero (see `crate::util::report_save_failure`); a checkpoint failure
+    /// must never be silent (cross-link #5807 / PR #5850's fail-closed policy).
     pub fn checkpoint(&mut self, db: &Database) -> Result<(), StorageError> {
         // 1. Make sure everything already emitted is on disk before we snapshot.
         db.sync_persistence()?;
@@ -265,5 +273,67 @@ mod tests {
         // The WAL on disk must now be a valid header-bearing (or empty) file that
         // recovery can reopen without error.
         let (_db2, _stats) = WalState::open(&db_path_str).expect("reopen after checkpoint");
+    }
+
+    /// Regression for issue #5832: a checkpoint-write failure must NEVER
+    /// truncate the WAL. We force `create_checkpoint` to fail by making the
+    /// checkpoint directory read-only, then assert (a) `checkpoint()` returns
+    /// an error and (b) the on-disk WAL bytes are unchanged, so every
+    /// committed change is still recoverable on the next open.
+    #[cfg(unix)]
+    #[test]
+    fn test_failed_checkpoint_leaves_wal_intact() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        use vibesql_types::DataType;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("failsafe.vbsql");
+        let db_path_str = db_path.to_string_lossy().to_string();
+
+        let (mut db, mut wal_state) = WalState::open(&db_path_str).unwrap();
+
+        // Write some committed DDL so the WAL has real content.
+        db.create_table(TableSchema::new(
+            "survivors".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, true)],
+        ))
+        .unwrap();
+        db.sync_persistence().unwrap();
+
+        let paths = wal_state.paths.clone();
+        let wal_before = std::fs::read(&paths.wal_path).unwrap();
+        assert!(!wal_before.is_empty(), "WAL must contain the CreateTable op");
+
+        // Inject the failure: make the checkpoint directory unwritable.
+        let dir = &paths.checkpoint_dir;
+        let orig_perms = std::fs::metadata(dir).unwrap().permissions();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Skip when running as root (root bypasses permission checks).
+        if std::fs::File::create(dir.join(".probe")).is_ok() {
+            let _ = std::fs::remove_file(dir.join(".probe"));
+            std::fs::set_permissions(dir, orig_perms).unwrap();
+            eprintln!("skipping test_failed_checkpoint_leaves_wal_intact: running as root");
+            return;
+        }
+
+        let result = wal_state.checkpoint(&db);
+        assert!(result.is_err(), "checkpoint into a read-only directory must fail");
+
+        // THE invariant: the WAL was not truncated (bytes are unchanged).
+        let wal_after = std::fs::read(&paths.wal_path).unwrap();
+        assert_eq!(wal_before, wal_after, "a failed checkpoint must leave the WAL byte-identical");
+
+        // Restore permissions and prove the data is still recoverable.
+        std::fs::set_permissions(dir, orig_perms).unwrap();
+        drop(db);
+        drop(wal_state);
+        let (db2, _state2) = WalState::open(&db_path_str).expect("reopen after failed checkpoint");
+        assert!(
+            db2.list_tables().iter().any(|t| t == "survivors"),
+            "committed DDL must be recovered from the intact WAL"
+        );
     }
 }
