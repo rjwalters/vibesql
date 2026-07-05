@@ -327,6 +327,9 @@ fn is_modification_statement(sql: &str) -> bool {
         || upper.starts_with("INSERT ")
         || upper.starts_with("UPDATE ")
         || upper.starts_with("DELETE ")
+        // REPLACE INTO is DML (delete conflicting rows + insert). Missing it
+        // meant a REPLACE-only session never checkpointed at exit (#5835).
+        || upper.starts_with("REPLACE ")
     {
         return true;
     }

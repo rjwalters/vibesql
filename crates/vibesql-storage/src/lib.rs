@@ -343,4 +343,120 @@ mod tests {
         assert_eq!(row1.get(1), row2.get(1));
         assert_eq!(row1.get(2), row2.get(2));
     }
+
+    // -----------------------------------------------------------------------
+    // Rowid stability (issue #5835)
+    // -----------------------------------------------------------------------
+
+    fn rowid_test_table() -> Table {
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+        );
+        Table::new(schema)
+    }
+
+    /// `next_rowid` covers both the physical row count (implicit rowids) and
+    /// the largest explicit rowid ever assigned, so allocation never collides
+    /// after explicit rowids (e.g. reloaded from a v13 snapshot) exceed the
+    /// physical count.
+    #[test]
+    fn test_next_rowid_tracks_explicit_rowids() {
+        let mut table = rowid_test_table();
+
+        // Empty table: next rowid is 1.
+        assert_eq!(table.next_rowid(), 1);
+
+        // Implicit rows: next rowid stays physical_count + 1.
+        table.insert(Row::new(vec![SqlValue::Integer(10)])).unwrap();
+        assert_eq!(table.next_rowid(), 2);
+
+        // Explicit rowid larger than the physical count (the reload shape:
+        // live rows persisted with rowids 1 and 7).
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(20)], 7)).unwrap();
+        assert_eq!(
+            table.next_rowid(),
+            8,
+            "must exceed the explicit rowid 7, not physical count 2"
+        );
+
+        // Deletes never decrease it (monotone).
+        assert!(table.mark_deleted_inplace(1));
+        assert_eq!(table.next_rowid(), 8);
+    }
+
+    /// Compaction physically shifts row positions; surviving implicit rowids
+    /// must be materialized before the shift so `WHERE rowid=N` still targets
+    /// the same row afterwards.
+    #[test]
+    fn test_compact_materializes_implicit_rowids() {
+        let mut table = rowid_test_table();
+        for i in 1..=10i64 {
+            table.insert(Row::new(vec![SqlValue::Integer(i)])).unwrap();
+        }
+
+        // Tombstone rows at physical indices 0..=5 (implicit rowids 1..=6) —
+        // over 50%, so compact_if_needed compacts.
+        for idx in 0..6 {
+            assert!(table.mark_deleted_inplace(idx));
+        }
+        assert!(table.compact_if_needed(), "expected compaction with 60% deleted");
+
+        // Survivors were at physical indices 6..=9 → implicit rowids 7..=10.
+        let rowids: Vec<u64> = table
+            .scan_live()
+            .map(|(_, row)| row.row_id.expect("materialized rowid"))
+            .collect();
+        assert_eq!(rowids, vec![7, 8, 9, 10]);
+
+        // Allocation continues past the materialized max, not at the
+        // (shrunken) physical count + 1 (which would collide with rowid 7).
+        assert_eq!(table.next_rowid(), 11);
+    }
+
+    /// Rowids are signed (SQLite model): a negative explicit rowid is stored
+    /// as its two's-complement u64 bit pattern and must never poison
+    /// allocation. Judge-review regression for PR #5891: previously
+    /// `INSERT INTO t(rowid,x) VALUES(-1,5)` set `max_assigned_rowid` to
+    /// `u64::MAX`, so the next implicit insert computed `u64::MAX + 1` —
+    /// panic in debug builds, duplicate rowid 0 in release builds.
+    ///
+    /// sqlite3-verified allocation: next implicit rowid = signed max + 1
+    /// (only -1 present → 0; only -5 present → -4), or 1 for an empty table.
+    #[test]
+    fn test_negative_explicit_rowid_does_not_poison_allocation() {
+        let mut table = rowid_test_table();
+
+        // Explicit rowid -1 (stored as u64::MAX bit pattern).
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(5)], (-1i64) as u64)).unwrap();
+        assert_eq!(table.max_rowid_signed(), Some(-1));
+        assert_eq!(table.next_rowid_signed(), 0, "sqlite3: after rowid -1, next is 0");
+        assert_eq!(table.next_rowid(), 0u64);
+
+        // The implicit insert that previously panicked: stamp the allocated
+        // rowid (as the executor does) and continue allocating past it.
+        let next = table.next_rowid();
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(6)], next)).unwrap();
+        assert_eq!(table.max_rowid_signed(), Some(0));
+        assert_eq!(table.next_rowid_signed(), 1);
+
+        // Deeply negative maxima allocate signed max + 1 (sqlite3: -5 → -4).
+        let mut table2 = rowid_test_table();
+        table2.insert(Row::with_row_id(vec![SqlValue::Integer(1)], (-5i64) as u64)).unwrap();
+        assert_eq!(table2.next_rowid_signed(), -4, "sqlite3: after rowid -5, next is -4");
+
+        // A positive rowid still dominates a negative one (signed max).
+        table2.insert(Row::with_row_id(vec![SqlValue::Integer(2)], 3)).unwrap();
+        assert_eq!(table2.next_rowid_signed(), 4, "sqlite3: max(-5, 3) + 1 = 4");
+    }
+
+    /// `next_rowid` saturates instead of overflowing when the max rowid is
+    /// `i64::MAX` (SQLite reports SQLITE_FULL; a duplicate-rowid conflict is
+    /// the closest safe behavior — never a wrap to a bogus rowid).
+    #[test]
+    fn test_next_rowid_saturates_at_i64_max() {
+        let mut table = rowid_test_table();
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(1)], i64::MAX as u64)).unwrap();
+        assert_eq!(table.next_rowid_signed(), i64::MAX);
+    }
 }

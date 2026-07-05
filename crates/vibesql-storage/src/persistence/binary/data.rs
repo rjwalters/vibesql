@@ -87,15 +87,40 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
             // Write row count
             write_u64(writer, table.row_count() as u64)?;
 
+            // Rowid-alias column (INTEGER PRIMARY KEY), if any: for aliased
+            // tables the column value IS the rowid, so persist that (v13).
+            let alias_idx = table.schema.rowid_alias_column;
+
             // Write each row (only live/non-deleted rows)
             // Using scan_live() to skip rows marked as deleted in the deletion bitmap.
             // This fixes a bug where deleted rows were being persisted to disk.
             //
-            // v7 layout: per-row MVCC prefix (xmin + xmax) followed by column values.
-            // For Phase 1a most rows will have the pre-MVCC sentinel xmin/xmax;
-            // executor write paths in Phase 1c will start stamping real txn ids.
-            for (_idx, row) in table.scan_live() {
+            // v13 layout: per-row MVCC prefix (xmin + xmax), then the row's
+            // effective rowid (u64), then column values. The effective rowid
+            // is materialized at write time (issue #5835): the rowid-alias
+            // IPK value when the table has one, else the row's explicit
+            // rowid, else the implicit physical position + 1. Persisting it
+            // keeps `WHERE rowid=N` stable across reloads even when live
+            // rows shift physical positions (tombstones are dropped here).
+            //
+            // Rowids are signed (SQLite model): the u64 written here is the
+            // two's-complement bit pattern of the i64 rowid, so a negative
+            // rowid (e.g. an IPK of -5, written via `*v as u64`) round-trips
+            // exactly — the reader restores the same bit pattern into
+            // `Row::row_id`, and every consumer reinterprets it via
+            // `as i64`. Allocation tracking (`Table::max_assigned_rowid`)
+            // also compares in signed space, so reloading a negative rowid
+            // can never poison `next_rowid()`.
+            for (idx, row) in table.scan_live() {
                 write_row_version_prefix(writer, row)?;
+                let effective_rowid = alias_idx
+                    .and_then(|i| match row.values.get(i) {
+                        Some(vibesql_types::SqlValue::Integer(v)) => Some(*v as u64),
+                        _ => None,
+                    })
+                    .or(row.row_id)
+                    .unwrap_or((idx + 1) as u64);
+                write_u64(writer, effective_rowid)?;
                 for value in &row.values {
                     write_sql_value(writer, value)?;
                 }
@@ -113,6 +138,10 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
 ///   the "always committed, visible to all snapshots" sentinel.
 /// - For `version >= 7`: each row begins with the MVCC version prefix
 ///   documented in the module-level doc comment.
+/// - For `version >= 13`: each row additionally carries its effective rowid
+///   (u64) between the MVCC prefix and the column values (issue #5835).
+///   Older files reconstruct rows with `row_id = None` (the pre-fix
+///   physical-position renumbering).
 pub fn read_data<R: Read>(
     reader: &mut R,
     db: &mut Database,
@@ -124,6 +153,7 @@ pub fn read_data<R: Read>(
     let mut loaded_tables = Vec::with_capacity(table_count);
 
     let has_mvcc_prefix = version >= 7;
+    let has_rowid = version >= 13;
 
     for _ in 0..table_count {
         // Read table name from file (don't rely on list_tables() ordering)
@@ -146,6 +176,9 @@ pub fn read_data<R: Read>(
                     (PRE_MVCC_TXN_ID, None)
                 };
 
+                // Read the persisted effective rowid on v13+ (issue #5835).
+                let row_id = if has_rowid { Some(read_u64(reader)?) } else { None };
+
                 let mut values = Vec::with_capacity(column_count);
                 for _ in 0..column_count {
                     values.push(read_sql_value(reader)?);
@@ -154,6 +187,7 @@ pub fn read_data<R: Read>(
                 let mut row = Row::from_vec(values);
                 row.xmin = xmin;
                 row.xmax = xmax;
+                row.row_id = row_id;
 
                 table.insert(row).map_err(|e| {
                     StorageError::NotImplemented(format!("Failed to insert row: {}", e))

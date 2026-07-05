@@ -485,13 +485,18 @@ fn execute_insert_internal(
     // Get table's current max rowid for auto-assignment (SQLite semantics)
     // When inserting with explicit rowid column, NULL rowids should be assigned values
     // greater than both:
-    // 1. The table's current max rowid
+    // 1. The table's current max *signed* rowid (`max_rowid_signed()`: covers
+    //    every effective rowid ever assigned — implicit positions AND explicit
+    //    rowids, including rowids reloaded from disk, which can exceed the
+    //    compacted physical count; issue #5835). SQLite rowids are signed:
+    //    a table whose only rowid is -1 auto-assigns 0 next (verified against
+    //    sqlite3), and `None` (no rows ever) auto-assigns 1.
     // 2. Explicit rowids processed so far in the batch (NOT future rows)
-    let table_max_rowid =
-        db.get_table(&storage_table_name).map(|t| t.row_count() as u64).unwrap_or(0);
+    let table_max_rowid: Option<i64> =
+        db.get_table(&storage_table_name).and_then(|t| t.max_rowid_signed());
 
-    // Track maximum rowid seen so far (updated as we process each row)
-    let mut batch_max_rowid = table_max_rowid;
+    // Track maximum signed rowid seen so far (updated as we process each row)
+    let mut batch_max_rowid: Option<i64> = table_max_rowid;
 
     for value_exprs in &rows_to_insert {
         // Build a complete row with values for all columns
@@ -511,18 +516,23 @@ fn execute_insert_internal(
             // an integer is coerced (e.g. '45' -> 45, -42.0 -> -42), a value
             // with a fractional part (e.g. 42.4) or a non-numeric TEXT/BLOB
             // raises "datatype mismatch" (triggerC-4.1.x).
+            // Rowids are signed (issue #5835): explicit values are tracked
+            // under signed comparison (a negative rowid raises the max only
+            // if the max is even more negative, matching sqlite3's
+            // `max(existing) + 1` allocation), and NULL/DEFAULT auto-assigns
+            // signed-max + 1 (or 1 for a table that never held a row).
+            // The returned u64 is the two's-complement bit pattern stored in
+            // `Row::row_id`.
             let mut apply_affinity = |affinity: RowidAffinity| -> u64 {
                 match affinity {
                     RowidAffinity::Value(i) => {
-                        let rowid = i as u64;
-                        if i > 0 {
-                            batch_max_rowid = batch_max_rowid.max(rowid);
-                        }
-                        rowid
+                        batch_max_rowid = Some(batch_max_rowid.map_or(i, |m| m.max(i)));
+                        i as u64
                     }
                     RowidAffinity::Auto => {
-                        batch_max_rowid += 1;
-                        batch_max_rowid
+                        let next = batch_max_rowid.map_or(1, |m| m.saturating_add(1));
+                        batch_max_rowid = Some(next);
+                        next as u64
                     }
                 }
             };
@@ -1117,7 +1127,12 @@ fn execute_insert_internal(
                 .get_table(&storage_table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?;
             let row_count_before = table_ref.row_count();
-            let physical_row_count_before = table_ref.physical_row_count();
+            // Collision-safe auto-rowid (issue #5835): identical to the old
+            // `physical_row_count + 1` for purely implicit tables, but also
+            // exceeds every explicit rowid ever assigned — required after a
+            // reload, where persisted rowids can exceed the compacted
+            // physical count.
+            let next_auto_rowid = table_ref.next_rowid();
 
             // SQLite REPLACE semantics: Check if the rowid we're about to use is reserved.
             // During REPLACE, the rowid for the new row is allocated BEFORE firing triggers.
@@ -1126,7 +1141,7 @@ fn execute_insert_internal(
             // - Explicit reservation: AFTER DELETE trigger auto-INSERTs skip to next rowid (SQLite
             //   reuses freed rowids, but VibeSQL doesn't, so we skip instead)
             let mut final_explicit_rowid = explicit_rowid;
-            let rowid_to_use = explicit_rowid.unwrap_or((physical_row_count_before + 1) as u64);
+            let rowid_to_use = explicit_rowid.unwrap_or(next_auto_rowid);
             if let Some((reserved_rowid, is_explicit_reservation)) =
                 db.get_reserved_rowid_info(&storage_table_name)
             {
@@ -1144,8 +1159,11 @@ fn execute_insert_internal(
                         )));
                     } else if explicit_rowid.is_none() {
                         // Explicit REPLACE rowid: auto-allocated trigger INSERT skips to next rowid
-                        // This approximates SQLite's rowid reuse behavior
-                        let new_rowid = reserved_rowid + 1;
+                        // This approximates SQLite's rowid reuse behavior.
+                        // Rowids are signed bit patterns (issue #5835): step
+                        // in signed space so a reserved rowid of -1
+                        // (u64::MAX) steps to 0, not past u64 range.
+                        let new_rowid = (reserved_rowid as i64).saturating_add(1) as u64;
                         final_explicit_rowid = Some(new_rowid);
 
                         // Also update the INTEGER PRIMARY KEY column value to match the new rowid
@@ -1168,6 +1186,16 @@ fn execute_insert_internal(
                         )));
                     }
                 }
+            }
+
+            // Materialize the auto-allocated rowid on the stored row (issue
+            // #5835) so it persists across saves/reloads and can never be
+            // silently renumbered. Skip INTEGER PRIMARY KEY (rowid alias)
+            // tables: there the IPK column value IS the rowid and every
+            // rowid read resolves through the alias column, so stamping a
+            // physical-position-derived row_id could disagree with it.
+            if final_explicit_rowid.is_none() && ipk_col_idx.is_none() {
+                final_explicit_rowid = Some(rowid_to_use);
             }
 
             // Insert the row
@@ -1227,7 +1255,7 @@ fn execute_insert_internal(
                 // trigger body (#5485). For an explicit `INSERT INTO t(rowid,...)`
                 // the row already carries `row_id`; for an auto-allocated rowid
                 // the row was created with `row_id == None`, and the actual rowid
-                // is `rowid_to_use` (physical_row_count_before + 1).
+                // is `rowid_to_use` (the table's next auto-allocated rowid).
                 let after_row = {
                     let mut r = row.clone();
                     if r.row_id.is_none() {
@@ -1364,11 +1392,12 @@ fn resolve_replace_conflicts_for_row(
     let reserved_rowid = if let Some(rowid) = explicit_rowid {
         rowid
     } else {
-        // Auto-allocate: next available rowid is physical row count + 1
-        // (physical includes deleted rows since rowid is based on physical index)
-        let current_physical =
-            db.get_table(storage_table_name).map(|t| t.physical_row_count() as u64).unwrap_or(0);
-        current_physical + 1
+        // Auto-allocate the next available rowid. `next_rowid()` covers both
+        // the physical row count (implicit rowids, including deleted rows)
+        // and every explicit rowid ever assigned — required after a reload,
+        // where persisted rowids can exceed the compacted physical count
+        // (issue #5835).
+        db.get_table(storage_table_name).map(|t| t.next_rowid()).unwrap_or(1)
     };
 
     // Reserve the rowid before firing triggers

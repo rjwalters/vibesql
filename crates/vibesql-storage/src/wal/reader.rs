@@ -263,6 +263,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i,
                     values: vec![SqlValue::Integer(i as i64)],
+                    rowid: None,
                 },
             );
             writer.append(&entry).unwrap();

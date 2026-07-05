@@ -202,6 +202,25 @@ pub struct Table {
 
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
+
+    /// Largest *signed* effective rowid ever assigned in this table
+    /// (issue #5835). `None` until the first row is inserted.
+    ///
+    /// SQLite rowids are signed 64-bit integers (they can be negative), and
+    /// `Row::row_id` stores the two's-complement bit pattern of that i64.
+    /// This field tracks the maximum under *signed* interpretation:
+    /// - explicit rowids contribute `row_id as i64` (so `-1`, stored as
+    ///   `u64::MAX`, contributes `-1` — it can never poison allocation);
+    /// - implicit rows (no `row_id`) contribute their effective rowid,
+    ///   `physical position + 1`.
+    ///
+    /// Updated on `insert` / `insert_batch` / `update_row` (including rows
+    /// reloaded from a v13+ snapshot or replayed from a v3+ WAL). Monotone:
+    /// deletes never decrease it, so rowid allocation via
+    /// [`Table::next_rowid`] can never collide with a rowid that is (or was)
+    /// in use. Not serialized — rebuilt naturally on load because every
+    /// reloaded row passes through `insert`.
+    max_assigned_rowid: Option<i64>,
     // Note: Table-level columnar caching was removed in #3892 to eliminate duplicate
     // caching with Database::columnar_cache. All columnar caching now goes through
     // Database::get_columnar() which provides LRU eviction and Arc-based sharing.
@@ -220,6 +239,7 @@ impl Clone for Table {
             append_tracker: self.append_tracker.clone(),
             statistics: self.statistics.clone(),
             modifications_since_stats: self.modifications_since_stats,
+            max_assigned_rowid: self.max_assigned_rowid,
         }
     }
 }
@@ -256,7 +276,24 @@ impl Table {
             append_tracker: AppendModeTracker::new(),
             statistics: None,
             modifications_since_stats: 0,
+            max_assigned_rowid: None,
         }
+    }
+
+    /// Track a row's effective *signed* rowid for allocation (issue #5835).
+    ///
+    /// `row_id` is the explicit rowid bit pattern if the row carries one;
+    /// `position` is the physical index the row occupies, from which an
+    /// implicit rowid (`position + 1`) is derived otherwise.
+    #[inline]
+    fn track_effective_rowid(&mut self, row_id: Option<u64>, position: usize) {
+        let effective: i64 = match row_id {
+            // SQLite rowids are signed; reinterpret the stored bit pattern.
+            Some(rid) => rid as i64,
+            None => position as i64 + 1,
+        };
+        self.max_assigned_rowid =
+            Some(self.max_assigned_rowid.map_or(effective, |m| m.max(effective)));
     }
 
     /// Check if this table uses native columnar storage
@@ -281,6 +318,10 @@ impl Table {
                 pk_indices.iter().map(|&idx| normalized_row.values[idx].clone()).collect();
             self.append_tracker.update(&pk_values);
         }
+
+        // Track the largest effective rowid ever assigned (issue #5835) so
+        // future implicit-rowid allocation never collides with it.
+        self.track_effective_rowid(normalized_row.row_id, self.rows.len());
 
         // Add row to table (always stored for indexing and potential row access)
         let row_index = self.rows.len();
@@ -393,6 +434,8 @@ impl Table {
 
         // Phase 3: Insert all rows into storage
         for row in normalized_rows {
+            // Track the largest effective rowid ever assigned (issue #5835).
+            self.track_effective_rowid(row.row_id, self.rows.len());
             self.rows.push(row);
             self.deleted.push(false);
         }
@@ -773,6 +816,50 @@ impl Table {
         self.rows.len()
     }
 
+    /// Largest *signed* effective rowid ever assigned, or `None` if no row
+    /// was ever inserted (issue #5835).
+    ///
+    /// SQLite rowids are signed 64-bit integers; `Row::row_id` stores the
+    /// two's-complement bit pattern. This is the signed maximum over every
+    /// effective rowid ever assigned (explicit rowids as `row_id as i64`,
+    /// implicit rows as `physical position + 1`). Monotone across deletes.
+    #[inline]
+    pub fn max_rowid_signed(&self) -> Option<i64> {
+        self.max_assigned_rowid
+    }
+
+    /// Next rowid to allocate for an implicit-rowid insert, as a *signed*
+    /// value (issue #5835).
+    ///
+    /// SQLite semantics (verified against sqlite3): the next implicit rowid
+    /// is the signed maximum existing rowid + 1, or 1 for a table that never
+    /// held a row. Negative maxima yield negative-or-zero allocations (after
+    /// `INSERT INTO t(rowid,x) VALUES(-1,5)`, the next implicit rowid is 0),
+    /// exactly matching sqlite3.
+    ///
+    /// `max_assigned_rowid` covers both implicit rowids (tracked as
+    /// physical position + 1 at insert time, preserving the pre-existing
+    /// `physical_row_count + 1` allocation for purely implicit tables) and
+    /// explicit rowids — including rows reloaded from disk, whose persisted
+    /// rowids can exceed the (compacted) physical count. Without the latter,
+    /// a reloaded table with rowids {1, 3} would hand out rowid 3 again.
+    ///
+    /// Saturating: a table whose max rowid is `i64::MAX` allocates
+    /// `i64::MAX` again rather than overflowing (SQLite reports SQLITE_FULL
+    /// here; a duplicate-rowid error is the closest safe behavior).
+    #[inline]
+    pub fn next_rowid_signed(&self) -> i64 {
+        self.max_assigned_rowid.map_or(1, |m| m.saturating_add(1))
+    }
+
+    /// [`Table::next_rowid_signed`] as the u64 bit pattern stored in
+    /// `Row::row_id` (two's complement — e.g. an allocation of `-4` is
+    /// returned as `(-4i64) as u64`).
+    #[inline]
+    pub fn next_rowid(&self) -> u64 {
+        self.next_rowid_signed() as u64
+    }
+
     /// Get count of deleted (logically removed) rows
     ///
     /// This is used for DML cost estimation, as tables with many deleted rows
@@ -852,6 +939,14 @@ impl Table {
         // Normalize and validate row
         let normalizer = RowNormalizer::new(&self.schema);
         let normalized_row = normalizer.normalize_and_validate(row)?;
+
+        // Track the largest explicit rowid ever assigned (issue #5835).
+        // Only explicit rowids are tracked here: an UPDATE replaces a row in
+        // place, so a `None` row_id cannot introduce a new effective rowid
+        // beyond what its insert already tracked.
+        if let Some(rid) = normalized_row.row_id {
+            self.track_effective_rowid(Some(rid), index);
+        }
 
         // Get old row for index updates (clone to avoid borrow issues)
         let old_row = self.rows[index].clone();
@@ -1310,13 +1405,29 @@ impl Table {
             return;
         }
 
-        // Build new vectors with only live rows
+        // Build new vectors with only live rows.
+        //
+        // Rowid stability (issue #5835): a row without an explicit rowid
+        // derives its implicit rowid from its physical position (idx + 1).
+        // Compaction shifts physical positions, so materialize each
+        // surviving implicit rowid BEFORE the shift — otherwise `WHERE
+        // rowid=N` would silently target a different row after compaction.
         let mut new_rows = Vec::with_capacity(self.rows.len() - self.deleted_count);
+        let mut max_effective: Option<i64> = self.max_assigned_rowid;
         for (idx, row) in self.rows.iter().enumerate() {
             if !self.deleted[idx] {
-                new_rows.push(row.clone());
+                let mut row = row.clone();
+                let effective = row.row_id.unwrap_or(idx as u64 + 1);
+                row.row_id = Some(effective);
+                // Signed interpretation (issue #5835): negative rowids are
+                // stored as two's-complement bit patterns and must never
+                // poison allocation tracking.
+                let signed = effective as i64;
+                max_effective = Some(max_effective.map_or(signed, |m| m.max(signed)));
+                new_rows.push(row);
             }
         }
+        self.max_assigned_rowid = max_effective;
 
         // Replace old vectors with compacted ones
         self.rows = new_rows;

@@ -201,6 +201,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 100,
                 values: vec![SqlValue::Integer(42)],
+                rowid: None,
             },
         );
 
@@ -226,6 +227,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i,
                     values: vec![SqlValue::Integer(i as i64)],
+                    rowid: None,
                 },
             );
             let lsn = writer.append(&entry).unwrap();
@@ -249,6 +251,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 100,
                 values: vec![SqlValue::Varchar(arcstr::ArcStr::from("test"))],
+                rowid: None,
             })
             .unwrap();
 

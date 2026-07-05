@@ -35,8 +35,12 @@ pub(super) fn sort_rows(rows: &mut [RowWithSortKeys]) {
             return sort_cmp;
         }
         // Use rowid as tie-breaker for deterministic ordering matching SQLite behavior
-        // When sort keys are equal, order by rowid (insertion order) ascending
-        row_a.row_id.cmp(&row_b.row_id)
+        // When sort keys are equal, order by rowid (insertion order) ascending.
+        // Rowids are SIGNED (issue #5835): row_id stores the two's-complement
+        // bit pattern of an i64, so compare in signed space — a rowid of -1
+        // (u64::MAX) must sort before 0. Identical to u64 order for
+        // non-negative rowids.
+        row_a.row_id.map(|r| r as i64).cmp(&row_b.row_id.map(|r| r as i64))
     };
 
     #[cfg(feature = "parallel")]

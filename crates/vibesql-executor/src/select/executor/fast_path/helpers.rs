@@ -377,7 +377,12 @@ impl SelectExecutor<'_> {
                                 }
                             }
                             (Some(id_a), Some(id_b)) => {
-                                let raw_cmp = id_a.cmp(&id_b);
+                                // Rowids are SIGNED (issue #5835): row_id is
+                                // the two's-complement bit pattern of an i64,
+                                // so compare in signed space — rowid -1
+                                // (u64::MAX) sorts before 0. Identical to
+                                // u64 order for non-negative rowids.
+                                let raw_cmp = (id_a as i64).cmp(&(id_b as i64));
                                 match dir {
                                     OrderDirection::Asc => raw_cmp,
                                     OrderDirection::Desc => raw_cmp.reverse(),

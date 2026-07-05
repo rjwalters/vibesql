@@ -783,3 +783,210 @@ fn test_load_binary_repopulates_catalog_for_all_indexes() {
     assert!(!m2.is_partial());
     assert_eq!(m2.table_name, "t");
 }
+
+// ---------------------------------------------------------------------------
+// Per-row rowid persistence (format v13, issue #5835)
+// ---------------------------------------------------------------------------
+
+/// Round-trip: explicit rowids survive a save/load, and implicit rowids are
+/// materialized from the row's physical position at save time. Before v13
+/// every reloaded row had `row_id = None` and was silently renumbered by
+/// physical position, so `WHERE rowid=N` targeted different rows across a
+/// process restart.
+#[test]
+fn test_row_id_roundtrip_v13() {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "rowid_rt".to_string(),
+        vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("rowid_rt").unwrap();
+    // Implicit rowid (physical position 0 → rowid 1).
+    table.insert(crate::Row::new(vec![SqlValue::Integer(10)])).unwrap();
+    // Explicit rowid well past the physical count.
+    table.insert(crate::Row::with_row_id(vec![SqlValue::Integer(20)], 42)).unwrap();
+    // Tombstoned row: dropped at save, but the following row's implicit
+    // rowid (physical position 3 → rowid 4) must NOT shift down to 3.
+    table.insert(crate::Row::new(vec![SqlValue::Integer(30)])).unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(40)])).unwrap();
+    assert!(table.mark_deleted_inplace(2));
+
+    let path = format!("/tmp/test_row_id_roundtrip_v13_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("rowid_rt").unwrap();
+    assert_eq!(loaded.row_count(), 3);
+
+    let rowid_of = |x: i64| -> u64 {
+        loaded
+            .scan_live()
+            .find(|(_, r)| matches!(r.values[0], SqlValue::Integer(v) if v == x))
+            .and_then(|(_, r)| r.row_id)
+            .unwrap_or_else(|| panic!("row x={x} must carry a persisted rowid after reload"))
+    };
+    assert_eq!(rowid_of(10), 1, "implicit rowid materialized from physical position");
+    assert_eq!(rowid_of(20), 42, "explicit rowid preserved");
+    assert_eq!(rowid_of(40), 4, "rowid must not shift when a tombstone is dropped at save");
+
+    // Allocation continuity: the next rowid must exceed every persisted one.
+    assert_eq!(loaded.next_rowid(), 43);
+}
+
+/// Negative rowids round-trip and never poison allocation (PR #5891 judge
+/// review). Rowids are signed (SQLite model): `-1` is stored as the
+/// two's-complement bit pattern `u64::MAX`. Before the fix, reload tracked
+/// that bit pattern as an *unsigned* max, so the next `next_rowid()` call
+/// computed `u64::MAX + 1` — a debug panic / a wrap to duplicate rowid 0 in
+/// release builds.
+#[test]
+fn test_negative_row_id_roundtrip_does_not_poison_allocation() {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "neg_rowid".to_string(),
+        vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("neg_rowid").unwrap();
+    table.insert(crate::Row::with_row_id(vec![SqlValue::Integer(5)], (-1i64) as u64)).unwrap();
+
+    let path = format!("/tmp/test_negative_row_id_roundtrip_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("neg_rowid").unwrap();
+
+    // Bit-pattern-faithful round-trip: the reloaded row still carries -1.
+    let rowids: Vec<i64> =
+        loaded.scan_live().map(|(_, r)| r.row_id.expect("persisted rowid") as i64).collect();
+    assert_eq!(rowids, vec![-1], "negative rowid must survive a binary reload");
+
+    // Allocation is signed (sqlite3-verified): after rowid -1 the next
+    // implicit rowid is 0 — NOT u64::MAX + 1 (panic) and NOT a positional
+    // renumber.
+    assert_eq!(loaded.max_rowid_signed(), Some(-1));
+    assert_eq!(loaded.next_rowid_signed(), 0, "sqlite3: after rowid -1, next implicit rowid is 0");
+}
+
+/// A negative INTEGER PRIMARY KEY value is the rowid (alias) and is written
+/// via `*v as u64`; reloading it must keep allocation sane so a REPLACE INTO
+/// (which reserves `next_rowid()`) cannot hit the `u64::MAX + 1` panic path
+/// (PR #5891 judge review, poisoning path 1).
+#[test]
+fn test_negative_ipk_alias_reload_keeps_next_rowid_sane() {
+    let mut db = Database::new();
+
+    let mut schema = TableSchema::with_primary_key(
+        "neg_ipk".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, false),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+        ],
+        vec!["a".to_string()],
+    );
+    schema.set_rowid_alias_column(Some(0));
+    schema.set_sql_source("CREATE TABLE neg_ipk(a INTEGER PRIMARY KEY, b INTEGER)".to_string());
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("neg_ipk").unwrap();
+    table
+        .insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)]))
+        .unwrap();
+
+    let path = format!("/tmp/test_negative_ipk_reload_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("neg_ipk").unwrap();
+
+    // The persisted rowid is the (negative) IPK value, bit-pattern faithful.
+    let rowids: Vec<i64> =
+        loaded.scan_live().map(|(_, r)| r.row_id.expect("persisted rowid") as i64).collect();
+    assert_eq!(rowids, vec![-5]);
+
+    // Signed allocation: next rowid is -4 (sqlite3: signed max + 1), and in
+    // particular next_rowid() is safe to call (no overflow panic).
+    assert_eq!(loaded.max_rowid_signed(), Some(-5));
+    assert_eq!(loaded.next_rowid_signed(), -4);
+    let _ = loaded.next_rowid();
+}
+
+/// The rowid-alias INTEGER PRIMARY KEY column value IS the rowid; the v13
+/// writer persists the alias value so the on-disk rowid stays meaningful.
+#[test]
+fn test_row_id_persists_ipk_alias_value() {
+    let mut db = Database::new();
+
+    let mut schema = TableSchema::with_primary_key(
+        "ipk_alias".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, false),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+        ],
+        vec!["a".to_string()],
+    );
+    schema.set_rowid_alias_column(Some(0));
+    schema.set_sql_source("CREATE TABLE ipk_alias(a INTEGER PRIMARY KEY, b INTEGER)".to_string());
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("ipk_alias").unwrap();
+    table
+        .insert(crate::Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(50)]))
+        .unwrap();
+    table
+        .insert(crate::Row::new(vec![SqlValue::Integer(7), SqlValue::Integer(70)]))
+        .unwrap();
+
+    let path = format!("/tmp/test_row_id_ipk_alias_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("ipk_alias").unwrap();
+
+    // The alias itself must be rehydrated from sql_source (issue #5835).
+    assert_eq!(
+        loaded.schema.rowid_alias_column,
+        Some(0),
+        "INTEGER PRIMARY KEY rowid alias must survive a binary reload"
+    );
+
+    // And each persisted rowid is the IPK value, not the physical position.
+    let rowids: Vec<u64> =
+        loaded.scan_live().map(|(_, r)| r.row_id.expect("persisted rowid")).collect();
+    assert_eq!(rowids, vec![5, 7]);
+}
+
+/// "INT PRIMARY KEY" (not the exact keyword "INTEGER") is NOT a rowid alias
+/// in SQLite; rehydration must not invent one.
+#[test]
+fn test_int_primary_key_is_not_rehydrated_as_rowid_alias() {
+    let mut db = Database::new();
+
+    let mut schema = TableSchema::with_primary_key(
+        "int_pk".to_string(),
+        vec![ColumnSchema::new("a".to_string(), DataType::Integer, false)],
+        vec!["a".to_string()],
+    );
+    schema.set_sql_source("CREATE TABLE int_pk(a INT PRIMARY KEY)".to_string());
+    db.create_table(schema).unwrap();
+
+    let path = format!("/tmp/test_int_pk_no_alias_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(
+        loaded_db.get_table("int_pk").unwrap().schema.rowid_alias_column,
+        None,
+        "INT PRIMARY KEY must not become a rowid alias on reload"
+    );
+}

@@ -1035,6 +1035,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 100,
                 values: vec![SqlValue::Integer(42)],
+                rowid: None,
             })
             .unwrap();
 
@@ -1059,6 +1060,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
             assert_eq!(lsn, i as u64);
@@ -1084,6 +1086,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }
@@ -1114,6 +1117,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }
@@ -1145,6 +1149,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 1,
                 values: vec![SqlValue::Integer(1)],
+                rowid: None,
             })
             .unwrap();
 
@@ -1167,6 +1172,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 1,
                 values: vec![SqlValue::Integer(1)],
+                rowid: None,
             })
             .unwrap();
 
@@ -1195,6 +1201,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }
@@ -1225,6 +1232,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }
@@ -1268,6 +1276,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }
@@ -1313,6 +1322,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
             // LSNs should still be assigned
@@ -1348,6 +1358,7 @@ mod tests {
                     table_name: "main.t".to_string(),
                     row_id: i as u64,
                     values: vec![SqlValue::Integer(i)],
+                    rowid: None,
                 })
                 .unwrap();
         }

@@ -43,7 +43,21 @@ pub enum WalOp {
     // table during recovery: it lives in a different id space than the
     // monotonic `table_id` stored in `CreateTable`.
     /// Insert a row into a table
-    Insert { table_id: u32, table_name: String, row_id: u64, values: Vec<SqlValue> },
+    ///
+    /// `row_id` is the row's physical index at emit time (diagnostic only —
+    /// replay appends rows in LSN order, reproducing physical positions).
+    /// `rowid` (WAL format v3+, issue #5835) is the row's effective SQLite
+    /// rowid: the explicit `Row::row_id` when present, else the implicit
+    /// physical position + 1. Recovery stamps it back onto the replayed row
+    /// so rowid semantics survive a crash. `None` only when parsed from a
+    /// v2-or-earlier log.
+    Insert {
+        table_id: u32,
+        table_name: String,
+        row_id: u64,
+        values: Vec<SqlValue>,
+        rowid: Option<u64>,
+    },
     /// Update a row in a table
     Update {
         table_id: u32,
@@ -168,7 +182,7 @@ impl WalOp {
     /// Serialize the operation to bytes
     pub fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), StorageError> {
         match self {
-            WalOp::Insert { table_id, table_name, row_id, values } => {
+            WalOp::Insert { table_id, table_name, row_id, values, rowid } => {
                 writer
                     .write_all(&[WalOpTag::Insert as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
@@ -176,6 +190,14 @@ impl WalOp {
                 write_string(writer, table_name)?;
                 write_u64(writer, *row_id)?;
                 write_sql_values(writer, values)?;
+                // WAL format v3 (issue #5835): effective rowid trailer.
+                match rowid {
+                    Some(r) => {
+                        write_bool(writer, true)?;
+                        write_u64(writer, *r)?;
+                    }
+                    None => write_bool(writer, false)?,
+                }
             }
             WalOp::Update { table_id, table_name, row_id, old_values, new_values } => {
                 writer
@@ -295,7 +317,19 @@ impl WalOp {
                     if dml_has_table_name { read_string(reader)? } else { String::new() };
                 let row_id = read_u64(reader)?;
                 let values = read_sql_values(reader)?;
-                Ok(WalOp::Insert { table_id, table_name, row_id, values })
+                // WAL format v3 (issue #5835): effective rowid trailer.
+                // Absent in v2-and-earlier logs — replay falls back to the
+                // legacy physical renumbering for such entries.
+                let rowid = if version >= 3 {
+                    if read_bool(reader)? {
+                        Some(read_u64(reader)?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                Ok(WalOp::Insert { table_id, table_name, row_id, values, rowid })
             }
             WalOpTag::Update => {
                 let table_id = read_u32(reader)?;
@@ -429,6 +463,7 @@ mod tests {
                     SqlValue::Varchar(arcstr::ArcStr::from("test")),
                     SqlValue::Boolean(true),
                 ],
+                rowid: Some(101),
             },
         );
 
