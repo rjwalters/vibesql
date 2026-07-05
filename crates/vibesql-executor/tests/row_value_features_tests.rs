@@ -15,6 +15,11 @@
 //! - Nested row values inside IS.
 //! - Join WHERE-clause conjunct coverage: predicates the columnar join path
 //!   cannot consume (e.g. `+col == other`) must not be silently dropped.
+//! - Outer join (LEFT / RIGHT / FULL) with a row-value equality in the ON
+//!   clause: an unmatched row-value predicate must null-extend the other side
+//!   instead of dropping the driving row (rowvalue.test section 12).
+//! - Scalar-subquery row on the LHS of `IN (subquery)` combined with a join
+//!   (rowvalue.test section 18.4).
 //!
 //! Expected values verified against SQLite (rowvalue.test / rowvalue2.test).
 
@@ -59,6 +64,20 @@ fn assert_scalar(db: &vibesql_storage::Database, sql: &str, expected: SqlValue) 
     assert_eq!(actual, expected, "Query: {} -- expected {:?}, got {:?}", sql, expected, actual);
 }
 
+/// Run a SELECT and return every row as a vector of column values.
+fn query_rows(db: &vibesql_storage::Database, sql: &str) -> Vec<Vec<SqlValue>> {
+    let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let executor = SelectExecutor::new(db);
+        let rows = executor
+            .execute(&select_stmt)
+            .unwrap_or_else(|e| panic!("Query failed: {} -- {:?}", sql, e));
+        rows.iter().map(|r| r.values.to_vec()).collect()
+    } else {
+        panic!("Expected SELECT statement: {}", sql);
+    }
+}
+
 /// Run a SELECT and return the first column of every row.
 fn query_column(db: &vibesql_storage::Database, sql: &str) -> Vec<SqlValue> {
     let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
@@ -98,6 +117,12 @@ fn assert_misused(db: &vibesql_storage::Database, sql: &str) {
 }
 
 const I: fn(i64) -> SqlValue = SqlValue::Integer;
+
+/// Build a text `SqlValue` matching how the executor materializes a string
+/// literal (`'x'`).
+fn txt(s: &str) -> SqlValue {
+    SqlValue::Varchar(arcstr::ArcStr::from(s))
+}
 
 // ─── Row-value IN (list) ────────────────────────────────────────────────────
 
@@ -349,4 +374,92 @@ fn join_where_conjunct_with_unary_plus_not_dropped() {
     // The row-value form must agree with the scalar-expanded form.
     let rows = query_column(&db, "SELECT zY FROM r1, r2 WHERE (x, +zY) == (a, iB) ORDER BY zY");
     assert_eq!(rows, vec![I(35)]);
+}
+
+// ─── Outer join with a row-value ON constraint (null-extension) ─────────────
+//
+// rowvalue.test section 12 (ticket fef4bb4bd9185ec8f): when a row-value
+// equality in an outer-join ON clause does not match, the unmatched side must
+// be null-extended rather than dropping the driving row entirely.
+
+fn make_t1_t2(db: &mut vibesql_storage::Database) {
+    run_stmt(db, "CREATE TABLE t1(a INT, b INT)");
+    run_stmt(db, "INSERT INTO t1 VALUES(1, 2)");
+    run_stmt(db, "CREATE TABLE t2(x INT, y INT)");
+    run_stmt(db, "INSERT INTO t2 VALUES(3, 4)");
+}
+
+#[test]
+fn left_join_row_value_on_null_extends() {
+    let mut db = vibesql_storage::Database::new();
+    make_t1_t2(&mut db);
+    // rowvalue.test 12.1: {1 2 {} {} x}. The ON row-value never matches, so the
+    // t2 columns null-extend and the t1 row is preserved.
+    let rows = query_rows(
+        &db,
+        "SELECT a, b, x, y, 'x' FROM t1 LEFT JOIN t2 ON (a,b)=(x,y)",
+    );
+    assert_eq!(
+        rows,
+        vec![vec![
+            I(1),
+            I(2),
+            SqlValue::Null,
+            SqlValue::Null,
+            txt("x"),
+        ]]
+    );
+}
+
+#[test]
+fn right_join_row_value_on_null_extends() {
+    let mut db = vibesql_storage::Database::new();
+    make_t1_t2(&mut db);
+    // rowvalue.test 12.2: {1 2 - -}. t1 is the preserved side of the RIGHT JOIN.
+    let rows = query_rows(
+        &db,
+        "SELECT t1.a, t1.b, t2.x, t2.y FROM t2 RIGHT JOIN t1 ON (a,b)=(x,y)",
+    );
+    assert_eq!(rows, vec![vec![I(1), I(2), SqlValue::Null, SqlValue::Null]]);
+}
+
+#[test]
+fn full_join_row_value_on_null_extends() {
+    let mut db = vibesql_storage::Database::new();
+    make_t1_t2(&mut db);
+    // rowvalue.test 12.3: both rows are null-extended because the row-value ON
+    // predicate never matches — {1 2 - -} and {- - 3 4}.
+    let rows = query_rows(
+        &db,
+        "SELECT t1.a, t1.b, t2.x, t2.y FROM t1 FULL JOIN t2 ON (a,b)=(x,y) \
+         ORDER BY coalesce(a, x)",
+    );
+    assert_eq!(
+        rows,
+        vec![
+            vec![I(1), I(2), SqlValue::Null, SqlValue::Null],
+            vec![SqlValue::Null, SqlValue::Null, I(3), I(4)],
+        ]
+    );
+}
+
+#[test]
+fn scalar_subquery_lhs_of_in_with_join() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE b3(a, b, PRIMARY KEY(a, b))");
+    run_stmt(&mut db, "CREATE TABLE b4(a)");
+    run_stmt(&mut db, "CREATE TABLE b5(a, b)");
+    run_stmt(&mut db, "INSERT INTO b3 VALUES(1, 1)");
+    run_stmt(&mut db, "INSERT INTO b3 VALUES(1, 2)");
+    run_stmt(&mut db, "INSERT INTO b4 VALUES(1)");
+    run_stmt(&mut db, "INSERT INTO b5 VALUES(1, 1)");
+    run_stmt(&mut db, "INSERT INTO b5 VALUES(1, 2)");
+    // rowvalue.test 18.4: a scalar-subquery row on the LHS of IN combined with a
+    // join — {1 1 1} and {1 2 1}.
+    let rows = query_rows(
+        &db,
+        "SELECT * FROM b3 JOIN b4 ON b4.a = b3.a \
+         WHERE (SELECT b3.a, b3.b) IN (SELECT a, b FROM b5)",
+    );
+    assert_eq!(rows, vec![vec![I(1), I(1), I(1)], vec![I(1), I(2), I(1)]]);
 }
