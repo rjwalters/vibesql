@@ -38,7 +38,10 @@ use std::{
 };
 
 use crate::{
-    persistence::binary::{read_catalog_v, read_data, read_header},
+    persistence::binary::{
+        constraints::{rehydrate_constraints_from_sql_source, ParentColumnLookup},
+        read_catalog_v, read_data, read_header,
+    },
     wal::{
         checkpoint::{read_checkpoint_data, CheckpointInfo, CheckpointWriter},
         entry::{Lsn, WalOp},
@@ -765,8 +768,22 @@ impl RecoveryManager {
             WalOp::CreateTable { table_id: _, table_name, schema_data } => {
                 // Deserialize schema and create table
                 match deserialize_table_schema(&schema_data) {
-                    Ok(schema) => {
+                    Ok(mut schema) => {
                         if db.get_table(&table_name).is_none() {
+                            // Rebuild CHECK/FK constraints and the INTEGER
+                            // PRIMARY KEY rowid alias from the sql_source
+                            // carried in the schema-blob trailer (issue
+                            // #5883), routing through the SAME rehydration
+                            // the checkpoint load path uses (issue #5834 /
+                            // PR #5878). Without this, a table whose CREATE
+                            // TABLE was logged after the last checkpoint
+                            // came back from a crash with none of its
+                            // constraints enforced. Rehydration failure is a
+                            // hard recovery error — constraint loss must
+                            // never be silent (recovery-failure policy).
+                            let parents = parent_column_lookup(db, &schema, &table_name);
+                            rehydrate_constraints_from_sql_source(&mut schema, &parents)?;
+
                             if let Err(e) = db.create_table(schema) {
                                 log::warn!(
                                     "Failed to create table {} during recovery: {}",
@@ -875,7 +892,138 @@ fn deserialize_table_schema(data: &[u8]) -> Result<vibesql_catalog::TableSchema,
         columns.push(ColumnSchema::new(column_name, data_type, nullable));
     }
 
-    Ok(TableSchema::new(table_name, columns))
+    // ---- Constraint/durability trailer (issue #5883) ----
+    //
+    // Blobs written before the trailer existed end exactly after the column
+    // list; their tables come back without PK/sql_source (the pre-#5883
+    // behavior). Newer blobs carry a versioned trailer with the primary key,
+    // the WITHOUT ROWID flag, and the verbatim CREATE TABLE sql_source —
+    // mirroring the per-table durability fields of the checkpoint catalog so
+    // the replay path can rehydrate constraints identically.
+    let mut primary_key: Option<Vec<String>> = None;
+    let mut without_rowid = false;
+    let mut sql_source: Option<String> = None;
+
+    if pos < data.len() {
+        let trailer_version = data[pos];
+        pos += 1;
+        if trailer_version < 1 {
+            return Err(StorageError::IoError(format!(
+                "Invalid schema data: unsupported trailer version {}",
+                trailer_version
+            )));
+        }
+
+        // Version 1 fields. Future trailer versions append fields after
+        // these, so a v1 reader parses what it knows and ignores the rest.
+        if read_trailer_u8(data, &mut pos, "primary-key flag")? != 0 {
+            let pk_count = read_trailer_u32(data, &mut pos, "primary-key column count")? as usize;
+            let mut pk_cols = Vec::with_capacity(pk_count);
+            for _ in 0..pk_count {
+                pk_cols.push(read_trailer_cstr(data, &mut pos, "primary-key column name")?);
+            }
+            primary_key = Some(pk_cols);
+        }
+
+        without_rowid = read_trailer_u8(data, &mut pos, "WITHOUT ROWID flag")? != 0;
+
+        if read_trailer_u8(data, &mut pos, "sql_source flag")? != 0 {
+            let len = read_trailer_u32(data, &mut pos, "sql_source length")? as usize;
+            if pos + len > data.len() {
+                return Err(StorageError::IoError(
+                    "Invalid schema data: truncated sql_source".to_string(),
+                ));
+            }
+            let src = String::from_utf8(data[pos..pos + len].to_vec()).map_err(|e| {
+                StorageError::IoError(format!("Invalid UTF-8 in sql_source: {}", e))
+            })?;
+            sql_source = Some(src);
+        }
+    }
+
+    let mut schema = match primary_key {
+        Some(pk_cols) => TableSchema::with_primary_key(table_name, columns, pk_cols),
+        None => TableSchema::new(table_name, columns),
+    };
+    schema.without_rowid = without_rowid;
+    if let Some(src) = sql_source {
+        schema.set_sql_source(src);
+    }
+
+    Ok(schema)
+}
+
+/// Read a single byte from the schema-blob trailer.
+fn read_trailer_u8(data: &[u8], pos: &mut usize, what: &str) -> Result<u8, StorageError> {
+    if *pos >= data.len() {
+        return Err(StorageError::IoError(format!("Invalid schema data: missing {}", what)));
+    }
+    let b = data[*pos];
+    *pos += 1;
+    Ok(b)
+}
+
+/// Read a little-endian u32 from the schema-blob trailer.
+fn read_trailer_u32(data: &[u8], pos: &mut usize, what: &str) -> Result<u32, StorageError> {
+    if *pos + 4 > data.len() {
+        return Err(StorageError::IoError(format!("Invalid schema data: missing {}", what)));
+    }
+    let v = u32::from_le_bytes([data[*pos], data[*pos + 1], data[*pos + 2], data[*pos + 3]]);
+    *pos += 4;
+    Ok(v)
+}
+
+/// Read a null-terminated UTF-8 string from the schema-blob trailer.
+fn read_trailer_cstr(data: &[u8], pos: &mut usize, what: &str) -> Result<String, StorageError> {
+    let end = data[*pos..]
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| StorageError::IoError(format!("Invalid schema data: missing {}", what)))?;
+    let s = String::from_utf8(data[*pos..*pos + end].to_vec())
+        .map_err(|e| StorageError::IoError(format!("Invalid UTF-8 in {}: {}", what, e)))?;
+    *pos += end + 1;
+    Ok(s)
+}
+
+/// Build the FK parent-column lookup for rehydrating a table replayed from a
+/// WAL `CreateTable` op (issue #5883).
+///
+/// Covers every table already recovered (from the checkpoint base and from
+/// earlier WAL entries — a parent's CreateTable precedes its child's in LSN
+/// order) plus the table being created itself (self-referential FKs). Keys
+/// are lowercased, both schema-qualified ("main.p") and bare ("p"), because
+/// FK clauses reference parents by whatever name the user wrote. A missing
+/// parent degrades to placeholder indices, exactly like the checkpoint path
+/// (enforcement resolves parents by name at runtime).
+fn parent_column_lookup(
+    db: &Database,
+    schema: &vibesql_catalog::TableSchema,
+    qualified_name: &str,
+) -> ParentColumnLookup {
+    let mut parents: ParentColumnLookup = HashMap::new();
+
+    let insert_keys =
+        |parents: &mut HashMap<String, Vec<String>>, name: &str, cols: &Vec<String>| {
+            parents.insert(name.to_lowercase(), cols.clone());
+            if let Some((_, bare)) = name.split_once('.') {
+                parents.entry(bare.to_lowercase()).or_insert_with(|| cols.clone());
+            }
+        };
+
+    for name in db.list_tables() {
+        if let Some(table) = db.get_table(&name) {
+            let cols: Vec<String> = table.schema.columns.iter().map(|c| c.name.clone()).collect();
+            insert_keys(&mut parents, &name, &cols);
+        }
+    }
+
+    // The table being created: cover self-referential FKs under both its
+    // schema name and the qualified WAL name.
+    let own_cols: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
+    insert_keys(&mut parents, &schema.name, &own_cols);
+    insert_keys(&mut parents, qualified_name, &own_cols);
+
+    parents
 }
 
 /// Parse a DataType from its debug string representation
@@ -1336,10 +1484,12 @@ mod tests {
         db.get_table(qualified).map(|t| t.scan_live().count()).unwrap_or(0)
     }
 
-    /// Serialize a schema into the WAL `CreateTable.schema_data` layout that
-    /// `deserialize_table_schema` (in this module) expects. Mirrors the
-    /// production `serialize_table_schema` helper, kept local to avoid reaching
-    /// into the private `database::table_api` module from a test.
+    /// Serialize a schema into the LEGACY (pre-#5883, trailer-less) WAL
+    /// `CreateTable.schema_data` layout: name/columns only. Kept as the
+    /// backward-compatibility fixture — blobs written by older binaries end
+    /// exactly after the column list, and `deserialize_table_schema` must
+    /// still accept them. New-format round-trips go through the production
+    /// `crate::database::serialize_table_schema` instead.
     fn serialize_schema_for_test(schema: &TableSchema) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend_from_slice(schema.name.as_bytes());
@@ -2084,5 +2234,220 @@ mod tests {
             .unwrap();
         assert!(db.get_table("main.checkpointed").is_some());
         assert!(db.get_table("main.legacy_snapshot").is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #5883: CreateTable log replay must not drop PK / constraints
+    // ------------------------------------------------------------------
+
+    /// The schema-blob trailer round-trips PK, WITHOUT ROWID, and sql_source
+    /// through the PRODUCTION serializer + this module's deserializer.
+    #[test]
+    fn test_schema_blob_trailer_roundtrip() {
+        let mut schema = TableSchema::with_primary_key(
+            "wr".to_string(),
+            vec![
+                ColumnSchema::new("a".to_string(), DataType::Integer, false),
+                ColumnSchema::new("b".to_string(), DataType::Integer, false),
+            ],
+            vec!["a".to_string(), "b".to_string()],
+        );
+        schema.without_rowid = true;
+        schema.set_sql_source(
+            "CREATE TABLE wr(a INTEGER, b INTEGER, PRIMARY KEY(a,b)) WITHOUT ROWID".to_string(),
+        );
+
+        let blob = crate::database::serialize_table_schema(&schema);
+        let out = deserialize_table_schema(&blob).unwrap();
+
+        assert_eq!(out.primary_key, Some(vec!["a".to_string(), "b".to_string()]));
+        assert!(out.without_rowid, "WITHOUT ROWID must survive the blob round-trip");
+        assert_eq!(out.sql_source, schema.sql_source);
+    }
+
+    /// A legacy blob (no trailer) still deserializes, with the pre-#5883
+    /// defaults: no PK, no sql_source, rowid table.
+    #[test]
+    fn test_schema_blob_without_trailer_still_parses() {
+        let schema = simple_schema("legacy");
+        let blob = serialize_schema_for_test(&schema);
+        let out = deserialize_table_schema(&blob).unwrap();
+
+        assert_eq!(out.name, "legacy");
+        assert_eq!(out.columns.len(), 2);
+        assert_eq!(out.primary_key, None);
+        assert!(!out.without_rowid);
+        assert_eq!(out.sql_source, None);
+    }
+
+    /// End-to-end crash replay: a parent + child created AFTER the last
+    /// checkpoint (WAL-only, like the executor does — PK and sql_source set
+    /// on the schema before `create_table`) must come back from recovery
+    /// with PK, CHECK, FK (with actions), and the INTEGER PRIMARY KEY rowid
+    /// alias intact. This was the #5883 gap: checkpoint-based recovery
+    /// rehydrated all of these (#5878), but log replay dropped every one.
+    #[test]
+    fn test_create_table_replay_restores_pk_constraints_and_rowid_alias() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        // --- Session 1: create parent + child with constraints, flush the
+        // WAL, then "crash" (no checkpoint is ever written).
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            let mut parent = TableSchema::with_primary_key(
+                "p".to_string(),
+                vec![ColumnSchema::new("x".to_string(), DataType::Integer, false)],
+                vec!["x".to_string()],
+            );
+            parent.set_sql_source("CREATE TABLE p(x INTEGER PRIMARY KEY)".to_string());
+            db.create_table(parent).unwrap();
+
+            let mut child = TableSchema::with_primary_key(
+                "c".to_string(),
+                vec![
+                    ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                    ColumnSchema::new("y".to_string(), DataType::Integer, true),
+                    ColumnSchema::new("z".to_string(), DataType::Integer, true),
+                ],
+                vec!["id".to_string()],
+            );
+            child.set_sql_source(
+                "CREATE TABLE c(id INTEGER PRIMARY KEY, \
+                 y INTEGER REFERENCES p(x) ON DELETE CASCADE, \
+                 z INTEGER CHECK(z > 0))"
+                    .to_string(),
+            );
+            db.create_table(child).unwrap();
+
+            db.insert_row("main.p", crate::row::Row::new(vec![SqlValue::Integer(1)])).unwrap();
+            db.insert_row(
+                "main.c",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(10),
+                    SqlValue::Integer(1),
+                    SqlValue::Integer(5),
+                ]),
+            )
+            .unwrap();
+
+            db.sync_persistence().unwrap();
+        }
+
+        // --- Session 2: recover from the WAL alone.
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.tables_created, 2);
+
+        let child = &db.get_table("main.c").expect("child table recovered").schema;
+
+        // PK survives (was: None after log replay).
+        assert_eq!(child.primary_key, Some(vec!["id".to_string()]));
+
+        // INTEGER PRIMARY KEY rowid alias survives (interacts with the WAL
+        // v3 rowid trailers from #5835/#5891: replayed rows carry their
+        // rowids, and the alias makes `WHERE rowid=N` resolve through `id`).
+        assert_eq!(child.rowid_alias_column, Some(0), "IPK rowid alias must be rebuilt");
+
+        // CHECK constraint survives.
+        assert_eq!(child.check_constraints.len(), 1, "CHECK must be rehydrated");
+        assert_eq!(child.check_constraints[0].0, "z>0");
+
+        // FK survives with its action and resolved parent columns (the
+        // parent's CreateTable precedes the child's in the WAL).
+        assert_eq!(child.foreign_keys.len(), 1, "FK must be rehydrated");
+        let fk = &child.foreign_keys[0];
+        assert_eq!(fk.parent_table, "p");
+        assert_eq!(fk.column_names, vec!["y".to_string()]);
+        assert_eq!(fk.parent_column_names, vec!["x".to_string()]);
+        assert_eq!(fk.parent_column_indices, vec![0]);
+        assert_eq!(fk.on_delete, vibesql_catalog::ReferentialAction::Cascade);
+
+        // Parent PK also survives.
+        let parent = &db.get_table("main.p").expect("parent table recovered").schema;
+        assert_eq!(parent.primary_key, Some(vec!["x".to_string()]));
+        assert_eq!(parent.rowid_alias_column, Some(0));
+
+        // Row data replays alongside the constraint state.
+        assert_eq!(live_row_count(&db, "main.p"), 1);
+        assert_eq!(live_row_count(&db, "main.c"), 1);
+    }
+
+    /// A WAL-replayed table whose schema blob has no trailer (written by an
+    /// older binary) still recovers — without constraints, as before #5883.
+    #[test]
+    fn test_create_table_replay_accepts_legacy_blob() {
+        use crate::wal::entry::WalEntry;
+        use crate::wal::writer::WalWriter;
+
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let schema = simple_schema("old");
+        let schema_data = serialize_schema_for_test(&schema);
+        {
+            let file = std::fs::File::create(&wal_path).unwrap();
+            let mut writer = WalWriter::create(file).unwrap();
+            writer
+                .append(&WalEntry::new(
+                    1,
+                    0,
+                    WalOp::CreateTable { table_id: 0, table_name: "main.old".into(), schema_data },
+                ))
+                .unwrap();
+            writer.flush().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.tables_created, 1);
+        let schema = &db.get_table("main.old").expect("legacy table recovered").schema;
+        assert_eq!(schema.primary_key, None);
+        assert!(schema.check_constraints.is_empty());
+        assert!(schema.foreign_keys.is_empty());
+    }
+
+    /// An unparseable sql_source in a replayed CreateTable is a HARD recovery
+    /// error — constraint loss must never be silent (same policy as the
+    /// checkpoint load path, #5833/#5834).
+    #[test]
+    fn test_create_table_replay_bad_sql_source_fails_loudly() {
+        use crate::wal::entry::WalEntry;
+        use crate::wal::writer::WalWriter;
+
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let mut schema = simple_schema("broken");
+        schema.set_sql_source("CREATE GIBBERISH broken(".to_string());
+        let schema_data = crate::database::serialize_table_schema(&schema);
+        {
+            let file = std::fs::File::create(&wal_path).unwrap();
+            let mut writer = WalWriter::create(file).unwrap();
+            writer
+                .append(&WalEntry::new(
+                    1,
+                    0,
+                    WalOp::CreateTable {
+                        table_id: 0,
+                        table_name: "main.broken".into(),
+                        schema_data,
+                    },
+                ))
+                .unwrap();
+            writer.flush().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        assert!(
+            manager.recover().is_err(),
+            "an unparseable sql_source must fail recovery loudly, never load unenforced"
+        );
     }
 }

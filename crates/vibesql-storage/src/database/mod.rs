@@ -26,6 +26,11 @@ pub mod transactions;
 mod tests;
 
 pub use core::{Database, ExportedSpatialIndexMetadata as SpatialIndexMetadata};
+// The WAL recovery path (`wal::recovery`) shares the CreateTable schema-blob
+// layout with the emit path here; its tests round-trip through the real
+// serializer (issue #5883). Test-only: production replay only deserializes.
+#[cfg(test)]
+pub(crate) use table_api::serialize_table_schema;
 
 pub use config::{DatabaseConfig, SpillPolicy, DEFAULT_COLUMNAR_CACHE_BUDGET};
 pub use index_ops::{
