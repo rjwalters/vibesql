@@ -248,6 +248,7 @@ mod tests {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }
     }
 

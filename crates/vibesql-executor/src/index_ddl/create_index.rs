@@ -156,6 +156,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -166,6 +167,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -176,6 +178,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
             ],
             table_constraints: vec![],
@@ -184,6 +187,7 @@ mod tests {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -455,6 +459,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "b".to_string(),
@@ -465,6 +470,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
             ],
             table_constraints: vec![],
@@ -473,6 +479,7 @@ mod tests {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         }
     }
 
@@ -593,6 +600,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "embedding".to_string(),
@@ -603,6 +611,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 ColumnDef {
                     name: "content".to_string(),
@@ -613,6 +622,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
             ],
             table_constraints: vec![],
@@ -621,6 +631,7 @@ mod tests {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         };
 
         CreateTableExecutor::execute(&stmt, db).unwrap();
@@ -1018,6 +1029,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 vibesql_ast::ColumnDef {
                     name: "price".to_string(),
@@ -1028,6 +1040,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
                 vibesql_ast::ColumnDef {
                     name: "discount".to_string(),
@@ -1038,6 +1051,7 @@ mod tests {
                     comment: None,
                     generated_expr: None,
                     is_exact_integer_type: false,
+                    type_source: None,
                 },
             ],
             table_constraints: vec![],
@@ -1046,6 +1060,7 @@ mod tests {
             name_source: None,
             as_query: None,
             without_rowid: false,
+            strict: false,
         };
         crate::CreateTableExecutor::execute(&table_stmt, &mut db).unwrap();
 

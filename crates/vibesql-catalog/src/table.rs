@@ -8,6 +8,65 @@ pub use vibesql_ast::StorageFormat;
 
 use crate::{column::ColumnSchema, foreign_key::ForeignKeyConstraint};
 
+/// The storage-type classification of a column in a SQLite STRICT table.
+///
+/// STRICT tables (<https://sqlite.org/stricttables.html>) allow exactly six
+/// declared datatypes. Each maps to a rigid runtime type that INSERT/UPDATE
+/// values must match (after the documented lossless coercions). This is kept
+/// distinct from [`vibesql_types::DataType`] because the two ends of the map
+/// are lossy: `ANY` and `BLOB` both parse to `DataType::BinaryLargeObject`, and
+/// `INT` vs `INTEGER` both parse to `DataType::Integer` — yet STRICT must treat
+/// each pair differently (ANY accepts everything; the error message echoes the
+/// exact declared keyword).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrictType {
+    /// `INT`
+    Int,
+    /// `INTEGER`
+    Integer,
+    /// `REAL`
+    Real,
+    /// `TEXT`
+    Text,
+    /// `BLOB`
+    Blob,
+    /// `ANY` — accepts any value, stored as-is (no type check, no coercion).
+    Any,
+}
+
+impl StrictType {
+    /// The canonical declared keyword for this strict type, used verbatim in
+    /// SQLite's `cannot store <T> value in <KEYWORD> column <tbl>.<col>` errors.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            StrictType::Int => "INT",
+            StrictType::Integer => "INTEGER",
+            StrictType::Real => "REAL",
+            StrictType::Text => "TEXT",
+            StrictType::Blob => "BLOB",
+            StrictType::Any => "ANY",
+        }
+    }
+
+    /// Classify a declared datatype's verbatim source text for a STRICT table.
+    ///
+    /// Returns `Some(strict_type)` only for the six allowed datatypes (matched
+    /// case-insensitively, with no size/precision specifier). Any other spelling
+    /// — including a parameterized form like `TEXT(50)` — returns `None`, which
+    /// the DDL layer reports as `unknown datatype for <tbl>.<col>: "<text>"`.
+    pub fn classify(declared_type: &str) -> Option<StrictType> {
+        match declared_type.trim().to_ascii_uppercase().as_str() {
+            "INT" => Some(StrictType::Int),
+            "INTEGER" => Some(StrictType::Integer),
+            "REAL" => Some(StrictType::Real),
+            "TEXT" => Some(StrictType::Text),
+            "BLOB" => Some(StrictType::Blob),
+            "ANY" => Some(StrictType::Any),
+            _ => None,
+        }
+    }
+}
+
 /// Table schema definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableSchema {
@@ -32,6 +91,17 @@ pub struct TableSchema {
     pub rowid_alias_column: Option<usize>,
     /// If true, table was created with WITHOUT ROWID clause (SQLite compatibility).
     pub without_rowid: bool,
+    /// If true, table was created with the STRICT clause (SQLite compatibility).
+    /// STRICT tables enforce rigid per-column datatypes on INSERT/UPDATE. See
+    /// <https://sqlite.org/stricttables.html>.
+    pub strict: bool,
+    /// Per-column STRICT storage-type classification, parallel to `columns`.
+    /// Empty when the table is not STRICT. When non-empty, `strict_types[i]` is
+    /// the declared strict type of `columns[i]` (validated at CREATE time to be
+    /// one of INT/INTEGER/REAL/TEXT/BLOB/ANY). Not serialized in the binary
+    /// catalog — it is rederived from `sql_source` on load (see the storage
+    /// crate's constraint rehydration), so no binary format bump is needed.
+    pub strict_types: Vec<StrictType>,
     /// If true, this schema is a pseudo-schema standing in for a VIEW rather than
     /// a base table. Views have no implicit rowid, so references to the
     /// `rowid`/`oid`/`_rowid_` pseudo-columns against a view must error with
@@ -88,7 +158,19 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
+    }
+
+    /// The STRICT storage type of the column at `col_idx`, or `None` when the
+    /// table is not STRICT (or `col_idx` is out of range). Callers use this to
+    /// gate STRICT type enforcement on INSERT/UPDATE.
+    pub fn strict_type_of(&self, col_idx: usize) -> Option<StrictType> {
+        if !self.strict {
+            return None;
+        }
+        self.strict_types.get(col_idx).copied()
     }
 
     /// Create a table schema with a primary key
@@ -112,6 +194,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 
@@ -136,6 +220,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 
@@ -160,6 +246,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 
@@ -185,6 +273,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 
@@ -212,6 +302,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 
@@ -236,6 +328,8 @@ impl TableSchema {
             without_rowid: false,
             is_view: false,
             sql_source: None,
+            strict: false,
+            strict_types: Vec::new(),
         }
     }
 

@@ -27,6 +27,7 @@ fn test_create_table_with_column_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -37,6 +38,7 @@ fn test_create_table_with_column_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -45,6 +47,7 @@ fn test_create_table_with_column_primary_key() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -72,6 +75,7 @@ fn test_create_table_with_table_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "tenant_id".to_string(),
@@ -82,6 +86,7 @@ fn test_create_table_with_table_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -107,6 +112,7 @@ fn test_create_table_with_table_primary_key() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -137,6 +143,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![TableConstraint {
             name: None,
@@ -154,6 +161,7 @@ fn test_create_table_with_multiple_primary_keys_fails() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -180,6 +188,7 @@ fn test_create_table_with_column_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -193,6 +202,7 @@ fn test_create_table_with_column_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -201,6 +211,7 @@ fn test_create_table_with_column_unique_constraint() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -228,6 +239,7 @@ fn test_create_table_with_table_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "last_name".to_string(),
@@ -238,6 +250,7 @@ fn test_create_table_with_table_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -263,6 +276,7 @@ fn test_create_table_with_table_unique_constraint() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -303,6 +317,7 @@ fn test_create_table_with_check_constraint() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -310,6 +325,7 @@ fn test_create_table_with_check_constraint() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -346,6 +362,7 @@ fn test_auto_index_for_single_column_primary_key() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -353,6 +370,7 @@ fn test_auto_index_for_single_column_primary_key() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -395,6 +413,7 @@ fn test_integer_primary_key_no_autoindex() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: true, // Must be true for INTEGER PRIMARY KEY rowid aliasing
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -402,6 +421,7 @@ fn test_integer_primary_key_no_autoindex() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -436,6 +456,7 @@ fn test_auto_index_for_composite_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "b".to_string(),
@@ -446,6 +467,7 @@ fn test_auto_index_for_composite_primary_key() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -471,6 +493,7 @@ fn test_auto_index_for_composite_primary_key() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -506,6 +529,7 @@ fn test_auto_index_for_single_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -519,6 +543,7 @@ fn test_auto_index_for_single_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -527,6 +552,7 @@ fn test_auto_index_for_single_unique_constraint() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -563,6 +589,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -576,6 +603,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "phone".to_string(),
@@ -589,6 +617,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -597,6 +626,7 @@ fn test_auto_index_for_multiple_unique_constraints() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -630,6 +660,7 @@ fn test_auto_index_for_composite_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "b".to_string(),
@@ -640,6 +671,7 @@ fn test_auto_index_for_composite_unique_constraint() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![TableConstraint {
@@ -665,6 +697,7 @@ fn test_auto_index_for_composite_unique_constraint() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -705,6 +738,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -718,6 +752,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -726,6 +761,7 @@ fn test_auto_index_for_primary_key_plus_unique() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -765,6 +801,7 @@ fn test_auto_index_visible_in_catalog() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "email".to_string(),
@@ -778,6 +815,7 @@ fn test_auto_index_visible_in_catalog() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -786,6 +824,7 @@ fn test_auto_index_visible_in_catalog() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);

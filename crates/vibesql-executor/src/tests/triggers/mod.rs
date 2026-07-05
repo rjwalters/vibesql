@@ -42,6 +42,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -49,6 +50,7 @@ pub(super) fn create_audit_table(db: &mut Database) {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create audit_log table");
 }
@@ -69,6 +71,7 @@ pub(super) fn create_users_table(db: &mut Database) {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             vibesql_ast::ColumnDef {
                 name: "username".to_string(),
@@ -79,6 +82,7 @@ pub(super) fn create_users_table(db: &mut Database) {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -87,6 +91,7 @@ pub(super) fn create_users_table(db: &mut Database) {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt, db).expect("Failed to create users table");
 }

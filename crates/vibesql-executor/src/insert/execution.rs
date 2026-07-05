@@ -655,8 +655,20 @@ fn execute_insert_internal(
                 cte_results.as_ref(),
             )?;
 
-            // Type check and coerce: ensure value matches column type
-            let coerced_value = super::validation::coerce_value(value, data_type)?;
+            // Type check and coerce: ensure value matches column type.
+            // STRICT tables (issue #5837) apply SQLite's rigid strict-datatype
+            // rules (with lossless coercions) in place of the default affinity
+            // coercion, erroring with `cannot store <T> value in <T> column ...`.
+            let coerced_value = if let Some(st) = schema.strict_type_of(*col_idx) {
+                crate::strict::enforce_strict_type(
+                    value,
+                    st,
+                    &schema.name,
+                    &schema.columns[*col_idx].name,
+                )?
+            } else {
+                super::validation::coerce_value(value, data_type)?
+            };
 
             // INTEGER PRIMARY KEY validation: only accept Integer or Null (for auto-generation)
             // SQLite rejects non-integer values with "datatype mismatch"

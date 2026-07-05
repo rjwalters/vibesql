@@ -22,6 +22,7 @@ fn test_index_ordering() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -32,6 +33,7 @@ fn test_index_ordering() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -40,6 +42,7 @@ fn test_index_ordering() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     vibesql_executor::CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

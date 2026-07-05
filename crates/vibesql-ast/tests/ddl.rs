@@ -20,6 +20,7 @@ fn test_create_table_statement() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -30,6 +31,7 @@ fn test_create_table_statement() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -38,6 +40,7 @@ fn test_create_table_statement() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     });
 
     match stmt {
@@ -57,6 +60,7 @@ fn test_column_def() {
         comment: None,
         generated_expr: None,
         is_exact_integer_type: false,
+        type_source: None,
     };
     assert_eq!(col.name, "email");
     assert!(!col.nullable);

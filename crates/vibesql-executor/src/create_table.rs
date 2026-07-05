@@ -45,7 +45,7 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false,
+    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
     ///         },
     ///         ColumnDef {
     ///             name: "name".to_string(),
@@ -54,14 +54,14 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false,
+    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
     ///         },
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
     ///     name_source: None,
-    ///     as_query: None, without_rowid: false,
+    ///     as_query: None, without_rowid: false, strict: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -353,6 +353,17 @@ impl CreateTableExecutor {
 
         // Apply WITHOUT ROWID flag from AST (SQLite compatibility)
         table_schema.without_rowid = stmt.without_rowid;
+
+        // Apply STRICT flag + per-column strict types (SQLite STRICT tables,
+        // issue #5837). Validation errors (missing / unknown datatype) fire here
+        // — before the table is inserted into the catalog — so an invalid STRICT
+        // CREATE never leaves a half-formed table behind.
+        if stmt.strict {
+            let strict_types =
+                crate::strict::classify_strict_columns(&table_name, &stmt.columns)?;
+            table_schema.strict = true;
+            table_schema.strict_types = strict_types;
+        }
 
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);

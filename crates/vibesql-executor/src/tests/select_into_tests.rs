@@ -21,6 +21,7 @@ fn test_select_into_single_row() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             vibesql_ast::ColumnDef {
                 name: "name".to_string(),
@@ -31,6 +32,7 @@ fn test_select_into_single_row() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -39,6 +41,7 @@ fn test_select_into_single_row() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -147,6 +150,7 @@ fn test_select_into_no_rows_error() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -154,6 +158,7 @@ fn test_select_into_no_rows_error() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -218,6 +223,7 @@ fn test_select_into_multiple_rows_error() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -225,6 +231,7 @@ fn test_select_into_multiple_rows_error() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 
@@ -299,6 +306,7 @@ fn test_select_into_with_expressions() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -306,6 +314,7 @@ fn test_select_into_with_expressions() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
 

@@ -27,6 +27,7 @@ fn test_create_spatial_index_basic() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -37,6 +38,7 @@ fn test_create_spatial_index_basic() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -45,6 +47,7 @@ fn test_create_spatial_index_basic() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -87,6 +90,7 @@ fn test_spatial_index_multiple_columns_error() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location1".to_string(),
@@ -97,6 +101,7 @@ fn test_spatial_index_multiple_columns_error() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location2".to_string(),
@@ -107,6 +112,7 @@ fn test_spatial_index_multiple_columns_error() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -115,6 +121,7 @@ fn test_spatial_index_multiple_columns_error() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -163,6 +170,7 @@ fn test_drop_spatial_index() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -173,6 +181,7 @@ fn test_drop_spatial_index() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -181,6 +190,7 @@ fn test_drop_spatial_index() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();
@@ -230,6 +240,7 @@ fn test_spatial_index_if_not_exists() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -240,6 +251,7 @@ fn test_spatial_index_if_not_exists() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -248,6 +260,7 @@ fn test_spatial_index_if_not_exists() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     CreateTableExecutor::execute(&create_table_stmt, &mut db).unwrap();

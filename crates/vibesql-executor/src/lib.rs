@@ -48,6 +48,7 @@ mod select_into;
 pub mod session;
 pub mod sqlite_schema;
 pub mod sqlite_stat;
+pub mod strict;
 pub mod timeout;
 mod transaction;
 mod trigger_ddl;

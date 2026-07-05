@@ -1233,6 +1233,67 @@ mod tests {
         );
     }
 
+    /// Issue #5837: a STRICT table's `strict` flag and per-column strict types
+    /// must survive a binary catalog round-trip. Neither is serialized as a
+    /// dedicated field — both are rederived from the persisted `sql_source` on
+    /// load — so no binary format bump was required. ANY must remain
+    /// distinguishable from BLOB after reload.
+    #[test]
+    fn test_binary_catalog_strict_round_trip() {
+        let mut db = Database::new();
+        let make_col = |name: &str, dt: vibesql_types::DataType| {
+            let is_exact = matches!(dt, vibesql_types::DataType::Integer);
+            vibesql_catalog::ColumnSchema {
+                name: name.to_string(),
+                data_type: dt,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: is_exact,
+            }
+        };
+
+        let mut strict_schema = vibesql_catalog::TableSchema::new(
+            "t_strict".to_string(),
+            vec![
+                make_col("a", vibesql_types::DataType::Integer),
+                make_col("b", vibesql_types::DataType::BinaryLargeObject), // BLOB
+                make_col("c", vibesql_types::DataType::BinaryLargeObject), // ANY (same DataType!)
+            ],
+        );
+        strict_schema.strict = true;
+        strict_schema.strict_types = vec![
+            vibesql_catalog::StrictType::Int,
+            vibesql_catalog::StrictType::Blob,
+            vibesql_catalog::StrictType::Any,
+        ];
+        // The strict flag/types are rederived from sql_source on load.
+        strict_schema
+            .set_sql_source("CREATE TABLE t_strict(a INT, b BLOB, c ANY) STRICT".to_string());
+        db.create_table_with_identifier(
+            strict_schema,
+            vibesql_catalog::TableIdentifier::new("t_strict", false),
+        )
+        .unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let schema = &reloaded.get_table("t_strict").expect("t_strict must survive").schema;
+        assert!(schema.strict, "STRICT flag must survive binary persistence (issue #5837)");
+        assert_eq!(
+            schema.strict_types,
+            vec![
+                vibesql_catalog::StrictType::Int,
+                vibesql_catalog::StrictType::Blob,
+                vibesql_catalog::StrictType::Any,
+            ],
+            "per-column strict types (incl. ANY vs BLOB) must survive reload"
+        );
+    }
+
     /// Issue #5771: views must survive a binary catalog round-trip. Before v10
     /// the serializer had no views section at all, so every `CREATE VIEW` was
     /// silently dropped when a file-backed DB reopened from a checkpoint under

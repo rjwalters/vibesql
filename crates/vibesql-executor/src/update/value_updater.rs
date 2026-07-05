@@ -124,9 +124,15 @@ impl<'a> ValueUpdater<'a> {
 
             // Apply type affinity coercion (SQLite compatibility)
             // This ensures UPDATE applies the same type conversion as INSERT
-            // e.g., UPDATE t SET r='5' on a REAL column stores 5.0, not '5'
+            // e.g., UPDATE t SET r='5' on a REAL column stores 5.0, not '5'.
+            // STRICT tables (issue #5837) apply the rigid strict-datatype rules
+            // instead, matching the INSERT strict gate.
             let column = &self.schema.columns[col_index];
-            let coerced_value = coerce_value(new_value, &column.data_type)?;
+            let coerced_value = if let Some(st) = self.schema.strict_type_of(col_index) {
+                crate::strict::enforce_strict_type(new_value, st, &self.schema.name, &column.name)?
+            } else {
+                coerce_value(new_value, &column.data_type)?
+            };
 
             // Update column in new row
             new_row

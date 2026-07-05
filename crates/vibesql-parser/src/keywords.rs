@@ -261,6 +261,7 @@ pub enum Keyword {
     Generated,
     Always,
     Stored,
+    Strict,
     Virtual,
     // CURSOR keywords
     Declare,
@@ -630,6 +631,7 @@ impl Keyword {
                 | Keyword::Row
                 | Keyword::Rows
                 | Keyword::Savepoint
+                | Keyword::Strict
                 | Keyword::Temp
                 | Keyword::Temporary
                 | Keyword::Ties
@@ -871,6 +873,7 @@ impl fmt::Display for Keyword {
             Keyword::Generated => "GENERATED",
             Keyword::Always => "ALWAYS",
             Keyword::Stored => "STORED",
+            Keyword::Strict => "STRICT",
             Keyword::Virtual => "VIRTUAL",
             Keyword::Declare => "DECLARE",
             Keyword::Cursor => "CURSOR",

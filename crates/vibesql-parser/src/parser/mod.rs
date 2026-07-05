@@ -116,6 +116,20 @@ impl Parser {
         self.source.get(span.start..span.end)
     }
 
+    /// Return the verbatim source text spanning the tokens in the half-open
+    /// index range `[start, end)`, preserving the original spelling, casing, and
+    /// any embedded whitespace (e.g. `TEXT(50)`, `DOUBLE PRECISION`). Returns
+    /// `None` when span/source information is unavailable (parsers built via
+    /// [`Parser::new`]) or the range is empty/out of bounds.
+    pub(crate) fn source_between(&self, start: usize, end: usize) -> Option<String> {
+        if self.source.is_empty() || end <= start {
+            return None;
+        }
+        let start_span = self.spans.get(start)?;
+        let end_span = self.spans.get(end - 1)?;
+        self.source.get(start_span.start..end_span.end).map(str::to_string)
+    }
+
     /// Parse a comma-separated list of items using a provided parser function
     ///
     /// This is a generic helper that consolidates the common pattern of parsing

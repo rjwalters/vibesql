@@ -87,6 +87,7 @@ fn test_add_column_invalidates_columnar_cache() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         },
     });
     AlterTableExecutor::execute(&add_col_stmt, &mut db).unwrap();
@@ -198,6 +199,7 @@ fn test_modify_column_invalidates_columnar_cache() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         },
     });
     AlterTableExecutor::execute(&modify_col_stmt, &mut db).unwrap();
@@ -261,6 +263,7 @@ fn test_change_column_invalidates_columnar_cache() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         },
     });
     AlterTableExecutor::execute(&change_col_stmt, &mut db).unwrap();
@@ -510,6 +513,7 @@ fn test_multiple_alter_operations_invalidate_cache() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         },
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();
@@ -612,6 +616,7 @@ fn test_alter_invalidates_prewarmed_cache() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         },
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();

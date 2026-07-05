@@ -35,6 +35,7 @@ fn test_create_simple_table() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -45,6 +46,7 @@ fn test_create_simple_table() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -53,6 +55,7 @@ fn test_create_simple_table() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -90,6 +93,7 @@ fn test_create_table_with_multiple_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "name".to_string(),
@@ -100,6 +104,7 @@ fn test_create_table_with_multiple_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "price".to_string(),
@@ -111,6 +116,7 @@ fn test_create_table_with_multiple_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "in_stock".to_string(),
@@ -121,6 +127,7 @@ fn test_create_table_with_multiple_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "description".to_string(),
@@ -131,6 +138,7 @@ fn test_create_table_with_multiple_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -139,6 +147,7 @@ fn test_create_table_with_multiple_types() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -170,6 +179,7 @@ fn test_create_table_already_exists() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -177,6 +187,7 @@ fn test_create_table_already_exists() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     // First creation succeeds
@@ -294,6 +305,7 @@ fn test_create_table_with_nullable_columns() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "middle_name".to_string(),
@@ -304,6 +316,7 @@ fn test_create_table_with_nullable_columns() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "manager_id".to_string(),
@@ -314,6 +327,7 @@ fn test_create_table_with_nullable_columns() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -322,6 +336,7 @@ fn test_create_table_with_nullable_columns() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -349,6 +364,7 @@ fn test_create_table_empty_columns_list() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     // Should succeed (though not very useful)
@@ -377,6 +393,7 @@ fn test_create_multiple_tables() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -384,6 +401,7 @@ fn test_create_multiple_tables() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt1, &mut db).unwrap();
 
@@ -401,6 +419,7 @@ fn test_create_multiple_tables() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -408,6 +427,7 @@ fn test_create_multiple_tables() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
     CreateTableExecutor::execute(&stmt2, &mut db).unwrap();
 
@@ -435,6 +455,7 @@ fn test_create_table_with_special_characters_in_name() {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -442,6 +463,7 @@ fn test_create_table_with_special_characters_in_name() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -464,6 +486,7 @@ fn create_table_stmt(name: &str, quoted: bool) -> CreateTableStmt {
             comment: None,
             generated_expr: None,
             is_exact_integer_type: false,
+            type_source: None,
         }],
         table_constraints: vec![],
         table_options: vec![],
@@ -471,6 +494,7 @@ fn create_table_stmt(name: &str, quoted: bool) -> CreateTableStmt {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     }
 }
 
@@ -536,6 +560,7 @@ fn test_create_table_with_spatial_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "location".to_string(),
@@ -546,6 +571,7 @@ fn test_create_table_with_spatial_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "area".to_string(),
@@ -556,6 +582,7 @@ fn test_create_table_with_spatial_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "regions".to_string(),
@@ -566,6 +593,7 @@ fn test_create_table_with_spatial_types() {
                 comment: None,
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -574,6 +602,7 @@ fn test_create_table_with_spatial_types() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -610,6 +639,7 @@ fn test_create_table_multipolygon_sqllogictest() {
                 comment: Some("text155459".to_string()),
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
             ColumnDef {
                 name: "c2".to_string(),
@@ -620,6 +650,7 @@ fn test_create_table_multipolygon_sqllogictest() {
                 comment: Some("text155461".to_string()),
                 generated_expr: None,
                 is_exact_integer_type: false,
+                type_source: None,
             },
         ],
         table_constraints: vec![],
@@ -628,6 +659,7 @@ fn test_create_table_multipolygon_sqllogictest() {
         name_source: None,
         as_query: None,
         without_rowid: false,
+        strict: false,
     };
 
     let result = CreateTableExecutor::execute(&stmt, &mut db);
