@@ -37,7 +37,12 @@ pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 /// - v2: DML ops carry an inline `table_name`, enabling correct DML replay.
 ///   Older v1 logs are still readable (the table name is parsed as absent and
 ///   such DML entries are skipped during replay).
-pub const WAL_VERSION: u32 = 2;
+/// - v3: `Insert` ops carry the row's effective SQLite rowid (present-flag +
+///   u64, after the values), so crash recovery can restore each replayed
+///   row's rowid instead of silently renumbering it by physical position
+///   (issue #5835). Older v2 logs are still readable (the rowid is parsed as
+///   absent and replayed rows fall back to physical renumbering).
+pub const WAL_VERSION: u32 = 3;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;

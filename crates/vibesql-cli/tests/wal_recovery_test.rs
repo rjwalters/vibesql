@@ -455,3 +455,75 @@ fn test_autocommit_writes_accumulate_across_separate_processes() {
         "committed UPDATE must persist across a process re-open; got:\n{updated}"
     );
 }
+
+/// End-to-end regression for issue #5835: INTEGER PRIMARY KEY ⇄ rowid
+/// aliasing must survive a cross-process reopen. Before the fix,
+/// `rowid_alias_column` was never rebuilt on load, so `WHERE rowid=5`
+/// returned zero rows and `DELETE ... WHERE rowid=N` removed the WRONG row
+/// (intpkey-2.6) after a restart.
+#[cfg(unix)]
+#[test]
+fn test_rowid_alias_survives_separate_process_reopen() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("rowid_alias.vbsql");
+    let bin = vibesql_binary();
+
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE p(a INTEGER PRIMARY KEY, b);\n\
+         INSERT INTO p VALUES(5,'five'),(7,'seven'),(9,'nine');\n",
+    );
+
+    // Process 2: rowid lookups must resolve through the IPK alias.
+    let out = run_script(bin, &db_path, home.path(), "SELECT b FROM p WHERE rowid=5;\n");
+    assert!(
+        out.contains("five"),
+        "WHERE rowid=5 must find the a=5 row after a process reopen; got:\n{out}"
+    );
+
+    // Process 3: DELETE by rowid must remove exactly the a=7 row.
+    run_script(bin, &db_path, home.path(), "DELETE FROM p WHERE rowid=7;\n");
+    let remaining = run_script(bin, &db_path, home.path(), "SELECT b FROM p ORDER BY a;\n");
+    assert!(
+        remaining.contains("five") && remaining.contains("nine") && !remaining.contains("seven"),
+        "DELETE WHERE rowid=7 must remove the a=7 row (and only it); got:\n{remaining}"
+    );
+}
+
+/// End-to-end regression for issues #5835 / #5871: a plain REPLACE INTO must
+/// be durable across a cross-process reopen. Before the fix the REPLACE's
+/// conflict-delete emitted no WAL op (and REPLACE never triggered the
+/// exit-time checkpoint), so the next process resurrected the old row next to
+/// the new one — two rows with the same INTEGER PRIMARY KEY.
+#[cfg(unix)]
+#[test]
+fn test_replace_into_durable_across_separate_process_reopen() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("replace_durable.vbsql");
+    let bin = vibesql_binary();
+
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE t1(aa INTEGER PRIMARY KEY, bb INT);\n\
+         INSERT INTO t1 VALUES(11,22);\nCREATE UNIQUE INDEX t1bb ON t1(bb);\n",
+    );
+
+    // Process 2: REPLACE the conflicting row (delete (11,22), insert (11,33)).
+    run_script(bin, &db_path, home.path(), "REPLACE INTO t1 VALUES(11,33);\n");
+
+    // Process 3: exactly one row, with the replaced value.
+    let count = run_script(bin, &db_path, home.path(), "SELECT count(*) AS n FROM t1;\n");
+    assert!(
+        count.contains('1') && !count.contains('2'),
+        "REPLACE must leave exactly one row after a process reopen; got:\n{count}"
+    );
+    let val = run_script(bin, &db_path, home.path(), "SELECT bb FROM t1 WHERE aa=11;\n");
+    assert!(
+        val.contains("33") && !val.contains("22"),
+        "the surviving row must be the REPLACEd one (bb=33); got:\n{val}"
+    );
+}

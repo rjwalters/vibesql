@@ -387,6 +387,9 @@ impl Database {
                 table_name: table_name.to_string(),
                 row_id: row_index as u64,
                 values: row.values.to_vec(),
+                // Effective SQLite rowid (issue #5835): explicit when the row
+                // carries one, else the implicit physical position + 1.
+                rowid: Some(row.row_id.unwrap_or(row_index as u64 + 1)),
             });
         }
 
@@ -492,6 +495,8 @@ impl Database {
                     table_name: table_name.to_string(),
                     row_id: row_index as u64,
                     values: row.values.to_vec(),
+                    // Effective SQLite rowid (issue #5835).
+                    rowid: Some(row.row_id.unwrap_or(row_index as u64 + 1)),
                 });
             }
 

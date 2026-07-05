@@ -207,6 +207,15 @@ pub fn handle_replace_conflicts(
     // For explicit reservations: AFTER DELETE trigger INSERTs will skip to next rowid.
     // The caller is responsible for releasing the reservation after the REPLACE INSERT.
 
+    // WAL-log the conflict deletes BEFORE applying them (issues #5835 /
+    // #5871), mirroring the DELETE executor. Without these ops the REPLACE's
+    // delete of the conflicting row is invisible to crash recovery: WAL
+    // replay re-inserts the new row next to the undeleted old one, yielding
+    // duplicate PRIMARY KEY rows after a restart (check-13.x, upsert5-3.x).
+    for (row_index, row) in &rows_to_delete {
+        db.emit_wal_delete(table_name, *row_index as u64, row.values.to_vec());
+    }
+
     // Remove entries from user-defined indexes BEFORE deleting rows
     // (while row indices are still valid)
     // Use batch method for better performance (pre-computes column indices once)

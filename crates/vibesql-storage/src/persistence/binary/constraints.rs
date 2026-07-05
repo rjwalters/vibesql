@@ -105,8 +105,10 @@ fn resolve_parent_columns(
     (references_columns.to_vec(), indices)
 }
 
-/// Rebuild `check_constraints` and `foreign_keys` on a freshly loaded
-/// `TableSchema` by re-parsing its persisted `sql_source`.
+/// Rebuild `check_constraints`, `foreign_keys`, and the INTEGER PRIMARY KEY
+/// rowid alias (`rowid_alias_column` + `is_exact_integer_type`, issue #5835)
+/// on a freshly loaded `TableSchema` by re-parsing its persisted
+/// `sql_source`.
 ///
 /// No-op when the schema has no `sql_source` (pre-v9 files, or tables whose
 /// source was invalidated by ALTER TABLE — those fall back to the previous
@@ -143,6 +145,38 @@ pub(super) fn rehydrate_constraints_from_sql_source(
     // CREATE TABLE ... AS SELECT carries no constraint clauses.
     if create.as_query.is_some() {
         return Ok(());
+    }
+
+    // ---- INTEGER PRIMARY KEY rowid aliasing (issue #5835) ----
+    // Neither `TableSchema::rowid_alias_column` nor
+    // `ColumnSchema::is_exact_integer_type` is serialized as a dedicated
+    // binary field, so before this rehydration every reloaded schema forgot
+    // that its INTEGER PRIMARY KEY column aliases the rowid. All rowid
+    // reads/writes (`WHERE rowid=N`, `SELECT rowid`, `DELETE ... WHERE
+    // rowid=N`, `RETURNING rowid`) then fell back to physical row numbering
+    // — returning zero rows or, worse, targeting the WRONG row after a
+    // process restart (intpkey-2.6).
+    //
+    // Rebuild both from the re-parsed source, mirroring the CREATE TABLE
+    // execution path (`create_table.rs`): a single-column PRIMARY KEY whose
+    // column was declared with the exact keyword "INTEGER" (not "INT")
+    // aliases the rowid.
+    for col_def in &create.columns {
+        if let Some(idx) = schema.get_column_index(&col_def.name) {
+            schema.columns[idx].is_exact_integer_type = col_def.is_exact_integer_type;
+        }
+    }
+    if let Some(pk_cols) = schema.primary_key.clone() {
+        if pk_cols.len() == 1 {
+            if let Some(col_idx) = schema.get_column_index(&pk_cols[0]) {
+                let col = &schema.columns[col_idx];
+                if matches!(col.data_type, vibesql_types::DataType::Integer)
+                    && col.is_exact_integer_type
+                {
+                    schema.set_rowid_alias_column(Some(col_idx));
+                }
+            }
+        }
     }
 
     // ---- CHECK constraints (column-level first, then table-level) ----

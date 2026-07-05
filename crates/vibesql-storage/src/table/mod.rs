@@ -202,6 +202,16 @@ pub struct Table {
 
     /// Counter for modifications since last statistics update
     modifications_since_stats: usize,
+
+    /// Largest explicit rowid ever assigned in this table (issue #5835).
+    ///
+    /// Updated whenever a row carrying an explicit `Row::row_id` is inserted
+    /// or updated (including rows reloaded from a v13+ snapshot or replayed
+    /// from a v3+ WAL). Monotone: deletes never decrease it, so rowid
+    /// allocation via [`Table::next_rowid`] can never collide with a rowid
+    /// that is (or was) in use. Not serialized — rebuilt naturally on load
+    /// because every reloaded row passes through `insert`.
+    max_assigned_rowid: u64,
     // Note: Table-level columnar caching was removed in #3892 to eliminate duplicate
     // caching with Database::columnar_cache. All columnar caching now goes through
     // Database::get_columnar() which provides LRU eviction and Arc-based sharing.
@@ -220,6 +230,7 @@ impl Clone for Table {
             append_tracker: self.append_tracker.clone(),
             statistics: self.statistics.clone(),
             modifications_since_stats: self.modifications_since_stats,
+            max_assigned_rowid: self.max_assigned_rowid,
         }
     }
 }
@@ -256,6 +267,7 @@ impl Table {
             append_tracker: AppendModeTracker::new(),
             statistics: None,
             modifications_since_stats: 0,
+            max_assigned_rowid: 0,
         }
     }
 
@@ -280,6 +292,12 @@ impl Table {
             let pk_values: Vec<SqlValue> =
                 pk_indices.iter().map(|&idx| normalized_row.values[idx].clone()).collect();
             self.append_tracker.update(&pk_values);
+        }
+
+        // Track the largest explicit rowid ever assigned (issue #5835) so
+        // future implicit-rowid allocation never collides with it.
+        if let Some(rid) = normalized_row.row_id {
+            self.max_assigned_rowid = self.max_assigned_rowid.max(rid);
         }
 
         // Add row to table (always stored for indexing and potential row access)
@@ -393,6 +411,10 @@ impl Table {
 
         // Phase 3: Insert all rows into storage
         for row in normalized_rows {
+            // Track the largest explicit rowid ever assigned (issue #5835).
+            if let Some(rid) = row.row_id {
+                self.max_assigned_rowid = self.max_assigned_rowid.max(rid);
+            }
             self.rows.push(row);
             self.deleted.push(false);
         }
@@ -773,6 +795,21 @@ impl Table {
         self.rows.len()
     }
 
+    /// Next rowid to allocate for an implicit-rowid insert (issue #5835).
+    ///
+    /// `max(physical_row_count, max_assigned_rowid) + 1`:
+    /// - `physical_row_count` covers implicit rowids (a row's implicit rowid
+    ///   is its physical position + 1), preserving the pre-existing
+    ///   `physical_row_count + 1` allocation for purely implicit tables.
+    /// - `max_assigned_rowid` covers explicit rowids — including rows
+    ///   reloaded from disk, whose persisted rowids can exceed the (compacted)
+    ///   physical count. Without it, a reloaded table with rowids {1, 3}
+    ///   would hand out rowid 3 again.
+    #[inline]
+    pub fn next_rowid(&self) -> u64 {
+        (self.rows.len() as u64).max(self.max_assigned_rowid) + 1
+    }
+
     /// Get count of deleted (logically removed) rows
     ///
     /// This is used for DML cost estimation, as tables with many deleted rows
@@ -852,6 +889,11 @@ impl Table {
         // Normalize and validate row
         let normalizer = RowNormalizer::new(&self.schema);
         let normalized_row = normalizer.normalize_and_validate(row)?;
+
+        // Track the largest explicit rowid ever assigned (issue #5835).
+        if let Some(rid) = normalized_row.row_id {
+            self.max_assigned_rowid = self.max_assigned_rowid.max(rid);
+        }
 
         // Get old row for index updates (clone to avoid borrow issues)
         let old_row = self.rows[index].clone();
@@ -1310,11 +1352,21 @@ impl Table {
             return;
         }
 
-        // Build new vectors with only live rows
+        // Build new vectors with only live rows.
+        //
+        // Rowid stability (issue #5835): a row without an explicit rowid
+        // derives its implicit rowid from its physical position (idx + 1).
+        // Compaction shifts physical positions, so materialize each
+        // surviving implicit rowid BEFORE the shift — otherwise `WHERE
+        // rowid=N` would silently target a different row after compaction.
         let mut new_rows = Vec::with_capacity(self.rows.len() - self.deleted_count);
         for (idx, row) in self.rows.iter().enumerate() {
             if !self.deleted[idx] {
-                new_rows.push(row.clone());
+                let mut row = row.clone();
+                let effective = row.row_id.unwrap_or(idx as u64 + 1);
+                row.row_id = Some(effective);
+                self.max_assigned_rowid = self.max_assigned_rowid.max(effective);
+                new_rows.push(row);
             }
         }
 

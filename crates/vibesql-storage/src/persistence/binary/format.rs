@@ -58,7 +58,19 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        v11 and earlier files remain readable: the read path is gated on
 ///        `version >= 12` and treats absence as `without_rowid = false`
 ///        (prior behavior). Issue #5796.
-pub const VERSION: u8 = 12;
+/// - v13: Added per-row rowid persistence (one u64 per row, after the MVCC
+///        version prefix and before the column values). Without it, every
+///        reloaded row lost its SQLite rowid and was silently renumbered by
+///        physical position, so `WHERE rowid=N` / `DELETE ... WHERE rowid=N`
+///        targeted different rows before and after a process restart, and
+///        new inserts could collide with reloaded explicit rowids. The write
+///        path materializes each live row's effective rowid (the rowid-alias
+///        INTEGER PRIMARY KEY value when the table has one, else the row's
+///        explicit rowid, else its implicit physical position + 1). v12 and
+///        earlier files remain readable: the read path is gated on
+///        `version >= 13` and treats absence as "no explicit rowid" (prior
+///        renumbering behavior). Issue #5835.
+pub const VERSION: u8 = 13;
 
 /// Type tags for binary serialization
 #[repr(u8)]

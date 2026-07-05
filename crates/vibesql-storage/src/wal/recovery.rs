@@ -665,7 +665,7 @@ impl RecoveryManager {
         stats: &mut RecoveryStats,
     ) -> Result<(), StorageError> {
         match op {
-            WalOp::Insert { table_id: _, table_name, row_id, values } => {
+            WalOp::Insert { table_id: _, table_name, row_id, values, rowid } => {
                 // WAL format v2+ carries the fully-qualified table_name so the
                 // mutation can be routed to the correct table during replay.
                 // (v1 logs serialize an empty name; such DML is unroutable and
@@ -680,7 +680,13 @@ impl RecoveryManager {
                 }
                 match db.get_table_mut(&table_name) {
                     Some(table) => {
-                        let row = crate::row::Row::new(values);
+                        let mut row = crate::row::Row::new(values);
+                        // WAL format v3 records the row's effective SQLite
+                        // rowid; stamp it back so `WHERE rowid=N` targets the
+                        // same row after crash recovery (issue #5835). v2
+                        // logs carry no rowid — such rows fall back to the
+                        // legacy physical renumbering.
+                        row.row_id = rowid;
                         match table.insert(row) {
                             Ok(()) => stats.inserts_applied += 1,
                             Err(e) => log::warn!(
@@ -707,7 +713,11 @@ impl RecoveryManager {
                 }
                 match db.get_table_mut(&table_name) {
                     Some(table) => {
-                        let row = crate::row::Row::new(new_values);
+                        let mut row = crate::row::Row::new(new_values);
+                        // Preserve the target row's rowid across the replayed
+                        // update (issue #5835): an UPDATE never changes a
+                        // row's rowid, so the replacement row must keep it.
+                        row.row_id = table.get_row(row_id as usize).and_then(|r| r.row_id);
                         match table.update_row(row_id as usize, row) {
                             Ok(()) => stats.updates_applied += 1,
                             Err(e) => log::warn!(
@@ -1155,6 +1165,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 0,
                 values: vec![SqlValue::Integer(42)],
+                rowid: None,
             },
         );
 
@@ -1177,6 +1188,7 @@ mod tests {
                 table_name: "main.t".to_string(),
                 row_id: 0,
                 values: vec![SqlValue::Integer(42)],
+                rowid: None,
             },
         );
 
@@ -1437,6 +1449,7 @@ mod tests {
                             SqlValue::Integer(i),
                             SqlValue::Varchar(arcstr::ArcStr::from(format!("v{i}"))),
                         ],
+                        rowid: None,
                     },
                     &mut lsn,
                 );
@@ -1793,11 +1806,12 @@ mod tests {
         let mut reader = &entry_buf[..];
         let entry = WalEntry::deserialize_versioned(&mut reader, 1).unwrap();
         match entry.op {
-            WalOp::Insert { table_id, table_name, row_id, values } => {
+            WalOp::Insert { table_id, table_name, row_id, values, rowid } => {
                 assert_eq!(table_id, 7);
                 assert!(table_name.is_empty(), "v1 op has no inline table_name");
                 assert_eq!(row_id, 0);
                 assert_eq!(values, vec![SqlValue::Integer(99)]);
+                assert_eq!(rowid, None, "v1 op has no rowid trailer");
             }
             other => panic!("expected Insert, got {:?}", other),
         }

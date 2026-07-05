@@ -343,4 +343,74 @@ mod tests {
         assert_eq!(row1.get(1), row2.get(1));
         assert_eq!(row1.get(2), row2.get(2));
     }
+
+    // -----------------------------------------------------------------------
+    // Rowid stability (issue #5835)
+    // -----------------------------------------------------------------------
+
+    fn rowid_test_table() -> Table {
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+        );
+        Table::new(schema)
+    }
+
+    /// `next_rowid` covers both the physical row count (implicit rowids) and
+    /// the largest explicit rowid ever assigned, so allocation never collides
+    /// after explicit rowids (e.g. reloaded from a v13 snapshot) exceed the
+    /// physical count.
+    #[test]
+    fn test_next_rowid_tracks_explicit_rowids() {
+        let mut table = rowid_test_table();
+
+        // Empty table: next rowid is 1.
+        assert_eq!(table.next_rowid(), 1);
+
+        // Implicit rows: next rowid stays physical_count + 1.
+        table.insert(Row::new(vec![SqlValue::Integer(10)])).unwrap();
+        assert_eq!(table.next_rowid(), 2);
+
+        // Explicit rowid larger than the physical count (the reload shape:
+        // live rows persisted with rowids 1 and 7).
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(20)], 7)).unwrap();
+        assert_eq!(
+            table.next_rowid(),
+            8,
+            "must exceed the explicit rowid 7, not physical count 2"
+        );
+
+        // Deletes never decrease it (monotone).
+        assert!(table.mark_deleted_inplace(1));
+        assert_eq!(table.next_rowid(), 8);
+    }
+
+    /// Compaction physically shifts row positions; surviving implicit rowids
+    /// must be materialized before the shift so `WHERE rowid=N` still targets
+    /// the same row afterwards.
+    #[test]
+    fn test_compact_materializes_implicit_rowids() {
+        let mut table = rowid_test_table();
+        for i in 1..=10i64 {
+            table.insert(Row::new(vec![SqlValue::Integer(i)])).unwrap();
+        }
+
+        // Tombstone rows at physical indices 0..=5 (implicit rowids 1..=6) —
+        // over 50%, so compact_if_needed compacts.
+        for idx in 0..6 {
+            assert!(table.mark_deleted_inplace(idx));
+        }
+        assert!(table.compact_if_needed(), "expected compaction with 60% deleted");
+
+        // Survivors were at physical indices 6..=9 → implicit rowids 7..=10.
+        let rowids: Vec<u64> = table
+            .scan_live()
+            .map(|(_, row)| row.row_id.expect("materialized rowid"))
+            .collect();
+        assert_eq!(rowids, vec![7, 8, 9, 10]);
+
+        // Allocation continues past the materialized max, not at the
+        // (shrunken) physical count + 1 (which would collide with rowid 7).
+        assert_eq!(table.next_rowid(), 11);
+    }
 }
