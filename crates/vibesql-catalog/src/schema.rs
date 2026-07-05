@@ -1,24 +1,30 @@
 //! Schema - Named collection of database objects
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use crate::{errors::CatalogError, table::TableSchema, TableIdentifier};
 
 /// A schema - named collection of database objects (tables, views, etc.)
+///
+/// Tables are stored in an `IndexMap` (not a `HashMap`) so enumeration order
+/// tracks creation order. SQLite returns `sqlite_schema` rows in rowid
+/// (creation) order, so `list_tables()` must preserve insertion order to
+/// match. See issue #5826.
 #[derive(Debug, Clone)]
 pub struct Schema {
     pub name: String,
-    /// Tables stored with canonical name as key (lowercase for unquoted, exact for quoted)
-    tables: HashMap<String, TableSchema>,
+    /// Tables stored with canonical name as key (lowercase for unquoted, exact for quoted).
+    /// `IndexMap` preserves creation order for `list_tables()` enumeration.
+    tables: IndexMap<String, TableSchema>,
     /// Track which tables were created with quoted identifiers
-    table_identifiers: HashMap<String, TableIdentifier>,
+    table_identifiers: IndexMap<String, TableIdentifier>,
     // Future: views, functions, sequences, etc.
 }
 
 impl Schema {
     /// Create a new empty schema
     pub fn new(name: String) -> Self {
-        Schema { name, tables: HashMap::new(), table_identifiers: HashMap::new() }
+        Schema { name, tables: IndexMap::new(), table_identifiers: IndexMap::new() }
     }
 
     /// Create a table in this schema using SQL:1999 identifier semantics.
@@ -88,8 +94,12 @@ impl Schema {
         identifier: &TableIdentifier,
     ) -> Result<(), CatalogError> {
         let canonical = identifier.canonical();
-        if self.tables.remove(canonical).is_some() {
-            self.table_identifiers.remove(canonical);
+        // Use `shift_remove` (not the default `swap_remove`) so the remaining
+        // tables keep their creation order. `swap_remove` would move the last
+        // table into the removed slot, corrupting `list_tables()` ordering
+        // (e.g. after DROP TABLE + re-CREATE). See issue #5826.
+        if self.tables.shift_remove(canonical).is_some() {
+            self.table_identifiers.shift_remove(canonical);
             Ok(())
         } else {
             Err(CatalogError::TableNotFound { table_name: identifier.display().to_string() })
