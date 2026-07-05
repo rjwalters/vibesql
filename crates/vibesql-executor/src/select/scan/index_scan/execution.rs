@@ -19,6 +19,24 @@ use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
 };
 
+/// Issue #5823: an index probe looks up raw (BINARY-ordered) key bytes, but a
+/// column declared with a non-BINARY collation (e.g. NOCASE) must match per
+/// that collation (`'XYZ'` must find stored `'xyz'`). Probing raw literals
+/// against such a column silently loses rows, and the WHERE post-filter can
+/// only remove rows, never restore missed ones. Return true when `col_name`
+/// resolves to a column with a declared non-BINARY collation, so callers can
+/// decline the probe and fall back to the full-index-scan + collation-aware
+/// WHERE-filter path (correct, just slower). BINARY/undeclared collations keep
+/// the fast probe.
+fn column_has_nonbinary_collation(schema: &vibesql_catalog::TableSchema, col_name: &str) -> bool {
+    schema
+        .columns
+        .iter()
+        .find(|c| c.name.eq_ignore_ascii_case(col_name))
+        .and_then(|c| c.collation.as_deref())
+        .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+}
+
 /// Execute an index scan
 ///
 /// Uses the specified index to retrieve matching rows, then fetches full rows from the table.
@@ -95,6 +113,15 @@ pub(crate) fn execute_index_scan(
         None
     };
 
+    // Issue #5823: a composite-key probe compares raw (BINARY-ordered) key
+    // bytes, so decline it when ANY covered index column has a non-BINARY
+    // collation — fall back to the collation-aware WHERE path below.
+    // `extract_composite_predicates_with_in` only succeeds when EVERY index
+    // column is covered, so checking all index columns is exact here.
+    let composite_predicates = composite_predicates.filter(|_| {
+        !index_column_names.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
+    });
+
     // Generate composite keys (handles both single key and multiple keys for IN predicates)
     let composite_keys: Option<Vec<Vec<vibesql_types::SqlValue>>> =
         composite_predicates.as_ref().map(|preds| generate_composite_keys(preds));
@@ -118,6 +145,14 @@ pub(crate) fn execute_index_scan(
         None
     };
 
+    // Issue #5823: decline the prefix+range probe when any covered column has a
+    // non-BINARY collation (a raw-key probe would lose collated rows). The
+    // `covered_columns` set is uppercase; `column_has_nonbinary_collation`
+    // matches case-insensitively.
+    let prefix_with_range_result = prefix_with_range_result.filter(|r| {
+        !r.covered_columns.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
+    });
+
     let use_prefix_bounded_lookup = prefix_with_range_result.is_some();
 
     // Try prefix lookup if full composite key not available (for partial prefix matches)
@@ -130,6 +165,12 @@ pub(crate) fn execute_index_scan(
         } else {
             None
         };
+
+    // Issue #5823: decline the prefix-equality probe when any covered column
+    // has a non-BINARY collation (raw-key probe would lose collated rows).
+    let prefix_result = prefix_result.filter(|r| {
+        !r.covered_columns.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
+    });
 
     // Check if we're using prefix lookup (partial composite key match)
     let use_prefix_lookup =
@@ -146,22 +187,22 @@ pub(crate) fn execute_index_scan(
         })
     };
 
-    // Issue #5806: an IN-list probe looks up the raw literal values in the
-    // index, but the index stores raw (BINARY-ordered) keys while IN on a
-    // non-BINARY-collated column (e.g. NOCASE) must match per the LHS
-    // collation ('XYZ' must find stored 'xyz'). Such a probe silently loses
-    // rows, and the WHERE post-filter can only remove rows, never restore
-    // missed ones. Decline the probe so we fall back to the
-    // full-index-scan + collation-aware WHERE-filter path below (correct,
-    // just slower). BINARY/undeclared collations keep the fast probe.
-    let index_predicate = if matches!(index_predicate, Some(IndexPredicate::In(_)))
-        && first_indexed_column
-            .and_then(|idx_col| idx_col.column_name())
-            .and_then(|col_name| {
-                table.schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name))
-            })
-            .and_then(|c| c.collation.as_deref())
-            .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+    // Issue #5806 / #5823: an equality/range/IN-list probe looks up the raw
+    // literal values in the index, but the index stores raw (BINARY-ordered)
+    // keys while a predicate on a non-BINARY-collated column (e.g. NOCASE) must
+    // match per the column collation ('XYZ' must find stored 'xyz'). Such a
+    // probe silently loses rows, and the WHERE post-filter can only remove
+    // rows, never restore missed ones. Decline the probe so we fall back to
+    // the full-index-scan + collation-aware WHERE-filter path below (correct,
+    // just slower). #5806 first added this gate for `IndexPredicate::In`;
+    // #5823 extends it to `IndexPredicate::Range` (which backs `=`, `<`, `<=`,
+    // `>`, `>=`, BETWEEN). BINARY/undeclared collations keep the fast probe.
+    let index_predicate = if matches!(
+        index_predicate,
+        Some(IndexPredicate::In(_)) | Some(IndexPredicate::Range(_))
+    ) && first_indexed_column
+        .and_then(|idx_col| idx_col.column_name())
+        .is_some_and(|col_name| column_has_nonbinary_collation(&table.schema, col_name))
     {
         None
     } else {

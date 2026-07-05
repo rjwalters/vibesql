@@ -122,6 +122,13 @@ impl SelectExecutor<'_> {
             let index_columns: Vec<&str> =
                 metadata.columns.iter().map(|c| c.expect_column_name()).collect();
 
+            // Issue #5823: skip indexes covering a non-BINARY-collated column;
+            // the raw prefix probe would lose rows. The standard scan path
+            // applies the collation-aware WHERE filter instead.
+            if index_covers_nonbinary_collation(&table.schema, &index_columns) {
+                continue;
+            }
+
             // Need at least 2 columns for prefix + ORDER BY pattern
             if index_columns.len() < 2 {
                 continue;
@@ -320,6 +327,13 @@ impl SelectExecutor<'_> {
             // Get index column names in order
             let index_columns: Vec<&str> =
                 metadata.columns.iter().map(|c| c.expect_column_name()).collect();
+
+            // Issue #5823: skip indexes covering a non-BINARY-collated column;
+            // a raw equality/prefix probe would silently lose rows. The
+            // standard scan path applies the collation-aware WHERE filter.
+            if index_covers_nonbinary_collation(&table.schema, &index_columns) {
+                continue;
+            }
 
             // Try to extract equality values from WHERE clause
             let index_values = match self.extract_pk_values(where_clause, &index_columns) {
@@ -537,6 +551,13 @@ impl SelectExecutor<'_> {
             let index_column_names: Vec<&str> =
                 metadata.columns.iter().map(|c| c.expect_column_name()).collect();
 
+            // Issue #5823: skip indexes covering a non-BINARY-collated column;
+            // a raw covering probe would silently lose rows. The standard scan
+            // path applies the collation-aware WHERE filter.
+            if index_covers_nonbinary_collation(&table.schema, &index_column_names) {
+                continue;
+            }
+
             // Check if this index covers all needed columns
             if check_covering_index(&index_column_names, &needed_columns).is_none() {
                 continue; // Index doesn't cover all needed columns
@@ -569,6 +590,27 @@ impl SelectExecutor<'_> {
         // No suitable covering index found
         Ok(None)
     }
+}
+
+/// Issue #5823: raw index probes compare BINARY-ordered key bytes and thus
+/// silently lose rows on a column declared with a non-BINARY collation (e.g.
+/// NOCASE) — the post-lookup WHERE filter can only remove rows, never restore
+/// missed ones. Return true when any of `index_columns` resolves to a column
+/// with a declared non-BINARY collation, so the fast index path can skip that
+/// index and let the standard scan path apply the collation-aware WHERE
+/// evaluator. BINARY/undeclared collations keep the fast path.
+fn index_covers_nonbinary_collation(
+    schema: &vibesql_catalog::TableSchema,
+    index_columns: &[&str],
+) -> bool {
+    index_columns.iter().any(|col_name| {
+        schema
+            .columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(col_name))
+            .and_then(|c| c.collation.as_deref())
+            .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+    })
 }
 
 /// Coerce string equality lookup keys to the stored temporal key type
