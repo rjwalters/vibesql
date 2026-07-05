@@ -202,6 +202,10 @@ impl<'arena> ArenaParser<'arena> {
                     self.consume_keyword(Keyword::Null)?;
                     let left_ref = self.arena.alloc(left);
                     left = Expression::IsNull { expr: left_ref, negated: true };
+                    // NOT NULL is syntactically closed, so tighter-binding operators
+                    // that follow take the whole node as their left operand
+                    // (SQLite: `1 NOT NULL + 1` = `(1 NOT NULL) + 1` = 2).
+                    left = self.continue_higher_precedence_ops(left)?;
                     continue;
                 } else {
                     self.position = saved_pos;
@@ -441,16 +445,25 @@ impl<'arena> ArenaParser<'arena> {
             // SQLite compatibility: ISNULL and NOTNULL as postfix operators
             // These are equivalent to IS NULL and IS NOT NULL respectively
             // The enclosing loop supports chaining: `x NOTNULL NOTNULL`
+            //
+            // Like IN, these postfix operators are syntactically closed (no right
+            // operand to consume), so a tighter-binding operator that follows takes
+            // the whole node as its left operand (SQLite: `1 ISNULL + 1` = 1, i.e.
+            // `(1 ISNULL) + 1`), hence continue_higher_precedence_ops. Shift-tier
+            // operators (`<<`, `>>`) are outside the arena grammar and must fail
+            // arena parsing, routing through parse_with_arena_fallback.
             if self.peek_keyword(Keyword::Isnull) {
                 self.consume_keyword(Keyword::Isnull)?;
                 let left_ref = self.arena.alloc(left);
                 left = Expression::IsNull { expr: left_ref, negated: false };
+                left = self.continue_higher_precedence_ops(left)?;
                 continue;
             }
             if self.peek_keyword(Keyword::Notnull) {
                 self.consume_keyword(Keyword::Notnull)?;
                 let left_ref = self.arena.alloc(left);
                 left = Expression::IsNull { expr: left_ref, negated: true };
+                left = self.continue_higher_precedence_ops(left)?;
                 continue;
             }
 
@@ -464,10 +477,12 @@ impl<'arena> ArenaParser<'arena> {
     /// Continue parsing tighter-binding binary operators (multiplicative, concat,
     /// additive) with an already-parsed left operand.
     ///
-    /// Used after an IN/NOT IN node: its right operand is syntactically closed
-    /// (a parenthesized list/subquery), so per SQLite a tighter-binding operator
-    /// that follows takes the entire IN expression as its left operand:
-    /// `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`.
+    /// Used after a syntactically-closed comparison-tier node — IN/NOT IN
+    /// (right operand is a parenthesized list/subquery) and the postfix null
+    /// tests ISNULL / NOTNULL / NOT NULL (no right operand at all). Per SQLite
+    /// a tighter-binding operator that follows takes the entire node as its
+    /// left operand: `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`
+    /// and `1 ISNULL + 1` as `(1 ISNULL) + 1`.
     ///
     /// Each operator's right operand is parsed at the next-tighter tier, so
     /// relative precedence among these operators is preserved

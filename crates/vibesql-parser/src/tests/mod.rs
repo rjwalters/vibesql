@@ -24,6 +24,7 @@ mod in_list;
 mod index;
 mod insert;
 mod introspection;
+mod isnull_postfix;
 mod joins;
 mod lexer;
 mod like;
