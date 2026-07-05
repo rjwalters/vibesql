@@ -82,3 +82,84 @@ fn test_json_operator_looser_than_comparison() {
     let (inner_op, _, _) = unwrap_binop(left, "inner ->");
     assert_eq!(inner_op, vibesql_ast::BinaryOperator::JsonExtract);
 }
+
+// ========================================================================
+// `||` (Concat) precedence tests (issue #5839)
+//
+// Per the SQLite grammar `||`, `->`, and `->>` share the tightest binary
+// tier, so `||` binds TIGHTER than `* / %` and `+ -`. The canonical
+// reproducer is `SELECT 22||45*66` which must parse as `(22||45)*66` and
+// evaluate to `"2245"*66 = 148170` (not `22||(45*66) = 222970`).
+// ========================================================================
+
+#[test]
+fn test_concat_binds_tighter_than_multiply() {
+    // 22 || 45 * 66 parses as (22 || 45) * 66
+    let expr = parse_select_expr("SELECT 22 || 45 * 66;");
+    let (op, left, _) = unwrap_binop(expr, "outer *");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Multiply);
+    let (inner_op, _, _) = unwrap_binop(left, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+}
+
+#[test]
+fn test_concat_binds_tighter_than_multiply_on_rhs() {
+    // 22 * 45 || 66 parses as 22 * (45 || 66)
+    let expr = parse_select_expr("SELECT 22 * 45 || 66;");
+    let (op, _, right) = unwrap_binop(expr, "outer *");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Multiply);
+    let (inner_op, _, _) = unwrap_binop(right, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+}
+
+#[test]
+fn test_concat_binds_tighter_than_divide_and_modulo() {
+    // 22 || 45 / 3 parses as (22 || 45) / 3
+    let expr = parse_select_expr("SELECT 22 || 45 / 3;");
+    let (op, left, _) = unwrap_binop(expr, "outer /");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Divide);
+    let (inner_op, _, _) = unwrap_binop(left, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+
+    // 22 || 45 % 7 parses as (22 || 45) % 7
+    let expr = parse_select_expr("SELECT 22 || 45 % 7;");
+    let (op, left, _) = unwrap_binop(expr, "outer %");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Modulo);
+    let (inner_op, _, _) = unwrap_binop(left, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+}
+
+#[test]
+fn test_concat_binds_tighter_than_plus() {
+    // 22 || 45 + 66 parses as (22 || 45) + 66
+    let expr = parse_select_expr("SELECT 22 || 45 + 66;");
+    let (op, left, _) = unwrap_binop(expr, "outer +");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Plus);
+    let (inner_op, _, _) = unwrap_binop(left, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+}
+
+#[test]
+fn test_concat_chain_then_multiply() {
+    // 1 || 2 || 3 * 4 parses as ((1 || 2 || 3) * 4); the left-associative
+    // concat chain is the tighter operand of the multiply.
+    let expr = parse_select_expr("SELECT 1 || 2 || 3 * 4;");
+    let (op, left, _) = unwrap_binop(expr, "outer *");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Multiply);
+    let (concat_op, concat_left, _) = unwrap_binop(left, "outer ||");
+    assert_eq!(concat_op, vibesql_ast::BinaryOperator::Concat);
+    // Left of the outer || is itself a || (left-associative chain).
+    let (inner_op, _, _) = unwrap_binop(concat_left, "inner ||");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::Concat);
+}
+
+#[test]
+fn test_concat_and_json_share_tier_left_associative() {
+    // a -> 'k' || 'x' parses as (a -> 'k') || 'x' — `||` and `->` share one
+    // left-associative tier.
+    let expr = parse_select_expr("SELECT a -> 'k' || 'x';");
+    let (op, left, _) = unwrap_binop(expr, "outer ||");
+    assert_eq!(op, vibesql_ast::BinaryOperator::Concat);
+    let (inner_op, _, _) = unwrap_binop(left, "inner ->");
+    assert_eq!(inner_op, vibesql_ast::BinaryOperator::JsonExtract);
+}
