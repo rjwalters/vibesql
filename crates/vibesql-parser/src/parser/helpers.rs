@@ -187,9 +187,14 @@ impl Parser {
                 self.advance();
                 Ok(identifier)
             }
-            Token::Keyword { keyword: kw, .. } => {
-                // Allow keywords as alias names - convert to uppercase string
-                let name = kw.to_string();
+            Token::Keyword { original, .. } => {
+                // Allow keywords as alias names. Preserve the original source-text
+                // case rather than the keyword's canonical uppercase form: SQLite
+                // names the column exactly as written, so `SELECT max(a) AS m`
+                // yields column `m`, not `M` (colname-6.11..6.19). `m`/`M` is a
+                // contextual keyword (HNSW parameter), which is why an unquoted
+                // `m` alias reached this arm at all.
+                let name = original.clone();
                 self.advance();
                 Ok(name)
             }

@@ -368,6 +368,16 @@ pub(super) fn evaluate(
 
     let mut acc = AggregateAccumulator::new(name.canonical(), distinct)?;
 
+    // Thread an explicit COLLATE on the aggregate argument into MIN/MAX so
+    // `min(x COLLATE nocase)` / `max(x COLLATE rtrim)` order by the requested
+    // collation instead of raw binary bytes (minmax3 §4). No-op for every other
+    // aggregate kind. This top-level `acc` is the one used by the plain MIN/MAX
+    // path; the specialized GROUP_CONCAT/JSON/PERCENTILE/MD5SUM branches build
+    // their own accumulators and are unaffected.
+    if args.len() == 1 {
+        acc.set_min_max_collation(crate::evaluator::collation::explicit_collation_of(&args[0]));
+    }
+
     // Special handling for COUNT(*)
     if name.to_uppercase() == "COUNT" && args.len() == 1 {
         let is_count_star = matches!(args[0], vibesql_ast::Expression::Wildcard)
@@ -790,17 +800,13 @@ pub(super) fn evaluate(
                 // outer schema; on failure (e.g. references inner columns),
                 // fall back to skipping the filter (no rows to filter from).
                 if let Some(filter_expr) = filter {
-                    let filter_val = evaluate_expr_against_outer_row(
-                        filter_expr,
-                        outer_row,
-                        outer_schema,
-                    )?;
+                    let filter_val =
+                        evaluate_expr_against_outer_row(filter_expr, outer_row, outer_schema)?;
                     if !executor.is_truthy(&filter_val)? {
                         continue;
                     }
                 }
-                let value =
-                    evaluate_expr_against_outer_row(&args[0], outer_row, outer_schema)?;
+                let value = evaluate_expr_against_outer_row(&args[0], outer_row, outer_schema)?;
                 acc.accumulate(&value);
             }
             let result = acc.finalize()?;

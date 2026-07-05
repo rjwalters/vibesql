@@ -45,11 +45,17 @@ pub enum AggregateAccumulator {
         value: Option<vibesql_types::SqlValue>,
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
+        /// Optional COLLATE sequence applied to the aggregate argument
+        /// (e.g. `min(x COLLATE nocase)`). `None` = default BINARY comparison.
+        collation: Option<String>,
     },
     Max {
         value: Option<vibesql_types::SqlValue>,
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
+        /// Optional COLLATE sequence applied to the aggregate argument
+        /// (e.g. `max(x COLLATE nocase)`). `None` = default BINARY comparison.
+        collation: Option<String>,
     },
     /// GROUP_CONCAT - Concatenate values with separator (SQLite compatible)
     GroupConcat {
@@ -125,8 +131,8 @@ impl AggregateAccumulator {
                 distinct,
                 seen,
             }),
-            "MIN" => Ok(AggregateAccumulator::Min { value: None, distinct, seen }),
-            "MAX" => Ok(AggregateAccumulator::Max { value: None, distinct, seen }),
+            "MIN" => Ok(AggregateAccumulator::Min { value: None, distinct, seen, collation: None }),
+            "MAX" => Ok(AggregateAccumulator::Max { value: None, distinct, seen, collation: None }),
             "GROUP_CONCAT" | "STRING_AGG" => Ok(AggregateAccumulator::GroupConcat {
                 values: Vec::new(),
                 separator: separator.to_string(),
@@ -165,6 +171,19 @@ impl AggregateAccumulator {
                 "Unknown aggregate function: {}",
                 function_name
             ))),
+        }
+    }
+
+    /// Attach a COLLATE sequence to a MIN/MAX accumulator so its comparisons
+    /// honor `min(x COLLATE nocase)` / `max(x COLLATE rtrim)`. No-op for every
+    /// other aggregate kind (collation only affects ordering).
+    pub fn set_min_max_collation(&mut self, new_collation: Option<String>) {
+        match self {
+            AggregateAccumulator::Min { collation, .. }
+            | AggregateAccumulator::Max { collation, .. } => {
+                *collation = new_collation;
+            }
+            _ => {}
         }
     }
 
@@ -290,7 +309,7 @@ impl AggregateAccumulator {
             }
 
             // MIN - finds minimum value, ignores NULLs
-            AggregateAccumulator::Min { value: ref mut current_min, distinct, seen } => {
+            AggregateAccumulator::Min { value: ref mut current_min, distinct, seen, collation } => {
                 if value.is_null() || !is_comparable_value(value) {
                     return; // Skip NULL and unsupported types
                 }
@@ -304,9 +323,11 @@ impl AggregateAccumulator {
                     seen_set.insert(value.clone());
                 }
 
-                // Update minimum if needed
+                // Update minimum if needed (honoring any COLLATE clause)
                 if let Some(ref current) = current_min {
-                    if compare_sql_values(value, current) == Ordering::Less {
+                    if compare_sql_values_with_collation(value, current, collation.as_deref())
+                        == Ordering::Less
+                    {
                         *current_min = Some(value.clone());
                     }
                 } else {
@@ -315,7 +336,7 @@ impl AggregateAccumulator {
             }
 
             // MAX - finds maximum value, ignores NULLs
-            AggregateAccumulator::Max { value: ref mut current_max, distinct, seen } => {
+            AggregateAccumulator::Max { value: ref mut current_max, distinct, seen, collation } => {
                 if value.is_null() || !is_comparable_value(value) {
                     return; // Skip NULL and unsupported types
                 }
@@ -329,9 +350,11 @@ impl AggregateAccumulator {
                     seen_set.insert(value.clone());
                 }
 
-                // Update maximum if needed
+                // Update maximum if needed (honoring any COLLATE clause)
                 if let Some(ref current) = current_max {
-                    if compare_sql_values(value, current) == Ordering::Greater {
+                    if compare_sql_values_with_collation(value, current, collation.as_deref())
+                        == Ordering::Greater
+                    {
                         *current_max = Some(value.clone());
                     }
                 } else {
@@ -619,7 +642,14 @@ impl AggregateAccumulator {
                 let json_array = sql_values_to_json_array(values);
                 Ok(vibesql_types::SqlValue::Varchar(json_array.into()))
             }
-            AggregateAccumulator::Percentile { values, fraction, discrete, error, distinct, .. } => {
+            AggregateAccumulator::Percentile {
+                values,
+                fraction,
+                discrete,
+                error,
+                distinct,
+                ..
+            } => {
                 // Deferred step errors surface at finalize time with the
                 // SQLite-exact message (SqliteCompatError displays as-is).
                 if let Some(msg) = error {
@@ -811,8 +841,13 @@ impl AggregateAccumulator {
 
             // MIN: Take minimum of minimums
             (
-                AggregateAccumulator::Min { value: v1, distinct: d1, seen: seen1 },
-                AggregateAccumulator::Min { value: v2, distinct: d2, seen: seen2 },
+                AggregateAccumulator::Min {
+                    value: v1,
+                    distinct: d1,
+                    seen: seen1,
+                    collation: coll1,
+                },
+                AggregateAccumulator::Min { value: v2, distinct: d2, seen: seen2, .. },
             ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
@@ -820,17 +855,23 @@ impl AggregateAccumulator {
                     ));
                 }
 
+                let coll = coll1.clone();
                 if *d1 {
                     // DISTINCT: Merge seen sets, find minimum from merged set
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Find minimum from merged set
-                        *v1 = s1_set.iter().min_by(|a, b| compare_sql_values(a, b)).cloned();
+                        *v1 = s1_set
+                            .iter()
+                            .min_by(|a, b| compare_sql_values_with_collation(a, b, coll.as_deref()))
+                            .cloned();
                     }
                 } else {
                     match (v1.as_ref(), v2) {
                         (Some(current), Some(new_val)) => {
-                            if compare_sql_values(&new_val, current) == Ordering::Less {
+                            if compare_sql_values_with_collation(&new_val, current, coll.as_deref())
+                                == Ordering::Less
+                            {
                                 *v1 = Some(new_val);
                             }
                         }
@@ -842,8 +883,13 @@ impl AggregateAccumulator {
 
             // MAX: Take maximum of maximums
             (
-                AggregateAccumulator::Max { value: v1, distinct: d1, seen: seen1 },
-                AggregateAccumulator::Max { value: v2, distinct: d2, seen: seen2 },
+                AggregateAccumulator::Max {
+                    value: v1,
+                    distinct: d1,
+                    seen: seen1,
+                    collation: coll1,
+                },
+                AggregateAccumulator::Max { value: v2, distinct: d2, seen: seen2, .. },
             ) => {
                 if *d1 != d2 {
                     return Err(crate::errors::ExecutorError::UnsupportedExpression(
@@ -851,17 +897,23 @@ impl AggregateAccumulator {
                     ));
                 }
 
+                let coll = coll1.clone();
                 if *d1 {
                     // DISTINCT: Merge seen sets, find maximum from merged set
                     if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
                         s1_set.extend(s2_set);
                         // Find maximum from merged set
-                        *v1 = s1_set.iter().max_by(|a, b| compare_sql_values(a, b)).cloned();
+                        *v1 = s1_set
+                            .iter()
+                            .max_by(|a, b| compare_sql_values_with_collation(a, b, coll.as_deref()))
+                            .cloned();
                     }
                 } else {
                     match (v1.as_ref(), v2) {
                         (Some(current), Some(new_val)) => {
-                            if compare_sql_values(&new_val, current) == Ordering::Greater {
+                            if compare_sql_values_with_collation(&new_val, current, coll.as_deref())
+                                == Ordering::Greater
+                            {
                                 *v1 = Some(new_val);
                             }
                         }
@@ -935,15 +987,9 @@ impl AggregateAccumulator {
             // and enforce fraction consistency across the two halves.
             (
                 AggregateAccumulator::Percentile {
-                    values: v1,
-                    fraction: f1,
-                    error: e1,
-                    name,
-                    ..
+                    values: v1, fraction: f1, error: e1, name, ..
                 },
-                AggregateAccumulator::Percentile {
-                    values: v2, fraction: f2, error: e2, ..
-                },
+                AggregateAccumulator::Percentile { values: v2, fraction: f2, error: e2, .. },
             ) => {
                 if e1.is_none() {
                     if let Some(msg) = e2 {
@@ -1519,11 +1565,13 @@ mod tests {
             value: Some(SqlValue::Integer(5)),
             distinct: false,
             seen: None,
+            collation: None,
         };
         let acc2 = AggregateAccumulator::Min {
             value: Some(SqlValue::Integer(3)),
             distinct: false,
             seen: None,
+            collation: None,
         };
 
         acc1.combine(acc2).unwrap();
@@ -1542,11 +1590,13 @@ mod tests {
             value: Some(SqlValue::Integer(5)),
             distinct: false,
             seen: None,
+            collation: None,
         };
         let acc2 = AggregateAccumulator::Max {
             value: Some(SqlValue::Integer(10)),
             distinct: false,
             seen: None,
+            collation: None,
         };
 
         acc1.combine(acc2).unwrap();
