@@ -837,6 +837,88 @@ fn test_row_id_roundtrip_v13() {
     assert_eq!(loaded.next_rowid(), 43);
 }
 
+/// Negative rowids round-trip and never poison allocation (PR #5891 judge
+/// review). Rowids are signed (SQLite model): `-1` is stored as the
+/// two's-complement bit pattern `u64::MAX`. Before the fix, reload tracked
+/// that bit pattern as an *unsigned* max, so the next `next_rowid()` call
+/// computed `u64::MAX + 1` — a debug panic / a wrap to duplicate rowid 0 in
+/// release builds.
+#[test]
+fn test_negative_row_id_roundtrip_does_not_poison_allocation() {
+    let mut db = Database::new();
+
+    let schema = TableSchema::new(
+        "neg_rowid".to_string(),
+        vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+    );
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("neg_rowid").unwrap();
+    table.insert(crate::Row::with_row_id(vec![SqlValue::Integer(5)], (-1i64) as u64)).unwrap();
+
+    let path = format!("/tmp/test_negative_row_id_roundtrip_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("neg_rowid").unwrap();
+
+    // Bit-pattern-faithful round-trip: the reloaded row still carries -1.
+    let rowids: Vec<i64> =
+        loaded.scan_live().map(|(_, r)| r.row_id.expect("persisted rowid") as i64).collect();
+    assert_eq!(rowids, vec![-1], "negative rowid must survive a binary reload");
+
+    // Allocation is signed (sqlite3-verified): after rowid -1 the next
+    // implicit rowid is 0 — NOT u64::MAX + 1 (panic) and NOT a positional
+    // renumber.
+    assert_eq!(loaded.max_rowid_signed(), Some(-1));
+    assert_eq!(loaded.next_rowid_signed(), 0, "sqlite3: after rowid -1, next implicit rowid is 0");
+}
+
+/// A negative INTEGER PRIMARY KEY value is the rowid (alias) and is written
+/// via `*v as u64`; reloading it must keep allocation sane so a REPLACE INTO
+/// (which reserves `next_rowid()`) cannot hit the `u64::MAX + 1` panic path
+/// (PR #5891 judge review, poisoning path 1).
+#[test]
+fn test_negative_ipk_alias_reload_keeps_next_rowid_sane() {
+    let mut db = Database::new();
+
+    let mut schema = TableSchema::with_primary_key(
+        "neg_ipk".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, false),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+        ],
+        vec!["a".to_string()],
+    );
+    schema.set_rowid_alias_column(Some(0));
+    schema.set_sql_source("CREATE TABLE neg_ipk(a INTEGER PRIMARY KEY, b INTEGER)".to_string());
+    db.create_table(schema).unwrap();
+
+    let table = db.get_table_mut("neg_ipk").unwrap();
+    table
+        .insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)]))
+        .unwrap();
+
+    let path = format!("/tmp/test_negative_ipk_reload_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let loaded = loaded_db.get_table("neg_ipk").unwrap();
+
+    // The persisted rowid is the (negative) IPK value, bit-pattern faithful.
+    let rowids: Vec<i64> =
+        loaded.scan_live().map(|(_, r)| r.row_id.expect("persisted rowid") as i64).collect();
+    assert_eq!(rowids, vec![-5]);
+
+    // Signed allocation: next rowid is -4 (sqlite3: signed max + 1), and in
+    // particular next_rowid() is safe to call (no overflow panic).
+    assert_eq!(loaded.max_rowid_signed(), Some(-5));
+    assert_eq!(loaded.next_rowid_signed(), -4);
+    let _ = loaded.next_rowid();
+}
+
 /// The rowid-alias INTEGER PRIMARY KEY column value IS the rowid; the v13
 /// writer persists the alias value so the on-disk rowid stays meaningful.
 #[test]

@@ -161,8 +161,11 @@ impl SortKeyComparator {
         if key_cmp != Ordering::Equal {
             return key_cmp;
         }
-        // Use rowid as tie-breaker for deterministic ordering
-        a.0.row_id.cmp(&b.0.row_id)
+        // Use rowid as tie-breaker for deterministic ordering.
+        // Rowids are SIGNED (issue #5835): row_id stores the two's-complement
+        // bit pattern of an i64, so compare in signed space (-1 sorts before
+        // 0). Identical to u64 order for non-negative rowids.
+        a.0.row_id.map(|r| r as i64).cmp(&b.0.row_id.map(|r| r as i64))
     }
 }
 
@@ -415,8 +418,9 @@ impl Ord for MergeEntry {
             return key_cmp;
         }
         // Use rowid as tie-breaker for SQLite-compatible ordering (issue #4893)
-        // Note: reversed because we're in a max-heap (smaller rowid = higher priority)
-        other.row.row_id.cmp(&self.row.row_id)
+        // Note: reversed because we're in a max-heap (smaller rowid = higher priority).
+        // Signed comparison (issue #5835): row_id is an i64 bit pattern.
+        other.row.row_id.map(|r| r as i64).cmp(&self.row.row_id.map(|r| r as i64))
     }
 }
 

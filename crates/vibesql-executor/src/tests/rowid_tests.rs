@@ -707,3 +707,113 @@ fn test_order_by_rowid_desc() {
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(20));
     assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(10));
 }
+
+// ---------------------------------------------------------------------------
+// Negative rowids (PR #5891 judge review) — rowids are SIGNED in SQLite
+// ---------------------------------------------------------------------------
+
+/// SQL-level helpers for the negative-rowid regressions below.
+mod negative_rowid_sql {
+    use vibesql_ast::Statement;
+    use vibesql_parser::Parser;
+
+    use super::super::super::*;
+
+    pub fn exec(db: &mut vibesql_storage::Database, sql: &str) {
+        match Parser::parse_sql(sql).unwrap() {
+            Statement::CreateTable(stmt) => {
+                CreateTableExecutor::execute(&stmt, db).unwrap();
+            }
+            Statement::Insert(stmt) => {
+                InsertExecutor::execute(db, &stmt).unwrap();
+            }
+            other => panic!("unsupported statement in test helper: {other:?}"),
+        }
+    }
+
+    /// Runs a SELECT and returns the rows.
+    pub fn query(db: &vibesql_storage::Database, sql: &str) -> Vec<vibesql_storage::Row> {
+        match Parser::parse_sql(sql).unwrap() {
+            Statement::Select(stmt) => SelectExecutor::new(db).execute(&stmt).unwrap(),
+            other => panic!("expected SELECT in test helper: {other:?}"),
+        }
+    }
+}
+
+/// Judge-review repro for PR #5891: an explicit NEGATIVE rowid must not
+/// poison rowid allocation. Previously `INSERT INTO t(rowid,x) VALUES(-1,5)`
+/// stored `-1` as `u64::MAX` and tracked it as an unsigned max, so the next
+/// implicit insert computed `u64::MAX + 1` — panic in debug builds,
+/// duplicate rowid 0 in release builds.
+///
+/// sqlite3-verified semantics: rowids are signed; allocation is
+/// `signed max + 1`, so after rowid -1 the next implicit rowid is 0.
+#[test]
+fn test_negative_explicit_rowid_then_implicit_insert() {
+    use negative_rowid_sql::{exec, query};
+
+    let mut db = vibesql_storage::Database::new();
+    exec(&mut db, "CREATE TABLE t(x INTEGER)");
+    exec(&mut db, "INSERT INTO t(rowid, x) VALUES(-1, 5)");
+    // This insert previously panicked (attempt to add with overflow).
+    exec(&mut db, "INSERT INTO t VALUES(6)");
+
+    // sqlite3: -1|5 then 0|6, ordered signed.
+    let rows = query(&db, "SELECT rowid, x FROM t ORDER BY rowid");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Bigint(-1));
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Integer(5));
+    assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Bigint(0), "sqlite3 allocates 0 after -1");
+    assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Integer(6));
+
+    // The negative rowid is addressable.
+    let by_rowid = query(&db, "SELECT x FROM t WHERE rowid = -1");
+    assert_eq!(by_rowid.len(), 1);
+    assert_eq!(by_rowid[0].values[0], vibesql_types::SqlValue::Integer(5));
+}
+
+/// Batch variant (sqlite3-verified): a NULL rowid in the same INSERT as a
+/// negative explicit rowid auto-assigns signed-max + 1.
+#[test]
+fn test_negative_rowid_batch_null_autoassign() {
+    use negative_rowid_sql::{exec, query};
+
+    let mut db = vibesql_storage::Database::new();
+    exec(&mut db, "CREATE TABLE t(x INTEGER)");
+    // sqlite3: -1|1 then 0|2.
+    exec(&mut db, "INSERT INTO t(rowid, x) VALUES(-1, 1), (NULL, 2)");
+
+    let rows = query(&db, "SELECT rowid, x FROM t ORDER BY rowid");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Bigint(-1));
+    assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Bigint(0));
+
+    // Deeply negative variant (sqlite3: after -5, the next implicit is -4).
+    let mut db2 = vibesql_storage::Database::new();
+    exec(&mut db2, "CREATE TABLE t(x INTEGER)");
+    exec(&mut db2, "INSERT INTO t(rowid, x) VALUES(-5, 1)");
+    exec(&mut db2, "INSERT INTO t VALUES(2)");
+    let rows2 = query(&db2, "SELECT rowid, x FROM t ORDER BY rowid");
+    assert_eq!(rows2[0].values[0], vibesql_types::SqlValue::Bigint(-5));
+    assert_eq!(rows2[1].values[0], vibesql_types::SqlValue::Bigint(-4), "sqlite3 allocates -4 after -5");
+}
+
+/// REPLACE INTO on a negative INTEGER PRIMARY KEY (the rowid alias) must not
+/// hit the poisoned `next_rowid()` reservation path (judge-review poisoning
+/// path 2: same-session variant; the cross-reload variant lives in
+/// vibesql-storage's binary_persistence tests).
+#[test]
+fn test_replace_into_with_negative_integer_primary_key() {
+    use negative_rowid_sql::{exec, query};
+
+    let mut db = vibesql_storage::Database::new();
+    exec(&mut db, "CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER)");
+    exec(&mut db, "INSERT INTO t VALUES(-5, 1)");
+    exec(&mut db, "REPLACE INTO t VALUES(-5, 2)");
+
+    // sqlite3: exactly one row, -5|2.
+    let rows = query(&db, "SELECT a, b FROM t");
+    assert_eq!(rows.len(), 1, "REPLACE must not duplicate the negative-IPK row");
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(-5));
+    assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Integer(2));
+}

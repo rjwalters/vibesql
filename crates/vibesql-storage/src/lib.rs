@@ -413,4 +413,50 @@ mod tests {
         // (shrunken) physical count + 1 (which would collide with rowid 7).
         assert_eq!(table.next_rowid(), 11);
     }
+
+    /// Rowids are signed (SQLite model): a negative explicit rowid is stored
+    /// as its two's-complement u64 bit pattern and must never poison
+    /// allocation. Judge-review regression for PR #5891: previously
+    /// `INSERT INTO t(rowid,x) VALUES(-1,5)` set `max_assigned_rowid` to
+    /// `u64::MAX`, so the next implicit insert computed `u64::MAX + 1` —
+    /// panic in debug builds, duplicate rowid 0 in release builds.
+    ///
+    /// sqlite3-verified allocation: next implicit rowid = signed max + 1
+    /// (only -1 present → 0; only -5 present → -4), or 1 for an empty table.
+    #[test]
+    fn test_negative_explicit_rowid_does_not_poison_allocation() {
+        let mut table = rowid_test_table();
+
+        // Explicit rowid -1 (stored as u64::MAX bit pattern).
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(5)], (-1i64) as u64)).unwrap();
+        assert_eq!(table.max_rowid_signed(), Some(-1));
+        assert_eq!(table.next_rowid_signed(), 0, "sqlite3: after rowid -1, next is 0");
+        assert_eq!(table.next_rowid(), 0u64);
+
+        // The implicit insert that previously panicked: stamp the allocated
+        // rowid (as the executor does) and continue allocating past it.
+        let next = table.next_rowid();
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(6)], next)).unwrap();
+        assert_eq!(table.max_rowid_signed(), Some(0));
+        assert_eq!(table.next_rowid_signed(), 1);
+
+        // Deeply negative maxima allocate signed max + 1 (sqlite3: -5 → -4).
+        let mut table2 = rowid_test_table();
+        table2.insert(Row::with_row_id(vec![SqlValue::Integer(1)], (-5i64) as u64)).unwrap();
+        assert_eq!(table2.next_rowid_signed(), -4, "sqlite3: after rowid -5, next is -4");
+
+        // A positive rowid still dominates a negative one (signed max).
+        table2.insert(Row::with_row_id(vec![SqlValue::Integer(2)], 3)).unwrap();
+        assert_eq!(table2.next_rowid_signed(), 4, "sqlite3: max(-5, 3) + 1 = 4");
+    }
+
+    /// `next_rowid` saturates instead of overflowing when the max rowid is
+    /// `i64::MAX` (SQLite reports SQLITE_FULL; a duplicate-rowid conflict is
+    /// the closest safe behavior — never a wrap to a bogus rowid).
+    #[test]
+    fn test_next_rowid_saturates_at_i64_max() {
+        let mut table = rowid_test_table();
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(1)], i64::MAX as u64)).unwrap();
+        assert_eq!(table.next_rowid_signed(), i64::MAX);
+    }
 }

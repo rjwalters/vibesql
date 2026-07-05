@@ -102,6 +102,15 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
             // rowid, else the implicit physical position + 1. Persisting it
             // keeps `WHERE rowid=N` stable across reloads even when live
             // rows shift physical positions (tombstones are dropped here).
+            //
+            // Rowids are signed (SQLite model): the u64 written here is the
+            // two's-complement bit pattern of the i64 rowid, so a negative
+            // rowid (e.g. an IPK of -5, written via `*v as u64`) round-trips
+            // exactly — the reader restores the same bit pattern into
+            // `Row::row_id`, and every consumer reinterprets it via
+            // `as i64`. Allocation tracking (`Table::max_assigned_rowid`)
+            // also compares in signed space, so reloading a negative rowid
+            // can never poison `next_rowid()`.
             for (idx, row) in table.scan_live() {
                 write_row_version_prefix(writer, row)?;
                 let effective_rowid = alias_idx
