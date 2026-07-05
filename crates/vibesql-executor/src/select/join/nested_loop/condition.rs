@@ -29,17 +29,17 @@ pub enum EquijoinEvalStrategy {
 /// - Null -> false
 /// - Integer(0) -> false
 /// - Integer(non-zero) -> true
-/// - Other types -> error
+/// - Strings/BLOBs -> SQLite leading-numeric coercion (non-zero prefix is true)
 pub fn eval_join_condition_to_bool(value: vibesql_types::SqlValue) -> Result<bool, ExecutorError> {
     match value {
         vibesql_types::SqlValue::Boolean(b) => Ok(b),
         vibesql_types::SqlValue::Null => Ok(false),
         // SQLite treats integer 0 as false, non-zero as true
         vibesql_types::SqlValue::Integer(i) => Ok(i != 0),
-        other => Err(ExecutorError::InvalidWhereClause(format!(
-            "JOIN condition must evaluate to boolean, got: {:?}",
-            other
-        ))),
+        // Float/string/blob and any remaining scalar types: delegate to the
+        // shared helper so SQLite truthiness (leading-numeric coercion) applies
+        // (#5830).
+        ref other => Ok(crate::evaluator::operators::is_truthy(other)),
     }
 }
 

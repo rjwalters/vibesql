@@ -441,11 +441,13 @@ fn apply_post_join_filter(
             vibesql_types::SqlValue::Real(_) => filtered_rows.push(row),
             vibesql_types::SqlValue::Double(0.0) => {} // Skip 0.0
             vibesql_types::SqlValue::Double(_) => filtered_rows.push(row),
-            other => {
-                return Err(ExecutorError::InvalidWhereClause(format!(
-                    "Filter expression must evaluate to boolean, got: {:?}",
-                    other
-                )))
+            // String, blob, and any remaining scalar types: delegate to the
+            // shared helper so text/BLOBs coerce via their leading-numeric
+            // prefix, matching SQLite (#5830).
+            ref other => {
+                if crate::evaluator::operators::is_truthy(other) {
+                    filtered_rows.push(row);
+                }
             }
         }
     }

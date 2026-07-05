@@ -220,12 +220,9 @@ impl SelectExecutor<'_> {
                     SqlValue::Numeric(f) => f != 0.0,
                     // String types (SQLite coerces strings to numeric for boolean context)
                     SqlValue::Varchar(ref s) | SqlValue::Character(ref s) => string_to_truthy(s),
-                    other => {
-                        return Err(ExecutorError::TypeError(format!(
-                            "WHERE clause must evaluate to boolean, got {:?}",
-                            other
-                        )));
-                    }
+                    // Blob and any remaining scalar types: delegate to the shared
+                    // helper so BLOBs coerce via their leading-numeric prefix (#5830).
+                    ref other => crate::evaluator::operators::is_truthy(other),
                 };
                 if !is_truthy {
                     continue;

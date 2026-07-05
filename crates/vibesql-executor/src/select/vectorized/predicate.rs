@@ -186,11 +186,9 @@ fn is_truthy(value: &vibesql_types::SqlValue) -> Result<bool, ExecutorError> {
         // String types (SQLite coerces strings to numeric for boolean context)
         SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(string_to_truthy(&s)),
 
-        // Error case (should be rare)
-        other => Err(ExecutorError::InvalidWhereClause(format!(
-            "WHERE clause must evaluate to boolean, got: {:?}",
-            other
-        ))),
+        // Blob and any remaining scalar types: delegate to the shared helper so
+        // BLOBs coerce via their leading-numeric prefix, matching SQLite (#5830).
+        other => Ok(crate::evaluator::operators::is_truthy(other)),
     }
 }
 

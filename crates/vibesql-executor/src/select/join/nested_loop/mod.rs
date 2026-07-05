@@ -567,12 +567,10 @@ pub(in crate::select::join) fn nested_loop_semi_join(
                     match value {
                         vibesql_types::SqlValue::Boolean(b) => b,
                         vibesql_types::SqlValue::Null => false,
-                        _ => {
-                            return Err(ExecutorError::InvalidWhereClause(format!(
-                                "Join condition must evaluate to boolean, got: {:?}",
-                                value
-                            )))
-                        }
+                        // Numeric/string/blob and any remaining scalar types:
+                        // delegate to the shared helper so SQLite truthiness
+                        // (leading-numeric coercion) applies (#5830).
+                        ref other => crate::evaluator::operators::is_truthy(other),
                     }
                 }
             };
@@ -689,12 +687,10 @@ pub(in crate::select::join) fn nested_loop_anti_join(
                     match value {
                         vibesql_types::SqlValue::Boolean(b) => b,
                         vibesql_types::SqlValue::Null => false,
-                        _ => {
-                            return Err(ExecutorError::InvalidWhereClause(format!(
-                                "Join condition must evaluate to boolean, got: {:?}",
-                                value
-                            )))
-                        }
+                        // Numeric/string/blob and any remaining scalar types:
+                        // delegate to the shared helper so SQLite truthiness
+                        // (leading-numeric coercion) applies (#5830).
+                        ref other => crate::evaluator::operators::is_truthy(other),
                     }
                 }
             };

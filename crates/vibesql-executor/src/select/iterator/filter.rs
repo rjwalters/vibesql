@@ -78,10 +78,10 @@ impl<'a, I: RowIterator> FilterIterator<'a, I> {
                 Ok(false)
             }
             vibesql_types::SqlValue::Real(_) | vibesql_types::SqlValue::Double(_) => Ok(true),
-            other => Err(ExecutorError::InvalidWhereClause(format!(
-                "Filter expression must evaluate to boolean, got: {:?}",
-                other
-            ))),
+            // Numeric/string/blob and any remaining scalar types: delegate to the
+            // shared helper so SQLite truthiness (leading-numeric coercion) applies
+            // to text and BLOBs (#5830).
+            other => Ok(crate::evaluator::operators::is_truthy(other)),
         }
     }
 }

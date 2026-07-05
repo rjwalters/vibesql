@@ -138,19 +138,12 @@ impl SelectExecutor<'_> {
                 evaluator.eval(where_clause, &empty_row)?
             };
 
-            // Check if WHERE condition is truthy (SQLite boolean semantics)
-            let is_truthy = match &where_result {
-                vibesql_types::SqlValue::Boolean(b) => *b,
-                vibesql_types::SqlValue::Null => false,
-                vibesql_types::SqlValue::Integer(n) => *n != 0,
-                vibesql_types::SqlValue::Smallint(n) => *n != 0,
-                vibesql_types::SqlValue::Bigint(n) => *n != 0,
-                vibesql_types::SqlValue::Float(f) => *f != 0.0,
-                vibesql_types::SqlValue::Real(f) => *f != 0.0,
-                vibesql_types::SqlValue::Double(f) => *f != 0.0,
-                vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
-                _ => true, // Non-numeric values are truthy
-            };
+            // Check if WHERE condition is truthy (SQLite boolean semantics).
+            // Delegate to the shared helper so string/blob values coerce via
+            // their leading-numeric prefix (SQLite: `WHERE 'first'` → 0 → falsy,
+            // `WHERE '1first'` → 1 → truthy) instead of being unconditionally
+            // treated as truthy (#5830).
+            let is_truthy = crate::evaluator::operators::is_truthy(&where_result);
 
             if !is_truthy {
                 // WHERE clause is false - return empty result
@@ -312,23 +305,9 @@ impl SelectExecutor<'_> {
         let result_row = vibesql_storage::Row::new(values);
         let where_result = where_evaluator.eval(where_clause, &result_row)?;
 
-        let is_truthy = match &where_result {
-            vibesql_types::SqlValue::Boolean(b) => *b,
-            vibesql_types::SqlValue::Null => false,
-            vibesql_types::SqlValue::Integer(n) => *n != 0,
-            vibesql_types::SqlValue::Smallint(n) => *n != 0,
-            vibesql_types::SqlValue::Bigint(n) => *n != 0,
-            vibesql_types::SqlValue::Float(f) => *f != 0.0,
-            vibesql_types::SqlValue::Real(f) => *f != 0.0,
-            vibesql_types::SqlValue::Double(f) => *f != 0.0,
-            vibesql_types::SqlValue::Numeric(n) => *n != 0.0,
-            // Non-numeric, non-NULL values follow SQLite numeric coercion:
-            // strings coerce to their numeric prefix (0 when non-numeric)
-            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
-                crate::evaluator::casting::string_to_number(s).1 != 0.0
-            }
-            _ => true,
-        };
+        // Delegate to the shared truthiness helper so string/blob values coerce
+        // via their leading-numeric prefix, matching SQLite (#5830).
+        let is_truthy = crate::evaluator::operators::is_truthy(&where_result);
 
         if !is_truthy {
             return Ok(vec![]);
