@@ -346,6 +346,61 @@ impl RecoveryManager {
             stats.skipped_checkpoints.extend(unreadable);
         }
 
+        // Creation-order sanity check (issue #5855): checkpoint ids strictly
+        // increase per write and the live WAL LSN counter never moves
+        // backwards across sessions (#5766), so the newest checkpoint by
+        // (LSN, id) must also be the highest-id one. If a higher-id file
+        // claims an older LSN, its header LSN is almost certainly corrupt —
+        // v1 envelope headers carry no checksum over the LSN field, so a bit
+        // flip there would otherwise make recovery silently open an older
+        // (stale) checkpoint with exit 0. Fail closed by default; the
+        // explicit fallback opt-in proceeds loudly in LSN order.
+        if let (Some(newest), Some(max_id)) =
+            (checkpoints.last(), checkpoints.iter().max_by_key(|c| c.id))
+        {
+            if max_id.id != newest.id {
+                if !fallback {
+                    return Err(StorageError::IoError(format!(
+                        "refusing to open: checkpoint LSN order disagrees with creation order \
+                         in {}: {} (id {}) was written after {} (id {}) but claims an older \
+                         LSN ({} < {}) — its header is likely corrupt. The database was NOT \
+                         modified. Re-run with --recover-fallback to recover from the newest \
+                         checkpoint by LSN (changes committed after it may be missing).",
+                        self.checkpoint_dir.display(),
+                        max_id.path.display(),
+                        max_id.id,
+                        newest.path.display(),
+                        newest.id,
+                        max_id.lsn,
+                        newest.lsn,
+                    )));
+                }
+                log::warn!(
+                    "checkpoint LSN order disagrees with creation order: {} (id {}, LSN {}) \
+                     vs {} (id {}, LSN {}); proceeding in LSN order per --recover-fallback",
+                    max_id.path.display(),
+                    max_id.id,
+                    max_id.lsn,
+                    newest.path.display(),
+                    newest.id,
+                    newest.lsn,
+                );
+                stats.corruption_detected = true;
+                stats.skipped_checkpoints.push(SkippedCheckpoint {
+                    path: max_id.path.clone(),
+                    error: format!(
+                        "written after {} (id {} > id {}) but claims an older LSN ({} < {}) — \
+                         header likely corrupt; recovery proceeded in LSN order",
+                        newest.path.display(),
+                        max_id.id,
+                        newest.id,
+                        max_id.lsn,
+                        newest.lsn
+                    ),
+                });
+            }
+        }
+
         // Try checkpoints from newest to oldest
         let mut retries = 0;
         let mut failures: Vec<String> = Vec::new();
@@ -1755,8 +1810,6 @@ mod tests {
     // then every skipped file is recorded in `RecoveryStats`.
     // ------------------------------------------------------------------
 
-    use crate::wal::checkpoint::crc32;
-
     /// Write a real checkpoint for `db` at `lsn` and return its path.
     fn write_db_checkpoint(dir: &Path, lsn: Lsn, db: &Database) -> PathBuf {
         let mut writer = CheckpointWriter::new(dir).unwrap();
@@ -1785,7 +1838,10 @@ mod tests {
         assert_eq!(&bytes[..4], b"VCHK", "not a checkpoint envelope");
         assert_eq!(&bytes[32..37], b"VBSQL", "payload is not a binary snapshot");
         bytes[37] = crate::persistence::binary::format::VERSION + 1;
-        let crc = crc32(&bytes[32..]);
+        // Re-stamp the envelope CRC per the envelope's own format version
+        // (v2 covers the 28-byte header prefix + payload; v1 payload only).
+        let header = crate::wal::CheckpointHeader::read(&mut &bytes[..]).unwrap();
+        let crc = header.expected_checksum(&bytes[32..]);
         bytes[28..32].copy_from_slice(&crc.to_le_bytes());
         fs::write(path, bytes).unwrap();
     }
@@ -1920,6 +1976,76 @@ mod tests {
         assert!(stats.corruption_detected);
         assert_eq!(stats.skipped_checkpoints.len(), 1);
         assert_eq!(stats.skipped_checkpoints[0].path, garbage);
+    }
+
+    /// Issue #5855: a higher-id (written-later) checkpoint claiming an OLDER
+    /// LSN than an earlier one means its header LSN is likely corrupt — v1
+    /// envelopes carry no header checksum, so a bit-flipped LSN would
+    /// otherwise make recovery silently open the older (stale) checkpoint
+    /// with exit 0. Default: hard error naming both files. Fallback: proceed
+    /// in LSN order, loudly, recording the suspect file.
+    #[test]
+    fn test_lsn_order_vs_creation_order_disagreement() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        // id 1 at LSN 20, then id 2 at LSN 5: creation order says id 2 is
+        // newest, LSN order says id 1 is. (In a healthy archive the WAL LSN
+        // counter never moves backwards across sessions — #5766.)
+        let older_by_id = write_db_checkpoint(&dir, 20, &db_with_table("lsn20_state"));
+        let newer_by_id = write_db_checkpoint(&dir, 5, &db_with_table("lsn5_state"));
+
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&newer_by_id.display().to_string())
+                && msg.contains(&older_by_id.display().to_string()),
+            "error must name both disagreeing checkpoints; was: {msg}"
+        );
+        assert!(msg.contains("recover-fallback"), "must mention the opt-in; was: {msg}");
+
+        // Fallback: recovers newest-by-LSN, loudly recording the suspect file.
+        let (db, stats) = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap();
+        assert!(db.get_table("main.lsn20_state").is_some());
+        assert!(stats.corruption_detected);
+        assert!(
+            stats.skipped_checkpoints.iter().any(|s| s.path == newer_by_id),
+            "the suspect checkpoint must be reported: {:?}",
+            stats.skipped_checkpoints
+        );
+    }
+
+    /// Issue #5855 gap 2 (integrated): flip the LSN field inside the newest
+    /// checkpoint's header so it sorts as the OLDEST. The v2 checksum covers
+    /// the header, so the file no longer verifies — but selection never even
+    /// loads it (a stale checkpoint sorts newest). The creation-order guard
+    /// must fail closed by default.
+    #[test]
+    fn test_header_lsn_byte_flip_never_opens_stale_silently() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().join("checkpoints");
+
+        write_db_checkpoint(&dir, 10, &db_with_table("stale_state"));
+        let newest = write_db_checkpoint(&dir, 20, &db_with_table("newest_state"));
+
+        // Zero the newest checkpoint's header LSN (bytes 8..16), leaving
+        // everything else — including the stored checksum — intact.
+        let mut bytes = fs::read(&newest).unwrap();
+        bytes[8..16].copy_from_slice(&0u64.to_le_bytes());
+        fs::write(&newest, &bytes).unwrap();
+
+        let err = RecoveryManager::new(&dir).recover().unwrap_err();
+        assert!(
+            err.to_string().contains(&newest.display().to_string()),
+            "default open must fail naming the suspect file; was: {err}"
+        );
+
+        // Fallback: the stale state is recovered — loudly — and the corrupt
+        // file is reported (its v2 checksum no longer verifies either).
+        let (db, stats) = RecoveryManager::with_config(&dir, fallback_config()).recover().unwrap();
+        assert!(db.get_table("main.stale_state").is_some());
+        assert!(stats.corruption_detected);
+        assert!(stats.skipped_checkpoints.iter().any(|s| s.path == newest));
     }
 
     /// `recover_with_base` seeds from the provided base only when no
