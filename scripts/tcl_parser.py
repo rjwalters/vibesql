@@ -162,6 +162,25 @@ class TclTestParser:
         r'attach',          # Attach database
         r'vtab',            # Virtual tables
         r'intarray',        # Int array extension
+        # C-API / pager / extension-internals files (#5844 long-tail triage).
+        # These have no SQL-reachable surface; keep static-parser mode consistent
+        # with the vibesql_skip_files list in tester_vibesql.tcl.
+        r'manydb',          # ~116 concurrent named connections
+        r'varint',          # btree_varint_test C extension
+        r'quota',           # quota-VFS C API (quota-glob)
+        r'jrnlmode',        # rollback-journal pager modes (jrnlmode, jrnlmode3)
+        r'pagesize',        # PRAGMA page_size + exact file-byte assertions
+        r'snapshot',        # sqlite3_snapshot_* C API
+        r'lock',            # file-locking / locking-style VFS C API (lock, lock5)
+        r'symlink',         # sqlite3_db_filename C API
+        r'filefmt',         # hexio raw-byte db file manipulation
+        r'colmeta',         # sqlite3_column_* metadata C API
+        r'tableapi',        # sqlite3_get_table_printf C API
+        r'bind',            # sqlite3_bind_* C API
+        r'ptrchng',         # sqlite3_value_pointer / sqlite3_result_pointer C API
+        r'badutf',          # invalid-UTF-8 injection via C API (badutf, badutf2)
+        r'strict2',         # writable_schema + rootpage aliasing
+        r'ieee754',         # unguarded load_static_extension db ieee754
     ]
 
     def __init__(self, verbose: bool = False):
