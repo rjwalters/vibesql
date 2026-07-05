@@ -1429,6 +1429,47 @@ proc trial_check_incremental {new_sql} {
     }
 }
 
+proc count_cli_statements {sql} {
+    # Count statements the way the VibeSQL CLI numbers them for its
+    # "Error executing statement N" output: every ';'-separated top-level
+    # statement, counted from 1, with CREATE TRIGGER ... END bodies treated as a
+    # single statement (their internal ';' do not delimit statements). A trailing
+    # empty segment after the final ';' is not counted. See #5853.
+    set masked [mask_trigger_bodies $sql]
+    set n 0
+    set start 0
+    set len [string length $masked]
+    for {set i 0} {$i < $len} {incr i} {
+        if {[string index $masked $i] eq ";"} {
+            if {[string trim [string range $sql $start [expr {$i - 1}]]] ne ""} {
+                incr n
+            }
+            set start [expr {$i + 1}]
+        }
+    }
+    if {[string trim [string range $sql $start end]] ne ""} {
+        incr n
+    }
+    return $n
+}
+
+proc select_error_line_for_stmt {output min_index} {
+    # Return the first "Error executing statement N: ..." line whose N is >=
+    # $min_index (the CLI index at which the NEW statement begins). Lower-N error
+    # lines are re-fires of already-attributed batched statements and are skipped
+    # so their stale message is not misreported for the new statement. Returns ""
+    # when no numbered error at/after $min_index exists. See #5853.
+    foreach line [split $output "\n"] {
+        set line [string trim $line]
+        if {[regexp {^Error executing statement ([0-9]+):} $line -> n]} {
+            if {$n >= $min_index} {
+                return $line
+            }
+        }
+    }
+    return ""
+}
+
 proc trial_check_in_transaction {new_sql} {
     # Trial-execute the cumulative transaction batch (existing $::sql_batch
     # plus $new_sql) with an appended ROLLBACK, so that errors from $new_sql
@@ -1465,20 +1506,34 @@ proc trial_check_in_transaction {new_sql} {
         trial_check_incremental $new_sql
         return
     }
-    set trial_stmts {}
+    set batch_stmts {}
     foreach stmt $::sql_batch {
         set s [string trimright $stmt]
         set s [string trimright $s ";"]
-        lappend trial_stmts $s
+        lappend batch_stmts $s
     }
     set new_clean [string trimright $new_sql]
     set new_clean [string trimright $new_clean ";"]
+    set trial_stmts $batch_stmts
     lappend trial_stmts $new_clean
     lappend trial_stmts "ROLLBACK"
 
     set combined [join $trial_stmts ";\n"]
     set pragma_prefix [build_pragma_prefix]
     set combined "${pragma_prefix}${combined}"
+
+    # Compute the CLI statement index at which the NEW statement begins. The CLI
+    # numbers every ';'-separated statement from 1 (pragma-prefix statements and
+    # the already-batched statements are "old"; the new statement — and the
+    # trailing ROLLBACK — come after them). Errors re-fired by old,
+    # already-attributed statements must NOT be misattributed to the new one
+    # (#5853). prefix_part is the pragma prefix followed by the batched
+    # statements exactly as they appear before the new statement in $combined.
+    set prefix_part $pragma_prefix
+    if {[llength $batch_stmts] > 0} {
+        append prefix_part [join $batch_stmts ";\n"]
+    }
+    set new_stmt_index [expr {[count_cli_statements $prefix_part] + 1}]
 
     set tmpfile "/tmp/vibesql_trial_[pid]_[clock microseconds].sql"
     set f [open $tmpfile w]
@@ -1515,6 +1570,30 @@ proc trial_check_in_transaction {new_sql} {
     # vibesql reports errors via lines starting with "Error executing statement"
     # or "Error:". Detect either pattern (matches exec_preserve_newlines).
     if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
+        # Attribute the error to the NEW statement only. The trial re-runs the
+        # whole accumulated batch, so already-tolerated errors from earlier
+        # (already-attributed) statements re-fire here; taking the first error
+        # line unconditionally misreports the stale lower-N message for the new
+        # statement (#5853, percentile-1.15.2-4). Select the first error line
+        # whose statement number is >= the new statement's index.
+        set new_err [select_error_line_for_stmt $result $new_stmt_index]
+        if {$new_err eq ""} {
+            # No numbered error at/after the new statement. If an unnumbered
+            # "Error:" line is present it is a genuine, unattributable failure —
+            # surface it. Otherwise only earlier statements re-fired and the new
+            # statement ran cleanly: return without raising so the caller batches
+            # it normally.
+            foreach line [split $result "\n"] {
+                set line [string trim $line]
+                if {[regexp {^Error: } $line]} {
+                    set new_err $line
+                    break
+                }
+            }
+            if {$new_err eq ""} {
+                return
+            }
+        }
         # Did the appended ROLLBACK actually find a transaction to roll back?
         # If so, the RAISE that errored was a RAISE(ABORT)/RAISE(FAIL) (or an
         # ordinary constraint violation) that rolled back only its statement and
@@ -1525,7 +1604,7 @@ proc trial_check_in_transaction {new_sql} {
         # the batched transaction open and replay the offending statement.
         set ::txn_survived_trial_error \
             [regexp {(?m)^Transaction rolled back} $result]
-        error [translate_error_to_sqlite $result]
+        error [translate_error_to_sqlite $new_err]
     }
 }
 
@@ -1751,6 +1830,30 @@ proc mask_trigger_bodies {sql} {
     return $out
 }
 
+proc find_close_then_reopen_split {sql} {
+    # Detect a "close then reopen" transaction body such as
+    #   ROLLBACK; BEGIN; UPDATE ...; SELECT ...
+    # which closes the current transaction and immediately opens a new one.
+    # Returns the character index in $sql of the ';' that terminates the first
+    # transaction-closing statement (COMMIT/END/ROLLBACK) when a BEGIN opens a
+    # fresh transaction later in the same body; otherwise returns -1. Trigger
+    # bodies are masked so their internal BEGIN/END/';' are ignored. See #5853.
+    set masked [mask_trigger_bodies $sql]
+    if {![regexp -nocase -indices \
+            {(?:^|;|\n)\s*(?:COMMIT|END|ROLLBACK)(?:\s+TRANSACTION)?\s*;} \
+            $masked cm]} {
+        return -1
+    }
+    set closer_end [lindex $cm 1]
+    set tail [string range $masked [expr {$closer_end + 1}] end]
+    if {![regexp -nocase \
+            {(?:^|;|\n)\s*BEGIN\s*(?:TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE|;|\s*$)} \
+            $tail]} {
+        return -1
+    }
+    return $closer_end
+}
+
 proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
@@ -1950,6 +2053,38 @@ proc execsql {sql {db ""}} {
     } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0)} {
         # SQL closes a transaction (e.g., "COMMIT" or has more COMMITs than BEGINs)
         # Flush the entire batch including this statement.
+        #
+        # --- Close-then-reopen split (#5853) -------------------------------
+        # A body such as `ROLLBACK; BEGIN; UPDATE ...; SELECT ...` closes the
+        # current transaction AND opens a new one. Flushing it as one unit runs
+        # the trailing (new) statements under the batch's tolerate flag — which
+        # swallows their genuine errors — and leaves a dangling open transaction
+        # in the dying batch process, desynchronising the shim from the DB (the
+        # next test's ROLLBACK then hits a fresh process with no active
+        # transaction). Split the body at the first closer: flush everything up
+        # to and including it (closing the current batch), then re-enter execsql
+        # with the reopening remainder so its trial-check surfaces any new error
+        # at THIS test's boundary. (percentile-1.16 / 1.17.)
+        #
+        # Gate on $::txn_had_tolerated_error: the swallowing only happens when
+        # the flush runs with tolerate_err=1 (a prior statement in this
+        # transaction surfaced an already-attributed error, #5478). When the
+        # batch carries no tolerated error the single flush surfaces new errors
+        # normally and subsequent statements run as autocommit, so splitting is
+        # unnecessary and would disturb multi-close/reopen PRAGMA-query bodies
+        # such as fkey6-1.10.1.
+        if {$::in_transaction && $::txn_had_tolerated_error \
+                && $begin_count > 0 && $end_count > 0} {
+            set split_at [find_close_then_reopen_split $sql]
+            if {$split_at >= 0} {
+                set part1 [string range $sql 0 $split_at]
+                set part2 [string range $sql [expr {$split_at + 1}] end]
+                if {[string trim $part2 " \t\n;"] ne ""} {
+                    execsql $part1 $db
+                    return [execsql $part2 $db]
+                }
+            }
+        }
         #
         # Standalone COMMIT with no batched-transaction context: treat as a
         # silent no-op. The trial-execute path above can surface an error and
