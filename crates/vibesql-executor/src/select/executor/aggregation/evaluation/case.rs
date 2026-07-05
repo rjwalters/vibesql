@@ -76,32 +76,13 @@ pub(super) fn evaluate(
                         evaluator,
                     )?;
 
-                    // Check if condition is TRUE (not FALSE or NULL)
-                    let is_true = match condition_value {
-                        vibesql_types::SqlValue::Boolean(true) => true,
-                        vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => {
-                            false
-                        }
-                        // SQLLogicTest compatibility: treat integers as truthy/falsy
-                        vibesql_types::SqlValue::Integer(0) => false,
-                        vibesql_types::SqlValue::Integer(_) => true,
-                        vibesql_types::SqlValue::Smallint(0) => false,
-                        vibesql_types::SqlValue::Smallint(_) => true,
-                        vibesql_types::SqlValue::Bigint(0) => false,
-                        vibesql_types::SqlValue::Bigint(_) => true,
-                        vibesql_types::SqlValue::Float(0.0) => false,
-                        vibesql_types::SqlValue::Float(_) => true,
-                        vibesql_types::SqlValue::Real(0.0) => false,
-                        vibesql_types::SqlValue::Real(_) => true,
-                        vibesql_types::SqlValue::Double(0.0) => false,
-                        vibesql_types::SqlValue::Double(_) => true,
-                        other => {
-                            return Err(ExecutorError::UnsupportedExpression(format!(
-                                "CASE condition must evaluate to boolean, got: {:?}",
-                                other
-                            )))
-                        }
-                    };
+                    // Check if condition is truthy. Delegate to the shared
+                    // SQLite truthiness helper so any expression is accepted
+                    // (strings/blobs coerce via the leading-numeric parse)
+                    // instead of erroring on non-boolean conditions — this
+                    // was the last grouped-aggregation path rejecting
+                    // non-boolean expressions (#5856).
+                    let is_true = crate::evaluator::operators::is_truthy(&condition_value);
 
                     if is_true {
                         // Evaluate result (may contain aggregates)

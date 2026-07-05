@@ -67,16 +67,6 @@ pub(crate) fn to_f64(value: &vibesql_types::SqlValue) -> Result<f64, ExecutorErr
     }
 }
 
-/// Convert Boolean to i64 (TRUE = 1, FALSE = 0)
-/// Used for implicit type coercion in arithmetic operations
-pub(crate) fn boolean_to_i64(value: &vibesql_types::SqlValue) -> Option<i64> {
-    match value {
-        vibesql_types::SqlValue::Boolean(true) => Some(1),
-        vibesql_types::SqlValue::Boolean(false) => Some(0),
-        _ => None,
-    }
-}
-
 /// SQLite-compatible string-to-number coercion for arithmetic operations
 ///
 /// SQLite rules for implicit string-to-number conversion:

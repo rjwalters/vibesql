@@ -46,7 +46,7 @@ pub(super) fn nan_to_null(value: SqlValue) -> SqlValue {
 use crate::{
     errors::ExecutorError,
     evaluator::casting::{
-        boolean_to_i64, is_approximate_numeric, is_exact_numeric, string_to_number, to_f64, to_i64,
+        is_approximate_numeric, is_exact_numeric, string_to_number, to_f64, to_i64,
     },
 };
 
@@ -74,6 +74,14 @@ fn coerce_single_value(value: &SqlValue) -> Option<(i64, f64, bool)> {
             let (i, f, is_float) = string_to_number(s);
             Some((i, f, is_float))
         }
+        // BLOB: SQLite coerces the bytes as text, then applies the same
+        // leading-numeric parse (#5856):
+        //   x'313233' + 1 → 124;  x'2E35' + 0 → 0.5;  x'AB' + 1 → 1
+        SqlValue::Blob(b) => {
+            let s = String::from_utf8_lossy(b);
+            let (i, f, is_float) = string_to_number(&s);
+            Some((i, f, is_float))
+        }
         _ => None,
     }
 }
@@ -86,30 +94,15 @@ pub(super) fn coerce_numeric_values(
 ) -> Result<CoercedValues, ExecutorError> {
     use SqlValue::*;
 
-    // Handle Boolean coercion first
-    if matches!(left, Boolean(_)) || matches!(right, Boolean(_)) {
-        let left_i64 = boolean_to_i64(left).or_else(|| to_i64(left).ok()).ok_or_else(|| {
-            ExecutorError::TypeMismatch {
-                left: left.clone(),
-                op: op.to_string(),
-                right: right.clone(),
-            }
-        })?;
-
-        let right_i64 = boolean_to_i64(right).or_else(|| to_i64(right).ok()).ok_or_else(|| {
-            ExecutorError::TypeMismatch {
-                left: left.clone(),
-                op: op.to_string(),
-                right: right.clone(),
-            }
-        })?;
-
-        return Ok(CoercedValues::ExactNumeric(left_i64, right_i64));
-    }
-
-    // Handle string coercion (SQLite compatibility)
-    // When either operand is a string, coerce it to a number
-    if matches!(left, Varchar(_) | Character(_)) || matches!(right, Varchar(_) | Character(_)) {
+    // Handle Boolean / string / BLOB coercion (SQLite compatibility).
+    // SQLite has no boolean storage class (comparison/EXISTS results are the
+    // integers 0/1), strings coerce via the leading-numeric parse, and BLOBs
+    // coerce via bytes → text → number (#5856). When any operand is one of
+    // these, coerce both sides to a common numeric type:
+    //   (1 > 0) + 'injection' → 1;  x'313233' + 1 → 124;  (1 > 0) + 0.5 → 1.5
+    if matches!(left, Boolean(_) | Varchar(_) | Character(_) | Blob(_))
+        || matches!(right, Boolean(_) | Varchar(_) | Character(_) | Blob(_))
+    {
         let left_coerced =
             coerce_single_value(left).ok_or_else(|| ExecutorError::TypeMismatch {
                 left: left.clone(),

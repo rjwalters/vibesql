@@ -144,6 +144,10 @@ fn to_boolean(value: &SqlValue) -> Result<Option<bool>, ExecutorError> {
             let numeric_value = parse_leading_numeric(trimmed);
             Ok(Some(numeric_value != 0.0))
         }
+        // BLOB: SQLite reads the bytes as text and applies the same
+        // leading-numeric coercion (#5856):
+        //   x'31' AND 1 → 1;  zeroblob(4) AND 1 → 0
+        Blob(b) => Ok(Some(is_truthy_string(&String::from_utf8_lossy(b)))),
         // Other types are not supported in boolean context
         _ => Err(ExecutorError::TypeMismatch {
             left: value.clone(),

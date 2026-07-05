@@ -44,6 +44,13 @@ pub(crate) fn eval_unary_op(
         // NULL propagation - unary operations on NULL return NULL
         (Plus | Minus, SqlValue::Null) => Ok(SqlValue::Null),
 
+        // Boolean (EXISTS/IN/comparison results) — SQLite has no boolean
+        // storage class; those expressions produce the integers 0/1, so
+        // unary +/- treats a Boolean as its integer value (#5856):
+        //   SELECT - EXISTS (SELECT 1) → -1;  SELECT + (5 > 3) → 1
+        (Plus, SqlValue::Boolean(b)) => Ok(SqlValue::Integer(*b as i64)),
+        (Minus, SqlValue::Boolean(b)) => Ok(SqlValue::Integer(-(*b as i64))),
+
         // Unary plus on text types - identity operation (SQLite behavior)
         // In SQLite, unary + on text returns the text unchanged
         (Plus, SqlValue::Character(s)) => Ok(SqlValue::Character(s.clone())),
