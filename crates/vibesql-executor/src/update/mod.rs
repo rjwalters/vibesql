@@ -125,10 +125,10 @@ impl UpdateExecutor {
     ///     quoted: false,
     ///     alias: None,
     ///     index_hint: None,
-    ///     assignments: vec![Assignment {
-    ///         column: "salary".to_string(),
-    ///         value: Expression::Literal(SqlValue::Integer(60000)),
-    ///     }],
+    ///     assignments: vec![Assignment::single(
+    ///         "salary".to_string(),
+    ///         Expression::Literal(SqlValue::Integer(60000)),
+    ///     )],
     ///     from_clause: None,
     ///     where_clause: None,
     ///     order_by: None,
