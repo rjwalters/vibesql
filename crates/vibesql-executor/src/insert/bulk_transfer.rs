@@ -276,6 +276,29 @@ fn execute_bulk_transfer(
         validated_rows.push(vibesql_storage::Row::new(row_values));
     }
 
+    // last_insert_rowid() support. SQLite's transfer optimization scans the
+    // source b-tree in ascending rowid order and inserts each row, so the value
+    // it reports afterwards is the rowid of the highest source row copied. For a
+    // rowid destination whose INTEGER PRIMARY KEY is the copied rowid, that is
+    // the maximum IPK value among the transferred rows. We compute the max here
+    // (rather than the last scanned row) because VibeSQL scans the source in
+    // physical order, which may differ from rowid order. Mirror the row-by-row
+    // INSERT path, which only tracks the rowid for rowid tables with an INTEGER
+    // PRIMARY KEY. Capture before the batch insert consumes `validated_rows`.
+    let last_rowid = if dest_schema.without_rowid {
+        None
+    } else {
+        dest_schema.get_integer_primary_key_index().and_then(|idx| {
+            validated_rows
+                .iter()
+                .filter_map(|row| match row.values.get(idx) {
+                    Some(SqlValue::Integer(v)) => Some(*v),
+                    _ => None,
+                })
+                .max()
+        })
+    };
+
     // Batch insert all rows at once (much faster than row-by-row)
     // This reduces WAL operations, index rebuilds, and cache invalidations
     let inserted_count = if !validated_rows.is_empty() {
@@ -284,6 +307,13 @@ fn execute_bulk_transfer(
     } else {
         0
     };
+
+    // Update last_insert_rowid() only when rows were actually inserted.
+    if inserted_count > 0 {
+        if let Some(rowid) = last_rowid {
+            db.set_last_insert_rowid(rowid);
+        }
+    }
 
     // Invalidate the database-level columnar cache since table data changed.
     // Note: The table-level cache is already invalidated by insert_rows_batch().

@@ -405,12 +405,21 @@ fn execute_insert_internal(
 
     // For multi-row INSERT, validate all rows first, then insert all
     // This ensures atomicity: all rows succeed or all fail (unless IGNORE is used)
-    // Each entry is (row values, explicit rowid, ipk_auto_assigned). The
-    // `ipk_auto_assigned` flag records whether the row's INTEGER PRIMARY KEY
-    // (rowid alias) value was auto-allocated rather than supplied by the INSERT;
-    // it is used to present `NEW.<ipk>` as the unwritten-rowid sentinel (-1) to
-    // BEFORE INSERT triggers.
-    let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>, bool)> = Vec::new();
+    // Each entry is (row values, explicit rowid, ipk_auto_assigned,
+    // candidate_last_id). The `ipk_auto_assigned` flag records whether the row's
+    // INTEGER PRIMARY KEY (rowid alias) value was auto-allocated rather than
+    // supplied by the INSERT; it is used to present `NEW.<ipk>` as the
+    // unwritten-rowid sentinel (-1) to BEFORE INSERT triggers.
+    //
+    // `candidate_last_id` is the value this row would contribute to
+    // last_insert_rowid() *if it is actually inserted* — the row's INTEGER
+    // PRIMARY KEY (rowid alias) value, or the first auto-generated sequence
+    // value for non-IPK tables. It is committed to `last_generated_id` only at
+    // the real insert call sites (below), so a row that takes the ON CONFLICT
+    // DO UPDATE arm — or is skipped by OR IGNORE / DO NOTHING — does not update
+    // last_insert_rowid() (SQLite excludes pure updates and skips; issue #5886).
+    let mut validated_rows: Vec<(Vec<vibesql_types::SqlValue>, Option<u64>, bool, Option<i64>)> =
+        Vec::new();
     let mut primary_key_values: Vec<Vec<vibesql_types::SqlValue>> = Vec::new(); // Track PK values for duplicate checking within batch
     let mut unique_constraint_values = if schema.get_unique_constraint_indices().is_empty() {
         Vec::new()
@@ -470,10 +479,11 @@ fn execute_insert_internal(
             }]
         );
 
-    // Track the first auto-generated ID for LAST_INSERT_ROWID() support
-    // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
-    // the first auto-generated value, not the last
-    let mut first_generated_id: Option<i64> = None;
+    // Track the most recently generated ID for last_insert_rowid() support.
+    // SQLite semantics: last_insert_rowid() returns the rowid of the most
+    // recently inserted row, so for multi-row INSERT ... VALUES / INSERT ... SELECT
+    // the LAST row in the batch wins (last writer wins).
+    let mut last_generated_id: Option<i64> = None;
 
     // Track the maximum INTEGER PRIMARY KEY value assigned within this batch
     // to handle multi-row INSERTs with NULL values correctly (SQLite semantics)
@@ -720,22 +730,12 @@ fn execute_insert_internal(
         // Apply generated/computed column values (AS(expression) syntax)
         super::defaults::apply_generated_columns(&schema, &mut full_row_values, db)?;
 
-        // Track the first generated ID across all rows
-        if first_generated_id.is_none() {
-            first_generated_id = generated_id;
-        }
-
-        // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value
-        // Also track explicit INTEGER PRIMARY KEY values for last_insert_rowid()
-        // SQLite semantics: last_insert_rowid() returns the rowid of the most recently
-        // inserted row, whether auto-generated or explicitly provided
+        // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value.
+        // (last_insert_rowid() tracking happens later, only for rows that are
+        // actually inserted — a row skipped by OR IGNORE must not update it.)
         if let Some(idx) = ipk_col_idx {
             if let Some(vibesql_types::SqlValue::Integer(val)) = full_row_values.get(idx) {
                 batch_max_ipk = Some(batch_max_ipk.map_or(*val, |prev| prev.max(*val)));
-                // Track first explicit INTEGER PRIMARY KEY value for last_insert_rowid()
-                if first_generated_id.is_none() {
-                    first_generated_id = Some(*val);
-                }
             }
         }
 
@@ -825,8 +825,31 @@ fn execute_insert_internal(
         // same batch (see fkey1-5.1 note above).
         batch_full_rows.push(full_row_values.clone());
 
+        // Compute the value this row would contribute to last_insert_rowid()
+        // *if it is actually inserted*. We commit it to `last_generated_id` only
+        // at the real insert call sites below (never in this validation loop),
+        // so a row that later takes the ON CONFLICT DO UPDATE arm, is skipped by
+        // a DO NOTHING clause, or is dropped by OR IGNORE does NOT update
+        // last_insert_rowid() — SQLite excludes pure updates and skipped rows
+        // (issue #5886). For rowid tables the value is the INTEGER PRIMARY KEY
+        // (whether explicit or auto-assigned); otherwise fall back to any
+        // auto-generated sequence value.
+        let candidate_last_id = if let Some(idx) = ipk_col_idx {
+            match full_row_values.get(idx) {
+                Some(vibesql_types::SqlValue::Integer(val)) => Some(*val),
+                _ => None,
+            }
+        } else {
+            generated_id
+        };
+
         // Store validated row for insertion (with optional explicit rowid)
-        validated_rows.push((full_row_values, explicit_rowid, ipk_auto_assigned));
+        validated_rows.push((
+            full_row_values,
+            explicit_rowid,
+            ipk_auto_assigned,
+            candidate_last_id,
+        ));
     }
 
     // All rows validated successfully, now insert them
@@ -896,7 +919,14 @@ fn execute_insert_internal(
     };
 
     if use_batch_insert && validated_rows.len() > 1 {
-        // Fast path: Use batch insert for multiple rows without triggers
+        // Fast path: Use batch insert for multiple rows without triggers.
+        // Every validated row is inserted (the batch path never runs for the ON
+        // CONFLICT DO UPDATE / DO NOTHING dispatch or REPLACE), so the last row
+        // carrying a candidate id wins last_insert_rowid() (last inserted row).
+        if let Some(id) = validated_rows.iter().rev().find_map(|t| t.3) {
+            last_generated_id = Some(id);
+        }
+
         // Use cost-based batch sizing to optimize for tables with many indexes
         let optimizer = DmlOptimizer::new(db, table_name);
         let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
@@ -911,7 +941,7 @@ fn execute_insert_internal(
             let mut row_offset = initial_row_count;
             for chunk in validated_rows.chunks(optimal_batch_size) {
                 let rows: Vec<vibesql_storage::Row> =
-                    chunk.iter().map(|(v, rowid, _)| make_row((v.clone(), *rowid))).collect();
+                    chunk.iter().map(|(v, rowid, _, _)| make_row((v.clone(), *rowid))).collect();
 
                 // Partial-aware unique-constraint check (storage skips
                 // partial UNIQUE indexes; the executor must do this itself).
@@ -953,7 +983,7 @@ fn execute_insert_internal(
         } else {
             // Single batch insert for low-cost tables
             let rows: Vec<vibesql_storage::Row> =
-                validated_rows.into_iter().map(|(v, rowid, _)| make_row((v, rowid))).collect();
+                validated_rows.into_iter().map(|(v, rowid, _, _)| make_row((v, rowid))).collect();
 
             // Partial-aware unique-constraint check (storage skips partial
             // UNIQUE indexes; the executor must do this itself).
@@ -992,7 +1022,9 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for (mut full_row_values, mut explicit_rowid, ipk_auto_assigned) in validated_rows {
+        for (mut full_row_values, mut explicit_rowid, ipk_auto_assigned, candidate_last_id) in
+            validated_rows
+        {
             // Check if ON DUPLICATE KEY UPDATE is specified
             if let Some(ref assignments) = stmt.on_duplicate_key_update {
                 // Try to update an existing row if there's a conflict
@@ -1290,6 +1322,14 @@ fn execute_insert_internal(
                 )?;
             }
 
+            // The row was genuinely inserted (not an ON CONFLICT DO UPDATE
+            // update, a DO NOTHING skip, or a RAISE(IGNORE) trigger skip — those
+            // paths `continue` above without reaching here), so it updates
+            // last_insert_rowid(). Last inserted row wins (issue #5886).
+            if let Some(id) = candidate_last_id {
+                last_generated_id = Some(id);
+            }
+
             rows_inserted += 1;
         }
     }
@@ -1310,7 +1350,7 @@ fn execute_insert_internal(
     // Update LAST_INSERT_ROWID if any auto-generated values were produced
     // SQLite: last_insert_rowid() is NOT updated for WITHOUT ROWID tables
     // (see SQLite documentation R-47220-63683)
-    if let Some(id) = first_generated_id {
+    if let Some(id) = last_generated_id {
         if !schema.without_rowid {
             db.set_last_insert_rowid(id);
         }

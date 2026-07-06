@@ -312,7 +312,8 @@ fn test_last_insert_rowid_multi_row_insert() {
     let result = CreateTableExecutor::execute(&stmt, &mut db);
     assert!(result.is_ok(), "Failed to create table: {:?}", result.err());
 
-    // Multi-row insert - per MySQL semantics, LAST_INSERT_ID returns the FIRST generated ID
+    // Multi-row insert - per SQLite semantics, last_insert_rowid() returns the
+    // rowid of the LAST row inserted (not the first)
     let multi_insert = InsertStmt {
         with_clause: None,
         schema_name: None,
@@ -339,8 +340,8 @@ fn test_last_insert_rowid_multi_row_insert() {
     let result = InsertExecutor::execute(&mut db, &multi_insert);
     assert!(result.is_ok(), "Failed to multi-row insert: {:?}", result.err());
 
-    // LAST_INSERT_ROWID should be 1 (the first generated ID, not 3)
-    assert_eq!(db.last_insert_rowid(), 1);
+    // last_insert_rowid() should be 3 (the LAST generated ID, per sqlite3)
+    assert_eq!(db.last_insert_rowid(), 3);
 
     // Verify all rows were inserted with correct IDs
     let table = db.get_table("items").unwrap();
@@ -524,4 +525,175 @@ fn test_last_insert_rowid_via_select() {
     } else {
         panic!("Expected SELECT statement");
     }
+}
+
+/// Execute a single DDL/DML statement expressed as SQL text against `db`.
+///
+/// Small dispatch helper used by the INSERT ... SELECT tests below so they can
+/// reproduce the exact multi-statement scripts from issue #5886 without hand
+/// building every AST node.
+fn exec_sql(db: &mut Database, sql: &str) {
+    use vibesql_parser::Parser;
+    let stmt = Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse failed for {sql:?}: {e:?}"));
+    match stmt {
+        vibesql_ast::Statement::CreateTable(create) => {
+            CreateTableExecutor::execute(&create, db)
+                .unwrap_or_else(|e| panic!("CREATE failed for {sql:?}: {e:?}"));
+        }
+        vibesql_ast::Statement::Insert(insert) => {
+            InsertExecutor::execute(db, &insert)
+                .unwrap_or_else(|e| panic!("INSERT failed for {sql:?}: {e:?}"));
+        }
+        other => panic!("unsupported statement in exec_sql: {other:?}"),
+    }
+}
+
+/// Reproduces the exact bug from issue #5886: after a multi-row
+/// `INSERT INTO ... SELECT`, `last_insert_rowid()` must return the rowid of the
+/// LAST row inserted (sqlite3 returns 2 here), not the first (which was 1).
+#[test]
+fn test_last_insert_rowid_insert_select() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE src(a INTEGER)");
+    exec_sql(&mut db, "INSERT INTO src VALUES(10)");
+    exec_sql(&mut db, "INSERT INTO src VALUES(20)");
+    exec_sql(&mut db, "CREATE TABLE t1(k INTEGER PRIMARY KEY, v INTEGER)");
+
+    // Two source rows -> two inserted rows with rowids 1 and 2.
+    exec_sql(&mut db, "INSERT INTO t1(v) SELECT a FROM src");
+
+    // sqlite3: last_insert_rowid() == 2 (the LAST inserted row)
+    assert_eq!(db.last_insert_rowid(), 2);
+
+    // Sanity check: both rows landed with the expected rowids/values.
+    let table = db.get_table("t1").unwrap();
+    let rows = table.scan();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    assert_eq!(rows[1].values[0], SqlValue::Integer(2));
+}
+
+/// Multi-row `INSERT ... VALUES` with explicit INTEGER PRIMARY KEY values must
+/// report the LAST explicit rowid (sqlite3 returns 3 here).
+#[test]
+fn test_last_insert_rowid_multi_values_explicit_key() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(10,1),(20,2),(30,3)");
+
+    // sqlite3: last_insert_rowid() == 30 (rowid of the last row inserted)
+    assert_eq!(db.last_insert_rowid(), 30);
+}
+
+/// Single explicit-key insert must be unchanged: last_insert_rowid() == the key.
+#[test]
+fn test_last_insert_rowid_single_explicit_key() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(100,999)");
+
+    // sqlite3: last_insert_rowid() == 100
+    assert_eq!(db.last_insert_rowid(), 100);
+}
+
+/// An INSERT ... SELECT that inserts zero rows must leave last_insert_rowid()
+/// at its previous value (sqlite3 semantics).
+#[test]
+fn test_last_insert_rowid_insert_select_zero_rows() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE src(a INTEGER)");
+    exec_sql(&mut db, "CREATE TABLE t1(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t1(v) VALUES(7)"); // rowid 1
+    assert_eq!(db.last_insert_rowid(), 1);
+
+    // src is empty -> zero rows inserted -> last_insert_rowid() unchanged.
+    exec_sql(&mut db, "INSERT INTO t1(v) SELECT a FROM src");
+    assert_eq!(db.last_insert_rowid(), 1);
+}
+
+/// INSERT OR IGNORE where the LAST row is skipped by a conflict: last_insert_rowid()
+/// must reflect the last row *actually inserted* (rowid 6), not the skipped one
+/// (sqlite3 returns 6 here).
+#[test]
+fn test_last_insert_rowid_or_ignore_skips_last_row() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
+    // (6,2) inserts; (5,3) conflicts on the existing k=5 and is skipped.
+    exec_sql(&mut db, "INSERT OR IGNORE INTO t VALUES(6,2),(5,3)");
+
+    // sqlite3: last_insert_rowid() == 6 (last row actually inserted)
+    assert_eq!(db.last_insert_rowid(), 6);
+}
+
+/// Mixed-batch upsert: the LAST row takes the ON CONFLICT DO UPDATE arm (an
+/// update, not an insert) while an earlier row inserts. last_insert_rowid() must
+/// report the last row *actually inserted* (rowid 6), NOT the updated row's
+/// rowid (5). SQLite excludes pure updates from last_insert_rowid(); verified
+/// against sqlite3 3.51.0 (returns 6). Regression guard for issue #5886.
+#[test]
+fn test_last_insert_rowid_upsert_mixed_batch_excludes_update() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
+    // (6,2) inserts (no conflict); (5,3) conflicts on k=5 and takes the DO
+    // UPDATE arm — an update, so it must not touch last_insert_rowid().
+    exec_sql(
+        &mut db,
+        "INSERT INTO t VALUES(6,2),(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+    );
+
+    // sqlite3: last_insert_rowid() == 6 (last row actually inserted, not 5)
+    assert_eq!(db.last_insert_rowid(), 6);
+}
+
+/// An upsert batch where EVERY row takes the DO UPDATE arm inserts nothing, so
+/// last_insert_rowid() must stay at its prior value (the rowid of the last row
+/// actually inserted by an earlier statement). Verified against sqlite3 3.51.0:
+/// after inserting rowid 9 then an all-update upsert, last_insert_rowid() == 9.
+/// Regression guard for issue #5886.
+#[test]
+fn test_last_insert_rowid_upsert_all_updates_keeps_prior() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(9,9)"); // last actual insert -> rowid 9
+    assert_eq!(db.last_insert_rowid(), 9);
+
+    // k=5 already exists -> DO UPDATE arm only; nothing inserted.
+    exec_sql(
+        &mut db,
+        "INSERT INTO t VALUES(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+    );
+
+    // sqlite3: last_insert_rowid() unchanged at 9 (no row inserted)
+    assert_eq!(db.last_insert_rowid(), 9);
+}
+
+/// The bulk-transfer fast path (`INSERT INTO t SELECT * FROM src`, no column
+/// list) must also report the last inserted rowid. Source rows are inserted out
+/// of rowid order so the value left by the last `INSERT INTO src` (200) differs
+/// from the last row copied into `t` in scan order (rowid 300) — sqlite3 == 300.
+#[test]
+fn test_last_insert_rowid_bulk_transfer() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE src(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO src VALUES(300,3)");
+    exec_sql(&mut db, "INSERT INTO src VALUES(100,1)");
+    exec_sql(&mut db, "INSERT INTO src VALUES(200,2)");
+    assert_eq!(db.last_insert_rowid(), 200); // last src insert
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t SELECT * FROM src");
+
+    // sqlite3: last_insert_rowid() == 300 (last row copied, in rowid scan order)
+    assert_eq!(db.last_insert_rowid(), 300);
 }
