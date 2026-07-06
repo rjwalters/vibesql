@@ -30,6 +30,17 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::ColumnAlreadyExists(stmt.column_def.name.clone()));
     }
 
+    // A STORED generated column may only be added while the table is empty.
+    // sqlite3 3.51.0 rejects `ADD COLUMN ... GENERATED ALWAYS AS (expr) STORED`
+    // on a populated table with `cannot add a STORED column` (a STORED column
+    // would require rewriting persisted row data). A VIRTUAL generated column
+    // (the default when neither keyword is given) is computed at read time and
+    // is backfilled below, so it stays permitted on a populated table. Checked
+    // before any schema mutation so the ALTER has no side effects on rejection.
+    if stmt.generated_stored && stmt.column_def.generated_expr.is_some() && table.row_count() > 0 {
+        return Err(ExecutorError::Other("cannot add a STORED column".to_string()));
+    }
+
     // STRICT tables (issue #5837) reject a non-strict datatype on the added
     // column, wrapping the strict error with SQLite's ALTER-context prefix:
     // `error in table <t> after add column: <strict error>`.

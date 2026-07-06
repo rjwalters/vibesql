@@ -10,14 +10,14 @@
 //!
 //! Parity target: sqlite3 3.51.0 (the TCL conformance reference), which returns
 //! the computed value for both the new-row path and the pre-existing-row
-//! backfill path, and — unlike older releases — accepts both STORED and VIRTUAL
-//! generated columns via ALTER TABLE ADD COLUMN. VibeSQL materializes generated
-//! columns at write time, so STORED and VIRTUAL are handled identically.
+//! backfill path. A VIRTUAL generated column (the default when neither keyword
+//! is given) may be added to a populated table; a STORED generated column may
+//! only be added while the table is empty (`cannot add a STORED column`
+//! otherwise), and DEFAULT may not be combined with a generated clause
+//! (`cannot use DEFAULT on a generated column`). VibeSQL matches all four.
 
 use vibesql_ast::Statement;
-use vibesql_executor::{
-    AlterTableExecutor, CreateTableExecutor, InsertExecutor, SelectExecutor,
-};
+use vibesql_executor::{AlterTableExecutor, CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
@@ -95,10 +95,12 @@ fn add_generated_column_backfills_existing_rows() {
     assert_eq!(query_col(&db, "SELECT y FROM g ORDER BY x"), vec![int(11), int(21)]);
 }
 
-/// sqlite3 3.51.0 accepts both STORED and VIRTUAL via ALTER and computes the
-/// value; VibeSQL must match (both materialized at write time).
+/// On an *empty* table sqlite3 3.51.0 accepts both STORED and VIRTUAL via ALTER
+/// and computes the value on the subsequent insert; VibeSQL must match (both
+/// materialized at write time). The STORED-on-populated case is rejected — see
+/// `add_generated_stored_column_on_populated_table_errors`.
 #[test]
-fn add_generated_column_stored_and_virtual_both_compute() {
+fn add_generated_column_stored_and_virtual_on_empty_table_compute() {
     for keyword in ["STORED", "VIRTUAL"] {
         let mut db = Database::new();
         exec_ddl_dml(&mut db, "CREATE TABLE g(x INTEGER)");
@@ -109,6 +111,85 @@ fn add_generated_column_stored_and_virtual_both_compute() {
         exec_ddl_dml(&mut db, "INSERT INTO g(x) VALUES(4)");
         assert_eq!(query_col(&db, "SELECT y FROM g"), vec![int(5)], "{keyword} must compute");
     }
+}
+
+/// Parse a statement, expecting success.
+fn parse_ok(sql: &str) {
+    Parser::parse_sql(sql).unwrap_or_else(|e| panic!("expected {sql:?} to parse: {e:?}"));
+}
+
+/// Parse a statement, expecting a ParseError whose message contains `needle`.
+fn parse_err_contains(sql: &str, needle: &str) {
+    match Parser::parse_sql(sql) {
+        Ok(stmt) => panic!("expected {sql:?} to be a parse error, got {stmt:?}"),
+        Err(e) => assert!(
+            e.message.contains(needle),
+            "expected error for {sql:?} to contain {needle:?}, got {:?}",
+            e.message
+        ),
+    }
+}
+
+/// Adding an explicit STORED generated column to a *populated* table must be
+/// rejected, matching sqlite3 3.51.0's `cannot add a STORED column` (a STORED
+/// column would require rewriting persisted row data). A VIRTUAL add on the same
+/// populated table stays allowed (backfilled at read/write time).
+#[test]
+fn add_generated_stored_column_on_populated_table_errors() {
+    let mut db = Database::new();
+    exec_ddl_dml(&mut db, "CREATE TABLE g(x INTEGER)");
+    exec_ddl_dml(&mut db, "INSERT INTO g(x) VALUES(10)");
+
+    let stmt =
+        Parser::parse_sql("ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1) STORED")
+            .expect("parse STORED add");
+    let Statement::AlterTable(alter) = stmt else { panic!("expected ALTER TABLE") };
+    let err = AlterTableExecutor::execute(&alter, &mut db)
+        .expect_err("STORED add on populated table must error");
+    assert!(err.to_string().contains("cannot add a STORED column"), "unexpected error: {err}");
+
+    // The rejected ALTER must not have mutated the schema.
+    assert!(
+        db.get_table("g").unwrap().schema.get_column_index("y").is_none(),
+        "column y must not have been added after the rejected STORED add"
+    );
+
+    // A VIRTUAL add on the same populated table is still accepted and backfills.
+    exec_ddl_dml(&mut db, "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1) VIRTUAL");
+    assert_eq!(query_col(&db, "SELECT y FROM g"), vec![int(11)]);
+}
+
+/// A generated column that also declares DEFAULT is invalid SQL. sqlite3 3.51.0
+/// rejects it with `cannot use DEFAULT on a generated column`, in either clause
+/// order and for both the ALTER TABLE and CREATE TABLE paths.
+#[test]
+fn generated_column_with_default_is_rejected() {
+    // ALTER: GENERATED ... DEFAULT
+    parse_err_contains(
+        "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1) DEFAULT 7",
+        "cannot use DEFAULT on a generated column",
+    );
+    // ALTER: short-form AS (...) DEFAULT
+    parse_err_contains(
+        "ALTER TABLE g ADD COLUMN y INTEGER AS (x+1) DEFAULT 7",
+        "cannot use DEFAULT on a generated column",
+    );
+    // ALTER: DEFAULT ... GENERATED (reverse order)
+    parse_err_contains(
+        "ALTER TABLE g ADD COLUMN y INTEGER DEFAULT 7 GENERATED ALWAYS AS (x+1)",
+        "cannot use DEFAULT on a generated column",
+    );
+    // CREATE TABLE: GENERATED ... DEFAULT
+    parse_err_contains(
+        "CREATE TABLE g(x INTEGER, y INTEGER GENERATED ALWAYS AS (x+1) DEFAULT 7)",
+        "cannot use DEFAULT on a generated column",
+    );
+
+    // A generated column without DEFAULT, and a plain column with DEFAULT, are
+    // both still valid (the guard must not over-reject).
+    parse_ok("ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1)");
+    parse_ok("ALTER TABLE g ADD COLUMN y INTEGER DEFAULT 7");
+    parse_ok("CREATE TABLE g(x INTEGER, y INTEGER GENERATED ALWAYS AS (x+1))");
 }
 
 /// A plain (non-generated) added column must keep its NULL default behavior.
@@ -140,8 +221,8 @@ fn add_generated_column_survives_binary_reload() {
     exec_ddl_dml(&mut db, "INSERT INTO g(x) VALUES(10)");
     exec_ddl_dml(&mut db, "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1)");
 
-    let path = std::env::temp_dir()
-        .join(format!("vibesql_5861_reload_{}.vbsql", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("vibesql_5861_reload_{}.vbsql", std::process::id()));
     db.save_binary(&path).expect("save_binary");
     let mut reloaded = Database::load_binary(&path).expect("load_binary");
     std::fs::remove_file(&path).ok();

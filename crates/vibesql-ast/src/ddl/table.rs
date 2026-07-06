@@ -350,6 +350,11 @@ pub enum AlterTableStmt {
 pub struct AddColumnStmt {
     pub table_name: String,
     pub column_def: ColumnDef,
+    /// True when the added column is a generated column declared explicitly
+    /// STORED (`GENERATED ALWAYS AS (expr) STORED`). SQLite defaults a generated
+    /// column to VIRTUAL, and only permits a STORED add when the table is empty;
+    /// the executor uses this flag to reject a STORED add on a populated table.
+    pub generated_stored: bool,
 }
 
 /// DROP COLUMN operation

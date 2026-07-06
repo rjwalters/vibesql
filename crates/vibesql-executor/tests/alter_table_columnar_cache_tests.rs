@@ -89,6 +89,7 @@ fn test_add_column_invalidates_columnar_cache() {
             is_exact_integer_type: false,
             type_source: None,
         },
+        generated_stored: false,
     });
     AlterTableExecutor::execute(&add_col_stmt, &mut db).unwrap();
 
@@ -515,6 +516,7 @@ fn test_multiple_alter_operations_invalidate_cache() {
             is_exact_integer_type: false,
             type_source: None,
         },
+        generated_stored: false,
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();
 
@@ -618,6 +620,7 @@ fn test_alter_invalidates_prewarmed_cache() {
             is_exact_integer_type: false,
             type_source: None,
         },
+        generated_stored: false,
     });
     AlterTableExecutor::execute(&add_stmt, &mut db).unwrap();
 

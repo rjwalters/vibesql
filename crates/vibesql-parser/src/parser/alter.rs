@@ -109,34 +109,13 @@ fn parse_add_column(
     // Without this the GENERATED/AS tokens were left unconsumed and
     // `generated_expr` stayed `None`, so the executor stored a plain column and
     // the added column silently returned NULL instead of the computed value
-    // (issue #5861). VibeSQL materializes generated columns at write time, so
-    // STORED and VIRTUAL are accepted and treated identically — matching
-    // sqlite3 3.51.0, which permits both via ALTER TABLE ADD COLUMN. The
-    // typeless short forms (`ADD COLUMN y AS (x+1)` / `... GENERATED ...`) are
-    // already routed here because `is_add_column_type_absent` treats a leading
-    // GENERATED/AS as "no data type".
-    let mut generated_expr: Option<Box<Expression>> = None;
-    if parser.peek_keyword(Keyword::Generated) {
-        parser.advance(); // consume GENERATED
-        parser.expect_keyword(Keyword::Always)?;
-        parser.expect_keyword(Keyword::As)?;
-        parser.expect_token(Token::LParen)?;
-        let expr = parser.parse_expression()?;
-        parser.expect_token(Token::RParen)?;
-        if parser.peek_keyword(Keyword::Stored) || parser.peek_keyword(Keyword::Virtual) {
-            parser.advance();
-        }
-        generated_expr = Some(Box::new(expr));
-    } else if parser.peek_keyword(Keyword::As) {
-        parser.advance(); // consume AS
-        parser.expect_token(Token::LParen)?;
-        let expr = parser.parse_expression()?;
-        parser.expect_token(Token::RParen)?;
-        if parser.peek_keyword(Keyword::Stored) || parser.peek_keyword(Keyword::Virtual) {
-            parser.advance();
-        }
-        generated_expr = Some(Box::new(expr));
-    }
+    // (issue #5861). SQLite defaults a generated column to VIRTUAL; the STORED
+    // flag is threaded to the executor so a STORED add on a populated table can
+    // be rejected the way sqlite3 3.51.0 does. The typeless short forms (`ADD
+    // COLUMN y AS (x+1)` / `... GENERATED ...`) are already routed here because
+    // `is_add_column_type_absent` treats a leading GENERATED/AS as "no data
+    // type".
+    let mut generated = parse_optional_generated_clause(parser)?;
 
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
@@ -144,6 +123,26 @@ fn parse_add_column(
         Some(Box::new(parser.parse_expression()?))
     } else {
         None
+    };
+
+    // A generated clause may also follow DEFAULT (`DEFAULT 7 GENERATED ALWAYS AS
+    // (...)`). SQLite rejects the DEFAULT + generated combination regardless of
+    // order, so parse the trailing generated clause here to feed the
+    // mutual-exclusion guard below instead of leaving the tokens unconsumed.
+    if generated.is_none() {
+        generated = parse_optional_generated_clause(parser)?;
+    }
+
+    // SQLite rejects a generated column that also declares DEFAULT with
+    // `cannot use DEFAULT on a generated column` (verified against sqlite3
+    // 3.51.0). Match that instead of silently accepting the invalid clause.
+    if generated.is_some() && default_value.is_some() {
+        return Err(ParseError { message: "cannot use DEFAULT on a generated column".to_string() });
+    }
+
+    let (generated_expr, generated_stored) = match generated {
+        Some((expr, stored)) => (Some(expr), stored),
+        None => (None, false),
     };
 
     // Parse column constraints
@@ -211,7 +210,39 @@ fn parse_add_column(
         type_source,
     };
 
-    Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def }))
+    Ok(AlterTableStmt::AddColumn(AddColumnStmt { table_name, column_def, generated_stored }))
+}
+
+/// Parse an optional generated-column clause: `GENERATED ALWAYS AS (expr)` or the
+/// short form `AS (expr)`, each optionally followed by `STORED` or `VIRTUAL`.
+/// Returns the generated expression and whether it was declared `STORED` (SQLite
+/// defaults a generated column to VIRTUAL when neither keyword is present).
+fn parse_optional_generated_clause(
+    parser: &mut crate::Parser,
+) -> Result<Option<(Box<Expression>, bool)>, ParseError> {
+    if parser.peek_keyword(Keyword::Generated) {
+        parser.advance(); // consume GENERATED
+        parser.expect_keyword(Keyword::Always)?;
+        parser.expect_keyword(Keyword::As)?;
+    } else if parser.peek_keyword(Keyword::As) {
+        parser.advance(); // consume AS (short form)
+    } else {
+        return Ok(None);
+    }
+
+    parser.expect_token(Token::LParen)?;
+    let expr = parser.parse_expression()?;
+    parser.expect_token(Token::RParen)?;
+
+    let mut stored = false;
+    if parser.peek_keyword(Keyword::Stored) {
+        parser.advance();
+        stored = true;
+    } else if parser.peek_keyword(Keyword::Virtual) {
+        parser.advance();
+    }
+
+    Ok(Some((Box::new(expr), stored)))
 }
 
 /// Determine whether the token following an ADD COLUMN column name signals

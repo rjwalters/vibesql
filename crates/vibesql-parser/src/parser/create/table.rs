@@ -220,6 +220,19 @@ impl Parser {
                 default_value = Some(d);
             }
 
+            // SQLite rejects a generated column that also declares DEFAULT with
+            // `cannot use DEFAULT on a generated column` (verified against
+            // sqlite3 3.51.0). The DEFAULT may be written either adjacent to the
+            // generated clause or interleaved with the column constraints
+            // (captured above as `mid_default`), so this guard runs after the
+            // constraint scan to cover both spellings — matching the same guard
+            // in the ALTER TABLE ADD COLUMN path.
+            if generated_expr.is_some() && default_value.is_some() {
+                return Err(ParseError {
+                    message: "cannot use DEFAULT on a generated column".to_string(),
+                });
+            }
+
             // Determine nullability based on constraints
             let nullable = !constraints
                 .iter()
