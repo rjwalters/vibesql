@@ -1170,3 +1170,178 @@ fn test_arena_fallback_between_bitwise_bound() {
         high
     );
 }
+
+// ============================================================================
+// Part B of #5851 (arena parser): relational operators (`< <= > >=`) form a
+// tier that binds TIGHTER than the equality/predicate tier. Unlike the bitwise
+// tier, relational operators ARE inside the arena grammar, so these expressions
+// parse directly through the arena parser (no fallback) and must produce the
+// same relational-tier bounds/patterns as the standard parser. Every expected
+// value below was verified against sqlite3 3.51.0.
+// ============================================================================
+
+/// Assert the arena expression is `Extended(Between { .. })` and hand the
+/// (low, high) bound expressions to the callback.
+fn with_arena_between<'a>(
+    expr: &'a vibesql_ast::arena::Expression<'a>,
+    check: impl FnOnce(&'a vibesql_ast::arena::Expression<'a>, &'a vibesql_ast::arena::Expression<'a>),
+) {
+    let vibesql_ast::arena::Expression::Extended(vibesql_ast::arena::ExtendedExpr::Between {
+        low,
+        high,
+        negated,
+        ..
+    }) = expr
+    else {
+        panic!("expected Between expression, got {:?}", expr);
+    };
+    assert!(!negated, "expected non-negated BETWEEN");
+    check(low, high);
+}
+
+#[test]
+fn test_arena_relational_in_between_high_bound() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 < 3; -- 0  (high bound is 3 < 3 = 0)
+    with_arena_select_expr("SELECT 2 BETWEEN 0 AND 3 < 3", |expr| {
+        with_arena_between(expr, |_low, high| {
+            assert!(
+                matches!(
+                    high,
+                    vibesql_ast::arena::Expression::BinaryOp {
+                        op: vibesql_ast::BinaryOperator::LessThan,
+                        ..
+                    }
+                ),
+                "high bound should be (3 < 3), got {:?}",
+                high
+            );
+        });
+    });
+}
+
+#[test]
+fn test_arena_relational_in_between_low_bound() {
+    // sqlite3: SELECT 2 BETWEEN 1 > 0 AND 3; -- 1  (low bound is 1 > 0 = 1)
+    with_arena_select_expr("SELECT 2 BETWEEN 1 > 0 AND 3", |expr| {
+        with_arena_between(expr, |low, _high| {
+            assert!(
+                matches!(
+                    low,
+                    vibesql_ast::arena::Expression::BinaryOp {
+                        op: vibesql_ast::BinaryOperator::GreaterThan,
+                        ..
+                    }
+                ),
+                "low bound should be (1 > 0), got {:?}",
+                low
+            );
+        });
+    });
+}
+
+#[test]
+fn test_arena_relational_in_like_pattern() {
+    // sqlite3: SELECT 2 LIKE 1 < 3; -- 0  (pattern is 1 < 3 = 1)
+    with_arena_select_expr("SELECT 2 LIKE 1 < 3", |expr| {
+        let vibesql_ast::arena::Expression::Extended(vibesql_ast::arena::ExtendedExpr::Like {
+            pattern,
+            negated,
+            ..
+        }) = expr
+        else {
+            panic!("expected Like expression, got {:?}", expr);
+        };
+        assert!(!negated);
+        assert!(
+            matches!(
+                pattern,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::LessThan,
+                    ..
+                }
+            ),
+            "LIKE pattern should be (1 < 3), got {:?}",
+            pattern
+        );
+    });
+}
+
+#[test]
+fn test_arena_equality_reduces_left_over_between() {
+    // Equality binds looser than the relational tier and reduces left, so the
+    // trailing `= 1` takes the whole BETWEEN as its left operand.
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 = 1; -- 1, i.e. (2 BETWEEN 0 AND 3) = 1
+    with_arena_select_expr("SELECT 2 BETWEEN 0 AND 3 = 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Equal at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::Extended(
+                    vibesql_ast::arena::ExtendedExpr::Between { .. }
+                )
+            ),
+            "LHS of = should be the BETWEEN node, got {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_relational_tighter_than_equality() {
+    // sqlite3: SELECT 1 < 2 = 1; -- 1, i.e. (1 < 2) = 1 (relational reduces first).
+    with_arena_select_expr("SELECT 1 < 2 = 1", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp Equal at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Equal);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::LessThan,
+                    ..
+                }
+            ),
+            "LHS of = should be (1 < 2), got {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_chained_relational_is_left_associative() {
+    // sqlite3: SELECT 1 < 2 < 3; -- 1, i.e. ((1 < 2) < 3).
+    with_arena_select_expr("SELECT 1 < 2 < 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp LessThan at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::LessThan);
+        assert!(
+            matches!(
+                left,
+                vibesql_ast::arena::Expression::BinaryOp {
+                    op: vibesql_ast::BinaryOperator::LessThan,
+                    ..
+                }
+            ),
+            "left of < should be (1 < 2), got {:?}",
+            left
+        );
+    });
+}
+
+#[test]
+fn test_arena_in_list_followed_by_relational() {
+    // sqlite3: SELECT 1 IN (1) < 3; -- 1, i.e. (1 IN (1)) < 3.
+    // The arena continue_higher_precedence_ops must climb the relational tier.
+    with_arena_select_expr("SELECT 1 IN (1) < 3", |expr| {
+        let vibesql_ast::arena::Expression::BinaryOp { op, left, .. } = expr else {
+            panic!("expected BinaryOp LessThan at top level, got {:?}", expr);
+        };
+        assert_eq!(*op, vibesql_ast::BinaryOperator::LessThan);
+        assert_arena_in_list(left, "left operand of <");
+    });
+}

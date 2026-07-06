@@ -272,12 +272,99 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parse comparison expression (handles =, <, >, <=, >=, !=, <>, IN, BETWEEN, LIKE, IS NULL)
-    /// These operators have lower precedence than arithmetic operators
+    /// Parse relational expression (handles `<`, `<=`, `>`, `>=`).
     ///
-    /// Per SQLite, all operators in this tier (=, <, >, IS, IN, BETWEEN, LIKE, GLOB,
-    /// ISNULL, NOTNULL, ...) are left-associative and composable, so they chain:
+    /// Per SQLite (https://sqlite.org/lang_expr.html#operators) the relational
+    /// operators form their own tier that binds TIGHTER than the equality /
+    /// predicate tier (`= == != <> IS IN LIKE GLOB BETWEEN ...`) but LOOSER than
+    /// the bitwise tier (`| & << >>`). They are left-associative, so
+    /// `1 < 2 < 3` parses as `((1 < 2) < 3)`. Because this tier binds tighter
+    /// than the predicate tier, BETWEEN bounds and LIKE/GLOB patterns parse
+    /// here: `2 BETWEEN 0 AND 3 < 3` has high bound `(3 < 3)`, and
+    /// `2 LIKE 1 < 3` has pattern `(1 < 3)`.
+    pub(super) fn parse_relational_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let seed = self.parse_unary_expression()?;
+        self.parse_relational_expression_from(seed)
+    }
+
+    /// Relational tier (`<`, `<=`, `>`, `>=`) with an already-parsed left operand.
+    ///
+    /// The seed is first climbed through the tighter bitwise tier (which in turn
+    /// climbs additive/multiplicative/concat), so this doubles as the seeded
+    /// precedence-climbing entry point used by `continue_higher_precedence_ops`.
+    fn parse_relational_expression_from(
+        &mut self,
+        left: vibesql_ast::Expression,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
+        let mut left = self.parse_bitwise_expression_from(left)?;
+
+        loop {
+            let op = match self.peek() {
+                Token::Symbol('<') => vibesql_ast::BinaryOperator::LessThan,
+                Token::Symbol('>') => vibesql_ast::BinaryOperator::GreaterThan,
+                Token::Operator(crate::token::MultiCharOperator::LessEqual) => {
+                    vibesql_ast::BinaryOperator::LessThanOrEqual
+                }
+                Token::Operator(crate::token::MultiCharOperator::GreaterEqual) => {
+                    vibesql_ast::BinaryOperator::GreaterThanOrEqual
+                }
+                _ => break,
+            };
+            self.advance();
+
+            // Quantified comparison (ALL / ANY / SOME): `x < ALL (SELECT ...)`.
+            // The relational operators live in this tier, so the quantified form
+            // is recognized here (the outer equality tier handles `= ALL` etc.).
+            if self.peek_keyword(Keyword::All)
+                || self.peek_keyword(Keyword::Any)
+                || self.peek_keyword(Keyword::Some)
+            {
+                let quantifier = if self.peek_keyword(Keyword::All) {
+                    self.consume_keyword(Keyword::All)?;
+                    vibesql_ast::Quantifier::All
+                } else if self.peek_keyword(Keyword::Any) {
+                    self.consume_keyword(Keyword::Any)?;
+                    vibesql_ast::Quantifier::Any
+                } else {
+                    self.consume_keyword(Keyword::Some)?;
+                    vibesql_ast::Quantifier::Some
+                };
+
+                self.expect_token(Token::LParen)?;
+                let subquery = self.parse_select_statement()?;
+                self.expect_token(Token::RParen)?;
+
+                left = vibesql_ast::Expression::QuantifiedComparison {
+                    expr: Box::new(left),
+                    op,
+                    quantifier,
+                    subquery: Box::new(subquery),
+                };
+                continue;
+            }
+
+            let right = self.parse_bitwise_expression()?;
+            left = vibesql_ast::Expression::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parse comparison expression (handles =, ==, !=, <>, IN, BETWEEN, LIKE, GLOB, IS NULL)
+    /// These operators have lower precedence than the relational (`< <= > >=`) tier.
+    ///
+    /// Per SQLite, the equality / predicate operators (=, ==, IS, IN, BETWEEN,
+    /// LIKE, GLOB, ISNULL, NOTNULL, ...) form a tier that binds LOOSER than the
+    /// relational tier. They are left-associative and composable, so they chain:
     /// `1 IN (1) NOT IN (SELECT 2)` parses as `(1 IN (1)) NOT IN (SELECT 2)`.
+    /// The seed and every operand within this tier parse at the relational tier,
+    /// so `1 < 2 = 1` parses as `((1 < 2) = 1)` and `1 = 2 < 3` as `(1 = (2 < 3))`.
     /// Additionally, IN's right operand is syntactically closed (a parenthesized
     /// list/subquery or a table name), so a tighter-binding operator that follows an
     /// IN node takes the whole IN expression as its left operand:
@@ -285,7 +372,7 @@ impl Parser {
     pub(super) fn parse_comparison_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_bitwise_expression()?;
+        let mut left = self.parse_relational_expression()?;
 
         loop {
             // Check for IN operator (including NOT IN) and BETWEEN (including NOT BETWEEN)
@@ -413,10 +500,11 @@ impl Parser {
                         false
                     };
 
-                    // Parse low AND high
-                    let low = self.parse_bitwise_expression()?;
+                    // Parse low AND high at the relational tier (see BETWEEN
+                    // below for the tier rationale).
+                    let low = self.parse_relational_expression()?;
                     self.consume_keyword(Keyword::And)?;
-                    let high = self.parse_bitwise_expression()?;
+                    let high = self.parse_relational_expression()?;
 
                     left = vibesql_ast::Expression::Between {
                         expr: Box::new(left),
@@ -430,13 +518,13 @@ impl Parser {
                     // It's NOT LIKE
                     self.consume_keyword(Keyword::Like)?;
 
-                    // Parse pattern expression
-                    let pattern = self.parse_bitwise_expression()?;
+                    // Parse pattern expression at the relational tier
+                    let pattern = self.parse_relational_expression()?;
 
                     // Check for optional ESCAPE clause
                     let escape = if self.peek_keyword(Keyword::Escape) {
                         self.consume_keyword(Keyword::Escape)?;
-                        Some(Box::new(self.parse_bitwise_expression()?))
+                        Some(Box::new(self.parse_relational_expression()?))
                     } else {
                         None
                     };
@@ -452,13 +540,13 @@ impl Parser {
                     // It's NOT GLOB (SQLite)
                     self.consume_keyword(Keyword::Glob)?;
 
-                    // Parse pattern expression
-                    let pattern = self.parse_bitwise_expression()?;
+                    // Parse pattern expression at the relational tier
+                    let pattern = self.parse_relational_expression()?;
 
                     // Check for optional ESCAPE clause
                     let escape = if self.peek_keyword(Keyword::Escape) {
                         self.consume_keyword(Keyword::Escape)?;
-                        Some(Box::new(self.parse_bitwise_expression()?))
+                        Some(Box::new(self.parse_relational_expression()?))
                     } else {
                         None
                     };
@@ -650,12 +738,15 @@ impl Parser {
                 };
 
                 // Parse low AND high
-                // Bounds parse at the bitwise tier (same as NOT BETWEEN): everything
-                // tighter than the comparison tier is allowed (including `& | << >>`);
-                // only the boolean AND separating low/high must not be consumed.
-                let low = self.parse_bitwise_expression()?;
+                // Bounds parse at the relational tier (same as NOT BETWEEN):
+                // everything tighter than the equality/predicate tier is allowed,
+                // including the relational operators (`< <= > >=`) and the bitwise
+                // tier (`& | << >>`). Per SQLite `2 BETWEEN 0 AND 3 < 3` has high
+                // bound `(3 < 3)`. Only the boolean AND separating low/high must
+                // not be consumed.
+                let low = self.parse_relational_expression()?;
                 self.consume_keyword(Keyword::And)?;
-                let high = self.parse_bitwise_expression()?;
+                let high = self.parse_relational_expression()?;
 
                 left = vibesql_ast::Expression::Between {
                     expr: Box::new(left),
@@ -669,13 +760,13 @@ impl Parser {
                 // It's LIKE (not negated)
                 self.consume_keyword(Keyword::Like)?;
 
-                // Parse pattern expression at the bitwise tier (same as NOT LIKE)
-                let pattern = self.parse_bitwise_expression()?;
+                // Parse pattern expression at the relational tier (same as NOT LIKE)
+                let pattern = self.parse_relational_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_bitwise_expression()?))
+                    Some(Box::new(self.parse_relational_expression()?))
                 } else {
                     None
                 };
@@ -691,13 +782,13 @@ impl Parser {
                 // It's GLOB (SQLite) (not negated)
                 self.consume_keyword(Keyword::Glob)?;
 
-                // Parse pattern expression at the bitwise tier (same as NOT GLOB)
-                let pattern = self.parse_bitwise_expression()?;
+                // Parse pattern expression at the relational tier (same as NOT GLOB)
+                let pattern = self.parse_relational_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_bitwise_expression()?))
+                    Some(Box::new(self.parse_relational_expression()?))
                 } else {
                     None
                 };
@@ -711,28 +802,32 @@ impl Parser {
                 continue;
             }
 
-            // Check for comparison operators (both single-char and multi-char)
-            // Note: Exclude || (concat) operator which should be handled in additive expression
+            // Check for equality / predicate comparison operators.
+            // The relational operators (`< <= > >=`) are NOT handled here: they
+            // bind tighter and are consumed by the relational tier (the seed of
+            // this function and every operand within it). Concat / shift / JSON
+            // operators bind tighter still and are consumed at their own tiers.
             let is_comparison = match self.peek() {
-                Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
-                Token::Operator(op) => !matches!(op, crate::token::MultiCharOperator::Concat),
+                Token::Symbol('=') => true,
+                Token::Operator(op) => !matches!(
+                    op,
+                    crate::token::MultiCharOperator::Concat
+                        | crate::token::MultiCharOperator::LessEqual
+                        | crate::token::MultiCharOperator::GreaterEqual
+                        | crate::token::MultiCharOperator::LeftShift
+                        | crate::token::MultiCharOperator::RightShift
+                        | crate::token::MultiCharOperator::JsonExtract
+                        | crate::token::MultiCharOperator::JsonExtractText
+                ),
                 _ => false,
             };
 
             if is_comparison {
                 let op = match self.peek() {
                     Token::Symbol('=') => vibesql_ast::BinaryOperator::Equal,
-                    Token::Symbol('<') => vibesql_ast::BinaryOperator::LessThan,
-                    Token::Symbol('>') => vibesql_ast::BinaryOperator::GreaterThan,
                     Token::Operator(op) => {
                         use crate::token::MultiCharOperator;
                         match op {
-                            MultiCharOperator::LessEqual => {
-                                vibesql_ast::BinaryOperator::LessThanOrEqual
-                            }
-                            MultiCharOperator::GreaterEqual => {
-                                vibesql_ast::BinaryOperator::GreaterThanOrEqual
-                            }
                             MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                                 vibesql_ast::BinaryOperator::NotEqual
                             }
@@ -748,12 +843,15 @@ impl Parser {
                             MultiCharOperator::L2Distance => {
                                 vibesql_ast::BinaryOperator::L2Distance
                             }
-                            // These operators bind tighter than comparison and
-                            // are consumed at lower tiers (Concat at the concat
-                            // tier, shifts at the bitwise tier, and `->`/`->>` at
-                            // the JSON-path tier), so reaching here means a
-                            // genuinely misplaced operator.
-                            MultiCharOperator::Concat
+                            // These operators bind tighter than the equality tier
+                            // and are consumed at lower tiers (relational `< <= > >=`
+                            // at the relational tier, Concat at the concat tier,
+                            // shifts at the bitwise tier, and `->`/`->>` at the
+                            // JSON-path tier), so the is_comparison gate above
+                            // already excludes them; this arm is unreachable.
+                            MultiCharOperator::LessEqual
+                            | MultiCharOperator::GreaterEqual
+                            | MultiCharOperator::Concat
                             | MultiCharOperator::LeftShift
                             | MultiCharOperator::RightShift
                             | MultiCharOperator::JsonExtract
@@ -802,7 +900,8 @@ impl Parser {
                     continue;
                 }
 
-                let right = self.parse_bitwise_expression()?;
+                // RHS parses at the relational tier, so `1 = 2 < 3` is `1 = (2 < 3)`.
+                let right = self.parse_relational_expression()?;
                 left = vibesql_ast::Expression::BinaryOp {
                     op,
                     left: Box::new(left),
@@ -827,7 +926,7 @@ impl Parser {
                 if self.peek_keyword(Keyword::Distinct) {
                     self.consume_keyword(Keyword::Distinct)?;
                     self.expect_keyword(Keyword::From)?;
-                    let right = self.parse_bitwise_expression()?;
+                    let right = self.parse_relational_expression()?;
                     left = vibesql_ast::Expression::IsDistinctFrom {
                         left: Box::new(left),
                         right: Box::new(right),
@@ -861,7 +960,7 @@ impl Parser {
                 } else {
                     // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
                     // This handles cases like `expr IS 0` or `expr IS 1`
-                    let right = self.parse_bitwise_expression()?;
+                    let right = self.parse_relational_expression()?;
                     left = vibesql_ast::Expression::IsDistinctFrom {
                         left: Box::new(left),
                         right: Box::new(right),
@@ -902,7 +1001,7 @@ impl Parser {
     }
 
     /// Continue parsing tighter-binding binary operators (multiplicative, concat,
-    /// additive, bitwise) with an already-parsed left operand.
+    /// additive, bitwise, relational) with an already-parsed left operand.
     ///
     /// Used after a syntactically-closed comparison-tier node — IN/NOT IN
     /// (right operand is a parenthesized list/subquery or a table name) and
@@ -910,7 +1009,8 @@ impl Parser {
     /// all). Per SQLite a tighter-binding operator that follows takes the
     /// entire node as its left operand: `1 IN (SELECT 1) + 1` parses as
     /// `(1 IN (SELECT 1)) + 1`, `1 NOT IN (SELECT 1) << 2` as
-    /// `(1 NOT IN (SELECT 1)) << 2`, and `1 ISNULL + 1` as `(1 ISNULL) + 1`.
+    /// `(1 NOT IN (SELECT 1)) << 2`, `1 IN (1) < 3` as `(1 IN (1)) < 3`, and
+    /// `1 ISNULL + 1` as `(1 ISNULL) + 1`.
     ///
     /// Note this does NOT apply to `IS NULL` / `IS [NOT] TRUE`: there SQLite
     /// treats NULL/TRUE as an ordinary expression operand of IS, so
@@ -920,15 +1020,18 @@ impl Parser {
     /// relative precedence among these operators is preserved
     /// (e.g. `x IN (1) + 2 * 3` parses as `(x IN (1)) + (2 * 3)`).
     ///
-    /// Delegates to `parse_bitwise_expression_from`, which climbs the seeded
-    /// left operand through the multiplicative, concat, additive, and bitwise
-    /// tiers using the canonical per-tier operator loops. The arena parser
-    /// has the same helper (minus the bitwise tier) in arena_parser/expression.rs.
+    /// Delegates to `parse_relational_expression_from`, which climbs the seeded
+    /// left operand through the multiplicative, concat, additive, bitwise, and
+    /// relational tiers using the canonical per-tier operator loops. The relational
+    /// tier is the tightest tier still looser than the equality/predicate tier, so
+    /// climbing to it (and no further) leaves the outer equality loop to reduce
+    /// left. The arena parser has the same helper (minus the bitwise tier) in
+    /// arena_parser/expression.rs.
     fn continue_higher_precedence_ops(
         &mut self,
         left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        self.parse_bitwise_expression_from(left)
+        self.parse_relational_expression_from(left)
     }
 
     /// Parse unary expression (handles unary +, -, ~ operators)

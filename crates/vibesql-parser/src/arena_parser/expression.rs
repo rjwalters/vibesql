@@ -91,17 +91,105 @@ impl<'arena> ArenaParser<'arena> {
         }
     }
 
+    /// Parse relational expression (handles `<`, `<=`, `>`, `>=`).
+    ///
+    /// Per SQLite the relational operators form their own tier that binds TIGHTER
+    /// than the equality / predicate tier (`= == != <> IS IN LIKE BETWEEN ...`)
+    /// but LOOSER than the arithmetic tiers. They are left-associative, so
+    /// `1 < 2 < 3` parses as `((1 < 2) < 3)`. Because this tier binds tighter
+    /// than the predicate tier, BETWEEN bounds and LIKE patterns parse here:
+    /// `2 BETWEEN 0 AND 3 < 3` has high bound `(3 < 3)`.
+    ///
+    /// The arena parser has no shift/bitwise tier, so this tier climbs the
+    /// additive tier directly (unlike the standard parser, which interposes the
+    /// bitwise tier). Expressions using `| & << >>` fail arena parsing and fall
+    /// back to the standard parser regardless.
+    fn parse_relational_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
+        let seed = self.parse_unary_expression()?;
+        self.parse_relational_expression_from(seed)
+    }
+
+    /// Relational tier (`<`, `<=`, `>`, `>=`) with an already-parsed left operand.
+    ///
+    /// The seed is first climbed through the tighter additive tier (which in turn
+    /// climbs multiplicative/concat), so this doubles as the seeded
+    /// precedence-climbing entry point used by `continue_higher_precedence_ops`.
+    fn parse_relational_expression_from(
+        &mut self,
+        left: Expression<'arena>,
+    ) -> Result<Expression<'arena>, ParseError> {
+        let mut left = self.parse_additive_expression_from(left)?;
+
+        loop {
+            let op = match self.peek() {
+                Token::Symbol('<') => BinaryOperator::LessThan,
+                Token::Symbol('>') => BinaryOperator::GreaterThan,
+                Token::Operator(MultiCharOperator::LessEqual) => {
+                    BinaryOperator::LessThanOrEqual
+                }
+                Token::Operator(MultiCharOperator::GreaterEqual) => {
+                    BinaryOperator::GreaterThanOrEqual
+                }
+                _ => break,
+            };
+            self.advance();
+
+            // Quantified comparison (ALL / ANY / SOME): `x < ALL (SELECT ...)`.
+            // The relational operators live in this tier, so the quantified form
+            // is recognized here (the outer equality tier handles `= ALL` etc.).
+            if self.peek_keyword(Keyword::All)
+                || self.peek_keyword(Keyword::Any)
+                || self.peek_keyword(Keyword::Some)
+            {
+                let quantifier = if self.try_consume_keyword(Keyword::All) {
+                    Quantifier::All
+                } else if self.try_consume_keyword(Keyword::Any) {
+                    Quantifier::Any
+                } else {
+                    self.consume_keyword(Keyword::Some)?;
+                    Quantifier::Some
+                };
+
+                self.expect_token(Token::LParen)?;
+                let subquery = self.parse_select_statement()?;
+                self.expect_token(Token::RParen)?;
+
+                let left_ref = self.arena.alloc(left);
+                left = Expression::Extended(self.arena.alloc(
+                    ExtendedExpr::QuantifiedComparison {
+                        expr: left_ref,
+                        op,
+                        quantifier,
+                        subquery,
+                    },
+                ));
+                continue;
+            }
+
+            let right = self.parse_additive_expression()?;
+            let left_ref = self.arena.alloc(left);
+            let right_ref = self.arena.alloc(right);
+            left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
+        }
+
+        Ok(left)
+    }
+
     /// Parse comparison expression.
     ///
-    /// Per SQLite, all operators in this tier (=, <, >, IS, IN, BETWEEN, LIKE,
-    /// ISNULL, NOTNULL, ...) are left-associative and composable, so they chain:
-    /// `1 IN (1) NOT IN (SELECT 2)` parses as `(1 IN (1)) NOT IN (SELECT 2)`.
+    /// Per SQLite, the equality / predicate operators (=, ==, IS, IN, BETWEEN,
+    /// LIKE, ISNULL, NOTNULL, ...) form a tier that binds LOOSER than the
+    /// relational (`< <= > >=`) tier. They are left-associative and composable,
+    /// so they chain: `1 IN (1) NOT IN (SELECT 2)` parses as
+    /// `(1 IN (1)) NOT IN (SELECT 2)`. The seed and every operand within this
+    /// tier parse at the relational tier, so `1 < 2 = 1` parses as
+    /// `((1 < 2) = 1)` and `1 = 2 < 3` as `(1 = (2 < 3))`.
     /// Additionally, IN's right operand is syntactically closed (a parenthesized
     /// list/subquery), so a tighter-binding operator that follows an IN node takes
     /// the whole IN expression as its left operand:
     /// `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`.
     fn parse_comparison_expression(&mut self) -> Result<Expression<'arena>, ParseError> {
-        let mut left = self.parse_additive_expression()?;
+        let mut left = self.parse_relational_expression()?;
 
         loop {
             // Check for IN, BETWEEN, LIKE operators
@@ -162,9 +250,9 @@ impl<'arena> ArenaParser<'arena> {
                         self.try_consume_keyword(Keyword::Asymmetric);
                     }
 
-                    let low = self.parse_additive_expression()?;
+                    let low = self.parse_relational_expression()?;
                     self.consume_keyword(Keyword::And)?;
-                    let high = self.parse_additive_expression()?;
+                    let high = self.parse_relational_expression()?;
 
                     let left_ref = self.arena.alloc(left);
                     let low_ref = self.arena.alloc(low);
@@ -180,11 +268,11 @@ impl<'arena> ArenaParser<'arena> {
                     continue;
                 } else if self.peek_keyword(Keyword::Like) {
                     self.consume_keyword(Keyword::Like)?;
-                    let pattern = self.parse_additive_expression()?;
+                    let pattern = self.parse_relational_expression()?;
                     let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape)
                     {
                         self.consume_keyword(Keyword::Escape)?;
-                        Some(self.arena.alloc(self.parse_additive_expression()?))
+                        Some(self.arena.alloc(self.parse_relational_expression()?))
                     } else {
                         None
                     };
@@ -264,9 +352,9 @@ impl<'arena> ArenaParser<'arena> {
                     self.try_consume_keyword(Keyword::Asymmetric);
                 }
 
-                let low = self.parse_additive_expression()?;
+                let low = self.parse_relational_expression()?;
                 self.consume_keyword(Keyword::And)?;
-                let high = self.parse_additive_expression()?;
+                let high = self.parse_relational_expression()?;
 
                 let left_ref = self.arena.alloc(left);
                 let low_ref = self.arena.alloc(low);
@@ -282,10 +370,10 @@ impl<'arena> ArenaParser<'arena> {
                 continue;
             } else if self.peek_keyword(Keyword::Like) {
                 self.consume_keyword(Keyword::Like)?;
-                let pattern = self.parse_additive_expression()?;
+                let pattern = self.parse_relational_expression()?;
                 let escape: Option<&Expression<'arena>> = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(self.arena.alloc(self.parse_additive_expression()?))
+                    Some(self.arena.alloc(self.parse_relational_expression()?))
                 } else {
                     None
                 };
@@ -300,14 +388,15 @@ impl<'arena> ArenaParser<'arena> {
                 continue;
             }
 
-            // Check for comparison operators
+            // Check for equality / predicate comparison operators.
+            // The relational operators (`< <= > >=`) are NOT handled here: they
+            // bind tighter and are consumed by the relational tier (the seed of
+            // this function and every operand within it).
             let is_comparison = match self.peek() {
-                Token::Symbol('=') | Token::Symbol('<') | Token::Symbol('>') => true,
+                Token::Symbol('=') => true,
                 Token::Operator(s) => matches!(
                     s,
-                    MultiCharOperator::LessEqual
-                        | MultiCharOperator::GreaterEqual
-                        | MultiCharOperator::NotEqual
+                    MultiCharOperator::NotEqual
                         | MultiCharOperator::NotEqualAlt
                         | MultiCharOperator::DoubleEqual
                         | MultiCharOperator::CosineDistance
@@ -320,11 +409,7 @@ impl<'arena> ArenaParser<'arena> {
             if is_comparison {
                 let op = match self.peek() {
                     Token::Symbol('=') => BinaryOperator::Equal,
-                    Token::Symbol('<') => BinaryOperator::LessThan,
-                    Token::Symbol('>') => BinaryOperator::GreaterThan,
                     Token::Operator(s) => match s {
-                        MultiCharOperator::LessEqual => BinaryOperator::LessThanOrEqual,
-                        MultiCharOperator::GreaterEqual => BinaryOperator::GreaterThanOrEqual,
                         MultiCharOperator::NotEqual | MultiCharOperator::NotEqualAlt => {
                             BinaryOperator::NotEqual
                         }
@@ -376,7 +461,8 @@ impl<'arena> ArenaParser<'arena> {
                     continue;
                 }
 
-                let right = self.parse_additive_expression()?;
+                // RHS parses at the relational tier, so `1 = 2 < 3` is `1 = (2 < 3)`.
+                let right = self.parse_relational_expression()?;
                 let left_ref = self.arena.alloc(left);
                 let right_ref = self.arena.alloc(right);
                 left = Expression::BinaryOp { op, left: left_ref, right: right_ref };
@@ -392,7 +478,7 @@ impl<'arena> ArenaParser<'arena> {
                 if self.peek_keyword(Keyword::Distinct) {
                     self.consume_keyword(Keyword::Distinct)?;
                     self.expect_keyword(Keyword::From)?;
-                    let right = self.parse_additive_expression()?;
+                    let right = self.parse_relational_expression()?;
                     let left_ref = self.arena.alloc(left);
                     let right_ref = self.arena.alloc(right);
                     left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
@@ -428,7 +514,7 @@ impl<'arena> ArenaParser<'arena> {
                 } else {
                     // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
                     // This handles cases like `expr IS 0` or `expr IS 1`
-                    let right = self.parse_additive_expression()?;
+                    let right = self.parse_relational_expression()?;
                     let left_ref = self.arena.alloc(left);
                     let right_ref = self.arena.alloc(right);
                     // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
@@ -475,23 +561,26 @@ impl<'arena> ArenaParser<'arena> {
     }
 
     /// Continue parsing tighter-binding binary operators (multiplicative, concat,
-    /// additive) with an already-parsed left operand.
+    /// additive, relational) with an already-parsed left operand.
     ///
     /// Used after a syntactically-closed comparison-tier node — IN/NOT IN
     /// (right operand is a parenthesized list/subquery) and the postfix null
     /// tests ISNULL / NOTNULL / NOT NULL (no right operand at all). Per SQLite
     /// a tighter-binding operator that follows takes the entire node as its
-    /// left operand: `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`
-    /// and `1 ISNULL + 1` as `(1 ISNULL) + 1`.
+    /// left operand: `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`,
+    /// `1 IN (1) < 3` as `(1 IN (1)) < 3`, and `1 ISNULL + 1` as `(1 ISNULL) + 1`.
     ///
     /// Each operator's right operand is parsed at the next-tighter tier, so
     /// relative precedence among these operators is preserved
     /// (e.g. `x IN (1) + 2 * 3` parses as `(x IN (1)) + (2 * 3)`).
     ///
-    /// Delegates to `parse_additive_expression_from`, which climbs the seeded
-    /// left operand through the multiplicative, concat, and additive tiers
-    /// using the canonical per-tier operator loops. The standard parser has
-    /// the same helper (plus a shift tier) in parser/expressions/operators.rs.
+    /// Delegates to `parse_relational_expression_from`, which climbs the seeded
+    /// left operand through the multiplicative, concat, additive, and relational
+    /// tiers using the canonical per-tier operator loops. The relational tier is
+    /// the tightest tier still looser than the equality/predicate tier, so
+    /// climbing to it (and no further) leaves the outer equality loop to reduce
+    /// left. The standard parser has the same helper (plus a bitwise tier) in
+    /// parser/expressions/operators.rs.
     ///
     /// Note: the arena parser has no shift/bitwise tiers; expressions using
     /// those operators fail here and fall back to the standard parser.
@@ -499,7 +588,7 @@ impl<'arena> ArenaParser<'arena> {
         &mut self,
         left: Expression<'arena>,
     ) -> Result<Expression<'arena>, ParseError> {
-        self.parse_additive_expression_from(left)
+        self.parse_relational_expression_from(left)
     }
 
     // ------------------------------------------------------------------
