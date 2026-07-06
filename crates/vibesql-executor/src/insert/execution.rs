@@ -725,6 +725,7 @@ fn execute_insert_internal(
             db,
             &storage_table_name,
             batch_max_ipk,
+            &assigned_columns,
         )?;
 
         // Apply generated/computed column values (AS(expression) syntax)
