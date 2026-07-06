@@ -353,7 +353,16 @@ pub fn apply_default_values_with_table_name(
     database: &mut vibesql_storage::Database,
     storage_table_name: &str,
 ) -> Result<Option<i64>, ExecutorError> {
-    apply_default_values_with_batch_context(schema, row_values, database, storage_table_name, None)
+    // No column was explicitly assigned by the caller, so every NULL slot is an
+    // omitted column that should receive its default.
+    apply_default_values_with_batch_context(
+        schema,
+        row_values,
+        database,
+        storage_table_name,
+        None,
+        &std::collections::HashSet::new(),
+    )
 }
 
 /// Apply DEFAULT values for unspecified columns, with batch context for multi-row inserts
@@ -361,6 +370,12 @@ pub fn apply_default_values_with_table_name(
 /// The `batch_max_ipk` parameter is used to track the maximum INTEGER PRIMARY KEY value
 /// already assigned within the current batch of inserts. This prevents duplicate values
 /// when multiple rows in the same INSERT have NULL for the INTEGER PRIMARY KEY column.
+///
+/// `explicitly_assigned` holds the schema column indices that the caller supplied a
+/// value for in this INSERT (including an explicit `NULL`). A default is NOT substituted
+/// for those columns: an explicit `NULL` must survive so the NOT NULL constraint check
+/// can fire, rather than being silently swapped for the column default (#5893). Columns
+/// omitted from the INSERT are absent from this set and still receive their default.
 ///
 /// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
 /// or None if no sequence values were generated.
@@ -370,6 +385,7 @@ pub fn apply_default_values_with_batch_context(
     database: &mut vibesql_storage::Database,
     storage_table_name: &str,
     batch_max_ipk: Option<i64>,
+    explicitly_assigned: &std::collections::HashSet<usize>,
 ) -> Result<Option<i64>, ExecutorError> {
     let mut first_generated_id: Option<i64> = None;
 
@@ -394,6 +410,13 @@ pub fn apply_default_values_with_batch_context(
     }
 
     for (col_idx, col) in schema.columns.iter().enumerate() {
+        // A column the caller explicitly assigned (even to NULL) keeps its
+        // supplied value: an explicit NULL must reach the NOT NULL constraint
+        // check rather than being silently replaced by the column default
+        // (#5893). Only columns omitted from the INSERT get their default.
+        if explicitly_assigned.contains(&col_idx) {
+            continue;
+        }
         // If column is NULL and has a default value, apply it
         if row_values[col_idx] == vibesql_types::SqlValue::Null {
             if let Some(default_expr) = &col.default_value {
