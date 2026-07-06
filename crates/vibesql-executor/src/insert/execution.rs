@@ -470,10 +470,11 @@ fn execute_insert_internal(
             }]
         );
 
-    // Track the first auto-generated ID for LAST_INSERT_ROWID() support
-    // Per MySQL semantics, for multi-row inserts, LAST_INSERT_ID() returns
-    // the first auto-generated value, not the last
-    let mut first_generated_id: Option<i64> = None;
+    // Track the most recently generated ID for last_insert_rowid() support.
+    // SQLite semantics: last_insert_rowid() returns the rowid of the most
+    // recently inserted row, so for multi-row INSERT ... VALUES / INSERT ... SELECT
+    // the LAST row in the batch wins (last writer wins).
+    let mut last_generated_id: Option<i64> = None;
 
     // Track the maximum INTEGER PRIMARY KEY value assigned within this batch
     // to handle multi-row INSERTs with NULL values correctly (SQLite semantics)
@@ -720,22 +721,12 @@ fn execute_insert_internal(
         // Apply generated/computed column values (AS(expression) syntax)
         super::defaults::apply_generated_columns(&schema, &mut full_row_values, db)?;
 
-        // Track the first generated ID across all rows
-        if first_generated_id.is_none() {
-            first_generated_id = generated_id;
-        }
-
-        // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value
-        // Also track explicit INTEGER PRIMARY KEY values for last_insert_rowid()
-        // SQLite semantics: last_insert_rowid() returns the rowid of the most recently
-        // inserted row, whether auto-generated or explicitly provided
+        // Update batch_max_ipk if this row has an INTEGER PRIMARY KEY value.
+        // (last_insert_rowid() tracking happens later, only for rows that are
+        // actually inserted — a row skipped by OR IGNORE must not update it.)
         if let Some(idx) = ipk_col_idx {
             if let Some(vibesql_types::SqlValue::Integer(val)) = full_row_values.get(idx) {
                 batch_max_ipk = Some(batch_max_ipk.map_or(*val, |prev| prev.max(*val)));
-                // Track first explicit INTEGER PRIMARY KEY value for last_insert_rowid()
-                if first_generated_id.is_none() {
-                    first_generated_id = Some(*val);
-                }
             }
         }
 
@@ -824,6 +815,20 @@ fn execute_insert_internal(
         // Track row for self-referential FK lookups by later rows in the
         // same batch (see fkey1-5.1 note above).
         batch_full_rows.push(full_row_values.clone());
+
+        // Track the rowid of this row for last_insert_rowid(). We do this here,
+        // after the OR IGNORE / DO NOTHING skip check, so only rows that are
+        // actually inserted count (SQLite: last inserted row wins). For rowid
+        // tables the final rowid is the INTEGER PRIMARY KEY value (whether
+        // explicit or auto-assigned); otherwise fall back to any auto-generated
+        // sequence value.
+        if let Some(idx) = ipk_col_idx {
+            if let Some(vibesql_types::SqlValue::Integer(val)) = full_row_values.get(idx) {
+                last_generated_id = Some(*val);
+            }
+        } else if generated_id.is_some() {
+            last_generated_id = generated_id;
+        }
 
         // Store validated row for insertion (with optional explicit rowid)
         validated_rows.push((full_row_values, explicit_rowid, ipk_auto_assigned));
@@ -1310,7 +1315,7 @@ fn execute_insert_internal(
     // Update LAST_INSERT_ROWID if any auto-generated values were produced
     // SQLite: last_insert_rowid() is NOT updated for WITHOUT ROWID tables
     // (see SQLite documentation R-47220-63683)
-    if let Some(id) = first_generated_id {
+    if let Some(id) = last_generated_id {
         if !schema.without_rowid {
             db.set_last_insert_rowid(id);
         }
