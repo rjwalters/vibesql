@@ -441,6 +441,9 @@ fn cascade_delete(
 
     // Rebuild indexes after deletion (handles both compaction and non-compaction cases)
     db.rebuild_indexes(child_table_name);
+    // Cascade mutations bypass the Database-level DML API, so invalidate the
+    // child table's columnar cache explicitly to avoid serving stale reads (#5876).
+    db.invalidate_columnar_cache(child_table_name);
 
     Ok(())
 }
@@ -706,6 +709,9 @@ fn apply_cascade_child_updates(
 
     // Rebuild indexes after updates.
     db.rebuild_indexes(child_table_name);
+    // Cascade mutations bypass the Database-level DML API, so invalidate the
+    // child table's columnar cache explicitly to avoid serving stale reads (#5876).
+    db.invalidate_columnar_cache(child_table_name);
 
     Ok(())
 }
