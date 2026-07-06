@@ -559,6 +559,9 @@ impl ForeignKeyValidator {
             }
             // Rebuild indexes after updates (following the same pattern as DELETE operations)
             db.rebuild_indexes(&table_name);
+            // Cascade mutations bypass the Database-level DML API, so invalidate the
+            // child table's columnar cache explicitly to avoid serving stale reads (#5876).
+            db.invalidate_columnar_cache(&table_name);
         }
 
         // Phase C2 of #5085: queue NO ACTION orphans onto the deferred
