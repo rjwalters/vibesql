@@ -27,7 +27,7 @@
 //! *declared* collation, or `None` when the column has none (default
 //! BINARY).
 
-use vibesql_ast::{ColumnIdentifier, Expression, UnaryOperator};
+use vibesql_ast::{ColumnIdentifier, Expression, SelectItem, UnaryOperator};
 
 /// Find an *explicit* COLLATE operator anywhere within an expression's
 /// subtree (SQLite's `EP_Collate` propagation).
@@ -74,6 +74,38 @@ fn operand_column_collation(
         Expression::Cast { expr, .. } => operand_column_collation(expr, column_collation),
         _ => None,
     }
+}
+
+/// Derive the per-column collation of a view (or subquery) body's select list,
+/// positionally aligned with the result columns.
+///
+/// SQLite propagates a view column's collation to the outer query in two ways
+/// (ticket a7debbe0ad1, issue #5864):
+///  1. An explicit `COLLATE` operator anywhere in the defining expression's
+///     subtree — including through `||`, `CAST`, and unary `+` — wins
+///     (`explicit_collation_of`).
+///  2. Otherwise a bare column reference (optionally wrapped in unary `+` or
+///     `CAST`) to an underlying column with a *declared* collation propagates
+///     that collation, resolved via the `column_collation` callback.
+///
+/// Any other expression (bare literal, function result, a `||` of operands
+/// without an explicit `COLLATE`, ...) has no collating sequence — `None`,
+/// i.e. default BINARY. Non-expression select items (wildcards) yield a `None`
+/// placeholder; because a wildcard expands to a variable number of columns,
+/// callers must guard by comparing the returned length against the actual
+/// column count and fall back to all-`None` when they differ.
+pub(crate) fn view_select_list_collations(
+    select_list: &[SelectItem],
+    column_collation: &dyn Fn(&ColumnIdentifier) -> Option<String>,
+) -> Vec<Option<String>> {
+    select_list
+        .iter()
+        .map(|item| match item {
+            SelectItem::Expression { expr, .. } => explicit_collation_of(expr)
+                .or_else(|| operand_column_collation(expr, column_collation).flatten()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Resolve the effective collating sequence of a single expression.
