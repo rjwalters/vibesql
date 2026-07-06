@@ -578,7 +578,7 @@ impl Parser {
                 self.expect_token(Token::Symbol('='))?;
                 let value = self.parse_expression()?;
 
-                assignments.push(vibesql_ast::Assignment { column, value });
+                assignments.push(vibesql_ast::Assignment::single(column, value));
 
                 if matches!(self.peek(), Token::Comma) {
                     self.advance();
@@ -596,23 +596,28 @@ impl Parser {
     ) -> Result<Vec<vibesql_ast::Assignment>, ParseError> {
         let mut assignments = Vec::new();
         loop {
-            let column = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let column_name = col.clone();
-                    self.advance();
-                    column_name
-                }
-                _ => {
-                    return Err(ParseError {
-                        message: "Expected column name in ON CONFLICT UPDATE".to_string(),
-                    })
-                }
-            };
+            // SQLite tuple assignment: `SET (b, c) = (row-value | subquery)`.
+            if matches!(self.peek(), Token::LParen) {
+                assignments.push(self.parse_tuple_assignment()?);
+            } else {
+                let column = match self.peek() {
+                    Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                        let column_name = col.clone();
+                        self.advance();
+                        column_name
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected column name in ON CONFLICT UPDATE".to_string(),
+                        })
+                    }
+                };
 
-            self.expect_token(Token::Symbol('='))?;
-            let value = self.parse_expression()?;
+                self.expect_token(Token::Symbol('='))?;
+                let value = self.parse_expression()?;
 
-            assignments.push(vibesql_ast::Assignment { column, value });
+                assignments.push(vibesql_ast::Assignment::single(column, value));
+            }
 
             if matches!(self.peek(), Token::Comma) {
                 self.advance();
@@ -621,5 +626,53 @@ impl Parser {
             }
         }
         Ok(assignments)
+    }
+
+    /// Parse a tuple/row SET assignment `(col, col, ...) = (row-value |
+    /// scalar-subquery)`. The current token must be `(`.
+    ///
+    /// A single-element list `(a) = v` collapses to an ordinary `a = v`
+    /// assignment; a list of two or more columns produces a tuple assignment
+    /// whose single RHS `value` is unpacked positionally by the executor.
+    pub(crate) fn parse_tuple_assignment(
+        &mut self,
+    ) -> Result<vibesql_ast::Assignment, ParseError> {
+        self.expect_token(Token::LParen)?; // consume '('
+        let mut columns = Vec::new();
+        loop {
+            match self.peek() {
+                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                    columns.push(col.clone());
+                    self.advance();
+                }
+                Token::Keyword { keyword: kw, .. } => {
+                    columns.push(format!("{}", kw).to_lowercase());
+                    self.advance();
+                }
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected column name in SET (column-list) assignment"
+                            .to_string(),
+                    })
+                }
+            }
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect_token(Token::RParen)?;
+        self.expect_token(Token::Symbol('='))?;
+        let value = self.parse_expression()?;
+
+        if columns.len() == 1 {
+            Ok(vibesql_ast::Assignment::single(
+                columns.into_iter().next().expect("len checked"),
+                value,
+            ))
+        } else {
+            Ok(vibesql_ast::Assignment::tuple(columns, value))
+        }
     }
 }

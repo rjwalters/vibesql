@@ -690,7 +690,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
     }
 
     fn convert_assignment(&self, a: &arena_dml::Assignment<'arena>) -> Assignment {
-        Assignment { column: self.resolve(a.column), value: self.convert_expression(&a.value) }
+        Assignment {
+            column: self.resolve(a.column),
+            columns: Vec::new(),
+            value: self.convert_expression(&a.value),
+        }
     }
 
     /// Convert an arena UpdateStmt to an owned UpdateStmt.

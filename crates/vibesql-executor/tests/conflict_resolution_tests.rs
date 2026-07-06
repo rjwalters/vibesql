@@ -236,6 +236,7 @@ fn test_update_or_ignore_primary_key_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "id".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(2)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -288,6 +289,7 @@ fn test_update_or_ignore_unique_constraint_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -330,6 +332,7 @@ fn test_update_or_ignore_no_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -378,6 +381,7 @@ fn test_update_or_replace_primary_key_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "id".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(2)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -427,6 +431,7 @@ fn test_update_or_replace_unique_constraint_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("bob@test.com"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -477,6 +482,7 @@ fn test_update_or_replace_no_conflict() {
         alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice Updated"))),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -553,6 +559,7 @@ fn test_update_or_ignore_not_null_violation() {
         alias: None,
         assignments: vec![Assignment {
             column: "email".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {

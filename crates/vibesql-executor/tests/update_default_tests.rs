@@ -35,7 +35,7 @@ fn test_update_with_default_value() {
         quoted: false,
         alias: None,
         table_name: "users".to_string(),
-        assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
+        assignments: vec![Assignment::single("name".to_string(), Expression::Default)],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
@@ -92,7 +92,7 @@ fn test_update_default_no_default_value_defined() {
         quoted: false,
         alias: None,
         table_name: "users".to_string(),
-        assignments: vec![Assignment { column: "name".to_string(), value: Expression::Default }],
+        assignments: vec![Assignment::single("name".to_string(), Expression::Default)],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
             op: BinaryOperator::Equal,
             left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(

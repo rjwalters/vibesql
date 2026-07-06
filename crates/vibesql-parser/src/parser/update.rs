@@ -71,38 +71,43 @@ impl Parser {
         // Parse assignments
         let mut assignments = Vec::new();
         loop {
-            // Parse column name (support regular, delimited identifiers, and rowid keyword)
-            let column = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let c = col.clone();
-                    self.advance();
-                    c
-                }
-                // SQLite allows updating the virtual rowid column
-                // SQLite compatibility: the left-hand side of a SET assignment is an
-                // unambiguous column-name position (it is followed by `=`), so any
-                // keyword here is an unquoted column name. This covers the virtual ROWID
-                // column and otherwise-reserved words like RELEASE used as column names
-                // (see table.test table-7.3). Normalize to lowercase.
-                Token::Keyword { keyword: kw, .. } => {
-                    let col_name = format!("{}", kw).to_lowercase();
-                    self.advance();
-                    col_name
-                }
-                _ => {
-                    return Err(ParseError {
-                        message: "Expected column name in SET clause".to_string(),
-                    })
-                }
-            };
+            // SQLite tuple assignment: `SET (a, b) = (row-value | subquery)`.
+            if matches!(self.peek(), Token::LParen) {
+                assignments.push(self.parse_tuple_assignment()?);
+            } else {
+                // Parse column name (support regular, delimited identifiers, and rowid keyword)
+                let column = match self.peek() {
+                    Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                        let c = col.clone();
+                        self.advance();
+                        c
+                    }
+                    // SQLite allows updating the virtual rowid column
+                    // SQLite compatibility: the left-hand side of a SET assignment is an
+                    // unambiguous column-name position (it is followed by `=`), so any
+                    // keyword here is an unquoted column name. This covers the virtual ROWID
+                    // column and otherwise-reserved words like RELEASE used as column names
+                    // (see table.test table-7.3). Normalize to lowercase.
+                    Token::Keyword { keyword: kw, .. } => {
+                        let col_name = format!("{}", kw).to_lowercase();
+                        self.advance();
+                        col_name
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected column name in SET clause".to_string(),
+                        })
+                    }
+                };
 
-            // Expect =
-            self.expect_token(Token::Symbol('='))?;
+                // Expect =
+                self.expect_token(Token::Symbol('='))?;
 
-            // Parse value expression
-            let value = self.parse_expression()?;
+                // Parse value expression
+                let value = self.parse_expression()?;
 
-            assignments.push(vibesql_ast::Assignment { column, value });
+                assignments.push(vibesql_ast::Assignment::single(column, value));
+            }
 
             if matches!(self.peek(), Token::Comma) {
                 self.advance();
@@ -236,33 +241,38 @@ impl Parser {
         // Parse assignments
         let mut assignments = Vec::new();
         loop {
-            let column = match self.peek() {
-                Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
-                    let c = col.clone();
-                    self.advance();
-                    c
-                }
-                // SQLite compatibility: the left-hand side of a SET assignment is an
-                // unambiguous column-name position (it is followed by `=`), so any
-                // keyword here is an unquoted column name. This covers the virtual ROWID
-                // column and otherwise-reserved words like RELEASE used as column names
-                // (see table.test table-7.3). Normalize to lowercase.
-                Token::Keyword { keyword: kw, .. } => {
-                    let col_name = format!("{}", kw).to_lowercase();
-                    self.advance();
-                    col_name
-                }
-                _ => {
-                    return Err(ParseError {
-                        message: "Expected column name in SET clause".to_string(),
-                    })
-                }
-            };
+            // SQLite tuple assignment: `SET (a, b) = (row-value | subquery)`.
+            if matches!(self.peek(), Token::LParen) {
+                assignments.push(self.parse_tuple_assignment()?);
+            } else {
+                let column = match self.peek() {
+                    Token::Identifier(col) | Token::DelimitedIdentifier(col) => {
+                        let c = col.clone();
+                        self.advance();
+                        c
+                    }
+                    // SQLite compatibility: the left-hand side of a SET assignment is an
+                    // unambiguous column-name position (it is followed by `=`), so any
+                    // keyword here is an unquoted column name. This covers the virtual ROWID
+                    // column and otherwise-reserved words like RELEASE used as column names
+                    // (see table.test table-7.3). Normalize to lowercase.
+                    Token::Keyword { keyword: kw, .. } => {
+                        let col_name = format!("{}", kw).to_lowercase();
+                        self.advance();
+                        col_name
+                    }
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected column name in SET clause".to_string(),
+                        })
+                    }
+                };
 
-            self.expect_token(Token::Symbol('='))?;
-            let value = self.parse_expression()?;
+                self.expect_token(Token::Symbol('='))?;
+                let value = self.parse_expression()?;
 
-            assignments.push(vibesql_ast::Assignment { column, value });
+                assignments.push(vibesql_ast::Assignment::single(column, value));
+            }
 
             if matches!(self.peek(), Token::Comma) {
                 self.advance();

@@ -364,6 +364,14 @@ pub(super) fn execute_internal(
         // Check if primary key is being updated
         let updates_pk = if let Some(ref pk_idx) = pk_indices {
             stmt.assignments.iter().any(|a| {
+                // Tuple assignment `SET (a, b, ...) = ...`: any listed column may
+                // be part of the primary key.
+                if a.is_tuple() {
+                    return a.columns.iter().any(|name| {
+                        schema.get_column_index(name).is_some_and(|idx| pk_idx.contains(&idx))
+                    });
+                }
+
                 // Check if this is a rowid assignment
                 let col_name_lower = a.column.to_lowercase();
                 let is_rowid = col_name_lower == "rowid"
@@ -1170,6 +1178,18 @@ fn validate_set_expressions(
     database: &Database,
 ) -> Result<(), ExecutorError> {
     for assignment in assignments {
+        // Tuple assignment `SET (a, b, ...) = ...`: validate every target
+        // column in the list, then the shared RHS expression.
+        if assignment.is_tuple() {
+            for name in &assignment.columns {
+                if schema.get_column_index(name).is_none() {
+                    return Err(ExecutorError::NoSuchColumn { column_ref: name.clone() });
+                }
+            }
+            validate_expression(&assignment.value, schema, database)?;
+            continue;
+        }
+
         // Validate target column exists (LHS of assignment)
         // Special case: rowid is a virtual column that always exists (SQLite compatibility)
         let col_name_lower = assignment.column.to_lowercase();

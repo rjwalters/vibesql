@@ -66,6 +66,7 @@ fn test_after_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("alice_updated"),
             )),
@@ -148,6 +149,7 @@ fn test_before_update_trigger_fires() {
         table_name: "USERS".to_string(),
         assignments: vec![vibesql_ast::Assignment {
             column: "username".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(
                 arcstr::ArcStr::from("alice_updated"),
             )),
@@ -235,6 +237,7 @@ fn test_update_of_fires_only_for_listed_column() {
             table_name: "USERS".to_string(),
             assignments: vec![vibesql_ast::Assignment {
                 column: column.to_string(),
+                columns: Vec::new(),
                 value: vibesql_ast::Expression::Literal(value),
             }],
             from_clause: None,

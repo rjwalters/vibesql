@@ -26,6 +26,7 @@ fn test_update_check_constraint_passes() {
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(100)),
         }],
         where_clause: None,
@@ -58,6 +59,7 @@ fn test_update_check_constraint_violation() {
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(-10)),
         }],
         where_clause: None,
@@ -98,6 +100,7 @@ fn test_update_check_constraint_with_null() {
         table_name: "products".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: None,
@@ -134,6 +137,7 @@ fn test_update_check_constraint_with_expression() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(15000)),
         }],
         where_clause: None,
@@ -156,6 +160,7 @@ fn test_update_check_constraint_with_expression() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: None,

@@ -200,6 +200,7 @@ fn bind_update(stmt: &UpdateStmt, params: &[SqlValue]) -> UpdateStmt {
             .iter()
             .map(|a| Assignment {
                 column: a.column.clone(),
+                columns: Vec::new(),
                 value: bind_expression(&a.value, params),
             })
             .collect(),

@@ -85,6 +85,7 @@ fn test_update_where_in_subquery() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(80000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
@@ -185,6 +186,7 @@ fn test_update_where_not_in_subquery() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
@@ -278,6 +280,7 @@ fn test_update_where_subquery_empty_result() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
@@ -388,6 +391,7 @@ fn test_update_where_complex_subquery_condition() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(70000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
@@ -492,6 +496,7 @@ fn test_update_where_multiple_rows_in_subquery() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "active".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Boolean(false)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {

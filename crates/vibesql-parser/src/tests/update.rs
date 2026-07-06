@@ -22,6 +22,79 @@ fn test_parse_update_basic() {
 }
 
 #[test]
+fn test_parse_update_tuple_set_row_value() {
+    // SQLite tuple assignment: `SET (a, b) = (row-value)`.
+    let result = Parser::parse_sql("UPDATE t SET (b, c) = (1, 'x') WHERE a = 2;");
+    assert!(result.is_ok(), "tuple SET should parse: {result:?}");
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            assert_eq!(update.assignments.len(), 1);
+            let a = &update.assignments[0];
+            assert!(a.is_tuple(), "expected a tuple assignment");
+            assert_eq!(a.columns, vec!["b".to_string(), "c".to_string()]);
+            // `column` mirrors the first target for single-column readers.
+            assert_eq!(a.column, "b");
+            assert!(matches!(a.value, vibesql_ast::Expression::RowValueConstructor(_)));
+        }
+        other => panic!("Expected UPDATE statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_update_tuple_set_subquery() {
+    // SQLite tuple assignment with a scalar subquery RHS.
+    let result = Parser::parse_sql("UPDATE t SET (b, c) = (SELECT 'x', 'y') WHERE a = 2;");
+    assert!(result.is_ok(), "tuple SET subquery should parse: {result:?}");
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let a = &update.assignments[0];
+            assert!(a.is_tuple());
+            assert_eq!(a.columns, vec!["b".to_string(), "c".to_string()]);
+            assert!(matches!(a.value, vibesql_ast::Expression::ScalarSubquery(_)));
+        }
+        other => panic!("Expected UPDATE statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_update_single_element_paren_collapses() {
+    // A one-column parenthesized list `(a) = v` is an ordinary single assignment.
+    let result = Parser::parse_sql("UPDATE t SET (b) = 5 WHERE a = 2;");
+    assert!(result.is_ok(), "single-element paren SET should parse: {result:?}");
+    match result.unwrap() {
+        vibesql_ast::Statement::Update(update) => {
+            let a = &update.assignments[0];
+            assert!(!a.is_tuple(), "single-element list must collapse to single");
+            assert_eq!(a.column, "b");
+        }
+        other => panic!("Expected UPDATE statement, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_on_conflict_do_update_tuple_set() {
+    // Tuple assignment inside a DO UPDATE arm (upsert4 1.x.7 / 1.x.8 shape).
+    let result = Parser::parse_sql(
+        "INSERT INTO t VALUES(2, NULL, 'zero') ON CONFLICT (a) DO UPDATE SET (c, a) = ('four', 4);",
+    );
+    assert!(result.is_ok(), "DO UPDATE tuple SET should parse: {result:?}");
+    match result.unwrap() {
+        vibesql_ast::Statement::Insert(insert) => {
+            let clause = &insert.on_conflict[0];
+            match &clause.action {
+                vibesql_ast::OnConflictAction::DoUpdate { assignments, .. } => {
+                    let a = &assignments[0];
+                    assert!(a.is_tuple());
+                    assert_eq!(a.columns, vec!["c".to_string(), "a".to_string()]);
+                }
+                other => panic!("Expected DO UPDATE, got {other:?}"),
+            }
+        }
+        other => panic!("Expected INSERT statement, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_parse_update_indexed_by() {
     // SQLite INDEXED BY hint on UPDATE (issue #5734, where9-6.8.x).
     let result = Parser::parse_sql("UPDATE t1 INDEXED BY t1b SET a = a + 100 WHERE a = 1;");

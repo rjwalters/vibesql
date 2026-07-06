@@ -20,6 +20,7 @@ fn test_update_all_rows() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(50000)),
         }],
         where_clause: None,
@@ -54,6 +55,7 @@ fn test_update_with_where_clause() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -103,10 +105,12 @@ fn test_update_multiple_columns() {
         assignments: vec![
             Assignment {
                 column: "salary".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(55000)),
             },
             Assignment {
                 column: "department".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Sales"))),
             },
         ],
@@ -149,6 +153,7 @@ fn test_update_with_expression() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::BinaryOp {
                 left: Box::new(Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
@@ -220,6 +225,7 @@ fn test_update_column_not_found() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "nonexistent_column".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(123)),
         }],
         where_clause: None,
@@ -249,6 +255,7 @@ fn test_update_no_matching_rows() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(99999)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {

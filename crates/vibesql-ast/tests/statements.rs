@@ -65,6 +65,7 @@ fn test_create_update_statement() {
         alias: None,
         assignments: vec![Assignment {
             column: "name".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Varchar(StringValue::from("Bob"))),
         }],
         from_clause: None,

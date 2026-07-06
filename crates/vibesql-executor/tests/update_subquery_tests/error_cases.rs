@@ -74,6 +74,7 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,
@@ -175,6 +176,7 @@ fn test_update_with_subquery_multiple_columns_error() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::ScalarSubquery(subquery),
         }],
         where_clause: None,

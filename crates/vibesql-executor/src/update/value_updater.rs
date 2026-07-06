@@ -38,6 +38,45 @@ impl<'a> ValueUpdater<'a> {
 
         // Apply each assignment
         for assignment in assignments {
+            // Tuple assignment `SET (a, b, ...) = (row-value | subquery)`:
+            // evaluate the RHS to one value per target column (positionally),
+            // then coerce and store each. Evaluated against the ORIGINAL row
+            // (two-phase semantics), like single-column assignments.
+            if assignment.is_tuple() {
+                let col_indices = assignment
+                    .columns
+                    .iter()
+                    .map(|name| {
+                        self.schema.get_column_index(name).ok_or_else(|| {
+                            ExecutorError::NoSuchColumn { column_ref: name.clone() }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let values = self.evaluator.eval_row_value(
+                    &assignment.value,
+                    original_row,
+                    col_indices.len(),
+                )?;
+                for (col_index, new_value) in col_indices.into_iter().zip(values) {
+                    let column = &self.schema.columns[col_index];
+                    let coerced_value = if let Some(st) = self.schema.strict_type_of(col_index) {
+                        crate::strict::enforce_strict_type(
+                            new_value,
+                            st,
+                            &self.schema.name,
+                            &column.name,
+                        )?
+                    } else {
+                        coerce_value(new_value, &column.data_type)?
+                    };
+                    new_row
+                        .set(col_index, coerced_value)
+                        .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                    changed_columns.insert(col_index);
+                }
+                continue;
+            }
+
             // Check if this is a rowid assignment (SQLite compatibility)
             let col_name_lower = assignment.column.to_lowercase();
             let is_rowid =
