@@ -218,59 +218,195 @@ pub fn rename_references_parent(
     Some(out)
 }
 
-/// Rewrite a column name in its *definition position* within the verbatim
-/// `CREATE TABLE` text, matching SQLite's `ALTER TABLE ... RENAME COLUMN`.
+/// Emit `new_col` as an identifier, mirroring SQLite's `bQuote` rule during
+/// RENAME COLUMN: the replacement is double-quoted when the *replaced* token was
+/// itself a quoted (delimited) identifier, or when the new name is not a safe
+/// bare identifier; otherwise it is emitted bare. Verified against sqlite3
+/// 3.51.0 (altercol.test 1.2/1.9 — a quoted `"b"`/`"B"` becomes quoted `"d"`
+/// even though `d` is a safe bare name; 4.4 — a quoted `"silly name"` becomes
+/// quoted `"reasonable"`).
+fn emit_renamed_ident(new_col: &str, replaced_was_quoted: bool) -> String {
+    if replaced_was_quoted || !is_safe_bare_identifier(new_col) {
+        quote_ident(new_col)
+    } else {
+        new_col.to_string()
+    }
+}
+
+/// Rewrite *every* reference to `old_col` that resolves to `table_name`'s column
+/// within the verbatim `CREATE TABLE` text, matching SQLite's
+/// `ALTER TABLE ... RENAME COLUMN` (with `legacy_alter_table=OFF`).
 ///
-/// Only the identifier that names the column at the start of a column definition
-/// (the first token of the column list, or the first token after a top-level
-/// comma inside the column list) is rewritten — references elsewhere (e.g. in a
-/// table-level constraint) are conservatively left untouched. Returns `None`
-/// when the definition cannot be located unambiguously, so the caller falls back
-/// to reconstruction. `new_name` is emitted bare when it is a safe identifier,
-/// otherwise double-quoted.
-pub fn rename_column(create_sql: &str, old_col: &str, new_col: &str) -> Option<String> {
+/// SQLite does not rewrite only the definition-position token: it rewrites the
+/// column name everywhere it appears as a reference to the renamed column —
+/// inside `CHECK(...)` expressions (bare `b` and qualified `t1.b`), table-level
+/// `PRIMARY KEY(...)`, `UNIQUE(...)`, and `FOREIGN KEY (...)` column lists, and
+/// column-level constraints. Verified against sqlite3 3.51.0 (altercol.test
+/// group 1). Without this, the persisted `sql_source` keeps the stale column
+/// name in its constraints; a later checkpoint reload then fails the
+/// fail-closed FK/constraint rehydration ("FK column 'b' ... not found").
+///
+/// Column references inside a `REFERENCES <other>(<col_list>)` parent column list
+/// are left untouched when `<other>` is a *different* table — those names resolve
+/// to the parent and are rewritten from the parent side (see
+/// [`rename_references_column`]). A self-referential `REFERENCES <table>(...)`
+/// list *is* rewritten, since those columns resolve to the renamed table.
+///
+/// Quoting follows SQLite's `bQuote` rule via [`emit_renamed_ident`]. Returns
+/// `None` when `old_col` is not referenced (the caller then falls back to
+/// invalidate-and-reconstruct), preserving the re-parseable-on-reload invariant.
+pub fn rename_column(
+    create_sql: &str,
+    table_name: &str,
+    old_col: &str,
+    new_col: &str,
+) -> Option<String> {
     let tokens = tokenize(create_sql)?;
     let (open, close) = column_list_parens(&tokens)?;
 
-    // Walk the column list at paren depth 1, tracking the start of each
-    // definition (top-level comma boundaries).
+    // Byte spans of every identifier token to rewrite, paired with whether the
+    // replaced token was quoted (drives replacement quoting).
+    let mut targets: Vec<(Span, bool)> = Vec::new();
     let mut depth = 0usize;
-    let mut at_def_start = false;
-    let mut target: Option<usize> = None;
-    for (i, (tok, _)) in tokens.iter().enumerate().take(close).skip(open) {
+
+    // Parent-column-list skipping: after `REFERENCES <parent>` where `<parent>`
+    // is a *different* table, the immediately following `(<col_list>)` names the
+    // parent's columns — skip rewriting inside it. `skip_below` holds the depth
+    // outside that parenthesized list while it is active.
+    let mut expect_parent_table = false;
+    let mut skip_below: Option<usize> = None;
+
+    let mut idx = open;
+    while idx < close {
+        let (tok, span) = &tokens[idx];
         match tok {
-            Token::LParen => {
-                if depth == 1 {
-                    at_def_start = false;
-                }
-                depth += 1;
-                if depth == 1 {
-                    at_def_start = true; // first token inside the column list
-                }
-            }
-            Token::RParen => depth -= 1,
-            Token::Comma if depth == 1 => at_def_start = true,
-            _ if depth == 1 => {
-                if at_def_start {
-                    at_def_start = false;
-                    if ident_matches(tok, old_col) {
-                        if target.is_some() {
-                            // Two definitions match: ambiguous; bail.
-                            return None;
-                        }
-                        target = Some(i);
+            Token::LParen => depth += 1,
+            Token::RParen => {
+                if let Some(d) = skip_below {
+                    if depth == d + 1 {
+                        skip_below = None;
                     }
                 }
+                depth -= 1;
             }
-            _ => {}
+            Token::Keyword { keyword: Keyword::References, .. } => {
+                expect_parent_table = true;
+            }
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+                if expect_parent_table {
+                    expect_parent_table = false;
+                    // This identifier names the parent table. When it is a
+                    // *different* table and introduces a `(col_list)`, skip that
+                    // list (those columns belong to the parent).
+                    if !ident_matches(tok, table_name)
+                        && matches!(tokens.get(idx + 1), Some((Token::LParen, _)))
+                    {
+                        skip_below = Some(depth);
+                    }
+                    idx += 1;
+                    continue;
+                }
+                if skip_below.is_some() {
+                    idx += 1;
+                    continue;
+                }
+                // An identifier immediately followed by `.` is a table qualifier
+                // (e.g. the `t1` in `t1.b`), not a column reference — never rewrite
+                // it. The column after the dot is handled on the next iteration.
+                if matches!(tokens.get(idx + 1), Some((Token::Symbol('.'), _))) {
+                    idx += 1;
+                    continue;
+                }
+                if ident_matches(tok, old_col) {
+                    targets.push((*span, matches!(tok, Token::DelimitedIdentifier(_))));
+                }
+            }
+            _ => {
+                expect_parent_table = false;
+            }
+        }
+        idx += 1;
+    }
+
+    if targets.is_empty() {
+        return None;
+    }
+
+    // Rewrite from the last span backward so earlier byte offsets stay valid.
+    let mut out = create_sql.to_string();
+    for (span, was_quoted) in targets.iter().rev() {
+        out.replace_range(span.start..span.end, &emit_renamed_ident(new_col, *was_quoted));
+    }
+    Some(out)
+}
+
+/// Rewrite the column name `old_col` -> `new_col` inside every
+/// `REFERENCES <parent_table>(<col_list>)` clause of a *child* table's verbatim
+/// `CREATE TABLE` text, matching SQLite's `sqlite_rename_column` propagation to
+/// child foreign keys when a *parent* table's column is renamed (verified against
+/// sqlite3 3.51.0, altercol.test 4.1/4.4).
+///
+/// Only column identifiers inside the parenthesized parent column list that
+/// immediately follows `REFERENCES <parent_table>` are considered, so a bare
+/// column reference elsewhere (the child's own columns, a `CHECK`, a string
+/// literal) is never touched. The parent-table match is quote-aware and
+/// case-insensitive (inherited from the lexer). Quoting of the replacement
+/// follows SQLite's `bQuote` rule via [`emit_renamed_ident`]. Returns `None` when
+/// no matching `REFERENCES <parent_table>(...)` column is present (the caller
+/// then invalidates and reconstructs).
+pub fn rename_references_column(
+    create_sql: &str,
+    parent_table: &str,
+    old_col: &str,
+    new_col: &str,
+) -> Option<String> {
+    let tokens = tokenize(create_sql)?;
+
+    let mut targets: Vec<(Span, bool)> = Vec::new();
+    for i in 0..tokens.len() {
+        if !matches!(tokens[i].0, Token::Keyword { keyword: Keyword::References, .. }) {
+            continue;
+        }
+        // The parent table follows REFERENCES; a `(` after it opens the col list.
+        match tokens.get(i + 1) {
+            Some((ptok, _)) if ident_matches(ptok, parent_table) => {}
+            _ => continue,
+        }
+        if !matches!(tokens.get(i + 2), Some((Token::LParen, _))) {
+            continue;
+        }
+        // Scan the balanced parent column list, rewriting matches at its top level.
+        let mut depth = 0usize;
+        let mut j = i + 2;
+        while j < tokens.len() {
+            match &tokens[j].0 {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Identifier(_) | Token::DelimitedIdentifier(_)
+                    if depth == 1 && ident_matches(&tokens[j].0, old_col) =>
+                {
+                    targets.push((tokens[j].1, matches!(tokens[j].0, Token::DelimitedIdentifier(_))));
+                }
+                _ => {}
+            }
+            j += 1;
         }
     }
 
-    let idx = target?;
-    let span = tokens[idx].1;
-    let replacement =
-        if is_safe_bare_identifier(new_col) { new_col.to_string() } else { quote_ident(new_col) };
-    Some(replace_span(create_sql, span, &replacement))
+    if targets.is_empty() {
+        return None;
+    }
+
+    let mut out = create_sql.to_string();
+    for (span, was_quoted) in targets.iter().rev() {
+        out.replace_range(span.start..span.end, &emit_renamed_ident(new_col, *was_quoted));
+    }
+    Some(out)
 }
 
 /// The byte position where a top-level definition begins inside the column
@@ -609,28 +745,152 @@ mod tests {
     #[test]
     fn rename_column_in_definition_position() {
         let sql = "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  b   TEXT\n)";
-        let out = rename_column(sql, "b", "bb").unwrap();
+        let out = rename_column(sql, "t", "b", "bb").unwrap();
         assert_eq!(out, "CREATE TABLE t (\n  a   INTEGER PRIMARY KEY,\n  bb   TEXT\n)");
     }
 
     #[test]
     fn rename_column_first_column() {
         let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
-        let out = rename_column(sql, "a", "aa").unwrap();
+        let out = rename_column(sql, "t", "a", "aa").unwrap();
         assert_eq!(out, "CREATE TABLE t (aa INTEGER, b TEXT)");
     }
 
     #[test]
     fn rename_column_quotes_unsafe_name() {
         let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
-        let out = rename_column(sql, "b", "new col").unwrap();
+        let out = rename_column(sql, "t", "b", "new col").unwrap();
         assert_eq!(out, "CREATE TABLE t (a INTEGER, \"new col\" TEXT)");
     }
 
     #[test]
     fn rename_column_missing_returns_none() {
         let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
-        assert!(rename_column(sql, "zzz", "qqq").is_none());
+        assert!(rename_column(sql, "t", "zzz", "qqq").is_none());
+    }
+
+    // Constraint-reference rewriting (altercol.test group 1, sqlite3 3.51.0).
+
+    #[test]
+    fn rename_column_preserves_quoted_def_position() {
+        // altercol 1.2: a quoted `"b"` def becomes quoted `"d"` (bQuote carries).
+        let sql = "CREATE TABLE t1(a INTEGER, x TEXT, \"b\" BLOB)";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, x TEXT, \"d\" BLOB)");
+    }
+
+    #[test]
+    fn rename_column_check_bare_ref() {
+        // altercol 1.3
+        let sql = "CREATE TABLE t1(a INTEGER, b TEXT, c BLOB, CHECK(b!=''))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, d TEXT, c BLOB, CHECK(d!=''))");
+    }
+
+    #[test]
+    fn rename_column_check_qualified_ref() {
+        // altercol 1.4: qualified `t1.b` rewrites the column, not the qualifier.
+        let sql = "CREATE TABLE t1(a INTEGER, b TEXT, c BLOB, CHECK(t1.b!=''))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, d TEXT, c BLOB, CHECK(t1.d!=''))");
+    }
+
+    #[test]
+    fn rename_column_check_nested_expr() {
+        // altercol 1.5
+        let sql = "CREATE TABLE t1(a INTEGER, b TEXT, c BLOB, CHECK( coalesce(b,c) ))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, d TEXT, c BLOB, CHECK( coalesce(d,c) ))");
+    }
+
+    #[test]
+    fn rename_column_quoted_def_no_space_plus_check() {
+        // altercol 1.6: `"b"TEXT` (no space) + CHECK referencing bare b.
+        let sql = "CREATE TABLE t1(a INTEGER, \"b\"TEXT, c BLOB, CHECK( coalesce(b,c) ))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, \"d\"TEXT, c BLOB, CHECK( coalesce(d,c) ))");
+    }
+
+    #[test]
+    fn rename_column_table_level_primary_key() {
+        // altercol 1.7
+        let sql = "CREATE TABLE t1(a INTEGER, b TEXT, c BLOB, PRIMARY KEY(b, c))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, d TEXT, c BLOB, PRIMARY KEY(d, c))");
+    }
+
+    #[test]
+    fn rename_column_pk_and_unique_quoted() {
+        // altercol 1.9: PK list + UNIQUE("B") (quoted, case-insensitive match).
+        let sql = "CREATE TABLE t1(a, b TEXT, c, PRIMARY KEY(a, b), UNIQUE(\"B\"))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a, d TEXT, c, PRIMARY KEY(a, d), UNIQUE(\"d\"))");
+    }
+
+    #[test]
+    fn rename_column_foreign_key_local_col_list() {
+        // altercol 1.13: the FK's own `(b)` list rewrites; parent name untouched.
+        let sql = "CREATE TABLE t1(a, b, c, FOREIGN KEY (b) REFERENCES t2)";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a, d, c, FOREIGN KEY (d) REFERENCES t2)");
+    }
+
+    #[test]
+    fn rename_column_skips_other_parent_col_list() {
+        // A `REFERENCES other(b)` parent column list belongs to `other`, not this
+        // table, so the parent-side `b` must NOT be rewritten — only this table's
+        // own column `b` (def position + local FK list).
+        let sql = "CREATE TABLE t1(a, b, FOREIGN KEY (b) REFERENCES other(b))";
+        let out = rename_column(sql, "t1", "b", "d").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a, d, FOREIGN KEY (d) REFERENCES other(b))");
+    }
+
+    #[test]
+    fn rename_column_big_fk_col_list() {
+        // altercol 2.x: many-column FK list, unquoted new name.
+        let sql = "CREATE TABLE t3(a, b, c, d, FOREIGN KEY (b, c, d) REFERENCES t4)";
+        let out = rename_column(sql, "t3", "b", "biglongname").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE t3(a, biglongname, c, d, FOREIGN KEY (biglongname, c, d) REFERENCES t4)"
+        );
+    }
+
+    // rename_references_column — child-table parent-column-list rewriting.
+
+    #[test]
+    fn rename_references_column_unsafe_new_name() {
+        // altercol 4.1: parent p1.d renamed to "silly name" -> child FK list.
+        let sql = "CREATE TABLE c1(a, b, FOREIGN KEY (a, b) REFERENCES p1(c, d))";
+        let out = rename_references_column(sql, "p1", "d", "silly name").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE c1(a, b, FOREIGN KEY (a, b) REFERENCES p1(c, \"silly name\"))"
+        );
+    }
+
+    #[test]
+    fn rename_references_column_quoted_old_stays_quoted() {
+        // altercol 4.4: "silly name" -> reasonable is emitted quoted (bQuote).
+        let sql = "CREATE TABLE c1(a, b, FOREIGN KEY (a, b) REFERENCES p1(c, \"silly name\"))";
+        let out = rename_references_column(sql, "p1", "silly name", "reasonable").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE c1(a, b, FOREIGN KEY (a, b) REFERENCES p1(c, \"reasonable\"))"
+        );
+    }
+
+    #[test]
+    fn rename_references_column_no_match_returns_none() {
+        // No parent column list after REFERENCES -> nothing to rewrite.
+        let sql = "CREATE TABLE c2(a, b, FOREIGN KEY (a, b) REFERENCES p1)";
+        assert!(rename_references_column(sql, "p1", "d", "reasonable").is_none());
+    }
+
+    #[test]
+    fn rename_references_column_ignores_other_parent() {
+        let sql = "CREATE TABLE c(a, FOREIGN KEY (a) REFERENCES q(d))";
+        assert!(rename_references_column(sql, "p1", "d", "x").is_none());
     }
 
     // DROP COLUMN — byte-for-byte against sqlite3 3.51.0 (verified manually).

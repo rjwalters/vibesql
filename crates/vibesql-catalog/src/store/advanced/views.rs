@@ -43,6 +43,19 @@ impl super::super::Catalog {
         self.views.get(&key)
     }
 
+    /// Get a mutable reference to a VIEW definition by name.
+    ///
+    /// Used by `ALTER TABLE ... RENAME COLUMN` to rewrite a view's stored
+    /// `sql_definition` text and its parsed `query` AST in place when a source
+    /// column it references is renamed (mirrors SQLite re-resolving dependent
+    /// views). Case-insensitivity follows the same key normalization as
+    /// [`get_view`](Self::get_view).
+    pub fn get_view_mut(&mut self, name: &str) -> Option<&mut ViewDefinition> {
+        let key =
+            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
+        self.views.get_mut(&key)
+    }
+
     /// List all VIEW names (returns original names, not normalized keys)
     pub fn list_views(&self) -> Vec<String> {
         self.views.values().map(|v| v.name.clone()).collect()

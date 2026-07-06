@@ -117,6 +117,31 @@ fn schema_row(obj_type: &str, name: &str, tbl_name: &str, sql: String) -> Row {
     ])
 }
 
+/// Build a `sqlite_master` row for an auto-created index (implicit PRIMARY KEY /
+/// UNIQUE index, named `sqlite_autoindex_*`). SQLite reports these with a NULL
+/// `sql` — the index is implied by its table's `CREATE TABLE` text and has no
+/// standalone `CREATE INDEX` statement — so the row still exists but is filtered
+/// out by the common `WHERE sql!=''` idiom (verified against sqlite3 3.51.0,
+/// altercol.test 1.7/1.8/1.9/1.14). Emitting a reconstructed `CREATE UNIQUE
+/// INDEX` here instead made the autoindex row leak into those schema queries.
+fn schema_row_autoindex(name: &str, tbl_name: &str) -> Row {
+    Row::new(vec![
+        SqlValue::Varchar(arcstr::ArcStr::from("index")),
+        SqlValue::Varchar(arcstr::ArcStr::from(name)),
+        SqlValue::Varchar(arcstr::ArcStr::from(tbl_name)),
+        SqlValue::Integer(0), // rootpage - always 0 for VibeSQL
+        SqlValue::Null,
+    ])
+}
+
+/// Whether `name` is an implicit PRIMARY KEY / UNIQUE auto-index (SQLite names
+/// these `sqlite_autoindex_<table>_<n>`); such indexes carry a NULL `sql` in
+/// `sqlite_master`.
+fn is_sqlite_autoindex(name: &str) -> bool {
+    name.len() >= "sqlite_autoindex_".len()
+        && name[.."sqlite_autoindex_".len()].eq_ignore_ascii_case("sqlite_autoindex_")
+}
+
 /// Execute a `sqlite_master` / `sqlite_schema` query.
 ///
 /// Lists **main-schema** objects only. Temp-schema objects (temp tables and
@@ -148,8 +173,12 @@ pub fn execute_sqlite_schema_query(
         if is_without_rowid_pk_autoindex(catalog, index) {
             continue;
         }
-        let sql = generate_create_index_sql(index);
-        rows.push(schema_row("index", &index.name, &index.table_name, sql));
+        if is_sqlite_autoindex(&index.name) {
+            rows.push(schema_row_autoindex(&index.name, &index.table_name));
+        } else {
+            let sql = generate_create_index_sql(index);
+            rows.push(schema_row("index", &index.name, &index.table_name, sql));
+        }
     }
 
     // Add views. Temp views are tagged with the `temp` schema (#5541) and
@@ -345,8 +374,12 @@ pub fn execute_sqlite_temp_schema_query(
         if is_without_rowid_pk_autoindex(catalog, index) {
             continue;
         }
-        let sql = generate_create_index_sql(index);
-        rows.push(schema_row("index", &index.name, &index.table_name, sql));
+        if is_sqlite_autoindex(&index.name) {
+            rows.push(schema_row_autoindex(&index.name, &index.table_name));
+        } else {
+            let sql = generate_create_index_sql(index);
+            rows.push(schema_row("index", &index.name, &index.table_name, sql));
+        }
     }
 
     // Add temp views. Views are stored flat in the catalog (not partitioned by
@@ -492,20 +525,38 @@ fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
         })
         .collect();
 
+    // Partial-index WHERE clause. SQLite renders the (rewritten) predicate after
+    // the column list, e.g. `CREATE INDEX i ON t(a) WHERE a>0`. The predicate is
+    // kept in sync with RENAME COLUMN via `rename_column_in_table_indexes`, so it
+    // already names the current column; render it verbatim from the AST. Without
+    // this the emitted `sqlite_master.sql` silently dropped the WHERE clause
+    // (altercol 1.12.4).
+    let where_str = index
+        .where_clause
+        .as_ref()
+        .map(|expr| format!(" WHERE {}", expr.to_sql()))
+        .unwrap_or_default();
+
     format!(
-        "CREATE {}INDEX {} ON {}({})",
+        "CREATE {}INDEX {} ON {}({}){}",
         unique_str,
         index.name,
         index.table_name,
-        columns.join(", ")
+        columns.join(", "),
+        where_str
     )
 }
 
 /// Generate CREATE VIEW SQL statement for a view
 fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
-    // Use stored SQL definition if available
+    // Use stored SQL definition if available. SQLite stores the statement text
+    // without a trailing `;` in `sqlite_master.sql`, so strip one if the captured
+    // verbatim text carried it (mirrors `generate_create_trigger_sql`; verified
+    // against sqlite3 3.51.0, altercol.test group 8).
     if let Some(ref sql) = view.sql_definition {
-        return sql.clone();
+        let trimmed = sql.trim_end();
+        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed);
+        return trimmed.trim_end().to_string();
     }
 
     // Otherwise generate from the view definition
