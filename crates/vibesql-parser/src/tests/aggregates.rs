@@ -350,3 +350,126 @@ fn test_order_by_not_allowed_on_non_aggregate() {
         "Unexpected error message: {msg}"
     );
 }
+
+// ========================================================================
+// WITHIN GROUP (ORDER BY ...) ordered-set aggregate tests (issue #5852)
+// ========================================================================
+
+/// Extract the single aggregate function from `SELECT <agg> FROM t1;`.
+fn parse_single_aggregate(sql: &str) -> (String, bool, Vec<vibesql_ast::Expression>) {
+    let stmt = Parser::parse_sql(sql).expect("expected successful parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
+                    (name.to_string(), *distinct, args.clone())
+                }
+                other => panic!("Expected aggregate function, got {other:?}"),
+            },
+            _ => panic!("Expected expression select item"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+fn assert_column(expr: &vibesql_ast::Expression, expected: &str) {
+    match expr {
+        vibesql_ast::Expression::ColumnRef(col_id)
+            if col_id.column_canonical() == expected => {}
+        other => panic!("Expected column reference {expected}, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_within_group_percentile_cont_rewrite() {
+    // percentile_cont(0.5) WITHIN GROUP (ORDER BY x) rewrites to the two-arg
+    // form percentile_cont(x, 0.5): the ORDER BY expr becomes the leading Y arg.
+    let (name, distinct, args) =
+        parse_single_aggregate("SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY x) FROM t1;");
+    assert_eq!(name, "percentile_cont");
+    assert!(!distinct);
+    assert_eq!(args.len(), 2, "expected rewritten two-arg call");
+    assert_column(&args[0], "x");
+    // Second argument is the original fraction literal.
+    assert!(
+        matches!(&args[1], vibesql_ast::Expression::Literal(_)),
+        "expected fraction literal as second arg, got {:?}",
+        args[1]
+    );
+}
+
+#[test]
+fn test_within_group_percentile_rewrite() {
+    // percentile(25) WITHIN GROUP (ORDER BY x) rewrites to percentile(x, 25).
+    let (name, _distinct, args) =
+        parse_single_aggregate("SELECT percentile(25) WITHIN GROUP (ORDER BY x) FROM t1;");
+    assert_eq!(name, "percentile");
+    assert_eq!(args.len(), 2);
+    assert_column(&args[0], "x");
+}
+
+#[test]
+fn test_within_group_median_zero_arg_rewrite() {
+    // median() WITHIN GROUP (ORDER BY x) is the zero-arg outer form; it rewrites
+    // to the one-arg call median(x).
+    let (name, distinct, args) =
+        parse_single_aggregate("SELECT median() WITHIN GROUP (ORDER BY x) FROM t1;");
+    assert_eq!(name, "median");
+    assert!(!distinct);
+    assert_eq!(args.len(), 1, "expected rewritten one-arg call");
+    assert_column(&args[0], "x");
+}
+
+#[test]
+fn test_within_group_ignores_desc_and_nulls() {
+    // ASC/DESC and NULLS FIRST/LAST are accepted and ignored by the rewrite.
+    let (name, _distinct, args) = parse_single_aggregate(
+        "SELECT percentile_disc(0.9) WITHIN GROUP (ORDER BY x DESC NULLS LAST) FROM t1;",
+    );
+    assert_eq!(name, "percentile_disc");
+    assert_eq!(args.len(), 2);
+    assert_column(&args[0], "x");
+}
+
+#[test]
+fn test_within_group_distinct_rejected() {
+    // DISTINCT is not allowed on the ordered-set form (percentile-1.1.distinct.2).
+    // The function name is reported in lowercase: `percentile()`.
+    let result =
+        Parser::parse_sql("SELECT percentile(DISTINCT 50) WITHIN GROUP (ORDER BY x) FROM t1;");
+    assert!(result.is_err(), "Expected parse error for DISTINCT ordered-set aggregate");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("DISTINCT not allowed on ordered-set aggregate percentile()"),
+        "Unexpected error message: {msg}"
+    );
+}
+
+#[test]
+fn test_median_distinct_still_legal() {
+    // The non-WITHIN-GROUP form median(DISTINCT x) remains valid.
+    let (name, distinct, args) = parse_single_aggregate("SELECT median(DISTINCT x) FROM t1;");
+    assert_eq!(name, "median");
+    assert!(distinct);
+    assert_eq!(args.len(), 1);
+    assert_column(&args[0], "x");
+}
+
+#[test]
+fn test_within_still_usable_as_identifier() {
+    // WITHIN is a non-reserved keyword: it must remain usable as a plain
+    // column/table identifier (non-regression).
+    let result = Parser::parse_sql("SELECT within FROM within;");
+    assert!(result.is_ok(), "Expected `within` to parse as an identifier: {result:?}");
+
+    let result2 = Parser::parse_sql("SELECT within AS w FROM t1;");
+    assert!(result2.is_ok(), "Expected `within` column reference to parse: {result2:?}");
+}
+
+#[test]
+fn test_within_group_rejected_on_non_ordered_set_aggregate() {
+    // WITHIN GROUP is only meaningful for the percentile family; other
+    // aggregates reject it.
+    let result = Parser::parse_sql("SELECT sum(x) WITHIN GROUP (ORDER BY y) FROM t1;");
+    assert!(result.is_err(), "Expected parse error for WITHIN GROUP on sum()");
+}

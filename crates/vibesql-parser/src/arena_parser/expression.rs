@@ -1222,13 +1222,68 @@ impl<'arena> ArenaParser<'arena> {
             let distinct = self.try_consume_keyword(Keyword::Distinct);
             self.try_consume_keyword(Keyword::All); // ALL is default
 
-            let args = if matches!(self.peek(), Token::RParen) {
+            let mut args = if matches!(self.peek(), Token::RParen) {
                 BumpVec::new_in(self.arena)
             } else {
                 self.parse_expression_list()?
             };
 
             self.expect_token(Token::RParen)?;
+
+            // Parse optional WITHIN GROUP (ORDER BY expr) — ordered-set aggregate
+            // syntax for the percentile family. `percentile(P) WITHIN GROUP
+            // (ORDER BY Y)` is rewritten to `percentile(Y, P)` and
+            // `median() WITHIN GROUP (ORDER BY Y)` to `median(Y)`; the ORDER BY
+            // expression becomes the leading Y argument. The executor's
+            // Percentile accumulator handles both calling conventions.
+            if self.peek_keyword(Keyword::Within) {
+                if !matches!(
+                    name_upper.as_str(),
+                    "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC"
+                ) {
+                    return Err(ParseError {
+                        message: format!(
+                            "WITHIN GROUP may not be used with non-ordered-set aggregate {}()",
+                            name
+                        ),
+                    });
+                }
+                self.advance(); // consume WITHIN
+                self.expect_keyword(Keyword::Group)?;
+                self.expect_token(Token::LParen)?;
+                self.expect_keyword(Keyword::Order)?;
+                self.expect_keyword(Keyword::By)?;
+
+                // A single ordering expression. ASC/DESC and NULLS FIRST/LAST are
+                // accepted and ignored — the accumulator sorts values itself.
+                let within_expr = self.parse_expression()?;
+                if self.peek_keyword(Keyword::Desc) || self.peek_keyword(Keyword::Asc) {
+                    self.advance();
+                }
+                if self.try_consume_keyword(Keyword::Nulls)
+                    && !(self.try_consume_keyword(Keyword::First)
+                        || self.try_consume_keyword(Keyword::Last))
+                {
+                    return Err(ParseError {
+                        message: "Expected FIRST or LAST after NULLS".to_string(),
+                    });
+                }
+                self.expect_token(Token::RParen)?;
+
+                // DISTINCT is rejected on the ordered-set form; `median(DISTINCT x)`
+                // (the non-WITHIN-GROUP form) stays legal.
+                if distinct {
+                    return Err(ParseError {
+                        message: format!(
+                            "DISTINCT not allowed on ordered-set aggregate {}()",
+                            name.to_lowercase()
+                        ),
+                    });
+                }
+
+                // Rewrite: the ORDER BY expression becomes the leading Y argument.
+                args.insert(0, within_expr);
+            }
 
             // Check for OVER clause (window function)
             if self.peek_keyword(Keyword::Over) {

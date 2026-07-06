@@ -98,6 +98,8 @@ pub enum Keyword {
     Others,
     Ties,
     Window,
+    // Ordered-set aggregate keyword: WITHIN GROUP (ORDER BY ...)
+    Within,
     // Note: Window function names (ROW_NUMBER, RANK, etc.) are identifiers, not keywords
     // Constraint keywords
     Primary,
@@ -409,6 +411,9 @@ impl Keyword {
             Keyword::Groups | Keyword::No | Keyword::Others | Keyword::Over |
             Keyword::Partition | Keyword::Preceding | Keyword::Range | Keyword::Ties |
             Keyword::Unbounded | Keyword::Window | Keyword::First | Keyword::Last |
+            // WITHIN is only contextual in the ordered-set aggregate clause
+            // (WITHIN GROUP), so it stays usable as an ordinary identifier.
+            Keyword::Within |
             // RETURNING is a "fallback" keyword in SQLite (3.35.0+): it is only
             // meaningful at the end of a DML statement and remains usable as an
             // ordinary identifier elsewhere.
@@ -743,6 +748,7 @@ impl fmt::Display for Keyword {
             Keyword::Others => "OTHERS",
             Keyword::Ties => "TIES",
             Keyword::Window => "WINDOW",
+            Keyword::Within => "WITHIN",
             Keyword::Primary => "PRIMARY",
             Keyword::Foreign => "FOREIGN",
             Keyword::Key => "KEY",

@@ -350,6 +350,69 @@ impl Parser {
             self.expect_token(Token::RParen)?;
         }
 
+        // Parse optional WITHIN GROUP (ORDER BY expr) — ordered-set aggregate
+        // syntax for the percentile family (SQLITE_ENABLE_ORDERED_SET_AGGREGATES).
+        // `percentile(P) WITHIN GROUP (ORDER BY Y)` is rewritten to the two-arg
+        // call `percentile(Y, P)`, and `median() WITHIN GROUP (ORDER BY Y)` to
+        // `median(Y)` — i.e. the ORDER BY expression becomes the leading Y
+        // argument. The executor's Percentile accumulator (#5818) handles both
+        // calling conventions, so no AST change is needed.
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Within, .. }) {
+            if !matches!(
+                function_name_upper.as_str(),
+                "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC"
+            ) {
+                return Err(ParseError {
+                    message: format!(
+                        "WITHIN GROUP may not be used with non-ordered-set aggregate {}()",
+                        first
+                    ),
+                });
+            }
+            self.advance(); // consume WITHIN
+            self.expect_keyword(Keyword::Group)?;
+            self.expect_token(Token::LParen)?;
+            self.expect_keyword(Keyword::Order)?;
+            self.expect_keyword(Keyword::By)?;
+
+            // A single ordering expression. ASC/DESC and NULLS FIRST/LAST are
+            // accepted and ignored — the accumulator sorts values itself.
+            let within_expr = self.parse_expression()?;
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Asc, .. })
+                || matches!(self.peek(), Token::Keyword { keyword: Keyword::Desc, .. })
+            {
+                self.advance();
+            }
+            if matches!(self.peek(), Token::Keyword { keyword: Keyword::Nulls, .. }) {
+                self.advance(); // consume NULLS
+                if matches!(self.peek(), Token::Keyword { keyword: Keyword::First, .. })
+                    || matches!(self.peek(), Token::Keyword { keyword: Keyword::Last, .. })
+                {
+                    self.advance();
+                } else {
+                    return Err(ParseError {
+                        message: "Expected FIRST or LAST after NULLS".to_string(),
+                    });
+                }
+            }
+            self.expect_token(Token::RParen)?;
+
+            // DISTINCT is rejected on the ordered-set form (percentile-1.1.distinct.2).
+            // Note: `median(DISTINCT x)` (the non-WITHIN-GROUP form) stays legal.
+            if distinct {
+                return Err(ParseError {
+                    message: format!(
+                        "DISTINCT not allowed on ordered-set aggregate {}()",
+                        first.to_lowercase()
+                    ),
+                });
+            }
+
+            // Rewrite: the ORDER BY expression becomes the leading Y argument.
+            args.insert(0, within_expr);
+            order_by = None;
+        }
+
         // Parse optional FILTER clause (SQL:2003)
         // Syntax: aggregate(...) FILTER (WHERE condition) [OVER (...)]
         let filter = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Filter, .. }) {
