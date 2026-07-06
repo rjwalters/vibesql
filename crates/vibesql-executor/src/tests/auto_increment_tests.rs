@@ -631,6 +631,52 @@ fn test_last_insert_rowid_or_ignore_skips_last_row() {
     assert_eq!(db.last_insert_rowid(), 6);
 }
 
+/// Mixed-batch upsert: the LAST row takes the ON CONFLICT DO UPDATE arm (an
+/// update, not an insert) while an earlier row inserts. last_insert_rowid() must
+/// report the last row *actually inserted* (rowid 6), NOT the updated row's
+/// rowid (5). SQLite excludes pure updates from last_insert_rowid(); verified
+/// against sqlite3 3.51.0 (returns 6). Regression guard for issue #5886.
+#[test]
+fn test_last_insert_rowid_upsert_mixed_batch_excludes_update() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
+    // (6,2) inserts (no conflict); (5,3) conflicts on k=5 and takes the DO
+    // UPDATE arm — an update, so it must not touch last_insert_rowid().
+    exec_sql(
+        &mut db,
+        "INSERT INTO t VALUES(6,2),(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+    );
+
+    // sqlite3: last_insert_rowid() == 6 (last row actually inserted, not 5)
+    assert_eq!(db.last_insert_rowid(), 6);
+}
+
+/// An upsert batch where EVERY row takes the DO UPDATE arm inserts nothing, so
+/// last_insert_rowid() must stay at its prior value (the rowid of the last row
+/// actually inserted by an earlier statement). Verified against sqlite3 3.51.0:
+/// after inserting rowid 9 then an all-update upsert, last_insert_rowid() == 9.
+/// Regression guard for issue #5886.
+#[test]
+fn test_last_insert_rowid_upsert_all_updates_keeps_prior() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(k INTEGER PRIMARY KEY, v INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
+    exec_sql(&mut db, "INSERT INTO t VALUES(9,9)"); // last actual insert -> rowid 9
+    assert_eq!(db.last_insert_rowid(), 9);
+
+    // k=5 already exists -> DO UPDATE arm only; nothing inserted.
+    exec_sql(
+        &mut db,
+        "INSERT INTO t VALUES(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+    );
+
+    // sqlite3: last_insert_rowid() unchanged at 9 (no row inserted)
+    assert_eq!(db.last_insert_rowid(), 9);
+}
+
 /// The bulk-transfer fast path (`INSERT INTO t SELECT * FROM src`, no column
 /// list) must also report the last inserted rowid. Source rows are inserted out
 /// of rowid order so the value left by the last `INSERT INTO src` (200) differs
