@@ -482,23 +482,9 @@ impl<'arena> ArenaParser<'arena> {
                     let left_ref = self.arena.alloc(left);
                     let right_ref = self.arena.alloc(right);
                     left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
-                } else if self.peek_keyword(Keyword::True) {
-                    self.consume_keyword(Keyword::True)?;
-                    let left_ref = self.arena.alloc(left);
-                    left = Expression::IsTruthValue {
-                        expr: left_ref,
-                        truth_value: TruthValue::True,
-                        negated,
-                    };
-                } else if self.peek_keyword(Keyword::False) {
-                    self.consume_keyword(Keyword::False)?;
-                    let left_ref = self.arena.alloc(left);
-                    left = Expression::IsTruthValue {
-                        expr: left_ref,
-                        truth_value: TruthValue::False,
-                        negated,
-                    };
                 } else if self.peek_keyword(Keyword::Unknown) {
+                    // UNKNOWN is not a literal in the expression grammar, so it is
+                    // only recognized here as the fixed `IS [NOT] UNKNOWN` form.
                     self.consume_keyword(Keyword::Unknown)?;
                     let left_ref = self.arena.alloc(left);
                     left = Expression::IsTruthValue {
@@ -506,23 +492,46 @@ impl<'arena> ArenaParser<'arena> {
                         truth_value: TruthValue::Unknown,
                         negated,
                     };
-                } else if self.peek_keyword(Keyword::Null) {
-                    // IS NULL / IS NOT NULL
-                    self.consume_keyword(Keyword::Null)?;
-                    let left_ref = self.arena.alloc(left);
-                    left = Expression::IsNull { expr: left_ref, negated };
                 } else {
-                    // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
-                    // This handles cases like `expr IS 0` or `expr IS 1`
+                    // SQLite parses the right side of `IS` as an ordinary expression,
+                    // and NULL/TRUE/FALSE are themselves expressions. Parse the full
+                    // relational-tier right operand so a tighter-binding operator that
+                    // follows binds to it (`1 IS NULL + 1` == `1 IS (NULL + 1)`), then
+                    // recover the specialized AST shapes for the plain-literal cases so
+                    // optimizers that rely on IsNull / IsTruthValue keep working.
                     let right = self.parse_relational_expression()?;
-                    let left_ref = self.arena.alloc(left);
-                    let right_ref = self.arena.alloc(right);
-                    // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
-                    // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
-                    left = Expression::IsDistinctFrom {
-                        left: left_ref,
-                        right: right_ref,
-                        negated: !negated,
+                    left = match right {
+                        Expression::Literal(SqlValue::Null) => {
+                            let left_ref = self.arena.alloc(left);
+                            Expression::IsNull { expr: left_ref, negated }
+                        }
+                        Expression::Literal(SqlValue::Boolean(true)) => {
+                            let left_ref = self.arena.alloc(left);
+                            Expression::IsTruthValue {
+                                expr: left_ref,
+                                truth_value: TruthValue::True,
+                                negated,
+                            }
+                        }
+                        Expression::Literal(SqlValue::Boolean(false)) => {
+                            let left_ref = self.arena.alloc(left);
+                            Expression::IsTruthValue {
+                                expr: left_ref,
+                                truth_value: TruthValue::False,
+                                negated,
+                            }
+                        }
+                        // SQLite compatibility: `IS <expr>` compares with NULL-safe
+                        // equals. IS is IS NOT DISTINCT FROM; IS NOT is IS DISTINCT FROM.
+                        _ => {
+                            let left_ref = self.arena.alloc(left);
+                            let right_ref = self.arena.alloc(right);
+                            Expression::IsDistinctFrom {
+                                left: left_ref,
+                                right: right_ref,
+                                negated: !negated,
+                            }
+                        }
                     };
                 }
                 continue;
