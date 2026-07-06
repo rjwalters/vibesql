@@ -64,6 +64,15 @@ pub(super) fn execute_add_column(
         new_column.set_default(*default_expr.clone());
     }
 
+    // Carry the generated-column expression onto the catalog column so the new
+    // column computes its value instead of storing a plain NULL. Without this
+    // the parsed `GENERATED ALWAYS AS (expr)` clause was dropped and the column
+    // read back as NULL (issue #5861). VibeSQL materializes generated columns at
+    // write time, so STORED and VIRTUAL behave identically here.
+    if let Some(ref gen_expr) = stmt.column_def.generated_expr {
+        new_column.generated_expr = Some(*gen_expr.clone());
+    }
+
     table.schema_mut().add_column(new_column)?;
 
     // Keep the parallel STRICT type vector aligned with the new column set.
@@ -71,16 +80,36 @@ pub(super) fn execute_add_column(
         table.schema_mut().strict_types.push(st);
     }
 
-    // Add default value (or NULL) to all existing rows
-    let default_value = if let Some(ref default_expr) = stmt.column_def.default_value {
-        // Evaluate the default expression for simple cases (literals)
-        evaluate_simple_default(default_expr)?
+    // Backfill existing rows. For a generated column, evaluate the expression
+    // per-row against each row's current (pre-existing) values, mirroring the
+    // INSERT-time materialization in `insert::defaults::apply_generated_columns`
+    // (issue #5861). The new column was appended at the end of the schema, so
+    // the indices of the pre-existing columns the expression references are
+    // unchanged, and evaluation resolves exactly as it does at INSERT time.
+    // Non-generated columns keep the previous behavior: a static default or NULL.
+    if let Some(ref gen_expr) = stmt.column_def.generated_expr {
+        let gen_expr = *gen_expr.clone();
+        let col_type = stmt.column_def.data_type.clone();
+        let schema_snapshot = table.schema.clone();
+        let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
+            .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
+        for row in table.rows_mut() {
+            let value = evaluator.eval(&gen_expr, row)?;
+            let coerced = crate::insert::validation::coerce_value(value, &col_type)?;
+            row.add_value(coerced);
+        }
     } else {
-        SqlValue::Null
-    };
+        // Add default value (or NULL) to all existing rows
+        let default_value = if let Some(ref default_expr) = stmt.column_def.default_value {
+            // Evaluate the default expression for simple cases (literals)
+            evaluate_simple_default(default_expr)?
+        } else {
+            SqlValue::Null
+        };
 
-    for row in table.rows_mut() {
-        row.add_value(default_value.clone());
+        for row in table.rows_mut() {
+            row.add_value(default_value.clone());
+        }
     }
 
     // Invalidate the database-level columnar cache since table structure changed.

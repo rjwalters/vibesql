@@ -103,6 +103,41 @@ fn parse_add_column(
         (dt, is_int, src)
     };
 
+    // Parse optional generated-column clause, mirroring the CREATE TABLE parser
+    // (create/table.rs). Supports both `GENERATED ALWAYS AS (expr)` and the
+    // short form `AS (expr)`, each optionally followed by STORED or VIRTUAL.
+    // Without this the GENERATED/AS tokens were left unconsumed and
+    // `generated_expr` stayed `None`, so the executor stored a plain column and
+    // the added column silently returned NULL instead of the computed value
+    // (issue #5861). VibeSQL materializes generated columns at write time, so
+    // STORED and VIRTUAL are accepted and treated identically — matching
+    // sqlite3 3.51.0, which permits both via ALTER TABLE ADD COLUMN. The
+    // typeless short forms (`ADD COLUMN y AS (x+1)` / `... GENERATED ...`) are
+    // already routed here because `is_add_column_type_absent` treats a leading
+    // GENERATED/AS as "no data type".
+    let mut generated_expr: Option<Box<Expression>> = None;
+    if parser.peek_keyword(Keyword::Generated) {
+        parser.advance(); // consume GENERATED
+        parser.expect_keyword(Keyword::Always)?;
+        parser.expect_keyword(Keyword::As)?;
+        parser.expect_token(Token::LParen)?;
+        let expr = parser.parse_expression()?;
+        parser.expect_token(Token::RParen)?;
+        if parser.peek_keyword(Keyword::Stored) || parser.peek_keyword(Keyword::Virtual) {
+            parser.advance();
+        }
+        generated_expr = Some(Box::new(expr));
+    } else if parser.peek_keyword(Keyword::As) {
+        parser.advance(); // consume AS
+        parser.expect_token(Token::LParen)?;
+        let expr = parser.parse_expression()?;
+        parser.expect_token(Token::RParen)?;
+        if parser.peek_keyword(Keyword::Stored) || parser.peek_keyword(Keyword::Virtual) {
+            parser.advance();
+        }
+        generated_expr = Some(Box::new(expr));
+    }
+
     // Parse optional DEFAULT clause
     let default_value = if parser.peek_keyword(Keyword::Default) {
         parser.advance(); // consume DEFAULT
@@ -171,7 +206,7 @@ fn parse_add_column(
         constraints,
         default_value,
         comment: None,
-        generated_expr: None,
+        generated_expr,
         is_exact_integer_type,
         type_source,
     };

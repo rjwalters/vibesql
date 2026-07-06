@@ -411,3 +411,82 @@ fn test_parse_alter_table_add_column_bare_no_column_keyword_no_type() {
         other => panic!("Expected ADD COLUMN, got {:?}", other),
     }
 }
+
+// ========================================================================
+// Generated-column ADD COLUMN (issue #5861)
+// ========================================================================
+
+#[test]
+fn test_parse_alter_table_add_generated_column_typed() {
+    // `GENERATED ALWAYS AS (expr)` after an explicit type must populate
+    // `generated_expr` on the ColumnDef (previously silently dropped).
+    let result = Parser::parse_sql(
+        "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1)",
+    );
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert_eq!(add.column_def.name, "y");
+            assert!(
+                add.column_def.generated_expr.is_some(),
+                "generated_expr must be populated for GENERATED ALWAYS AS"
+            );
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_generated_column_typed_stored_and_virtual() {
+    for sql in [
+        "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1) STORED",
+        "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1) VIRTUAL",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} -> err: {:?}", result);
+        match result.unwrap() {
+            vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+                assert!(
+                    add.column_def.generated_expr.is_some(),
+                    "{sql}: generated_expr must be populated"
+                );
+            }
+            other => panic!("{sql} -> Expected ADD COLUMN, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_generated_column_typeless_short_form() {
+    // Typeless short form: `ADD COLUMN y AS (x+1)`.
+    let result = Parser::parse_sql("ALTER TABLE g ADD COLUMN y AS (x+1)");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert_eq!(add.column_def.name, "y");
+            assert!(
+                add.column_def.generated_expr.is_some(),
+                "generated_expr must be populated for the typeless AS short form"
+            );
+            // No explicit type -> BLOB affinity, like a typeless column.
+            assert!(matches!(
+                add.column_def.data_type,
+                vibesql_types::DataType::BinaryLargeObject
+            ));
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_plain_column_has_no_generated_expr() {
+    // Regression guard: a plain column must NOT gain a generated expression.
+    let result = Parser::parse_sql("ALTER TABLE g ADD COLUMN z INTEGER");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert!(add.column_def.generated_expr.is_none());
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}
