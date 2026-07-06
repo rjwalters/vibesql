@@ -33,6 +33,7 @@ mod limit;
 mod literals;
 mod not_is_null_precedence;
 mod null_functions;
+mod parse_expression_sql;
 mod pragma;
 mod predicates;
 mod prepared;
