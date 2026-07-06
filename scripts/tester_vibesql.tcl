@@ -1861,6 +1861,27 @@ proc find_close_then_reopen_split {sql} {
     return $closer_end
 }
 
+# Resolve which underlying .vbsql file a named connection should target.
+#
+# The default "db" connection (and an empty/unspecified name) always tracks
+# ::db_file so existing single-connection behaviour is unchanged. A named
+# connection opened via `sqlite3 db2 test.db` is looked up in ::db_file_map so
+# `do_execsql_test -db db2 ...` reads/writes the file db2 was opened against,
+# even after a later `sqlite3 dbN` call overwrote ::db_file (#5946).
+#
+# NOTE: truly concurrent multi-connection scenarios (two live read-write
+# transactions held open simultaneously, WAL reader/writer interleaving,
+# snapshot isolation across two live sessions) remain out of scope: the shim's
+# per-batch process model executes each SQL batch in a fresh CLI process, so it
+# cannot emulate two connections holding open transactions at once. Such tests
+# (e.g. manydb.test, ~116 concurrent connections) stay on the skip list.
+proc resolve_db_file {db} {
+    if {$db ne "" && $db ne "db" && [info exists ::db_file_map($db)]} {
+        return $::db_file_map($db)
+    }
+    return $::db_file
+}
+
 proc execsql {sql {db ""}} {
     # Execute SQL and return results as a TCL list
     # Error messages are automatically translated to SQLite-compatible format
@@ -2206,10 +2227,11 @@ proc execsql {sql {db ""}} {
     # - Zero rows returned (empty output) → should return {}
     # - One NULL row returned (single \n output) → should return {""}
     # TCL's exec strips one trailing newline, making these indistinguishable.
-    if {$::db_file eq ""} {
+    set target_db_file [resolve_db_file $db]
+    if {$target_db_file eq ""} {
         set result [exec_preserve_newlines $raw_sql ""]
     } else {
-        set result [exec_preserve_newlines $raw_sql $::db_file]
+        set result [exec_preserve_newlines $raw_sql $target_db_file]
     }
 
     set parsed [parse_raw_result $result]
@@ -2583,10 +2605,11 @@ proc execsql_with_headers {sql {db ""}} {
     set pragma_prefix [build_pragma_prefix]
     set prefixed_sql "${pragma_prefix}$sql"
 
-    if {$::db_file eq ""} {
+    set target_db_file [resolve_db_file $db]
+    if {$target_db_file eq ""} {
         set result [exec echo $prefixed_sql | $::vibesql_path 2>@1]
     } else {
-        set result [exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1]
+        set result [exec echo $prefixed_sql | $::vibesql_path $target_db_file 2>@1]
     }
 
     return [parse_result_with_headers $result]
@@ -2639,10 +2662,11 @@ proc execsql2 {sql {db ""}} {
     set prefixed_sql ".mode csv\n${pragma_prefix}$sql"
 
     # Use catch to handle process errors and translate them to SQLite format
-    if {$::db_file eq ""} {
+    set target_db_file [resolve_db_file $db]
+    if {$target_db_file eq ""} {
         set exec_code [catch {exec echo $prefixed_sql | $::vibesql_path 2>@1} result]
     } else {
-        set exec_code [catch {exec echo $prefixed_sql | $::vibesql_path $::db_file 2>@1} result]
+        set exec_code [catch {exec echo $prefixed_sql | $::vibesql_path $target_db_file 2>@1} result]
     }
 
     if {$exec_code != 0} {
@@ -5120,16 +5144,33 @@ proc is_search_count_mismatch {result expected} {
     return [expr {$result_prefix eq $expected_prefix}]
 }
 
-proc do_execsql_test {name sql {expected {}}} {
+proc do_execsql_test {args} {
     # Convenience wrapper for SQL execution tests
     # Expected is optional - if not provided, just execute the SQL
+    #
+    # Supports the canonical SQLite tester.tcl signature, including the
+    # optional leading "-db DB" flag used by multi-connection tests
+    # (e.g. altercol.test line 126: do_execsql_test -db db2 2.1 { ... }).
+    # See docs/reference/sqlite/test/tester.tcl (~line 941) for the canonical
+    # pattern. Without this, "-db" was misparsed as the test name and aborted
+    # the whole file from that point on (#5946).
+    set db db
+    if {[lindex $args 0] eq "-db"} {
+        set db [lindex $args 1]
+        set args [lrange $args 2 end]
+    }
+    set name [lindex $args 0]
+    set sql [lindex $args 1]
+    set expected [lindex $args 2]
 
     # Pre-substitute TCL variables using stack-walking substitution
     # This handles cases like: foreach {id x} {...} { do_execsql_test test.$id {INSERT ... $x} }
     # where $x needs to be substituted before the SQL is passed down
     set sql [substitute_tcl_vars $sql]
 
-    do_test $name [list execsql $sql] $expected
+    # Pass the named connection through to execsql so it can route the query
+    # to the file that connection was opened against (see ::db_file_map).
+    do_test $name [list execsql $sql $db] $expected
 }
 
 proc do_catchsql_test {name sql expected} {
@@ -5820,6 +5861,15 @@ proc sqlite3 {db args} {
     }
 
     set ::db_file $new_file
+
+    # Record this connection -> file mapping so named connections (db2, db3, ...)
+    # can be routed to the file they were opened against even after ::db_file is
+    # overwritten by a later "sqlite3 dbN" call (#5946). The default "db"
+    # connection continues to track ::db_file directly (last-write-wins), so a
+    # test that opens db and db2 on the SAME underlying file (the common
+    # altercol.test case where both resolve to $::db_file) reads/writes the same
+    # data regardless of which handle it uses.
+    set ::db_file_map($db) $new_file
 
     # Reset PRAGMA state to defaults for new database
     # (session-only PRAGMAs like reverse_unordered_selects are reset on new connections)
@@ -6677,6 +6727,10 @@ proc run_test_file {filename} {
     # Clear the opened_dbs tracking so all databases are treated as "first time" opens
     # This ensures sqlite3 proc will delete stale database files from previous test runs
     set ::opened_dbs {}
+
+    # Clear the connection->file map so a named connection (db2, db3, ...) opened
+    # by a previous test file cannot leak a stale file path into this one (#5946).
+    array unset ::db_file_map
 
     puts "Running: $filename"
     puts ""
