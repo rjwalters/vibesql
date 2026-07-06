@@ -166,6 +166,58 @@ fn table_name_index(tokens: &[(Token, Span)]) -> Option<usize> {
     Some(i)
 }
 
+/// Rewrite every `REFERENCES <old_parent>` clause in the verbatim `CREATE TABLE`
+/// text of a *child* table to `REFERENCES "<new_parent>"`, matching SQLite's
+/// `sqlite_rename_parent` (invoked when the referenced parent table is renamed
+/// via `ALTER TABLE ... RENAME TO`, with `legacy_alter_table=OFF`).
+///
+/// Only the parent-table identifier that immediately follows a `REFERENCES`
+/// keyword is considered, so a bare `p` appearing elsewhere (inside a string
+/// literal, a column name, or an identifier that merely contains `p` as a
+/// substring) is never touched. Quote-awareness is inherited from the lexer,
+/// which normalizes `"p"`, `` `p` ``, and `[p]` all to a delimited-identifier
+/// token and emits string literals as a distinct token kind — so all quoted
+/// spellings of the parent match while string-literal look-alikes do not.
+///
+/// The replacement is emitted double-quoted (`"<new_parent>"`) to mirror
+/// SQLite's output style for renamed objects. Handles multiple matching FKs in a
+/// single `CREATE TABLE` (e.g. two columns each `REFERENCES p`). Returns `None`
+/// when no `REFERENCES <old_parent>` clause is present (the caller then
+/// invalidates and reconstructs), keeping the re-parseable-on-reload invariant.
+pub fn rename_references_parent(
+    create_sql: &str,
+    old_parent: &str,
+    new_parent: &str,
+) -> Option<String> {
+    let tokens = tokenize(create_sql)?;
+    let replacement = quote_ident(new_parent);
+
+    // Collect the byte spans of every parent-table identifier that immediately
+    // follows a `REFERENCES` keyword and matches `old_parent` (case-insensitively
+    // for bare and delimited identifiers, mirroring SQLite's name folding).
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, (tok, _)) in tokens.iter().enumerate() {
+        if !matches!(tok, Token::Keyword { keyword: Keyword::References, .. }) {
+            continue;
+        }
+        if let Some((next_tok, next_span)) = tokens.get(i + 1) {
+            if ident_matches(next_tok, old_parent) {
+                spans.push(*next_span);
+            }
+        }
+    }
+    if spans.is_empty() {
+        return None;
+    }
+
+    // Replace from the last span backward so earlier byte offsets stay valid.
+    let mut out = create_sql.to_string();
+    for span in spans.iter().rev() {
+        out.replace_range(span.start..span.end, &replacement);
+    }
+    Some(out)
+}
+
 /// Rewrite a column name in its *definition position* within the verbatim
 /// `CREATE TABLE` text, matching SQLite's `ALTER TABLE ... RENAME COLUMN`.
 ///
@@ -458,6 +510,100 @@ mod tests {
         let sql = "CREATE TABLE IF NOT EXISTS t (x int)";
         let out = rename_table(sql, "t2").unwrap();
         assert_eq!(out, "CREATE TABLE IF NOT EXISTS \"t2\" (x int)");
+    }
+
+    // rename_references_parent — quote-aware child REFERENCES rewriter.
+
+    #[test]
+    fn rename_references_parent_bare_name() {
+        let sql = "CREATE TABLE c(x REFERENCES p(id) ON DELETE CASCADE)";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p_new\"(id) ON DELETE CASCADE)");
+    }
+
+    #[test]
+    fn rename_references_parent_table_constraint_form() {
+        let sql = "CREATE TABLE c(x, FOREIGN KEY(x) REFERENCES p(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x, FOREIGN KEY(x) REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_double_quoted_old_name() {
+        let sql = "CREATE TABLE c(x REFERENCES \"p\"(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_bracket_quoted_old_name() {
+        let sql = "CREATE TABLE c(x REFERENCES [p](id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_backtick_quoted_old_name() {
+        let sql = "CREATE TABLE c(x REFERENCES `p`(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_case_insensitive() {
+        let sql = "CREATE TABLE c(x REFERENCES P(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_multiple_fks() {
+        let sql = "CREATE TABLE c(a REFERENCES p(id), b REFERENCES p(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(a REFERENCES \"p_new\"(id), b REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_self_referential() {
+        // After the header has already been rewritten to the new name, the inline
+        // self-reference still names the old table and must be rewritten too.
+        let sql = "CREATE TABLE \"p_new\"(id INTEGER PRIMARY KEY, pid REFERENCES p(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE \"p_new\"(id INTEGER PRIMARY KEY, pid REFERENCES \"p_new\"(id))"
+        );
+    }
+
+    #[test]
+    fn rename_references_parent_ignores_string_literal_lookalike() {
+        // A bare `p` inside a string literal default must not be rewritten.
+        let sql = "CREATE TABLE c(note TEXT DEFAULT 'see p for details', x REFERENCES p(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE c(note TEXT DEFAULT 'see p for details', x REFERENCES \"p_new\"(id))"
+        );
+    }
+
+    #[test]
+    fn rename_references_parent_ignores_substring_identifier() {
+        // `parent` merely contains `p`; only the exact REFERENCES target changes.
+        let sql = "CREATE TABLE c(parent TEXT, x REFERENCES p(id))";
+        let out = rename_references_parent(sql, "p", "p_new").unwrap();
+        assert_eq!(out, "CREATE TABLE c(parent TEXT, x REFERENCES \"p_new\"(id))");
+    }
+
+    #[test]
+    fn rename_references_parent_no_match_returns_none() {
+        let sql = "CREATE TABLE c(x REFERENCES other(id))";
+        assert!(rename_references_parent(sql, "p", "p_new").is_none());
+    }
+
+    #[test]
+    fn rename_references_parent_no_references_returns_none() {
+        let sql = "CREATE TABLE c(x INTEGER, y TEXT)";
+        assert!(rename_references_parent(sql, "p", "p_new").is_none());
     }
 
     #[test]

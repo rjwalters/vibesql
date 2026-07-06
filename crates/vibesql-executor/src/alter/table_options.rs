@@ -96,6 +96,17 @@ pub(super) fn execute_rename_table(
     // `sqlite_master.sql` text consistent. See `crate::trigger_rename`.
     rewrite_triggers_for_rename(database, &stmt.table_name, &stmt.new_table_name);
 
+    // Re-bind every child table's foreign key that referenced the old parent
+    // name, and rewrite its verbatim REFERENCES text. SQLite
+    // (legacy_alter_table=OFF) rewrites both the child's in-memory FK target and
+    // the stored `sqlite_master.sql` REFERENCES clause so cascade enforcement
+    // survives the rename. Without this, `fk.parent_table` keeps pointing at the
+    // now-nonexistent old name (silently severing enforcement) and a reload would
+    // resurrect the stale binding from the un-rewritten sql_source. Runs after
+    // the drop+create above, so the renamed table already exists under its new
+    // name — self-referential FKs on it are picked up by the same loop.
+    rebind_child_foreign_keys(database, &stmt.table_name, &stmt.new_table_name);
+
     // Invalidate the database-level columnar cache for both old and new table names.
     // The old table name's cache is invalidated since the table no longer exists,
     // and the new table name's cache is invalidated to ensure fresh columnar data.
@@ -103,6 +114,53 @@ pub(super) fn execute_rename_table(
     database.invalidate_columnar_cache(&stmt.new_table_name);
 
     Ok(format!("Table '{}' renamed to '{}'", stmt.table_name, stmt.new_table_name))
+}
+
+/// Re-bind foreign keys that referenced a just-renamed parent table.
+///
+/// For every table in the database, any `ForeignKeyConstraint` whose
+/// `parent_table` matches `old_name` (case-insensitively) is repointed to
+/// `new_name`, and the table's verbatim `sql_source` `REFERENCES <old_name>`
+/// text is rewritten to `REFERENCES "<new_name>"` so `sqlite_master.sql` and any
+/// future reload (which rehydrates constraints from `sql_source`) stay
+/// consistent. Mirrors SQLite's `sqlite_rename_parent` under
+/// `legacy_alter_table=OFF`.
+///
+/// The storage `Table` schema is the mutation target; the catalog copy is then
+/// re-synced from it (matching the `sync_catalog_schema_from_storage` pattern in
+/// `alter/mod.rs`). If the `REFERENCES` text cannot be rewritten cleanly, the
+/// stale `sql_source` is invalidated so it is reconstructed from the (already
+/// re-bound) schema on next serialization — never left pointing at the old name.
+fn rebind_child_foreign_keys(database: &mut Database, old_name: &str, new_name: &str) {
+    for tbl in database.list_tables() {
+        // Mutate the storage copy in place, returning the updated schema to sync
+        // into the catalog. The `continue` short-circuits tables with no matching
+        // FK so untouched tables are neither cloned nor re-inserted.
+        let updated_schema = {
+            let Some(table) = database.get_table_mut(&tbl) else {
+                continue;
+            };
+            let mut changed = false;
+            for fk in table.schema_mut().foreign_keys.iter_mut() {
+                if fk.parent_table.eq_ignore_ascii_case(old_name) {
+                    fk.parent_table = new_name.to_string();
+                    changed = true;
+                }
+            }
+            if !changed {
+                continue;
+            }
+            let rewritten = table.schema.sql_source.as_deref().and_then(|sql| {
+                crate::alter_rewrite::rename_references_parent(sql, old_name, new_name)
+            });
+            match rewritten {
+                Some(text) => table.schema_mut().set_sql_source(text),
+                None => table.schema_mut().invalidate_sql_source(),
+            }
+            table.schema.clone()
+        };
+        database.catalog.replace_table_schema(&tbl, updated_schema);
+    }
 }
 
 /// Rewrite all trigger definitions in the catalog that reference `old_name`,
