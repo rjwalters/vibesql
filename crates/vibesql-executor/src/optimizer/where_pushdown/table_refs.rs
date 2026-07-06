@@ -122,7 +122,10 @@ fn extract_tables_recursive_branch(
             // SUM(l_quantity) > 300) The subquery is non-correlated, so this can be
             // pushed down to filter the orders table during the scan phase,
             // significantly reducing the join input size.
-            if !crate::correlation::is_correlated(subquery, schema) {
+            // This static optimizer pass has no live `Database` handle, so it
+            // uses the outer-schema-only self-join heuristic (issue #5880 fix
+            // applies only where a `Database` is threaded through at runtime).
+            if !crate::correlation::is_correlated(subquery, schema, None) {
                 // Non-correlated subquery: the predicate can be pushed down
                 // Extract table references from the left-hand expression only
                 // (the subquery is evaluated independently, so it doesn't add table references)

@@ -142,7 +142,8 @@ impl CombinedExpressionEvaluator<'_> {
             self.compute_subquery_hash_cached(subquery)
         } else if !self.schema.table_schemas.is_empty() {
             // Has outer context: include correlation values in cache key for safety
-            if let Some(correlation_values) = extract_correlation_values(subquery, row, self.schema)
+            if let Some(correlation_values) =
+                extract_correlation_values(subquery, row, self.schema, self.database)
             {
                 // Hash is cached by AST pointer (issue #4142)
                 let subquery_hash = self.compute_subquery_hash_cached(subquery);

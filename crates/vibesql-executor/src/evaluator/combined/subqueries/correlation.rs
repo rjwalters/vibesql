@@ -4,6 +4,34 @@
 //! references from subqueries. Correlated subqueries reference columns from
 //! outer queries, which affects caching and execution strategies.
 
+/// Check whether an unqualified column resolves to one of the subquery's own
+/// inner tables by consulting the actual database schema.
+///
+/// SQL name resolution is innermost-scope-first: an unqualified column that
+/// exists on a table in the subquery's own FROM clause binds to that inner
+/// table, NOT to a same-named column in the outer query. The correlation walk
+/// must therefore treat such a column as a local (non-correlation) reference.
+///
+/// Historically this check only consulted the *outer* schema (issue #4761),
+/// which handled the self-join case (inner table name == outer table name) but
+/// silently failed whenever the inner and outer tables were *different* tables:
+/// the inner table is never present in the outer schema, so the lookup always
+/// returned `None` and the column was misclassified as an outer correlation
+/// reference (issue #5880). Passing the `Database` lets us inspect the inner
+/// table's real column list and apply innermost-scope-first resolution.
+fn unqualified_column_in_inner_tables(
+    database: Option<&vibesql_storage::Database>,
+    subquery_tables: &[String],
+    column: &str,
+) -> bool {
+    let Some(db) = database else {
+        return false;
+    };
+    subquery_tables.iter().any(|table_name| {
+        db.get_table(table_name).is_some_and(|table| table.schema.has_column(column))
+    })
+}
+
 /// Extract correlation values from the current row for correlated subquery caching
 ///
 /// For correlated subqueries, we need to identify which columns from the outer query
@@ -15,6 +43,12 @@
 /// This function collects all column references in the subquery that belong to the
 /// outer schema (not the subquery's own FROM clause). The values of these columns
 /// from the current row are extracted and returned in a deterministic order.
+///
+/// The optional `database` is consulted to resolve unqualified column names
+/// against the subquery's own inner tables (innermost-scope-first resolution,
+/// issue #5880). When `None`, the function falls back to the outer-schema-only
+/// heuristic, which correctly handles self-joins but may over-report
+/// correlation for distinct inner/outer tables that share a column name.
 ///
 /// # Returns
 ///
@@ -36,13 +70,20 @@ pub(super) fn extract_correlation_values(
     subquery: &vibesql_ast::SelectStmt,
     row: &vibesql_storage::Row,
     outer_schema: &crate::schema::CombinedSchema,
+    database: Option<&vibesql_storage::Database>,
 ) -> Option<Vec<(String, vibesql_types::SqlValue)>> {
     // Get all tables in the subquery's FROM clause
     let subquery_tables = extract_table_names_from_from_clause(subquery.from.as_ref());
 
     // Collect correlation column references
     let mut correlation_refs = std::collections::BTreeSet::new(); // Use BTreeSet for deterministic ordering
-    collect_correlation_refs(subquery, outer_schema, &subquery_tables, &mut correlation_refs);
+    collect_correlation_refs(
+        subquery,
+        outer_schema,
+        &subquery_tables,
+        database,
+        &mut correlation_refs,
+    );
 
     // Extract values from the current row
     let mut correlation_values = Vec::new();
@@ -100,29 +141,36 @@ fn collect_correlation_refs(
     subquery: &vibesql_ast::SelectStmt,
     outer_schema: &crate::schema::CombinedSchema,
     subquery_tables: &[String],
+    database: Option<&vibesql_storage::Database>,
     refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
 ) {
     // Check WHERE clause
     if let Some(where_clause) = &subquery.where_clause {
-        collect_correlation_refs_from_expr(where_clause, outer_schema, subquery_tables, refs);
+        collect_correlation_refs_from_expr(
+            where_clause,
+            outer_schema,
+            subquery_tables,
+            database,
+            refs,
+        );
     }
 
     // Check SELECT list
     for item in &subquery.select_list {
         if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
         }
     }
 
     // Check HAVING clause
     if let Some(having) = &subquery.having {
-        collect_correlation_refs_from_expr(having, outer_schema, subquery_tables, refs);
+        collect_correlation_refs_from_expr(having, outer_schema, subquery_tables, database, refs);
     }
 
     // Check GROUP BY
     if let Some(group_by) = &subquery.group_by {
         for expr in group_by.all_expressions() {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
         }
     }
 
@@ -132,7 +180,13 @@ fn collect_correlation_refs(
     // where 'a' in the JOIN condition references an outer table t1.
     // Without this check, the correlation values would be empty, causing incorrect caching.
     if let Some(from) = &subquery.from {
-        collect_correlation_refs_from_from_clause(from, outer_schema, subquery_tables, refs);
+        collect_correlation_refs_from_from_clause(
+            from,
+            outer_schema,
+            subquery_tables,
+            database,
+            refs,
+        );
     }
 
     // FIX for issue #4749: Also check set operations (INTERSECT, UNION, EXCEPT)
@@ -146,7 +200,7 @@ fn collect_correlation_refs(
         extract_table_names_recursive_from_select(&set_op.right, &mut all_subquery_tables);
 
         // Recursively collect correlation refs from the right side of the set operation
-        collect_correlation_refs(&set_op.right, outer_schema, &all_subquery_tables, refs);
+        collect_correlation_refs(&set_op.right, outer_schema, &all_subquery_tables, database, refs);
     }
 }
 
@@ -158,6 +212,7 @@ fn collect_correlation_refs_from_from_clause(
     from: &vibesql_ast::FromClause,
     outer_schema: &crate::schema::CombinedSchema,
     subquery_tables: &[String],
+    database: Option<&vibesql_storage::Database>,
     refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
 ) {
     match from {
@@ -175,22 +230,46 @@ fn collect_correlation_refs_from_from_clause(
                 extract_table_names_recursive(nested_from, &mut nested_tables);
             }
             // Recursively collect correlation refs from the derived table
-            collect_correlation_refs(query, outer_schema, &nested_tables, refs);
+            collect_correlation_refs(query, outer_schema, &nested_tables, database, refs);
         }
         vibesql_ast::FromClause::Join { left, right, condition, .. } => {
             // Check both sides of the join
-            collect_correlation_refs_from_from_clause(left, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_from_clause(right, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_from_clause(
+                left,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
+            collect_correlation_refs_from_from_clause(
+                right,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
             // Check the join condition for correlation refs
             if let Some(cond) = condition {
-                collect_correlation_refs_from_expr(cond, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    cond,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
         }
         vibesql_ast::FromClause::Values { rows, .. } => {
             // Check VALUES expressions for correlation refs
             for row in rows {
                 for expr in row {
-                    collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+                    collect_correlation_refs_from_expr(
+                        expr,
+                        outer_schema,
+                        subquery_tables,
+                        database,
+                        refs,
+                    );
                 }
             }
         }
@@ -216,6 +295,7 @@ fn collect_correlation_refs_from_expr(
     expr: &vibesql_ast::Expression,
     outer_schema: &crate::schema::CombinedSchema,
     subquery_tables: &[String],
+    database: Option<&vibesql_storage::Database>,
     refs: &mut std::collections::BTreeSet<(Option<String>, String)>,
 ) {
     match expr {
@@ -242,10 +322,19 @@ fn collect_correlation_refs_from_expr(
                 // a table that both the subquery and outer query reference (same table name),
                 // the column resolves to the subquery's scope first (innermost scope wins).
                 // We should NOT add it as a correlation reference.
-                let column_exists_in_subquery_tables = subquery_tables.iter().any(|t| {
-                    // Check if this table exists in outer_schema and has this column
-                    outer_schema.get_column_index(Some(t), column).is_some()
-                });
+                //
+                // FIX for issue #5880: The outer-schema-only check above only catches the
+                // self-join case (inner table name == outer table name). When the inner and
+                // outer tables are *different* tables that happen to share a column name
+                // (e.g. `SELECT MIN(x) FROM u WHERE u.y = y` with outer table `t`), the inner
+                // table `u` is never present in the outer schema, so the check misses it and
+                // `y` is wrongly reported as an outer correlation reference. Consult the actual
+                // database schema so an unqualified name that exists on an inner table resolves
+                // innermost-first and is NOT a correlation ref.
+                let column_exists_in_subquery_tables = subquery_tables
+                    .iter()
+                    .any(|t| outer_schema.get_column_index(Some(t), column).is_some())
+                    || unqualified_column_in_inner_tables(database, subquery_tables, column);
 
                 if !column_exists_in_subquery_tables {
                     // Column doesn't exist in any subquery table, might be from outer
@@ -258,24 +347,42 @@ fn collect_correlation_refs_from_expr(
             }
         }
         vibesql_ast::Expression::BinaryOp { left, right, .. } => {
-            collect_correlation_refs_from_expr(left, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_expr(right, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(left, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(
+                right,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::Function { args, .. }
         | vibesql_ast::Expression::AggregateFunction { args, .. } => {
             for arg in args {
-                collect_correlation_refs_from_expr(arg, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    arg,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
         }
         vibesql_ast::Expression::IsNull { expr, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
             if let Some(op) = operand {
-                collect_correlation_refs_from_expr(op, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    op,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
             for when in when_clauses {
                 for condition in &when.conditions {
@@ -283,6 +390,7 @@ fn collect_correlation_refs_from_expr(
                         condition,
                         outer_schema,
                         subquery_tables,
+                        database,
                         refs,
                     );
                 }
@@ -290,43 +398,92 @@ fn collect_correlation_refs_from_expr(
                     &when.result,
                     outer_schema,
                     subquery_tables,
+                    database,
                     refs,
                 );
             }
             if let Some(else_expr) = else_result {
-                collect_correlation_refs_from_expr(else_expr, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    else_expr,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
         }
         vibesql_ast::Expression::InList { expr, values, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
             for val in values {
-                collect_correlation_refs_from_expr(val, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    val,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
         }
         vibesql_ast::Expression::Between { expr, low, high, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_expr(low, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_expr(high, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(low, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(high, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::Like { expr, pattern, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_expr(pattern, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(
+                pattern,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         vibesql_ast::Expression::Cast { expr, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::Position { substring, string, .. } => {
-            collect_correlation_refs_from_expr(substring, outer_schema, subquery_tables, refs);
-            collect_correlation_refs_from_expr(string, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(
+                substring,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
+            collect_correlation_refs_from_expr(
+                string,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         vibesql_ast::Expression::Trim { removal_char, string, .. } => {
             if let Some(c) = removal_char {
-                collect_correlation_refs_from_expr(c, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    c,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
-            collect_correlation_refs_from_expr(string, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(
+                string,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         vibesql_ast::Expression::Interval { value, .. } => {
-            collect_correlation_refs_from_expr(value, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(
+                value,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         // Nested subqueries: recursively collect correlation refs from their contents
         // FIX for issue #4618: Previously we skipped nested subqueries, which caused
@@ -335,15 +492,15 @@ fn collect_correlation_refs_from_expr(
         vibesql_ast::Expression::ScalarSubquery(subq)
         | vibesql_ast::Expression::Exists { subquery: subq, .. } => {
             // Recursively collect correlation refs from the nested subquery
-            collect_correlation_refs(subq, outer_schema, subquery_tables, refs);
+            collect_correlation_refs(subq, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::In { subquery: subq, expr, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
-            collect_correlation_refs(subq, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs(subq, outer_schema, subquery_tables, database, refs);
         }
         vibesql_ast::Expression::QuantifiedComparison { expr, subquery, .. } => {
-            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, refs);
-            collect_correlation_refs(subquery, outer_schema, subquery_tables, refs);
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs(subquery, outer_schema, subquery_tables, database, refs);
         }
         // Window functions: check args, PARTITION BY, ORDER BY for outer column refs.
         // Without this, queries like `(SELECT min(a) OVER ())` over a correlated `a`
@@ -357,11 +514,23 @@ fn collect_correlation_refs_from_expr(
                 | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
             };
             for arg in args {
-                collect_correlation_refs_from_expr(arg, outer_schema, subquery_tables, refs);
+                collect_correlation_refs_from_expr(
+                    arg,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
             if let Some(partition_by) = &over.partition_by {
                 for p in partition_by {
-                    collect_correlation_refs_from_expr(p, outer_schema, subquery_tables, refs);
+                    collect_correlation_refs_from_expr(
+                        p,
+                        outer_schema,
+                        subquery_tables,
+                        database,
+                        refs,
+                    );
                 }
             }
             if let Some(order_by) = &over.order_by {
@@ -370,6 +539,7 @@ fn collect_correlation_refs_from_expr(
                         &ob_item.expr,
                         outer_schema,
                         subquery_tables,
+                        database,
                         refs,
                     );
                 }

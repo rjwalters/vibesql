@@ -119,7 +119,7 @@ impl CombinedExpressionEvaluator<'_> {
         // `None` (extraction failure against the empty probe row) means the
         // subquery might read the outer row, so we must not hoist.
         let probe_row = vibesql_storage::Row::new(Vec::<vibesql_types::SqlValue>::new());
-        match extract_correlation_values(subquery, &probe_row, self.schema) {
+        match extract_correlation_values(subquery, &probe_row, self.schema, self.database) {
             Some(refs) if refs.is_empty() => {}
             _ => return None,
         }
