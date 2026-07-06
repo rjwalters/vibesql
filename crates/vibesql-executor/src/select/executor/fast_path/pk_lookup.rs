@@ -235,9 +235,16 @@ impl SelectExecutor<'_> {
 
         let is_desc = order_by[0].direction == vibesql_ast::OrderDirection::Desc;
 
-        // Get PK index from database's index infrastructure (sqlite_autoindex_{table_name}_1)
-        // Primary key index is always the first auto-index created
-        let pk_index_name = format!("sqlite_autoindex_{}_1", table_name);
+        // Get PK index from database's index infrastructure. For a rowid table the
+        // PK is the first auto-index (`sqlite_autoindex_{table}_1`); for a WITHOUT
+        // ROWID table the PK index is materialized under an internal name outside
+        // the autoindex namespace so it does not consume an ordinal (issue #5882).
+        // Selecting the right name here keeps the fast path engaged for both.
+        let pk_index_name = if table.schema.without_rowid {
+            format!("{}{}", vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX, table_name)
+        } else {
+            format!("sqlite_autoindex_{}_1", table_name)
+        };
         let pk_index_data = match self.database.get_index_data(&pk_index_name) {
             Some(idx) => idx,
             None => return Ok(None),

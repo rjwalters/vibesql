@@ -420,8 +420,13 @@ impl Database {
             // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
             // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE constraints
             //   (follows SQLite naming convention for implicit indexes)
+            // - the WITHOUT ROWID PK internal index (issue #5882) is regenerated from the
+            //   CREATE TABLE DDL on reload, so it must not be dumped as a CREATE INDEX
             let lower_name = index_name.to_lowercase();
-            if lower_name.starts_with("pk_") || lower_name.starts_with("sqlite_autoindex_") {
+            if lower_name.starts_with("pk_")
+                || lower_name.starts_with("sqlite_autoindex_")
+                || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            {
                 continue;
             }
             let metadata = self.get_index(&index_name).unwrap();
