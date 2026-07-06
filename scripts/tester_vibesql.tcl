@@ -567,6 +567,13 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (DISTINCT aggregates must have exactly one argument)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # DISTINCT on an ordered-set aggregate (percentile family WITHIN GROUP form).
+    # "Parse error: DISTINCT not allowed on ordered-set aggregate percentile()"
+    # -> "DISTINCT not allowed on ordered-set aggregate percentile()"
+    # (percentile-1.1.distinct.2)
+    if {[regexp -nocase {^Parse error: (DISTINCT not allowed on ordered-set aggregate .+\(\))$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # ORDER BY without LIMIT on DELETE/UPDATE (SQLite-compatible error messages)
     if {[regexp -nocase {^Parse error: (ORDER BY without LIMIT on (?:DELETE|UPDATE))$} $error_msg -> parse_msg]} {
         return $parse_msg
@@ -5350,14 +5357,13 @@ proc check_single_capability {cap} {
     # errors with `no such column: rowid` (#5492). Marking it unsupported makes
     # `ifcapable !allow_rowid_in_view` blocks (e.g. trigger9-4.2/4.3) take their
     # error-expecting branch, matching real sqlite3 with the option off.
-    # `ordered_set_aggregates` is the SQLITE_ENABLE_ORDERED_SET_AGGREGATES
-    # compile-time option (percentile_cont(F) WITHIN GROUP (ORDER BY x)),
-    # which is OFF by default in SQLite. VibeSQL matches the default: the
-    # WITHIN GROUP syntax errors with `near "(": syntax error`, exactly like
-    # a stock sqlite3 build. Marking it unsupported makes percentile.test's
-    # `ifcapable ordered_set_aggregates` blocks (~89 tests) skip and its
-    # else-branch (expecting the syntax error) run (#5818, 2026-07-03).
-    # WITHIN GROUP parser support is tracked as a follow-up to #5818.
+    # `ordered_set_aggregates` (SQLITE_ENABLE_ORDERED_SET_AGGREGATES) is now
+    # SUPPORTED: VibeSQL's parser accepts the `agg(F) WITHIN GROUP (ORDER BY x)`
+    # ordered-set syntax for the percentile family and rewrites it to the
+    # two-arg calling convention handled by the executor's Percentile
+    # accumulator (#5852, follow-up to #5818). It is therefore no longer in
+    # unsupported_caps, so percentile.test's `ifcapable ordered_set_aggregates`
+    # blocks now execute their WITHIN GROUP tests against the parser.
     # `crashtest` gates SQLite's crash-recovery harness (crashsql + the
     # crash-test child process machinery in test6.c). The shim has no crashsql,
     # so crash*.test files must take their `ifcapable !crashtest { finish_test;
@@ -5365,7 +5371,7 @@ proc check_single_capability {cap} {
     # `fts3_unicode` is the FTS3/4 unicode61 tokenizer compile-time option; FTS
     # is unsupported in VibeSQL, so fts4unicode.test self-skips via its
     # `ifcapable !fts3_unicode` guard (#5843).
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view ordered_set_aggregates crashtest}
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
