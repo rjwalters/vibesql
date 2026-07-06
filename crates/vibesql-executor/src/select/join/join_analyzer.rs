@@ -255,8 +255,18 @@ fn flatten_and_conditions<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression
 fn extract_column_index(expr: &Expression, schema: &CombinedSchema) -> Option<usize> {
     match expr {
         Expression::ColumnRef(col_id) => {
+            let column = col_id.column_canonical();
+            // Return None for ambiguous unqualified refs (e.g. `id` in `ON id=aid` when
+            // multiple joined tables have an `id` column). Returning None here forces the
+            // caller into EquijoinEvalStrategy::Complex, which routes through the full
+            // CombinedExpressionEvaluator and raises AmbiguousColumnName — matching SQLite's
+            // "ambiguous column name: id" instead of silently resolving the leftmost match.
+            // USING/NATURAL join key columns are exempt inside is_column_ambiguous (issue #4517).
+            if col_id.table_canonical().is_none() && schema.is_column_ambiguous(column) {
+                return None;
+            }
             // Resolve column to index in combined schema
-            schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
+            schema.get_column_index(col_id.table_canonical(), column)
         }
         _ => None,
     }

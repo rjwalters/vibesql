@@ -1,0 +1,328 @@
+//! Regression tests for issue #5870
+//!
+//! When an unqualified column name in a join predicate exists in more than one
+//! visible table, SQLite rejects the query with `ambiguous column name: <col>`.
+//! VibeSQL used to silently resolve it to the leftmost table's column and return
+//! results.
+//!
+//! Root cause: two equijoin fast paths resolved unqualified join-key columns with
+//! `CombinedSchema::get_column_index(None, col)`, which falls back to leftmost-name
+//! matching, bypassing the `is_column_ambiguous` check that lives on the full
+//! expression-evaluator path:
+//!   1. `select::join::join_analyzer::extract_column_index` (nested-loop + hash join)
+//!   2. `columnar_execution::join_helpers::resolve_join_column_indices` (columnar path)
+//!
+//! Both are fixed to detect ambiguity for unqualified refs. USING/NATURAL join key
+//! columns are exempt (issue #4517) and qualified refs are unaffected.
+//!
+//! These tests run through the default `SelectExecutor`, which exercises the
+//! columnar path first (it falls back to the row-oriented path on the ambiguity
+//! error), so they pin the fixed behavior regardless of which path is chosen.
+
+use vibesql_catalog::{ColumnSchema, TableSchema};
+use vibesql_executor::{ExecutorError, SelectExecutor};
+use vibesql_parser::Parser;
+use vibesql_storage::{Database, Row};
+use vibesql_types::{DataType, SqlValue};
+
+fn parse_select(sql: &str) -> vibesql_ast::SelectStmt {
+    match Parser::parse_sql(sql) {
+        Ok(vibesql_ast::Statement::Select(select_stmt)) => *select_stmt,
+        _ => panic!("Failed to parse SELECT statement: {}", sql),
+    }
+}
+
+fn run(db: &Database, sql: &str) -> Vec<Row> {
+    let select = parse_select(sql);
+    SelectExecutor::new(db).execute(&select).unwrap()
+}
+
+/// Execute expecting an `AmbiguousColumnName` error and assert the offending
+/// column name matches. Also confirms the SQLite-compatible Display message.
+fn assert_ambiguous(db: &Database, sql: &str, expected_col: &str) {
+    let select = parse_select(sql);
+    match SelectExecutor::new(db).execute(&select) {
+        Err(ExecutorError::AmbiguousColumnName { column_name }) => {
+            assert_eq!(
+                column_name.to_lowercase(),
+                expected_col.to_lowercase(),
+                "wrong ambiguous column reported for: {sql}"
+            );
+            let msg = ExecutorError::AmbiguousColumnName { column_name }.to_string();
+            assert_eq!(msg, format!("ambiguous column name: {expected_col}"));
+        }
+        Err(other) => panic!("expected AmbiguousColumnName for `{sql}`, got: {other:?}"),
+        Ok(rows) => panic!(
+            "expected AmbiguousColumnName for `{sql}`, got {} row(s) instead",
+            rows.len()
+        ),
+    }
+}
+
+/// Schema/data from the issue #5870 reproduction. Every table has an `id`
+/// column, so unqualified `id` in a join predicate is ambiguous.
+///
+/// ```sql
+/// CREATE TABLE a1(id INTEGER PRIMARY KEY, v);
+/// CREATE TABLE b1(id INTEGER PRIMARY KEY, aid, v);
+/// CREATE TABLE c1(id INTEGER PRIMARY KEY, bid, v);
+/// INSERT INTO a1 VALUES(1,'a1'),(2,'a2'),(3,'a3');
+/// INSERT INTO b1 VALUES(10,1,'b1'),(11,2,'b2');
+/// INSERT INTO c1 VALUES(100,10,'c1');
+/// ```
+fn setup_db() -> Database {
+    let mut db = Database::new();
+
+    let a1 = TableSchema::with_primary_key(
+        "A1".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("v".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(a1).unwrap();
+
+    let b1 = TableSchema::with_primary_key(
+        "B1".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("aid".to_string(), DataType::Integer, true),
+            ColumnSchema::new("v".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(b1).unwrap();
+
+    let c1 = TableSchema::with_primary_key(
+        "C1".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("bid".to_string(), DataType::Integer, true),
+            ColumnSchema::new("v".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(c1).unwrap();
+
+    for (id, v) in [(1, "a1"), (2, "a2"), (3, "a3")] {
+        db.insert_row("A1", Row::new(vec![SqlValue::Integer(id), SqlValue::Varchar(v.into())]))
+            .unwrap();
+    }
+    for (id, aid, v) in [(10, 1, "b1"), (11, 2, "b2")] {
+        db.insert_row(
+            "B1",
+            Row::new(vec![
+                SqlValue::Integer(id),
+                SqlValue::Integer(aid),
+                SqlValue::Varchar(v.into()),
+            ]),
+        )
+        .unwrap();
+    }
+    db.insert_row(
+        "C1",
+        Row::new(vec![
+            SqlValue::Integer(100),
+            SqlValue::Integer(10),
+            SqlValue::Varchar("c1".into()),
+        ]),
+    )
+    .unwrap();
+
+    db
+}
+
+/// Primary reproducer: unqualified `id` in a 2-table ON clause is ambiguous.
+/// (Was: silently resolved to a1.id and returned 2 rows.)
+#[test]
+fn test_ambiguous_unqualified_id_in_on_two_tables() {
+    let db = setup_db();
+    assert_ambiguous(&db, "SELECT a1.id FROM a1 JOIN b1 ON id=aid", "id");
+}
+
+/// Second reproducer: unqualified `id` in the second ON of a 3-table chain.
+/// (Was: silently resolved to a1.id and returned 0 rows.)
+#[test]
+fn test_ambiguous_unqualified_id_in_on_three_tables() {
+    let db = setup_db();
+    assert_ambiguous(
+        &db,
+        "SELECT a1.id, b1.id, c1.id FROM a1 JOIN b1 ON b1.aid=a1.id JOIN c1 ON bid=id",
+        "id",
+    );
+}
+
+/// Predicate written in flipped order (`aid=id`) must be caught too.
+#[test]
+fn test_ambiguous_unqualified_id_in_on_flipped() {
+    let db = setup_db();
+    assert_ambiguous(&db, "SELECT a1.id FROM a1 JOIN b1 ON aid=id", "id");
+}
+
+/// Comma-join with the ambiguous equijoin key in the WHERE clause: the columnar
+/// path extracts it as an equijoin key, hits the guard, and falls back to the
+/// row path which raises the same error.
+#[test]
+fn test_ambiguous_unqualified_id_in_comma_join_where() {
+    let db = setup_db();
+    assert_ambiguous(&db, "SELECT a1.id FROM a1, b1 WHERE id=aid", "id");
+}
+
+/// Qualified refs in the ON clause are never ambiguous — must keep working.
+#[test]
+fn test_qualified_refs_in_on_not_ambiguous() {
+    let db = setup_db();
+    let rows = run(&db, "SELECT a1.id FROM a1 JOIN b1 ON b1.aid=a1.id ORDER BY 1");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    assert_eq!(rows[1].values[0], SqlValue::Integer(2));
+}
+
+/// An unqualified column that exists in only ONE table stays unambiguous and
+/// resolves correctly (`aid` lives only on b1).
+#[test]
+fn test_unqualified_single_table_column_not_ambiguous() {
+    let db = setup_db();
+    let rows = run(&db, "SELECT a1.id FROM a1 JOIN b1 ON aid=a1.id ORDER BY 1");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    assert_eq!(rows[1].values[0], SqlValue::Integer(2));
+}
+
+/// Unambiguous 3-table chain (all predicates qualified/single-table) still works.
+#[test]
+fn test_unambiguous_three_table_chain() {
+    let db = setup_db();
+    let rows = run(
+        &db,
+        "SELECT a1.id, b1.id, c1.id FROM a1 JOIN b1 ON b1.aid=a1.id JOIN c1 ON c1.bid=b1.id",
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    assert_eq!(rows[0].values[1], SqlValue::Integer(10));
+    assert_eq!(rows[0].values[2], SqlValue::Integer(100));
+}
+
+/// USING-join key columns are NOT ambiguous (issue #4517): the shared `x`
+/// resolves to the coalesced join column, not an ambiguity error.
+#[test]
+fn test_using_join_key_not_ambiguous() {
+    let mut db = Database::new();
+    for t in ["A", "B"] {
+        let schema = TableSchema::new(
+            t.to_string(),
+            vec![
+                ColumnSchema::new("x".to_string(), DataType::Integer, true),
+                ColumnSchema::new(
+                    if t == "A" { "y" } else { "z" }.to_string(),
+                    DataType::Integer,
+                    true,
+                ),
+            ],
+        );
+        db.create_table(schema).unwrap();
+    }
+    db.insert_row("A", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
+    db.insert_row("B", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+
+    // Reference the USING key unqualified in the SELECT list: still not ambiguous.
+    let rows = run(&db, "SELECT x FROM a JOIN b USING (x)");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+
+    let rows = run(&db, "SELECT a.y FROM a JOIN b USING (x)");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(10));
+}
+
+/// NATURAL-join key columns are NOT ambiguous (issue #4517).
+#[test]
+fn test_natural_join_key_not_ambiguous() {
+    let mut db = Database::new();
+    for t in ["A", "B"] {
+        let schema = TableSchema::new(
+            t.to_string(),
+            vec![
+                ColumnSchema::new("x".to_string(), DataType::Integer, true),
+                ColumnSchema::new(
+                    if t == "A" { "y" } else { "z" }.to_string(),
+                    DataType::Integer,
+                    true,
+                ),
+            ],
+        );
+        db.create_table(schema).unwrap();
+    }
+    db.insert_row("A", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(10)])).unwrap();
+    db.insert_row("B", Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(100)])).unwrap();
+
+    let rows = run(&db, "SELECT a.y FROM a NATURAL JOIN b");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], SqlValue::Integer(10));
+}
+
+/// Self-join with aliases: an unqualified key present on both aliased instances
+/// is ambiguous.
+#[test]
+fn test_self_join_unqualified_key_ambiguous() {
+    let mut db = Database::new();
+    let t = TableSchema::with_primary_key(
+        "T".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("parent".to_string(), DataType::Integer, true),
+            ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: None }, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(t).unwrap();
+    db.insert_row(
+        "T",
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Null, SqlValue::Varchar("root".into())]),
+    )
+    .unwrap();
+    db.insert_row(
+        "T",
+        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Varchar("child".into())]),
+    )
+    .unwrap();
+
+    assert_ambiguous(&db, "SELECT t1.name FROM t t1 JOIN t t2 ON id=parent", "id");
+
+    // Qualified self-join key is fine.
+    let rows = run(&db, "SELECT t1.name FROM t t1 JOIN t t2 ON t2.parent=t1.id");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], SqlValue::Varchar("root".into()));
+}
+
+/// The fix is not specific to rowid-alias `id` columns: a duplicate non-PK
+/// column name used unqualified in an ON clause is ambiguous too.
+#[test]
+fn test_duplicate_non_pk_column_unqualified_ambiguous() {
+    let mut db = Database::new();
+    for (table, cols) in [("TA", vec!["w", "v"]), ("TB", vec!["w", "aw", "v"])] {
+        let schema = TableSchema::new(
+            table.to_string(),
+            cols.iter()
+                .map(|c| {
+                    if *c == "v" {
+                        ColumnSchema::new(c.to_string(), DataType::Varchar { max_length: None }, true)
+                    } else {
+                        ColumnSchema::new(c.to_string(), DataType::Integer, true)
+                    }
+                })
+                .collect(),
+        );
+        db.create_table(schema).unwrap();
+    }
+    db.insert_row("TA", Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar("a".into())]))
+        .unwrap();
+    db.insert_row(
+        "TB",
+        Row::new(vec![SqlValue::Integer(10), SqlValue::Integer(1), SqlValue::Varchar("b".into())]),
+    )
+    .unwrap();
+
+    assert_ambiguous(&db, "SELECT ta.v FROM ta JOIN tb ON w=aw", "w");
+}
