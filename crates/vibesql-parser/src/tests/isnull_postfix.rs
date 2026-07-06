@@ -437,3 +437,200 @@ fn test_default_not_null_column_constraint_unaffected() {
     let result = Parser::parse_sql("CREATE TABLE t (a TEXT DEFAULT 'v' NOT NULL, b INT);");
     assert!(result.is_ok(), "DEFAULT <literal> NOT NULL constraint should parse: {:?}", result);
 }
+
+// ========================================================================
+// `IS` operand composability (issue #5889)
+//
+// Unlike the closed postfix operators ISNULL / NOTNULL / NOT NULL, SQLite's
+// `IS` takes an ordinary *expression* right operand, and NULL/TRUE/FALSE are
+// themselves expressions. So a tighter-binding operator that follows binds
+// to the right operand, not to the IS result:
+//
+//   SELECT 1 IS NULL + 1;      -- 0   i.e. 1 IS (NULL + 1)
+//   SELECT NULL IS NULL + 1;   -- 1   i.e. NULL IS (NULL + 1)
+//   SELECT 1 IS NOT NULL + 1;  -- 1   i.e. 1 IS NOT (NULL + 1)
+//   SELECT 1 IS TRUE + 1;      -- 0   i.e. 1 IS (TRUE + 1) = 1 IS 2
+//
+// When the right operand is a bare NULL/TRUE/FALSE literal we keep emitting
+// the specialized IsNull / IsTruthValue AST shape optimizers rely on; when it
+// is any other expression we emit IsDistinctFrom (NULL-safe equality), whose
+// `negated` field is the inverse of the surface IS/IS-NOT polarity.
+// ========================================================================
+
+/// Assert the expression is `IsDistinctFrom` with the given polarity and
+/// return `(left, right)` operands.
+fn unwrap_is_distinct_from(
+    expr: vibesql_ast::Expression,
+    expected_negated: bool,
+    context: &str,
+) -> (vibesql_ast::Expression, vibesql_ast::Expression) {
+    if let vibesql_ast::Expression::IsDistinctFrom { left, right, negated } = expr {
+        assert_eq!(negated, expected_negated, "{}: wrong IsDistinctFrom polarity", context);
+        (*left, *right)
+    } else {
+        panic!("{}: expected IsDistinctFrom node, got {:?}", context, expr);
+    }
+}
+
+/// Assert the expression is a `NULL + 1` additive BinaryOp.
+fn assert_null_plus_one(expr: &vibesql_ast::Expression, context: &str) {
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = expr {
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus, "{}: expected + operator", context);
+        assert!(
+            matches!(**left, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
+            "{}: expected NULL as left operand of +: {:?}",
+            context,
+            left
+        );
+    } else {
+        panic!("{}: expected BinaryOp Plus, got {:?}", context, expr);
+    }
+}
+
+#[test]
+fn test_is_null_plus_one_binds_to_operand() {
+    // sqlite3: SELECT 1 IS NULL + 1; -- 0, i.e. 1 IS (NULL + 1)
+    let expr = parse_select_expr("SELECT 1 IS NULL + 1;");
+    // IS (not negated) → IsDistinctFrom { negated: true } (NULL-safe equals).
+    let (_left, right) = unwrap_is_distinct_from(expr, true, "1 IS NULL + 1");
+    assert_null_plus_one(&right, "1 IS NULL + 1 right operand");
+}
+
+#[test]
+fn test_null_is_null_plus_one_binds_to_operand() {
+    // sqlite3: SELECT NULL IS NULL + 1; -- 1, i.e. NULL IS (NULL + 1)
+    let expr = parse_select_expr("SELECT NULL IS NULL + 1;");
+    let (left, right) = unwrap_is_distinct_from(expr, true, "NULL IS NULL + 1");
+    assert!(
+        matches!(left, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
+        "left operand should be NULL: {:?}",
+        left
+    );
+    assert_null_plus_one(&right, "NULL IS NULL + 1 right operand");
+}
+
+#[test]
+fn test_is_not_null_plus_one_binds_to_operand() {
+    // sqlite3: SELECT 1 IS NOT NULL + 1; -- 1, i.e. 1 IS NOT (NULL + 1)
+    let expr = parse_select_expr("SELECT 1 IS NOT NULL + 1;");
+    // IS NOT (negated) → IsDistinctFrom { negated: false } (NULL-safe not-equals).
+    let (_left, right) = unwrap_is_distinct_from(expr, false, "1 IS NOT NULL + 1");
+    assert_null_plus_one(&right, "1 IS NOT NULL + 1 right operand");
+}
+
+#[test]
+fn test_is_true_plus_one_binds_to_operand() {
+    // sqlite3: SELECT 1 IS TRUE + 1; -- 0, i.e. 1 IS (TRUE + 1) = 1 IS 2
+    let expr = parse_select_expr("SELECT 1 IS TRUE + 1;");
+    // TRUE + 1 is a BinaryOp, not a bare literal → IsDistinctFrom, not IsTruthValue.
+    let (_left, right) = unwrap_is_distinct_from(expr, true, "1 IS TRUE + 1");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = &right {
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus, "expected + operator");
+        assert!(
+            matches!(**left, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))),
+            "expected TRUE as left operand of +: {:?}",
+            left
+        );
+    } else {
+        panic!("expected BinaryOp Plus, got {:?}", right);
+    }
+}
+
+// ------------------------------------------------------------------------
+// Non-regression: plain literal right operands keep their specialized shape
+// ------------------------------------------------------------------------
+
+#[test]
+fn test_plain_is_null_still_is_null_node() {
+    // No trailing tighter operator → keep the IsNull AST optimizers rely on.
+    let expr = parse_select_expr("SELECT x IS NULL;");
+    unwrap_is_null(expr, false, "x IS NULL");
+}
+
+#[test]
+fn test_plain_is_not_null_still_is_null_node() {
+    let expr = parse_select_expr("SELECT x IS NOT NULL;");
+    unwrap_is_null(expr, true, "x IS NOT NULL");
+}
+
+#[test]
+fn test_plain_is_true_still_truth_value_node() {
+    let expr = parse_select_expr("SELECT x IS TRUE;");
+    assert!(
+        matches!(
+            expr,
+            vibesql_ast::Expression::IsTruthValue {
+                truth_value: vibesql_ast::TruthValue::True,
+                negated: false,
+                ..
+            }
+        ),
+        "x IS TRUE should be IsTruthValue(True): {:?}",
+        expr
+    );
+}
+
+#[test]
+fn test_plain_is_false_still_truth_value_node() {
+    let expr = parse_select_expr("SELECT x IS FALSE;");
+    assert!(
+        matches!(
+            expr,
+            vibesql_ast::Expression::IsTruthValue {
+                truth_value: vibesql_ast::TruthValue::False,
+                negated: false,
+                ..
+            }
+        ),
+        "x IS FALSE should be IsTruthValue(False): {:?}",
+        expr
+    );
+}
+
+#[test]
+fn test_plain_is_not_true_still_truth_value_node() {
+    let expr = parse_select_expr("SELECT x IS NOT TRUE;");
+    assert!(
+        matches!(
+            expr,
+            vibesql_ast::Expression::IsTruthValue {
+                truth_value: vibesql_ast::TruthValue::True,
+                negated: true,
+                ..
+            }
+        ),
+        "x IS NOT TRUE should be IsTruthValue(True, negated): {:?}",
+        expr
+    );
+}
+
+#[test]
+fn test_plain_is_unknown_still_truth_value_node() {
+    // UNKNOWN is not a literal in the expression grammar; the fixed IS-form
+    // must keep mapping to IsTruthValue(Unknown).
+    let expr = parse_select_expr("SELECT x IS UNKNOWN;");
+    assert!(
+        matches!(
+            expr,
+            vibesql_ast::Expression::IsTruthValue {
+                truth_value: vibesql_ast::TruthValue::Unknown,
+                negated: false,
+                ..
+            }
+        ),
+        "x IS UNKNOWN should be IsTruthValue(Unknown): {:?}",
+        expr
+    );
+}
+
+#[test]
+fn test_plain_is_literal_int_still_distinct_from() {
+    // sqlite3: SELECT 1 IS 1; -- 1. `IS <int-literal>` was already IsDistinctFrom.
+    let expr = parse_select_expr("SELECT 1 IS 1;");
+    let (_left, right) = unwrap_is_distinct_from(expr, true, "1 IS 1");
+    assert!(
+        matches!(right, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
+        "right operand should be integer 1: {:?}",
+        right
+    );
+}

@@ -932,41 +932,48 @@ impl Parser {
                         right: Box::new(right),
                         negated,
                     };
-                } else if self.peek_keyword(Keyword::True) {
-                    self.consume_keyword(Keyword::True)?;
-                    left = vibesql_ast::Expression::IsTruthValue {
-                        expr: Box::new(left),
-                        truth_value: vibesql_ast::TruthValue::True,
-                        negated,
-                    };
-                } else if self.peek_keyword(Keyword::False) {
-                    self.consume_keyword(Keyword::False)?;
-                    left = vibesql_ast::Expression::IsTruthValue {
-                        expr: Box::new(left),
-                        truth_value: vibesql_ast::TruthValue::False,
-                        negated,
-                    };
                 } else if self.peek_keyword(Keyword::Unknown) {
+                    // UNKNOWN is not a literal in the expression grammar, so it is
+                    // only recognized here as the fixed `IS [NOT] UNKNOWN` form.
                     self.consume_keyword(Keyword::Unknown)?;
                     left = vibesql_ast::Expression::IsTruthValue {
                         expr: Box::new(left),
                         truth_value: vibesql_ast::TruthValue::Unknown,
                         negated,
                     };
-                } else if self.peek_keyword(Keyword::Null) {
-                    // IS NULL / IS NOT NULL
-                    self.consume_keyword(Keyword::Null)?;
-                    left = vibesql_ast::Expression::IsNull { expr: Box::new(left), negated };
                 } else {
-                    // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
-                    // This handles cases like `expr IS 0` or `expr IS 1`
+                    // SQLite parses the right side of `IS` as an ordinary expression,
+                    // and NULL/TRUE/FALSE are themselves expressions. Parse the full
+                    // relational-tier right operand so a tighter-binding operator that
+                    // follows binds to it (`1 IS NULL + 1` == `1 IS (NULL + 1)`), then
+                    // recover the specialized AST shapes for the plain-literal cases so
+                    // optimizers that rely on IsNull / IsTruthValue keep working.
                     let right = self.parse_relational_expression()?;
-                    left = vibesql_ast::Expression::IsDistinctFrom {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                        // IS is equivalent to IS NOT DISTINCT FROM (NULL-safe equals)
-                        // IS NOT is equivalent to IS DISTINCT FROM (NULL-safe not equals)
-                        negated: !negated,
+                    left = match right {
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null) => {
+                            vibesql_ast::Expression::IsNull { expr: Box::new(left), negated }
+                        }
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true)) => {
+                            vibesql_ast::Expression::IsTruthValue {
+                                expr: Box::new(left),
+                                truth_value: vibesql_ast::TruthValue::True,
+                                negated,
+                            }
+                        }
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false)) => {
+                            vibesql_ast::Expression::IsTruthValue {
+                                expr: Box::new(left),
+                                truth_value: vibesql_ast::TruthValue::False,
+                                negated,
+                            }
+                        }
+                        // SQLite compatibility: `IS <expr>` compares with NULL-safe
+                        // equals. IS is IS NOT DISTINCT FROM; IS NOT is IS DISTINCT FROM.
+                        _ => vibesql_ast::Expression::IsDistinctFrom {
+                            left: Box::new(left),
+                            right: Box::new(right),
+                            negated: !negated,
+                        },
                     };
                 }
                 continue;
