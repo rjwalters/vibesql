@@ -81,7 +81,8 @@ impl ExpressionEvaluator<'_> {
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
-        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+        let is_correlated =
+            crate::correlation::is_correlated(subquery, &outer_combined, self.database);
 
         // Execute or retrieve from cache
         let rows = if !is_correlated {
@@ -330,7 +331,8 @@ impl ExpressionEvaluator<'_> {
 
         let rows = {
             // Check if this is a non-correlated subquery that can be cached
-            let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+            let is_correlated =
+                crate::correlation::is_correlated(subquery, &outer_combined, self.database);
 
             // Execute or retrieve from cache
             if !is_correlated {
@@ -421,7 +423,8 @@ impl ExpressionEvaluator<'_> {
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
-        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+        let is_correlated =
+            crate::correlation::is_correlated(subquery, &outer_combined, self.database);
 
         // Execute or retrieve from cache
         let rows = if !is_correlated {
@@ -515,7 +518,8 @@ impl ExpressionEvaluator<'_> {
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a non-correlated subquery that can be cached
-        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+        let is_correlated =
+            crate::correlation::is_correlated(subquery, &outer_combined, self.database);
 
         // Execute or retrieve from cache
         let rows = if !is_correlated {
@@ -603,7 +607,8 @@ impl ExpressionEvaluator<'_> {
             crate::schema::CombinedSchema::from_table(table_name_for_outer, self.schema.clone());
 
         // Check if this is a correlated subquery
-        let is_correlated = crate::correlation::is_correlated(subquery, &outer_combined);
+        let is_correlated =
+            crate::correlation::is_correlated(subquery, &outer_combined, self.database);
 
         // Execute the subquery
         let rows = if !is_correlated {
