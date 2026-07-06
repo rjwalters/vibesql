@@ -55,7 +55,7 @@ impl Parser {
             {
                 // Restore position and let the other parsers handle it
                 self.position = saved_pos;
-                return self.parse_bitwise_or_expression();
+                return self.parse_comparison_expression();
             }
 
             // It's a unary NOT - parse the expression it applies to
@@ -67,53 +67,13 @@ impl Parser {
                 expr: Box::new(expr),
             })
         } else {
-            self.parse_bitwise_or_expression()
+            self.parse_comparison_expression()
         }
-    }
-
-    /// Parse bitwise OR expression (handles |)
-    /// Precedence: between NOT and bitwise AND
-    pub(super) fn parse_bitwise_or_expression(
-        &mut self,
-    ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_bitwise_and_expression()?;
-
-        while self.peek() == &Token::Symbol('|') {
-            self.advance();
-            let right = self.parse_bitwise_and_expression()?;
-            left = vibesql_ast::Expression::BinaryOp {
-                op: vibesql_ast::BinaryOperator::BitwiseOr,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-
-        Ok(left)
-    }
-
-    /// Parse bitwise AND expression (handles &)
-    /// Precedence: between bitwise OR and comparison
-    pub(super) fn parse_bitwise_and_expression(
-        &mut self,
-    ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_comparison_expression()?;
-
-        while self.peek() == &Token::Symbol('&') {
-            self.advance();
-            let right = self.parse_comparison_expression()?;
-            left = vibesql_ast::Expression::BinaryOp {
-                op: vibesql_ast::BinaryOperator::BitwiseAnd,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-
-        Ok(left)
     }
 
     // ------------------------------------------------------------------
     // Arithmetic tier functions, loosest -> tightest:
-    //   shift -> additive -> multiplicative -> concat/JSON-path -> unary
+    //   bitwise -> additive -> multiplicative -> concat/JSON-path -> unary
     // Per the SQLite grammar `||`, `->`, and `->>` share the tightest binary
     // tier (tighter than `* / %`); they live in parse_concat_json_expression.
     //
@@ -126,27 +86,35 @@ impl Parser {
     //   `_from` variant.
     //
     // Parallel-structure invariant (see arena_parser/expression.rs): the
-    // arena parser mirrors this decomposition minus the shift and bitwise
-    // tiers, which it deliberately lacks. The arena parser must produce ASTs
-    // equivalent to this parser for everything it accepts; anything it cannot
-    // express must fail arena parsing (triggering parse_with_arena_fallback),
-    // never silently truncate.
+    // arena parser mirrors this decomposition minus the bitwise tier
+    // (`| & << >>`), which it deliberately lacks. The arena parser must
+    // produce ASTs equivalent to this parser for everything it accepts;
+    // anything it cannot express must fail arena parsing (triggering
+    // parse_with_arena_fallback), never silently truncate.
     // ------------------------------------------------------------------
 
-    /// Parse shift expression (handles <<, >>)
-    /// Precedence: between comparison and additive
-    pub(super) fn parse_shift_expression(&mut self) -> Result<vibesql_ast::Expression, ParseError> {
+    /// Parse bitwise expression (handles `|`, `&`, `<<`, `>>`).
+    ///
+    /// Per SQLite (https://sqlite.org/lang_expr.html#operators) these four
+    /// operators form a *single flat left-to-right tier* that binds tighter
+    /// than the comparison operators (`= < > <= >= != IS IN LIKE BETWEEN ...`)
+    /// but looser than `+`/`-`. There is no C-style sub-ordering between `|`,
+    /// `&`, and the shifts: `5 | 3 & 1` parses as `((5 | 3) & 1)`, and
+    /// `5 & 3 << 1` parses as `((5 & 3) << 1)`.
+    pub(super) fn parse_bitwise_expression(
+        &mut self,
+    ) -> Result<vibesql_ast::Expression, ParseError> {
         let seed = self.parse_unary_expression()?;
-        self.parse_shift_expression_from(seed)
+        self.parse_bitwise_expression_from(seed)
     }
 
-    /// Shift tier (`<<`, `>>`) with an already-parsed left operand.
+    /// Bitwise tier (`|`, `&`, `<<`, `>>`) with an already-parsed left operand.
     ///
     /// The seed is first climbed through the tighter tiers
     /// (additive -> multiplicative -> concat/JSON-path), so this doubles as the
     /// seeded precedence-climbing entry point used by
     /// `continue_higher_precedence_ops`.
-    fn parse_shift_expression_from(
+    fn parse_bitwise_expression_from(
         &mut self,
         left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
@@ -154,6 +122,8 @@ impl Parser {
 
         loop {
             let op = match self.peek() {
+                Token::Symbol('|') => vibesql_ast::BinaryOperator::BitwiseOr,
+                Token::Symbol('&') => vibesql_ast::BinaryOperator::BitwiseAnd,
                 Token::Operator(crate::token::MultiCharOperator::LeftShift) => {
                     vibesql_ast::BinaryOperator::LeftShift
                 }
@@ -315,7 +285,7 @@ impl Parser {
     pub(super) fn parse_comparison_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        let mut left = self.parse_shift_expression()?;
+        let mut left = self.parse_bitwise_expression()?;
 
         loop {
             // Check for IN operator (including NOT IN) and BETWEEN (including NOT BETWEEN)
@@ -444,9 +414,9 @@ impl Parser {
                     };
 
                     // Parse low AND high
-                    let low = self.parse_shift_expression()?;
+                    let low = self.parse_bitwise_expression()?;
                     self.consume_keyword(Keyword::And)?;
-                    let high = self.parse_shift_expression()?;
+                    let high = self.parse_bitwise_expression()?;
 
                     left = vibesql_ast::Expression::Between {
                         expr: Box::new(left),
@@ -461,12 +431,12 @@ impl Parser {
                     self.consume_keyword(Keyword::Like)?;
 
                     // Parse pattern expression
-                    let pattern = self.parse_shift_expression()?;
+                    let pattern = self.parse_bitwise_expression()?;
 
                     // Check for optional ESCAPE clause
                     let escape = if self.peek_keyword(Keyword::Escape) {
                         self.consume_keyword(Keyword::Escape)?;
-                        Some(Box::new(self.parse_shift_expression()?))
+                        Some(Box::new(self.parse_bitwise_expression()?))
                     } else {
                         None
                     };
@@ -483,12 +453,12 @@ impl Parser {
                     self.consume_keyword(Keyword::Glob)?;
 
                     // Parse pattern expression
-                    let pattern = self.parse_shift_expression()?;
+                    let pattern = self.parse_bitwise_expression()?;
 
                     // Check for optional ESCAPE clause
                     let escape = if self.peek_keyword(Keyword::Escape) {
                         self.consume_keyword(Keyword::Escape)?;
-                        Some(Box::new(self.parse_shift_expression()?))
+                        Some(Box::new(self.parse_bitwise_expression()?))
                     } else {
                         None
                     };
@@ -680,12 +650,12 @@ impl Parser {
                 };
 
                 // Parse low AND high
-                // Bounds parse at the shift tier (same as NOT BETWEEN): everything
-                // tighter than the comparison tier is allowed; only the boolean AND
-                // separating low/high must not be consumed.
-                let low = self.parse_shift_expression()?;
+                // Bounds parse at the bitwise tier (same as NOT BETWEEN): everything
+                // tighter than the comparison tier is allowed (including `& | << >>`);
+                // only the boolean AND separating low/high must not be consumed.
+                let low = self.parse_bitwise_expression()?;
                 self.consume_keyword(Keyword::And)?;
-                let high = self.parse_shift_expression()?;
+                let high = self.parse_bitwise_expression()?;
 
                 left = vibesql_ast::Expression::Between {
                     expr: Box::new(left),
@@ -699,13 +669,13 @@ impl Parser {
                 // It's LIKE (not negated)
                 self.consume_keyword(Keyword::Like)?;
 
-                // Parse pattern expression at the shift tier (same as NOT LIKE)
-                let pattern = self.parse_shift_expression()?;
+                // Parse pattern expression at the bitwise tier (same as NOT LIKE)
+                let pattern = self.parse_bitwise_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_shift_expression()?))
+                    Some(Box::new(self.parse_bitwise_expression()?))
                 } else {
                     None
                 };
@@ -721,13 +691,13 @@ impl Parser {
                 // It's GLOB (SQLite) (not negated)
                 self.consume_keyword(Keyword::Glob)?;
 
-                // Parse pattern expression at the shift tier (same as NOT GLOB)
-                let pattern = self.parse_shift_expression()?;
+                // Parse pattern expression at the bitwise tier (same as NOT GLOB)
+                let pattern = self.parse_bitwise_expression()?;
 
                 // Check for optional ESCAPE clause
                 let escape = if self.peek_keyword(Keyword::Escape) {
                     self.consume_keyword(Keyword::Escape)?;
-                    Some(Box::new(self.parse_shift_expression()?))
+                    Some(Box::new(self.parse_bitwise_expression()?))
                 } else {
                     None
                 };
@@ -780,7 +750,7 @@ impl Parser {
                             }
                             // These operators bind tighter than comparison and
                             // are consumed at lower tiers (Concat at the concat
-                            // tier, shifts at the shift tier, and `->`/`->>` at
+                            // tier, shifts at the bitwise tier, and `->`/`->>` at
                             // the JSON-path tier), so reaching here means a
                             // genuinely misplaced operator.
                             MultiCharOperator::Concat
@@ -832,7 +802,7 @@ impl Parser {
                     continue;
                 }
 
-                let right = self.parse_shift_expression()?;
+                let right = self.parse_bitwise_expression()?;
                 left = vibesql_ast::Expression::BinaryOp {
                     op,
                     left: Box::new(left),
@@ -857,7 +827,7 @@ impl Parser {
                 if self.peek_keyword(Keyword::Distinct) {
                     self.consume_keyword(Keyword::Distinct)?;
                     self.expect_keyword(Keyword::From)?;
-                    let right = self.parse_shift_expression()?;
+                    let right = self.parse_bitwise_expression()?;
                     left = vibesql_ast::Expression::IsDistinctFrom {
                         left: Box::new(left),
                         right: Box::new(right),
@@ -891,7 +861,7 @@ impl Parser {
                 } else {
                     // SQLite compatibility: IS <expr> - compare using IS semantics (NULL-safe equals)
                     // This handles cases like `expr IS 0` or `expr IS 1`
-                    let right = self.parse_shift_expression()?;
+                    let right = self.parse_bitwise_expression()?;
                     left = vibesql_ast::Expression::IsDistinctFrom {
                         left: Box::new(left),
                         right: Box::new(right),
@@ -932,7 +902,7 @@ impl Parser {
     }
 
     /// Continue parsing tighter-binding binary operators (multiplicative, concat,
-    /// additive, shift) with an already-parsed left operand.
+    /// additive, bitwise) with an already-parsed left operand.
     ///
     /// Used after a syntactically-closed comparison-tier node — IN/NOT IN
     /// (right operand is a parenthesized list/subquery or a table name) and
@@ -950,15 +920,15 @@ impl Parser {
     /// relative precedence among these operators is preserved
     /// (e.g. `x IN (1) + 2 * 3` parses as `(x IN (1)) + (2 * 3)`).
     ///
-    /// Delegates to `parse_shift_expression_from`, which climbs the seeded
-    /// left operand through the multiplicative, concat, additive, and shift
+    /// Delegates to `parse_bitwise_expression_from`, which climbs the seeded
+    /// left operand through the multiplicative, concat, additive, and bitwise
     /// tiers using the canonical per-tier operator loops. The arena parser
-    /// has the same helper (minus the shift tier) in arena_parser/expression.rs.
+    /// has the same helper (minus the bitwise tier) in arena_parser/expression.rs.
     fn continue_higher_precedence_ops(
         &mut self,
         left: vibesql_ast::Expression,
     ) -> Result<vibesql_ast::Expression, ParseError> {
-        self.parse_shift_expression_from(left)
+        self.parse_bitwise_expression_from(left)
     }
 
     /// Parse unary expression (handles unary +, -, ~ operators)
