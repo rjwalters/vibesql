@@ -244,6 +244,24 @@ impl Clone for Table {
     }
 }
 
+/// Rowid allocation exhausted the signed 64-bit rowid space (issue #5894).
+///
+/// sqlite3 surfaces this as `SQLITE_FULL` ("database or disk is full"): when
+/// the maximum rowid is already `i64::MAX`, sqlite3 probes random unused
+/// rowids rather than reusing `i64::MAX` (a silent duplicate) or overflowing;
+/// if every probe collides with an existing rowid it gives up with this error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowidExhausted;
+
+impl std::fmt::Display for RowidExhausted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Matches sqlite3's SQLITE_FULL text so callers can surface it verbatim.
+        write!(f, "database or disk is full")
+    }
+}
+
+impl std::error::Error for RowidExhausted {}
+
 impl Table {
     /// Create a new empty table with given schema
     ///
@@ -860,6 +878,63 @@ impl Table {
         self.next_rowid_signed() as u64
     }
 
+    /// Allocate the next rowid for an auto-assigned insert, matching sqlite3
+    /// exactly — including the `i64::MAX` corner that [`Table::next_rowid_signed`]
+    /// only saturates over (issue #5894).
+    ///
+    /// This is the fallible allocator that insert paths must use for any rowid
+    /// that gets *stored* (implicit rowids, explicit NULL/DEFAULT rowids, and
+    /// `INTEGER PRIMARY KEY` NULL auto-assign). Semantics:
+    ///
+    /// - empty table (never held a row): `1`;
+    /// - otherwise the signed maximum rowid `+ 1` (negative maxima included —
+    ///   a table whose max rowid is `-5` allocates `-4`, matching sqlite3);
+    /// - when the maximum rowid is already `i64::MAX`, sqlite3 does not reuse it
+    ///   (a silent duplicate) or overflow — it probes up to 100 random positive
+    ///   rowids for one not currently in use, returning [`RowidExhausted`]
+    ///   (`SQLITE_FULL`) only if every probe collides.
+    ///
+    /// The random-probe fallback is inherently nondeterministic (as it is in
+    /// sqlite3): callers get *some* unused rowid, not a predictable one.
+    pub fn allocate_rowid(&self) -> Result<i64, RowidExhausted> {
+        match self.max_assigned_rowid {
+            None => Ok(1),
+            // `m < i64::MAX` guarantees `m + 1` cannot overflow.
+            Some(m) if m < i64::MAX => Ok(m + 1),
+            Some(_) => self.probe_random_rowid(),
+        }
+    }
+
+    /// [`Table::allocate_rowid`] as the u64 bit pattern stored in `Row::row_id`
+    /// (two's complement — an allocation of `-4` is returned as `(-4i64) as u64`).
+    #[inline]
+    pub fn allocate_rowid_u64(&self) -> Result<u64, RowidExhausted> {
+        self.allocate_rowid().map(|r| r as u64)
+    }
+
+    /// sqlite3's random-rowid fallback: probe positive rowids in `[1, i64::MAX)`
+    /// for one not currently in use, giving up after 100 attempts (issue #5894).
+    ///
+    /// The set of in-use effective rowids is snapshotted once (live rows only —
+    /// deleted rowids are free) so each probe is an O(1) membership test.
+    fn probe_random_rowid(&self) -> Result<i64, RowidExhausted> {
+        use rand::RngExt;
+
+        let in_use: std::collections::HashSet<i64> = self
+            .scan_live()
+            .map(|(pos, row)| row.row_id.map_or(pos as i64 + 1, |rid| rid as i64))
+            .collect();
+
+        let mut rng = rand::rng();
+        for _ in 0..100 {
+            let candidate = rng.random_range(1..i64::MAX);
+            if !in_use.contains(&candidate) {
+                return Ok(candidate);
+            }
+        }
+        Err(RowidExhausted)
+    }
+
     /// Get count of deleted (logically removed) rows
     ///
     /// This is used for DML cost estimation, as tables with many deleted rows
@@ -905,10 +980,19 @@ impl Table {
     }
 
     /// Clear all rows
+    ///
+    /// Used by the full-table clear paths (`TRUNCATE TABLE` and the no-`WHERE`
+    /// `DELETE FROM t` fast path). Resets rowid allocation: an emptied table's
+    /// next rowid is `1`, matching sqlite3 (`max(rowid)` of an empty table is
+    /// NULL, so allocation restarts at 1) and the AUTO_INCREMENT-reset contract
+    /// (issue #5894). Since `allocate_rowid` now reads `max_assigned_rowid`, the
+    /// counter must be cleared here — otherwise a truncated table would keep
+    /// allocating past its pre-truncate maximum.
     pub fn clear(&mut self) {
         self.rows.clear();
         self.deleted.clear();
         self.deleted_count = 0;
+        self.max_assigned_rowid = None;
         // Clear indexes (delegate to IndexManager)
         self.indexes.clear();
         // Reset append mode tracking

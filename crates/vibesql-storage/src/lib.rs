@@ -60,7 +60,7 @@ pub use query_buffer_pool::{
 };
 pub use row::{Row, RowValues, TxnId, PRE_MVCC_TXN_ID, ROW_INLINE_CAPACITY};
 pub use statistics::{ColumnStatistics, TableIndexInfo, TableStatistics};
-pub use table::{DeleteResult, Table};
+pub use table::{DeleteResult, RowidExhausted, Table};
 pub use wal::{
     DurabilityConfig, DurabilityMode, Lsn, PersistenceConfig, PersistenceEngine, PersistenceStats,
     TransactionDurability, WalEntry, WalOp, WalOpTag,
@@ -450,13 +450,73 @@ mod tests {
         assert_eq!(table2.next_rowid_signed(), 4, "sqlite3: max(-5, 3) + 1 = 4");
     }
 
-    /// `next_rowid` saturates instead of overflowing when the max rowid is
-    /// `i64::MAX` (SQLite reports SQLITE_FULL; a duplicate-rowid conflict is
-    /// the closest safe behavior — never a wrap to a bogus rowid).
+    /// `next_rowid_signed` is the infallible *peek* helper: it saturates at
+    /// `i64::MAX` rather than overflowing. The fallible sqlite3-parity allocator
+    /// [`Table::allocate_rowid`] is what insert paths use for stored rowids
+    /// (see the tests below); this only guards the peek's saturation.
     #[test]
     fn test_next_rowid_saturates_at_i64_max() {
         let mut table = rowid_test_table();
         table.insert(Row::with_row_id(vec![SqlValue::Integer(1)], i64::MAX as u64)).unwrap();
         assert_eq!(table.next_rowid_signed(), i64::MAX);
+    }
+
+    /// `allocate_rowid` matches sqlite3's `max(rowid) + 1` in the ordinary
+    /// (non-saturated) range, including negative maxima — the same values the
+    /// plain-rowid and INTEGER PRIMARY KEY NULL-assign paths must agree on
+    /// (issue #5894).
+    #[test]
+    fn test_allocate_rowid_matches_sqlite_normal_range() {
+        // Empty table: first allocation is 1.
+        let table = rowid_test_table();
+        assert_eq!(table.allocate_rowid(), Ok(1));
+
+        // Only negative rowids present: next is signed max + 1, NOT 1
+        // (sqlite3: after rowid -5, next is -4; after -1, next is 0).
+        let mut neg = rowid_test_table();
+        neg.insert(Row::with_row_id(vec![SqlValue::Integer(1)], (-5i64) as u64)).unwrap();
+        assert_eq!(neg.allocate_rowid(), Ok(-4));
+
+        let mut neg1 = rowid_test_table();
+        neg1.insert(Row::with_row_id(vec![SqlValue::Integer(1)], (-1i64) as u64)).unwrap();
+        assert_eq!(neg1.allocate_rowid(), Ok(0));
+
+        // Mixed negative/positive: the positive max dominates.
+        neg.insert(Row::with_row_id(vec![SqlValue::Integer(2)], 10)).unwrap();
+        assert_eq!(neg.allocate_rowid(), Ok(11));
+
+        // A table one below the ceiling allocates i64::MAX itself (no error).
+        let mut near = rowid_test_table();
+        near.insert(Row::with_row_id(vec![SqlValue::Integer(1)], (i64::MAX - 1) as u64)).unwrap();
+        assert_eq!(near.allocate_rowid(), Ok(i64::MAX));
+    }
+
+    /// At `i64::MAX`, sqlite3 does NOT reuse the max (a silent duplicate) or
+    /// overflow — it probes a random *unused* rowid. `allocate_rowid` must
+    /// return a fresh, in-range, not-in-use rowid (issue #5894). The value is
+    /// nondeterministic, so we assert uniqueness and validity, not a specific
+    /// number.
+    #[test]
+    fn test_allocate_rowid_at_i64_max_probes_unused() {
+        let mut table = rowid_test_table();
+        table.insert(Row::with_row_id(vec![SqlValue::Integer(1)], i64::MAX as u64)).unwrap();
+
+        let in_use: std::collections::HashSet<i64> =
+            table.scan_live().map(|(_, r)| r.row_id.unwrap() as i64).collect();
+
+        // 20 draws must all be positive, in range, and unused — never i64::MAX.
+        for _ in 0..20 {
+            let allocated = table.allocate_rowid().expect("random probe should find a free rowid");
+            assert!(allocated > 0, "probed rowid must be positive: {allocated}");
+            assert!(allocated < i64::MAX, "probed rowid must be below the ceiling");
+            assert!(!in_use.contains(&allocated), "probed rowid must be unused: {allocated}");
+        }
+    }
+
+    /// The exhaustion marker mirrors sqlite3's SQLITE_FULL text so callers can
+    /// surface it verbatim (issue #5894).
+    #[test]
+    fn test_rowid_exhausted_display() {
+        assert_eq!(crate::RowidExhausted.to_string(), "database or disk is full");
     }
 }
