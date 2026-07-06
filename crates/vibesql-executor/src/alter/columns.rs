@@ -414,22 +414,50 @@ pub(super) fn execute_rename_column(
     // body, SQLite (legacy_alter_table=OFF) aborts the whole ALTER and leaves
     // the schema unchanged. Roll back the schema rename on that error so the
     // ALTER is atomic, matching SQLite.
+    // Rolls back the just-applied schema rename and returns the error, keeping the
+    // ALTER atomic when a dependent-object rewrite (trigger or view) aborts on a
+    // genuine ambiguity — matching SQLite, which leaves the schema unchanged.
+    let rollback = |database: &mut Database, err: ExecutorError| -> ExecutorError {
+        if let Some(table) = database.get_table_mut(&stmt.table_name) {
+            if let Some(idx) = table.schema.get_column_index(&stmt.new_column_name) {
+                let _ = table.schema_mut().rename_column(idx, &stmt.old_column_name);
+            }
+        }
+        database.invalidate_columnar_cache(&stmt.table_name);
+        err
+    };
+
     if let Err(err) = super::table_options::rewrite_triggers_for_column_rename(
         database,
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
     ) {
-        if let Some(table) = database.get_table_mut(&stmt.table_name) {
-            if let Some(idx) = table.schema.get_column_index(&stmt.new_column_name) {
-                // Best-effort rollback; the column was just renamed so this
-                // restores the original name.
-                let _ = table.schema_mut().rename_column(idx, &stmt.old_column_name);
-            }
-        }
-        database.invalidate_columnar_cache(&stmt.table_name);
-        return Err(err);
+        return Err(rollback(database, err));
     }
+
+    // Propagate the rename into dependent VIEW definitions (verbatim
+    // `sql_definition` text + parsed `query` AST). Runs after the trigger rewrite
+    // so an ambiguous view aborts the whole ALTER before index/FK bookkeeping.
+    if let Err(err) = super::table_options::rewrite_views_for_column_rename(
+        database,
+        &stmt.table_name,
+        &stmt.old_column_name,
+        &stmt.new_column_name,
+    ) {
+        return Err(rollback(database, err));
+    }
+
+    // Propagate the rename into any child table's foreign key that references the
+    // renamed column of THIS (parent) table: rewrite the child's verbatim
+    // `REFERENCES <table>(<col_list>)` text and its in-memory FK parent-column
+    // metadata (altercol.test 4.1/4.4).
+    super::table_options::rewrite_child_foreign_keys_for_column_rename(
+        database,
+        &stmt.table_name,
+        &stmt.old_column_name,
+        &stmt.new_column_name,
+    );
 
     // Propagate the rename into dependent index metadata, in BOTH copies:
     // the catalog copy (drives sqlite_master rendering and planner/FK

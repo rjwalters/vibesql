@@ -331,3 +331,170 @@ pub(super) fn rewrite_triggers_for_column_rename(
     }
     Ok(())
 }
+
+/// Propagate a *parent* table's column rename into every *child* table's foreign
+/// key that references it, when `ALTER TABLE <parent> RENAME <old_col> TO
+/// <new_col>` runs.
+///
+/// SQLite (`legacy_alter_table=OFF`) rewrites the referenced column name in each
+/// child's `REFERENCES <parent>(<col_list>)` clause — both the stored
+/// `sqlite_master.sql` text and the in-memory FK metadata — so FK enforcement and
+/// reload stay consistent (verified against sqlite3 3.51.0, altercol.test
+/// 4.1/4.4). Without the in-memory `parent_column_names` update, FK checks would
+/// keep matching on the old parent column; without the `sql_source` rewrite, a
+/// reload would rehydrate the stale reference (and the fail-closed open policy
+/// would reject the child table's checkpoint).
+///
+/// The renamed parent's *own* table (its PK/UNIQUE/FK-local column references) is
+/// handled separately by `update_sql_source_after_alter` +
+/// `alter_rewrite::rename_column`; this loop only touches *other* tables' FK
+/// references to it (a self-referential child FK is covered because the parent is
+/// just another table in the same loop).
+pub(super) fn rewrite_child_foreign_keys_for_column_rename(
+    database: &mut Database,
+    parent_table: &str,
+    old_column: &str,
+    new_column: &str,
+) {
+    for tbl in database.list_tables() {
+        let updated_schema = {
+            let Some(table) = database.get_table_mut(&tbl) else {
+                continue;
+            };
+            let mut changed = false;
+            for fk in table.schema_mut().foreign_keys.iter_mut() {
+                if !fk.parent_table.eq_ignore_ascii_case(parent_table) {
+                    continue;
+                }
+                for pcol in fk.parent_column_names.iter_mut() {
+                    if pcol.eq_ignore_ascii_case(old_column) {
+                        *pcol = new_column.to_string();
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                continue;
+            }
+            // Rewrite the verbatim `REFERENCES <parent>(<col_list>)` text. If the
+            // in-place edit cannot apply cleanly, invalidate so `sql_source` is
+            // reconstructed from the (already-updated) FK metadata — never left
+            // naming the old column.
+            let rewritten = table.schema.sql_source.as_deref().and_then(|sql| {
+                crate::alter_rewrite::rename_references_column(
+                    sql,
+                    parent_table,
+                    old_column,
+                    new_column,
+                )
+            });
+            match rewritten {
+                Some(text) => table.schema_mut().set_sql_source(text),
+                None => table.schema_mut().invalidate_sql_source(),
+            }
+            table.schema.clone()
+        };
+        database.catalog.replace_table_schema(&tbl, updated_schema);
+    }
+}
+
+/// Rewrite dependent VIEW definitions that reference a renamed column, when
+/// `ALTER TABLE <table> RENAME <old_column> TO <new_column>` runs.
+///
+/// SQLite (`legacy_alter_table=OFF`) rewrites references inside view bodies that
+/// resolve to `<table>.<old_column>` — both qualified (`t.col`) and unqualified —
+/// updating the `sqlite_master.sql` text and re-resolving the view (verified
+/// against sqlite3 3.51.0, altercol.test group 8). VibeSQL materializes views by
+/// executing their stored `query` AST, so both the verbatim `sql_definition` and
+/// the parsed `query` are rewritten here (the latter by re-parsing the rewritten
+/// text) so the view keeps working after the rename.
+///
+/// Reuses the trigger-body column resolver
+/// ([`rewrite_column_refs_in_trigger_sql`]), which is table-name-aware and
+/// aborts on a genuinely ambiguous unqualified reference. Two-phase (compute all
+/// rewrites, then commit) so an ambiguity in any view aborts the whole ALTER
+/// before any view is mutated, matching SQLite's atomic behavior.
+pub(super) fn rewrite_views_for_column_rename(
+    database: &mut Database,
+    table: &str,
+    old_column: &str,
+    new_column: &str,
+) -> Result<(), ExecutorError> {
+    // Snapshot table -> column-name set for the resolver (same pattern as the
+    // trigger rewrite). Reflects the post-rename schema, so the renamed table's
+    // pre-rename column is handled explicitly in the closure.
+    let schema: std::collections::HashMap<String, Vec<String>> = database
+        .list_tables()
+        .into_iter()
+        .filter_map(|name| {
+            database.get_table(&name).map(|tbl| {
+                (
+                    name.to_ascii_lowercase(),
+                    tbl.schema.columns.iter().map(|c| c.name.clone()).collect(),
+                )
+            })
+        })
+        .collect();
+
+    let renamed_table_lc = table.to_ascii_lowercase();
+    let old_column_owned = old_column.to_string();
+    let table_has_column = move |t: &str, c: &str| -> bool {
+        let t_lc = t.to_ascii_lowercase();
+        if t_lc == renamed_table_lc && c.eq_ignore_ascii_case(&old_column_owned) {
+            return true;
+        }
+        schema.get(&t_lc).is_some_and(|cols| cols.iter().any(|col| col.eq_ignore_ascii_case(c)))
+    };
+
+    // Phase 1: compute the rewritten verbatim text for each affected view. A
+    // genuine ambiguity aborts the whole ALTER (SQLite:
+    // "error in view <name>: ambiguous column name: <col>").
+    let view_names = database.catalog.list_views();
+    let mut pending: Vec<(String, String)> = Vec::new();
+    for name in view_names {
+        let Some(view) = database.catalog.get_view(&name) else {
+            continue;
+        };
+        // Prefer the verbatim `CREATE VIEW` text; fall back to reconstructing it
+        // from the parsed query when a view was stored without captured source,
+        // so a view still tracks the rename either way.
+        let old_text = view.sql_definition.clone().unwrap_or_else(|| {
+            use vibesql_ast::pretty_print::ToSql;
+            let cols = view
+                .columns
+                .as_ref()
+                .map(|c| format!("({})", c.join(", ")))
+                .unwrap_or_default();
+            format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
+        });
+        let new_text = rewrite_column_refs_in_trigger_sql(
+            &old_text,
+            table,
+            old_column,
+            new_column,
+            &table_has_column,
+        )
+        .map_err(|col| {
+            ExecutorError::Other(format!("error in view {}: ambiguous column name: {}", name, col))
+        })?;
+        if new_text != old_text {
+            pending.push((name, new_text));
+        }
+    }
+
+    // Phase 2: commit each update — re-parse the rewritten text into a fresh
+    // `query` AST (so view execution resolves the new column) and store both the
+    // AST and the verbatim `sql_definition`.
+    for (name, new_text) in pending {
+        let stmt = vibesql_parser::parse_with_arena_fallback(&new_text).map_err(|e| {
+            ExecutorError::Other(format!("error in view {}: {}", name, e))
+        })?;
+        if let vibesql_ast::Statement::CreateView(cv) = stmt {
+            if let Some(view) = database.catalog.get_view_mut(&name) {
+                view.query = *cv.query;
+                view.sql_definition = Some(new_text);
+            }
+        }
+    }
+    Ok(())
+}

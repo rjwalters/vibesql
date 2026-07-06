@@ -187,6 +187,7 @@ fn update_sql_source_after_alter(
             .and_then(|coldef| crate::alter_rewrite::append_column(&current, &coldef)),
         AlterTableStmt::RenameColumn(rename) => crate::alter_rewrite::rename_column(
             &current,
+            table_name,
             &rename.old_column_name,
             &rename.new_column_name,
         ),
