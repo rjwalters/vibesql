@@ -1390,6 +1390,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
                                 .into_iter()
                                 .map(|a| Assignment {
                                     column: a.column,
+                                    columns: a.columns,
                                     value: transform_expression(visitor, a.value),
                                 })
                                 .collect(),
@@ -1404,6 +1405,7 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
                 .into_iter()
                 .map(|a| Assignment {
                     column: a.column,
+                    columns: a.columns,
                     value: transform_expression(visitor, a.value),
                 })
                 .collect()
@@ -1445,7 +1447,11 @@ pub fn transform_update<V: ExpressionMutVisitor>(visitor: &mut V, stmt: UpdateSt
         assignments: stmt
             .assignments
             .into_iter()
-            .map(|a| Assignment { column: a.column, value: transform_expression(visitor, a.value) })
+            .map(|a| Assignment {
+                column: a.column,
+                columns: a.columns,
+                value: transform_expression(visitor, a.value),
+            })
             .collect(),
         from_clause: stmt
             .from_clause

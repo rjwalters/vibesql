@@ -325,15 +325,23 @@ fn resolve_target_items<'a>(
 /// (order-insensitive). Column items match resolved column indices;
 /// expression items match expression components structurally
 /// (`expressions_equal`, so `a+(+b)` does NOT match `a+b` — upsert1-210).
-/// The target-level WHERE must structurally equal the index predicate:
-/// a bare target never matches a partial index (upsert1-300) and a
-/// mismatched predicate never matches (upsert1-310).
+/// The target-level WHERE is matched against the index predicate with SQLite's
+/// asymmetric rule:
+/// - against a **partial** index (`candidate.predicate = Some`), the target
+///   WHERE must structurally equal the index predicate: a bare target never
+///   matches a partial index (upsert1-300) and a mismatched predicate never
+///   matches (upsert1-310);
+/// - against a **full** (non-partial) index (`candidate.predicate = None`), a
+///   target WHERE clause is parsed and validated but ignored for matching, so
+///   `ON CONFLICT(b,c,d) WHERE a!=0` still matches a full index on
+///   `(d,c,b)` (upsert4 2.x.2.6 / 2.x.2.9).
 fn candidate_matches_target(
     candidate: &UniqueCandidate,
     target: &[ResolvedTargetItem<'_>],
     target_where: Option<&Expression>,
 ) -> bool {
-    // Partial-index predicate must match structurally.
+    // Partial-index predicate must match structurally; a full index ignores
+    // any target WHERE.
     match (target_where, candidate.predicate.as_ref()) {
         (None, None) => {}
         (Some(tw), Some(pred)) => {
@@ -341,7 +349,10 @@ fn candidate_matches_target(
                 return false;
             }
         }
-        _ => return false,
+        // Full index (no predicate) with a target WHERE: accepted, WHERE ignored.
+        (Some(_), None) => {}
+        // Bare target against a partial index never matches.
+        (None, Some(_)) => return false,
     }
 
     if candidate.parts.len() != target.len() {
@@ -782,12 +793,34 @@ pub fn handle_on_conflict_update(
         // Apply SET assignments against a copy of the existing row.
         let mut new_values = existing_row.values.clone();
         for assignment in assignments {
-            let col_idx = schema.get_column_index(&assignment.column).ok_or_else(|| {
-                ExecutorError::SqliteCompatError(format!("no such column: {}", assignment.column))
-            })?;
             let substituted =
                 substitute_excluded_refs(assignment.value.clone(), schema, row_values)?;
-            new_values[col_idx] = evaluator.eval(&substituted, &existing_row)?;
+            if assignment.is_tuple() {
+                // Tuple assignment `SET (a, b, ...) = (row-value | subquery)`:
+                // evaluate the RHS to one value per target column, positionally.
+                let col_indices = assignment
+                    .columns
+                    .iter()
+                    .map(|name| {
+                        schema.get_column_index(name).ok_or_else(|| {
+                            ExecutorError::SqliteCompatError(format!("no such column: {}", name))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let values =
+                    evaluator.eval_row_value(&substituted, &existing_row, col_indices.len())?;
+                for (col_idx, value) in col_indices.into_iter().zip(values) {
+                    new_values[col_idx] = value;
+                }
+            } else {
+                let col_idx = schema.get_column_index(&assignment.column).ok_or_else(|| {
+                    ExecutorError::SqliteCompatError(format!(
+                        "no such column: {}",
+                        assignment.column
+                    ))
+                })?;
+                new_values[col_idx] = evaluator.eval(&substituted, &existing_row)?;
+            }
         }
         new_values
     };
@@ -943,4 +976,77 @@ fn substitute_excluded_refs(
         return Err(err);
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod candidate_match_tests {
+    use super::*;
+
+    fn full_index() -> UniqueCandidate {
+        UniqueCandidate { parts: vec![KeyPart::Column(0)], predicate: None, index_name: None }
+    }
+
+    fn partial_index(pred: Expression) -> UniqueCandidate {
+        UniqueCandidate {
+            parts: vec![KeyPart::Column(0)],
+            predicate: Some(pred),
+            index_name: None,
+        }
+    }
+
+    // `a != 0`, matching the upsert4 2.x.2.6 target WHERE.
+    fn pred_a_ne_0() -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::NotEqual,
+            right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+        }
+    }
+
+    fn target() -> Vec<ResolvedTargetItem<'static>> {
+        vec![ResolvedTargetItem::Column(0)]
+    }
+
+    #[test]
+    fn full_index_bare_target_matches() {
+        assert!(candidate_matches_target(&full_index(), &target(), None));
+    }
+
+    #[test]
+    fn full_index_ignores_target_where() {
+        // upsert4 2.x.2.6 / 2.x.2.9: a target WHERE against a full (non-partial)
+        // index is parsed and validated but ignored for matching.
+        let where_clause = pred_a_ne_0();
+        assert!(candidate_matches_target(&full_index(), &target(), Some(&where_clause)));
+    }
+
+    #[test]
+    fn partial_index_rejects_bare_target() {
+        // upsert1-300: a bare target must not match a partial index.
+        let cand = partial_index(pred_a_ne_0());
+        assert!(!candidate_matches_target(&cand, &target(), None));
+    }
+
+    #[test]
+    fn partial_index_matches_equal_predicate() {
+        let cand = partial_index(pred_a_ne_0());
+        let where_clause = pred_a_ne_0();
+        assert!(candidate_matches_target(&cand, &target(), Some(&where_clause)));
+    }
+
+    #[test]
+    fn partial_index_rejects_mismatched_predicate() {
+        // upsert1-310: a mismatched predicate must not match a partial index.
+        let cand = partial_index(pred_a_ne_0());
+        let different = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "a", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::GreaterThan,
+            right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+        };
+        assert!(!candidate_matches_target(&cand, &target(), Some(&different)));
+    }
 }

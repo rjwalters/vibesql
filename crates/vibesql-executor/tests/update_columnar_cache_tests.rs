@@ -60,6 +60,7 @@ fn test_update_invalidates_columnar_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -136,6 +137,7 @@ fn test_update_invalidates_prewarmed_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(75000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -186,6 +188,7 @@ fn test_update_all_rows_invalidates_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: None,
@@ -228,6 +231,7 @@ fn test_update_no_match_does_not_invalidate_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(999999)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -277,6 +281,7 @@ fn test_multiple_updates_invalidate_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(50000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -312,6 +317,7 @@ fn test_multiple_updates_invalidate_cache() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -364,10 +370,12 @@ fn test_update_multiple_columns_invalidates_cache() {
         assignments: vec![
             Assignment {
                 column: "salary".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(70000)),
             },
             Assignment {
                 column: "department".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Management"))),
             },
         ],

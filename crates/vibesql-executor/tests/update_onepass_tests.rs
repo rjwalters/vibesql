@@ -110,14 +110,17 @@ fn test_onepass_multiple_literal_assignments() {
         assignments: vec![
             Assignment {
                 column: "name".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Updated"))),
             },
             Assignment {
                 column: "price".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(999)),
             },
             Assignment {
                 column: "quantity".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(50)),
             },
         ],
@@ -166,6 +169,7 @@ fn test_onepass_single_literal_assignment() {
         table_name: "items".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(777)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -205,6 +209,7 @@ fn test_onepass_pk_not_found_returns_zero() {
         table_name: "items".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(999)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -253,6 +258,7 @@ fn test_onepass_not_null_constraint_enforced() {
         table_name: "required".to_string(),
         assignments: vec![Assignment {
             column: "required_field".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Null),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -293,6 +299,7 @@ fn test_composite_pk_update_both_columns_specified() {
         table_name: "order_items".to_string(),
         assignments: vec![Assignment {
             column: "quantity".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(99)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -349,6 +356,7 @@ fn test_composite_pk_update_reversed_order() {
         table_name: "order_items".to_string(),
         assignments: vec![Assignment {
             column: "price".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(500)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -400,6 +408,7 @@ fn test_composite_pk_partial_match_uses_scan() {
         table_name: "order_items".to_string(),
         assignments: vec![Assignment {
             column: "quantity".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(1)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -442,6 +451,7 @@ fn test_composite_pk_not_found_returns_zero() {
         table_name: "order_items".to_string(),
         assignments: vec![Assignment {
             column: "quantity".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(999)),
         }],
         where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
@@ -488,10 +498,12 @@ fn test_composite_pk_multiple_columns_updated() {
         assignments: vec![
             Assignment {
                 column: "quantity".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(100)),
             },
             Assignment {
                 column: "price".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Integer(1000)),
             },
         ],

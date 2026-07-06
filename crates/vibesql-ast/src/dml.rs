@@ -215,11 +215,43 @@ pub struct UpdateStmt {
     pub returning: Option<Vec<SelectItem>>,
 }
 
-/// Column assignment (column = value)
+/// Column assignment (`column = value`, or the tuple form
+/// `(col-a, col-b, ...) = (row-value | scalar-subquery)`).
+///
+/// SQLite allows the left-hand side of an `UPDATE`/`DO UPDATE` assignment to be
+/// a parenthesized column list, e.g.
+/// `SET (b, c) = (SELECT 'x', 'y')` or `SET (c, a) = ('four', 4)`.
+/// For an ordinary single-column assignment `columns` is empty and `column`
+/// is authoritative. For a tuple assignment `columns` holds the full ordered
+/// column list (length >= 2), `column` mirrors `columns[0]` so naive
+/// single-column readers still see a real target, and the single `value` is a
+/// row-valued expression (a `RowValueConstructor` or a multi-column
+/// `ScalarSubquery`) whose elements map positionally to `columns`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment {
     pub column: String,
+    /// Tuple-assignment column list; empty for a single-column assignment.
+    pub columns: Vec<String>,
     pub value: Expression,
+}
+
+impl Assignment {
+    /// Construct an ordinary single-column assignment (`column = value`).
+    pub fn single(column: String, value: Expression) -> Self {
+        Assignment { column, columns: Vec::new(), value }
+    }
+
+    /// Construct a tuple assignment (`(cols) = value`). `columns` must contain
+    /// at least two names; `column` mirrors the first for single-column readers.
+    pub fn tuple(columns: Vec<String>, value: Expression) -> Self {
+        let column = columns.first().cloned().unwrap_or_default();
+        Assignment { column, columns, value }
+    }
+
+    /// True when this is a tuple/row assignment (`(a, b) = ...`).
+    pub fn is_tuple(&self) -> bool {
+        self.columns.len() >= 2
+    }
 }
 
 // ============================================================================

@@ -134,7 +134,7 @@ fn create_update_stmt(
         quoted: false,
         alias: None,
         table_name: table_name.to_string(),
-        assignments: vec![Assignment { column: column.to_string(), value }],
+        assignments: vec![Assignment::single(column.to_string(), value)],
         from_clause: None,
         where_clause,
         order_by: None,
@@ -157,7 +157,7 @@ fn create_multi_column_update_stmt(
         table_name: table_name.to_string(),
         assignments: assignments
             .into_iter()
-            .map(|(col, val)| Assignment { column: col.to_string(), value: val })
+            .map(|(col, val)| Assignment::single(col.to_string(), val))
             .collect(),
         from_clause: None,
         where_clause: None,

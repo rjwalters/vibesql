@@ -169,10 +169,12 @@ fn test_update_unique_constraint_composite() {
         assignments: vec![
             Assignment {
                 column: "first_name".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice"))),
             },
             Assignment {
                 column: "last_name".to_string(),
+                columns: Vec::new(),
                 value: Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Smith"))),
             },
         ],

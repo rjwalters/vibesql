@@ -66,10 +66,12 @@ fn upsert_product(db: &mut Database, id: i64, name: &str, stock: i64) {
         on_duplicate_key_update: Some(vec![
             vibesql_ast::Assignment {
                 column: "name".to_string(),
+                columns: Vec::new(),
                 value: vibesql_ast::Expression::DuplicateKeyValue { column: "name".to_string() },
             },
             vibesql_ast::Assignment {
                 column: "stock".to_string(),
+                columns: Vec::new(),
                 value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
             },
         ]),
@@ -257,6 +259,7 @@ fn test_on_duplicate_key_update_unique_constraint_invalidates_cache() {
         on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "score".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "score".to_string() },
         }]),
         returning: None,
@@ -344,6 +347,7 @@ fn test_on_duplicate_key_update_arithmetic_invalidates_cache() {
         on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
                 left: Box::new(vibesql_ast::Expression::ColumnRef(

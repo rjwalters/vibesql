@@ -182,6 +182,7 @@ pub fn create_update_with_id_clause(
         table_name: table_name.to_string(),
         assignments: vec![Assignment {
             column: column.to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(value),
         }],
         from_clause: None,

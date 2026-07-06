@@ -437,6 +437,40 @@ impl ExpressionEvaluator<'_> {
         self.with_incremented_depth(|evaluator| evaluator.eval_impl(expr, row))
     }
 
+    /// Evaluate the right-hand side of a tuple/row assignment
+    /// (`SET (a, b, ...) = value`) into exactly `expected` values.
+    ///
+    /// The RHS is either a `RowValueConstructor` (a parenthesized value list,
+    /// e.g. `('four', 4)`) or a multi-column `ScalarSubquery`
+    /// (e.g. `(SELECT 'x', 'y')`). Both map positionally onto the target
+    /// columns. SQLite semantics: a subquery that returns no rows yields a row
+    /// of NULLs, a subquery that returns several rows uses the first, and an
+    /// arity mismatch is an error.
+    pub fn eval_row_value(
+        &self,
+        expr: &vibesql_ast::Expression,
+        row: &vibesql_storage::Row,
+        expected: usize,
+    ) -> Result<Vec<vibesql_types::SqlValue>, ExecutorError> {
+        match expr {
+            vibesql_ast::Expression::RowValueConstructor(elems) => {
+                if elems.len() != expected {
+                    return Err(ExecutorError::SubqueryColumnCountMismatch {
+                        expected,
+                        actual: elems.len(),
+                    });
+                }
+                elems.iter().map(|e| self.eval(e, row)).collect()
+            }
+            vibesql_ast::Expression::ScalarSubquery(subquery) => {
+                self.eval_scalar_subquery_as_row(subquery, row, expected)
+            }
+            // A non-row RHS for a multi-column target is a misuse per SQLite
+            // (e.g. `SET (a, b) = 1`).
+            _ => Err(ExecutorError::RowValueMisused),
+        }
+    }
+
     /// Internal implementation of eval with depth already incremented
     #[inline]
     fn eval_impl(

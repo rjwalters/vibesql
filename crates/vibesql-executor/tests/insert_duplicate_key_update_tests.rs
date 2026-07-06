@@ -76,6 +76,7 @@ fn test_on_duplicate_key_update_basic() {
         on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
         returning: None,
@@ -142,6 +143,7 @@ fn test_on_duplicate_key_update_with_arithmetic() {
         on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::BinaryOp {
                 op: vibesql_ast::BinaryOperator::Plus,
                 left: Box::new(vibesql_ast::Expression::ColumnRef(
@@ -190,6 +192,7 @@ fn test_on_duplicate_key_update_no_conflict() {
         on_conflict: vec![],
         on_duplicate_key_update: Some(vec![vibesql_ast::Assignment {
             column: "stock".to_string(),
+            columns: Vec::new(),
             value: vibesql_ast::Expression::DuplicateKeyValue { column: "stock".to_string() },
         }]),
         returning: None,

@@ -40,6 +40,12 @@ pub(super) fn try_fast_path_update(
     // Use canonical table name from schema for all storage operations
     let table_name = &schema.name;
 
+    // Tuple/row assignments (`SET (a, b) = ...`) need the row-value unpacking
+    // in the main path; the fast paths evaluate each assignment as a scalar.
+    if stmt.assignments.iter().any(|a| a.is_tuple()) {
+        return Ok(None);
+    }
+
     // Check if we have a simple PK lookup in WHERE clause
     let where_clause = match &stmt.where_clause {
         Some(vibesql_ast::WhereClause::Condition(expr)) => expr,

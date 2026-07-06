@@ -70,6 +70,7 @@ fn test_update_where_scalar_subquery_equal() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(55000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -166,6 +167,7 @@ fn test_update_where_scalar_subquery_less_than() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "bonus".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(5000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -254,6 +256,7 @@ fn test_update_where_subquery_returns_null() {
         alias: None,
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Integer(60000)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -354,6 +357,7 @@ fn test_update_where_subquery_with_aggregate() {
         table_name: "items".to_string(),
         assignments: vec![Assignment {
             column: "discounted".to_string(),
+            columns: Vec::new(),
             value: Expression::Literal(SqlValue::Boolean(true)),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::BinaryOp {
@@ -491,6 +495,7 @@ fn test_update_where_and_set_both_use_subqueries() {
         table_name: "employees".to_string(),
         assignments: vec![Assignment {
             column: "salary".to_string(),
+            columns: Vec::new(),
             value: Expression::ScalarSubquery(set_subquery),
         }],
         where_clause: Some(vibesql_ast::WhereClause::Condition(Expression::In {
