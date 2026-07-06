@@ -533,16 +533,30 @@ fn execute_insert_internal(
             // signed-max + 1 (or 1 for a table that never held a row).
             // The returned u64 is the two's-complement bit pattern stored in
             // `Row::row_id`.
-            let mut apply_affinity = |affinity: RowidAffinity| -> u64 {
+            let mut apply_affinity = |affinity: RowidAffinity| -> Result<u64, ExecutorError> {
                 match affinity {
                     RowidAffinity::Value(i) => {
                         batch_max_rowid = Some(batch_max_rowid.map_or(i, |m| m.max(i)));
-                        i as u64
+                        Ok(i as u64)
                     }
                     RowidAffinity::Auto => {
-                        let next = batch_max_rowid.map_or(1, |m| m.saturating_add(1));
+                        // sqlite3 parity (issue #5894): max rowid + 1, but when the
+                        // running max is already i64::MAX, delegate to the storage
+                        // allocator's random-probe / SQLITE_FULL fallback instead of
+                        // saturating (which would silently reuse i64::MAX — a
+                        // duplicate rowid). The table is only consulted in that
+                        // saturated corner, so the common path stays allocation-free.
+                        let next = match batch_max_rowid {
+                            None => 1,
+                            Some(m) if m < i64::MAX => m + 1,
+                            Some(_) => db
+                                .get_table(&storage_table_name)
+                                .map(|t| t.allocate_rowid())
+                                .unwrap_or(Ok(1))
+                                .map_err(|e| ExecutorError::StorageError(e.to_string()))?,
+                        };
                         batch_max_rowid = Some(next);
-                        next as u64
+                        Ok(next as u64)
                     }
                 }
             };
@@ -550,10 +564,10 @@ fn execute_insert_internal(
             match rowid_expr {
                 // Literal value: apply rowid (INTEGER) affinity directly.
                 vibesql_ast::Expression::Literal(val) => {
-                    Some(apply_affinity(coerce_rowid_affinity(val)?))
+                    Some(apply_affinity(coerce_rowid_affinity(val)?)?)
                 }
                 // DEFAULT means auto-assign, like NULL.
-                vibesql_ast::Expression::Default => Some(apply_affinity(RowidAffinity::Auto)),
+                vibesql_ast::Expression::Default => Some(apply_affinity(RowidAffinity::Auto)?),
                 // Negative numeric literal (parsed as unary minus over a literal):
                 // negate, then apply rowid affinity. This handles -42 (integer)
                 // AND -42.0 (real) uniformly (triggerC-4.1.4).
@@ -584,7 +598,7 @@ fn execute_insert_internal(
                             ));
                         }
                     };
-                    Some(apply_affinity(coerce_rowid_affinity(&negated)?))
+                    Some(apply_affinity(coerce_rowid_affinity(&negated)?)?)
                 }
                 _ => {
                     // For complex expressions (CASE, functions, subqueries, trigger
@@ -620,7 +634,7 @@ fn execute_insert_internal(
 
                     // Apply rowid (INTEGER) affinity to the evaluated value,
                     // matching the literal path (triggerC-4.1.x).
-                    Some(apply_affinity(coerce_rowid_affinity(&val)?))
+                    Some(apply_affinity(coerce_rowid_affinity(&val)?)?)
                 }
             }
         } else {
@@ -1172,12 +1186,6 @@ fn execute_insert_internal(
                 .get_table(&storage_table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(full_table_name.clone()))?;
             let row_count_before = table_ref.row_count();
-            // Collision-safe auto-rowid (issue #5835): identical to the old
-            // `physical_row_count + 1` for purely implicit tables, but also
-            // exceeds every explicit rowid ever assigned — required after a
-            // reload, where persisted rowids can exceed the compacted
-            // physical count.
-            let next_auto_rowid = table_ref.next_rowid();
 
             // SQLite REPLACE semantics: Check if the rowid we're about to use is reserved.
             // During REPLACE, the rowid for the new row is allocated BEFORE firing triggers.
@@ -1186,7 +1194,19 @@ fn execute_insert_internal(
             // - Explicit reservation: AFTER DELETE trigger auto-INSERTs skip to next rowid (SQLite
             //   reuses freed rowids, but VibeSQL doesn't, so we skip instead)
             let mut final_explicit_rowid = explicit_rowid;
-            let rowid_to_use = explicit_rowid.unwrap_or(next_auto_rowid);
+            // Collision-safe auto-rowid (issue #5835, #5894): only allocated when
+            // the row has no explicit rowid. `allocate_rowid_u64()` matches sqlite3
+            // — the max rowid + 1 (identical to the old `physical_row_count + 1`
+            // for purely implicit tables, but also exceeding every explicit rowid
+            // ever assigned, required after a reload), a random *unused* rowid when
+            // the max is already `i64::MAX`, or `SQLITE_FULL` if the rowid space is
+            // exhausted — never a silent reuse of `i64::MAX` (a duplicate rowid).
+            let rowid_to_use = match explicit_rowid {
+                Some(r) => r,
+                None => table_ref
+                    .allocate_rowid_u64()
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?,
+            };
             if let Some((reserved_rowid, is_explicit_reservation)) =
                 db.get_reserved_rowid_info(&storage_table_name)
             {
@@ -1445,12 +1465,18 @@ fn resolve_replace_conflicts_for_row(
     let reserved_rowid = if let Some(rowid) = explicit_rowid {
         rowid
     } else {
-        // Auto-allocate the next available rowid. `next_rowid()` covers both
-        // the physical row count (implicit rowids, including deleted rows)
+        // Auto-allocate the next available rowid. `allocate_rowid_u64()` covers
+        // both the physical row count (implicit rowids, including deleted rows)
         // and every explicit rowid ever assigned — required after a reload,
         // where persisted rowids can exceed the compacted physical count
-        // (issue #5835).
-        db.get_table(storage_table_name).map(|t| t.next_rowid()).unwrap_or(1)
+        // (issue #5835) — and matches sqlite3 at `i64::MAX` (random unused rowid,
+        // then `SQLITE_FULL`) instead of silently reusing it (issue #5894).
+        match db.get_table(storage_table_name) {
+            None => 1,
+            Some(t) => {
+                t.allocate_rowid_u64().map_err(|e| ExecutorError::StorageError(e.to_string()))?
+            }
+        }
     };
 
     // Reserve the rowid before firing triggers

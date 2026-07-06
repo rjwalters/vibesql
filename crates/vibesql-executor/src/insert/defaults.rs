@@ -394,7 +394,7 @@ pub fn apply_default_values_with_batch_context(
     if let Some(ipk_idx) = schema.get_integer_primary_key_index() {
         if row_values[ipk_idx] == vibesql_types::SqlValue::Null {
             // Auto-generate: max(existing_pk, batch_max) + 1, or 1 if table is empty
-            let table_max = compute_next_integer_pk_value(database, storage_table_name, ipk_idx)?;
+            let table_max = compute_next_integer_pk_value(database, storage_table_name)?;
             // The next value should be max of (table_max, batch_max_ipk + 1)
             let next_val = match batch_max_ipk {
                 Some(batch_max) => table_max.max(batch_max + 1),
@@ -452,43 +452,30 @@ pub fn apply_default_values_with_batch_context(
     Ok(first_generated_id)
 }
 
-/// Compute the next INTEGER PRIMARY KEY value for auto-generation
+/// Compute the next INTEGER PRIMARY KEY value for auto-generation.
 ///
-/// Returns max(existing_pk_values) + 1, or 1 if the table is empty.
-/// This implements SQLite's behavior where inserting NULL into an INTEGER PRIMARY KEY
-/// column auto-generates the next available value.
+/// An `INTEGER PRIMARY KEY` column is an alias for the rowid, so this simply
+/// delegates to the storage-layer rowid allocator ([`Table::allocate_rowid`]),
+/// which is the single source of truth for both plain-rowid and IPK inserts
+/// (issue #5894). That matches sqlite3 exactly and, unlike the old O(n) column
+/// scan, correctly handles:
+///
+/// - negative existing IPKs (max `-5` allocates `-4`, not `1`), and
+/// - saturation at `i64::MAX` (random unused rowid, then `SQLITE_FULL` — never
+///   a debug panic or a release wrap to `i64::MIN`).
+///
+/// Returns `1` when the table does not yet exist in storage.
 fn compute_next_integer_pk_value(
     database: &vibesql_storage::Database,
     table_name: &str,
-    pk_col_idx: usize,
 ) -> Result<i64, ExecutorError> {
-    let table = match database.get_table(table_name) {
-        Some(t) => t,
-        None => {
-            // Table doesn't exist in storage yet, start at 1
-            return Ok(1);
-        }
-    };
-
-    // Find the maximum value in the PRIMARY KEY column
-    let mut max_val: i64 = 0;
-
-    for row in table.scan() {
-        if let Some(value) = row.get(pk_col_idx) {
-            let int_val = match value {
-                vibesql_types::SqlValue::Integer(i) => *i,
-                vibesql_types::SqlValue::Bigint(i) => *i,
-                vibesql_types::SqlValue::Null => continue, // Skip NULL values
-                _ => continue, // Skip non-integer values (shouldn't happen)
-            };
-            if int_val > max_val {
-                max_val = int_val;
-            }
+    match database.get_table(table_name) {
+        // Table doesn't exist in storage yet, start at 1.
+        None => Ok(1),
+        Some(table) => {
+            table.allocate_rowid().map_err(|e| ExecutorError::StorageError(e.to_string()))
         }
     }
-
-    // Return max + 1 (or 1 if table was empty, since max_val starts at 0)
-    Ok(max_val + 1)
 }
 
 #[cfg(test)]
