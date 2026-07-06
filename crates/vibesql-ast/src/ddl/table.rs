@@ -240,7 +240,20 @@ pub enum ColumnConstraintKind {
         /// Syntax: NOT NULL ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE
         on_conflict: Option<crate::ConflictClause>,
     },
-    Check(Box<Expression>),
+    /// CHECK constraint.
+    ///
+    /// `source_text` holds the verbatim source spelling of the expression
+    /// between the CHECK parentheses (interior whitespace preserved, outer
+    /// whitespace trimmed), exactly as SQLite echoes it in the
+    /// "CHECK constraint failed: <expr>" message for an unnamed constraint.
+    /// The parsed `expr` alone is lossy — re-rendering it via `ToSql` drops the
+    /// original operator spacing (`d > 0` becomes `d>0`). `None` when the AST
+    /// was built programmatically without source spans, in which case callers
+    /// fall back to `expr.to_sql()`.
+    Check {
+        expr: Box<Expression>,
+        source_text: Option<String>,
+    },
     References {
         table: String,
         /// Column in the referenced table. If None, defaults to the primary key.
@@ -294,6 +307,14 @@ pub enum TableConstraintKind {
     },
     Check {
         expr: Box<Expression>,
+        /// Verbatim source text of the CHECK expression between the
+        /// parentheses (interior whitespace preserved, outer whitespace
+        /// trimmed), matching what SQLite echoes in the
+        /// "CHECK constraint failed: <expr>" message for an unnamed
+        /// table-level constraint. `None` when the AST was built
+        /// programmatically without source spans; callers then fall back to
+        /// `expr.to_sql()`.
+        source_text: Option<String>,
     },
     /// FULLTEXT index constraint
     /// Example: FULLTEXT INDEX ft_search (title, body)

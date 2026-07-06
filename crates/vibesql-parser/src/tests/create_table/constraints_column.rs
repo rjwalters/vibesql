@@ -63,7 +63,7 @@ fn test_parse_create_table_with_check_constraint() {
             assert!(matches!(
                 create.columns[0].constraints[0],
                 vibesql_ast::ColumnConstraint {
-                    kind: vibesql_ast::ColumnConstraintKind::Check(_),
+                    kind: vibesql_ast::ColumnConstraintKind::Check { .. },
                     ..
                 }
             ));
@@ -148,7 +148,7 @@ fn test_parse_create_table_with_multiple_constraints() {
             assert!(matches!(
                 create.columns[2].constraints[0],
                 vibesql_ast::ColumnConstraint {
-                    kind: vibesql_ast::ColumnConstraintKind::Check(_),
+                    kind: vibesql_ast::ColumnConstraintKind::Check { .. },
                     ..
                 }
             ));
@@ -585,7 +585,7 @@ fn test_parse_default_interleaved_with_constraints() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check(_))));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

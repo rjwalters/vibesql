@@ -130,6 +130,28 @@ impl Parser {
         self.source.get(start_span.start..end_span.end).map(str::to_string)
     }
 
+    /// Return the verbatim source text that sits *between* the two delimiter
+    /// tokens at indices `open` and `close` (exclusive of both), trimmed of
+    /// leading and trailing ASCII whitespace but otherwise byte-for-byte from
+    /// the original source.
+    ///
+    /// This is used to recover a CHECK constraint expression's original
+    /// spelling from `CHECK ( <here> )`: SQLite echoes exactly these bytes
+    /// (interior spacing and comments preserved, outer whitespace trimmed) in
+    /// its "CHECK constraint failed: <expr>" message. Returns `None` when
+    /// span/source information is unavailable (parsers built via
+    /// [`Parser::new`]) or the delimiter indices are out of range.
+    pub(crate) fn source_inside_delimiters(&self, open: usize, close: usize) -> Option<String> {
+        if self.source.is_empty() || close <= open {
+            return None;
+        }
+        let open_span = self.spans.get(open)?;
+        let close_span = self.spans.get(close)?;
+        self.source
+            .get(open_span.end..close_span.start)
+            .map(|s| s.trim().to_string())
+    }
+
     /// Parse a comma-separated list of items using a provided parser function
     ///
     /// This is a generic helper that consolidates the common pattern of parsing

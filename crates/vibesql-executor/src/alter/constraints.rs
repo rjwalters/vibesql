@@ -74,7 +74,7 @@ pub(super) fn execute_add_constraint(
 
             Ok(format!("UNIQUE constraint added to table '{}'", stmt.table_name))
         }
-        TableConstraintKind::Check { expr } => {
+        TableConstraintKind::Check { expr, .. } => {
             let constraint_name = stmt
                 .constraint
                 .name

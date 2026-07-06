@@ -2353,9 +2353,10 @@ mod tests {
         // rowids, and the alias makes `WHERE rowid=N` resolve through `id`).
         assert_eq!(child.rowid_alias_column, Some(0), "IPK rowid alias must be rebuilt");
 
-        // CHECK constraint survives.
+        // CHECK constraint survives, with its name preserving the original
+        // source spacing (`CHECK(z > 0)` → `z > 0`, SQLite-compatible).
         assert_eq!(child.check_constraints.len(), 1, "CHECK must be rehydrated");
-        assert_eq!(child.check_constraints[0].0, "z>0");
+        assert_eq!(child.check_constraints[0].0, "z > 0");
 
         // FK survives with its action and resolved parent columns (the
         // parent's CreateTable precedes the child's in the WAL).

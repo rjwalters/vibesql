@@ -191,7 +191,7 @@ fn test_parse_create_table_typeless_with_check_constraint() {
             assert!(create.columns[0]
                 .constraints
                 .iter()
-                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check(_))));
+                .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check { .. })));
         }
         _ => panic!("Expected CREATE TABLE statement"),
     }

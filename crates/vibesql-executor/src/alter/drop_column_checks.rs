@@ -490,7 +490,7 @@ fn check_constraint_missing_column(schema: &TableSchema, dropped: &str) -> Optio
 
     // Table-level CHECK constraints always survive the drop.
     for constraint in &create.table_constraints {
-        if let TableConstraintKind::Check { expr } = &constraint.kind {
+        if let TableConstraintKind::Check { expr, .. } = &constraint.kind {
             if let Some(display) = find_column_ref_display(expr, dropped) {
                 return Some(display);
             }
@@ -504,7 +504,7 @@ fn check_constraint_missing_column(schema: &TableSchema, dropped: &str) -> Optio
             continue;
         }
         for constraint in &column.constraints {
-            if let ColumnConstraintKind::Check(expr) = &constraint.kind {
+            if let ColumnConstraintKind::Check { expr, .. } = &constraint.kind {
                 if let Some(display) = find_column_ref_display(expr, dropped) {
                     return Some(display);
                 }
