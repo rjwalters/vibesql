@@ -83,6 +83,103 @@ fn apply_column_aliases(
     Ok(schema)
 }
 
+/// Resolve a bare column reference in a view body to its source column's
+/// collation, walking the view's FROM clause (issue #5864).
+///
+/// Base-table sources contribute the column's declared collation; view sources
+/// recurse into the inner view body so collation propagates through arbitrarily
+/// nested views. Subqueries, table-valued functions, and other exotic sources
+/// yield `None` (default BINARY), matching the safe-degradation contract of
+/// `view_select_list_collations`.
+fn view_body_column_collation(
+    database: &vibesql_storage::Database,
+    from: Option<&vibesql_ast::FromClause>,
+    col_id: &vibesql_ast::ColumnIdentifier,
+) -> Option<String> {
+    let from = from?;
+    let column_name = col_id.column_canonical();
+    // A table-qualified reference resolves against that source directly.
+    if let Some(table_name) = col_id.table_canonical() {
+        return source_column_collation(database, table_name, column_name);
+    }
+    find_collation_in_from(database, from, column_name)
+}
+
+/// Search a FROM clause's table/join sources for a column's collation.
+fn find_collation_in_from(
+    database: &vibesql_storage::Database,
+    from: &vibesql_ast::FromClause,
+    column_name: &str,
+) -> Option<String> {
+    match from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            source_column_collation(database, name, column_name)
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            find_collation_in_from(database, left, column_name)
+                .or_else(|| find_collation_in_from(database, right, column_name))
+        }
+        _ => None,
+    }
+}
+
+/// Resolve `column_name` in a FROM source named `source_name`. A base table
+/// yields the column's declared collation; a view recurses into its defining
+/// body so an explicit COLLATE (or a base column's collation) propagates
+/// through nested views. Anything unresolved yields `None` (BINARY).
+fn source_column_collation(
+    database: &vibesql_storage::Database,
+    source_name: &str,
+    column_name: &str,
+) -> Option<String> {
+    if let Some(table) = database.get_table(source_name) {
+        return table
+            .schema
+            .columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(column_name))
+            .and_then(|c| c.collation.clone());
+    }
+    // View source: map the referenced column to its select-list position and
+    // resolve that item's collation against the inner view's own FROM clause.
+    let view = database.catalog.get_view(source_name)?;
+    let idx = view_output_column_index(view, column_name)?;
+    let inner_from = view.query.from.as_ref();
+    let resolver = |c: &vibesql_ast::ColumnIdentifier| -> Option<String> {
+        view_body_column_collation(database, inner_from, c)
+    };
+    let collations = crate::evaluator::collation::view_select_list_collations(
+        &view.query.select_list,
+        &resolver,
+    );
+    collations.get(idx).cloned().flatten()
+}
+
+/// Map a view's exposed column name to its select-list index. Uses the view's
+/// explicit column list when present, otherwise the select item's output name
+/// (an alias, or a bare column reference's name). Returns `None` when the name
+/// cannot be positioned (e.g. wildcard bodies) so collation degrades to BINARY.
+fn view_output_column_index(
+    view: &vibesql_catalog::ViewDefinition,
+    column_name: &str,
+) -> Option<usize> {
+    if let Some(cols) = &view.columns {
+        return cols.iter().position(|c| c.eq_ignore_ascii_case(column_name));
+    }
+    view.query.select_list.iter().position(|item| match item {
+        vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+            if let Some(a) = alias {
+                a.eq_ignore_ascii_case(column_name)
+            } else if let vibesql_ast::Expression::ColumnRef(c) = expr {
+                c.column_canonical().eq_ignore_ascii_case(column_name)
+            } else {
+                false
+            }
+        }
+        _ => false,
+    })
+}
+
 /// Sort rows by INTEGER PRIMARY KEY column value (Issue #4926)
 ///
 /// SQLite guarantees that tables with INTEGER PRIMARY KEY return rows in rowid order
@@ -352,6 +449,34 @@ pub(crate) fn execute_table_scan(
             select_result.columns.clone()
         };
 
+        // Propagate each view column's collation from the view body's select
+        // list so that comparisons in the outer query use the right collating
+        // sequence (ticket a7debbe0ad1, issue #5864). Without this, an outer
+        // `SELECT B < a FROM v` where the view defines `B` as
+        // `'B' COLLATE NOCASE` would compare BINARY instead of NOCASE.
+        //
+        // Only the (left) branch of the body's select list is inspected — for
+        // a UNION body SQLite likewise takes the collation from the first
+        // branch. The derived vector is applied only when it aligns 1:1 with
+        // the result columns, so wildcard-expanded bodies (whose select-item
+        // count differs from the column count) degrade safely to BINARY.
+        let view_from = view.query.from.as_ref();
+        let column_collation_fn = |col_id: &vibesql_ast::ColumnIdentifier| -> Option<String> {
+            view_body_column_collation(database, view_from, col_id)
+        };
+        let derived_collations = crate::evaluator::collation::view_select_list_collations(
+            &view.query.select_list,
+            &column_collation_fn,
+        );
+        let use_derived_collations = derived_collations.len() == column_names.len();
+        let collation_for = |idx: usize| -> Option<String> {
+            if use_derived_collations {
+                derived_collations.get(idx).cloned().flatten()
+            } else {
+                None
+            }
+        };
+
         // Since views can have arbitrary SELECT expressions, we derive column types from the first
         // row
         let columns = if !select_result.rows.is_empty() {
@@ -359,14 +484,15 @@ pub(crate) fn execute_table_scan(
             column_names
                 .iter()
                 .zip(&first_row.values)
-                .map(|(name, value)| {
+                .enumerate()
+                .map(|(idx, (name, value))| {
                     vibesql_catalog::ColumnSchema {
                         name: name.clone(),
                         data_type: value.get_type(),
                         nullable: true, // Views return nullable columns by default
                         default_value: None,
                         generated_expr: None, // Views don't have generated columns
-                        collation: None,      // Views don't preserve collation
+                        collation: collation_for(idx), // Propagate view body collation (#5864)
                         is_exact_integer_type: false, // Views don't preserve exact type
                     }
                 })
@@ -375,14 +501,15 @@ pub(crate) fn execute_table_scan(
             // For empty views, create columns without specific types
             // This is a limitation but views with no rows are edge cases
             column_names
-                .into_iter()
-                .map(|name| vibesql_catalog::ColumnSchema {
-                    name,
+                .iter()
+                .enumerate()
+                .map(|(idx, name)| vibesql_catalog::ColumnSchema {
+                    name: name.clone(),
                     data_type: vibesql_types::DataType::Varchar { max_length: None },
                     nullable: true,
                     default_value: None,
                     generated_expr: None, // Views don't have generated columns
-                    collation: None,      // Views don't preserve collation
+                    collation: collation_for(idx), // Propagate view body collation (#5864)
                     is_exact_integer_type: false, // Views don't preserve exact type
                 })
                 .collect()
