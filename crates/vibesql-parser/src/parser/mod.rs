@@ -226,8 +226,24 @@ impl Parser {
 
         let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
         let expr = parser.parse_expression()?;
+        // A single trailing `;` is a benign terminator, but anything after it
+        // means the rendered text did not round-trip as one expression (e.g. a
+        // corrupt/hand-crafted catalog blob smuggling `x; DROP TABLE t`). Fail
+        // closed: consume one semicolon, then require EOF (issue #5866).
         match parser.peek() {
-            Token::Eof | Token::Semicolon => Ok(expr),
+            Token::Eof => Ok(expr),
+            Token::Semicolon => {
+                parser.advance(); // consume the terminating semicolon
+                match parser.peek() {
+                    Token::Eof => Ok(expr),
+                    other => Err(ParseError {
+                        message: format!(
+                            "Unexpected trailing token {:?} after expression in '{}'",
+                            other, input
+                        ),
+                    }),
+                }
+            }
             other => Err(ParseError {
                 message: format!(
                     "Unexpected trailing token {:?} after expression in '{}'",
