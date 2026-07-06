@@ -24,6 +24,7 @@ Cargo.lock
 *.profraw
 .loom/state.json
 .loom/worktrees/
+.loom/sweep-checkpoint/
 .loom/*.log
 .loom/*.sock
 lcov.info
