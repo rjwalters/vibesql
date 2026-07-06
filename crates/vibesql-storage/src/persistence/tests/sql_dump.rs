@@ -88,6 +88,88 @@ fn test_sql_dump_emits_verbatim_create_source() {
     std::fs::remove_file(path).ok();
 }
 
+/// Issue #5868: an unnamed CHECK constraint stores the verbatim source text of
+/// its expression as its "name" (preserving operator spacing, e.g. `d > 0`).
+/// When reconstructing DDL for a schema that has no verbatim `sql_source`, the
+/// dump must NOT mistake that spaced text for a user-provided constraint name
+/// and emit a bogus `CONSTRAINT d > 0` identifier; it must emit `CHECK (d > 0)`
+/// verbatim so the constraint round-trips.
+#[test]
+fn test_sql_dump_unnamed_check_preserves_source_spacing() {
+    use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+
+    let check_expr = Expression::BinaryOp {
+        left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("d", false))),
+        op: BinaryOperator::GreaterThan,
+        right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+    };
+
+    let mut db = Database::new();
+    let mut schema =
+        TableSchema::new("t".to_string(), vec![ColumnSchema::new(
+            "d".to_string(),
+            DataType::Integer,
+            true,
+        )]);
+    // No sql_source → the dump reconstructs the CREATE TABLE from fields,
+    // exercising the CHECK reconstruction branch in save.rs. The stored name
+    // is the verbatim (spaced) source text of the unnamed CHECK.
+    schema.check_constraints = vec![("d > 0".to_string(), check_expr.clone())];
+    db.create_table(schema).unwrap();
+
+    let path = "/tmp/test_db_5868_unnamed_check.sql";
+    db.save_sql_dump(path).unwrap();
+    let content = std::fs::read_to_string(path).unwrap();
+
+    assert!(
+        content.contains("CHECK (d > 0)"),
+        "unnamed CHECK must be emitted verbatim, got:\n{}",
+        content
+    );
+    assert!(
+        !content.contains("CONSTRAINT d > 0"),
+        "spaced source text must not be emitted as a bogus constraint name, got:\n{}",
+        content
+    );
+
+    std::fs::remove_file(path).ok();
+}
+
+/// A genuinely named CHECK must still emit its `CONSTRAINT <name> CHECK (...)`
+/// form in the reconstructed dump (issue #5868 regression guard).
+#[test]
+fn test_sql_dump_named_check_keeps_constraint_name() {
+    use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+
+    let check_expr = Expression::BinaryOp {
+        left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("d", false))),
+        op: BinaryOperator::GreaterThan,
+        right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+    };
+
+    let mut db = Database::new();
+    let mut schema =
+        TableSchema::new("t".to_string(), vec![ColumnSchema::new(
+            "d".to_string(),
+            DataType::Integer,
+            true,
+        )]);
+    schema.check_constraints = vec![("chk_d".to_string(), check_expr)];
+    db.create_table(schema).unwrap();
+
+    let path = "/tmp/test_db_5868_named_check.sql";
+    db.save_sql_dump(path).unwrap();
+    let content = std::fs::read_to_string(path).unwrap();
+
+    assert!(
+        content.contains("CONSTRAINT chk_d CHECK"),
+        "named CHECK must keep its constraint name, got:\n{}",
+        content
+    );
+
+    std::fs::remove_file(path).ok();
+}
+
 #[test]
 fn test_sql_value_to_literal() {
     use crate::persistence::save::sql_value_to_literal;

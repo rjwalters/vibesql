@@ -257,15 +257,24 @@ impl Database {
                 for (constraint_name, check_expr) in &schema.check_constraints {
                     use vibesql_ast::pretty_print::ToSql;
                     let expr_text = check_expr.to_sql();
-                    // Only output CONSTRAINT keyword if the name is different from expression
-                    // (i.e., it's a user-provided name)
-                    if constraint_name != &expr_text {
+                    // An unnamed CHECK's stored "name" is the verbatim source
+                    // text of its expression (whitespace preserved), so it
+                    // differs from `to_sql()` only by operator spacing (e.g.
+                    // `d > 0` vs `d>0`). Compare with all whitespace removed to
+                    // recognize that case; otherwise a spaced source form would
+                    // be misread as a user-provided name and emitted as a bogus
+                    // `CONSTRAINT d > 0` identifier.
+                    let strip_ws = |s: &str| s.split_whitespace().collect::<String>();
+                    if strip_ws(constraint_name) != strip_ws(&expr_text) {
+                        // User-provided name: emit it with the re-rendered expr.
                         write!(writer, ", CONSTRAINT {} CHECK ({})", constraint_name, expr_text)
                             .map_err(|e| {
                                 StorageError::NotImplemented(format!("Write error: {}", e))
                             })?;
                     } else {
-                        write!(writer, ", CHECK ({})", expr_text).map_err(|e| {
+                        // Unnamed: emit the verbatim source text so the reloaded
+                        // constraint's violation message round-trips byte-exact.
+                        write!(writer, ", CHECK ({})", constraint_name).map_err(|e| {
                             StorageError::NotImplemented(format!("Write error: {}", e))
                         })?;
                     }

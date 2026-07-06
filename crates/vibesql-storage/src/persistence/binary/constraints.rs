@@ -218,17 +218,33 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
     let mut check_constraints: Vec<(String, vibesql_ast::Expression)> = Vec::new();
     for col_def in &create.columns {
         for constraint in &col_def.constraints {
-            if let vibesql_ast::ColumnConstraintKind::Check(expr) = &constraint.kind {
+            if let vibesql_ast::ColumnConstraintKind::Check { expr, source_text } =
+                &constraint.kind
+            {
                 use vibesql_ast::pretty_print::ToSql;
-                let name = constraint.name.clone().unwrap_or_else(|| expr.to_sql());
+                // Prefer the explicit name, then the verbatim CHECK source
+                // text (preserves the original operator spacing that SQLite
+                // echoes in "CHECK constraint failed: <expr>"), falling back
+                // to the re-rendered expression only if no span was captured.
+                let name = constraint
+                    .name
+                    .clone()
+                    .or_else(|| source_text.clone())
+                    .unwrap_or_else(|| expr.to_sql());
                 check_constraints.push((name, (**expr).clone()));
             }
         }
     }
     for table_constraint in &create.table_constraints {
-        if let vibesql_ast::TableConstraintKind::Check { expr } = &table_constraint.kind {
+        if let vibesql_ast::TableConstraintKind::Check { expr, source_text } =
+            &table_constraint.kind
+        {
             use vibesql_ast::pretty_print::ToSql;
-            let name = table_constraint.name.clone().unwrap_or_else(|| expr.to_sql());
+            let name = table_constraint
+                .name
+                .clone()
+                .or_else(|| source_text.clone())
+                .unwrap_or_else(|| expr.to_sql());
             check_constraints.push((name, (**expr).clone()));
         }
     }
@@ -381,11 +397,31 @@ mod tests {
         rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
 
         assert_eq!(schema.check_constraints.len(), 2);
-        // Unnamed column-level CHECK gets the expression's to_sql() text as
-        // its name (same derivation as ConstraintValidator at CREATE time).
-        assert_eq!(schema.check_constraints[0].0, "a>0");
+        // Unnamed column-level CHECK gets the verbatim CHECK source text as
+        // its name, preserving the original operator spacing (SQLite echoes
+        // exactly this in "CHECK constraint failed: a > 0"). Same derivation
+        // as ConstraintValidator at CREATE time.
+        assert_eq!(schema.check_constraints[0].0, "a > 0");
         // Named table-level CHECK keeps its explicit name.
         assert_eq!(schema.check_constraints[1].0, "b_pos");
+    }
+
+    #[test]
+    fn rehydrated_check_name_preserves_source_spacing() {
+        // Both spaced and unspaced CHECK forms round-trip verbatim through
+        // rehydration, matching SQLite's violation-message text byte-for-byte.
+        let mut spaced = schema_with_source(
+            "t",
+            vec![col("d")],
+            "CREATE TABLE t(d INTEGER, CHECK (d > 0))",
+        );
+        rehydrate_constraints_from_sql_source(&mut spaced, &HashMap::new()).unwrap();
+        assert_eq!(spaced.check_constraints[0].0, "d > 0");
+
+        let mut unspaced =
+            schema_with_source("t", vec![col("d")], "CREATE TABLE t(d INTEGER, CHECK(d>0))");
+        rehydrate_constraints_from_sql_source(&mut unspaced, &HashMap::new()).unwrap();
+        assert_eq!(unspaced.check_constraints[0].0, "d>0");
     }
 
     #[test]

@@ -93,11 +93,17 @@ impl ConstraintValidator {
                     ColumnConstraintKind::Unique { .. } => {
                         result.unique_constraints.push(vec![col_def.name.clone()]);
                     }
-                    ColumnConstraintKind::Check(expr) => {
-                        // Use explicit name if provided, otherwise use expression text
-                        // This matches SQLite's behavior for error messages
-                        let constraint_name =
-                            constraint.name.clone().unwrap_or_else(|| expr.to_sql());
+                    ColumnConstraintKind::Check { expr, source_text } => {
+                        // Use explicit name if provided; otherwise use the
+                        // verbatim CHECK source text (SQLite echoes the
+                        // original operator spacing in the violation message),
+                        // falling back to the re-rendered expression only when
+                        // no source span was captured.
+                        let constraint_name = constraint
+                            .name
+                            .clone()
+                            .or_else(|| source_text.clone())
+                            .unwrap_or_else(|| expr.to_sql());
                         result.check_constraints.push((constraint_name, (**expr).clone()));
                     }
                     ColumnConstraintKind::NotNull
@@ -159,11 +165,15 @@ impl ConstraintValidator {
                         columns.iter().map(|c| c.expect_column_name().to_string()).collect();
                     result.unique_constraints.push(column_names);
                 }
-                TableConstraintKind::Check { expr } => {
-                    // Use explicit name if provided, otherwise use expression text
-                    // This matches SQLite's behavior for error messages
-                    let constraint_name =
-                        table_constraint.name.clone().unwrap_or_else(|| expr.to_sql());
+                TableConstraintKind::Check { expr, source_text } => {
+                    // Use explicit name if provided; otherwise the verbatim
+                    // CHECK source text, falling back to the re-rendered
+                    // expression only when no source span was captured.
+                    let constraint_name = table_constraint
+                        .name
+                        .clone()
+                        .or_else(|| source_text.clone())
+                        .unwrap_or_else(|| expr.to_sql());
                     result.check_constraints.push((constraint_name, (**expr).clone()));
                 }
                 TableConstraintKind::ForeignKey { .. } => {
@@ -359,13 +369,69 @@ mod tests {
 
         let columns = vec![make_column_def(
             "age",
-            vec![ColumnConstraintKind::Check(Box::new(check_expr.clone()))],
+            // No source_text (programmatic AST) → name falls back to expr.to_sql().
+            vec![ColumnConstraintKind::Check {
+                expr: Box::new(check_expr.clone()),
+                source_text: None,
+            }],
         )];
 
         let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.check_constraints.len(), 1);
         assert_eq!(result.check_constraints[0].1, check_expr);
+        // Programmatic AST carries no source span, so the name falls back to
+        // the re-rendered expression text.
+        assert_eq!(result.check_constraints[0].0, check_expr.to_sql());
+    }
+
+    #[test]
+    fn test_check_constraint_name_preserves_source_spacing() {
+        // When the parser captured verbatim source text, the constraint name
+        // (used in "CHECK constraint failed: <name>") echoes the original
+        // operator spacing rather than the whitespace-stripped `to_sql()`.
+        let check_expr = Expression::BinaryOp {
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "d", false,
+            ))),
+            op: vibesql_ast::BinaryOperator::GreaterThan,
+            right: Box::new(Expression::Literal(vibesql_types::SqlValue::Integer(0))),
+        };
+
+        // Spaced source form is preserved verbatim.
+        let columns = vec![make_column_def(
+            "d",
+            vec![ColumnConstraintKind::Check {
+                expr: Box::new(check_expr.clone()),
+                source_text: Some("d > 0".to_string()),
+            }],
+        )];
+        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        assert_eq!(result.check_constraints[0].0, "d > 0");
+
+        // Unspaced source form is likewise preserved verbatim (SQLite echoes
+        // exactly what the user wrote).
+        let columns = vec![make_column_def(
+            "d",
+            vec![ColumnConstraintKind::Check {
+                expr: Box::new(check_expr.clone()),
+                source_text: Some("d>0".to_string()),
+            }],
+        )];
+        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        assert_eq!(result.check_constraints[0].0, "d>0");
+
+        // An explicit constraint name always wins over the source text.
+        let mut col = make_column_def("d", vec![]);
+        col.constraints.push(ColumnConstraint {
+            name: Some("chk_d".to_string()),
+            kind: ColumnConstraintKind::Check {
+                expr: Box::new(check_expr.clone()),
+                source_text: Some("d > 0".to_string()),
+            },
+        });
+        let result = ConstraintValidator::process_constraints("t", &[col], &[]).unwrap();
+        assert_eq!(result.check_constraints[0].0, "chk_d");
     }
 
     #[test]

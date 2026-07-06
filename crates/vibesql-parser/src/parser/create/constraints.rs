@@ -471,12 +471,22 @@ impl Parser {
                 }
                 Token::Keyword { keyword: Keyword::Check, .. } => {
                     self.advance(); // consume CHECK
+                    let lparen_pos = self.position;
                     self.expect_token(Token::LParen)?;
                     let expr = self.parse_expression()?;
+                    let rparen_pos = self.position;
                     self.expect_token(Token::RParen)?;
+                    // Preserve the verbatim CHECK expression text so the
+                    // "CHECK constraint failed: <expr>" message echoes the
+                    // original operator spacing (SQLite-compatible), not the
+                    // whitespace-stripped `expr.to_sql()` re-render.
+                    let source_text = self.source_inside_delimiters(lparen_pos, rparen_pos);
                     constraints.push(vibesql_ast::ColumnConstraint {
                         name,
-                        kind: vibesql_ast::ColumnConstraintKind::Check(Box::new(expr)),
+                        kind: vibesql_ast::ColumnConstraintKind::Check {
+                            expr: Box::new(expr),
+                            source_text,
+                        },
                     });
                 }
                 Token::Keyword { keyword: Keyword::References, .. } => {
@@ -700,10 +710,16 @@ impl Parser {
             }
             Token::Keyword { keyword: Keyword::Check, .. } => {
                 self.advance(); // consume CHECK
+                let lparen_pos = self.position;
                 self.expect_token(Token::LParen)?;
                 let expr = self.parse_expression()?;
+                let rparen_pos = self.position;
                 self.expect_token(Token::RParen)?;
-                vibesql_ast::TableConstraintKind::Check { expr: Box::new(expr) }
+                // Preserve the verbatim CHECK expression text (see the
+                // column-level CHECK arm) so the violation message echoes the
+                // original operator spacing.
+                let source_text = self.source_inside_delimiters(lparen_pos, rparen_pos);
+                vibesql_ast::TableConstraintKind::Check { expr: Box::new(expr), source_text }
             }
             Token::Keyword { keyword: Keyword::Fulltext, .. } => {
                 self.advance(); // consume FULLTEXT

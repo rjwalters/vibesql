@@ -311,7 +311,10 @@ fn test_create_table_with_check_constraint() {
             nullable: false,
             constraints: vec![ColumnConstraint {
                 name: None,
-                kind: ColumnConstraintKind::Check(Box::new(check_expr.clone())),
+                kind: ColumnConstraintKind::Check {
+                    expr: Box::new(check_expr.clone()),
+                    source_text: None,
+                },
             }],
             default_value: None,
             comment: None,
