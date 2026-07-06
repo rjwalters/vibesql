@@ -12,6 +12,19 @@ pub const DEFAULT_SCHEMA: &str = "main";
 /// Temp tables are not persisted and have session scope.
 pub const TEMP_SCHEMA: &str = "temp";
 
+/// Name prefix for the internal unique index materialized for a WITHOUT ROWID
+/// table's PRIMARY KEY.
+///
+/// In SQLite the PRIMARY KEY of a WITHOUT ROWID table *is* the table B-tree and
+/// gets no separate `sqlite_autoindex_*` entry, so a `UNIQUE` constraint on the
+/// same table is the first real index and is named `sqlite_autoindex_<t>_1`.
+/// VibeSQL still materializes a real unique index to enforce/plan the PK, but
+/// names it `<prefix><table>` — outside the `sqlite_autoindex_` namespace — so
+/// it neither consumes an autoindex ordinal nor surfaces in `sqlite_master`.
+/// The index is regenerated from DDL on reload, so persistence layers skip it
+/// on save (see issue #5882).
+pub const WITHOUT_ROWID_PK_INDEX_PREFIX: &str = "_withoutrowidinternalpk_";
+
 mod advanced_objects;
 mod column;
 mod domain;

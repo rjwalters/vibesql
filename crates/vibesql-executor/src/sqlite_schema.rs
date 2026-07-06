@@ -79,41 +79,31 @@ pub fn get_sqlite_schema_table_schema() -> TableSchema {
     )
 }
 
-/// Whether `index` is the implicit PRIMARY KEY autoindex of a WITHOUT ROWID
-/// table and must therefore be hidden from `sqlite_master` listings.
+/// Whether `index` is the implicit PRIMARY KEY index of a WITHOUT ROWID table
+/// and must therefore be hidden from `sqlite_master` listings.
 ///
 /// In SQLite, the PRIMARY KEY of a WITHOUT ROWID table *is* the table's B-tree
 /// — no separate `sqlite_autoindex_*` entry exists for it in `sqlite_master`
 /// (verified against sqlite3 3.51.0: `CREATE TABLE t(a, b, PRIMARY KEY(a))
 /// WITHOUT ROWID` yields only the `table` row; a `UNIQUE` constraint on the
-/// same table still gets its autoindex row). VibeSQL materializes a real
-/// unique index for the WITHOUT ROWID PK internally (uniqueness enforcement
-/// and planning), so we filter it out at listing time instead. Covers
-/// alterdropcol 7.2, where `SELECT sql FROM sqlite_schema` must return only
-/// the CREATE TABLE row.
+/// same table still gets its autoindex row, named `sqlite_autoindex_<t>_1`).
+/// VibeSQL materializes a real unique index for the WITHOUT ROWID PK internally
+/// (uniqueness enforcement and planning) under the
+/// [`WITHOUT_ROWID_PK_INDEX_PREFIX`] name — outside the `sqlite_autoindex_`
+/// namespace so it consumes no autoindex ordinal (issue #5882) — and we filter
+/// it out at listing time here. Covers alterdropcol 7.2, where `SELECT sql FROM
+/// sqlite_schema` must return only the CREATE TABLE row.
+///
+/// [`WITHOUT_ROWID_PK_INDEX_PREFIX`]: vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX
 fn is_without_rowid_pk_autoindex(
     catalog: &vibesql_catalog::Catalog,
     index: &vibesql_catalog::IndexMetadata,
 ) -> bool {
-    if !index.name.starts_with("sqlite_autoindex_") {
+    if !index.name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX) {
         return false;
     }
-    let Some(table) = catalog.get_table(&index.table_name) else {
-        return false;
-    };
-    if !table.without_rowid {
-        return false;
-    }
-    let Some(pk_cols) = &table.primary_key else {
-        return false;
-    };
-    // Match the index column list against the PK column list (a UNIQUE
-    // autoindex on the same WITHOUT ROWID table keeps its listing).
-    pk_cols.len() == index.columns.len()
-        && pk_cols
-            .iter()
-            .zip(index.columns.iter())
-            .all(|(pk, ic)| ic.column_name().is_some_and(|name| name.eq_ignore_ascii_case(pk)))
+    // Defensive: the internal PK index only ever exists on a WITHOUT ROWID table.
+    catalog.get_table(&index.table_name).is_some_and(|table| table.without_rowid)
 }
 
 /// Build a single sqlite_master-format row.
@@ -1208,14 +1198,17 @@ mod tests {
             ]
         };
 
-        // WITHOUT ROWID table with PK(a) and UNIQUE(b).
+        // WITHOUT ROWID table with PK(a) and UNIQUE(b). The PK materializes an
+        // internal index outside the autoindex namespace (issue #5882), so the
+        // UNIQUE constraint is the first real index and gets the `_1` ordinal.
+        let wr_pk_index = format!("{}t_wr", vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX);
         let mut wr =
             TableSchema::with_primary_key("t_wr".to_string(), make_cols(), vec!["a".to_string()]);
         wr.without_rowid = true;
         catalog.create_table(wr).unwrap();
         catalog
             .add_index(IndexMetadata::new(
-                "sqlite_autoindex_t_wr_1".to_string(),
+                wr_pk_index.clone(),
                 "t_wr".to_string(),
                 IndexType::BTree,
                 vec![IndexedColumn::new_column("a".to_string(), SortOrder::Ascending)],
@@ -1224,7 +1217,7 @@ mod tests {
             .unwrap();
         catalog
             .add_index(IndexMetadata::new(
-                "sqlite_autoindex_t_wr_2".to_string(),
+                "sqlite_autoindex_t_wr_1".to_string(),
                 "t_wr".to_string(),
                 IndexType::BTree,
                 vec![IndexedColumn::new_column("b".to_string(), SortOrder::Ascending)],
@@ -1261,12 +1254,16 @@ mod tests {
             .collect();
 
         assert!(
-            !index_names.contains(&"sqlite_autoindex_t_wr_1".to_string()),
-            "WITHOUT ROWID PK autoindex must be hidden, got {index_names:?}"
+            !index_names.contains(&wr_pk_index),
+            "WITHOUT ROWID PK internal index must be hidden, got {index_names:?}"
         );
         assert!(
-            index_names.contains(&"sqlite_autoindex_t_wr_2".to_string()),
-            "UNIQUE autoindex on WITHOUT ROWID table must stay listed, got {index_names:?}"
+            index_names.contains(&"sqlite_autoindex_t_wr_1".to_string()),
+            "UNIQUE autoindex on WITHOUT ROWID table must stay listed as _1, got {index_names:?}"
+        );
+        assert!(
+            !index_names.contains(&"sqlite_autoindex_t_wr_2".to_string()),
+            "UNIQUE autoindex must not be bumped to _2 by the hidden PK, got {index_names:?}"
         );
         assert!(
             index_names.contains(&"sqlite_autoindex_t_rowid_1".to_string()),

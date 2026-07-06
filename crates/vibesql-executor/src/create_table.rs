@@ -674,8 +674,18 @@ impl CreateTableExecutor {
         // and doesn't need a separate B-tree index (matches SQLite behavior)
         if let Some(pk_cols) = &table_schema.primary_key {
             if table_schema.rowid_alias_column.is_none() {
-                let index_name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
-                autoindex_counter += 1;
+                // WITHOUT ROWID tables: the PK *is* the table B-tree in SQLite and
+                // gets no `sqlite_autoindex_*` slot. We still materialize a real
+                // unique index to enforce/plan the PK, but give it an internal name
+                // outside the autoindex namespace and do NOT consume an ordinal, so
+                // UNIQUE constraints on the same table start at `_1` (issue #5882).
+                let index_name = if table_schema.without_rowid {
+                    format!("{}{}", vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX, table_name)
+                } else {
+                    let name = format!("sqlite_autoindex_{}_{}", table_name, autoindex_counter);
+                    autoindex_counter += 1;
+                    name
+                };
 
                 // Create IndexColumn specs for the PRIMARY KEY columns
                 let index_columns: Vec<IndexColumn> = pk_cols
