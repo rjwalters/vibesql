@@ -835,3 +835,229 @@ fn test_like_bitwise_and_pattern() {
         other => panic!("expected Like expression, got {:?}", other),
     }
 }
+
+// ============================================================================
+// Part B of #5851: relational operators (`< <= > >=`) form a tier that binds
+// TIGHTER than the equality/predicate tier (`= == != <> IS IN LIKE GLOB
+// BETWEEN`) but LOOSER than the bitwise tier. So BETWEEN bounds and LIKE/GLOB
+// patterns parse at the relational tier, while `=`/`==`/IS reduce left. Every
+// expected value below was verified against sqlite3 3.51.0.
+// ============================================================================
+
+#[test]
+fn test_relational_lt_in_between_high_bound() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 < 3; -- 0  (high bound is 3 < 3 = 0)
+    let expr = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 < 3;");
+    match expr {
+        vibesql_ast::Expression::Between { high, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&high),
+                vibesql_ast::BinaryOperator::LessThan,
+                "high bound should be (3 < 3), got {:?}",
+                high
+            );
+        }
+        other => panic!("expected Between expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_relational_le_in_between_high_bound() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 <= 3; -- 0  (high bound is 3 <= 3 = 1)
+    let expr = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 <= 3;");
+    match expr {
+        vibesql_ast::Expression::Between { high, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&high),
+                vibesql_ast::BinaryOperator::LessThanOrEqual,
+                "high bound should be (3 <= 3), got {:?}",
+                high
+            );
+        }
+        other => panic!("expected Between expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_relational_gt_in_between_low_bound() {
+    // sqlite3: SELECT 2 BETWEEN 1 > 0 AND 3; -- 1  (low bound is 1 > 0 = 1)
+    let expr = parse_select_expr("SELECT 2 BETWEEN 1 > 0 AND 3;");
+    match expr {
+        vibesql_ast::Expression::Between { low, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&low),
+                vibesql_ast::BinaryOperator::GreaterThan,
+                "low bound should be (1 > 0), got {:?}",
+                low
+            );
+        }
+        other => panic!("expected Between expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_relational_lt_in_like_pattern() {
+    // sqlite3: SELECT 2 LIKE 1 < 3; -- 0  (pattern is 1 < 3 = 1)
+    let expr = parse_select_expr("SELECT 2 LIKE 1 < 3;");
+    match expr {
+        vibesql_ast::Expression::Like { pattern, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&pattern),
+                vibesql_ast::BinaryOperator::LessThan,
+                "LIKE pattern should be (1 < 3), got {:?}",
+                pattern
+            );
+        }
+        other => panic!("expected Like expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_relational_gt_in_like_pattern() {
+    // sqlite3: SELECT 2 LIKE 1 > 3; -- 0  (pattern is 1 > 3 = 0)
+    let expr = parse_select_expr("SELECT 2 LIKE 1 > 3;");
+    match expr {
+        vibesql_ast::Expression::Like { pattern, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&pattern),
+                vibesql_ast::BinaryOperator::GreaterThan,
+                "LIKE pattern should be (1 > 3), got {:?}",
+                pattern
+            );
+        }
+        other => panic!("expected Like expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_relational_in_glob_pattern() {
+    // sqlite3: SELECT 2 GLOB 1 < 3; -- 0  (pattern is 1 < 3 = 1)
+    let expr = parse_select_expr("SELECT 2 GLOB 1 < 3;");
+    match expr {
+        vibesql_ast::Expression::Glob { pattern, negated, .. } => {
+            assert!(!negated);
+            assert_eq!(
+                bin_op(&pattern),
+                vibesql_ast::BinaryOperator::LessThan,
+                "GLOB pattern should be (1 < 3), got {:?}",
+                pattern
+            );
+        }
+        other => panic!("expected Glob expression, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_equality_reduces_left_over_between() {
+    // Equality binds LOOSER than the relational tier and reduces left, so the
+    // trailing `= 1` takes the whole BETWEEN as its left operand (unchanged).
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 = 1; -- 1, i.e. (2 BETWEEN 0 AND 3) = 1
+    let expr = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 = 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::Equal, "top =");
+    assert!(
+        matches!(left, vibesql_ast::Expression::Between { negated: false, .. }),
+        "LHS of = should be the BETWEEN node, got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_relational_binds_tighter_than_equality_lhs() {
+    // sqlite3: SELECT 1 < 2 = 1; -- 1, i.e. (1 < 2) = 1 (relational reduces first)
+    let expr = parse_select_expr("SELECT 1 < 2 = 1;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::Equal, "top =");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::LessThan,
+        "LHS of = should be (1 < 2), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_relational_binds_tighter_than_equality_rhs() {
+    // sqlite3: SELECT 1 = 2 < 3; -- 1, i.e. 1 = (2 < 3) (relational reduces first)
+    let expr = parse_select_expr("SELECT 1 = 2 < 3;");
+    let (_, right) = expect_bin(&expr, vibesql_ast::BinaryOperator::Equal, "top =");
+    assert_eq!(
+        bin_op(right),
+        vibesql_ast::BinaryOperator::LessThan,
+        "RHS of = should be (2 < 3), got {:?}",
+        right
+    );
+}
+
+#[test]
+fn test_chained_relational_is_left_associative() {
+    // sqlite3: SELECT 1 < 2 < 3; -- 1, i.e. ((1 < 2) < 3), NOT (1 < (2 < 3)).
+    let expr = parse_select_expr("SELECT 1 < 2 < 3;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::LessThan, "top <");
+    assert_eq!(
+        bin_op(left),
+        vibesql_ast::BinaryOperator::LessThan,
+        "left of < should be (1 < 2), got {:?}",
+        left
+    );
+}
+
+#[test]
+fn test_in_list_followed_by_relational() {
+    // sqlite3: SELECT 1 IN (1) < 3; -- 1, i.e. (1 IN (1)) < 3.
+    // continue_higher_precedence_ops must climb the relational tier.
+    let expr = parse_select_expr("SELECT 1 IN (1) < 3;");
+    let (left, _) = expect_bin(&expr, vibesql_ast::BinaryOperator::LessThan, "top <");
+    assert!(
+        matches!(left, vibesql_ast::Expression::InList { .. }),
+        "LHS of < should be an IN list, got {:?}",
+        left
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Symmetry: negated and non-negated forms must produce identically shaped
+// ASTs with relational bounds/patterns, differing only in the `negated` flag.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_between_relational_bound_negated_symmetry() {
+    // sqlite3: SELECT 2 BETWEEN 0 AND 3 < 3;     -- 0
+    // sqlite3: SELECT 2 NOT BETWEEN 0 AND 3 < 3; -- 1
+    let plain = parse_select_expr("SELECT 2 BETWEEN 0 AND 3 < 3;");
+    let negated = parse_select_expr("SELECT 2 NOT BETWEEN 0 AND 3 < 3;");
+    match (plain, negated) {
+        (
+            vibesql_ast::Expression::Between { low: l1, high: h1, negated: n1, .. },
+            vibesql_ast::Expression::Between { low: l2, high: h2, negated: n2, .. },
+        ) => {
+            assert!(!n1);
+            assert!(n2);
+            assert_eq!(l1, l2, "BETWEEN low bound must parse identically in both forms");
+            assert_eq!(h1, h2, "BETWEEN high bound must parse identically in both forms");
+        }
+        other => panic!("expected two Between expressions, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_like_relational_pattern_negated_symmetry() {
+    // sqlite3: SELECT 2 LIKE 1 < 3;     -- 0
+    // sqlite3: SELECT 2 NOT LIKE 1 < 3; -- 1
+    let plain = parse_select_expr("SELECT 2 LIKE 1 < 3;");
+    let negated = parse_select_expr("SELECT 2 NOT LIKE 1 < 3;");
+    match (plain, negated) {
+        (
+            vibesql_ast::Expression::Like { pattern: p1, negated: n1, .. },
+            vibesql_ast::Expression::Like { pattern: p2, negated: n2, .. },
+        ) => {
+            assert!(!n1);
+            assert!(n2);
+            assert_eq!(p1, p2, "LIKE pattern must parse identically in both forms");
+        }
+        other => panic!("expected two Like expressions, got {:?}", other),
+    }
+}
