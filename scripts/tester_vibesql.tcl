@@ -1436,13 +1436,73 @@ proc trial_check_incremental {new_sql} {
     }
 }
 
+proc mask_string_literals {sql} {
+    # Blank out the interior of single-quoted string literals with spaces so
+    # that ';' characters inside string data (e.g. INSERT INTO t VALUES('a;b'))
+    # are not miscounted as statement separators by count_cli_statements. See
+    # #5947.
+    #
+    # The transformation is length-preserving by construction: only the interior
+    # bytes are replaced (each with a single space) and the surrounding ' quote
+    # characters are kept in place, so every character offset in the result maps
+    # 1:1 to the input. count_cli_statements slices the ORIGINAL $sql using the
+    # masked ';' offsets, so this length invariance is required for correct
+    # segment boundaries.
+    #
+    # The SQL doubled-quote escape ('') is the way a literal single-quote is
+    # written inside a string; it is treated as string interior (both quotes
+    # blanked) and does NOT terminate the string. An unterminated opening quote
+    # blanks to end-of-input (still length-preserving). Scanning style mirrors
+    # convert_dqs_to_single_quotes (single-quote branch) above.
+    set result ""
+    set len [string length $sql]
+    set i 0
+    while {$i < $len} {
+        set char [string index $sql $i]
+        if {$char eq "'"} {
+            # Opening quote — keep it, then blank the interior until the real
+            # closing quote (a ' that is not part of a '' escape).
+            append result "'"
+            incr i
+            while {$i < $len} {
+                set c [string index $sql $i]
+                if {$c eq "'"} {
+                    if {[expr {$i + 1}] < $len && [string index $sql [expr {$i + 1}]] eq "'"} {
+                        # '' escape — part of the string interior. Blank both
+                        # quotes and stay in string mode.
+                        append result "  "
+                        incr i 2
+                    } else {
+                        # Real closing quote — keep it and exit string mode.
+                        append result "'"
+                        incr i
+                        break
+                    }
+                } else {
+                    append result " "
+                    incr i
+                }
+            }
+        } else {
+            append result $char
+            incr i
+        }
+    }
+    return $result
+}
+
 proc count_cli_statements {sql} {
     # Count statements the way the VibeSQL CLI numbers them for its
     # "Error executing statement N" output: every ';'-separated top-level
     # statement, counted from 1, with CREATE TRIGGER ... END bodies treated as a
     # single statement (their internal ';' do not delimit statements). A trailing
     # empty segment after the final ';' is not counted. See #5853.
-    set masked [mask_trigger_bodies $sql]
+    #
+    # Mask trigger bodies first (so their internal ';' are blanked), then mask
+    # single-quoted string literals (so ';' inside string data is blanked too);
+    # both masks are length-preserving so the ';' offsets in $masked line up with
+    # $sql for the segment slice below. See #5947.
+    set masked [mask_string_literals [mask_trigger_bodies $sql]]
     set n 0
     set start 0
     set len [string length $masked]
