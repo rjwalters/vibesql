@@ -124,9 +124,7 @@ impl<'arena> ArenaParser<'arena> {
             let op = match self.peek() {
                 Token::Symbol('<') => BinaryOperator::LessThan,
                 Token::Symbol('>') => BinaryOperator::GreaterThan,
-                Token::Operator(MultiCharOperator::LessEqual) => {
-                    BinaryOperator::LessThanOrEqual
-                }
+                Token::Operator(MultiCharOperator::LessEqual) => BinaryOperator::LessThanOrEqual,
                 Token::Operator(MultiCharOperator::GreaterEqual) => {
                     BinaryOperator::GreaterThanOrEqual
                 }
@@ -155,14 +153,12 @@ impl<'arena> ArenaParser<'arena> {
                 self.expect_token(Token::RParen)?;
 
                 let left_ref = self.arena.alloc(left);
-                left = Expression::Extended(self.arena.alloc(
-                    ExtendedExpr::QuantifiedComparison {
-                        expr: left_ref,
-                        op,
-                        quantifier,
-                        subquery,
-                    },
-                ));
+                left = Expression::Extended(self.arena.alloc(ExtendedExpr::QuantifiedComparison {
+                    expr: left_ref,
+                    op,
+                    quantifier,
+                    subquery,
+                }));
                 continue;
             }
 
@@ -482,16 +478,6 @@ impl<'arena> ArenaParser<'arena> {
                     let left_ref = self.arena.alloc(left);
                     let right_ref = self.arena.alloc(right);
                     left = Expression::IsDistinctFrom { left: left_ref, right: right_ref, negated };
-                } else if self.peek_keyword(Keyword::Unknown) {
-                    // UNKNOWN is not a literal in the expression grammar, so it is
-                    // only recognized here as the fixed `IS [NOT] UNKNOWN` form.
-                    self.consume_keyword(Keyword::Unknown)?;
-                    let left_ref = self.arena.alloc(left);
-                    left = Expression::IsTruthValue {
-                        expr: left_ref,
-                        truth_value: TruthValue::Unknown,
-                        negated,
-                    };
                 } else {
                     // SQLite parses the right side of `IS` as an ordinary expression,
                     // and NULL/TRUE/FALSE are themselves expressions. Parse the full
@@ -499,6 +485,12 @@ impl<'arena> ArenaParser<'arena> {
                     // follows binds to it (`1 IS NULL + 1` == `1 IS (NULL + 1)`), then
                     // recover the specialized AST shapes for the plain-literal cases so
                     // optimizers that rely on IsNull / IsTruthValue keep working.
+                    //
+                    // UNKNOWN is intentionally handled by this generic branch: SQLite
+                    // has no `IS UNKNOWN` truth-value predicate, so `UNKNOWN` parses as
+                    // an ordinary identifier (column reference) and `x IS UNKNOWN`
+                    // becomes NULL-safe equality against a column named `unknown`
+                    // (erroring at runtime if no such column is in scope).
                     let right = self.parse_relational_expression()?;
                     left = match right {
                         Expression::Literal(SqlValue::Null) => {

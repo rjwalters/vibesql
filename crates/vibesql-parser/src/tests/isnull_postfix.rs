@@ -527,7 +527,10 @@ fn test_is_true_plus_one_binds_to_operand() {
     if let vibesql_ast::Expression::BinaryOp { op, left, .. } = &right {
         assert_eq!(*op, vibesql_ast::BinaryOperator::Plus, "expected + operator");
         assert!(
-            matches!(**left, vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))),
+            matches!(
+                **left,
+                vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))
+            ),
             "expected TRUE as left operand of +: {:?}",
             left
         );
@@ -604,23 +607,67 @@ fn test_plain_is_not_true_still_truth_value_node() {
     );
 }
 
+// ------------------------------------------------------------------------
+// IS UNKNOWN — SQLite alignment (issue #5948)
+//
+// SQLite has no SQL:1999 `IS UNKNOWN` truth-value predicate. `UNKNOWN` in
+// expression position is an ordinary identifier / column reference:
+//   sqlite3> SELECT 1 IS UNKNOWN;                -- Error: no such column: UNKNOWN
+//   sqlite3> SELECT x IS UNKNOWN
+//            FROM (SELECT 1 AS x, 1 AS unknown); -- 1  (NULL-safe equals x == unknown)
+// So `x IS UNKNOWN` is `x IS <column unknown>` == IsDistinctFrom{negated:true}
+// (IS is NULL-safe equals; IS NOT is the distinct form) and UNKNOWN binds
+// following tighter operators like any identifier: `1 IS UNKNOWN + 1` is
+// `1 IS (unknown + 1)`.
+// ------------------------------------------------------------------------
+
+/// Assert the expression is a bare unqualified column reference with the given
+/// canonical name.
+fn assert_column_ref(expr: &vibesql_ast::Expression, expected: &str, context: &str) {
+    if let vibesql_ast::Expression::ColumnRef(col_id) = expr {
+        assert_eq!(col_id.column_canonical(), expected, "{}: wrong column name", context);
+        assert!(col_id.table_canonical().is_none(), "{}: expected unqualified column", context);
+    } else {
+        panic!("{}: expected ColumnRef({:?}), got {:?}", context, expected, expr);
+    }
+}
+
 #[test]
-fn test_plain_is_unknown_still_truth_value_node() {
-    // UNKNOWN is not a literal in the expression grammar; the fixed IS-form
-    // must keep mapping to IsTruthValue(Unknown).
+fn test_is_unknown_is_column_reference_null_safe_equals() {
+    // sqlite3 treats UNKNOWN as an identifier, so `x IS UNKNOWN` is NULL-safe
+    // equality against a column named `unknown`: IsDistinctFrom { negated: true }.
     let expr = parse_select_expr("SELECT x IS UNKNOWN;");
-    assert!(
-        matches!(
-            expr,
-            vibesql_ast::Expression::IsTruthValue {
-                truth_value: vibesql_ast::TruthValue::Unknown,
-                negated: false,
-                ..
-            }
-        ),
-        "x IS UNKNOWN should be IsTruthValue(Unknown): {:?}",
-        expr
-    );
+    let (_left, right) = unwrap_is_distinct_from(expr, true, "x IS UNKNOWN");
+    assert_column_ref(&right, "unknown", "x IS UNKNOWN right operand");
+}
+
+#[test]
+fn test_is_not_unknown_is_negated_null_safe_equals() {
+    // `x IS NOT UNKNOWN` is the distinct form: IsDistinctFrom { negated: false }.
+    let expr = parse_select_expr("SELECT x IS NOT UNKNOWN;");
+    let (_left, right) = unwrap_is_distinct_from(expr, false, "x IS NOT UNKNOWN");
+    assert_column_ref(&right, "unknown", "x IS NOT UNKNOWN right operand");
+}
+
+#[test]
+fn test_is_unknown_plus_one_binds_to_operand() {
+    // sqlite3: `1 IS UNKNOWN + 1` parses as `1 IS (unknown + 1)`, i.e. the `+`
+    // binds to the identifier operand, not the IS node.
+    let expr = parse_select_expr("SELECT 1 IS UNKNOWN + 1;");
+    let (_left, right) = unwrap_is_distinct_from(expr, true, "1 IS UNKNOWN + 1");
+    if let vibesql_ast::Expression::BinaryOp { op, left, .. } = &right {
+        assert_eq!(*op, vibesql_ast::BinaryOperator::Plus, "expected + operator");
+        assert_column_ref(left, "unknown", "1 IS UNKNOWN + 1 left operand of +");
+    } else {
+        panic!("expected BinaryOp Plus as IS right operand, got {:?}", right);
+    }
+}
+
+#[test]
+fn test_bare_unknown_is_column_reference() {
+    // In expression position UNKNOWN is a plain identifier.
+    let expr = parse_select_expr("SELECT unknown;");
+    assert_column_ref(&expr, "unknown", "bare unknown");
 }
 
 #[test]

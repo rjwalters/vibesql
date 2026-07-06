@@ -455,7 +455,11 @@ impl Keyword {
     ///    (`SELECT by FROM t ORDER BY by`, keyword1.test).
     /// 3. **Special primary forms / literals** that have dedicated parsing
     ///    (`CASE`/`WHEN`/`THEN`/`ELSE`, `CAST`, `EXISTS`, `NULL`, `TRUE`,
-    ///    `FALSE`, `UNKNOWN`, the `CURRENT_*` constants, `DISTINCT`). `END` is
+    ///    `FALSE`, the `CURRENT_*` constants, `DISTINCT`). `UNKNOWN` is NOT
+    ///    denied: SQLite has no `IS UNKNOWN` truth-value predicate and treats
+    ///    `UNKNOWN` in expression position as an ordinary identifier / column
+    ///    reference (`SELECT 1 IS UNKNOWN` errors with "no such column:
+    ///    UNKNOWN"), so it round-trips as a column name here. `END` is
     ///    NOT denied: it is only meaningful *after* a complete CASE body, where
     ///    the CASE parser consumes it at clause level before expression
     ///    parsing resumes; at operand start SQLite treats it as a column
@@ -526,7 +530,6 @@ impl Keyword {
                 | Keyword::Null
                 | Keyword::True
                 | Keyword::False
-                | Keyword::Unknown
                 | Keyword::Distinct
                 | Keyword::CurrentDate
                 | Keyword::CurrentTime

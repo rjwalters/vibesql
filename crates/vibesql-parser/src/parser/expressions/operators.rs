@@ -932,15 +932,6 @@ impl Parser {
                         right: Box::new(right),
                         negated,
                     };
-                } else if self.peek_keyword(Keyword::Unknown) {
-                    // UNKNOWN is not a literal in the expression grammar, so it is
-                    // only recognized here as the fixed `IS [NOT] UNKNOWN` form.
-                    self.consume_keyword(Keyword::Unknown)?;
-                    left = vibesql_ast::Expression::IsTruthValue {
-                        expr: Box::new(left),
-                        truth_value: vibesql_ast::TruthValue::Unknown,
-                        negated,
-                    };
                 } else {
                     // SQLite parses the right side of `IS` as an ordinary expression,
                     // and NULL/TRUE/FALSE are themselves expressions. Parse the full
@@ -948,25 +939,31 @@ impl Parser {
                     // follows binds to it (`1 IS NULL + 1` == `1 IS (NULL + 1)`), then
                     // recover the specialized AST shapes for the plain-literal cases so
                     // optimizers that rely on IsNull / IsTruthValue keep working.
+                    //
+                    // UNKNOWN is intentionally handled by this generic branch: SQLite
+                    // has no `IS UNKNOWN` truth-value predicate, so `UNKNOWN` parses as
+                    // an ordinary identifier (column reference) and `x IS UNKNOWN`
+                    // becomes NULL-safe equality against a column named `unknown`
+                    // (erroring at runtime if no such column is in scope).
                     let right = self.parse_relational_expression()?;
                     left = match right {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null) => {
                             vibesql_ast::Expression::IsNull { expr: Box::new(left), negated }
                         }
-                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true)) => {
-                            vibesql_ast::Expression::IsTruthValue {
-                                expr: Box::new(left),
-                                truth_value: vibesql_ast::TruthValue::True,
-                                negated,
-                            }
-                        }
-                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false)) => {
-                            vibesql_ast::Expression::IsTruthValue {
-                                expr: Box::new(left),
-                                truth_value: vibesql_ast::TruthValue::False,
-                                negated,
-                            }
-                        }
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(
+                            true,
+                        )) => vibesql_ast::Expression::IsTruthValue {
+                            expr: Box::new(left),
+                            truth_value: vibesql_ast::TruthValue::True,
+                            negated,
+                        },
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(
+                            false,
+                        )) => vibesql_ast::Expression::IsTruthValue {
+                            expr: Box::new(left),
+                            truth_value: vibesql_ast::TruthValue::False,
+                            negated,
+                        },
                         // SQLite compatibility: `IS <expr>` compares with NULL-safe
                         // equals. IS is IS NOT DISTINCT FROM; IS NOT is IS DISTINCT FROM.
                         _ => vibesql_ast::Expression::IsDistinctFrom {
