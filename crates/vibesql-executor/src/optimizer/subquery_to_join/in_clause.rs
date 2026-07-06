@@ -228,7 +228,32 @@ pub(super) fn try_convert_in_to_join(
             .as_ref()
             .map(|w| rewrite_column_refs_with_alias(w, effective_table, effective_table));
 
-        (table_alias.clone(), expr.clone(), qualified_subquery_column, qualified_subquery_where)
+        // FIX for issue #5926: qualify the outer expression against its ORIGINAL
+        // lexical scope (the outer FROM) before it becomes the left side of the
+        // synthesized SEMI/ANTI-join predicate.
+        //
+        // Without this, an unqualified outer column such as `id` in
+        //   SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)
+        // is folded verbatim into the join ON condition, whose combined schema now
+        // contains BOTH customers and orders. The #5870 ambiguity guard then sees
+        // `id` present in two tables and wrongly raises "ambiguous column name: id"
+        // — even though `id` was unambiguous in the outer scope where it was written
+        // (only customers was visible there; orders lives inside the subquery).
+        // Resolving the reference in its own scope here, and qualified refs bypass
+        // the guard, restoring SQLite-matching results on both the row-oriented and
+        // columnar join paths.
+        //
+        // This mirrors the self-join branch above and is only applied when the outer
+        // FROM is a single table: then any unqualified outer column must belong to
+        // that one table. Multi-table outer FROMs keep the column unqualified so that
+        // genuine outer-scope ambiguity still errors as SQLite requires.
+        let outer_expr_qualified = if let Some(outer_table) = get_outer_table_name(from) {
+            rewrite_column_refs_with_alias(expr, &outer_table, &outer_table)
+        } else {
+            expr.clone()
+        };
+
+        (table_alias.clone(), outer_expr_qualified, qualified_subquery_column, qualified_subquery_where)
     };
 
     // Create the join condition: expr = subquery_column

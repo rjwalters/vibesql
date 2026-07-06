@@ -326,3 +326,138 @@ fn test_duplicate_non_pk_column_unqualified_ambiguous() {
 
     assert_ambiguous(&db, "SELECT ta.v FROM ta JOIN tb ON w=aw", "w");
 }
+
+// ---------------------------------------------------------------------------
+// Issue #5926 regression: the ambiguity guard must respect the reference's
+// ORIGINAL lexical scope.
+//
+// `SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)` is
+// UNAMBIGUOUS in SQLite: `orders` is only visible inside the subquery, so the
+// outer `id` binds to `customers.id`. But the uncorrelated IN-subquery is
+// planned as an internal SEMI join whose combined schema contains BOTH
+// customers and orders (both have `id`). The #5870 guard used to fire on the
+// outer `id` reference that got folded into the join predicate, wrongly raising
+// "ambiguous column name: id". The fix qualifies the outer expression against
+// its outer-only scope before flattening folds it into the predicate.
+// ---------------------------------------------------------------------------
+
+/// customers(id) and orders(id, customer_id, status) — both carry an `id`
+/// column, so an unqualified `id` folded into a semi-join predicate spanning
+/// both tables would trip the #5870 guard unless outer-scope resolution wins.
+fn setup_semi_join_db() -> Database {
+    let mut db = Database::new();
+
+    let customers = TableSchema::with_primary_key(
+        "customers".to_string(),
+        vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+        vec!["id".to_string()],
+    );
+    db.create_table(customers).unwrap();
+
+    let orders = TableSchema::with_primary_key(
+        "orders".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("customer_id".to_string(), DataType::Integer, true),
+            ColumnSchema::new("status".to_string(), DataType::Integer, true),
+        ],
+        vec!["id".to_string()],
+    );
+    db.create_table(orders).unwrap();
+
+    for id in [1, 2, 3] {
+        db.insert_row("customers", Row::new(vec![SqlValue::Integer(id)])).unwrap();
+    }
+    // orders: customers 1 and 2 have orders; customer 3 has none. status=1 only on order 2.
+    for (id, cust, status) in [(1, 1, 0), (2, 2, 1)] {
+        db.insert_row(
+            "orders",
+            Row::new(vec![
+                SqlValue::Integer(id),
+                SqlValue::Integer(cust),
+                SqlValue::Integer(status),
+            ]),
+        )
+        .unwrap();
+    }
+
+    db
+}
+
+fn first_col_ints(db: &Database, sql: &str) -> Vec<i64> {
+    let mut out: Vec<i64> = run(db, sql)
+        .iter()
+        .map(|row| match &row.values[0] {
+            SqlValue::Integer(i) => *i,
+            other => panic!("expected integer, got {other:?}"),
+        })
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+/// Uncorrelated IN-subquery over a table that shares the `id` column name with
+/// the outer table must NOT be treated as ambiguous — the outer `id` resolves to
+/// `customers.id` in its own scope. SQLite returns {1, 2}.
+#[test]
+fn test_in_subquery_semi_join_outer_ref_not_ambiguous() {
+    let db = setup_semi_join_db();
+    assert_eq!(
+        first_col_ints(&db, "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)"),
+        vec![1, 2],
+        "outer `id` is unambiguous (orders only visible inside the subquery)"
+    );
+
+    // The implying filter narrows to customer 2; still unambiguous.
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders WHERE status = 1)"
+        ),
+        vec![2],
+    );
+}
+
+/// NOT IN shares the same rewrite path (ANTI join). Customer 3 has no order, so
+/// SQLite returns {3}. Must not raise an ambiguity error on the outer `id`.
+#[test]
+fn test_not_in_subquery_anti_join_outer_ref_not_ambiguous() {
+    let db = setup_semi_join_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT id FROM customers WHERE id NOT IN (SELECT customer_id FROM orders)"
+        ),
+        vec![3],
+        "outer `id` is unambiguous; NOT IN yields the customer with no orders"
+    );
+}
+
+/// The same shapes must hold on the row-oriented join path (columnar join
+/// disabled). `VIBESQL_DISABLE_COLUMNAR_JOIN` is process-global; both paths
+/// produce identical correct results, and the concurrent ambiguity tests raise
+/// the same error on either path, so a transient flip cannot break them.
+#[test]
+fn test_in_and_not_in_subquery_outer_ref_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db = setup_semi_join_db();
+    let in_ids =
+        first_col_ints(&db, "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)");
+    let not_in_ids = first_col_ints(
+        &db,
+        "SELECT id FROM customers WHERE id NOT IN (SELECT customer_id FROM orders)",
+    );
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+
+    assert_eq!(in_ids, vec![1, 2], "row path: IN-subquery outer `id` unambiguous");
+    assert_eq!(not_in_ids, vec![3], "row path: NOT IN-subquery outer `id` unambiguous");
+}
+
+/// Guard against over-correction: genuine same-scope ambiguity in an explicit
+/// two-table join must still error (the outer-scope exemption is specific to
+/// subquery-flattened tables, not real joined tables).
+#[test]
+fn test_explicit_join_still_ambiguous_after_semi_join_fix() {
+    let db = setup_semi_join_db();
+    assert_ambiguous(&db, "SELECT customers.id FROM customers JOIN orders ON id = customer_id", "id");
+}
