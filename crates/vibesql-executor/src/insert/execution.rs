@@ -1035,6 +1035,23 @@ fn execute_insert_internal(
                 );
             }
         }
+
+        // For a rowid table WITHOUT an INTEGER PRIMARY KEY the batch path
+        // allocates implicit rowids inside the storage layer, so no candidate id
+        // surfaced above (last_generated_id is still None). Read the max rowid
+        // back after the batch insert so last_insert_rowid() tracks the last
+        // inserted row — implicit rowids ascend, so the max equals the final
+        // row's rowid (#5944). VibeSQL is single-threaded within a session, so
+        // nothing can insert between the batch and this readback. The WITHOUT
+        // ROWID guard at the `set_last_insert_rowid()` call below still excludes
+        // WITHOUT ROWID tables.
+        if ipk_col_idx.is_none() && last_generated_id.is_none() && !schema.without_rowid {
+            if let Some(max_rowid) =
+                db.get_table(&storage_table_name).and_then(|t| t.max_rowid_signed())
+            {
+                last_generated_id = Some(max_rowid);
+            }
+        }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
         for (mut full_row_values, mut explicit_rowid, ipk_auto_assigned, candidate_last_id) in
@@ -1342,6 +1359,20 @@ fn execute_insert_internal(
                     dml_schema.as_deref(),
                 )?;
             }
+
+            // For a rowid table WITHOUT an INTEGER PRIMARY KEY, the implicit
+            // rowid is allocated above (materialized into `final_explicit_rowid`
+            // from `allocate_rowid_u64()`) and never flows through
+            // `candidate_last_id`, which only tracks explicit/auto IPK and
+            // sequence values. Feed the allocated rowid back so
+            // last_insert_rowid() matches sqlite3 for plain tables (#5944). The
+            // WITHOUT ROWID guard at the `set_last_insert_rowid()` call below
+            // still excludes WITHOUT ROWID tables.
+            let candidate_last_id = match candidate_last_id {
+                Some(id) => Some(id),
+                None if ipk_col_idx.is_none() => final_explicit_rowid.map(|r| r as i64),
+                None => None,
+            };
 
             // The row was genuinely inserted (not an ON CONFLICT DO UPDATE
             // update, a DO NOTHING skip, or a RAISE(IGNORE) trigger skip — those

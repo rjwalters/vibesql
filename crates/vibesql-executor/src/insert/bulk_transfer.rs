@@ -299,6 +299,13 @@ fn execute_bulk_transfer(
         })
     };
 
+    // Whether the destination is a rowid table WITHOUT an INTEGER PRIMARY KEY.
+    // For those, the implicit rowid is allocated by the storage layer during the
+    // batch insert below, so `last_rowid` above is None — we read the max rowid
+    // back after the insert instead (#5944).
+    let dest_is_implicit_rowid =
+        !dest_schema.without_rowid && dest_schema.get_integer_primary_key_index().is_none();
+
     // Batch insert all rows at once (much faster than row-by-row)
     // This reduces WAL operations, index rebuilds, and cache invalidations
     let inserted_count = if !validated_rows.is_empty() {
@@ -312,6 +319,13 @@ fn execute_bulk_transfer(
     if inserted_count > 0 {
         if let Some(rowid) = last_rowid {
             db.set_last_insert_rowid(rowid);
+        } else if dest_is_implicit_rowid {
+            // Non-IPK rowid destination: implicit rowids ascend, so the max
+            // rowid after the batch equals the last inserted row's rowid,
+            // matching SQLite's transfer-optimization last_insert_rowid() (#5944).
+            if let Some(rowid) = db.get_table(dest_table).and_then(|t| t.max_rowid_signed()) {
+                db.set_last_insert_rowid(rowid);
+            }
         }
     }
 
