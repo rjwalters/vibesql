@@ -16,6 +16,13 @@ pub(super) enum ColumnNamingMode {
 
 impl SelectExecutor<'_> {
     /// Determine the column naming mode from database PRAGMA settings
+    ///
+    /// This governs naming of *explicit* result columns (e.g. `SELECT a`,
+    /// `SELECT tabc.a`). For these, sqlite3 lets `full_column_names=ON` win
+    /// even when `short_column_names=ON` — i.e. `SELECT a FROM tabc` reports
+    /// `tabc.a` whenever full is ON, regardless of short. Wildcard expansion
+    /// (`SELECT *`) follows a different precedence; see
+    /// [`Self::get_wildcard_naming_mode`].
     fn get_column_naming_mode(&self) -> ColumnNamingMode {
         let full = self.database.full_column_names();
         let short = self.database.short_column_names();
@@ -33,6 +40,30 @@ impl SelectExecutor<'_> {
         }
     }
 
+    /// Determine the naming mode for wildcard (`SELECT *`) expansion.
+    ///
+    /// Unlike explicit column references, wildcard expansion lets
+    /// `short_column_names=ON` override `full_column_names=ON`: the
+    /// `table.column` prefix appears **only** when `short=OFF AND full=ON`.
+    /// Verified against sqlite3 3.51.0 (colname.test rules (3)/(5)):
+    ///
+    /// | short | full | `SELECT * FROM tabc` |
+    /// |-------|------|----------------------|
+    /// | ON    | ON   | `a` (short wins)     |
+    /// | ON    | OFF  | `a`                  |
+    /// | OFF   | ON   | `tabc.a`             |
+    /// | OFF   | OFF  | `a`                  |
+    fn get_wildcard_naming_mode(&self) -> ColumnNamingMode {
+        let mode = self.get_column_naming_mode();
+        // short_column_names=ON forces bare column names for wildcards, even
+        // when full_column_names=ON. Downgrade Full -> Short in that case.
+        if mode == ColumnNamingMode::Full && self.database.short_column_names() {
+            ColumnNamingMode::Short
+        } else {
+            mode
+        }
+    }
+
     /// Derive column names from SELECT list
     ///
     /// Column naming follows SQLite's PRAGMA settings:
@@ -47,7 +78,8 @@ impl SelectExecutor<'_> {
         from_result: Option<&FromResult>,
     ) -> Result<Vec<String>, ExecutorError> {
         let mode = self.get_column_naming_mode();
-        self.derive_column_names_internal(select_list, from_result, mode)
+        let wildcard_mode = self.get_wildcard_naming_mode();
+        self.derive_column_names_internal(select_list, from_result, mode, wildcard_mode)
     }
 
     /// Derive simple column names (without table prefix) for internal use
@@ -59,15 +91,26 @@ impl SelectExecutor<'_> {
         select_list: &[vibesql_ast::SelectItem],
         from_result: Option<&FromResult>,
     ) -> Result<Vec<String>, ExecutorError> {
-        self.derive_column_names_internal(select_list, from_result, ColumnNamingMode::Short)
+        self.derive_column_names_internal(
+            select_list,
+            from_result,
+            ColumnNamingMode::Short,
+            ColumnNamingMode::Short,
+        )
     }
 
-    /// Internal implementation with configurable naming mode
+    /// Internal implementation with configurable naming mode.
+    ///
+    /// `mode` governs explicit column references; `wildcard_mode` governs
+    /// `SELECT *` / `SELECT table.*` expansion. They differ only when
+    /// `short_column_names=ON AND full_column_names=ON`, where wildcards use
+    /// bare names but explicit references remain `table.column`.
     fn derive_column_names_internal(
         &self,
         select_list: &[vibesql_ast::SelectItem],
         from_result: Option<&FromResult>,
         mode: ColumnNamingMode,
+        wildcard_mode: ColumnNamingMode,
     ) -> Result<Vec<String>, ExecutorError> {
         let mut column_names = Vec::new();
         let schema = from_result.map(|fr| &fr.schema);
@@ -198,7 +241,7 @@ impl SelectExecutor<'_> {
                             // name in full_column_names mode, even for a single-table query
                             // (colname.test section 4: `SELECT * FROM tabc` -> tabc.a, ...).
                             for (_, col_name, effective_table_name) in table_columns {
-                                let display_name = match mode {
+                                let display_name = match wildcard_mode {
                                     ColumnNamingMode::Full => {
                                         format!("{}.{}", effective_table_name, col_name)
                                     }
@@ -239,7 +282,7 @@ impl SelectExecutor<'_> {
                                 // The prefix uses the schema's canonical table name, not the
                                 // qualifier as typed.
                                 for col_schema in &table_schema.columns {
-                                    let display_name = match mode {
+                                    let display_name = match wildcard_mode {
                                         ColumnNamingMode::Full => {
                                             format!("{}.{}", table_schema.name, col_schema.name)
                                         }

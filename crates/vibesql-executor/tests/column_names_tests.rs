@@ -82,12 +82,11 @@ fn test_column_names_star_expansion() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // With full_column_names=ON, SELECT * prefixes every column with its source
-        // table name, even for a single-table query (colname.test section 4.1).
-        assert_eq!(
-            result.columns,
-            vec!["employees.id", "employees.name", "employees.department", "employees.salary"]
-        );
+        // create_test_database sets full_column_names=ON but leaves
+        // short_column_names at its default (ON). Per sqlite3 3.51.0, short=ON
+        // overrides full=ON for wildcard expansion (issue #5974), so SELECT *
+        // yields bare column names here.
+        assert_eq!(result.columns, vec!["id", "name", "department", "salary"]);
         assert_eq!(result.rows.len(), 3);
     } else {
         panic!("Expected SELECT statement");
@@ -274,13 +273,33 @@ fn test_pragma_wildcard_short_column_names() {
 fn test_pragma_wildcard_full_column_names() {
     let mut db = create_test_database_default_settings();
     db.set_full_column_names(true);
+    // short_column_names is still ON (the default). Per sqlite3 3.51.0, short=ON
+    // overrides full=ON for wildcards (issue #5974): SELECT * -> bare names.
 
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // full_column_names=ON: SELECT * uses table.column form (colname.test section 4.1)
+        assert_eq!(result.columns, vec!["id", "name"]);
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_pragma_wildcard_full_only_short_off() {
+    // The table-qualified wildcard form requires short=OFF AND full=ON.
+    let mut db = create_test_database_default_settings();
+    db.set_full_column_names(true);
+    db.set_short_column_names(false);
+
+    let executor = SelectExecutor::new(&db);
+
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute_with_columns(&select_stmt).unwrap();
+        // short=OFF, full=ON: SELECT * uses table.column form (colname.test section 4.1)
         assert_eq!(result.columns, vec!["employees.id", "employees.name"]);
     } else {
         panic!("Expected SELECT statement");
@@ -435,6 +454,102 @@ fn test_short_column_names_star_no_prefix() {
     } else {
         panic!("Expected SELECT statement");
     }
+}
+
+// ---------------------------------------------------------------------------
+// short_column_names=ON overrides full_column_names=ON for wildcards (issue
+// #5974). Verified against sqlite3 3.51.0 (colname.test rules (3)/(5)): the
+// `table.column` prefix appears for a wildcard ONLY when short=OFF AND full=ON.
+// Explicit column references are governed separately: full=ON keeps `table.col`
+// even when short=ON.
+//
+// Wildcard precedence matrix (SELECT * FROM tabc):
+//   | short | full | wildcard columns |
+//   |-------|------|------------------|
+//   | ON    | ON   | a, b, c          |  <- the case this issue fixes
+//   | ON    | OFF  | a, b, c          |
+//   | OFF   | ON   | tabc.a, ...      |
+//   | OFF   | OFF  | a, b, c          |
+// ---------------------------------------------------------------------------
+
+fn create_wildcard_matrix_database(short: bool, full: bool) -> vibesql_storage::Database {
+    let mut db = vibesql_storage::Database::new();
+    db.set_short_column_names(short);
+    db.set_full_column_names(full);
+
+    let create_stmt = vibesql_parser::Parser::parse_sql("CREATE TABLE tabc(a, b, c)").unwrap();
+    if let vibesql_ast::Statement::CreateTable(create_table) = create_stmt {
+        vibesql_executor::CreateTableExecutor::execute(&create_table, &mut db).unwrap();
+    }
+    let insert_stmt =
+        vibesql_parser::Parser::parse_sql("INSERT INTO tabc VALUES(1, 2, 3)").unwrap();
+    if let vibesql_ast::Statement::Insert(insert) = insert_stmt {
+        vibesql_executor::InsertExecutor::execute(&mut db, &insert).unwrap();
+    }
+    db
+}
+
+#[test]
+fn test_wildcard_matrix_short_on_full_on() {
+    // short=ON wins: SELECT * -> bare column names even with full=ON.
+    let db = create_wildcard_matrix_database(true, true);
+    let result = run_select(&db, "SELECT * FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_wildcard_matrix_short_on_full_off() {
+    // Default-like: short=ON, full=OFF -> bare names.
+    let db = create_wildcard_matrix_database(true, false);
+    let result = run_select(&db, "SELECT * FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_wildcard_matrix_short_off_full_on() {
+    // Only combination that prefixes wildcards: short=OFF, full=ON.
+    let db = create_wildcard_matrix_database(false, true);
+    let result = run_select(&db, "SELECT * FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["tabc.a", "tabc.b", "tabc.c"]);
+}
+
+#[test]
+fn test_wildcard_matrix_short_off_full_off() {
+    // Both off -> bare names for wildcards.
+    let db = create_wildcard_matrix_database(false, false);
+    let result = run_select(&db, "SELECT * FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_wildcard_short_on_full_on_multi_table() {
+    // short=ON overrides full=ON for multi-table wildcards too: all bare.
+    let mut db = create_two_table_database_full_names();
+    db.set_short_column_names(true); // full stays ON
+    let result = run_select(&db, "SELECT * FROM tabc, txyz").unwrap();
+    assert_eq!(result.columns, vec!["a", "b", "c", "x", "y", "z"]);
+}
+
+#[test]
+fn test_wildcard_short_on_full_on_qualified() {
+    // Qualified wildcard (table.*) is always bare, unaffected by short/full.
+    let mut db = create_two_table_database_full_names();
+    db.set_short_column_names(true); // full stays ON
+    let result = run_select(&db, "SELECT tabc.* FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["a", "b", "c"]);
+}
+
+#[test]
+fn test_explicit_column_ref_short_on_full_on_keeps_prefix() {
+    // Regression guard: explicit column references follow full=ON regardless of
+    // short. sqlite3 3.51.0: `SELECT a FROM tabc` with short=ON, full=ON -> tabc.a.
+    let db = create_wildcard_matrix_database(true, true);
+    let result = run_select(&db, "SELECT a FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["tabc.a"]);
+
+    // Qualified explicit reference likewise stays table-qualified.
+    let result = run_select(&db, "SELECT tabc.a FROM tabc").unwrap();
+    assert_eq!(result.columns, vec!["tabc.a"]);
 }
 
 // ---------------------------------------------------------------------------
