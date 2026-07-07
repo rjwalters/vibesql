@@ -640,3 +640,132 @@ fn test_multi_table_outer_genuinely_ambiguous_column_errors_row_path() {
         other => panic!("expected AmbiguousColumnName on row path, got: {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Issue #5926 regression (third cycle): CTE / VIEW outer FROM.
+//
+// The catalog-aware resolver resolved outer tables through `database.get_table()`
+// only, which returns base tables. When the outer FROM is a CTE or a VIEW,
+// `get_table()` misses, the resolver counts zero outer matches, leaves the outer
+// column unqualified, and the #5870 guard over-errors on a query SQLite accepts.
+//
+// The fix extends outer-source resolution to consult views (`catalog.get_view` /
+// derived from the view SELECT list) and enclosing CTEs (the query's
+// `with_clause`, resolved via the CTE column list or its body's projection). The
+// "exactly one outer source → qualify, two-or-more → leave for the guard" split
+// is preserved for every source kind, matching SQLite's outer-scope-only
+// semantics. Verified against sqlite3 3.51.0 on both the columnar (default) and
+// row (`VIBESQL_DISABLE_COLUMNAR_JOIN=1`) paths.
+// ---------------------------------------------------------------------------
+
+/// Run a DDL/DML setup statement (CREATE TABLE / CREATE VIEW / INSERT) end to end.
+fn exec_setup(db: &mut Database, sql: &str) {
+    match Parser::parse_sql(sql).unwrap() {
+        vibesql_ast::Statement::CreateTable(create_table) => {
+            vibesql_executor::CreateTableExecutor::execute(&create_table, db).unwrap();
+        }
+        vibesql_ast::Statement::CreateView(view) => {
+            vibesql_executor::advanced_objects::execute_create_view(&view, db).unwrap();
+        }
+        vibesql_ast::Statement::Insert(insert) => {
+            vibesql_executor::InsertExecutor::execute(db, &insert).unwrap();
+        }
+        other => panic!("unsupported setup statement: {other:?}"),
+    }
+}
+
+/// VIEW `t1(a, v)` over base table `base`, plus subquery table `t3(a)` sharing
+/// the `a` column name with the view. In the outer FROM only the view exposes
+/// `a`, so it is UNAMBIGUOUS; `t3` lives inside the subquery. sqlite3: `10,20`.
+fn setup_view_outer_db() -> Database {
+    let mut db = Database::new();
+    exec_setup(&mut db, "CREATE TABLE base(a INTEGER, v INTEGER)");
+    exec_setup(&mut db, "INSERT INTO base VALUES(1,10),(2,20),(3,30)");
+    exec_setup(&mut db, "CREATE TABLE t3(a INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t3 VALUES(1),(2)");
+    exec_setup(&mut db, "CREATE VIEW t1 AS SELECT a, v FROM base");
+    db
+}
+
+/// Base tables for the CTE cases. The CTE `t1` is declared inline in each query
+/// via its WITH clause (parsed into the SELECT), sharing `a` with subquery `t3`.
+fn setup_cte_outer_db() -> Database {
+    let mut db = Database::new();
+    exec_setup(&mut db, "CREATE TABLE t3(a INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t3 VALUES(1),(2)");
+    db
+}
+
+/// CTE in the outer FROM sharing a column with the subquery table → returns rows.
+/// `WITH t1(a,v) AS (VALUES...)`; only the CTE exposes `a` in the outer scope, so
+/// it is unambiguous. sqlite3 3.51.0: `10,20`.
+#[test]
+fn test_cte_outer_in_subquery_shared_column_not_ambiguous() {
+    let db = setup_cte_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "WITH t1(a,v) AS (VALUES(1,10),(2,20),(3,30)) \
+             SELECT t1.v FROM t1 WHERE a IN (SELECT a FROM t3)"
+        ),
+        vec![10, 20],
+        "outer `a` resolves to the enclosing CTE t1 (t3 is inside the subquery)"
+    );
+}
+
+/// VIEW in the outer FROM sharing a column with the subquery table → returns rows.
+/// sqlite3 3.51.0: `10,20`.
+#[test]
+fn test_view_outer_in_subquery_shared_column_not_ambiguous() {
+    let db = setup_view_outer_db();
+    assert_eq!(
+        first_col_ints(&db, "SELECT t1.v FROM t1 WHERE a IN (SELECT a FROM t3)"),
+        vec![10, 20],
+        "outer `a` resolves to the VIEW t1 (t3 is inside the subquery)"
+    );
+}
+
+/// Both CTE and VIEW shapes must hold on the row-oriented path too.
+#[test]
+fn test_cte_and_view_outer_in_subquery_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let cte_db = setup_cte_outer_db();
+    let cte_vs = first_col_ints(
+        &cte_db,
+        "WITH t1(a,v) AS (VALUES(1,10),(2,20),(3,30)) \
+         SELECT t1.v FROM t1 WHERE a IN (SELECT a FROM t3)",
+    );
+    let view_db = setup_view_outer_db();
+    let view_vs = first_col_ints(&view_db, "SELECT t1.v FROM t1 WHERE a IN (SELECT a FROM t3)");
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+
+    assert_eq!(cte_vs, vec![10, 20], "row path: CTE outer `a` unambiguous");
+    assert_eq!(view_vs, vec![10, 20], "row path: VIEW outer `a` unambiguous");
+}
+
+/// Genuine ambiguity with a CTE column duplicated on a second outer table must
+/// still error: `a` on both the CTE `t1` and base table `t2`. sqlite3 3.51.0:
+/// `ambiguous column name: a`.
+#[test]
+fn test_cte_outer_genuinely_ambiguous_column_errors() {
+    let mut db = setup_cte_outer_db();
+    exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
+    assert_ambiguous(
+        &db,
+        "WITH t1(a,v) AS (VALUES(1,10),(2,20),(3,30)) \
+         SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)",
+        "a",
+    );
+}
+
+/// Genuine ambiguity with a VIEW column duplicated on a second outer table must
+/// still error: `a` on both the VIEW `t1` and base table `t2`. sqlite3 3.51.0:
+/// `ambiguous column name: a`.
+#[test]
+fn test_view_outer_genuinely_ambiguous_column_errors() {
+    let mut db = setup_view_outer_db();
+    exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
+    assert_ambiguous(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)", "a");
+}

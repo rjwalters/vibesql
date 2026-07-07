@@ -36,7 +36,9 @@
 //! ) AS __in_agg ON o_orderkey = __in_agg.l_orderkey
 //! ```
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+use vibesql_ast::{
+    BinaryOperator, CommonTableExpr, Expression, FromClause, JoinType, SelectItem, SelectStmt,
+};
 use vibesql_storage::Database;
 
 use super::helpers::{
@@ -63,12 +65,16 @@ fn qualify_outer_expr_in_scope(
     expr: &Expression,
     from: &FromClause,
     database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Expression {
     if let Expression::ColumnRef(col_id) = expr {
         if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
-            if let Some(qualifier) =
-                resolve_outer_column_qualifier(from, database, col_id.column_canonical())
-            {
+            if let Some(qualifier) = resolve_outer_column_qualifier(
+                from,
+                database,
+                with_clause,
+                col_id.column_canonical(),
+            ) {
                 return rewrite_column_refs_with_alias(expr, &qualifier, &qualifier);
             }
         }
@@ -83,6 +89,7 @@ pub(super) fn try_convert_in_to_join(
     subquery: &SelectStmt,
     negated: bool,
     database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<InToJoinResult> {
     // Must have exactly one column in SELECT list
     if subquery.select_list.len() != 1 {
@@ -123,6 +130,7 @@ pub(super) fn try_convert_in_to_join(
             &subquery_column,
             negated,
             database,
+            with_clause,
         );
     }
 
@@ -287,7 +295,7 @@ pub(super) fn try_convert_in_to_join(
         //     outer scope; leave unqualified so the guard errors, matching SQLite.
         //   - anything else (non-column expr, derived table in scope, unresolved) →
         //     leave unchanged.
-        let outer_expr_qualified = qualify_outer_expr_in_scope(expr, from, database);
+        let outer_expr_qualified = qualify_outer_expr_in_scope(expr, from, database, with_clause);
 
         (
             table_alias.clone(),
@@ -372,6 +380,7 @@ fn try_convert_aggregate_in_to_join(
     subquery_column: &Expression,
     negated: bool,
     database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<InToJoinResult> {
     // Extract the column name from the subquery's select list for the join condition
     // The column must be a simple column reference for us to build the join condition
@@ -407,7 +416,8 @@ fn try_convert_aggregate_in_to_join(
     // #5870), same as the simple-subquery path above, so a bare outer column that
     // is unambiguous in the outer scope is not tripped by the ambiguity guard after
     // being folded into the synthesized predicate.
-    let outer_expr_qualified = qualify_outer_expr_in_scope(outer_expr, from, database);
+    let outer_expr_qualified =
+        qualify_outer_expr_in_scope(outer_expr, from, database, with_clause);
 
     // Create the join condition: outer_expr = __in_agg.column_name
     let join_condition = Expression::BinaryOp {

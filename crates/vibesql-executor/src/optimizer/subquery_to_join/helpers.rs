@@ -4,18 +4,19 @@
 //! - Collecting and detecting table names (for self-join detection)
 //! - Qualifying and rewriting column references
 
-use vibesql_ast::{Expression, FromClause};
+use vibesql_ast::{CommonTableExpr, Expression, FromClause, SelectItem, SelectStmt};
 use vibesql_storage::Database;
 
-/// Collect the `(effective_name, real_table_name)` pairs for every base table
+/// Collect the `(effective_name, real_table_name)` pairs for every named table
 /// directly reachable in a FROM clause, for outer-scope column resolution.
 ///
 /// `effective_name` is the alias if present, otherwise the table name — it is the
-/// qualifier a column reference would use. `real_table_name` is the catalog table
-/// name used to look the schema up. Subquery/VALUES derived tables are skipped:
-/// their columns are not resolvable against the catalog here, so an unqualified
-/// column that could come from one of them is treated as unresolvable (we do not
-/// qualify it, and the downstream ambiguity guard handles it).
+/// qualifier a column reference would use. `real_table_name` is the catalog/CTE
+/// name used to look the columns up (base table schema, view definition, or
+/// enclosing CTE). Subquery/VALUES derived tables are skipped: their columns are
+/// not resolvable against the catalog here, so an unqualified column that could
+/// come from one of them is treated as unresolvable (we do not qualify it, and
+/// the downstream ambiguity guard handles it).
 fn collect_base_table_refs(from: &FromClause, out: &mut Vec<(String, String)>) {
     match from {
         FromClause::Table { name, alias, .. } => {
@@ -31,19 +32,113 @@ fn collect_base_table_refs(from: &FromClause, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// Resolve which outer-FROM table an unqualified column belongs to, matching
-/// SQLite's scoping: ambiguity is measured ONLY against the outer FROM tables.
+/// Derive the output column names of a SELECT statement's projection.
+///
+/// Used to resolve which columns a view or CTE exposes to the outer scope when
+/// no explicit column list was declared. Returns `None` if any output column
+/// name cannot be determined (e.g. a `*` wildcard whose expansion is not known
+/// here, or a computed expression without an alias or usable source text) — in
+/// that case the caller must treat the source as unresolvable rather than risk a
+/// false "column absent" verdict.
+fn derived_output_columns(stmt: &SelectStmt) -> Option<Vec<String>> {
+    // A VALUES-body view/CTE has no projection list; its column names are only
+    // known from an explicit column list, handled by the callers.
+    if stmt.select_list.is_empty() {
+        return None;
+    }
+    let mut cols = Vec::with_capacity(stmt.select_list.len());
+    for item in &stmt.select_list {
+        match item {
+            SelectItem::Expression { expr, alias, source_text } => {
+                if let Some(a) = alias {
+                    cols.push(a.clone());
+                } else if let Expression::ColumnRef(col_id) = expr {
+                    cols.push(col_id.column_canonical().to_string());
+                } else if let Some(src) = source_text {
+                    cols.push(src.clone());
+                } else {
+                    // Unnameable computed column — can't reason about this source.
+                    return None;
+                }
+            }
+            // Any wildcard means the output columns depend on the underlying
+            // table(s), which we can't expand safely here.
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => return None,
+        }
+    }
+    Some(cols)
+}
+
+/// Find an enclosing CTE by name and return the column names it projects.
+///
+/// Prefers an explicit column list (`WITH cte(a, b) AS ...`), otherwise derives
+/// the names from the CTE body's projection. Returns `None` when the name is not
+/// a CTE in this WITH clause or its columns cannot be determined.
+fn cte_output_columns(
+    with_clause: Option<&[CommonTableExpr]>,
+    name: &str,
+) -> Option<Vec<String>> {
+    let cte = with_clause?.iter().find(|c| c.name.eq_ignore_ascii_case(name))?;
+    if let Some(cols) = &cte.columns {
+        return Some(cols.clone());
+    }
+    derived_output_columns(&cte.query)
+}
+
+/// Return the output column names of a view, or `None` if the name is not a view
+/// or its columns cannot be determined.
+fn view_output_columns(database: &Database, name: &str) -> Option<Vec<String>> {
+    let view = database.catalog.get_view(name)?;
+    if let Some(cols) = &view.columns {
+        return Some(cols.clone());
+    }
+    derived_output_columns(&view.query)
+}
+
+/// Whether the named outer-FROM source (base table, view, or enclosing CTE)
+/// exposes `column`. Enclosing CTEs shadow catalog objects of the same name, and
+/// views are consulted only when no base table matches — mirroring name
+/// resolution precedence so the outer scope is measured exactly as SQLite sees it.
+fn source_has_column(
+    name: &str,
+    column: &str,
+    database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
+) -> bool {
+    // CTEs take precedence: at transform time they are not in the catalog, but
+    // they shadow any same-named catalog object in the query's scope.
+    if let Some(cols) = cte_output_columns(with_clause, name) {
+        return cols.iter().any(|c| c.eq_ignore_ascii_case(column));
+    }
+    if let Some(table) = database.get_table(name) {
+        return table.schema.has_column(column);
+    }
+    if let Some(cols) = view_output_columns(database, name) {
+        return cols.iter().any(|c| c.eq_ignore_ascii_case(column));
+    }
+    false
+}
+
+/// Resolve which outer-FROM source an unqualified column belongs to, matching
+/// SQLite's scoping: ambiguity is measured ONLY against the outer FROM sources.
+///
+/// Outer sources are resolved through all three name-resolution kinds — base
+/// tables (`database.get_table`), views (`catalog.get_view` /
+/// `ViewDefinition.columns`), and enclosing CTEs (the query's `with_clause`) —
+/// so a view or CTE in the outer FROM is treated exactly like a base table.
 ///
 /// Returns:
-/// - `Some(effective_name)` when exactly one outer base table has the column —
-///   the qualifier to attach so the reference is unambiguous.
-/// - `None` when zero or two-or-more outer base tables have the column, or when a
-///   derived table is present in the outer FROM (unresolvable here). In the
-///   two-or-more case the reference is genuinely ambiguous in the outer scope and
-///   must stay unqualified so the downstream guard errors, exactly as SQLite does.
+/// - `Some(effective_name)` when exactly one outer source has the column — the
+///   qualifier to attach so the reference is unambiguous.
+/// - `None` when zero or two-or-more outer sources have the column, or when a
+///   derived (subquery/VALUES) table is present in the outer FROM (unresolvable
+///   here). In the two-or-more case the reference is genuinely ambiguous in the
+///   outer scope and must stay unqualified so the downstream guard errors,
+///   exactly as SQLite does.
 pub(super) fn resolve_outer_column_qualifier(
     from: &FromClause,
     database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
     column: &str,
 ) -> Option<String> {
     let mut refs = Vec::new();
@@ -56,13 +151,13 @@ pub(super) fn resolve_outer_column_qualifier(
         return None;
     }
 
-    let mut matches = refs.iter().filter(|(_, table_name)| {
-        database.get_table(table_name).map(|t| t.schema.has_column(column)).unwrap_or(false)
-    });
+    let mut matches = refs
+        .iter()
+        .filter(|(_, table_name)| source_has_column(table_name, column, database, with_clause));
 
     let first = matches.next()?;
     if matches.next().is_some() {
-        // Two or more outer tables carry the column: genuinely ambiguous.
+        // Two or more outer sources carry the column: genuinely ambiguous.
         None
     } else {
         Some(first.0.clone())
