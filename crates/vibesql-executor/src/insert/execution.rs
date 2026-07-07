@@ -942,6 +942,18 @@ fn execute_insert_internal(
             last_generated_id = Some(id);
         }
 
+        // For a non-IPK rowid table whose column list names the rowid
+        // pseudo-column, every validated row carries its exact per-row rowid in
+        // tuple field `.1` (`explicit_rowid`) — the supplied value, or the
+        // value auto-assigned for a NULL/DEFAULT rowid. Capture the LAST row's
+        // rowid now (before the batch insert consumes `validated_rows`) so the
+        // readback below can report SQLite's last-inserted-row semantics even
+        // when the batch supplies explicit, out-of-order rowids
+        // (e.g. VALUES(10,'a'),(5,'b') → 5, not the batch max 10; issue #5955).
+        // The stored u64 is the two's-complement bit pattern of a signed rowid.
+        let last_row_explicit_rowid: Option<i64> =
+            validated_rows.last().and_then(|t| t.1).map(|r| r as i64);
+
         // Use cost-based batch sizing to optimize for tables with many indexes
         let optimizer = DmlOptimizer::new(db, table_name);
         let optimal_batch_size = optimizer.optimal_insert_batch_size(validated_rows.len());
@@ -1038,15 +1050,25 @@ fn execute_insert_internal(
 
         // For a rowid table WITHOUT an INTEGER PRIMARY KEY the batch path
         // allocates implicit rowids inside the storage layer, so no candidate id
-        // surfaced above (last_generated_id is still None). Read the max rowid
-        // back after the batch insert so last_insert_rowid() tracks the last
-        // inserted row — implicit rowids ascend, so the max equals the final
-        // row's rowid (#5944). VibeSQL is single-threaded within a session, so
-        // nothing can insert between the batch and this readback. The WITHOUT
-        // ROWID guard at the `set_last_insert_rowid()` call below still excludes
-        // WITHOUT ROWID tables.
+        // surfaced above (last_generated_id is still None). Recover the last
+        // inserted row's rowid so last_insert_rowid() tracks it.
+        //
+        // Prefer the last validated row's exact per-row rowid (`explicit_rowid`,
+        // captured above) when the column list named the rowid pseudo-column:
+        // that yields SQLite's last-inserted-row semantics regardless of value
+        // ordering, so a batch supplying explicit out-of-order rowids reports
+        // the final row's value (VALUES(10,'a'),(5,'b') → 5), not the batch max
+        // (issue #5955). Only when no per-row rowid is available (the storage
+        // layer auto-allocated ascending implicit rowids) fall back to the max
+        // rowid readback — for that pure auto-allocated case the max equals the
+        // final row's rowid (#5944). VibeSQL is single-threaded within a
+        // session, so nothing can insert between the batch and this readback.
+        // The WITHOUT ROWID guard at the `set_last_insert_rowid()` call below
+        // still excludes WITHOUT ROWID tables.
         if ipk_col_idx.is_none() && last_generated_id.is_none() && !schema.without_rowid {
-            if let Some(max_rowid) =
+            if let Some(rowid) = last_row_explicit_rowid {
+                last_generated_id = Some(rowid);
+            } else if let Some(max_rowid) =
                 db.get_table(&storage_table_name).and_then(|t| t.max_rowid_signed())
             {
                 last_generated_id = Some(max_rowid);
