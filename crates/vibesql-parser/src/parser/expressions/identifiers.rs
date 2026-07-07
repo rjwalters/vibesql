@@ -20,6 +20,16 @@ impl Parser {
                 self.advance();
                 (name, true)
             }
+            // SQLite compatibility: a single-quoted string used as the qualifier
+            // of a dotted name is an identifier, not a string literal
+            // (quote.test quote-1.3: `'@abc'.'!pqr'`). `parse_literal` defers to
+            // us in this case; only accept it when a `.` actually follows so an
+            // ordinary bare string is never mistaken for a column reference.
+            Token::String(id) if matches!(self.peek_next(), Token::Symbol('.')) => {
+                let name = id.clone();
+                self.advance();
+                (name, true)
+            }
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
                 // SQLite compatibility: in expression / primary position, a keyword that
                 // is not a reserved operator, clause-structure word, or special primary
@@ -146,6 +156,13 @@ impl Parser {
                     self.advance();
                     (name, true)
                 }
+                // SQLite compatibility: single-quoted string as a qualified name
+                // part (quote.test quote-1.3: `'@abc'.'!pqr'`).
+                Token::String(id) => {
+                    let name = id.clone();
+                    self.advance();
+                    (name, true)
+                }
                 Token::Keyword { keyword: kw, .. } => {
                     // Allow keywords as column names when qualified (e.g., table.year)
                     // SQL:1999 normalizes unquoted identifiers to lowercase
@@ -184,6 +201,13 @@ impl Parser {
                         (name, false)
                     }
                     Token::DelimitedIdentifier(id) => {
+                        let name = id.clone();
+                        self.advance();
+                        (name, true)
+                    }
+                    // SQLite compatibility: single-quoted string as a qualified
+                    // name part (schema.table.column with quoted parts).
+                    Token::String(id) => {
                         let name = id.clone();
                         self.advance();
                         (name, true)

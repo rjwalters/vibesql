@@ -38,6 +38,7 @@ mod pragma;
 mod predicates;
 mod prepared;
 mod quantified;
+mod quoted_identifiers;
 mod raise;
 mod revoke;
 mod role;

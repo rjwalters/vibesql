@@ -946,27 +946,54 @@ impl Parser {
                     // becomes NULL-safe equality against a column named `unknown`
                     // (erroring at runtime if no such column is in scope).
                     let right = self.parse_relational_expression()?;
-                    left = match right {
+
+                    // A COLLATE postfix on the right operand of `IS TRUE/FALSE/NULL`
+                    // is a no-op: the predicate tests truthiness / null-ness, which
+                    // no collation can change. SQLite parses `0.5 IS TRUE COLLATE
+                    // NOCASE` as `0.5 IS (TRUE COLLATE NOCASE)` and returns 1 (the
+                    // COLLATE is discarded). Look through the wrapper so the
+                    // specialized IsTruthValue / IsNull AST is still produced; for
+                    // any other right operand the COLLATE is preserved in the
+                    // IsDistinctFrom comparison below.
+                    enum RhsKind {
+                        Null,
+                        True,
+                        False,
+                        Other,
+                    }
+                    let unwrapped = match &right {
+                        vibesql_ast::Expression::Collate { expr, .. } => expr.as_ref(),
+                        other => other,
+                    };
+                    let kind = match unwrapped {
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null) => {
-                            vibesql_ast::Expression::IsNull { expr: Box::new(left), negated }
+                            RhsKind::Null
                         }
                         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(
                             true,
-                        )) => vibesql_ast::Expression::IsTruthValue {
+                        )) => RhsKind::True,
+                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(
+                            false,
+                        )) => RhsKind::False,
+                        _ => RhsKind::Other,
+                    };
+                    left = match kind {
+                        RhsKind::Null => {
+                            vibesql_ast::Expression::IsNull { expr: Box::new(left), negated }
+                        }
+                        RhsKind::True => vibesql_ast::Expression::IsTruthValue {
                             expr: Box::new(left),
                             truth_value: vibesql_ast::TruthValue::True,
                             negated,
                         },
-                        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(
-                            false,
-                        )) => vibesql_ast::Expression::IsTruthValue {
+                        RhsKind::False => vibesql_ast::Expression::IsTruthValue {
                             expr: Box::new(left),
                             truth_value: vibesql_ast::TruthValue::False,
                             negated,
                         },
                         // SQLite compatibility: `IS <expr>` compares with NULL-safe
                         // equals. IS is IS NOT DISTINCT FROM; IS NOT is IS DISTINCT FROM.
-                        _ => vibesql_ast::Expression::IsDistinctFrom {
+                        RhsKind::Other => vibesql_ast::Expression::IsDistinctFrom {
                             left: Box::new(left),
                             right: Box::new(right),
                             negated: !negated,

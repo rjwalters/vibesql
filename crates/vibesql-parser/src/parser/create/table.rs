@@ -118,6 +118,16 @@ impl Parser {
                     self.advance();
                     col_name
                 }
+                // SQLite compatibility: a single-quoted string literal is accepted
+                // as a column name in a column-definition position (quote.test
+                // quote-1.0: `CREATE TABLE '@abc'('#xyz' int, '!pqr' text)`).
+                // In DDL name position there is no string-literal-vs-identifier
+                // ambiguity, so we take the string verbatim as the column name.
+                Token::String(col) => {
+                    let c = col.clone();
+                    self.advance();
+                    c
+                }
                 _ => return Err(ParseError { message: "Expected column name".to_string() }),
             };
 
