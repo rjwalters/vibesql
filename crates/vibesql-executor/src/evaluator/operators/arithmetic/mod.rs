@@ -777,6 +777,148 @@ mod tests {
         assert_eq!(result, SqlValue::Integer(5));
     }
 
+    // --- Division affinity matrix (issue #5943) ---
+    //
+    // In SQLite semantics the result type of `/` follows the numeric affinity
+    // of the *coerced* operands, not their surface SqlValue type. A text
+    // operand that parses to an integer must divide as an integer (matching
+    // sqlite3), and a text operand that parses to a real must divide as a real.
+    // These verify the four affinity cases plus the previously latent panic.
+
+    #[test]
+    fn test_division_affinity_int_int_sqlite() {
+        // 2245 / 3 = 748 (integer division), matches sqlite3
+        let result = ArithmeticOps::divide(
+            &SqlValue::Integer(2245),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(748));
+    }
+
+    #[test]
+    fn test_division_affinity_text_int_int_sqlite() {
+        // '2245' / 3 = 748 (integer division). This is the core issue #5943
+        // reproducer: previously yielded a float because the result type was
+        // derived from the Varchar surface type rather than the coerced value.
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2245")),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(748));
+    }
+
+    #[test]
+    fn test_division_affinity_real_int_sqlite() {
+        // 2245.0 / 3 = 748.333... (real division), matches sqlite3 typeof=real
+        let result = ArithmeticOps::divide(
+            &SqlValue::Real(2245.0),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        match result {
+            SqlValue::Real(f) => assert!((f - 748.333_333).abs() < 1e-3),
+            other => panic!("Expected Real result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_division_affinity_text_real_int_sqlite() {
+        // '2245.0' / 3 = 748.333... (real division). Text that parses to a real
+        // divides as a real, matching sqlite3 typeof=real.
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2245.0")),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        match result {
+            SqlValue::Real(f) => assert!((f - 748.333_333).abs() < 1e-3),
+            other => panic!("Expected Real result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_string_float_division_sqlite_no_panic() {
+        // '2245.5' / 3 = 748.5 (Real). Previously hit the
+        // `(ApproximateNumeric, Integer)` unreachable! panic in SQLite mode
+        // because is_float_value(Varchar) is false. Must not panic.
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2245.5")),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        match result {
+            SqlValue::Real(f) => assert!((f - 748.5).abs() < 1e-6),
+            other => panic!("Expected Real result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_string_division_non_numeric_sqlite() {
+        // 'abc' / 3 = 0 (non-numeric string → 0, integer division), matches sqlite3
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn test_string_exponent_division_sqlite() {
+        // '2e2' / 3 → real 66.666... Exponent notation parses to real 200.0, so
+        // the division is real. Verified against sqlite3 3.51.0:
+        //   SELECT typeof('2e2'/3), '2e2'/3;  -- real|66.6666666666667
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2e2")),
+            &SqlValue::Integer(3),
+            vibesql_types::SqlMode::SQLite,
+        )
+        .unwrap();
+        match result {
+            SqlValue::Real(f) => assert!((f - 66.666_666).abs() < 1e-3),
+            other => panic!("Expected Real result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_division_affinity_text_int_mysql_slt() {
+        // mysql_slt (MySQL syntax + SQLite division semantics): '2245'/3 = 748.
+        // The TCL runner uses this mode; verify text-int coercion is integer.
+        let mode: vibesql_types::SqlMode = "mysql_slt".parse().unwrap();
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2245")),
+            &SqlValue::Integer(3),
+            mode,
+        )
+        .unwrap();
+        assert_eq!(result, SqlValue::Integer(748));
+    }
+
+    #[test]
+    fn test_division_text_int_mysql_default_numeric() {
+        // Default MySQL mode is unchanged: '2245'/3 → Numeric (float), preserving
+        // SQLLogicTest expectations (INTEGER/INTEGER → DECIMAL).
+        let mode = vibesql_types::SqlMode::MySQL { flags: Default::default() };
+        let result = ArithmeticOps::divide(
+            &SqlValue::Varchar(arcstr::ArcStr::from("2245")),
+            &SqlValue::Integer(3),
+            mode,
+        )
+        .unwrap();
+        match result {
+            SqlValue::Numeric(f) => assert!((f - 748.333_333).abs() < 1e-3),
+            other => panic!("Expected Numeric result in MySQL mode, got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_string_modulo() {
         // '17' % 5 = 2

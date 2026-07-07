@@ -75,8 +75,44 @@ impl Division {
             return Ok(Null); // Non-strict mode: division by zero returns NULL
         }
 
-        // Use TypeBehavior trait to determine result type based on original operands
-        let result_type = sql_mode.division_result_type(left, right);
+        // Determine the result type.
+        //
+        // In SQLite mode (and the mysql_slt compatibility variant), integer vs
+        // float division is a property of the *coerced* operands, not the
+        // original SqlValue types. `division_result_type` inspects the original
+        // operands via `is_float_value`, which returns `false` for a text
+        // operand — so `'2245'/3` and `'2245.5'/3` would both be classified by
+        // their surface type rather than their numeric affinity. That produced
+        // two bugs:
+        //   1. text-integer operands like `'2245'/3` yielded float in MySQL mode
+        //      (`division_result_type` always returns Numeric there), diverging
+        //      from sqlite3's integer division (748.33 vs 748).
+        //   2. `'2245.5'/3` in SQLite mode hit the `(ApproximateNumeric, Integer)`
+        //      unreachable! panic, because coercion says float but
+        //      `division_result_type` says Integer for a Varchar operand.
+        //
+        // Mirror how Modulo derives its result type: use the CoercedValues
+        // variant directly to pick Integer vs Float in SQLite-semantics modes.
+        // MySQL mode without sqlite_division_semantics is unchanged (always
+        // Numeric), preserving SQLLogicTest expectations.
+        let result_type = match (&coerced, &sql_mode) {
+            (super::CoercedValues::ExactNumeric(_, _), vibesql_types::SqlMode::SQLite) => {
+                ValueType::Integer
+            }
+            (super::CoercedValues::ApproximateNumeric(_, _), vibesql_types::SqlMode::SQLite) => {
+                ValueType::Float
+            }
+            (super::CoercedValues::ExactNumeric(_, _), vibesql_types::SqlMode::MySQL { flags })
+                if flags.sqlite_division_semantics =>
+            {
+                ValueType::Integer
+            }
+            (
+                super::CoercedValues::ApproximateNumeric(_, _),
+                vibesql_types::SqlMode::MySQL { flags },
+            ) if flags.sqlite_division_semantics => ValueType::Float,
+            _ => sql_mode.division_result_type(left, right),
+        };
 
         // Perform division based on coerced values and convert to determined type
         // Apply nan_to_null for SQLite compatibility (infinity/infinity = NaN → NULL)
