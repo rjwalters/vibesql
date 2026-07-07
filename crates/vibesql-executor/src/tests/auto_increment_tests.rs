@@ -644,10 +644,7 @@ fn test_last_insert_rowid_upsert_mixed_batch_excludes_update() {
     exec_sql(&mut db, "INSERT INTO t VALUES(5,1)");
     // (6,2) inserts (no conflict); (5,3) conflicts on k=5 and takes the DO
     // UPDATE arm — an update, so it must not touch last_insert_rowid().
-    exec_sql(
-        &mut db,
-        "INSERT INTO t VALUES(6,2),(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-    );
+    exec_sql(&mut db, "INSERT INTO t VALUES(6,2),(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v");
 
     // sqlite3: last_insert_rowid() == 6 (last row actually inserted, not 5)
     assert_eq!(db.last_insert_rowid(), 6);
@@ -668,10 +665,7 @@ fn test_last_insert_rowid_upsert_all_updates_keeps_prior() {
     assert_eq!(db.last_insert_rowid(), 9);
 
     // k=5 already exists -> DO UPDATE arm only; nothing inserted.
-    exec_sql(
-        &mut db,
-        "INSERT INTO t VALUES(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-    );
+    exec_sql(&mut db, "INSERT INTO t VALUES(5,3) ON CONFLICT(k) DO UPDATE SET v=excluded.v");
 
     // sqlite3: last_insert_rowid() unchanged at 9 (no row inserted)
     assert_eq!(db.last_insert_rowid(), 9);
@@ -696,4 +690,79 @@ fn test_last_insert_rowid_bulk_transfer() {
 
     // sqlite3: last_insert_rowid() == 300 (last row copied, in rowid scan order)
     assert_eq!(db.last_insert_rowid(), 300);
+}
+
+/// A single-row INSERT into a table WITHOUT an INTEGER PRIMARY KEY (implicit
+/// rowid) must update last_insert_rowid() with the allocated implicit rowid.
+/// sqlite3 returns 1 here; VibeSQL previously left it at 0 (issue #5944). This
+/// exercises the slow (row-by-row) insert path, which single-row inserts take.
+#[test]
+fn test_last_insert_rowid_implicit_rowid_table() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t VALUES('a')");
+
+    // sqlite3: last_insert_rowid() == 1 (the allocated implicit rowid)
+    assert_eq!(db.last_insert_rowid(), 1);
+}
+
+/// A multi-row INSERT ... VALUES into an implicit-rowid table must report the
+/// rowid of the LAST inserted row. This exercises the fast batch insert path
+/// (more than one row, no triggers). sqlite3 returns 3 here (issue #5944).
+#[test]
+fn test_last_insert_rowid_implicit_rowid_multi_row() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t VALUES('a')"); // rowid 1 (slow path)
+    assert_eq!(db.last_insert_rowid(), 1);
+
+    // Two more rows -> rowids 2 and 3 via the fast batch path.
+    exec_sql(&mut db, "INSERT INTO t VALUES('b'),('c')");
+
+    // sqlite3: last_insert_rowid() == 3 (last row inserted)
+    assert_eq!(db.last_insert_rowid(), 3);
+}
+
+/// The bulk-transfer fast path (`INSERT INTO t SELECT ...`) into an
+/// implicit-rowid destination must also update last_insert_rowid() with the
+/// last copied row's allocated rowid. sqlite3 returns 2 here (issue #5944).
+#[test]
+fn test_last_insert_rowid_implicit_rowid_bulk_transfer() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE src(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO src VALUES('d')"); // src rowid 1
+    exec_sql(&mut db, "INSERT INTO src VALUES('e')"); // src rowid 2
+    assert_eq!(db.last_insert_rowid(), 2);
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t SELECT x FROM src");
+
+    // Two rows copied into t get implicit rowids 1 and 2; the last is 2.
+    // sqlite3: last_insert_rowid() == 2.
+    assert_eq!(db.last_insert_rowid(), 2);
+}
+
+/// A WITHOUT ROWID table must NOT update last_insert_rowid() (SQLite
+/// R-47220-63683). Inserting into one leaves the prior value untouched.
+#[test]
+fn test_last_insert_rowid_without_rowid_unchanged() {
+    let mut db = Database::new();
+
+    // Establish a prior last_insert_rowid() from a normal rowid table.
+    exec_sql(&mut db, "CREATE TABLE r(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO r VALUES('a')"); // rowid 1
+    assert_eq!(db.last_insert_rowid(), 1);
+
+    // Inserting into a WITHOUT ROWID table must leave last_insert_rowid() at 1.
+    exec_sql(&mut db, "CREATE TABLE wr(x TEXT PRIMARY KEY) WITHOUT ROWID");
+    exec_sql(&mut db, "INSERT INTO wr VALUES('z')");
+    assert_eq!(db.last_insert_rowid(), 1);
+
+    // A multi-row insert into the WITHOUT ROWID table (fast batch path) must
+    // also leave it unchanged.
+    exec_sql(&mut db, "INSERT INTO wr VALUES('y'),('x')");
+    assert_eq!(db.last_insert_rowid(), 1);
 }
