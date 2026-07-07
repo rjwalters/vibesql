@@ -81,16 +81,19 @@ fn test_covering_index_single_column_select() {
                 column_name: "s_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_quantity".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_i_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -143,16 +146,19 @@ fn test_covering_index_multiple_columns_select() {
                 column_name: "s_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_quantity".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_i_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -204,11 +210,13 @@ fn test_non_covering_index_falls_back_to_table_fetch() {
                 column_name: "s_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_i_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -251,16 +259,19 @@ fn test_covering_index_prefix_equality_range() {
                 column_name: "s_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_quantity".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "s_i_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )

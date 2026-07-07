@@ -617,6 +617,7 @@ fn create_tpce_indexes_vibesql(db: &mut VibeDB) {
             column_name: name.to_uppercase(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }
     }
 

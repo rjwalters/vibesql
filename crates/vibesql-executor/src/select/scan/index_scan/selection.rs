@@ -2813,6 +2813,7 @@ mod tests {
                 column_name: n.to_string(),
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             })
             .collect()
     }
@@ -3179,6 +3180,7 @@ mod tests {
                     column_name: name.to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 }]
             };
             let where_expr = where_of("SELECT a FROM t1 WHERE b>1000 AND (c>=31031 OR d IS NULL)");
@@ -3221,6 +3223,7 @@ mod tests {
                     column_name: name.to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 }]
             };
             let seekable = |sql: &str, col: &str| {
@@ -3269,6 +3272,7 @@ mod tests {
                     column_name: name.to_string(),
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 }]
             };
             let seekable = |sql: &str, col: &str| {

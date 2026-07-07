@@ -55,6 +55,7 @@ impl CreateIndexExecutor {
     ///         column_name: "email".to_string(),
     ///         direction: OrderDirection::Asc,
     ///         prefix_length: None,
+    ///         collation: None,
     ///     }],
     ///     where_clause: None,
     /// };
@@ -207,6 +208,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -236,6 +238,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -260,11 +263,13 @@ mod tests {
                     column_name: "email".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 },
                 IndexColumn::Column {
                     column_name: "name".to_string(),
                     direction: OrderDirection::Desc,
                     prefix_length: None,
+                    collation: None,
                 },
             ],
             where_clause: None,
@@ -288,6 +293,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -315,6 +321,7 @@ mod tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -338,6 +345,7 @@ mod tests {
                 column_name: "nonexistent_column".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -361,6 +369,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -389,6 +398,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -404,6 +414,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -427,6 +438,7 @@ mod tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -493,6 +505,7 @@ mod tests {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         }
@@ -572,6 +585,7 @@ mod tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -654,6 +668,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -683,6 +698,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -709,6 +725,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -736,6 +753,7 @@ mod tests {
                 column_name: "content".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -764,11 +782,13 @@ mod tests {
                     column_name: "embedding".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 },
                 IndexColumn::Column {
                     column_name: "id".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 },
             ],
             where_clause: None,
@@ -796,6 +816,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -873,6 +894,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -915,6 +937,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -949,6 +972,7 @@ mod tests {
                 column_name: "embedding".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             where_clause: None,
         };

@@ -26,8 +26,17 @@
 //! upsert1-210) and a target WHERE must structurally equal the index
 //! predicate (upsert1-300/310).
 //!
+//! Conflict-target `COLLATE` matching (issue #5921): a target *column* with an
+//! explicit `COLLATE` matches an index key-part only when their effective
+//! collations are equal (the explicit index `COLLATE`, else the column's
+//! declared collation, else `binary`); a target column without an explicit
+//! `COLLATE` matches regardless. So `ON CONFLICT(b COLLATE nocase, c, d)`
+//! matches `CREATE UNIQUE INDEX ... ON xyz(d, c, b COLLATE nocase)` (upsert4
+//! 2.x.2.1) while `ON CONFLICT(b COLLATE nocase)` against a binary index on `b`
+//! does not (upsert1-130). Expression targets carrying a non-BINARY `COLLATE`
+//! are still treated as inexact and never match.
+//!
 //! Known limitations (issue #5269):
-//! - Non-BINARY `COLLATE` in the target is never matched (upsert1-130).
 //! - UPDATE triggers do not fire on the upsert update arm (parity with the
 //!   MySQL-style `ON DUPLICATE KEY UPDATE` path).
 //!
@@ -188,10 +197,30 @@ pub enum UpsertAction {
 
 /// One key component of a unique constraint/index candidate.
 enum KeyPart {
-    /// Plain column, resolved to a schema column index.
-    Column(usize),
+    /// Plain column, resolved to a schema column index, plus the key-part's
+    /// effective collation (the explicit index `COLLATE`, else the column's
+    /// declared collation, else `binary`; normalized lowercase). Used to match
+    /// a conflict-target column's explicit `COLLATE` (issue #5921).
+    Column { idx: usize, collation: String },
     /// Expression component of an expression index.
     Expr(Expression),
+}
+
+/// SQLite's default collation name.
+const DEFAULT_COLLATION: &str = "binary";
+
+/// Effective collation of a column key-part: the explicit index `COLLATE` if
+/// present, else the column's declared collation, else `binary`. Normalized to
+/// lowercase for case-insensitive comparison (issue #5921).
+fn effective_key_collation(
+    schema: &vibesql_catalog::TableSchema,
+    idx: usize,
+    explicit: Option<&str>,
+) -> String {
+    explicit
+        .or_else(|| schema.columns.get(idx).and_then(|c| c.collation.as_deref()))
+        .unwrap_or(DEFAULT_COLLATION)
+        .to_ascii_lowercase()
 }
 
 /// A unique constraint or index that can act as an upsert conflict target:
@@ -219,10 +248,18 @@ fn collect_unique_candidates(
 ) -> Vec<UniqueCandidate> {
     let mut candidates: Vec<UniqueCandidate> = Vec::new();
 
+    // PK and table-level UNIQUE constraint key-parts carry no explicit index
+    // collation, so their effective collation is the column's declared
+    // collation (else `binary`).
+    let column_key_part = |idx: usize| KeyPart::Column {
+        idx,
+        collation: effective_key_collation(schema, idx, None),
+    };
+
     if let Some(pk) = schema.get_primary_key_indices() {
         if !pk.is_empty() {
             candidates.push(UniqueCandidate {
-                parts: pk.into_iter().map(KeyPart::Column).collect(),
+                parts: pk.into_iter().map(column_key_part).collect(),
                 predicate: None,
                 index_name: None,
             });
@@ -232,7 +269,7 @@ fn collect_unique_candidates(
     for unique in schema.get_unique_constraint_indices() {
         if !unique.is_empty() {
             candidates.push(UniqueCandidate {
-                parts: unique.into_iter().map(KeyPart::Column).collect(),
+                parts: unique.into_iter().map(column_key_part).collect(),
                 predicate: None,
                 index_name: None,
             });
@@ -249,7 +286,10 @@ fn collect_unique_candidates(
         for index_col in &meta.columns {
             if let Some(name) = index_col.column_name() {
                 match schema.get_column_index(name) {
-                    Some(idx) => parts.push(KeyPart::Column(idx)),
+                    Some(idx) => parts.push(KeyPart::Column {
+                        idx,
+                        collation: effective_key_collation(schema, idx, index_col.collation()),
+                    }),
                     None => {
                         // Unknown column: the index cannot be matched.
                         representable = false;
@@ -260,7 +300,10 @@ fn collect_unique_candidates(
                 // Normalize bare column-ref expressions to plain columns so
                 // a column-name target can match them.
                 match bare_column_index(schema, expr) {
-                    Some(idx) => parts.push(KeyPart::Column(idx)),
+                    Some(idx) => parts.push(KeyPart::Column {
+                        idx,
+                        collation: effective_key_collation(schema, idx, None),
+                    }),
                     None => parts.push(KeyPart::Expr(expr.clone())),
                 }
             } else {
@@ -293,7 +336,10 @@ fn bare_column_index(schema: &vibesql_catalog::TableSchema, expr: &Expression) -
 
 /// A conflict-target item resolved against the table schema.
 enum ResolvedTargetItem<'a> {
-    Column(usize),
+    /// A column index plus the target's *explicit* `COLLATE` (normalized
+    /// lowercase), or `None` when the target column has no explicit collation
+    /// (issue #5921).
+    Column { idx: usize, collation: Option<String> },
     Expr(&'a Expression),
 }
 
@@ -306,13 +352,18 @@ fn resolve_target_items<'a>(
     target
         .iter()
         .map(|item| match item {
-            ConflictTargetItem::Column(name) => {
-                schema.get_column_index(name).map(ResolvedTargetItem::Column).ok_or_else(|| {
-                    ExecutorError::SqliteCompatError(format!("no such column: {}", name))
+            ConflictTargetItem::Column { name, collation } => schema
+                .get_column_index(name)
+                .map(|idx| ResolvedTargetItem::Column {
+                    idx,
+                    collation: collation.as_deref().map(str::to_ascii_lowercase),
                 })
-            }
+                .ok_or_else(|| {
+                    ExecutorError::SqliteCompatError(format!("no such column: {}", name))
+                }),
             ConflictTargetItem::Expression(expr) => match bare_column_index(schema, expr) {
-                Some(idx) => Ok(ResolvedTargetItem::Column(idx)),
+                // A bare-column expression target carries no explicit collation.
+                Some(idx) => Ok(ResolvedTargetItem::Column { idx, collation: None }),
                 None => Ok(ResolvedTargetItem::Expr(expr)),
             },
         })
@@ -368,7 +419,20 @@ fn candidate_matches_target(
                 continue;
             }
             let matches = match (item, part) {
-                (ResolvedTargetItem::Column(t), KeyPart::Column(c)) => t == c,
+                (
+                    ResolvedTargetItem::Column { idx: t, collation: t_coll },
+                    KeyPart::Column { idx: c, collation: c_coll },
+                ) => {
+                    // A target column with an explicit COLLATE only matches a
+                    // key-part whose effective collation is equal; a target
+                    // column without one matches regardless (issue #5921,
+                    // upsert4 2.x.2.1 / 2.x.2.3 / 2.x.2.8).
+                    t == c
+                        && match t_coll {
+                            None => true,
+                            Some(tc) => tc == c_coll,
+                        }
+                }
                 (ResolvedTargetItem::Expr(t), KeyPart::Expr(c)) => expressions_equal(t, c),
                 _ => false,
             };
@@ -504,7 +568,7 @@ fn eval_candidate_key(
     let mut key = Vec::with_capacity(candidate.parts.len());
     for part in &candidate.parts {
         let value = match part {
-            KeyPart::Column(idx) => row.values.get(*idx)?.clone(),
+            KeyPart::Column { idx, .. } => row.values.get(*idx)?.clone(),
             KeyPart::Expr(expr) => evaluator.eval(expr, row).unwrap_or(SqlValue::Null),
         };
         if matches!(value, SqlValue::Null) {
@@ -576,7 +640,7 @@ fn unique_violation_message(
     let mut cols = Vec::with_capacity(candidate.parts.len());
     for part in &candidate.parts {
         match part {
-            KeyPart::Column(idx) => {
+            KeyPart::Column { idx, .. } => {
                 let name = schema.columns.get(*idx).map(|c| c.name.as_str()).unwrap_or("?");
                 cols.push(format!("{}.{}", table_name, name));
             }
@@ -982,16 +1046,16 @@ fn substitute_excluded_refs(
 mod candidate_match_tests {
     use super::*;
 
+    fn binary_col(idx: usize) -> KeyPart {
+        KeyPart::Column { idx, collation: DEFAULT_COLLATION.to_string() }
+    }
+
     fn full_index() -> UniqueCandidate {
-        UniqueCandidate { parts: vec![KeyPart::Column(0)], predicate: None, index_name: None }
+        UniqueCandidate { parts: vec![binary_col(0)], predicate: None, index_name: None }
     }
 
     fn partial_index(pred: Expression) -> UniqueCandidate {
-        UniqueCandidate {
-            parts: vec![KeyPart::Column(0)],
-            predicate: Some(pred),
-            index_name: None,
-        }
+        UniqueCandidate { parts: vec![binary_col(0)], predicate: Some(pred), index_name: None }
     }
 
     // `a != 0`, matching the upsert4 2.x.2.6 target WHERE.
@@ -1006,7 +1070,7 @@ mod candidate_match_tests {
     }
 
     fn target() -> Vec<ResolvedTargetItem<'static>> {
-        vec![ResolvedTargetItem::Column(0)]
+        vec![ResolvedTargetItem::Column { idx: 0, collation: None }]
     }
 
     #[test]
@@ -1048,5 +1112,85 @@ mod candidate_match_tests {
             right: Box::new(Expression::Literal(SqlValue::Integer(0))),
         };
         assert!(!candidate_matches_target(&cand, &target(), Some(&different)));
+    }
+
+    // ---- COLLATE conflict-target matching (issue #5921) ----
+
+    fn nocase_index() -> UniqueCandidate {
+        UniqueCandidate {
+            parts: vec![KeyPart::Column { idx: 0, collation: "nocase".to_string() }],
+            predicate: None,
+            index_name: None,
+        }
+    }
+
+    fn target_with_collation(collation: Option<&str>) -> Vec<ResolvedTargetItem<'static>> {
+        vec![ResolvedTargetItem::Column {
+            idx: 0,
+            collation: collation.map(|c| c.to_ascii_lowercase()),
+        }]
+    }
+
+    #[test]
+    fn target_no_collate_matches_nocase_keypart() {
+        // A target column without an explicit COLLATE matches any key-part
+        // collation (upsert4 2.x.2.2).
+        assert!(candidate_matches_target(&nocase_index(), &target_with_collation(None), None));
+    }
+
+    #[test]
+    fn target_no_collate_matches_binary_keypart() {
+        assert!(candidate_matches_target(&full_index(), &target_with_collation(None), None));
+    }
+
+    #[test]
+    fn target_explicit_nocase_matches_nocase_keypart() {
+        // upsert4 2.x.2.1: `(b COLLATE nocase)` matches an index part
+        // `b COLLATE nocase`.
+        assert!(candidate_matches_target(
+            &nocase_index(),
+            &target_with_collation(Some("nocase")),
+            None
+        ));
+    }
+
+    #[test]
+    fn target_explicit_nocase_rejects_binary_keypart() {
+        // upsert4 2.x.2.3 / upsert1-130: `(c COLLATE nocase)` does not match a
+        // binary-collation key-part.
+        assert!(!candidate_matches_target(
+            &full_index(),
+            &target_with_collation(Some("nocase")),
+            None
+        ));
+    }
+
+    #[test]
+    fn target_explicit_binary_matches_binary_keypart() {
+        // upsert1-140: `(b COLLATE binary)` matches a binary-collation key-part.
+        assert!(candidate_matches_target(
+            &full_index(),
+            &target_with_collation(Some("binary")),
+            None
+        ));
+    }
+
+    #[test]
+    fn target_explicit_binary_rejects_nocase_keypart() {
+        assert!(!candidate_matches_target(
+            &nocase_index(),
+            &target_with_collation(Some("binary")),
+            None
+        ));
+    }
+
+    #[test]
+    fn collation_comparison_is_case_insensitive() {
+        // Collation names are case-insensitive; both sides are normalized.
+        assert!(candidate_matches_target(
+            &nocase_index(),
+            &target_with_collation(Some("NOCASE")),
+            None
+        ));
     }
 }

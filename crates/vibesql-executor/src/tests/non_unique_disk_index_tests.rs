@@ -105,6 +105,7 @@ fn test_basic_non_unique_index_with_duplicates() {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -199,11 +200,13 @@ fn test_multi_column_non_unique_index() {
                 column_name: "department".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "salary".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -307,6 +310,7 @@ fn test_range_queries_with_duplicates() {
             column_name: "salary".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -401,6 +405,7 @@ fn test_updates_affecting_non_unique_indexes() {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -505,6 +510,7 @@ fn test_deletes_with_duplicates() {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -577,6 +583,7 @@ fn test_heavy_duplicate_scenario_in_memory() {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -641,6 +648,7 @@ fn test_heavy_duplicate_scenario_disk_backed() {
             column_name: "department".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

@@ -650,7 +650,10 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     .iter()
                     .map(|item| match item {
                         arena_dml::ConflictTargetItem::Column(s) => {
-                            crate::ConflictTargetItem::Column(self.resolve(*s))
+                            crate::ConflictTargetItem::Column {
+                                name: self.resolve(*s),
+                                collation: None,
+                            }
                         }
                         arena_dml::ConflictTargetItem::Expression(e) => {
                             crate::ConflictTargetItem::Expression(self.convert_expression(e))

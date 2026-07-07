@@ -471,28 +471,40 @@ impl Parser {
                     p.reject_nulls_in_index_position()?;
 
                     // Peel an optional COLLATE wrapper.
-                    let (base, collation) = match expr {
+                    let (base, mut collation) = match expr {
                         vibesql_ast::Expression::Collate { expr: inner, collation } => {
                             (*inner, Some(collation))
                         }
                         other => (other, None),
                     };
 
-                    // A non-default (non-BINARY) collation cannot be matched
-                    // against an index in v1 (upsert1-130).
+                    // A bare column target carries its explicit COLLATE into the
+                    // AST; matching against an index key-part's collation happens
+                    // in the executor (issue #5921). `collation.take()` leaves
+                    // `collation = None` for the column case so the inexact flag
+                    // below stays false.
+                    let item = match base {
+                        vibesql_ast::Expression::ColumnRef(id)
+                            if id.table_canonical().is_none() =>
+                        {
+                            vibesql_ast::ConflictTargetItem::Column {
+                                name: id.column_display().to_string(),
+                                collation: collation.take(),
+                            }
+                        }
+                        other => vibesql_ast::ConflictTargetItem::Expression(other),
+                    };
+
+                    // An *expression* target with a non-default (non-BINARY)
+                    // collation still cannot be matched exactly (the collation is
+                    // dropped from the peeled expression), so keep marking it
+                    // inexact (upsert1-130 / upsert4 section 3). For the column
+                    // case `collation` was taken above and is now `None`.
                     let inexact = collation
                         .as_deref()
                         .map(|c| !c.eq_ignore_ascii_case("binary"))
                         .unwrap_or(false);
 
-                    let item = match &base {
-                        vibesql_ast::Expression::ColumnRef(id)
-                            if id.table_canonical().is_none() =>
-                        {
-                            vibesql_ast::ConflictTargetItem::Column(id.column_display().to_string())
-                        }
-                        _ => vibesql_ast::ConflictTargetItem::Expression(base),
-                    };
                     Ok((item, inexact))
                 })?;
                 self.expect_token(Token::RParen)?;

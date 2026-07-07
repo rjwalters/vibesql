@@ -98,6 +98,7 @@ fn test_index_scan_with_email_index() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -136,6 +137,7 @@ fn test_index_scan_with_age_index() {
             column_name: "age".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -202,6 +204,7 @@ fn test_index_scan_with_comparison_operator() {
             column_name: "age".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -246,6 +249,7 @@ fn test_index_scan_with_and_condition() {
             column_name: "age".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -279,6 +283,7 @@ fn test_unique_index_enforcement() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     );
 
@@ -338,6 +343,7 @@ fn test_index_scan_where_order_by_no_double_filtering() {
             column_name: "col3".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

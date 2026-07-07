@@ -173,12 +173,12 @@ impl Parser {
         // Optional COLLATE clause (SQLite grammar allows a per-column collation
         // inside table-level PRIMARY KEY / UNIQUE column lists, e.g.
         // `PRIMARY KEY(a COLLATE nocase, a)` — verified against sqlite3 3.51.0).
-        // Parsed and accepted for grammar compatibility; the collation is not
-        // yet carried into `IndexColumn`, matching the CREATE INDEX column-list
-        // behavior in `parser/index.rs` which also parses and discards it.
-        if self.peek_keyword(crate::keywords::Keyword::Collate) {
+        // Carried into `IndexColumn` so upsert conflict-target matching can
+        // compare a target column's explicit COLLATE against this key-part's
+        // collation (issue #5921), mirroring the CREATE INDEX column-list path.
+        let collation = if self.peek_keyword(crate::keywords::Keyword::Collate) {
             self.advance(); // consume COLLATE
-            let _collation = match self.peek() {
+            let name = match self.peek() {
                 Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                     let name = name.clone();
                     self.advance();
@@ -196,7 +196,10 @@ impl Parser {
                     })
                 }
             };
-        }
+            Some(name)
+        } else {
+            None
+        };
 
         // Check for optional ASC/DESC
         let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
@@ -213,7 +216,7 @@ impl Parser {
         // CREATE INDEX column specs (see `parse_index_column_list`).
         self.reject_nulls_in_index_position()?;
 
-        Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length })
+        Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length, collation })
     }
     /// Parse the ON DELETE/UPDATE actions and MATCH clauses of a
     /// foreign-key-clause.

@@ -131,6 +131,7 @@ mod adaptive_backend_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 
@@ -174,6 +175,7 @@ mod adaptive_backend_tests {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -186,6 +188,7 @@ mod adaptive_backend_tests {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -198,6 +201,7 @@ mod adaptive_backend_tests {
                 column_name: "c".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -237,6 +241,7 @@ mod correctness_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 
@@ -283,6 +288,7 @@ mod correctness_tests {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 
@@ -323,6 +329,7 @@ mod correctness_tests {
                 column_name: "category".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 
@@ -384,11 +391,13 @@ mod correctness_tests {
                     column_name: "last_name".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 },
                 IndexColumn::Column {
                     column_name: "first_name".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 },
             ],
         );
@@ -434,6 +443,7 @@ mod correctness_tests {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -488,6 +498,7 @@ mod persistence_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 
@@ -514,6 +525,7 @@ mod persistence_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -551,6 +563,7 @@ mod index_operations_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -588,6 +601,7 @@ mod index_operations_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -600,6 +614,7 @@ mod index_operations_tests {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -640,6 +655,7 @@ mod index_operations_tests {
                 column_name: "id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         );
 

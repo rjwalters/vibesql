@@ -1491,6 +1491,7 @@ mod tests {
                 column_name: "price".to_string(),
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();

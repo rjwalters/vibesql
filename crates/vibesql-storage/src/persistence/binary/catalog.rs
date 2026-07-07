@@ -178,6 +178,20 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                 writer
                     .write_all(&[direction])
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+                // v15+: per-key-part explicit collation, column-type parts only
+                // (issue #5921). Expression parts encode any collation inside
+                // their SQL text, so nothing extra is written for them; the read
+                // path mirrors this (only reads for type byte 0).
+                if let IndexColumn::Column { collation, .. } = col {
+                    match collation {
+                        Some(name) => {
+                            write_bool(writer, true)?;
+                            write_string(writer, name)?;
+                        }
+                        None => write_bool(writer, false)?,
+                    }
+                }
             }
 
             // v8+: persist partial-index WHERE clause (if any). Catalog-side
@@ -644,11 +658,23 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
 
                 match type_byte {
                     0 => {
-                        // Column reference
+                        // Column reference. v15+ appends a present-flag bool +
+                        // optional collation name after the direction byte
+                        // (issue #5921); v14 and earlier omit it entirely.
+                        let collation = if version >= 15 {
+                            if read_bool(reader)? {
+                                Some(read_string(reader)?)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
                         vibesql_ast::IndexColumn::Column {
                             column_name: content,
                             direction,
                             prefix_length: None,
+                            collation,
                         }
                     }
                     1 => {
@@ -688,7 +714,12 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                         )))
                     }
                 };
-                vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length: None }
+                vibesql_ast::IndexColumn::Column {
+                    column_name,
+                    direction,
+                    prefix_length: None,
+                    collation: None,
+                }
             };
 
             columns.push(index_column);

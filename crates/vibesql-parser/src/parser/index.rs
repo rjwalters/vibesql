@@ -221,6 +221,7 @@ impl Parser {
             column_name,
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
+            collation: None,
         }];
 
         Ok(vibesql_ast::CreateIndexStmt {
@@ -346,6 +347,7 @@ impl Parser {
             column_name,
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
+            collation: None,
         }];
 
         Ok(vibesql_ast::CreateIndexStmt {
@@ -625,13 +627,17 @@ impl Parser {
 
                 // Check for optional COLLATE clause (SQLite compatibility)
                 // Syntax: column_name COLLATE collation_name
-                if self.peek_keyword(crate::keywords::Keyword::Collate) {
+                //
+                // Stored on the IndexColumn so upsert conflict-target matching
+                // can compare a target column's explicit COLLATE against this
+                // key-part's collation (issue #5921).
+                let collation = if self.peek_keyword(crate::keywords::Keyword::Collate) {
                     self.advance(); // consume COLLATE
                                     // Parse collation name (e.g., NOCASE, BINARY, RTRIM)
-                    let _collation = self.parse_identifier()?;
-                    // Note: We parse and ignore the collation for now
-                    // Full collation support would require storing it in IndexColumn
-                }
+                    Some(self.parse_identifier()?)
+                } else {
+                    None
+                };
 
                 // Check for optional ASC/DESC
                 let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
@@ -654,6 +660,7 @@ impl Parser {
                     column_name,
                     direction,
                     prefix_length,
+                    collation,
                 });
             }
 

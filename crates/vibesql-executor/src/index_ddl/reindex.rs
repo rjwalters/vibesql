@@ -151,6 +151,7 @@ mod tests {
                 column_name: "email".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             }],
             where_clause: None,
         };
@@ -178,6 +179,7 @@ mod tests {
                 column_name: "email".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             }],
             where_clause: None,
         };

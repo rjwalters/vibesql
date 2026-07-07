@@ -300,6 +300,9 @@ pub enum IndexColumn<'arena> {
         column_name: Symbol,
         direction: super::expression::OrderDirection,
         prefix_length: Option<u64>,
+        /// Explicit per-key-part collation (`ON t(b COLLATE nocase)`); `None`
+        /// adopts the column's declared collation (issue #5921).
+        collation: Option<Symbol>,
     },
     /// Expression index (functional index)
     Expression { expr: &'arena Expression<'arena>, direction: super::expression::OrderDirection },

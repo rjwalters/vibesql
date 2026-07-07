@@ -93,6 +93,7 @@ fn test_index_ordering() {
             column_name: "name".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
         where_clause: None,
     };

@@ -119,6 +119,7 @@ fn test_index_range_scan_between_numeric_types() {
             column_name: "int_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -131,6 +132,7 @@ fn test_index_range_scan_between_numeric_types() {
             column_name: "real_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -143,6 +145,7 @@ fn test_index_range_scan_between_numeric_types() {
             column_name: "double_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -229,6 +232,7 @@ fn test_index_multi_lookup_large_value_set() {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -295,6 +299,7 @@ fn test_index_commuted_comparisons() {
             column_name: "value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -374,6 +379,7 @@ fn test_index_numeric_type_normalization() {
             column_name: "int_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -386,6 +392,7 @@ fn test_index_numeric_type_normalization() {
             column_name: "real_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -398,6 +405,7 @@ fn test_index_numeric_type_normalization() {
             column_name: "double_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -410,6 +418,7 @@ fn test_index_numeric_type_normalization() {
             column_name: "numeric_value".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

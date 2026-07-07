@@ -46,6 +46,7 @@ fn test_create_index_with_prefix_length() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
+            collation: None,
         }],
     )
     .unwrap();
@@ -66,6 +67,7 @@ fn test_create_unique_index_with_prefix_length() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
+            collation: None,
         }],
     )
     .unwrap();
@@ -86,6 +88,7 @@ fn test_unique_prefix_index_enforces_prefix_uniqueness() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
+            collation: None,
         }],
     )
     .unwrap();
@@ -128,6 +131,7 @@ fn test_unique_prefix_index_allows_different_prefixes() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
+            collation: None,
         }],
     )
     .unwrap();
@@ -169,6 +173,7 @@ fn test_prefix_index_with_short_strings() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
+            collation: None,
         }],
     )
     .unwrap();
@@ -212,11 +217,13 @@ fn test_composite_prefix_index() {
                 column_name: "email".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: Some(10),
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "name".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: Some(5),
+                collation: None,
             },
         ],
     )
@@ -275,6 +282,7 @@ fn test_prefix_index_with_utf8_strings() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(6),
+            collation: None,
         }],
     )
     .unwrap();
@@ -329,6 +337,7 @@ fn test_non_unique_prefix_index_allows_duplicates() {
             column_name: "email".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
+            collation: None,
         }],
     )
     .unwrap();

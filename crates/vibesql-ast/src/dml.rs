@@ -86,8 +86,11 @@ pub enum OnConflictAction {
 /// structurally identical component (upsert1-200).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConflictTargetItem {
-    /// Plain column name with the default BINARY collation.
-    Column(String),
+    /// Plain column name, with an optional explicit `COLLATE` (`b COLLATE
+    /// nocase`). A column with an explicit collation only matches an index
+    /// key-part whose effective collation is equal; a column without one
+    /// matches regardless (issue #5921).
+    Column { name: String, collation: Option<String> },
     /// Expression entry (e.g. `ON CONFLICT(a+b)`); matched structurally
     /// against expression-index components.
     Expression(Expression),
