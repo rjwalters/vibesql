@@ -147,7 +147,10 @@ class TclTestParser:
         r'catchsql',        # Nested catchsql
     ]
 
-    # Patterns to skip entire test files
+    # Intentionally-broad family patterns: skip an entire file *family* by
+    # unanchored substring match. VibeSQL does not share SQLite's storage layer,
+    # so skipping the whole WAL/journal/vacuum/etc. family is a deliberate choice.
+    # These predate #5844 and MUST stay broad — do not narrow them.
     SKIP_FILE_PATTERNS = [
         r'malloc',          # Memory allocation tests
         r'corrupt',         # Corruption tests
@@ -162,26 +165,40 @@ class TclTestParser:
         r'attach',          # Attach database
         r'vtab',            # Virtual tables
         r'intarray',        # Int array extension
-        # C-API / pager / extension-internals files (#5844 long-tail triage).
-        # These have no SQL-reachable surface; keep static-parser mode consistent
-        # with the vibesql_skip_files list in tester_vibesql.tcl.
-        r'manydb',          # ~116 concurrent named connections
-        r'varint',          # btree_varint_test C extension
-        r'quota',           # quota-VFS C API (quota-glob)
-        r'jrnlmode',        # rollback-journal pager modes (jrnlmode, jrnlmode3)
-        r'pagesize',        # PRAGMA page_size + exact file-byte assertions
-        r'snapshot',        # sqlite3_snapshot_* C API
-        r'lock',            # file-locking / locking-style VFS C API (lock, lock5)
-        r'symlink',         # sqlite3_db_filename C API
-        r'filefmt',         # hexio raw-byte db file manipulation
-        r'colmeta',         # sqlite3_column_* metadata C API
-        r'tableapi',        # sqlite3_get_table_printf C API
-        r'bind',            # sqlite3_bind_* C API
-        r'ptrchng',         # sqlite3_value_pointer / sqlite3_result_pointer C API
-        r'badutf',          # invalid-UTF-8 injection via C API (badutf, badutf2)
-        r'strict2',         # writable_schema + rootpage aliasing
-        r'ieee754',         # unguarded load_static_extension db ieee754
     ]
+
+    # Exact-stem skips: mirror the native `vibesql_skip_files` array keys in
+    # scripts/tester_vibesql.tcl, which are matched with an exact hash lookup
+    # (`[info exists vibesql_skip_files($basename)]`, run_test_file). These are
+    # per-file C-API / pager / extension-internals entries (#5844 long-tail
+    # triage) with no SQL-reachable surface. They MUST NOT be substring patterns:
+    # an unanchored `lock` wrongly swallows lock2..lock7/nolock/sharedlock, etc.
+    # Match the file stem exactly (case-sensitive, like the TCL `file rootname`)
+    # so static-parser mode agrees with native exact-match semantics.
+    SKIP_FILE_EXACT = frozenset({
+        'manydb',           # ~116 concurrent named connections
+        'varint',           # btree_varint_test C extension
+        'quota-glob',       # quota_file_size()/quota_glob() C-only VFS quota API
+        'jrnlmode',         # rollback-journal pager modes
+        'jrnlmode3',        # journal mode x multi-database transactions
+        'pagesize',         # PRAGMA page_size + exact file-byte assertions
+        'snapshot',         # sqlite3_snapshot_* C API
+        'lock',             # file-locking VFS C API (lock_status/fcntl_lockstate)
+        'lock5',            # locking-style VFS + sqlite3_unlock_notify callbacks
+        'shared6',          # sqlite3_enable_shared_cache C API
+        'symlink',          # sqlite3_db_filename C API
+        'filefmt',          # hexio raw-byte db file manipulation
+        'corruptL',         # sqlite3_deserialize corrupted-page injection
+        'colmeta',          # sqlite3_column_* metadata C API
+        'tableapi',         # sqlite3_get_table_printf C API
+        'bind',             # sqlite3_bind_* C API
+        'ptrchng',          # sqlite3_value_pointer / sqlite3_result_pointer C API
+        'badutf',           # invalid-UTF-8 injection via C API
+        'badutf2',          # invalid-UTF-8 injection via C API
+        'ieee754',          # unguarded load_static_extension db ieee754
+        'trustschema1',     # trusted_schema pragma + TCL-registered UDFs
+        'strict2',          # writable_schema + rootpage aliasing
+    })
 
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -189,9 +206,20 @@ class TclTestParser:
         self._skip_file_regex = re.compile('|'.join(self.SKIP_FILE_PATTERNS), re.IGNORECASE)
 
     def should_skip_file(self, file_path: str) -> Optional[str]:
-        """Check if entire file should be skipped based on filename."""
-        filename = Path(file_path).stem.lower()
-        match = self._skip_file_regex.search(filename)
+        """Check if entire file should be skipped based on filename.
+
+        Two independent mechanisms, mirroring tester_vibesql.tcl:
+        - Exact-stem skips (SKIP_FILE_EXACT) mirror the native
+          `vibesql_skip_files` array's exact hash lookup — per-file entries only.
+        - Broad family patterns (SKIP_FILE_PATTERNS) skip whole file families by
+          unanchored substring (WAL/journal/vacuum/etc.).
+        """
+        stem = Path(file_path).stem
+        # Exact-stem match first (case-sensitive, like the native `file rootname`).
+        if stem in self.SKIP_FILE_EXACT:
+            return f"File '{stem}' not applicable to VibeSQL (exact skip)"
+        # Fall back to the intentionally-broad family patterns.
+        match = self._skip_file_regex.search(stem.lower())
         if match:
             return f"File type '{match.group()}' not applicable to VibeSQL"
         return None
