@@ -276,11 +276,34 @@ pub fn rename_column(
     let mut expect_parent_table = false;
     let mut skip_below: Option<usize> = None;
 
+    // Non-column-reference position guards (see issue #5939): the token scanner
+    // must not rewrite an identifier that merely *spells* the old column name but
+    // occupies a type-name, function-name, or collation-name slot in the DDL.
+    //
+    // - `expect_collation`: the identifier immediately after `COLLATE` names a
+    //   collating sequence (e.g. `COLLATE nocase`), never a column reference.
+    // - `at_def_start`: true at the first token of a top-level column/constraint
+    //   definition (right after the opening `(` and after each depth-1 `,`); the
+    //   first identifier there is the column *name* (a rewrite target), and marks
+    //   the following depth-1 identifier as this column's *type* name.
+    // - `saw_col_name`: set right after a depth-1 column-name identifier; the next
+    //   depth-1 bare identifier is the type name (e.g. the `foo` in `a foo`) and
+    //   must be skipped.
+    let mut expect_collation = false;
+    let mut at_def_start = false;
+    let mut saw_col_name = false;
+
     let mut idx = open;
     while idx < close {
         let (tok, span) = &tokens[idx];
         match tok {
-            Token::LParen => depth += 1,
+            Token::LParen => {
+                depth += 1;
+                if depth == 1 {
+                    // Opening paren of the column list: the first definition begins.
+                    at_def_start = true;
+                }
+            }
             Token::RParen => {
                 if let Some(d) = skip_below {
                     if depth == d + 1 {
@@ -289,12 +312,35 @@ pub fn rename_column(
                 }
                 depth -= 1;
             }
+            Token::Comma if depth == 1 => {
+                // A new top-level definition begins after each depth-1 comma.
+                at_def_start = true;
+                saw_col_name = false;
+                expect_collation = false;
+                expect_parent_table = false;
+            }
             Token::Keyword { keyword: Keyword::References, .. } => {
                 expect_parent_table = true;
+                if depth == 1 {
+                    saw_col_name = false;
+                    at_def_start = false;
+                }
+            }
+            Token::Keyword { keyword: Keyword::Collate, .. } => {
+                // The identifier that follows names a collating sequence.
+                expect_collation = true;
+                if depth == 1 {
+                    saw_col_name = false;
+                    at_def_start = false;
+                }
             }
             Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
                 if expect_parent_table {
                     expect_parent_table = false;
+                    if depth == 1 {
+                        saw_col_name = false;
+                        at_def_start = false;
+                    }
                     // This identifier names the parent table. When it is a
                     // *different* table and introduces a `(col_list)`, skip that
                     // list (those columns belong to the parent).
@@ -307,6 +353,43 @@ pub fn rename_column(
                     continue;
                 }
                 if skip_below.is_some() {
+                    idx += 1;
+                    continue;
+                }
+                // Collation-name position: the identifier immediately after
+                // `COLLATE` (e.g. `nocase`) is a collating sequence, never a
+                // column reference — leave it untouched.
+                if expect_collation {
+                    expect_collation = false;
+                    idx += 1;
+                    continue;
+                }
+                // Column-name (definition) position: the first identifier of a
+                // top-level column definition. It *is* a rewrite target, and it
+                // marks the next depth-1 identifier as this column's type name.
+                if depth == 1 && at_def_start {
+                    at_def_start = false;
+                    saw_col_name = true;
+                    if ident_matches(tok, old_col) {
+                        targets.push((*span, matches!(tok, Token::DelimitedIdentifier(_))));
+                    }
+                    idx += 1;
+                    continue;
+                }
+                // Type-name position: a bare-identifier type immediately following
+                // a column name (e.g. the `foo` in `a foo`) — not a column
+                // reference, even when it spells the renamed column.
+                if depth == 1 && saw_col_name {
+                    saw_col_name = false;
+                    idx += 1;
+                    continue;
+                }
+                // Function-call position: an identifier immediately followed by
+                // `(` is a function call (e.g. `abs(a)` inside a CHECK), not a
+                // column reference. Bare identifiers inside paren lists such as
+                // `PRIMARY KEY(abs)` are not followed by `(`, so they still
+                // rewrite correctly.
+                if matches!(tokens.get(idx + 1), Some((Token::LParen, _))) {
                     idx += 1;
                     continue;
                 }
@@ -323,6 +406,14 @@ pub fn rename_column(
             }
             _ => {
                 expect_parent_table = false;
+                expect_collation = false;
+                if depth == 1 {
+                    // Any other depth-1 token (a type keyword like INTEGER, a
+                    // constraint keyword, an operator, …) ends the column-name /
+                    // type-name window.
+                    saw_col_name = false;
+                    at_def_start = false;
+                }
             }
         }
         idx += 1;
@@ -390,7 +481,8 @@ pub fn rename_references_column(
                 Token::Identifier(_) | Token::DelimitedIdentifier(_)
                     if depth == 1 && ident_matches(&tokens[j].0, old_col) =>
                 {
-                    targets.push((tokens[j].1, matches!(tokens[j].0, Token::DelimitedIdentifier(_))));
+                    targets
+                        .push((tokens[j].1, matches!(tokens[j].0, Token::DelimitedIdentifier(_))));
                 }
                 _ => {}
             }
@@ -854,6 +946,48 @@ mod tests {
             out,
             "CREATE TABLE t3(a, biglongname, c, d, FOREIGN KEY (biglongname, c, d) REFERENCES t4)"
         );
+    }
+
+    // Over-rewrite guards (issue #5939): a renamed column that coincidentally
+    // spells a type / function / collation name used elsewhere in the same DDL
+    // must NOT rewrite those non-column-reference tokens (verified against
+    // sqlite3 3.51.0).
+
+    #[test]
+    fn rename_column_preserves_type_name_collision() {
+        // The `foo` type of column `a` must be preserved; only the `foo` *column*
+        // is renamed. sqlite3 3.51.0: CREATE TABLE t1(a foo, bar INTEGER).
+        let sql = "CREATE TABLE t1(a foo, foo INTEGER)";
+        let out = rename_column(sql, "t1", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a foo, bar INTEGER)");
+    }
+
+    #[test]
+    fn rename_column_preserves_function_name_collision() {
+        // The `abs(a)` function call in the CHECK must be preserved; only the
+        // `abs` *column* is renamed. sqlite3 3.51.0 keeps CHECK(abs(a) > 0).
+        let sql = "CREATE TABLE t1(a INTEGER, abs INTEGER, CHECK(abs(a) > 0))";
+        let out = rename_column(sql, "t1", "abs", "absval").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, absval INTEGER, CHECK(abs(a) > 0))");
+    }
+
+    #[test]
+    fn rename_column_preserves_collation_name_collision() {
+        // The `nocase` collation of column `a` must be preserved; only the
+        // `nocase` *column* is renamed. sqlite3 3.51.0 keeps COLLATE nocase.
+        let sql = "CREATE TABLE t1(a TEXT COLLATE nocase, nocase INTEGER)";
+        let out = rename_column(sql, "t1", "nocase", "nc").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a TEXT COLLATE nocase, nc INTEGER)");
+    }
+
+    #[test]
+    fn rename_column_still_rewrites_bare_ref_in_paren_list() {
+        // Regression guard: the function-call guard must only suppress
+        // identifier-immediately-followed-by-`(`. A bare column inside a
+        // `PRIMARY KEY(...)` list (not followed by `(`) still rewrites.
+        let sql = "CREATE TABLE t1(a INTEGER, abs INTEGER, PRIMARY KEY(abs))";
+        let out = rename_column(sql, "t1", "abs", "absval").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(a INTEGER, absval INTEGER, PRIMARY KEY(absval))");
     }
 
     // rename_references_column — child-table parent-column-list rewriting.
