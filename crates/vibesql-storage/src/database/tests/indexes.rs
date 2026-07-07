@@ -157,6 +157,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
         None,
         None,
@@ -201,6 +202,7 @@ fn test_in_memory_index_for_small_tables() {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
         None,
         None,
@@ -351,6 +353,7 @@ fn test_budget_enforcement_with_spill_policy() {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
         None,
         None,
@@ -369,6 +372,7 @@ fn test_budget_enforcement_with_spill_policy() {
             column_name: "value".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
         None,
         None,
@@ -427,6 +431,7 @@ fn test_lru_eviction_order() {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             None,
             None,
@@ -448,6 +453,7 @@ fn test_lru_eviction_order() {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             None,
             None,
@@ -474,6 +480,7 @@ fn test_lru_eviction_order() {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             None,
             None,
@@ -524,6 +531,7 @@ fn test_access_tracking() {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             None,
             None,
@@ -583,6 +591,7 @@ fn test_resource_cleanup_on_drop() {
                 column_name: "value".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
             None,
             None,
@@ -671,6 +680,7 @@ fn test_index_scan_after_database_reset() {
                 column_name: "col0".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -851,6 +861,7 @@ fn test_thread_local_pool_pattern() {
                 column_name: "col0".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             }],
         )
         .unwrap();
@@ -932,6 +943,7 @@ fn test_lookup_by_index_single_column() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -982,6 +994,7 @@ fn test_lookup_one_by_index() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -1062,16 +1075,19 @@ fn test_lookup_by_index_composite_key() {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1138,6 +1154,7 @@ fn test_lookup_by_index_batch() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -1199,6 +1216,7 @@ fn test_lookup_one_by_index_batch() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -1327,16 +1345,19 @@ fn test_lookup_by_index_prefix_basic() {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1433,11 +1454,13 @@ fn test_lookup_by_index_prefix_single_column() {
                 column_name: "warehouse".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "district".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1486,11 +1509,13 @@ fn test_lookup_by_index_prefix_no_match() {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1546,16 +1571,19 @@ fn test_lookup_by_index_prefix_batch_basic() {
                 column_name: "w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1623,16 +1651,19 @@ fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
                 column_name: "no_w_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "no_d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "no_o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -1712,11 +1743,13 @@ fn test_lookup_by_index_prefix_empty_prefix() {
                 column_name: "a".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )

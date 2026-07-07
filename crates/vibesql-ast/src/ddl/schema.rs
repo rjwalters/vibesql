@@ -276,6 +276,11 @@ pub enum IndexColumn {
         /// Optional prefix length for indexed columns (MySQL/SQLite feature)
         /// Example: UNIQUE (name(10)) creates index on first 10 characters of 'name'
         prefix_length: Option<u64>,
+        /// Explicit per-key-part collation (`CREATE INDEX ... ON t(b COLLATE nocase)`).
+        /// `None` means the key-part adopts the column's declared collation (or
+        /// BINARY). Persisted for round-trip and used by upsert conflict-target
+        /// matching (issue #5921).
+        collation: Option<String>,
     },
     /// Expression index (functional index)
     /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
@@ -285,7 +290,16 @@ pub enum IndexColumn {
 impl IndexColumn {
     /// Create a new simple column index
     pub fn new_column(column_name: String, direction: crate::select::OrderDirection) -> Self {
-        IndexColumn::Column { column_name, direction, prefix_length: None }
+        IndexColumn::Column { column_name, direction, prefix_length: None, collation: None }
+    }
+
+    /// Create a new simple column index with an explicit collation.
+    pub fn new_column_with_collation(
+        column_name: String,
+        direction: crate::select::OrderDirection,
+        collation: Option<String>,
+    ) -> Self {
+        IndexColumn::Column { column_name, direction, prefix_length: None, collation }
     }
 
     /// Create a new column index with prefix length
@@ -294,7 +308,12 @@ impl IndexColumn {
         direction: crate::select::OrderDirection,
         prefix_length: u64,
     ) -> Self {
-        IndexColumn::Column { column_name, direction, prefix_length: Some(prefix_length) }
+        IndexColumn::Column {
+            column_name,
+            direction,
+            prefix_length: Some(prefix_length),
+            collation: None,
+        }
     }
 
     /// Create a new expression index
@@ -333,6 +352,15 @@ impl IndexColumn {
     pub fn prefix_length(&self) -> Option<u64> {
         match self {
             IndexColumn::Column { prefix_length, .. } => *prefix_length,
+            IndexColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Get the explicit per-key-part collation if this is a simple column with
+    /// an explicit `COLLATE` clause (issue #5921).
+    pub fn collation(&self) -> Option<&str> {
+        match self {
+            IndexColumn::Column { collation, .. } => collation.as_deref(),
             IndexColumn::Expression { .. } => None,
         }
     }

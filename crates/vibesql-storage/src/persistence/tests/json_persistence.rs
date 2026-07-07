@@ -863,6 +863,7 @@ fn test_json_index_roundtrip() {
         column_name: "name".to_string(),
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
+        collation: None,
     };
 
     db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx]).unwrap();

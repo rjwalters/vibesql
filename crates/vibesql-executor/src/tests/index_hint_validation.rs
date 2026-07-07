@@ -47,6 +47,7 @@ fn create_test_db() -> Database {
             column_name: "x".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -59,6 +60,7 @@ fn create_test_db() -> Database {
             column_name: "a".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

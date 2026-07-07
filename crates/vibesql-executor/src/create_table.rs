@@ -694,6 +694,7 @@ impl CreateTableExecutor {
                         column_name: col_name.to_string(),
                         direction: OrderDirection::Asc,
                         prefix_length: None,
+                        collation: None,
                     })
                     .collect();
 
@@ -737,6 +738,7 @@ impl CreateTableExecutor {
                     column_name: col_name.to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 })
                 .collect();
 

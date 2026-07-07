@@ -68,6 +68,7 @@ fn test_unique_index_basic_insert_enforcement() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -125,6 +126,7 @@ fn test_unique_index_null_values_allowed() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -185,11 +187,13 @@ fn test_unique_index_composite_key() {
                 column_name: "first_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -275,11 +279,13 @@ fn test_unique_index_composite_with_null() {
                 column_name: "first_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -329,6 +335,7 @@ fn test_unique_index_update_enforcement() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -397,6 +404,7 @@ fn test_unique_index_update_same_value_allowed() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -442,6 +450,7 @@ fn test_unique_index_update_to_different_value() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -490,6 +499,7 @@ fn test_unique_index_update_to_null() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -537,6 +547,7 @@ fn test_unique_index_multiple_indexes_on_table() {
             column_name: "email".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -549,6 +560,7 @@ fn test_unique_index_multiple_indexes_on_table() {
             column_name: "phone".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

@@ -163,6 +163,7 @@ fn test_order_by_secondary_index_after_compaction_5524() {
             column_name: "b".to_string(),
             prefix_length: None,
             direction: vibesql_ast::OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

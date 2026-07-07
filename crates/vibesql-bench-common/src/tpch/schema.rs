@@ -877,6 +877,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "R_REGIONKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -893,6 +894,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "N_NATIONKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -909,6 +911,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "C_CUSTKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -925,6 +928,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "S_SUPPKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -941,6 +945,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "O_ORDERKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -958,11 +963,13 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
                 column_name: "L_ORDERKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "L_LINENUMBER".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )
@@ -980,6 +987,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             column_name: "P_PARTKEY".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -997,11 +1005,13 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
                 column_name: "PS_PARTKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "PS_SUPPKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
+                collation: None,
             },
         ],
     )

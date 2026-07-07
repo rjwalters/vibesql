@@ -192,6 +192,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -205,6 +206,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
             column_name: "k".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();

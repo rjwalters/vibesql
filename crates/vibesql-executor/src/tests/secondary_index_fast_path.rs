@@ -94,6 +94,7 @@ fn test_secondary_index_single_column_lookup() {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -137,16 +138,19 @@ fn test_secondary_index_composite_lookup() {
                 column_name: "c_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -189,16 +193,19 @@ fn test_secondary_index_with_order_by() {
                 column_name: "c_w_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
             IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
+                collation: None,
             },
         ],
     )
@@ -235,6 +242,7 @@ fn test_secondary_index_select_star() {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -272,6 +280,7 @@ fn test_secondary_index_no_match() {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -305,6 +314,7 @@ fn test_secondary_index_with_limit() {
             column_name: "c_last".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -362,6 +372,7 @@ fn test_secondary_index_residual_predicate_filter() {
             column_name: "col3".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();
@@ -417,6 +428,7 @@ fn test_secondary_index_residual_predicate_match() {
             column_name: "col3".to_string(),
             prefix_length: None,
             direction: OrderDirection::Asc,
+            collation: None,
         }],
     )
     .unwrap();

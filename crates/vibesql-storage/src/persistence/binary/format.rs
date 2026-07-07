@@ -80,7 +80,18 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        temp objects must not survive a checkpoint at all. v13 and earlier
 ///        files remain readable: the read path is gated on `version >= 14` and
 ///        treats absence as `schema = None` (prior behavior). Issue #5940.
-pub const VERSION: u8 = 14;
+/// - v15: Added per-index-key-part explicit collation persistence
+///        (`IndexColumn::Column::collation`, the `COLLATE nocase` in
+///        `CREATE UNIQUE INDEX xyz1 ON xyz(d, c, b COLLATE nocase)`). Encoded as
+///        a present-flag bool + optional collation name, appended after the
+///        column's direction byte, and only for column-type index parts
+///        (type byte 0); expression parts carry any collation inside their SQL
+///        text. Without it, a reloaded index forgot its key-part collation, so
+///        an upsert conflict target such as `ON CONFLICT(b COLLATE nocase, ...)`
+///        stopped matching after a checkpoint (upsert4 2.x.2.1). v14 and earlier
+///        files remain readable: the read path is gated on `version >= 15` and
+///        treats absence as `collation = None` (prior behavior). Issue #5921.
+pub const VERSION: u8 = 15;
 
 /// Type tags for binary serialization
 #[repr(u8)]

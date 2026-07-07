@@ -128,6 +128,10 @@ pub enum JsonIndexColumn {
         direction: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prefix_length: Option<u64>,
+        /// Explicit per-key-part collation (`ON t(b COLLATE nocase)`); absent
+        /// for the common no-collation case (issue #5921).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collation: Option<String>,
     },
     /// Expression index (functional index)
     Expression {
@@ -299,6 +303,7 @@ impl Database {
                                     name: name.to_string(),
                                     direction,
                                     prefix_length: col.prefix_length(),
+                                    collation: col.collation().map(str::to_string),
                                 }
                             } else if let Some(expr) = col.get_expression() {
                                 JsonIndexColumn::Expression {
@@ -311,6 +316,7 @@ impl Database {
                                     name: "unknown".to_string(),
                                     direction,
                                     prefix_length: None,
+                                    collation: None,
                                 }
                             }
                         })
@@ -555,7 +561,7 @@ fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> 
             .columns
             .iter()
             .filter_map(|c| match c {
-                JsonIndexColumn::Column { name, direction, prefix_length } => {
+                JsonIndexColumn::Column { name, direction, prefix_length, collation } => {
                     Some(vibesql_ast::IndexColumn::Column {
                         column_name: name.clone(),
                         direction: if direction == "DESC" {
@@ -564,6 +570,7 @@ fn json_database_to_db(json_db: JsonDatabase) -> Result<Database, StorageError> 
                             OrderDirection::Asc
                         },
                         prefix_length: *prefix_length,
+                        collation: collation.clone(),
                     })
                 }
                 JsonIndexColumn::Expression { expression: _, direction: _ } => {

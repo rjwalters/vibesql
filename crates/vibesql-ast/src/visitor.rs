@@ -1369,8 +1369,8 @@ pub fn transform_insert<V: ExpressionMutVisitor>(visitor: &mut V, stmt: InsertSt
                     items
                         .into_iter()
                         .map(|item| match item {
-                            crate::ConflictTargetItem::Column(name) => {
-                                crate::ConflictTargetItem::Column(name)
+                            crate::ConflictTargetItem::Column { name, collation } => {
+                                crate::ConflictTargetItem::Column { name, collation }
                             }
                             crate::ConflictTargetItem::Expression(expr) => {
                                 crate::ConflictTargetItem::Expression(transform_expression(

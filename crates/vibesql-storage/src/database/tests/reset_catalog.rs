@@ -45,6 +45,7 @@ fn test_reset_clears_catalog_and_indexes() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -95,6 +96,7 @@ fn test_reset_clears_catalog_and_indexes() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -234,6 +236,7 @@ fn test_reset_preserves_database_config() {
             column_name: "id".to_string(),
             direction: OrderDirection::Asc,
             prefix_length: None,
+            collation: None,
         }],
     )
     .unwrap();
@@ -277,6 +280,7 @@ fn test_reset_multiple_tables_and_indexes() {
                     column_name: col_name.to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
+                    collation: None,
                 }],
             )
             .unwrap();
