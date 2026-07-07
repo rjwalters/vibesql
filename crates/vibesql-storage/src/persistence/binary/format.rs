@@ -70,7 +70,17 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        earlier files remain readable: the read path is gated on
 ///        `version >= 13` and treats absence as "no explicit rowid" (prior
 ///        renumbering behavior). Issue #5835.
-pub const VERSION: u8 = 13;
+/// - v14: Added `TriggerDefinition::schema` persistence per trigger (one
+///        present-flag bool + optional string, appended after the trigger's
+///        triggered_action). Without it, every reloaded trigger lost its schema
+///        tag and became a main-schema trigger, so a trigger that SQLite binds
+///        to a temp-table namesake was silently rebound to the main table after
+///        a checkpoint. The same change filters temp views and temp triggers
+///        (`is_temp()`) out of the catalog write entirely, since session-scoped
+///        temp objects must not survive a checkpoint at all. v13 and earlier
+///        files remain readable: the read path is gated on `version >= 14` and
+///        treats absence as `schema = None` (prior behavior). Issue #5940.
+pub const VERSION: u8 = 14;
 
 /// Type tags for binary serialization
 #[repr(u8)]
