@@ -513,6 +513,12 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for view_name in self.catalog.list_views() {
             if let Some(view_def) = self.catalog.get_view(&view_name) {
+                // Skip temp views (`CREATE TEMP VIEW`): they are session-scoped
+                // and must not survive into the next session via the SQL dump
+                // (issue #5940, Cluster A).
+                if view_def.is_temp() {
+                    continue;
+                }
                 // Use stored SQL definition if available, otherwise create a minimal definition
                 let sql = view_def.sql_definition.as_ref().map_or_else(
                     || {
@@ -543,6 +549,12 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         for trigger_name in self.catalog.list_triggers() {
             if let Some(trigger_def) = self.catalog.get_trigger(&trigger_name) {
+                // Skip temp triggers (`CREATE TEMP TRIGGER`): they are
+                // session-scoped and must not survive into the next session via
+                // the SQL dump (issue #5940, Cluster A).
+                if trigger_def.is_temp() {
+                    continue;
+                }
                 match trigger_def.sql_definition.as_ref() {
                     Some(sql) => {
                         let sql = sql.trim_end_matches(';').trim();
@@ -838,4 +850,108 @@ fn format_f32_for_sql(n: f32) -> String {
     let mut buffer = ryu::Buffer::new();
     let s = buffer.format(n);
     s.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Database;
+
+    /// Issue #5940, Cluster A: the SQL dump must exclude temp views and temp
+    /// triggers. They are session-scoped, so re-emitting their `CREATE TEMP …`
+    /// text would re-materialize them in the next session — a persistence leak.
+    /// Non-temp views/triggers must still appear in the dump.
+    #[test]
+    fn test_sql_dump_excludes_temp_views_and_triggers() {
+        let parse = |sql: &str| vibesql_parser::arena_parser::parse_select_to_owned(sql).unwrap();
+
+        let mut db = Database::new();
+
+        // Backing table so the defining SELECTs reference something real.
+        let schema = vibesql_catalog::TableSchema::new(
+            "t".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "a".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t", false))
+            .unwrap();
+
+        // Persistent view — must appear in the dump.
+        db.catalog
+            .create_view(vibesql_catalog::ViewDefinition::new_with_sql(
+                "v_main".to_string(),
+                None,
+                parse("SELECT a FROM t"),
+                false,
+                "CREATE VIEW v_main AS SELECT a FROM t".to_string(),
+            ))
+            .unwrap();
+
+        // Temp view — must NOT appear in the dump.
+        db.catalog
+            .create_view(
+                vibesql_catalog::ViewDefinition::new_with_sql(
+                    "v_temp".to_string(),
+                    None,
+                    parse("SELECT a FROM t"),
+                    false,
+                    "CREATE TEMP VIEW v_temp AS SELECT a FROM t".to_string(),
+                )
+                .with_schema(Some("temp".to_string())),
+            )
+            .unwrap();
+
+        // Persistent trigger — must appear in the dump.
+        db.catalog
+            .create_trigger(vibesql_catalog::TriggerDefinition::new_with_sql(
+                "tr_main".to_string(),
+                vibesql_ast::TriggerTiming::After,
+                vibesql_ast::TriggerEvent::Insert,
+                "t".to_string(),
+                vibesql_ast::TriggerGranularity::Row,
+                None,
+                vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+                "CREATE TRIGGER tr_main AFTER INSERT ON t BEGIN SELECT 1; END".to_string(),
+            ))
+            .unwrap();
+
+        // Temp trigger — must NOT appear in the dump.
+        db.catalog
+            .create_trigger(
+                vibesql_catalog::TriggerDefinition::new_with_sql(
+                    "tr_temp".to_string(),
+                    vibesql_ast::TriggerTiming::After,
+                    vibesql_ast::TriggerEvent::Insert,
+                    "t".to_string(),
+                    vibesql_ast::TriggerGranularity::Row,
+                    None,
+                    vibesql_ast::TriggerAction::RawSql("SELECT 2".to_string()),
+                    "CREATE TEMP TRIGGER tr_temp AFTER INSERT ON t BEGIN SELECT 2; END".to_string(),
+                )
+                .with_schema(Some("temp".to_string())),
+            )
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dump.sql");
+        db.save_sql_dump(&path).unwrap();
+        let dump = std::fs::read_to_string(&path).unwrap();
+
+        assert!(dump.contains("v_main"), "persistent view must appear in dump");
+        assert!(dump.contains("tr_main"), "persistent trigger must appear in dump");
+        assert!(
+            !dump.contains("v_temp"),
+            "temp view must NOT appear in the SQL dump, got:\n{dump}"
+        );
+        assert!(
+            !dump.contains("tr_temp"),
+            "temp trigger must NOT appear in the SQL dump, got:\n{dump}"
+        );
+    }
 }

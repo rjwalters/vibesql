@@ -212,7 +212,18 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // `CREATE VIEW` text) is persisted too so `sqlite_master.sql` renders the
     // user's exact formatting; when absent, load falls back to the
     // `ToSql`-reconstructed SELECT.
-    let view_names = db.catalog.list_views();
+    //
+    // Temp views (`view.is_temp()`, e.g. `CREATE TEMP VIEW`) are session-scoped
+    // and MUST NOT survive a checkpoint. They are filtered out before the count
+    // is written so a session-local temp view never reappears in the next
+    // session's catalog (issue #5940, Cluster A). The count and the write loop
+    // iterate the same filtered list so they stay in lockstep.
+    let view_names: Vec<String> = db
+        .catalog
+        .list_views()
+        .into_iter()
+        .filter(|name| db.catalog.get_view(name).is_some_and(|v| !v.is_temp()))
+        .collect();
     write_u32(writer, view_names.len() as u32)?;
 
     for view_name in view_names {
@@ -266,7 +277,19 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     }
 
     // Write triggers
-    let trigger_names = db.catalog.list_triggers();
+    //
+    // Temp triggers (`trigger.is_temp()`, e.g. `CREATE TEMP TRIGGER`) are
+    // session-scoped and MUST NOT survive a checkpoint. They are filtered out
+    // before the count is written so a session-local temp trigger never
+    // reappears in the next session's catalog (issue #5940, Cluster A). The
+    // count and the write loop iterate the same filtered list so they stay in
+    // lockstep.
+    let trigger_names: Vec<String> = db
+        .catalog
+        .list_triggers()
+        .into_iter()
+        .filter(|name| db.catalog.get_trigger(name).is_some_and(|t| !t.is_temp()))
+        .collect();
     write_u32(writer, trigger_names.len() as u32)?;
 
     for trigger_name in trigger_names {
@@ -340,6 +363,27 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                         .write_all(&[0u8])
                         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                     write_string(writer, sql)?;
+                }
+            }
+
+            // Write the trigger's schema (v14+, issue #5940). `TriggerDefinition`
+            // carries a `schema` field (`None` == main; `Some("temp")` == temp)
+            // that SQLite name resolution depends on — a trigger on a temp-table
+            // namesake must bind to the temp table. Earlier binary versions never
+            // wrote it, so every reloaded trigger silently became a main-schema
+            // trigger. Temp triggers are already filtered out above, so this in
+            // practice persists an explicit non-temp schema (e.g. `Some("main")`);
+            // it is encoded as a present-flag bool + string. Written last in the
+            // per-trigger record so v13-and-earlier readers, which stop after the
+            // triggered_action, are unaffected; the read path gates on
+            // `version >= 14`.
+            match &trigger.schema {
+                Some(schema) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, schema)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
                 }
             }
         }
@@ -886,6 +930,21 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             }
         };
 
+        // Read the trigger's schema (v14+, issue #5940). v13-and-earlier files
+        // do not include this field; absence is treated as `None` (main schema),
+        // matching prior behavior where every reloaded trigger was a main-schema
+        // trigger. Written as present-flag bool + string.
+        let schema = if version >= 14 {
+            let has_schema = read_bool(reader)?;
+            if has_schema {
+                Some(read_string(reader)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Create trigger definition
         let trigger = vibesql_catalog::TriggerDefinition::new(
             name,
@@ -895,7 +954,8 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             granularity,
             when_condition,
             triggered_action,
-        );
+        )
+        .with_schema(schema);
 
         // Add to catalog
         db.catalog.create_trigger(trigger).map_err(|e| {
@@ -1400,10 +1460,14 @@ mod tests {
         assert!(v.with_check_option);
         assert_eq!(v.query.to_sql(), parse("SELECT a FROM t1 WHERE a > 0").to_sql());
 
-        // Temp view.
-        let v = reloaded.catalog.get_view("v_temp").expect("v_temp must survive");
-        assert_eq!(v.schema.as_deref(), Some("temp"));
-        assert!(v.is_temp());
+        // Temp view (issue #5940, Cluster A): a `CREATE TEMP VIEW` is
+        // session-scoped and MUST NOT survive a checkpoint round-trip. It is
+        // filtered out of `write_catalog`, so it is absent from the reloaded
+        // catalog even though the other views round-trip.
+        assert!(
+            reloaded.catalog.get_view("v_temp").is_none(),
+            "temp view must NOT survive a checkpoint round-trip"
+        );
 
         // Compound view (UNION + ORDER BY, issue #5798): must survive the
         // round-trip with the ORDER BY still applying to the whole compound.
@@ -1837,5 +1901,110 @@ mod tests {
         );
         assert_eq!(table.schema.columns[0].collation, None);
         assert!(table.schema.columns[0].nullable);
+    }
+
+    /// Issue #5940, Cluster A: temp triggers must NOT survive a checkpoint,
+    /// and a non-temp trigger's explicit `schema` field must round-trip (v14).
+    ///
+    /// Before the fix, `write_catalog` serialized every trigger with no
+    /// `is_temp()` filter and never wrote the `schema` field, so (a) a
+    /// `CREATE TEMP TRIGGER` persisted into the next session and (b) every
+    /// reloaded trigger lost its schema tag and became a main-schema trigger.
+    #[test]
+    fn test_binary_catalog_temp_trigger_dropped_and_schema_round_trips() {
+        let mut db = Database::new();
+
+        // A plain (main-schema) trigger: `schema = None`. Must survive.
+        let plain = vibesql_catalog::TriggerDefinition::new(
+            "tr_main".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+        );
+        db.catalog.create_trigger(plain).unwrap();
+
+        // A trigger with an explicit non-temp schema. Must survive AND keep its
+        // schema across the round-trip (this is the v14 schema-persistence fix).
+        let explicit = vibesql_catalog::TriggerDefinition::new(
+            "tr_explicit".to_string(),
+            vibesql_ast::TriggerTiming::Before,
+            vibesql_ast::TriggerEvent::Delete,
+            "t".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 2".to_string()),
+        )
+        .with_schema(Some("main".to_string()));
+        db.catalog.create_trigger(explicit).unwrap();
+
+        // A temp trigger (`schema = Some("temp")`). Must NOT survive.
+        let temp = vibesql_catalog::TriggerDefinition::new(
+            "tr_temp".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 3".to_string()),
+        )
+        .with_schema(Some("temp".to_string()));
+        db.catalog.create_trigger(temp).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        // Main-schema trigger survived.
+        let tr = reloaded.catalog.get_trigger("tr_main").expect("tr_main must survive");
+        assert_eq!(tr.schema, None);
+        assert!(!tr.is_temp());
+
+        // Explicit-schema trigger survived AND kept its schema (v14 fix).
+        let tr = reloaded.catalog.get_trigger("tr_explicit").expect("tr_explicit must survive");
+        assert_eq!(tr.schema.as_deref(), Some("main"));
+        assert!(!tr.is_temp());
+
+        // Temp trigger did NOT survive the checkpoint round-trip.
+        assert!(
+            reloaded.catalog.get_trigger("tr_temp").is_none(),
+            "temp trigger must NOT survive a checkpoint round-trip"
+        );
+    }
+
+    /// Issue #5940, Cluster A: a v13 file has no per-trigger schema field, so the
+    /// v14 reader must default the trigger schema to `None` (a main-schema
+    /// trigger) rather than mis-parsing the following bytes. Exercised by writing
+    /// a schema-less trigger record by hand and reading it back at version 13.
+    #[test]
+    fn test_v13_trigger_loads_schema_as_none() {
+        // Build a catalog with a single main-schema trigger, serialize it at the
+        // current version, then read it back at version 13. Because the write
+        // path for `tr.schema = None` emits a single `false` present-flag byte at
+        // the end of the record, a v13 reader (which stops before that byte)
+        // still parses the rest of the record correctly and defaults schema to
+        // None — identical to what a real pre-v14 file would contain.
+        let mut db = Database::new();
+        let tr = vibesql_catalog::TriggerDefinition::new(
+            "tr".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+        );
+        db.catalog.create_trigger(tr).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+
+        // Read at version 13: the schema field is skipped, defaults to None.
+        let reloaded = read_catalog_v(&mut &buf[..], 13).unwrap();
+        let tr = reloaded.catalog.get_trigger("tr").expect("tr must load under v13 reader");
+        assert_eq!(tr.schema, None, "a v13 file has no trigger-schema field; must default to None");
+        assert!(!tr.is_temp());
     }
 }
