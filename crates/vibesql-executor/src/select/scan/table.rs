@@ -143,16 +143,27 @@ fn source_column_collation(
     // View source: map the referenced column to its select-list position and
     // resolve that item's collation against the inner view's own FROM clause.
     let view = database.catalog.get_view(source_name)?;
-    let idx = view_output_column_index(view, column_name)?;
     let inner_from = view.query.from.as_ref();
-    let resolver = |c: &vibesql_ast::ColumnIdentifier| -> Option<String> {
-        view_body_column_collation(database, inner_from, c)
-    };
-    let collations = crate::evaluator::collation::view_select_list_collations(
-        &view.query.select_list,
-        &resolver,
-    );
-    collations.get(idx).cloned().flatten()
+    if let Some(idx) = view_output_column_index(view, column_name) {
+        let resolver = |c: &vibesql_ast::ColumnIdentifier| -> Option<String> {
+            view_body_column_collation(database, inner_from, c)
+        };
+        let collations = crate::evaluator::collation::view_select_list_collations(
+            &view.query.select_list,
+            &resolver,
+        );
+        if let Some(result) = collations.get(idx).cloned().flatten() {
+            return Some(result);
+        }
+    }
+    // Wildcard fallback (issue #5925): `view_output_column_index` returns `None`
+    // for a wildcard body (`SELECT * FROM ...`) because the output column's
+    // select-list position is unknowable. It can also position the column via an
+    // explicit view column list while the wildcard body still yields no derived
+    // collation. In both cases resolve the column by name directly against the
+    // inner view's FROM sources so collation propagates through nested wildcard
+    // views.
+    find_collation_in_from(database, inner_from?, column_name)
 }
 
 /// Map a view's exposed column name to its select-list index. Uses the view's
@@ -458,8 +469,7 @@ pub(crate) fn execute_table_scan(
         // Only the (left) branch of the body's select list is inspected — for
         // a UNION body SQLite likewise takes the collation from the first
         // branch. The derived vector is applied only when it aligns 1:1 with
-        // the result columns, so wildcard-expanded bodies (whose select-item
-        // count differs from the column count) degrade safely to BINARY.
+        // the result columns.
         let view_from = view.query.from.as_ref();
         let column_collation_fn = |col_id: &vibesql_ast::ColumnIdentifier| -> Option<String> {
             view_body_column_collation(database, view_from, col_id)
@@ -469,11 +479,28 @@ pub(crate) fn execute_table_scan(
             &column_collation_fn,
         );
         let use_derived_collations = derived_collations.len() == column_names.len();
+        // Wildcard fallback (issue #5925): a `SELECT *` (or `SELECT t.*`) body
+        // yields a select-item count that differs from the expanded output
+        // column count, so `view_select_list_collations` cannot align 1:1.
+        // Instead of degrading every column to BINARY, resolve each output
+        // column by name against the view's FROM sources. `find_collation_in_from`
+        // recurses through JOINs and delegates to base tables / nested views, so
+        // multi-table wildcard bodies (`SELECT * FROM t1 JOIN t2 ...`) are
+        // covered. A body with no FROM clause (e.g. `SELECT * FROM (VALUES ...)`)
+        // resolves to `None` and degrades gracefully.
+        let wildcard_collations: Vec<Option<String>> = if use_derived_collations {
+            Vec::new()
+        } else {
+            column_names
+                .iter()
+                .map(|name| view_from.and_then(|from| find_collation_in_from(database, from, name)))
+                .collect()
+        };
         let collation_for = |idx: usize| -> Option<String> {
             if use_derived_collations {
                 derived_collations.get(idx).cloned().flatten()
             } else {
-                None
+                wildcard_collations.get(idx).cloned().flatten()
             }
         };
 

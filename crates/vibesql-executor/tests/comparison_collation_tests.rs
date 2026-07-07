@@ -294,3 +294,113 @@ fn view_plain_literal_column_is_binary() {
     run_stmt(&mut db, "CREATE VIEW vlit(a, b) AS SELECT 'A', 'a' FROM t0");
     assert_rows(&db, "SELECT a = b FROM vlit", &[0]);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #5925: wildcard (`SELECT *`) view bodies must propagate the underlying
+// column's declared collation to outer-query comparisons. Follow-up to #5864,
+// which only aligned collation when the body's select-item count matched the
+// output column count (explicit select lists). Expected values verified against
+// sqlite3 3.51.0 (see the oracle in the issue body).
+// ---------------------------------------------------------------------------
+
+/// `t2(a TEXT, B TEXT COLLATE NOCASE)` seeded with one row `('a','B')` — the
+/// fixture used by the sqlite3 oracle in issue #5925.
+fn db_with_t2_nocase() -> vibesql_storage::Database {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t2(a TEXT, B TEXT COLLATE NOCASE)");
+    run_stmt(&mut db, "INSERT INTO t2 VALUES('a', 'B')");
+    db
+}
+
+#[test]
+fn view_wildcard_propagates_underlying_collation() {
+    // Bare wildcard body: `SELECT * FROM t2`. The oracle:
+    //   SELECT B < a FROM vstar  ->  0  (NOCASE: 'B' < 'a' is false)
+    //   SELECT a >= B FROM vstar ->  1
+    // Before this fix VibeSQL degraded every wildcard column to BINARY and
+    // returned 1 / 0 respectively.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vstar AS SELECT * FROM t2");
+    assert_rows(&db, "SELECT B < a FROM vstar", &[0]);
+    assert_rows(&db, "SELECT a >= B FROM vstar", &[1]);
+}
+
+#[test]
+fn view_qualified_wildcard_propagates_underlying_collation() {
+    // Qualified wildcard body: `SELECT t2.* FROM t2` behaves identically.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vqstar AS SELECT t2.* FROM t2");
+    assert_rows(&db, "SELECT B < a FROM vqstar", &[0]);
+    assert_rows(&db, "SELECT a >= B FROM vqstar", &[1]);
+}
+
+#[test]
+fn view_of_wildcard_view_propagates_collation() {
+    // Two levels of nesting: an explicit-select view over a wildcard view.
+    // NOCASE must still reach the outer comparison.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vstar AS SELECT * FROM t2");
+    run_stmt(&mut db, "CREATE VIEW vstar2 AS SELECT a, B FROM vstar");
+    assert_rows(&db, "SELECT B < a FROM vstar2", &[0]);
+    assert_rows(&db, "SELECT a >= B FROM vstar2", &[1]);
+}
+
+#[test]
+fn view_of_wildcard_of_wildcard_view_propagates_collation() {
+    // Three levels: wildcard over wildcard over base table.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vstar AS SELECT * FROM t2");
+    run_stmt(&mut db, "CREATE VIEW vstar2 AS SELECT * FROM vstar");
+    assert_rows(&db, "SELECT B < a FROM vstar2", &[0]);
+    assert_rows(&db, "SELECT a >= B FROM vstar2", &[1]);
+}
+
+#[test]
+fn view_explicit_column_list_over_wildcard_body_propagates_collation() {
+    // Explicit view column list + wildcard body. `view_output_column_index`
+    // positions the column via `view.columns`, but the derived collation is
+    // `[None]`; the Path 2 fallback resolves it by name from the inner FROM.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vstar (a, B) AS SELECT * FROM t2");
+    assert_rows(&db, "SELECT B < a FROM vstar", &[0]);
+    assert_rows(&db, "SELECT a >= B FROM vstar", &[1]);
+}
+
+#[test]
+fn view_multi_join_wildcard_propagates_single_collated_column() {
+    // Multi-table wildcard body where only one joined table has a collated
+    // column. `find_collation_in_from` recurses through the JOIN and resolves
+    // `B` from t2 while `x`/`y` stay BINARY.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE TABLE t1(x TEXT, y TEXT)");
+    run_stmt(&mut db, "INSERT INTO t1 VALUES('a', 'a')");
+    run_stmt(&mut db, "CREATE VIEW vjoin AS SELECT * FROM t1 JOIN t2 ON t1.x = t2.a");
+    // B (NOCASE) vs a (from t2) -> NOCASE -> 0.
+    assert_rows(&db, "SELECT B < a FROM vjoin", &[0]);
+    // x and y are plain BINARY columns from t1: 'a' = 'a' -> 1.
+    assert_rows(&db, "SELECT x = y FROM vjoin", &[1]);
+}
+
+#[test]
+fn view_wildcard_simple_retrieval_unchanged() {
+    // Plain row retrieval from a wildcard view (no outer comparison) still
+    // returns the stored values unchanged.
+    let mut db = db_with_t2_nocase();
+    run_stmt(&mut db, "CREATE VIEW vstar AS SELECT * FROM t2");
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT a, B FROM vstar").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let executor = SelectExecutor::new(&db);
+        let rows = executor.execute(&select_stmt).unwrap();
+        assert_eq!(rows.len(), 1);
+        let as_str = |v: &SqlValue| -> String {
+            match v {
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                other => panic!("Expected text value, got {:?}", other),
+            }
+        };
+        assert_eq!(as_str(&rows[0].values[0]), "a");
+        assert_eq!(as_str(&rows[0].values[1]), "B");
+    } else {
+        panic!("Expected SELECT");
+    }
+}
