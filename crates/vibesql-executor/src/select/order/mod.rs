@@ -18,6 +18,9 @@ use super::grouping;
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 // Re-export public API
+pub(crate) use position::{
+    extract_column_position, validate_column_position, ColumnPositionResult,
+};
 pub(crate) use resolution::{
     extract_order_by_aggregates, extract_window_aggregates, order_by_volatile_output_index,
     resolve_order_by_alias, resolve_order_by_for_aggregates, resolve_where_aliases,
