@@ -117,11 +117,13 @@ pub(super) fn execute_update_on_view(
     // updated view row per trigger fire, not whatever the trigger body did).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|(_, new_row)| new_row).collect();
+        // RETURNING does not honor the table alias (issue #5840 item 6);
+        // resolve against the real view name.
         Some(crate::dml_returning::project_returning(
             items,
             &view_schema,
             database,
-            stmt.alias.as_deref(),
+            None,
             &new_rows,
             None,
         )?)

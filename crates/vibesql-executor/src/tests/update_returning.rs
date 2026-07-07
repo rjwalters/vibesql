@@ -56,6 +56,20 @@ fn execute_update_returning(
     }
 }
 
+/// Run an UPDATE ... RETURNING and return the raw Result so error cases can
+/// be asserted.
+fn try_update_returning(
+    db: &mut vibesql_storage::Database,
+    sql: &str,
+) -> Result<(usize, Option<crate::select::SelectResult>), crate::errors::ExecutorError> {
+    let stmt =
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
+    match stmt {
+        Statement::Update(s) => UpdateExecutor::execute_returning(&s, db),
+        other => panic!("Expected UPDATE, got {:?}", other),
+    }
+}
+
 fn int_rows(result: &crate::select::SelectResult) -> Vec<Vec<i64>> {
     result
         .rows
@@ -223,4 +237,45 @@ fn test_update_returning_through_instead_of_trigger_with_from() {
     assert_eq!(count, 0);
     let returning = returning.expect("RETURNING clause should produce a result");
     assert_eq!(int_rows(&returning), vec![vec![4, 15], vec![4, 15], vec![4, 15]]);
+}
+
+// ------------------------------------------------------------------------
+// Issue #5840 item 6 (returning1.test 7.7/7.8): the RETURNING clause does
+// NOT honor the target table's alias — the opposite of WHERE/SET, which do.
+// A qualified reference in RETURNING resolves against the real table name;
+// the alias is not a valid qualifier there.
+// ------------------------------------------------------------------------
+
+/// returning1.test 7.8: `RETURNING t1.b` succeeds even when the UPDATE
+/// aliases the table (`UPDATE t1 AS alias`). The real table name resolves in
+/// RETURNING, and the alias is still valid in the SET expression.
+#[test]
+fn test_update_returning_resolves_real_table_name_when_aliased() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t1(a INT, b INT)");
+    execute_sql(&mut db, "INSERT INTO t1(a, b) VALUES (1, 2)");
+
+    let (count, returning) =
+        execute_update_returning(&mut db, "UPDATE t1 AS alias SET b=alias.b+1000 RETURNING t1.b");
+    assert_eq!(count, 1);
+    let returning = returning.expect("RETURNING clause should produce a result");
+    assert_eq!(returning.columns, vec!["b".to_string()]);
+    assert_eq!(int_rows(&returning), vec![vec![1002]]);
+}
+
+/// returning1.test 7.7: `RETURNING alias.b` is an error — the alias is not a
+/// valid qualifier in the RETURNING clause even though the UPDATE aliases the
+/// table. (SQLite raises `no such column: alias.b`.)
+#[test]
+fn test_update_returning_rejects_alias_qualifier() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t1(a INT, b INT)");
+    execute_sql(&mut db, "INSERT INTO t1(a, b) VALUES (1, 2)");
+
+    let result = try_update_returning(&mut db, "UPDATE t1 AS alias SET b=123 RETURNING alias.b");
+    assert!(
+        result.is_err(),
+        "RETURNING must not honor the table alias; expected an error, got {:?}",
+        result.map(|(c, _)| c)
+    );
 }

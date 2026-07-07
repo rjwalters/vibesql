@@ -1043,13 +1043,20 @@ pub(super) fn execute_internal(
     // Project RETURNING items against the NEW rows (SQLite 3.35.0+), with
     // the statement's WITH-clause CTEs (if any) visible to subqueries in
     // RETURNING expressions (issue #5359).
+    //
+    // The RETURNING clause does NOT honor the table alias, even though the
+    // rest of the statement (WHERE/SET) does. In SQLite, `UPDATE t1 AS a ...
+    // RETURNING a.b` raises `no such column: a.b` while `RETURNING t1.b`
+    // succeeds — the opposite of WHERE/SET resolution (see returning1.test
+    // 7.7/7.8, issue #5840 item 6). Pass `None` so RETURNING resolves
+    // qualified references against the real table name, not the alias.
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
         Some(crate::dml_returning::project_returning(
             items,
             schema,
             database,
-            stmt.alias.as_deref(),
+            None,
             &new_rows,
             cte_results.as_ref(),
         )?)
@@ -2294,11 +2301,13 @@ fn execute_update_from(
     // RETURNING expressions (issue #5363).
     let returning = if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
+        // RETURNING does not honor the table alias (see issue #5840 item 6 /
+        // returning1.test 7.7-7.8); resolve against the real table name.
         Some(crate::dml_returning::project_returning(
             items,
             schema,
             database,
-            stmt.alias.as_deref(),
+            None,
             &new_rows,
             cte_results,
         )?)
@@ -2321,11 +2330,13 @@ fn empty_returning(
     stmt.returning
         .as_ref()
         .map(|items| {
+            // RETURNING does not honor the table alias (issue #5840 item 6);
+            // resolve against the real table name.
             crate::dml_returning::project_returning(
                 items,
                 schema,
                 database,
-                stmt.alias.as_deref(),
+                None,
                 &[],
                 cte_results,
             )
