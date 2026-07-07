@@ -63,7 +63,7 @@ impl Parser {
                         }
                         self.consume_keyword(Keyword::Using)?;
                         self.expect_token(Token::LParen)?;
-                        let columns = self.parse_comma_separated_list(|p| p.parse_identifier())?;
+                        let columns = self.parse_comma_separated_list(|p| p.parse_column_name())?;
                         self.expect_token(Token::RParen)?;
                         (None, Some(columns))
                     } else {

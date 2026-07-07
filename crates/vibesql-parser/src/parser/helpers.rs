@@ -137,6 +137,38 @@ impl Parser {
         }
     }
 
+    /// Parse a column name, accepting contextual keywords (those accepted by
+    /// SQLite's fallback mechanism in expression/column-name position) in
+    /// addition to plain and delimited identifiers. This covers keywords like
+    /// `m` (HNSW parameter), `key`, `level`, `trigger`, `view`, etc. that
+    /// SQLite allows as unquoted column names, while still rejecting truly
+    /// reserved words (`SELECT`, `AND`, `NOT`, `NULL`, ...) that would create
+    /// grammar ambiguity.
+    ///
+    /// This mirrors the expression/column-ref position (`identifiers.rs`) and
+    /// SQLite's `%fallback ID` mechanism. Use it for column-list positions —
+    /// `FOREIGN KEY (…)`, `REFERENCES t(…)`, `PRIMARY KEY (…)`, `UNIQUE (…)`,
+    /// `USING (…)`, and `RENAME COLUMN` — where `parse_identifier()` would
+    /// otherwise reject a contextual keyword used as a column name.
+    ///
+    /// Keyword-derived names are lowercased, consistent with the lexer's
+    /// normalization of unquoted identifiers.
+    pub(super) fn parse_column_name(&mut self) -> Result<String, ParseError> {
+        match self.peek() {
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
+                let identifier = name.clone();
+                self.advance();
+                Ok(identifier)
+            }
+            Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
+                let name = kw.to_string().to_lowercase();
+                self.advance();
+                Ok(name)
+            }
+            _ => Err(ParseError { message: self.peek().syntax_error() }),
+        }
+    }
+
     /// Parse an identifier or any keyword. Used for SQL positions where the grammar
     /// permits a name and the keyword/identifier distinction does not matter
     /// (e.g. PRAGMA schema/name parts: `PRAGMA temp.foreign_key_check`).

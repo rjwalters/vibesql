@@ -103,7 +103,7 @@ impl Parser {
         // if this turns out to be an expression like abs(b) rather than a column name
         let saved_position = self.position;
 
-        let column_name = self.parse_identifier()?;
+        let column_name = self.parse_column_name()?;
 
         // Check for optional prefix length: column_name(length)
         // BUT: if the token after ( is not a number, this is likely a function call
@@ -500,7 +500,7 @@ impl Parser {
                     let column = if self.peek() == &Token::LParen {
                         self.advance(); // consume LParen
                                         // Accept both regular and quoted identifiers for column names
-                        let col_name = self.parse_identifier().map_err(|_| ParseError {
+                        let col_name = self.parse_column_name().map_err(|_| ParseError {
                             message: "Expected column name in REFERENCES".to_string(),
                         })?;
                         self.expect_token(Token::RParen)?;
@@ -632,7 +632,7 @@ impl Parser {
                 let mut columns = Vec::new();
                 loop {
                     // Accept both regular and quoted identifiers for column names
-                    let col = self.parse_identifier().map_err(|_| ParseError {
+                    let col = self.parse_column_name().map_err(|_| ParseError {
                         message: "Expected column name in FOREIGN KEY".to_string(),
                     })?;
                     columns.push(col);
@@ -659,7 +659,7 @@ impl Parser {
 
                     loop {
                         // Accept both regular and quoted identifiers for column names
-                        let col = self.parse_identifier().map_err(|_| ParseError {
+                        let col = self.parse_column_name().map_err(|_| ParseError {
                             message: "Expected column name in REFERENCES".to_string(),
                         })?;
                         references_columns.push(col);
