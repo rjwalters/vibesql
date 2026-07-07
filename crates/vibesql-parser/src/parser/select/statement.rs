@@ -512,8 +512,14 @@ impl Parser {
                     p.advance();
                     Ok(name)
                 }
-                // Allow unreserved keywords as column names
-                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier() => {
+                // Allow keywords as column names in a CTE column-list definition.
+                // This is a definition position (like a table's column list), so
+                // it accepts the same broad set of otherwise-reserved words that
+                // SQLite permits as column identifiers — e.g. `WITH t(name, level)`
+                // (with1.test 11.x). `can_be_identifier_in_expression` is the
+                // denylist predicate used for column references, so the set of
+                // names accepted here matches the set usable in the CTE body.
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
                     let name = format!("{}", kw).to_lowercase();
                     p.advance();
                     Ok(name)

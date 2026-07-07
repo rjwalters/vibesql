@@ -62,6 +62,80 @@ where
     execute_ctes_with_memory_check(ctes, Some(root), database, executor, |_| Ok(()))
 }
 
+/// SQLite evaluates a recursive CTE lazily against the queue that feeds the
+/// outer query. When the outer statement simply reads a single recursive CTE
+/// with a `LIMIT`, materialization stops once enough rows have been produced —
+/// so an otherwise infinite/circular CTE terminates (with1.test 5.1, 5.4).
+///
+/// We approximate that laziness with a *row hint*: the number of rows the outer
+/// query can possibly consume from a directly-referenced recursive CTE. The
+/// hint is only derived when the outer statement reads the CTE without any
+/// clause that could drop or reorder rows (no WHERE/JOIN/GROUP BY/HAVING/
+/// DISTINCT/ORDER BY/set-operation), so stopping early can never change the
+/// outer result. When the shape is anything more complex, the hint is `None`
+/// and the CTE materializes fully (up to the recursion cap).
+///
+/// The hint is `outer LIMIT + outer OFFSET`: OFFSET rows are consumed and
+/// discarded before LIMIT rows are returned, so both count toward the number of
+/// CTE rows the outer query needs.
+fn outer_row_hint_for_stmt(
+    root: &vibesql_ast::SelectStmt,
+    ctes: &[vibesql_ast::CommonTableExpr],
+    database: &vibesql_storage::Database,
+) -> Option<usize> {
+    // Only a bare `SELECT ... FROM <name> LIMIT n [OFFSET m]` qualifies: any
+    // filtering/reordering/aggregation could make an early stop drop rows the
+    // outer query would have kept.
+    if root.limit.is_none()
+        || root.where_clause.is_some()
+        || root.group_by.is_some()
+        || root.having.is_some()
+        || root.distinct
+        || root.order_by.is_some()
+        || root.set_operation.is_some()
+        || root.values.is_some()
+    {
+        return None;
+    }
+
+    // FROM must be a single table reference naming one of this statement's CTEs.
+    let name = match root.from.as_ref()? {
+        vibesql_ast::FromClause::Table { name, .. } => name,
+        _ => return None,
+    };
+    if !ctes.iter().any(|c| c.name.eq_ignore_ascii_case(name)) {
+        return None;
+    }
+
+    let limit = eval_const_count(root.limit.as_ref()?, database)?;
+    let offset = match &root.offset {
+        Some(expr) => eval_const_count(expr, database)?,
+        None => 0,
+    };
+    Some(limit.saturating_add(offset))
+}
+
+/// Evaluate a LIMIT/OFFSET expression against an empty row/schema, returning the
+/// non-negative row count. Returns `None` for negative ("unlimited") or
+/// unresolvable expressions, which disable the early-stop optimization.
+fn eval_const_count(
+    expr: &vibesql_ast::Expression,
+    database: &vibesql_storage::Database,
+) -> Option<usize> {
+    use crate::evaluator::ExpressionEvaluator;
+
+    let empty_schema = vibesql_catalog::TableSchema::new(String::new(), vec![]);
+    let evaluator = ExpressionEvaluator::with_database(&empty_schema, database);
+    let empty_row = vibesql_storage::Row::new(vec![]);
+    let value = evaluator.eval(expr, &empty_row).ok()?;
+    let n = crate::select::helpers::coerce_limit_offset_to_i64(value).ok()?;
+    if n < 0 {
+        None
+    } else {
+        Some(n as usize)
+    }
+}
+
 /// Execute all CTEs with memory tracking
 ///
 /// CTEs are executed in order, allowing later CTEs to reference earlier ones.
@@ -84,6 +158,12 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
     M: Fn(usize) -> Result<(), ExecutorError>,
 {
+    // If the root statement reads a directly-referenced recursive CTE under a
+    // LIMIT, thread that limit inward so lazy recursion can terminate early
+    // (with1.test 5.1, 5.4). Only top-level CTEs of the root statement are
+    // eligible for this hint.
+    let outer_row_hint = root.and_then(|stmt| outer_row_hint_for_stmt(stmt, ctes, database));
+
     let mut in_progress = Vec::new();
     execute_cte_list(
         ctes,
@@ -91,6 +171,7 @@ where
         &HashMap::new(),
         &mut in_progress,
         false,
+        outer_row_hint,
         database,
         &executor,
         &memory_check,
@@ -108,17 +189,15 @@ enum CteState {
 
 /// Execute a (possibly nested) WITH-clause CTE list.
 ///
-/// - `root`: when provided, CTEs not (transitively) referenced by this
-///   statement are skipped entirely (SQLite lazy expansion).
-/// - `outer_ctes`: fully-materialized CTEs from enclosing scopes. Local names
-///   shadow outer names.
-/// - `in_progress`: names of enclosing CTE definitions currently being
-///   executed. A body reference that can only resolve to one of these is a
-///   circular reference (with2.test 3.5).
-/// - `nested`: true when this list is the WITH clause of a CTE body (as opposed
-///   to a statement's top-level WITH). Both kinds resolve sibling references
-///   regardless of declaration order (with1.test 2.5, with2.test 1.11); the
-///   flag is retained to distinguish the two scopes for future use.
+/// - `root`: when provided, CTEs not (transitively) referenced by this statement are skipped
+///   entirely (SQLite lazy expansion).
+/// - `outer_ctes`: fully-materialized CTEs from enclosing scopes. Local names shadow outer names.
+/// - `in_progress`: names of enclosing CTE definitions currently being executed. A body reference
+///   that can only resolve to one of these is a circular reference (with2.test 3.5).
+/// - `nested`: true when this list is the WITH clause of a CTE body (as opposed to a statement's
+///   top-level WITH). Both kinds resolve sibling references regardless of declaration order
+///   (with1.test 2.5, with2.test 1.11); the flag is retained to distinguish the two scopes for
+///   future use.
 #[allow(clippy::too_many_arguments)]
 fn execute_cte_list<F, M>(
     ctes: &[vibesql_ast::CommonTableExpr],
@@ -126,6 +205,7 @@ fn execute_cte_list<F, M>(
     outer_ctes: &HashMap<String, CteResult>,
     in_progress: &mut Vec<String>,
     nested: bool,
+    outer_row_hint: Option<usize>,
     database: &vibesql_storage::Database,
     executor: &F,
     memory_check: &M,
@@ -142,11 +222,24 @@ where
         None => vec![true; ctes.len()],
     };
 
+    // The outer LIMIT hint only applies to the specific CTE the outer statement
+    // reads directly; identify it so the hint is not misapplied to a sibling.
+    let hinted_cte: Option<String> = outer_row_hint.and(root).and_then(|stmt| match &stmt.from {
+        Some(vibesql_ast::FromClause::Table { name, .. }) => Some(name.to_ascii_lowercase()),
+        _ => None,
+    });
+
     let mut states = vec![CteState::Pending; ctes.len()];
     let mut local = HashMap::new();
 
     for idx in 0..ctes.len() {
         if needed[idx] && states[idx] == CteState::Pending {
+            let hint =
+                if hinted_cte.as_deref().is_some_and(|h| ctes[idx].name.eq_ignore_ascii_case(h)) {
+                    outer_row_hint
+                } else {
+                    None
+                };
             execute_cte_at(
                 idx,
                 ctes,
@@ -155,6 +248,7 @@ where
                 outer_ctes,
                 in_progress,
                 nested,
+                hint,
                 database,
                 executor,
                 memory_check,
@@ -176,6 +270,7 @@ fn execute_cte_at<F, M>(
     outer_ctes: &HashMap<String, CteResult>,
     in_progress: &mut Vec<String>,
     nested: bool,
+    outer_row_hint: Option<usize>,
     database: &vibesql_storage::Database,
     executor: &F,
     memory_check: &M,
@@ -227,6 +322,10 @@ where
                 outer_ctes,
                 in_progress,
                 nested,
+                // A sibling materialized on demand is not the CTE the outer
+                // statement reads directly, so the outer LIMIT hint never
+                // applies to it.
+                None,
                 database,
                 executor,
                 memory_check,
@@ -304,6 +403,7 @@ where
         is_recursive,
         &mut visible,
         in_progress,
+        outer_row_hint,
         database,
         executor,
         memory_check,
@@ -331,11 +431,13 @@ where
 /// This is the core fix for issue #5838 (PR A): previously a WITH clause
 /// nested inside a CTE body was silently ignored, so the body's references
 /// resolved to outer CTEs or real tables instead of the nested CTEs.
+#[allow(clippy::too_many_arguments)]
 fn execute_cte_body<F, M>(
     cte: &vibesql_ast::CommonTableExpr,
     is_recursive: bool,
     visible: &mut HashMap<String, CteResult>,
     in_progress: &mut Vec<String>,
+    outer_row_hint: Option<usize>,
     database: &vibesql_storage::Database,
     executor: &F,
     memory_check: &M,
@@ -349,7 +451,9 @@ where
 {
     if let Some(inner_list) = &cte.query.with_clause {
         // The body is the reachability root for its own WITH list: nested CTEs
-        // the body never references are skipped (SQLite lazy expansion).
+        // the body never references are skipped (SQLite lazy expansion). The
+        // outer LIMIT hint belongs to the enclosing statement's scope, not this
+        // nested list, so it is not propagated inward.
         let snapshot = visible.clone();
         let inner_results = execute_cte_list(
             inner_list,
@@ -357,6 +461,7 @@ where
             &snapshot,
             in_progress,
             true,
+            None,
             database,
             executor,
             memory_check,
@@ -369,7 +474,7 @@ where
 
     if is_recursive {
         // Recursive CTE: execute base term, then iteratively execute recursive term
-        execute_recursive_cte(cte, visible, database, executor, memory_check)
+        execute_recursive_cte(cte, visible, outer_row_hint, database, executor, memory_check)
     } else {
         // Non-recursive CTE: execute query directly
         executor(&cte.query, visible)
@@ -419,10 +524,10 @@ fn compute_needed_ctes(
 /// respecting WITH-clause shadowing: a name defined by a (nested) WITH clause
 /// is not reported as a reference by the scopes it covers.
 ///
-/// - `skip_with`: ignore the statement's own WITH clause entirely (used when
-///   the caller is processing that clause itself).
-/// - `skip_set_op`: ignore the statement's set operation (used to inspect only
-///   the base term of a recursive CTE).
+/// - `skip_with`: ignore the statement's own WITH clause entirely (used when the caller is
+///   processing that clause itself).
+/// - `skip_set_op`: ignore the statement's set operation (used to inspect only the base term of a
+///   recursive CTE).
 fn collect_stmt_table_refs(
     stmt: &vibesql_ast::SelectStmt,
     shadowed: &HashSet<String>,
@@ -1023,7 +1128,7 @@ fn collect_select_list_columns(
     Some(names)
 }
 
-/// Execute a recursive CTE using iterative evaluation
+/// Execute a recursive CTE using iterative evaluation.
 ///
 /// Recursive CTEs in SQL:1999/SQLite are defined with UNION or UNION ALL:
 /// ```sql
@@ -1034,17 +1139,27 @@ fn collect_select_list_columns(
 /// )
 /// ```
 ///
-/// Algorithm:
-/// 1. Split query into base and recursive terms (before/after UNION [ALL])
-/// 2. Execute base term to get initial working table
-/// 3. Repeat until no new rows or max depth reached:
-///    - Make working table available as CTE
-///    - Execute recursive term
-///    - Add new rows to result (with deduplication for UNION)
-///    - Update working table to new rows
+/// SQLite evaluates this with a **queue** (see <https://sqlite.org/lang_with.html>):
+/// base rows seed the queue, then rows are pulled one at a time, the recursive
+/// term is run against the pulled row, and the produced rows are appended to the
+/// queue and (for UNION) deduplicated. Two ordering disciplines matter:
+///
+/// - **No `ORDER BY` on the recursive term** — the queue is FIFO, giving a breadth-first traversal.
+///   This is the common case and is handled by an efficient *frontier* loop that expands a whole
+///   level per iteration.
+/// - **`ORDER BY` on the recursive term** — the queue becomes a priority queue: the row that sorts
+///   first is pulled next, so the result is emitted in a global sorted order across all levels.
+///   `ORDER BY … DESC` on a depth column yields depth-first search, ascending yields breadth-first
+///   (with1.test 10.3–10.6, 11.1–11.3). This path pulls one row at a time.
+///
+/// A `LIMIT`/`OFFSET` written after the `UNION ALL` caps and windows the *total*
+/// CTE result (with1.test 5.3, 5.2.3), and an `outer_row_hint` (an outer `LIMIT`
+/// over a directly-referenced CTE) lets an otherwise infinite/circular CTE
+/// terminate early (with1.test 5.1, 5.4).
 fn execute_recursive_cte<F, M>(
     cte: &vibesql_ast::CommonTableExpr,
     cte_results: &HashMap<String, CteResult>,
+    outer_row_hint: Option<usize>,
     database: &vibesql_storage::Database,
     executor: &F,
     memory_check: &M,
@@ -1077,6 +1192,15 @@ where
     // Base term: the main SELECT (before UNION [ALL])
     // Recursive term: the right side of UNION [ALL]
 
+    // ORDER BY / LIMIT / OFFSET written after the `UNION ALL` bind to the
+    // *compound* query (the parser stores them on `cte.query`, not on the base
+    // or recursive terms). For a recursive CTE these are queue directives — the
+    // ORDER BY controls the priority-queue traversal, and LIMIT/OFFSET cap and
+    // window the total result — so they must NOT be applied to the base term or
+    // re-applied on each recursive iteration. We interpret them here and strip
+    // them from the base term.
+    let recursive_order_by = cte.query.order_by.clone();
+
     // Create base-only query without the UNION ALL set operation
     // This prevents the base term from trying to reference the CTE before it exists
     let base_query = vibesql_ast::SelectStmt {
@@ -1090,12 +1214,16 @@ where
         group_by: cte.query.group_by.clone(),
         having: cte.query.having.clone(),
         window_definitions: cte.query.window_definitions.clone(),
-        order_by: cte.query.order_by.clone(),
-        limit: cte.query.limit.clone(),
-        offset: cte.query.offset.clone(),
+        // Compound-level ORDER BY/LIMIT/OFFSET do not apply to the base term.
+        order_by: None,
+        limit: None,
+        offset: None,
         set_operation: None, // Remove UNION ALL for base term execution
         values: cte.query.values.clone(),
     };
+
+    // The recursive term drives per-iteration expansion; execute it as written
+    // (it already carries no compound-level ORDER BY/LIMIT/OFFSET).
     let recursive_query = &set_op.right;
 
     // SQLite compatibility: window functions are not allowed in the recursive
@@ -1120,96 +1248,355 @@ where
             ));
         }
     }
-    // Fall back to runtime validation for wildcards (existing code below at line 279-289)
+    // Fall back to runtime validation for wildcards (existing code below)
+
+    // A LIMIT/OFFSET after the UNION ALL caps and windows the TOTAL CTE result —
+    // base rows included (with1.test 5.3: `... LIMIT 5` yields exactly 5 rows
+    // counting the base row; `LIMIT 0` yields none, not even the base row).
+    // Resolve them (and the outer LIMIT hint) to a single "produce at most
+    // `total_cap` rows, then discard the first `output_offset`" pair.
+    let term_limit = cte.query.limit.as_ref().and_then(|e| eval_const_count(e, database));
+    let term_offset =
+        cte.query.offset.as_ref().and_then(|e| eval_const_count(e, database)).unwrap_or(0);
+    // Rows produced (before OFFSET is applied) that we must generate.
+    let mut total_cap = term_limit.map(|l| l.saturating_add(term_offset));
+    if let Some(hint) = outer_row_hint {
+        total_cap =
+            Some(total_cap.map_or(hint, |c: usize| c.min(hint.saturating_add(term_offset))));
+    }
+    // Rows to drop from the front of the emitted result (recursive-term OFFSET).
+    let output_offset = term_offset;
 
     // Step 1: Execute base term to get initial rows
-    let mut all_rows = executor(&base_query, cte_results)?;
+    let mut base_rows = executor(&base_query, cte_results)?;
 
     // Derive schema from base term result
     // Wildcards in the base term are expanded against database tables and
     // prior CTEs (#5293)
-    let schema = derive_cte_schema(cte, &all_rows, database, cte_results)?;
+    let schema = derive_cte_schema(cte, &base_rows, database, cte_results)?;
 
     // Track seen rows for UNION (deduplication)
     // For UNION ALL, we skip tracking to preserve all rows
     let mut seen_rows: Option<HashSet<vibesql_storage::RowValues>> = if !set_op.all {
-        let mut seen = HashSet::with_capacity(all_rows.len());
+        let mut seen = HashSet::with_capacity(base_rows.len());
         // For plain UNION, SQLite also deduplicates the base term itself, not
         // just recursive-term rows (issue #5838, item 7; with1.test 26.2).
         // Drop duplicate seed rows so the result and the working table start
         // deduplicated.
-        all_rows.retain(|row| seen.insert(row.values.clone()));
+        base_rows.retain(|row| seen.insert(row.values.clone()));
         Some(seen)
     } else {
         None
     };
 
-    let mut working_table = all_rows.clone();
+    // Resolve each ORDER BY term to an output-column index (positional or by
+    // alias/column name). `None` means "no priority ordering" (FIFO). An
+    // unresolvable term is a name-resolution error (with1.test 10.7.1).
+    let order_indices = match &recursive_order_by {
+        Some(items) => Some(resolve_recursive_order_indices(items, &set_op.right, &base_query)?),
+        None => None,
+    };
 
-    // Step 2: Iterative evaluation
+    // Helper to run one expansion of the recursive term against a working set.
+    let expand =
+        |working: &[vibesql_storage::Row]| -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
+            let mut recursive_cte_results = cte_results.clone();
+            recursive_cte_results
+                .insert(cte.name.clone(), (schema.clone(), Arc::new(working.to_vec())));
+            executor(recursive_query, &recursive_cte_results)
+        };
+
+    let all_rows = if let (Some(order_by), Some(indices)) =
+        (recursive_order_by.as_ref(), order_indices.as_ref())
+    {
+        // Priority-queue traversal: pull one row at a time in sorted order.
+        execute_recursive_queue(
+            base_rows,
+            &expand,
+            order_by,
+            indices,
+            &mut seen_rows,
+            total_cap,
+            memory_check,
+        )?
+    } else {
+        // FIFO frontier traversal (breadth-first): expand a whole level at once.
+        execute_recursive_frontier(
+            base_rows,
+            &expand,
+            &mut seen_rows,
+            total_cap,
+            memory_check,
+            MAX_RECURSIVE_CTE_ITERATIONS,
+            &cte.name,
+        )?
+    };
+
+    // Apply the recursive-term OFFSET as a window over the emitted result.
+    let all_rows = if output_offset > 0 {
+        all_rows.into_iter().skip(output_offset).collect()
+    } else {
+        all_rows
+    };
+
+    Ok(all_rows)
+}
+
+/// FIFO (breadth-first) recursive-CTE traversal.
+///
+/// Expands an entire frontier per iteration, which is equivalent to a FIFO queue
+/// but far cheaper than pulling rows one at a time. Terminates when the frontier
+/// is empty, when `total_cap` rows have been produced, or (as a safety net for
+/// genuinely unbounded CTEs with no cap) when the iteration limit is reached.
+#[allow(clippy::too_many_arguments)]
+fn execute_recursive_frontier<E, M>(
+    base_rows: Vec<vibesql_storage::Row>,
+    expand: &E,
+    seen_rows: &mut Option<HashSet<vibesql_storage::RowValues>>,
+    total_cap: Option<usize>,
+    memory_check: &M,
+    max_iterations: usize,
+    cte_name: &str,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError>
+where
+    E: Fn(&[vibesql_storage::Row]) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    let mut all_rows = base_rows.clone();
+    let mut working_table = base_rows;
+
+    // Honor a cap on the base (seed) rows too: `LIMIT n` counts them.
+    if let Some(cap) = total_cap {
+        if all_rows.len() >= cap {
+            all_rows.truncate(cap);
+            return Ok(all_rows);
+        }
+    }
+
     let mut depth = 0;
-    while !working_table.is_empty() && depth < MAX_RECURSIVE_CTE_ITERATIONS {
+    while !working_table.is_empty() {
+        // With no cap, an unbounded CTE would loop forever; bound it.
+        if total_cap.is_none() && depth >= max_iterations {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "Recursive CTE '{}' exceeded maximum iteration limit of {}",
+                cte_name, max_iterations
+            )));
+        }
         depth += 1;
 
-        // Make working table available as this CTE for recursive reference
-        let mut recursive_cte_results = cte_results.clone();
-        recursive_cte_results
-            .insert(cte.name.clone(), (schema.clone(), Arc::new(working_table.clone())));
-
-        // Execute recursive term with working table as CTE
-        let new_rows = executor(recursive_query, &recursive_cte_results)?;
-
-        // If no new rows, we're done
+        let new_rows = expand(&working_table)?;
         if new_rows.is_empty() {
             break;
         }
 
-        // Validate that recursive term returns same number of columns as base term
-        // This check is done on first iteration to catch schema mismatches early
-        if depth == 1 && !new_rows.is_empty() && !all_rows.is_empty() {
-            let base_col_count = all_rows[0].values.len();
-            let recursive_col_count = new_rows[0].values.len();
-            if base_col_count != recursive_col_count {
-                return Err(ExecutorError::UnsupportedFeature(
-                    "SELECTs to the left and right of UNION ALL do not have the same number of result columns".to_string()
-                ));
-            }
-        }
-
-        // Check memory before adding new rows
         let estimated_size = super::helpers::estimate_result_size(&new_rows);
         memory_check(estimated_size)?;
 
         // Filter out duplicates for UNION (keep all for UNION ALL)
-        let rows_to_add: Vec<vibesql_storage::Row> = if let Some(ref mut seen) = seen_rows {
-            // UNION: only add rows we haven't seen before
+        let rows_to_add: Vec<vibesql_storage::Row> = if let Some(seen) = seen_rows.as_mut() {
             new_rows.into_iter().filter(|row| seen.insert(row.values.clone())).collect()
         } else {
-            // UNION ALL: keep all rows
             new_rows
         };
 
-        // If no new unique rows (for UNION), we're done
         if rows_to_add.is_empty() {
             break;
         }
 
-        // Add new rows to result
         all_rows.extend(rows_to_add.clone());
-
-        // Update working table to be the new rows for next iteration
         working_table = rows_to_add;
-    }
 
-    // Check if we hit max recursion depth
-    if depth >= MAX_RECURSIVE_CTE_ITERATIONS {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "Recursive CTE '{}' exceeded maximum iteration limit of {}",
-            cte.name, MAX_RECURSIVE_CTE_ITERATIONS
-        )));
+        if let Some(cap) = total_cap {
+            if all_rows.len() >= cap {
+                all_rows.truncate(cap);
+                break;
+            }
+        }
     }
 
     Ok(all_rows)
+}
+
+/// Priority-queue recursive-CTE traversal (ORDER BY on the recursive term).
+///
+/// Implements SQLite's queue model exactly: the smallest-sorting queued row is
+/// pulled, emitted to the result, and expanded; produced rows are appended to
+/// the queue. The emission order is therefore a global sorted order across all
+/// recursion levels. `ORDER BY … DESC` yields depth-first, ASC yields
+/// breadth-first (with1.test 10.3–10.6, 11.1–11.3, 5.2.x).
+fn execute_recursive_queue<E, M>(
+    base_rows: Vec<vibesql_storage::Row>,
+    expand: &E,
+    order_by: &[vibesql_ast::OrderByItem],
+    order_indices: &[usize],
+    seen_rows: &mut Option<HashSet<vibesql_storage::RowValues>>,
+    total_cap: Option<usize>,
+    memory_check: &M,
+) -> Result<Vec<vibesql_storage::Row>, ExecutorError>
+where
+    E: Fn(&[vibesql_storage::Row]) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
+    // The queue holds rows not yet expanded, kept sorted so the front is the
+    // next row to pull. Base rows seed the queue in base order.
+    let mut queue: Vec<vibesql_storage::Row> = base_rows;
+    let mut result: Vec<vibesql_storage::Row> = Vec::new();
+
+    // Sort the queue by the ORDER BY terms, reading values at the resolved
+    // output-column positions. A stable sort preserves insertion order among
+    // equal keys, matching SQLite's FIFO tie-break.
+    let sort_queue = |queue: &mut Vec<vibesql_storage::Row>| {
+        queue.sort_by(|a, b| {
+            for (term, &idx) in order_by.iter().zip(order_indices.iter()) {
+                let va = a.values.get(idx).unwrap_or(&vibesql_types::SqlValue::Null);
+                let vb = b.values.get(idx).unwrap_or(&vibesql_types::SqlValue::Null);
+                let ord = super::grouping::compare_sql_values(va, vb);
+                let ord = match term.direction {
+                    vibesql_ast::OrderDirection::Asc => ord,
+                    vibesql_ast::OrderDirection::Desc => ord.reverse(),
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+    };
+
+    sort_queue(&mut queue);
+
+    while !queue.is_empty() {
+        if let Some(cap) = total_cap {
+            if result.len() >= cap {
+                break;
+            }
+        }
+
+        // Pull the smallest-sorting row (front of the sorted queue).
+        let row = queue.remove(0);
+        result.push(row.clone());
+
+        // Expand it, dedup for UNION, then merge into the queue and re-sort so
+        // the next pull respects the global order.
+        let new_rows = expand(std::slice::from_ref(&row))?;
+        if new_rows.is_empty() {
+            continue;
+        }
+        let estimated_size = super::helpers::estimate_result_size(&new_rows);
+        memory_check(estimated_size)?;
+
+        let to_queue: Vec<vibesql_storage::Row> = if let Some(seen) = seen_rows.as_mut() {
+            new_rows.into_iter().filter(|r| seen.insert(r.values.clone())).collect()
+        } else {
+            new_rows
+        };
+        if !to_queue.is_empty() {
+            queue.extend(to_queue);
+            sort_queue(&mut queue);
+        }
+    }
+
+    if let Some(cap) = total_cap {
+        result.truncate(cap);
+    }
+    Ok(result)
+}
+
+/// Resolve each ORDER BY term of a recursive CTE's recursive term to a 0-based
+/// output-column index.
+///
+/// SQLite resolves the ORDER BY against the compound query's result columns:
+/// - A positive integer literal `N` selects output column `N` (1-based).
+/// - A bare name matches a SELECT-list alias/column of the recursive term or the base term
+///   (with1.test 10.7.2 uses the base-term alias `b`, 10.7.3 the recursive-term alias `c`). A name
+///   that matches neither is an error (with1.test 10.7.1: `ORDER BY a` where the output is aliased
+///   `b`/`c`).
+fn resolve_recursive_order_indices(
+    order_by: &[vibesql_ast::OrderByItem],
+    recursive_term: &vibesql_ast::SelectStmt,
+    base_query: &vibesql_ast::SelectStmt,
+) -> Result<Vec<usize>, ExecutorError> {
+    let col_count = recursive_term.select_list.len();
+    let mut indices = Vec::with_capacity(order_by.len());
+    for (term_index, item) in order_by.iter().enumerate() {
+        // A COLLATE wrapper attaches a collation to the sort key but does not
+        // change which column the term selects: `ORDER BY 3 COLLATE nocase`
+        // still orders by output column 3 (with1.test 10.8.1). Unwrap it before
+        // position/name resolution. (The collation itself is not yet applied in
+        // the priority-queue comparator.)
+        let expr = match &item.expr {
+            vibesql_ast::Expression::Collate { expr, .. } => expr.as_ref(),
+            other => other,
+        };
+        match super::order::extract_column_position(expr) {
+            super::order::ColumnPositionResult::Position(pos) => {
+                indices.push(super::order::validate_column_position(pos, col_count, term_index)?);
+            }
+            super::order::ColumnPositionResult::Negative(pos) => {
+                return Err(ExecutorError::OrderByOutOfRange {
+                    term_position: term_index + 1,
+                    column_number: pos,
+                    select_list_len: col_count,
+                });
+            }
+            super::order::ColumnPositionResult::NotAPosition => {
+                // Resolve a bare column name against the recursive and base
+                // select-list output aliases.
+                let name = match expr {
+                    vibesql_ast::Expression::ColumnRef(col) => {
+                        Some(col.column_canonical().to_string())
+                    }
+                    _ => None,
+                };
+                let idx = name.as_deref().and_then(|n| {
+                    select_output_index(&recursive_term.select_list, n)
+                        .or_else(|| select_output_index(&base_query.select_list, n))
+                });
+                match idx {
+                    Some(i) => indices.push(i),
+                    None => {
+                        return Err(ExecutorError::SqliteCompatError(format!(
+                            "{}{} ORDER BY term does not match any column in the result set",
+                            term_index + 1,
+                            ordinal_suffix(term_index + 1),
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(indices)
+}
+
+/// Find the 0-based output index of a SELECT-list item whose alias or bare
+/// column name matches `name` (case-insensitive).
+fn select_output_index(select_list: &[vibesql_ast::SelectItem], name: &str) -> Option<usize> {
+    for (i, item) in select_list.iter().enumerate() {
+        if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+            if let Some(a) = alias {
+                if a.eq_ignore_ascii_case(name) {
+                    return Some(i);
+                }
+            }
+            if let vibesql_ast::Expression::ColumnRef(col) = expr {
+                if col.column_canonical().eq_ignore_ascii_case(name) {
+                    return Some(i);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// English ordinal suffix for the SQLite ORDER BY error message ("1st", "2nd").
+fn ordinal_suffix(n: usize) -> &'static str {
+    match (n % 10, n % 100) {
+        (1, 11) | (2, 12) | (3, 13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    }
 }
 
 /// Count columns if select list has only explicit expressions (no wildcards)

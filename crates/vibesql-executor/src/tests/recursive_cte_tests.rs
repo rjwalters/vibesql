@@ -440,3 +440,303 @@ fn test_recursive_cte_union_cycle_detection() {
     assert_eq!(result[1].values[0], vibesql_types::SqlValue::Integer(2));
     assert_eq!(result[2].values[0], vibesql_types::SqlValue::Integer(3));
 }
+
+// ===========================================================================
+// Issue #5941 — Gap 2 (lazy recursion under LIMIT) and Gap 3 (ORDER BY in the
+// recursive term = priority-queue traversal). Cases mirror with1.test 5.x,
+// 10.x, and 11.x.
+// ===========================================================================
+
+/// Collect the i64 values of a single-column result in row order.
+fn ints(rows: &[vibesql_storage::Row]) -> Vec<i64> {
+    rows.iter()
+        .map(|r| match r.values[0] {
+            vibesql_types::SqlValue::Integer(n) => n,
+            ref other => panic!("expected integer, got {:?}", other),
+        })
+        .collect()
+}
+
+/// Collect the string values of a single-column result in row order.
+fn strs(rows: &[vibesql_storage::Row]) -> Vec<String> {
+    rows.iter()
+        .map(|r| match &r.values[0] {
+            vibesql_types::SqlValue::Varchar(s) => s.to_string(),
+            other => panic!("expected varchar, got {:?}", other),
+        })
+        .collect()
+}
+
+/// with1.test 5.1 — an infinite recursive CTE under an outer LIMIT returns
+/// exactly the requested rows instead of running to the recursion cap.
+#[test]
+fn test_recursive_cte_infinite_outer_limit() {
+    let mut db = vibesql_storage::Database::new();
+    let rows = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( VALUES(1) UNION ALL SELECT x+1 FROM i) SELECT x FROM i LIMIT 10",
+    )
+    .expect("infinite CTE with outer LIMIT must terminate");
+    assert_eq!(ints(&rows), vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+}
+
+/// with1.test 5.4 — a circular UNION ALL sequence under an outer LIMIT returns
+/// the requested number of rows (the sequence never converges, so only the
+/// outer LIMIT can stop it).
+#[test]
+fn test_recursive_cte_circular_outer_limit() {
+    let mut db = vibesql_storage::Database::new();
+    let rows = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( VALUES(1) UNION ALL SELECT (x+1)%10 FROM i) SELECT x FROM i LIMIT 20",
+    )
+    .expect("circular CTE with outer LIMIT must terminate");
+    assert_eq!(ints(&rows), vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
+}
+
+/// with1.test 5.3 — a LIMIT after the UNION ALL caps the TOTAL CTE result
+/// (base row included).
+#[test]
+fn test_recursive_cte_limit_on_recursive_term() {
+    let mut db = vibesql_storage::Database::new();
+    let rows = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( VALUES(1) UNION ALL SELECT x+1 FROM i LIMIT 5) SELECT x FROM i",
+    )
+    .expect("recursive-term LIMIT must cap the total result");
+    assert_eq!(ints(&rows), vec![1, 2, 3, 4, 5]);
+}
+
+/// Edge case from the issue test plan: `LIMIT 0` after the UNION ALL returns no
+/// rows at all — not even the base row.
+#[test]
+fn test_recursive_cte_limit_zero_on_recursive_term() {
+    let mut db = vibesql_storage::Database::new();
+    let rows = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( VALUES(1) UNION ALL SELECT x+1 FROM i LIMIT 0) SELECT x FROM i",
+    )
+    .expect("LIMIT 0 must yield an empty result");
+    assert!(rows.is_empty(), "LIMIT 0 should drop even the base row, got {:?}", ints(&rows));
+}
+
+/// with1.test 5.2.2 — ORDER BY on a UNION ALL recursive term produces a global
+/// priority-queue traversal: rows are emitted in sorted order across all
+/// recursion levels.
+#[test]
+fn test_recursive_cte_order_by_priority_queue() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE edge(xfrom, xto, seq)").unwrap();
+    for (f, t, s) in [
+        (0, 1, 10),
+        (1, 2, 20),
+        (0, 3, 30),
+        (2, 4, 40),
+        (3, 4, 40),
+        (2, 5, 50),
+        (3, 6, 60),
+        (5, 7, 70),
+        (3, 7, 70),
+        (4, 8, 80),
+        (7, 8, 80),
+        (8, 9, 90),
+    ] {
+        execute_sql(&mut db, &format!("INSERT INTO edge VALUES({f},{t},{s})")).unwrap();
+    }
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE ancest(id, mtime) AS (
+             VALUES(0, 0)
+             UNION ALL
+             SELECT edge.xto, edge.seq FROM edge, ancest
+              WHERE edge.xfrom=ancest.id
+              ORDER BY 2
+         )
+         SELECT id FROM ancest",
+    )
+    .unwrap();
+    // Globally sorted by mtime (seq), FIFO tie-break among equal keys.
+    assert_eq!(ints(&rows), vec![0, 1, 2, 3, 4, 4, 5, 6, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9]);
+}
+
+/// with1.test 5.2.3 — ORDER BY + LIMIT + OFFSET after the UNION ALL: the
+/// LIMIT/OFFSET window the sorted extraction sequence.
+#[test]
+fn test_recursive_cte_order_by_limit_offset() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE edge(xfrom, xto, seq)").unwrap();
+    for (f, t, s) in [
+        (0, 1, 10),
+        (1, 2, 20),
+        (0, 3, 30),
+        (2, 4, 40),
+        (3, 4, 40),
+        (2, 5, 50),
+        (3, 6, 60),
+        (5, 7, 70),
+        (3, 7, 70),
+        (4, 8, 80),
+        (7, 8, 80),
+        (8, 9, 90),
+    ] {
+        execute_sql(&mut db, &format!("INSERT INTO edge VALUES({f},{t},{s})")).unwrap();
+    }
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE ancest(id, mtime) AS (
+             VALUES(0, 0)
+             UNION ALL
+             SELECT edge.xto, edge.seq FROM edge, ancest
+              WHERE edge.xfrom=ancest.id
+              ORDER BY 2 LIMIT 4 OFFSET 2
+         )
+         SELECT id FROM ancest",
+    )
+    .unwrap();
+    assert_eq!(ints(&rows), vec![2, 3, 4, 4]);
+}
+
+/// with1.test 11.1 / 11.2 — the org-chart example: `ORDER BY level` yields
+/// breadth-first, `ORDER BY level DESC` yields depth-first. Also exercises
+/// `level` as a CTE column-list identifier (parser fix).
+#[test]
+fn test_recursive_cte_bfs_vs_dfs_org_chart() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE org(name TEXT PRIMARY KEY, boss TEXT)").unwrap();
+    for (name, boss) in [
+        ("Alice", "NULL"),
+        ("Bob", "'Alice'"),
+        ("Cindy", "'Alice'"),
+        ("Dave", "'Bob'"),
+        ("Emma", "'Bob'"),
+        ("Fred", "'Cindy'"),
+        ("Gail", "'Cindy'"),
+        ("Harry", "'Dave'"),
+        ("Ingrid", "'Dave'"),
+        ("Jim", "'Emma'"),
+        ("Kate", "'Emma'"),
+    ] {
+        execute_sql(&mut db, &format!("INSERT INTO org VALUES('{name}', {boss})")).unwrap();
+    }
+
+    // 11.1: breadth-first (ORDER BY level ASC).
+    let bfs = execute_sql(
+        &mut db,
+        "WITH RECURSIVE under_alice(name,level) AS (
+             VALUES('Alice','0')
+             UNION ALL
+             SELECT org.name, under_alice.level+1
+               FROM org, under_alice
+              WHERE org.boss=under_alice.name
+              ORDER BY 2
+         )
+         SELECT name FROM under_alice",
+    )
+    .unwrap();
+    assert_eq!(
+        strs(&bfs),
+        vec![
+            "Alice", "Bob", "Cindy", "Dave", "Emma", "Fred", "Gail", "Harry", "Ingrid", "Jim",
+            "Kate"
+        ]
+    );
+
+    // 11.2: depth-first (ORDER BY level DESC).
+    let dfs = execute_sql(
+        &mut db,
+        "WITH RECURSIVE under_alice(name,level) AS (
+             VALUES('Alice','0')
+             UNION ALL
+             SELECT org.name, under_alice.level+1
+               FROM org, under_alice
+              WHERE org.boss=under_alice.name
+              ORDER BY 2 DESC
+         )
+         SELECT name FROM under_alice",
+    )
+    .unwrap();
+    assert_eq!(
+        strs(&dfs),
+        vec![
+            "Alice", "Bob", "Dave", "Harry", "Ingrid", "Emma", "Jim", "Kate", "Cindy", "Fred",
+            "Gail"
+        ]
+    );
+}
+
+/// with1.test 11.3 — without ORDER BY, the recursive query uses a FIFO, giving
+/// a breadth-first search.
+#[test]
+fn test_recursive_cte_fifo_is_breadth_first() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE org(name TEXT PRIMARY KEY, boss TEXT)").unwrap();
+    for (name, boss) in [
+        ("Alice", "NULL"),
+        ("Bob", "'Alice'"),
+        ("Cindy", "'Alice'"),
+        ("Dave", "'Bob'"),
+        ("Emma", "'Bob'"),
+        ("Fred", "'Cindy'"),
+    ] {
+        execute_sql(&mut db, &format!("INSERT INTO org VALUES('{name}', {boss})")).unwrap();
+    }
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE under_alice(name,level) AS (
+             VALUES('Alice','0')
+             UNION ALL
+             SELECT org.name, under_alice.level+1
+               FROM org, under_alice
+              WHERE org.boss=under_alice.name
+         )
+         SELECT name FROM under_alice",
+    )
+    .unwrap();
+    assert_eq!(strs(&rows), vec!["Alice", "Bob", "Cindy", "Dave", "Emma", "Fred"]);
+}
+
+/// with1.test 10.7.1 — an ORDER BY term that matches no output column of the
+/// recursive query is an error.
+#[test]
+fn test_recursive_cte_order_by_unknown_column_errors() {
+    let mut db = vibesql_storage::Database::new();
+    let err = execute_sql(
+        &mut db,
+        "WITH t(a) AS (
+             SELECT 1 AS b UNION ALL SELECT a+1 AS c FROM t WHERE a<5 ORDER BY a
+         )
+         SELECT * FROM t",
+    )
+    .unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("does not match any column"),
+        "expected ORDER BY resolution error, got: {msg}"
+    );
+}
+
+/// with1.test 10.7.2 / 10.7.3 — an ORDER BY term may match a SELECT-list alias
+/// of either the base term (`b`) or the recursive term (`c`).
+#[test]
+fn test_recursive_cte_order_by_matches_select_alias() {
+    let mut db = vibesql_storage::Database::new();
+    let by_base = execute_sql(
+        &mut db,
+        "WITH t(a) AS (
+             SELECT 1 AS b UNION ALL SELECT a+1 AS c FROM t WHERE a<5 ORDER BY b
+         )
+         SELECT * FROM t",
+    )
+    .unwrap();
+    assert_eq!(ints(&by_base), vec![1, 2, 3, 4, 5]);
+
+    let by_recursive = execute_sql(
+        &mut db,
+        "WITH t(a) AS (
+             SELECT 1 AS b UNION ALL SELECT a+1 AS c FROM t WHERE a<5 ORDER BY c
+         )
+         SELECT * FROM t",
+    )
+    .unwrap();
+    assert_eq!(ints(&by_recursive), vec![1, 2, 3, 4, 5]);
+}
