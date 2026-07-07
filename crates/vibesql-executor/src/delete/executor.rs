@@ -525,6 +525,19 @@ impl DeleteExecutor {
         // than any ancestor is iterating compacts normally.
         let defer_compaction = crate::compaction_guard::is_iterating(table_name);
         let deleted_count: usize;
+
+        // When a RETURNING expression contains a subquery, that subquery must be
+        // recomputed per row as each row is deleted (it observes the incremental
+        // post-DELETE table state), matching SQLite's correlated-subquery
+        // treatment (returning1.test section 20). We detect this case up front so
+        // the common subquery-free RETURNING keeps the cheap batch path below
+        // with zero behavior change. `per_row_returning`, when `Some`, holds the
+        // fully projected RETURNING result and suppresses the statement-end
+        // projection.
+        let returning_needs_per_row =
+            stmt.returning.as_deref().is_some_and(crate::dml_returning::returning_has_subquery);
+        let mut per_row_returning: Option<crate::select::SelectResult> = None;
+
         if has_delete_triggers {
             #[cfg(feature = "mvcc_enabled")]
             let mvcc_delete_txn_id = database.transaction_id();
@@ -665,6 +678,100 @@ impl DeleteExecutor {
             // are excluded).
             rows_and_indices_to_delete = applied_rows;
             deleted_count = deleted;
+        } else if returning_needs_per_row {
+            // Per-row RETURNING path (no triggers): delete each row, then
+            // project its RETURNING row against the now-updated table state so
+            // subqueries recompute after each step. Deletions use the bitmap
+            // (`mark_deleted_inplace`) so physical indices stay valid across the
+            // loop; compaction and any index rebuild happen once at the end,
+            // mirroring the trigger path above.
+            #[cfg(feature = "mvcc_enabled")]
+            let mvcc_delete_txn_id = database.transaction_id();
+
+            let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+
+            let items = stmt.returning.as_deref().expect("returning present");
+            let visible_columns = crate::dml_returning::visible_columns(&schema);
+            let columns = crate::dml_returning::derive_returning_columns(
+                items,
+                &schema,
+                None,
+                &visible_columns,
+            )?;
+            let mut result_rows: Vec<vibesql_storage::Row> =
+                Vec::with_capacity(rows_and_indices_to_delete.len());
+
+            let mut deleted = 0usize;
+            let mut compacted = false;
+
+            for (idx, row) in rows_and_indices_to_delete.iter() {
+                // Referential integrity for this row (CASCADE / SET NULL / etc.)
+                check_no_child_references(database, table_name, row)?;
+
+                // WAL + index maintenance for this single row (indices stay
+                // valid: compaction is deferred to the end of the loop).
+                database.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
+                let rows_refs: Vec<(usize, &vibesql_storage::Row)> = vec![(*idx, row)];
+                database.batch_update_indexes_for_delete(table_name, &rows_refs);
+                expression_index_maintenance::maintain_expression_indexes_for_delete(
+                    database, table_name, row, *idx,
+                );
+                partial_index_maintenance::maintain_partial_indexes_for_delete(
+                    database, table_name, row, *idx,
+                );
+
+                {
+                    let table_mut = database
+                        .get_table_mut(table_name)
+                        .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+                    #[cfg(feature = "mvcc_enabled")]
+                    if let Some(id) = mvcc_delete_txn_id {
+                        table_mut.stamp_row_xmax_inplace(*idx, id);
+                    }
+
+                    if table_mut.mark_deleted_inplace(*idx) {
+                        deleted += 1;
+                    }
+                }
+
+                // Drop the stale row-oriented columnar snapshot so the RETURNING
+                // subquery sees this row's deletion (mirrors the trigger path).
+                database.invalidate_columnar_cache(table_name);
+
+                // Project this row's RETURNING against the now-updated state.
+                let projected = crate::dml_returning::project_returning_row(
+                    items,
+                    &columns,
+                    &schema,
+                    database,
+                    row,
+                    &visible_columns,
+                    cte_results.as_ref(),
+                )?;
+                result_rows.push(projected);
+            }
+
+            if deleted > 0 {
+                if !defer_compaction {
+                    if let Some(table_mut) = database.get_table_mut(table_name) {
+                        compacted = table_mut.compact_if_needed();
+                    }
+                    if compacted {
+                        database.rebuild_indexes(table_name);
+                        expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                            database, table_name,
+                        );
+                        partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                            database, table_name,
+                        );
+                    }
+                }
+                database.invalidate_columnar_cache(table_name);
+            }
+
+            deleted_count = deleted;
+            per_row_returning = Some(crate::select::SelectResult { columns, rows: result_rows });
         } else {
             // Fast path: no DELETE triggers — batch delete as before.
 
@@ -777,7 +884,10 @@ impl DeleteExecutor {
         // Rows are projected in collection order (ORDER BY/LIMIT already
         // applied); zero deleted rows yields an empty result whose column
         // names are still derived from the RETURNING items.
-        let returning = if let Some(items) = &stmt.returning {
+        let returning = if let Some(per_row) = per_row_returning {
+            // Already projected per row (subquery-bearing RETURNING).
+            Some(per_row)
+        } else if let Some(items) = &stmt.returning {
             let old_rows: Vec<&vibesql_storage::Row> =
                 rows_and_indices_to_delete.iter().map(|(_, row)| row).collect();
             Some(crate::dml_returning::project_returning(
