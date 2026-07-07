@@ -855,7 +855,7 @@ pub(super) fn execute_internal(
         // on it (fired by a row trigger below) defers compaction — compacting
         // would shift our not-yet-processed physical row indices (#5486).
         let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
-        for u in &updates {
+        for u in &mut updates {
             // BEFORE(R): a RAISE(IGNORE) drops this row entirely.
             let before_outcome = crate::TriggerFirer::execute_before_triggers(
                 database,
@@ -880,6 +880,31 @@ pub(super) fn execute_internal(
                 .unwrap_or(true)
             {
                 continue;
+            }
+
+            // Item 3 (#5840): a BEFORE UPDATE trigger may have written to THIS
+            // same row (e.g. `UPDATE t SET c = ... WHERE id = old.id`). Those
+            // writes already landed in storage. `u.new_row` was snapshotted
+            // pre-trigger, so re-applying it verbatim would clobber the
+            // trigger's writes. SQLite instead re-reads the current row and
+            // applies only the parent statement's SET columns on top, so a
+            // trigger's write to a column the parent does NOT set survives —
+            // and is visible to AFTER triggers, RETURNING, and index
+            // maintenance (all of which consume `u.new_row` below). Merge the
+            // current stored values for every column outside
+            // `u.changed_columns` back into `u.new_row`.
+            if let Some(current) =
+                database.get_table(table_name).and_then(|t| t.get_row(u.row_index))
+            {
+                if current.values != u.old_row.values {
+                    for col_idx in 0..u.new_row.values.len() {
+                        if !u.changed_columns.contains(&col_idx) {
+                            if let Some(v) = current.values.get(col_idx) {
+                                u.new_row.values[col_idx] = v.clone();
+                            }
+                        }
+                    }
+                }
             }
 
             // apply(R): mutate just this row so the AFTER trigger (and the

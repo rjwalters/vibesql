@@ -78,6 +78,18 @@ fn texts(db: &Database, sql: &str) -> Vec<String> {
         .collect()
 }
 
+/// Extract the first column of every row as an i64.
+fn ints(db: &Database, sql: &str) -> Vec<i64> {
+    query(db, sql)
+        .into_iter()
+        .map(|r| match &r[0] {
+            SqlValue::Bigint(n) => *n,
+            SqlValue::Integer(n) => *n,
+            other => panic!("expected integer, got {other:?}"),
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Item 2: REPLACE conflict-delete triggers gated on recursive_triggers.
 // ---------------------------------------------------------------------------
@@ -190,4 +202,128 @@ fn changes_inside_trigger_body_reflects_nested_dml_and_restores() {
     // The top-level statement's changes() is its own direct row count (1),
     // unaffected by the nested trigger DML.
     assert_eq!(db.last_changes_count(), 1, "outer INSERT changes() restored to 1");
+}
+
+// ---------------------------------------------------------------------------
+// Item 2b: a REPLACE whose single new row conflicts with MULTIPLE existing
+// rows deletes them one at a time. With recursive_triggers ON, each conflict
+// row's DELETE triggers fire interleaved (BEFORE R -> remove R -> AFTER R)
+// before the next conflict row, so a trigger body that reads the table sees
+// the row count DECREMENT between conflict deletions — it must not observe a
+// stale, frozen pre-deletion count. Verified against sqlite3 3.51.0.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn replace_multi_conflict_delete_triggers_see_decrementing_count() {
+    let mut db = Database::new();
+    db.set_recursive_triggers(true);
+    // A single inserted row (id=3) conflicts with id=1 on `a` AND id=2 on `b`,
+    // forcing two conflict deletions within one REPLACE.
+    exec(&mut db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a UNIQUE, b UNIQUE)");
+    exec(&mut db, "CREATE TABLE log(cnt)");
+    exec(&mut db, "INSERT INTO t VALUES(1, 'a1', 'b1')");
+    exec(&mut db, "INSERT INTO t VALUES(2, 'a2', 'b2')");
+    exec(
+        &mut db,
+        "CREATE TRIGGER bd BEFORE DELETE ON t BEGIN \
+         INSERT INTO log VALUES((SELECT count(*) FROM t)); END",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER ad AFTER DELETE ON t BEGIN \
+         INSERT INTO log VALUES(-(SELECT count(*) FROM t)); END",
+    );
+
+    exec(&mut db, "INSERT OR REPLACE INTO t VALUES(3, 'a1', 'b2')");
+
+    // Interleaved: BEFORE(first)=2, AFTER(first)=1, BEFORE(second)=1,
+    // AFTER(second)=0. AFTER counts are stored negated to distinguish them.
+    // Stale-state behavior would instead log 2, -2, 2, -2 (all BEFOREs see the
+    // pre-deletion count and all AFTERs see the post-batch count).
+    assert_eq!(
+        ints(&db, "SELECT cnt FROM log"),
+        vec![2, -1, 1, 0],
+        "conflict-delete trigger bodies must see the table shrink between deletions"
+    );
+
+    // Exactly the new row survives.
+    assert_eq!(ints(&db, "SELECT id FROM t"), vec![3]);
+    assert_eq!(texts(&db, "SELECT a FROM t"), vec!["a1".to_string()]);
+    assert_eq!(texts(&db, "SELECT b FROM t"), vec!["b2".to_string()]);
+}
+
+// ---------------------------------------------------------------------------
+// Item 3: a BEFORE UPDATE trigger that writes to the SAME row the parent
+// statement is updating must not have its write clobbered. SQLite applies the
+// trigger's write, then overlays only the parent's SET columns — so a
+// trigger's write to a column the parent does NOT set survives, and IS visible
+// to AFTER triggers, RETURNING, and index maintenance. Verified against
+// sqlite3 3.51.0.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn before_update_trigger_same_row_write_survives_for_unset_column() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a, b, c)");
+    exec(&mut db, "INSERT INTO t VALUES(1, 'a0', 'b0', 'c0')");
+    // BEFORE trigger writes column c; the parent statement only sets column a.
+    exec(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE UPDATE ON t BEGIN \
+         UPDATE t SET c = 'trig_c' WHERE id = 1; END",
+    );
+
+    exec(&mut db, "UPDATE t SET a = 'a_parent' WHERE id = 1");
+
+    // Parent wins on the column it set (a); trigger's write to c survives; b is
+    // untouched by either.
+    assert_eq!(texts(&db, "SELECT a FROM t"), vec!["a_parent".to_string()]);
+    assert_eq!(texts(&db, "SELECT b FROM t"), vec!["b0".to_string()]);
+    assert_eq!(texts(&db, "SELECT c FROM t"), vec!["trig_c".to_string()]);
+}
+
+#[test]
+fn before_update_trigger_write_to_parent_column_is_overwritten() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a, b)");
+    exec(&mut db, "INSERT INTO t VALUES(1, 'a0', 'b0')");
+    // Both the trigger and the parent write column a; the parent's value wins.
+    exec(
+        &mut db,
+        "CREATE TRIGGER trg BEFORE UPDATE ON t BEGIN \
+         UPDATE t SET a = 'trig_a' WHERE id = 1; END",
+    );
+
+    exec(&mut db, "UPDATE t SET a = 'a_parent' WHERE id = 1");
+
+    assert_eq!(texts(&db, "SELECT a FROM t"), vec!["a_parent".to_string()]);
+    assert_eq!(texts(&db, "SELECT b FROM t"), vec!["b0".to_string()]);
+}
+
+#[test]
+fn before_update_trigger_same_row_write_visible_to_after_trigger() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(id INTEGER PRIMARY KEY, a, c)");
+    exec(&mut db, "CREATE TABLE log(x)");
+    exec(&mut db, "INSERT INTO t VALUES(1, 'a0', 'c0')");
+    exec(
+        &mut db,
+        "CREATE TRIGGER b4 BEFORE UPDATE ON t BEGIN \
+         UPDATE t SET c = 'trig_c' WHERE id = 1; END",
+    );
+    // The AFTER trigger's NEW.c must reflect the BEFORE trigger's write.
+    exec(&mut db, "CREATE TRIGGER af AFTER UPDATE ON t BEGIN INSERT INTO log VALUES(new.c); END");
+
+    exec(&mut db, "UPDATE t SET a = 'a_parent' WHERE id = 1");
+
+    assert_eq!(texts(&db, "SELECT c FROM t"), vec!["trig_c".to_string()]);
+    // AFTER fires twice (verified against sqlite3 3.51.0): once for the BEFORE
+    // trigger's own nested `UPDATE t SET c` and once for the parent UPDATE. In
+    // both firings NEW.c must reflect the trigger's same-row write ('trig_c') —
+    // never the pre-trigger value 'c0'.
+    assert_eq!(
+        texts(&db, "SELECT x FROM log"),
+        vec!["trig_c".to_string(), "trig_c".to_string()],
+        "AFTER trigger NEW.* reflects the BEFORE trigger's same-row write"
+    );
 }
