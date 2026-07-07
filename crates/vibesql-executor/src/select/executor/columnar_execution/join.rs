@@ -318,6 +318,27 @@ impl SelectExecutor<'_> {
             }
         };
 
+        // Issue #5927: validate WHERE clause column refs against the combined schema
+        // before applying the SIMD filter. The row-oriented path does this via
+        // validate_select_columns_with_context at execute.rs:1280. The columnar path
+        // skipped it, silently resolving ambiguous unqualified refs left-to-right.
+        //
+        // This runs AFTER execute_columnar_join_chain: USING/NATURAL joins produce
+        // no equijoin conditions, so the chain returns Ok(None) and we fall back to
+        // the row path (which coalesces the join keys and validates correctly)
+        // before reaching this point. Only equijoin columnar joins get here, where
+        // combined_schema.joined_columns is correctly empty and an unqualified ref
+        // matching two tables is genuinely ambiguous.
+        if let Some(ref where_expr) = stmt.where_clause {
+            super::super::validation::validate_select_columns_with_context(
+                &stmt.select_list,
+                Some(where_expr),
+                &combined_schema,
+                self.procedural_context,
+                self.outer_schema,
+            )?;
+        }
+
         // Apply remaining WHERE predicates (non-join conditions) using SIMD filtering
         // First, constant-fold the WHERE clause to handle expressions like `BETWEEN 1 AND 1+2`
         // which need to become `BETWEEN 1 AND 3` for the predicate extractor to recognize them
