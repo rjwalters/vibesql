@@ -323,8 +323,18 @@ impl ExpressionEvaluator<'_> {
         // through to the unchanged cached/correlated paths below.
         if let Some(trigger_ctx) = self.trigger_context {
             let substituted = substitute_trigger_pseudo_vars(subquery, trigger_ctx)?;
-            let select_executor =
-                crate::select::SelectExecutor::new_with_depth(database, self.depth);
+            // After pseudo-var substitution the subquery no longer needs the
+            // trigger context, but it may still reference a CTE declared on the
+            // enclosing DML statement (e.g. a trigger body
+            // `INSERT INTO log WITH map(k,v) AS (...) SELECT (SELECT v FROM map ...)`).
+            // Thread `cte_context` into the executor so `map` resolves to the CTE
+            // rather than failing / resolving to a same-named catalog table
+            // (with1.test 27.1).
+            let select_executor = if let Some(cte_ctx) = self.cte_context {
+                crate::select::SelectExecutor::new_with_cte_and_depth(database, cte_ctx, self.depth)
+            } else {
+                crate::select::SelectExecutor::new_with_depth(database, self.depth)
+            };
             let rows = select_executor.execute(&substituted)?;
             return Ok(rows);
         }
@@ -364,12 +374,29 @@ impl ExpressionEvaluator<'_> {
             } else {
                 // Correlated subquery - execute with outer context (can't cache)
                 let select_executor = if !outer_combined.table_schemas.is_empty() {
-                    crate::select::SelectExecutor::new_with_outer_context_and_depth(
-                        database,
-                        row,
-                        &outer_combined,
-                        self.depth,
-                    )
+                    // The subquery is correlated to the DML target row AND may
+                    // reference a CTE declared on the enclosing statement (e.g.
+                    // `WITH uset(a,b) AS (...) UPDATE t1 SET x =
+                    //  COALESCE((SELECT b FROM uset WHERE a=x), x)`). Passing only
+                    // the outer context drops `cte_context`, so `uset` fails with
+                    // "no such table". Use the combined outer+CTE executor when a
+                    // CTE context is present (with1.test 4.3).
+                    if let Some(cte_ctx) = self.cte_context {
+                        crate::select::SelectExecutor::new_with_outer_and_cte_and_depth(
+                            database,
+                            row,
+                            &outer_combined,
+                            cte_ctx,
+                            self.depth,
+                        )
+                    } else {
+                        crate::select::SelectExecutor::new_with_outer_context_and_depth(
+                            database,
+                            row,
+                            &outer_combined,
+                            self.depth,
+                        )
+                    }
                 } else if let Some(cte_ctx) = self.cte_context {
                     crate::select::SelectExecutor::new_with_cte_and_depth(
                         database, cte_ctx, self.depth,

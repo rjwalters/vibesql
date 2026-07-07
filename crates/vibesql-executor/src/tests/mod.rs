@@ -77,6 +77,7 @@ mod count_star_fast_path;
 mod covering_index_tests;
 mod create_table_constraints;
 mod create_table_tests;
+mod cte_dml_subquery_visibility_tests;
 mod cte_scalar_subquery_tests;
 mod delete_returning;
 mod error_display;
