@@ -30,8 +30,9 @@ impl Parser {
                 name
             }
             // Allow LEFT, RIGHT, REPLACE, SCHEMA, GROUPING, GROUPING_ID, GLOB, LIKE, MATCH,
-            // DATE, and TIME keywords as function names. These are reserved keywords but
-            // can also be functions (DATE/TIME: SQLite date('now')/time('now'), #5307).
+            // DATE, TIME, and IF keywords as function names. These are reserved keywords but
+            // can also be functions (DATE/TIME: SQLite date('now')/time('now'), #5307;
+            // IF: SQLite/MySQL if(cond, x, y) and variadic if(c1, v1, ..., else), #5942).
             Token::Keyword { keyword: Keyword::Left, .. }
             | Token::Keyword { keyword: Keyword::Right, .. }
             | Token::Keyword { keyword: Keyword::Replace, .. }
@@ -42,7 +43,8 @@ impl Parser {
             | Token::Keyword { keyword: Keyword::Like, .. }
             | Token::Keyword { keyword: Keyword::Match, .. }
             | Token::Keyword { keyword: Keyword::Date, .. }
-            | Token::Keyword { keyword: Keyword::Time, .. } => {
+            | Token::Keyword { keyword: Keyword::Time, .. }
+            | Token::Keyword { keyword: Keyword::If, .. } => {
                 // Peek ahead to see if this is followed by '('
                 // Don't consume the keyword unless we're sure it's a function
                 // SQL:1999 normalizes unquoted identifiers (including function names) to lowercase
@@ -58,6 +60,7 @@ impl Parser {
                     Token::Keyword { keyword: Keyword::Match, .. } => "match",
                     Token::Keyword { keyword: Keyword::Date, .. } => "date",
                     Token::Keyword { keyword: Keyword::Time, .. } => "time",
+                    Token::Keyword { keyword: Keyword::If, .. } => "if",
                     _ => unreachable!(),
                 };
 
