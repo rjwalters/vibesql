@@ -8,41 +8,22 @@ use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
 
-/// IIF(condition, true_value, false_value) - Inline if (SQLite ternary)
+/// IIF(...) - Inline if (SQLite ternary / 3.48+ variadic)
 ///
-/// Equivalent to CASE WHEN condition THEN true_value ELSE false_value END
-/// Also equivalent to IF(condition, true_value, false_value)
+/// Two supported forms:
+/// - `IIF(condition, true_value, false_value)` — equivalent to
+///   `CASE WHEN condition THEN true_value ELSE false_value END`.
+/// - `IIF(c1, v1, c2, v2, ..., else)` — CASE-chain form (odd argument count,
+///   `>= 3`); returns the value paired with the first truthy condition, or the
+///   trailing `else` argument if none match.
+///
+/// Conditions use SQLite truthiness rules
+/// (`crate::evaluator::operators::is_truthy`): `NULL` and numeric zero are
+/// false, non-zero numerics are true, and strings coerce via their leading
+/// numeric portion. This shares the exact implementation used by `IF` and
+/// CASE/WHERE so all conditional paths agree.
 pub(crate) fn iif(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    if args.len() != 3 {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "IIF requires exactly 3 arguments, got {}",
-            args.len()
-        )));
-    }
-
-    // SQLite's IIF treats any non-zero, non-NULL value as true
-    let condition = &args[0];
-    let is_true = match condition {
-        SqlValue::Null => false,
-        SqlValue::Boolean(b) => *b,
-        SqlValue::Integer(i) => *i != 0,
-        SqlValue::Bigint(i) => *i != 0,
-        SqlValue::Smallint(i) => *i != 0,
-        SqlValue::Unsigned(u) => *u != 0,
-        SqlValue::Real(r) => *r != 0.0,
-        SqlValue::Double(d) => *d != 0.0,
-        SqlValue::Numeric(n) => *n != 0.0,
-        SqlValue::Float(f) => *f != 0.0,
-        // Non-empty strings are truthy in SQLite
-        SqlValue::Varchar(s) | SqlValue::Character(s) => !s.is_empty(),
-        _ => true, // Other non-null values are truthy
-    };
-
-    if is_true {
-        Ok(args[1].clone())
-    } else {
-        Ok(args[2].clone())
-    }
+    crate::evaluator::functions::control::variadic_conditional("IIF", args)
 }
 
 /// IFNULL(x, y) - Return y if x is NULL, otherwise return x
@@ -98,6 +79,110 @@ mod tests {
             iif(&[SqlValue::Integer(0), SqlValue::Integer(1), SqlValue::Integer(2)]).unwrap(),
             SqlValue::Integer(2)
         );
+
+        // String condition uses leading-numeric coercion (SQLite truthiness)
+        assert_eq!(
+            iif(&[
+                SqlValue::Varchar(arcstr::ArcStr::from("1abc")),
+                SqlValue::Integer(1),
+                SqlValue::Integer(2)
+            ])
+            .unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            iif(&[
+                SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+                SqlValue::Integer(1),
+                SqlValue::Integer(2)
+            ])
+            .unwrap(),
+            SqlValue::Integer(2)
+        );
+    }
+
+    #[test]
+    fn test_iif_variadic() {
+        // First branch true -> first value
+        assert_eq!(
+            iif(&[
+                SqlValue::Boolean(true),
+                SqlValue::Integer(1),
+                SqlValue::Boolean(true),
+                SqlValue::Integer(2),
+                SqlValue::Integer(99),
+            ])
+            .unwrap(),
+            SqlValue::Integer(1)
+        );
+
+        // First branch false, second branch true -> second value
+        assert_eq!(
+            iif(&[
+                SqlValue::Boolean(false),
+                SqlValue::Integer(1),
+                SqlValue::Boolean(true),
+                SqlValue::Integer(2),
+                SqlValue::Integer(99),
+            ])
+            .unwrap(),
+            SqlValue::Integer(2)
+        );
+
+        // No branch true -> trailing else value
+        assert_eq!(
+            iif(&[
+                SqlValue::Boolean(false),
+                SqlValue::Integer(1),
+                SqlValue::Boolean(false),
+                SqlValue::Integer(2),
+                SqlValue::Integer(99),
+            ])
+            .unwrap(),
+            SqlValue::Integer(99)
+        );
+
+        // NULL condition is falsy and skips its branch
+        assert_eq!(
+            iif(&[
+                SqlValue::Null,
+                SqlValue::Integer(1),
+                SqlValue::Integer(0),
+                SqlValue::Integer(2),
+                SqlValue::Integer(99),
+            ])
+            .unwrap(),
+            SqlValue::Integer(99)
+        );
+
+        // 5-arg mixed-type CASE chain (mirrors strict1.test usage):
+        // iif(0, 'a', 0.0, 'b', 'c') -> 'c'
+        assert_eq!(
+            iif(&[
+                SqlValue::Integer(0),
+                SqlValue::Varchar(arcstr::ArcStr::from("a")),
+                SqlValue::Real(0.0),
+                SqlValue::Varchar(arcstr::ArcStr::from("b")),
+                SqlValue::Varchar(arcstr::ArcStr::from("c")),
+            ])
+            .unwrap(),
+            SqlValue::Varchar(arcstr::ArcStr::from("c"))
+        );
+    }
+
+    #[test]
+    fn test_iif_invalid_arity() {
+        // Even argument count is rejected
+        assert!(iif(&[SqlValue::Boolean(true), SqlValue::Integer(1)]).is_err());
+        assert!(iif(&[
+            SqlValue::Boolean(true),
+            SqlValue::Integer(1),
+            SqlValue::Boolean(true),
+            SqlValue::Integer(2),
+        ])
+        .is_err());
+        // Fewer than 3 arguments is rejected
+        assert!(iif(&[SqlValue::Boolean(true)]).is_err());
     }
 
     #[test]
