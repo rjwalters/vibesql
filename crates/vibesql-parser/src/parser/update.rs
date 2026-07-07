@@ -93,6 +93,15 @@ impl Parser {
                         self.advance();
                         col_name
                     }
+                    // SQLite compatibility: a single-quoted string is accepted as
+                    // a column name on the left of a SET assignment (it is
+                    // followed by `=`, so there is no literal-vs-identifier
+                    // ambiguity). quote.test quote-1.4: `UPDATE '@abc' SET '#xyz'=11`.
+                    Token::String(col) => {
+                        let c = col.clone();
+                        self.advance();
+                        c
+                    }
                     _ => {
                         return Err(ParseError {
                             message: "Expected column name in SET clause".to_string(),
@@ -260,6 +269,13 @@ impl Parser {
                         let col_name = format!("{}", kw).to_lowercase();
                         self.advance();
                         col_name
+                    }
+                    // SQLite compatibility: single-quoted string as a SET-clause
+                    // column name (quote.test quote-1.4).
+                    Token::String(col) => {
+                        let c = col.clone();
+                        self.advance();
+                        c
                     }
                     _ => {
                         return Err(ParseError {

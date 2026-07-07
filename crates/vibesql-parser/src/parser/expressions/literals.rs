@@ -24,6 +24,13 @@ impl Parser {
                 }
             }
             Token::String(s) => {
+                // SQLite compatibility: a single-quoted string immediately
+                // followed by `.` is a qualified name, not a string literal
+                // (quote.test quote-1.3: `'@abc'.'!pqr'`). Defer to
+                // `parse_identifier_expression`, which builds the ColumnRef.
+                if matches!(self.peek_next(), Token::Symbol('.')) {
+                    return Ok(None);
+                }
                 let string_val = arcstr::ArcStr::from(s.as_str());
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(

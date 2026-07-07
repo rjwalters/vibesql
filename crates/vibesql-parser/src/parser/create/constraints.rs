@@ -379,7 +379,10 @@ impl Parser {
             let name = if self.peek_keyword(Keyword::Constraint) {
                 self.advance(); // consume CONSTRAINT
                 match self.peek() {
-                    Token::Identifier(n) => {
+                    // SQLite accepts identifiers, double-quoted identifiers, and
+                    // single-quoted string literals as constraint names
+                    // (e.g. `CONSTRAINT 'c1' NOT NULL`).
+                    Token::Identifier(n) | Token::DelimitedIdentifier(n) | Token::String(n) => {
                         let constraint_name = n.clone();
                         self.advance();
                         Some(constraint_name)
@@ -588,7 +591,10 @@ impl Parser {
         let name = if self.peek_keyword(Keyword::Constraint) {
             self.advance(); // consume CONSTRAINT
             match self.peek() {
-                Token::Identifier(n) => {
+                // SQLite accepts identifiers, double-quoted identifiers, and
+                // single-quoted string literals as constraint names
+                // (e.g. `CONSTRAINT 'c1' CHECK(...)`).
+                Token::Identifier(n) | Token::DelimitedIdentifier(n) | Token::String(n) => {
                     let constraint_name = n.clone();
                     self.advance();
                     Some(constraint_name)
