@@ -23,6 +23,14 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, select::Selec
 /// derived from the RETURNING items (aliases win, then original source
 /// text, then the expression's column name).
 ///
+/// `table_alias` should be `None` for RETURNING projection: unlike the rest
+/// of a DML statement (WHERE/SET), the RETURNING clause does NOT honor the
+/// target table's alias. In SQLite, `UPDATE t1 AS a ... RETURNING a.b` raises
+/// `no such column: a.b` while `RETURNING t1.b` succeeds — qualified
+/// references resolve against the real table name, not the alias (see
+/// returning1.test 7.7/7.8, issue #5840 item 6). The parameter is retained
+/// for wildcard-qualifier validation flexibility but callers pass `None`.
+///
 /// `cte_results` carries the enclosing statement's WITH-clause CTEs (if any)
 /// so subqueries in RETURNING expressions can reference CTE names, matching
 /// SQLite (issue #5359).
