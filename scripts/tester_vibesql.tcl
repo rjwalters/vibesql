@@ -170,6 +170,31 @@ set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
 set ::temp_replay_ddl [dict create]      ;# lowercase name -> CREATE TEMP TABLE DDL (replayed)
 set ::temp_created_this_batch [dict create]  ;# names whose CREATE TEMP TABLE is in the current batch
 
+# TEMP VIEW / TEMP TRIGGER replay (#5940 cluster B).
+#
+# Unlike temp tables — which the shim demotes to persistent CREATE TABLE so they
+# survive across batches in the shared .vbsql — temp views and temp triggers are
+# kept genuinely session-scoped (PR #5956 stopped persisting them to the
+# checkpoint/dump, matching SQLite's temp-object lifetime). But the shim spawns a
+# fresh CLI process per batch, so a temp view/trigger created in batch N is gone
+# by batch N+1. To reproduce SQLite's whole-file temp visibility we record each
+# `CREATE TEMP VIEW` / `CREATE TEMP TRIGGER` DDL and replay it as a per-batch
+# prelude (cf. the temp-table replay above), dropping the entry when the test
+# later drops the object. Replay order in build_pragma_prefix is tables → views →
+# triggers so a temp trigger that fires on a temp table (or view) finds its
+# dependency already reconstructed.
+set ::temp_view_replay_ddl [dict create]     ;# lowercase name -> CREATE TEMP VIEW DDL (replayed)
+set ::temp_trigger_replay_ddl [dict create]  ;# lowercase name -> CREATE TEMP TRIGGER DDL (replayed)
+set ::temp_trigger_table [dict create]       ;# trigger name -> lowercase target table/view it fires on
+set ::temp_view_table [dict create]          ;# view name -> lowercase source table it reads from (first FROM)
+set ::temp_vt_created_this_batch [dict create] ;# temp view/trigger names created in the current batch
+# When set, execsql does NOT register temp view/trigger DDL for replay. Used by
+# catchsql, which may run a CREATE that is *expected to fail* (e.g. trigger1's
+# `CREATE TEMP TRIGGER ... ON no_such_table`): registering a failed create would
+# make build_pragma_prefix replay it in a later batch's setup and abort the file.
+# catchsql re-registers only on success (errorcode 0). (#5940)
+set ::suppress_temp_registration 0
+
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
 set ::TEMP_STORE 0       ;# Temp storage in file
@@ -797,6 +822,199 @@ proc strip_temp_table_keyword {sql} {
     return $out
 }
 
+# Capture a CREATE TEMP VIEW / CREATE TEMP TRIGGER statement verbatim, starting
+# at index $start in $sql (the index of the "CREATE" keyword). Returns the
+# statement text WITHOUT its trailing ';'.
+#
+#   - view: everything up to the ';' at paren-depth 0.
+#   - trigger: everything up to (and including) the `END` that closes the
+#     trigger body. Trigger bodies are `... BEGIN <stmt>; <stmt>; ... END`, and
+#     the body statements themselves contain `;`, so we cannot stop at the first
+#     ';'. We track BEGIN/CASE ... END nesting: the trigger closes at the `END`
+#     that returns nesting depth to 0. String/quoted-identifier literals are
+#     skipped so a `;`, `BEGIN`, or `END` inside a literal is ignored.
+proc extract_temp_object_ddl {sql start is_trigger} {
+    set n [string length $sql]
+    set inq ""
+    set depth 0        ;# paren depth (for the view case)
+    set blockdepth 0   ;# BEGIN/CASE ... END nesting (for the trigger case)
+    set seen_begin 0
+    set i $start
+    while {$i < $n} {
+        set c [string index $sql $i]
+        if {$inq ne ""} {
+            if {$c eq $inq} { set inq "" }
+            incr i
+            continue
+        }
+        switch -- $c {
+            "'"  { set inq "'"; incr i; continue }
+            "\"" { set inq "\""; incr i; continue }
+            "`"  { set inq "`"; incr i; continue }
+            "("  { incr depth; incr i; continue }
+            ")"  { incr depth -1; incr i; continue }
+        }
+        if {!$is_trigger} {
+            if {$c eq ";" && $depth == 0} {
+                return [string range $sql $start [expr {$i - 1}]]
+            }
+            incr i
+            continue
+        }
+        # Trigger: match keywords on word boundaries.
+        if {[string is alpha $c] || $c eq "_"} {
+            # Read the identifier/keyword.
+            set j $i
+            while {$j < $n} {
+                set cj [string index $sql $j]
+                if {[string is alnum $cj] || $cj eq "_"} { incr j } else { break }
+            }
+            set word [string toupper [string range $sql $i [expr {$j - 1}]]]
+            if {$word eq "BEGIN" || $word eq "CASE"} {
+                incr blockdepth
+                set seen_begin 1
+            } elseif {$word eq "END"} {
+                incr blockdepth -1
+                if {$seen_begin && $blockdepth <= 0} {
+                    return [string range $sql $start [expr {$j - 1}]]
+                }
+            }
+            set i $j
+            continue
+        }
+        incr i
+    }
+    # Unterminated (shouldn't happen for valid SQL) — take the rest.
+    return [string range $sql $start end]
+}
+
+# Scan a SQL batch for `CREATE TEMP[ORARY] VIEW` / `CREATE TEMP[ORARY] TRIGGER`
+# and `DROP VIEW`/`DROP TRIGGER`, updating the per-file replay dicts (#5940).
+#
+# VibeSQL keeps temp views/triggers session-scoped, so each fresh per-batch CLI
+# process loses them; build_pragma_prefix replays the recorded DDL. A DROP in a
+# later batch removes the entry so it is not resurrected. This registration is
+# lossy in the same spirit as the temp-table demotion: it replays DDL, not prior
+# temp *data*, which is sufficient for the trigger1/triggerC/view cases.
+proc register_temp_views_triggers {sql} {
+    # Reset per-batch tracking so the prelude does not re-create what THIS batch
+    # already creates itself.
+    set ::temp_vt_created_this_batch [dict create]
+
+    # DROP handling always runs, even under $::suppress_temp_registration (i.e.
+    # inside catchsql): a catchsql block that later fails may still have run a
+    # successful DROP TABLE first (e.g. view.test's view-1.6:
+    # `DROP TABLE t1; SELECT * FROM v1`, expecting the SELECT to error). If we
+    # skipped that DROP, a temp view/trigger depending on the dropped object
+    # would keep being replayed and abort a later batch with "no such table".
+    # Over-purging is safe (worst case: lost cross-batch persistence for an
+    # object that was not really dropped); under-purging is fatal.
+    purge_temp_drops $sql
+
+    # CREATE registration is gated: catchsql suppresses it for creates that may
+    # be expected to fail, and re-invokes this proc itself only on success.
+    if {$::suppress_temp_registration} { return }
+
+    # CREATE TEMP VIEW <name>
+    set vpat {\yCREATE\s+TEMP(?:ORARY)?\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    foreach {m name} [regexp -all -inline -indices -nocase $vpat $sql] {
+        # $m is {start end} of the whole match; $name is {start end} of the name.
+        lassign $m ms me
+        set nm [string range $sql [lindex $name 0] [lindex $name 1]]
+        set key [string tolower [string trim $nm {[]"`}]]
+        set ddl [extract_temp_object_ddl $sql $ms 0]
+        dict set ::temp_view_replay_ddl $key $ddl
+        dict set ::temp_vt_created_this_batch $key 1
+        # Record the view's first FROM source so DROP TABLE/VIEW can purge a view
+        # whose base object is gone (else replaying its CREATE aborts the file
+        # with "no such table"). This is a best-effort single-table heuristic;
+        # multi-table/CTE views simply are not purged (their replay may still
+        # fail, but the common `CREATE TEMP VIEW v AS SELECT ... FROM t` case —
+        # e.g. view.test's v1temp on t1 — is covered).
+        if {[regexp -nocase {\yFROM\s+(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $ddl - src]} {
+            dict set ::temp_view_table $key [string tolower [string trim $src {[]"`}]]
+        }
+    }
+
+    # CREATE TEMP TRIGGER <name> [BEFORE|AFTER|INSTEAD OF] <event> ON <table>
+    # Capture the target table so DROP TABLE can purge dependent triggers (SQLite
+    # auto-drops a table's triggers, so a stale replay would abort on a missing
+    # table). The table may be schema-qualified (`main.t`, `temp.t`) — key on the
+    # bare name.
+    set tpat {\yCREATE\s+TEMP(?:ORARY)?\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    foreach {m name} [regexp -all -inline -indices -nocase $tpat $sql] {
+        lassign $m ms me
+        set nm [string range $sql [lindex $name 0] [lindex $name 1]]
+        set key [string tolower [string trim $nm {[]"`}]]
+        set ddl [extract_temp_object_ddl $sql $ms 1]
+        dict set ::temp_trigger_replay_ddl $key $ddl
+        dict set ::temp_vt_created_this_batch $key 1
+        # Extract the `ON <table>` target from the captured DDL.
+        if {[regexp -nocase {\yON\s+(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $ddl - tbl]} {
+            dict set ::temp_trigger_table $key [string tolower [string trim $tbl {[]"`}]]
+        }
+    }
+
+}
+
+# Purge replayed temp view/trigger state for objects the batch drops. Runs
+# unconditionally (see register_temp_views_triggers) so a successful DROP inside
+# an overall-failing catchsql block is still honored (#5940).
+proc purge_temp_drops {sql} {
+    # DROP VIEW <name> — forget a replayed temp view (name may be schema-qualified
+    # `temp.<name>`; we key on the bare name, matching how it was registered).
+    foreach {- name} [regexp -all -inline -nocase \
+            {\yDROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $sql] {
+        set key [string tolower [string trim $name {[]"`}]]
+        dict unset ::temp_view_replay_ddl $key
+        dict unset ::temp_view_table $key
+        forget_temp_dependents_on $key
+    }
+
+    # DROP TRIGGER <name> — forget a replayed temp trigger.
+    foreach {- name} [regexp -all -inline -nocase \
+            {\yDROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $sql] {
+        set key [string tolower [string trim $name {[]"`}]]
+        dict unset ::temp_trigger_replay_ddl $key
+        dict unset ::temp_trigger_table $key
+    }
+
+    # DROP TABLE <name> — SQLite auto-drops the table's triggers, so purge any
+    # replayed temp trigger that fires on it (and any temp view that reads from
+    # it); otherwise its stale replay would fail with "no such table" and abort
+    # the whole file.
+    foreach {- name} [regexp -all -inline -nocase \
+            {\yDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $sql] {
+        set key [string tolower [string trim $name {[]"`}]]
+        forget_temp_dependents_on $key
+    }
+}
+
+# Remove every replayed temp trigger/view that depends on the given (dropped)
+# table or view name. Mirrors SQLite auto-dropping a table's triggers, and keeps
+# a temp view whose base table is gone from being replayed into a fresh batch
+# where it would fail with "no such table" and abort the file (#5940). Cascades:
+# dropping a base table also invalidates a temp view on it, which in turn
+# invalidates any temp trigger/view built on that view.
+proc forget_temp_dependents_on {name_key} {
+    # Temp triggers firing on the dropped object.
+    foreach trig [dict keys $::temp_trigger_table] {
+        if {[dict get $::temp_trigger_table $trig] eq $name_key} {
+            dict unset ::temp_trigger_replay_ddl $trig
+            dict unset ::temp_trigger_table $trig
+        }
+    }
+    # Temp views reading from the dropped object — cascade so dependents of the
+    # invalidated view are purged too.
+    foreach view [dict keys $::temp_view_table] {
+        if {[dict get $::temp_view_table $view] eq $name_key} {
+            dict unset ::temp_view_replay_ddl $view
+            dict unset ::temp_view_table $view
+            forget_temp_dependents_on $view
+        }
+    }
+}
+
 #-----------------------------------------------------------------------------
 # Core SQL execution
 #-----------------------------------------------------------------------------
@@ -1158,6 +1376,22 @@ proc build_pragma_prefix {} {
     if {[dict size $::temp_replay_ddl] > 0} {
         dict for {name ddl} $::temp_replay_ddl {
             if {[dict exists $::temp_created_this_batch $name]} { continue }
+            append prefix "${ddl};\n"
+        }
+    }
+    # Replay real TEMP VIEWs then TEMP TRIGGERs (#5940) AFTER temp tables, so a
+    # temp trigger that fires on a temp table/view finds its dependency already
+    # reconstructed in this fresh CLI process. These objects are session-scoped
+    # in VibeSQL and vanish between batches, so the replayed DDL rebuilds them.
+    if {[dict size $::temp_view_replay_ddl] > 0} {
+        dict for {name ddl} $::temp_view_replay_ddl {
+            if {[dict exists $::temp_vt_created_this_batch $name]} { continue }
+            append prefix "${ddl};\n"
+        }
+    }
+    if {[dict size $::temp_trigger_replay_ddl] > 0} {
+        dict for {name ddl} $::temp_trigger_replay_ddl {
+            if {[dict exists $::temp_vt_created_this_batch $name]} { continue }
             append prefix "${ddl};\n"
         }
     }
@@ -1961,6 +2195,11 @@ proc execsql {sql {db ""}} {
     # shim's per-batch process model (see strip_temp_table_keyword, #5512).
     set sql [strip_temp_table_keyword $sql]
 
+    # Record CREATE/DROP TEMP VIEW and TEMP TRIGGER DDL so build_pragma_prefix can
+    # replay them in every per-batch CLI process (#5940). Temp views/triggers are
+    # session-scoped in VibeSQL and would otherwise vanish between batches.
+    register_temp_views_triggers $sql
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -2658,6 +2897,11 @@ proc execsql_with_headers {sql {db ""}} {
     # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
     set sql [strip_temp_table_keyword $sql]
 
+    # Record CREATE/DROP TEMP VIEW and TEMP TRIGGER DDL so build_pragma_prefix can
+    # replay them in every per-batch CLI process (#5940). Temp views/triggers are
+    # session-scoped in VibeSQL and would otherwise vanish between batches.
+    register_temp_views_triggers $sql
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -2701,6 +2945,11 @@ proc execsql2 {sql {db ""}} {
 
     # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
     set sql [strip_temp_table_keyword $sql]
+
+    # Record CREATE/DROP TEMP VIEW and TEMP TRIGGER DDL so build_pragma_prefix can
+    # replay them in every per-batch CLI process (#5940). Temp views/triggers are
+    # session-scoped in VibeSQL and would otherwise vanish between batches.
+    register_temp_views_triggers $sql
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -2762,11 +3011,24 @@ proc execsql2 {sql {db ""}} {
 proc catchsql {sql {db ""}} {
     # Execute SQL and catch errors, return {errorcode result}
     # Error messages are translated to SQLite-compatible format for test compatibility
-    if {[catch {execsql $sql $db} result]} {
+    #
+    # Suppress temp view/trigger replay registration during the wrapped execsql:
+    # a CREATE here may be *expected to fail* (e.g. `CREATE TEMP TRIGGER ... ON
+    # no_such_table`), and registering a failed create would make the per-batch
+    # replay prelude re-run it later and abort the file (#5940). We re-register
+    # from the same SQL only when the block succeeds.
+    set saved $::suppress_temp_registration
+    set ::suppress_temp_registration 1
+    set failed [catch {execsql $sql $db} result]
+    set ::suppress_temp_registration $saved
+    if {$failed} {
         # Error occurred - translate to SQLite format
         set sqlite_error [translate_error_to_sqlite $result]
         return [list 1 $sqlite_error]
     } else {
+        # Block succeeded: NOW it is safe to record any temp view/trigger DDL it
+        # created (and honor any DROPs) for cross-batch replay.
+        register_temp_views_triggers $sql
         return [list 0 $result]
     }
 }
@@ -6040,7 +6302,13 @@ proc db {cmd args} {
             return ""
         }
         close {
-            # No-op
+            # Closing the connection drops all TEMP objects in real SQLite. The
+            # shim keeps the persistent file-backed DB (so this is otherwise a
+            # no-op), but any replayed temp view/trigger DDL must be forgotten —
+            # otherwise it would be re-injected after a reopen and reference
+            # tables that no longer carry the temp objects (view.test view-26.x
+            # regressed on a stale v1temp replay). (#5940)
+            clear_temp_view_trigger_replay
         }
         nullvalue {
             # Sets the string used for NULL values
@@ -6268,6 +6536,22 @@ proc reset_db {} {
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
+    # Drop all temp view/trigger replay state — reset_db wipes the database, so
+    # replaying stale temp-object DDL into the fresh db would resurrect objects
+    # the test expects gone (e.g. trigger1-22.10's temp trigger bleeding into the
+    # reset_db'd trigger1-23.1). (#5940)
+    clear_temp_view_trigger_replay
+}
+
+# Forget all replayed temp view/trigger state (connection-lifetime reset). Called
+# on reset_db and on `db close` — both end the logical SQLite connection whose
+# temp objects would not survive. (#5940)
+proc clear_temp_view_trigger_replay {} {
+    set ::temp_view_replay_ddl [dict create]
+    set ::temp_trigger_replay_ddl [dict create]
+    set ::temp_trigger_table [dict create]
+    set ::temp_view_table [dict create]
+    set ::temp_vt_created_this_batch [dict create]
 }
 
 proc forcedelete {args} {

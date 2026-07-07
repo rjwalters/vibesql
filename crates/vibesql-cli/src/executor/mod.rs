@@ -25,6 +25,10 @@ pub struct SqlExecutor {
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
     /// writing a full snapshot. `None` preserves the default snapshot behavior.
     wal_state: Option<wal::WalState>,
+    /// Path of the file-backed database, if any. Used by `PRAGMA database_list`
+    /// to report the `main` schema's backing file (SQLite reports the absolute
+    /// path here, or an empty string for `:memory:` / no-path sessions).
+    db_path: Option<String>,
     /// Exclusive inter-process lock on the database (`<stem>.lock` sibling),
     /// held for every file-backed session — WAL-active AND snapshot-only —
     /// for the whole session (issue #5808). `None` for `:memory:` / no-path
@@ -321,10 +325,15 @@ impl SqlExecutor {
                     timing_enabled: false,
                     count_changes: false,
                     wal_state: Some(wal_state),
+                    db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
                 });
             }
         }
+
+        // Remember the file path (if any) for `PRAGMA database_list`. Captured
+        // before `database` is consumed by the load below.
+        let db_path = database.clone();
 
         // Load database from file if provided, otherwise create new in-memory database
         let mut db = if let Some(db_path) = database {
@@ -351,6 +360,7 @@ impl SqlExecutor {
             timing_enabled: false,
             count_changes: false,
             wal_state: None,
+            db_path,
             _db_lock: db_lock,
         })
     }
@@ -1191,6 +1201,9 @@ impl SqlExecutor {
             "TABLE_INFO" => {
                 return self.execute_pragma_table_info(stmt);
             }
+            "DATABASE_LIST" => {
+                return self.execute_pragma_database_list();
+            }
             "INTEGRITY_CHECK" | "QUICK_CHECK" => {
                 // SQLite compatibility: `PRAGMA integrity_check` and the
                 // table-scoped form `PRAGMA integrity_check('t1')` both report
@@ -1499,6 +1512,43 @@ impl SqlExecutor {
                 }
             }
         }
+    }
+
+    /// PRAGMA database_list
+    ///
+    /// Lists the databases attached to the current connection. VibeSQL has no
+    /// ATTACH, so at most two rows are reported, matching sqlite3:
+    ///   - seq 0, name `main`, file = the backing file path (absolute) or "" for
+    ///     an in-memory / no-path session.
+    ///   - seq 1, name `temp`, file = "" (always empty) — emitted only once a
+    ///     temp object has materialized this session's temp schema, mirroring
+    ///     sqlite3 3.51.0, which omits the `temp` row until a temp object exists.
+    fn execute_pragma_database_list(&self) -> anyhow::Result<QueryResult> {
+        let columns = vec!["seq".to_string(), "name".to_string(), "file".to_string()];
+
+        // sqlite3 reports the canonicalized absolute path for a file-backed
+        // `main`; fall back to the raw path if canonicalization fails (e.g. the
+        // file was created this session and not yet flushed), and to "" for
+        // in-memory sessions.
+        let main_file = match &self.db_path {
+            Some(path) => std::fs::canonicalize(path)
+                .ok()
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| path.clone()),
+            None => String::new(),
+        };
+
+        let mut rows = vec![vec![Some("0".to_string()), Some("main".to_string()), Some(main_file)]];
+
+        // The `temp` database appears only after this session has created a
+        // temp object (table, view, or trigger), matching sqlite3's behavior.
+        // Its file is always empty.
+        if self.db.catalog.has_temp_objects() {
+            rows.push(vec![Some("1".to_string()), Some("temp".to_string()), Some(String::new())]);
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
     }
 
     /// PRAGMA foreign_key_list(table_name)

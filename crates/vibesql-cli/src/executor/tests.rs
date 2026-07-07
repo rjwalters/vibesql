@@ -628,3 +628,63 @@ fn test_pragma_integrity_check_with_table_argument() {
     assert_eq!(result.row_count, 1);
     assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
 }
+
+#[test]
+fn test_pragma_database_list_memory_no_temp() {
+    // An in-memory session with no temp objects reports exactly one row:
+    // seq=0, name=main, file="" — matching sqlite3 3.51.0, which omits the
+    // `temp` row until a temp object exists.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.columns, vec!["seq", "name", "file"]);
+    assert_eq!(result.row_count, 1, "no temp object yet -> only main");
+    assert_eq!(result.rows[0][0].as_deref(), Some("0"));
+    assert_eq!(result.rows[0][1].as_deref(), Some("main"));
+    assert_eq!(result.rows[0][2].as_deref(), Some(""), "in-memory main has empty file");
+}
+
+#[test]
+fn test_pragma_database_list_temp_table_adds_temp_row() {
+    // Creating a temp table materializes the session temp schema; the `temp`
+    // database then appears as seq=1, name=temp, file="".
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TEMP TABLE t(x INT)").unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.row_count, 2, "temp table -> main + temp");
+    assert_eq!(result.rows[0][1].as_deref(), Some("main"));
+    assert_eq!(result.rows[1][0].as_deref(), Some("1"));
+    assert_eq!(result.rows[1][1].as_deref(), Some("temp"));
+    assert_eq!(result.rows[1][2].as_deref(), Some(""), "temp file is always empty");
+}
+
+#[test]
+fn test_pragma_database_list_temp_view_adds_temp_row() {
+    // A temp view (no temp table) also triggers the temp database row.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TEMP VIEW v AS SELECT 1").unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.row_count, 2, "temp view -> main + temp");
+    assert_eq!(result.rows[1][1].as_deref(), Some("temp"));
+}
+
+#[test]
+fn test_pragma_database_list_temp_trigger_adds_temp_row() {
+    // A temp trigger (fired on a persistent table) also triggers the temp row.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE base(a INT)").unwrap();
+    executor.execute("CREATE TEMP TRIGGER tr AFTER INSERT ON base BEGIN SELECT 1; END").unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.row_count, 2, "temp trigger -> main + temp");
+    assert_eq!(result.rows[1][1].as_deref(), Some("temp"));
+}
+
+#[test]
+fn test_pragma_database_list_persistent_objects_no_temp_row() {
+    // Persistent tables/views must NOT cause the temp database to appear.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a INT)").unwrap();
+    executor.execute("CREATE VIEW v AS SELECT 1").unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.row_count, 1, "persistent objects only -> just main");
+    assert_eq!(result.rows[0][1].as_deref(), Some("main"));
+}
