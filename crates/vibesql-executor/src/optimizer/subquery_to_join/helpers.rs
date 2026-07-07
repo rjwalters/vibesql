@@ -5,6 +5,80 @@
 //! - Qualifying and rewriting column references
 
 use vibesql_ast::{Expression, FromClause};
+use vibesql_storage::Database;
+
+/// Collect the `(effective_name, real_table_name)` pairs for every base table
+/// directly reachable in a FROM clause, for outer-scope column resolution.
+///
+/// `effective_name` is the alias if present, otherwise the table name — it is the
+/// qualifier a column reference would use. `real_table_name` is the catalog table
+/// name used to look the schema up. Subquery/VALUES derived tables are skipped:
+/// their columns are not resolvable against the catalog here, so an unqualified
+/// column that could come from one of them is treated as unresolvable (we do not
+/// qualify it, and the downstream ambiguity guard handles it).
+fn collect_base_table_refs(from: &FromClause, out: &mut Vec<(String, String)>) {
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            let effective = alias.clone().unwrap_or_else(|| name.clone());
+            out.push((effective, name.clone()));
+        }
+        FromClause::Join { left, right, .. } => {
+            collect_base_table_refs(left, out);
+            collect_base_table_refs(right, out);
+        }
+        // Derived tables (subquery/VALUES) have no catalog schema to consult here.
+        FromClause::Subquery { .. } | FromClause::Values { .. } => {}
+    }
+}
+
+/// Resolve which outer-FROM table an unqualified column belongs to, matching
+/// SQLite's scoping: ambiguity is measured ONLY against the outer FROM tables.
+///
+/// Returns:
+/// - `Some(effective_name)` when exactly one outer base table has the column —
+///   the qualifier to attach so the reference is unambiguous.
+/// - `None` when zero or two-or-more outer base tables have the column, or when a
+///   derived table is present in the outer FROM (unresolvable here). In the
+///   two-or-more case the reference is genuinely ambiguous in the outer scope and
+///   must stay unqualified so the downstream guard errors, exactly as SQLite does.
+pub(super) fn resolve_outer_column_qualifier(
+    from: &FromClause,
+    database: &Database,
+    column: &str,
+) -> Option<String> {
+    let mut refs = Vec::new();
+    collect_base_table_refs(from, &mut refs);
+
+    // If any derived table is in scope we cannot be sure the column does not also
+    // live there, so we conservatively decline to qualify.
+    let has_derived = from_has_derived_table(from);
+    if has_derived {
+        return None;
+    }
+
+    let mut matches = refs.iter().filter(|(_, table_name)| {
+        database.get_table(table_name).map(|t| t.schema.has_column(column)).unwrap_or(false)
+    });
+
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        // Two or more outer tables carry the column: genuinely ambiguous.
+        None
+    } else {
+        Some(first.0.clone())
+    }
+}
+
+/// Whether the FROM clause contains any subquery/VALUES derived table.
+fn from_has_derived_table(from: &FromClause) -> bool {
+    match from {
+        FromClause::Table { .. } => false,
+        FromClause::Join { left, right, .. } => {
+            from_has_derived_table(left) || from_has_derived_table(right)
+        }
+        FromClause::Subquery { .. } | FromClause::Values { .. } => true,
+    }
+}
 
 /// Extract all table names from a FROM clause (for self-join detection)
 pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {

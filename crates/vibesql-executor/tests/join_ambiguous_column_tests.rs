@@ -52,10 +52,9 @@ fn assert_ambiguous(db: &Database, sql: &str, expected_col: &str) {
             assert_eq!(msg, format!("ambiguous column name: {expected_col}"));
         }
         Err(other) => panic!("expected AmbiguousColumnName for `{sql}`, got: {other:?}"),
-        Ok(rows) => panic!(
-            "expected AmbiguousColumnName for `{sql}`, got {} row(s) instead",
-            rows.len()
-        ),
+        Ok(rows) => {
+            panic!("expected AmbiguousColumnName for `{sql}`, got {} row(s) instead", rows.len())
+        }
     }
 }
 
@@ -284,7 +283,11 @@ fn test_self_join_unqualified_key_ambiguous() {
     .unwrap();
     db.insert_row(
         "T",
-        Row::new(vec![SqlValue::Integer(2), SqlValue::Integer(1), SqlValue::Varchar("child".into())]),
+        Row::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Integer(1),
+            SqlValue::Varchar("child".into()),
+        ]),
     )
     .unwrap();
 
@@ -307,7 +310,11 @@ fn test_duplicate_non_pk_column_unqualified_ambiguous() {
             cols.iter()
                 .map(|c| {
                     if *c == "v" {
-                        ColumnSchema::new(c.to_string(), DataType::Varchar { max_length: None }, true)
+                        ColumnSchema::new(
+                            c.to_string(),
+                            DataType::Varchar { max_length: None },
+                            true,
+                        )
                     } else {
                         ColumnSchema::new(c.to_string(), DataType::Integer, true)
                     }
@@ -403,7 +410,10 @@ fn first_col_ints(db: &Database, sql: &str) -> Vec<i64> {
 fn test_in_subquery_semi_join_outer_ref_not_ambiguous() {
     let db = setup_semi_join_db();
     assert_eq!(
-        first_col_ints(&db, "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)"),
+        first_col_ints(
+            &db,
+            "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)"
+        ),
         vec![1, 2],
         "outer `id` is unambiguous (orders only visible inside the subquery)"
     );
@@ -441,8 +451,10 @@ fn test_not_in_subquery_anti_join_outer_ref_not_ambiguous() {
 fn test_in_and_not_in_subquery_outer_ref_row_path() {
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let db = setup_semi_join_db();
-    let in_ids =
-        first_col_ints(&db, "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)");
+    let in_ids = first_col_ints(
+        &db,
+        "SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)",
+    );
     let not_in_ids = first_col_ints(
         &db,
         "SELECT id FROM customers WHERE id NOT IN (SELECT customer_id FROM orders)",
@@ -459,5 +471,172 @@ fn test_in_and_not_in_subquery_outer_ref_row_path() {
 #[test]
 fn test_explicit_join_still_ambiguous_after_semi_join_fix() {
     let db = setup_semi_join_db();
-    assert_ambiguous(&db, "SELECT customers.id FROM customers JOIN orders ON id = customer_id", "id");
+    assert_ambiguous(
+        &db,
+        "SELECT customers.id FROM customers JOIN orders ON id = customer_id",
+        "id",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #5926 regression (second cycle): MULTI-TABLE outer FROM.
+//
+// The first fix only qualified the outer expression when the outer FROM was a
+// single table. For a multi-table outer FROM the outer column stayed unqualified,
+// so the subquery table pulled into the flattened SEMI/ANTI join still tripped the
+// #5870 guard. SQLite scopes ambiguity to the OUTER FROM ONLY, never the subquery
+// tables, so:
+//   - a column unique among the outer tables (but shared with a subquery table)
+//     must resolve and return rows;
+//   - a column genuinely ambiguous AMONG the outer tables must still error.
+//
+// The fix resolves which outer table owns the unqualified column (via the catalog)
+// and qualifies against exactly that table, regardless of outer table count.
+// ---------------------------------------------------------------------------
+
+/// Judge's reproducer: `a` exists on `t1` and `t3` only. In the outer FROM
+/// `t1, t2` only `t1` has `a`, so it is UNAMBIGUOUS; `t3` lives inside the
+/// subquery. sqlite3 3.51.0 returns `10,10,20,20`.
+fn setup_multi_table_outer_db() -> Database {
+    let mut db = Database::new();
+
+    let t1 = TableSchema::new(
+        "t1".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("v".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t1).unwrap();
+
+    let t2 = TableSchema::new(
+        "t2".to_string(),
+        vec![
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+            ColumnSchema::new("w".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t2).unwrap();
+
+    let t3 = TableSchema::new(
+        "t3".to_string(),
+        vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+    );
+    db.create_table(t3).unwrap();
+
+    for (a, v) in [(1, 10), (2, 20), (3, 30)] {
+        db.insert_row("t1", Row::new(vec![SqlValue::Integer(a), SqlValue::Integer(v)])).unwrap();
+    }
+    for (b, w) in [(1, 100), (2, 200)] {
+        db.insert_row("t2", Row::new(vec![SqlValue::Integer(b), SqlValue::Integer(w)])).unwrap();
+    }
+    for a in [1, 2] {
+        db.insert_row("t3", Row::new(vec![SqlValue::Integer(a)])).unwrap();
+    }
+
+    db
+}
+
+/// Same as `setup_multi_table_outer_db` but `a` exists on BOTH `t1` and `t2`, so
+/// `a` is GENUINELY ambiguous in the outer FROM `t1, t2` and must error.
+fn setup_multi_table_outer_ambiguous_db() -> Database {
+    let mut db = Database::new();
+
+    let t1 = TableSchema::new(
+        "t1".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("v".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t1).unwrap();
+
+    let t2 = TableSchema::new(
+        "t2".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("w".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(t2).unwrap();
+
+    let t3 = TableSchema::new(
+        "t3".to_string(),
+        vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+    );
+    db.create_table(t3).unwrap();
+
+    for (a, v) in [(1, 10), (2, 20), (3, 30)] {
+        db.insert_row("t1", Row::new(vec![SqlValue::Integer(a), SqlValue::Integer(v)])).unwrap();
+    }
+    for (a, w) in [(1, 100), (2, 200)] {
+        db.insert_row("t2", Row::new(vec![SqlValue::Integer(a), SqlValue::Integer(w)])).unwrap();
+    }
+    for a in [1, 2] {
+        db.insert_row("t3", Row::new(vec![SqlValue::Integer(a)])).unwrap();
+    }
+
+    db
+}
+
+/// Multi-table outer FROM, column unique among the outer tables: must return
+/// rows and match sqlite3 `{10,10,20,20}`, NOT raise an ambiguity error.
+#[test]
+fn test_multi_table_outer_in_subquery_unique_column_not_ambiguous() {
+    let db = setup_multi_table_outer_db();
+    assert_eq!(
+        first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)"),
+        vec![10, 10, 20, 20],
+        "outer `a` is unique among {{t1, t2}} (t3 is inside the subquery)"
+    );
+}
+
+/// NOT IN shares the ANTI-join path; still unambiguous. `a IN t3` matches t1
+/// rows 1 and 2 (each × 2 t2 rows). NOT IN keeps t1 row 3 (× 2). sqlite3: `30,30`.
+#[test]
+fn test_multi_table_outer_not_in_subquery_unique_column_not_ambiguous() {
+    let db = setup_multi_table_outer_db();
+    assert_eq!(
+        first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a NOT IN (SELECT a FROM t3)"),
+        vec![30, 30],
+        "outer `a` unique among outer tables; NOT IN keeps t1.a=3"
+    );
+}
+
+/// Same multi-table shape on the row-oriented path (columnar join disabled).
+#[test]
+fn test_multi_table_outer_in_subquery_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db = setup_multi_table_outer_db();
+    let in_vs = first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)");
+    let not_in_vs =
+        first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a NOT IN (SELECT a FROM t3)");
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+
+    assert_eq!(in_vs, vec![10, 10, 20, 20], "row path: multi-table outer `a` unambiguous (IN)");
+    assert_eq!(not_in_vs, vec![30, 30], "row path: multi-table outer `a` unambiguous (NOT IN)");
+}
+
+/// Genuine ambiguity AMONG the outer tables must still error: `a` on both `t1`
+/// and `t2`. sqlite3 3.51.0: `Error: ambiguous column name: a`.
+#[test]
+fn test_multi_table_outer_genuinely_ambiguous_column_errors() {
+    let db = setup_multi_table_outer_ambiguous_db();
+    assert_ambiguous(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)", "a");
+}
+
+/// The genuine-ambiguity error must also fire on the row-oriented path.
+#[test]
+fn test_multi_table_outer_genuinely_ambiguous_column_errors_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db = setup_multi_table_outer_ambiguous_db();
+    let select = parse_select("SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)");
+    let result = SelectExecutor::new(&db).execute(&select);
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+    match result {
+        Err(ExecutorError::AmbiguousColumnName { column_name }) => {
+            assert_eq!(column_name.to_lowercase(), "a");
+        }
+        other => panic!("expected AmbiguousColumnName on row path, got: {other:?}"),
+    }
 }
