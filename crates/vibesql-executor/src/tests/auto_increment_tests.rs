@@ -766,3 +766,97 @@ fn test_last_insert_rowid_without_rowid_unchanged() {
     exec_sql(&mut db, "INSERT INTO wr VALUES('y'),('x')");
     assert_eq!(db.last_insert_rowid(), 1);
 }
+
+/// A multi-row `INSERT ... VALUES` into a non-IPK rowid table that supplies
+/// EXPLICIT, out-of-order rowid pseudo-column values must report the LAST row's
+/// rowid, not the batch max. This exercises the fast batch path; the prior
+/// max-rowid readback (issue #5944) returned the batch max (10) here, which
+/// diverges from SQLite. Verified against sqlite3 3.51.0: returns 5 (issue
+/// #5955).
+#[test]
+fn test_last_insert_rowid_explicit_out_of_order_non_ipk() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    // rowids 10 then 5 — the LAST inserted row's rowid is 5, below the max (10).
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(10, 'a'), (5, 'b')");
+
+    // sqlite3: last_insert_rowid() == 5 (rowid of the last row inserted)
+    assert_eq!(db.last_insert_rowid(), 5);
+}
+
+/// Three explicit out-of-order rowids (3, 1, 2) into a non-IPK rowid table:
+/// last_insert_rowid() must be the last row's rowid (2), neither the max (3)
+/// nor the min. Verified against sqlite3 3.51.0: returns 2 (issue #5955).
+#[test]
+fn test_last_insert_rowid_explicit_out_of_order_three_rows() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(3, 'a'), (1, 'b'), (2, 'c')");
+
+    // sqlite3: last_insert_rowid() == 2 (rowid of the last row inserted)
+    assert_eq!(db.last_insert_rowid(), 2);
+}
+
+/// A negative explicit rowid on the LAST row of a non-IPK batch must be
+/// reported verbatim, even though it is below every other rowid in the batch
+/// (rowids are signed). Verified against sqlite3 3.51.0: returns -3 (issue
+/// #5955).
+#[test]
+fn test_last_insert_rowid_explicit_negative_last_row_non_ipk() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(10, 'a'), (-3, 'b')");
+
+    // sqlite3: last_insert_rowid() == -3 (rowid of the last row inserted)
+    assert_eq!(db.last_insert_rowid(), -3);
+}
+
+/// Mixed batch into a non-IPK rowid table where the LAST row's rowid is NULL
+/// (auto-assigned). The auto-assigned rowid is max+1, so last_insert_rowid()
+/// must report the allocated value (11), matching the exact rowid the last row
+/// received. Verified against sqlite3 3.51.0: returns 11 (issue #5955).
+#[test]
+fn test_last_insert_rowid_explicit_then_null_non_ipk() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    // rowid 10 then NULL -> the NULL row auto-assigns max+1 = 11.
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(10, 'a'), (NULL, 'b')");
+
+    // sqlite3: last_insert_rowid() == 11 (the auto-allocated rowid of the last row)
+    assert_eq!(db.last_insert_rowid(), 11);
+}
+
+/// Mixed batch into a non-IPK rowid table where the FIRST row's rowid is NULL
+/// (auto-assigned to 1) and the LAST row supplies an explicit, lower rowid (5,
+/// still above 1). last_insert_rowid() must report the last row's explicit
+/// value (5). Verified against sqlite3 3.51.0: returns 5 (issue #5955).
+#[test]
+fn test_last_insert_rowid_null_then_explicit_non_ipk() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    // NULL (auto -> 1) then explicit 5 -> the last row's rowid is 5.
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(NULL, 'a'), (5, 'b')");
+
+    // sqlite3: last_insert_rowid() == 5 (rowid of the last row inserted)
+    assert_eq!(db.last_insert_rowid(), 5);
+}
+
+/// In-order explicit ascending rowids into a non-IPK rowid table: the last
+/// row's rowid IS the batch max, so the value is unchanged from the pre-#5955
+/// behavior — a guard that the fix does not regress the monotonic case.
+/// Verified against sqlite3 3.51.0: returns 10 (issue #5955).
+#[test]
+fn test_last_insert_rowid_explicit_in_order_non_ipk() {
+    let mut db = Database::new();
+
+    exec_sql(&mut db, "CREATE TABLE t(x TEXT)");
+    exec_sql(&mut db, "INSERT INTO t(rowid, x) VALUES(5, 'a'), (10, 'b')");
+
+    // sqlite3: last_insert_rowid() == 10 (rowid of the last row inserted == max)
+    assert_eq!(db.last_insert_rowid(), 10);
+}
