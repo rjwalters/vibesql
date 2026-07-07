@@ -82,9 +82,12 @@ fn test_column_names_star_expansion() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // SQLite quirk: SELECT * always uses short column names, even with full_column_names=ON
-        // This matches SQLite behavior where wildcards ignore the PRAGMA setting
-        assert_eq!(result.columns, vec!["id", "name", "department", "salary"]);
+        // With full_column_names=ON, SELECT * prefixes every column with its source
+        // table name, even for a single-table query (colname.test section 4.1).
+        assert_eq!(
+            result.columns,
+            vec!["employees.id", "employees.name", "employees.department", "employees.salary"]
+        );
         assert_eq!(result.rows.len(), 3);
     } else {
         panic!("Expected SELECT statement");
@@ -277,8 +280,8 @@ fn test_pragma_wildcard_full_column_names() {
     let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM employees").unwrap();
     if let vibesql_ast::Statement::Select(select_stmt) = stmt {
         let result = executor.execute_with_columns(&select_stmt).unwrap();
-        // SQLite quirk: SELECT * ignores full_column_names PRAGMA (always uses short names)
-        assert_eq!(result.columns, vec!["id", "name"]);
+        // full_column_names=ON: SELECT * uses table.column form (colname.test section 4.1)
+        assert_eq!(result.columns, vec!["employees.id", "employees.name"]);
     } else {
         panic!("Expected SELECT statement");
     }
@@ -341,6 +344,97 @@ fn test_pragma_set_and_get() {
     // Set short_column_names ON
     db.set_short_column_names(true);
     assert!(db.short_column_names());
+}
+
+// ---------------------------------------------------------------------------
+// full_column_names=ON table-prefix behavior for wildcards (issue #5842 item 3c,
+// colname.test section 4). SQLite prefixes every wildcard-expanded column with
+// its source table name when short_column_names=OFF and full_column_names=ON.
+// ---------------------------------------------------------------------------
+
+fn create_two_table_database_full_names() -> vibesql_storage::Database {
+    let mut db = vibesql_storage::Database::new();
+    db.set_short_column_names(false);
+    db.set_full_column_names(true);
+
+    for ddl in ["CREATE TABLE tabc(a, b, c)", "CREATE TABLE txyz(x, y, z)"] {
+        let stmt = vibesql_parser::Parser::parse_sql(ddl).unwrap();
+        if let vibesql_ast::Statement::CreateTable(create_table) = stmt {
+            vibesql_executor::CreateTableExecutor::execute(&create_table, &mut db).unwrap();
+        }
+    }
+    for dml in ["INSERT INTO tabc VALUES(1, 2, 3)", "INSERT INTO txyz VALUES(4, 5, 6)"] {
+        let stmt = vibesql_parser::Parser::parse_sql(dml).unwrap();
+        if let vibesql_ast::Statement::Insert(insert) = stmt {
+            vibesql_executor::InsertExecutor::execute(&mut db, &insert).unwrap();
+        }
+    }
+    db
+}
+
+#[test]
+fn test_full_column_names_single_table_star() {
+    // colname-4.1: SELECT * FROM tabc -> tabc.a, tabc.b, tabc.c
+    let db = create_two_table_database_full_names();
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM tabc").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute_with_columns(&select_stmt).unwrap();
+        assert_eq!(result.columns, vec!["tabc.a", "tabc.b", "tabc.c"]);
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_full_column_names_qualified_wildcards() {
+    // colname-4.6: SELECT tabc.*, txyz.* -> tabc.a..tabc.c, txyz.x..txyz.z
+    let db = create_two_table_database_full_names();
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT tabc.*, txyz.* FROM tabc, txyz").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute_with_columns(&select_stmt).unwrap();
+        assert_eq!(
+            result.columns,
+            vec!["tabc.a", "tabc.b", "tabc.c", "txyz.x", "txyz.y", "txyz.z"]
+        );
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_full_column_names_multi_table_star() {
+    // colname-4.5 tail: SELECT * FROM tabc, txyz -> all columns table-qualified
+    let db = create_two_table_database_full_names();
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT * FROM tabc, txyz").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute_with_columns(&select_stmt).unwrap();
+        assert_eq!(
+            result.columns,
+            vec!["tabc.a", "tabc.b", "tabc.c", "txyz.x", "txyz.y", "txyz.z"]
+        );
+    } else {
+        panic!("Expected SELECT statement");
+    }
+}
+
+#[test]
+fn test_short_column_names_star_no_prefix() {
+    // Regression guard: with short_column_names=ON (default), SELECT * stays unprefixed
+    // even across multiple tables.
+    let mut db = create_two_table_database_full_names();
+    db.set_full_column_names(false);
+    db.set_short_column_names(true);
+    let executor = SelectExecutor::new(&db);
+    let stmt = vibesql_parser::Parser::parse_sql("SELECT tabc.*, txyz.* FROM tabc, txyz").unwrap();
+    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
+        let result = executor.execute_with_columns(&select_stmt).unwrap();
+        assert_eq!(result.columns, vec!["a", "b", "c", "x", "y", "z"]);
+    } else {
+        panic!("Expected SELECT statement");
+    }
 }
 
 // ---------------------------------------------------------------------------
