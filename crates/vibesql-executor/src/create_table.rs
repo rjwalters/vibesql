@@ -3,7 +3,7 @@
 use vibesql_ast::{CreateTableStmt, IndexColumn, OrderDirection};
 use vibesql_catalog::{ColumnSchema, TableIdentifier, TableSchema};
 use vibesql_storage::Database;
-use vibesql_types::DataType;
+use vibesql_types::{DataType, TypeAffinity};
 
 use crate::{
     constraint_validator::ConstraintValidator, errors::ExecutorError,
@@ -359,8 +359,7 @@ impl CreateTableExecutor {
         // — before the table is inserted into the catalog — so an invalid STRICT
         // CREATE never leaves a half-formed table behind.
         if stmt.strict {
-            let strict_types =
-                crate::strict::classify_strict_columns(&table_name, &stmt.columns)?;
+            let strict_types = crate::strict::classify_strict_columns(&table_name, &stmt.columns)?;
             table_schema.strict = true;
             table_schema.strict_types = strict_types;
         }
@@ -815,15 +814,19 @@ impl CreateTableExecutor {
         // Execute the SELECT query to get results
         let rows = SelectExecutor::new(database).execute(query)?;
 
-        // Derive column names from the SELECT list (expanding wildcards if needed)
-        let column_names =
-            Self::derive_column_names_from_select_list(&query.select_list, &query.from, database)?;
+        // Derive column names + SQLite type affinities from the SELECT list
+        // (expanding wildcards if needed). The affinity is taken from the source
+        // column for a direct column reference and is BLOB/None for any other
+        // expression (function, arithmetic, literal, ...). This mirrors how
+        // SQLite stamps the generated `sqlite_master.sql` for CREATE TABLE AS
+        // SELECT.
+        let column_info = Self::derive_ctas_columns(&query.select_list, &query.from, database)?;
 
         // Derive column schema from the first row (if any) or default to BLOB
-        let columns: Vec<ColumnSchema> = column_names
+        let columns: Vec<ColumnSchema> = column_info
             .iter()
             .enumerate()
-            .map(|(idx, col_name)| {
+            .map(|(idx, (col_name, _affinity))| {
                 // Try to infer data type from the first row if available
                 let data_type = if !rows.is_empty() && idx < rows[0].values.len() {
                     Self::infer_data_type(&rows[0].values[idx])
@@ -844,8 +847,13 @@ impl CreateTableExecutor {
             })
             .collect();
 
-        // Create the table schema
-        let table_schema = TableSchema::new(table_name.to_string(), columns);
+        // Create the table schema, stamping the SQLite-faithful
+        // `sqlite_master.sql` text. Without this the schema falls back to the
+        // auto-generated form which emits unquoted, un-reparseable identifiers
+        // (e.g. keyword or apostrophe-bearing column names) and inferred, rather
+        // than affinity-derived, type codes.
+        let mut table_schema = TableSchema::new(table_name.to_string(), columns);
+        table_schema.set_sql_source(Self::generate_ctas_sql_source(table_name, &column_info));
 
         // Create the table
         database
@@ -866,13 +874,19 @@ impl CreateTableExecutor {
         ))
     }
 
-    /// Derive column names from a SELECT list, expanding wildcards using the database schema
-    fn derive_column_names_from_select_list(
+    /// Derive `(column name, SQLite type affinity)` pairs from a CTAS SELECT
+    /// list, expanding wildcards using the database schema.
+    ///
+    /// The affinity drives the type code emitted into `sqlite_master.sql`:
+    /// a direct column reference (including a wildcard-expanded one) carries the
+    /// source column's affinity; every other expression carries BLOB/None
+    /// affinity (SQLite emits no type at all for non-column expressions).
+    fn derive_ctas_columns(
         select_list: &[vibesql_ast::SelectItem],
         from: &Option<vibesql_ast::FromClause>,
         database: &Database,
-    ) -> Result<Vec<String>, ExecutorError> {
-        let mut names = Vec::new();
+    ) -> Result<Vec<(String, TypeAffinity)>, ExecutorError> {
+        let mut columns = Vec::new();
         let mut counter = 0;
 
         for item in select_list {
@@ -883,7 +897,7 @@ impl CreateTableExecutor {
                     for table_name in table_names {
                         if let Some(schema) = database.catalog.get_table(&table_name) {
                             for col in &schema.columns {
-                                names.push(col.name.clone());
+                                columns.push((col.name.clone(), col.data_type.sqlite_affinity()));
                             }
                         } else {
                             return Err(ExecutorError::TableNotFound(table_name));
@@ -894,7 +908,7 @@ impl CreateTableExecutor {
                     // Expand table.* using the specific table's schema
                     if let Some(schema) = database.catalog.get_table(qualifier) {
                         for col in &schema.columns {
-                            names.push(col.name.clone());
+                            columns.push((col.name.clone(), col.data_type.sqlite_affinity()));
                         }
                     } else {
                         return Err(ExecutorError::TableNotFound(qualifier.clone()));
@@ -910,12 +924,122 @@ impl CreateTableExecutor {
                         // (e.g. `max(b+c)`, `b+c`) rather than `column1`.
                         Self::derive_column_name_from_expr(expr, source_text, &mut counter)
                     };
-                    names.push(name);
+                    let affinity = Self::resolve_ctas_affinity(expr, from, database);
+                    columns.push((name, affinity));
                 }
             }
         }
 
-        Ok(names)
+        Ok(columns)
+    }
+
+    /// Determine the SQLite type affinity a CTAS result column inherits.
+    ///
+    /// Only a bare column reference (optionally aliased) inherits its source
+    /// column's affinity; SQLite assigns no declared type — hence BLOB/None
+    /// affinity — to any other expression. When the reference cannot be resolved
+    /// (unknown table/alias, computed source) we also fall back to None.
+    fn resolve_ctas_affinity(
+        expr: &vibesql_ast::Expression,
+        from: &Option<vibesql_ast::FromClause>,
+        database: &Database,
+    ) -> TypeAffinity {
+        let vibesql_ast::Expression::ColumnRef(col_id) = expr else {
+            return TypeAffinity::None;
+        };
+        let column = col_id.column_canonical();
+
+        let table_names = Self::get_table_names_from_from(from).unwrap_or_default();
+        // Prefer the qualifier's table when present, but fall back to a scan of
+        // every FROM table (handles table aliases, which the qualifier names but
+        // the catalog does not).
+        for table_name in &table_names {
+            if let Some(schema) = database.catalog.get_table(table_name) {
+                if let Some(col) = schema.columns.iter().find(|c| c.name == column) {
+                    return col.data_type.sqlite_affinity();
+                }
+            }
+        }
+        TypeAffinity::None
+    }
+
+    /// Build the `sqlite_master.sql` text for a CREATE TABLE ... AS SELECT,
+    /// replicating SQLite's `createTableStmt`: identifiers are double-quoted
+    /// only when required, each column carries an affinity-derived type code
+    /// (`""`/`TEXT`/`NUM`/`INT`/`REAL`), and the layout is compact or pretty
+    /// depending on a length heuristic.
+    fn generate_ctas_sql_source(table_name: &str, columns: &[(String, TypeAffinity)]) -> String {
+        // Length heuristic (SQLite: n<50 → single line, else one column per
+        // line). `ctas_ident_length` matches SQLite's `identLength`, which
+        // always budgets for surrounding quotes plus any doubled `"`.
+        let mut n = 0usize;
+        for (name, _) in columns {
+            n += Self::ctas_ident_length(name) + 5;
+        }
+        n += Self::ctas_ident_length(table_name);
+        let (sep_first, sep_rest, end) =
+            if n < 50 { ("", ",", ")") } else { ("\n  ", ",\n  ", "\n)") };
+
+        let mut sql = String::from("CREATE TABLE ");
+        Self::ctas_ident_put(&mut sql, table_name);
+        sql.push('(');
+        for (i, (name, affinity)) in columns.iter().enumerate() {
+            sql.push_str(if i == 0 { sep_first } else { sep_rest });
+            Self::ctas_ident_put(&mut sql, name);
+            sql.push_str(Self::ctas_affinity_type(*affinity));
+        }
+        sql.push_str(end);
+        sql
+    }
+
+    /// SQLite `azType[]`: the type token (with its leading space) emitted for a
+    /// CTAS column of the given affinity. BLOB/None emits no type.
+    fn ctas_affinity_type(affinity: TypeAffinity) -> &'static str {
+        match affinity {
+            TypeAffinity::None => "",
+            TypeAffinity::Text => " TEXT",
+            TypeAffinity::Numeric => " NUM",
+            TypeAffinity::Integer => " INT",
+            TypeAffinity::Real => " REAL",
+        }
+    }
+
+    /// SQLite `identLength`: char count + one per embedded `"` (doubled on
+    /// output) + 2 for the surrounding quotes (always budgeted).
+    fn ctas_ident_length(name: &str) -> usize {
+        name.chars().count() + name.chars().filter(|c| *c == '"').count() + 2
+    }
+
+    /// SQLite `identPut`: append `name`, double-quoting it only when required —
+    /// empty, starts with a digit, contains a non alphanumeric/underscore
+    /// character, or is a reserved keyword.
+    fn ctas_ident_put(out: &mut String, name: &str) {
+        if Self::ctas_needs_quote(name) {
+            out.push('"');
+            for c in name.chars() {
+                out.push(c);
+                if c == '"' {
+                    out.push('"');
+                }
+            }
+            out.push('"');
+        } else {
+            out.push_str(name);
+        }
+    }
+
+    /// Whether `name` must be double-quoted to survive a re-parse as an
+    /// identifier (see `ctas_ident_put`).
+    fn ctas_needs_quote(name: &str) -> bool {
+        match name.chars().next() {
+            None => return true,
+            Some(c) if c.is_ascii_digit() => return true,
+            Some(_) => {}
+        }
+        if name.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '_')) {
+            return true;
+        }
+        vibesql_parser::is_keyword(name)
     }
 
     /// Extract table names from a FROM clause
@@ -1023,5 +1147,88 @@ impl CreateTableExecutor {
             SqlValue::Vector(v) => DataType::Vector { dimensions: v.len() as u32 },
             SqlValue::Blob(_) => DataType::BinaryLargeObject,
         }
+    }
+}
+
+#[cfg(test)]
+mod ctas_sql_source_tests {
+    use super::CreateTableExecutor as E;
+    use vibesql_types::TypeAffinity::{Integer, None as Blob, Numeric, Real, Text};
+
+    fn col(name: &str, aff: vibesql_types::TypeAffinity) -> (String, vibesql_types::TypeAffinity) {
+        (name.to_string(), aff)
+    }
+
+    #[test]
+    fn compact_layout_matches_sqlite() {
+        // Short schema (n < 50) → single line, no spaces after commas, affinity
+        // type codes, BLOB affinity emits no type. Verified against sqlite3.
+        let cols = vec![
+            col("a", Integer),
+            col("b", Text),
+            col("c", Real),
+            col("d", Blob),
+            col("e", Numeric),
+        ];
+        assert_eq!(
+            E::generate_ctas_sql_source("t2s", &cols),
+            "CREATE TABLE t2s(a INT,b TEXT,c REAL,d,e NUM)"
+        );
+    }
+
+    #[test]
+    fn pretty_layout_quotes_keywords_and_digits() {
+        // Long schema (n >= 50) → one column per line, keyword/digit-leading
+        // identifiers double-quoted. Matches sqlite3 table-8.1.1.
+        let cols = vec![
+            col("desc", Text),
+            col("asc", Text),
+            col("key", Integer),
+            col("14_vac", Numeric),
+            col("fuzzy_dog_12", Text),
+            col("begin", Blob),
+            col("end", Text),
+        ];
+        let expected = "CREATE TABLE t2(\n  \"desc\" TEXT,\n  \"asc\" TEXT,\n  \"key\" INT,\n  \"14_vac\" NUM,\n  fuzzy_dog_12 TEXT,\n  \"begin\",\n  \"end\" TEXT\n)";
+        assert_eq!(E::generate_ctas_sql_source("t2", &cols), expected);
+    }
+
+    #[test]
+    fn quotes_table_name_and_expression_columns() {
+        // Embedded double-quote in the table name is doubled; an expression
+        // column name with special chars is quoted and carries no type.
+        // Matches sqlite3 table-8.3.1.
+        let cols = vec![col("cnt", Blob), col("max(b+c)", Blob)];
+        assert_eq!(
+            E::generate_ctas_sql_source("t4\"abc", &cols),
+            "CREATE TABLE \"t4\"\"abc\"(cnt,\"max(b+c)\")"
+        );
+    }
+
+    #[test]
+    fn apostrophe_alias_is_quoted_not_dropped() {
+        // Apostrophe-bearing alias must round-trip as a double-quoted
+        // identifier (data-loss-adjacent regression guard).
+        let cols = vec![col("it's", Integer)];
+        assert_eq!(E::generate_ctas_sql_source("t5", &cols), "CREATE TABLE t5(\"it's\" INT)");
+    }
+
+    #[test]
+    fn dotted_column_name_is_quoted() {
+        // A `.` forces quoting; single short column stays compact. table-8.9.
+        let cols = vec![col("col.1", Text)];
+        assert_eq!(E::generate_ctas_sql_source("t11", &cols), "CREATE TABLE t11(\"col.1\" TEXT)");
+    }
+
+    #[test]
+    fn needs_quote_rules() {
+        assert!(!E::ctas_needs_quote("fuzzy_dog_12"));
+        assert!(!E::ctas_needs_quote("_x"));
+        assert!(E::ctas_needs_quote("key")); // keyword
+        assert!(E::ctas_needs_quote("desc")); // keyword
+        assert!(E::ctas_needs_quote("14_vac")); // leading digit
+        assert!(E::ctas_needs_quote("col.1")); // dot
+        assert!(E::ctas_needs_quote("it's")); // apostrophe
+        assert!(E::ctas_needs_quote("")); // empty
     }
 }
