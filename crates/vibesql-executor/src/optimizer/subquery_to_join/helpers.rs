@@ -7,28 +7,87 @@
 use vibesql_ast::{CommonTableExpr, Expression, FromClause, SelectItem, SelectStmt};
 use vibesql_storage::Database;
 
-/// Collect the `(effective_name, real_table_name)` pairs for every named table
-/// directly reachable in a FROM clause, for outer-scope column resolution.
+/// One source directly reachable in the outer FROM clause, described in the terms
+/// needed to decide whether it exposes a given unqualified column.
 ///
-/// `effective_name` is the alias if present, otherwise the table name — it is the
-/// qualifier a column reference would use. `real_table_name` is the catalog/CTE
-/// name used to look the columns up (base table schema, view definition, or
-/// enclosing CTE). Subquery/VALUES derived tables are skipped: their columns are
-/// not resolvable against the catalog here, so an unqualified column that could
-/// come from one of them is treated as unresolvable (we do not qualify it, and
-/// the downstream ambiguity guard handles it).
-fn collect_base_table_refs(from: &FromClause, out: &mut Vec<(String, String)>) {
+/// Every `FromClause` variant that can appear in the outer FROM maps to one of
+/// these:
+/// - `FromClause::Table` → `Named` (base table via `database.get_table`, or a
+///   view via the catalog) unless it carries an explicit `column_aliases` list,
+///   in which case its exposed names are exactly that list (`Columns`).
+/// - `FromClause::Subquery` (derived table) → `Columns` from its explicit
+///   `column_aliases`, else from the inner SELECT projection
+///   (`derived_output_columns`); if neither can be determined, `Opaque`.
+/// - `FromClause::Values` → `Columns` from its explicit `column_aliases`, else
+///   the SQLite-style positional names `column1, column2, …`.
+/// - `FromClause::Join` → recurses into both sides.
+///
+/// `effective` is always the qualifier a column reference would use (the alias
+/// when present, otherwise the table name).
+enum OuterSource {
+    /// A catalog-resolvable source (base table, view, or enclosing CTE). The
+    /// stored name is the real catalog/CTE name used to look columns up.
+    Named { effective: String, real_name: String },
+    /// A source whose exposed column names are known explicitly.
+    Columns { effective: String, columns: Vec<String> },
+    /// A derived (subquery/VALUES) source whose columns genuinely cannot be
+    /// enumerated here (e.g. a `SELECT *` projection whose expansion is unknown).
+    /// We can neither confirm nor deny the column lives here, so the transform
+    /// must be skipped rather than risk a wrong qualification or a wrong error.
+    /// Its effective name is irrelevant (we never qualify against it).
+    Opaque,
+}
+
+/// The SQLite-style positional column names a bare VALUES table exposes when no
+/// explicit column alias list is given: `column1`, `column2`, … one per column
+/// in the first row.
+fn values_positional_columns(rows: &[Vec<Expression>]) -> Option<Vec<String>> {
+    let width = rows.first()?.len();
+    if width == 0 {
+        return None;
+    }
+    Some((1..=width).map(|i| format!("column{i}")).collect())
+}
+
+/// Collect every source directly reachable in the outer FROM clause, in the
+/// terms needed for outer-scope column resolution. Covers all `FromClause`
+/// variants (table/view, join, subquery/derived table, VALUES) uniformly.
+fn collect_outer_sources(from: &FromClause, out: &mut Vec<OuterSource>) {
     match from {
-        FromClause::Table { name, alias, .. } => {
+        FromClause::Table { name, alias, column_aliases, .. } => {
             let effective = alias.clone().unwrap_or_else(|| name.clone());
-            out.push((effective, name.clone()));
+            // An explicit `AS t(x, y)` column-alias list renames the exposed
+            // columns; it is the authoritative output name set.
+            if let Some(cols) = column_aliases {
+                out.push(OuterSource::Columns { effective, columns: cols.clone() });
+            } else {
+                out.push(OuterSource::Named { effective, real_name: name.clone() });
+            }
         }
         FromClause::Join { left, right, .. } => {
-            collect_base_table_refs(left, out);
-            collect_base_table_refs(right, out);
+            collect_outer_sources(left, out);
+            collect_outer_sources(right, out);
         }
-        // Derived tables (subquery/VALUES) have no catalog schema to consult here.
-        FromClause::Subquery { .. } | FromClause::Values { .. } => {}
+        FromClause::Subquery { query, alias, column_aliases } => {
+            let effective = alias.clone();
+            if let Some(cols) = column_aliases {
+                out.push(OuterSource::Columns { effective, columns: cols.clone() });
+            } else if let Some(cols) = derived_output_columns(query) {
+                out.push(OuterSource::Columns { effective, columns: cols });
+            } else {
+                out.push(OuterSource::Opaque);
+            }
+        }
+        FromClause::Values { rows, alias, column_aliases } => {
+            let effective = alias.clone();
+            if let Some(cols) = column_aliases {
+                out.push(OuterSource::Columns { effective, columns: cols.clone() });
+            } else if let Some(cols) = values_positional_columns(rows) {
+                out.push(OuterSource::Columns { effective, columns: cols });
+            } else {
+                out.push(OuterSource::Opaque);
+            }
+        }
     }
 }
 
@@ -119,59 +178,106 @@ fn source_has_column(
     false
 }
 
+/// The outcome of resolving an unqualified column against the outer FROM scope.
+///
+/// SQLite scopes ambiguity to the outer FROM sources only (never the subquery's
+/// own tables), so the whole point of this resolver is to reproduce that scope
+/// exactly before the column is folded into the synthesized SEMI/ANTI-join
+/// predicate — whose combined schema would otherwise trip the #5870 guard.
+pub(super) enum OuterQualifier {
+    /// Exactly one outer source exposes the column: qualify the reference with
+    /// this effective name so it is unambiguous and bypasses the guard.
+    Qualify(String),
+    /// Leave the reference unqualified and let normal resolution / the ambiguity
+    /// guard handle it. This covers two distinct enumerable cases that both match
+    /// pre-existing behavior:
+    /// - Two or more outer sources expose the column: genuinely ambiguous in the
+    ///   outer scope, so the guard errors, matching SQLite.
+    /// - No outer source exposes the column (and none were opaque): it is not an
+    ///   outer-scope column at all (e.g. a correlated reference to a further-out
+    ///   scope), so it stays unqualified for normal resolution.
+    LeaveUnqualified,
+    /// No enumerable outer source exposes the column and at least one source
+    /// could not be enumerated (an opaque derived/VALUES table). We can neither
+    /// qualify it (risking a wrong qualification) nor let the guard fire (risking
+    /// a wrong error). The caller must skip the IN→join transform entirely and
+    /// fall back to row-by-row `eval_in_subquery`, which never over-errors —
+    /// preserving `main`'s over-accepting behavior instead of regressing to an
+    /// error.
+    Skip,
+}
+
 /// Resolve which outer-FROM source an unqualified column belongs to, matching
 /// SQLite's scoping: ambiguity is measured ONLY against the outer FROM sources.
 ///
-/// Outer sources are resolved through all three name-resolution kinds — base
-/// tables (`database.get_table`), views (`catalog.get_view` /
-/// `ViewDefinition.columns`), and enclosing CTEs (the query's `with_clause`) —
-/// so a view or CTE in the outer FROM is treated exactly like a base table.
+/// Every outer-FROM source kind is handled uniformly (see [`OuterSource`]):
+/// - Base tables via `database.get_table`, views via `catalog.get_view`, and
+///   enclosing CTEs via the query's `with_clause`.
+/// - Derived (subquery) tables via their explicit `column_aliases` or their
+///   inner SELECT projection.
+/// - `VALUES` tables via their explicit `column_aliases` or the positional
+///   `column1, column2, …` names.
+/// - Table aliases with an explicit column list (`AS t(x, y)`).
 ///
-/// Returns:
-/// - `Some(effective_name)` when exactly one outer source has the column — the
-///   qualifier to attach so the reference is unambiguous.
-/// - `None` when zero or two-or-more outer sources have the column, or when a
-///   derived (subquery/VALUES) table is present in the outer FROM (unresolvable
-///   here). In the two-or-more case the reference is genuinely ambiguous in the
-///   outer scope and must stay unqualified so the downstream guard errors,
-///   exactly as SQLite does.
+/// The exactly-one → qualify / two-or-more → leave-for-guard rule applies to all
+/// of them identically. When a derived/VALUES source is genuinely unenumerable
+/// (e.g. `SELECT *`) and nothing else resolves the column, we return
+/// [`OuterQualifier::Skip`] rather than let the guard fire — over-accepting
+/// (matching `main`) is safe; over-erroring is the regression this PR exists to
+/// prevent.
 pub(super) fn resolve_outer_column_qualifier(
     from: &FromClause,
     database: &Database,
     with_clause: Option<&[CommonTableExpr]>,
     column: &str,
-) -> Option<String> {
-    let mut refs = Vec::new();
-    collect_base_table_refs(from, &mut refs);
+) -> OuterQualifier {
+    let mut sources = Vec::new();
+    collect_outer_sources(from, &mut sources);
 
-    // If any derived table is in scope we cannot be sure the column does not also
-    // live there, so we conservatively decline to qualify.
-    let has_derived = from_has_derived_table(from);
-    if has_derived {
-        return None;
-    }
+    let mut matched_effective: Option<String> = None;
+    let mut match_count = 0usize;
+    let mut has_opaque = false;
 
-    let mut matches = refs
-        .iter()
-        .filter(|(_, table_name)| source_has_column(table_name, column, database, with_clause));
-
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        // Two or more outer sources carry the column: genuinely ambiguous.
-        None
-    } else {
-        Some(first.0.clone())
-    }
-}
-
-/// Whether the FROM clause contains any subquery/VALUES derived table.
-fn from_has_derived_table(from: &FromClause) -> bool {
-    match from {
-        FromClause::Table { .. } => false,
-        FromClause::Join { left, right, .. } => {
-            from_has_derived_table(left) || from_has_derived_table(right)
+    for source in &sources {
+        match source {
+            OuterSource::Named { effective, real_name } => {
+                if source_has_column(real_name, column, database, with_clause) {
+                    match_count += 1;
+                    matched_effective.get_or_insert_with(|| effective.clone());
+                }
+            }
+            OuterSource::Columns { effective, columns } => {
+                if columns.iter().any(|c| c.eq_ignore_ascii_case(column)) {
+                    match_count += 1;
+                    matched_effective.get_or_insert_with(|| effective.clone());
+                }
+            }
+            OuterSource::Opaque => {
+                has_opaque = true;
+            }
         }
-        FromClause::Subquery { .. } | FromClause::Values { .. } => true,
+    }
+
+    match match_count {
+        // Exactly one enumerable outer source carries the column.
+        1 => OuterQualifier::Qualify(matched_effective.unwrap()),
+        // Two or more carry it: genuinely ambiguous in the outer scope.
+        n if n >= 2 => OuterQualifier::LeaveUnqualified,
+        // Zero enumerable matches.
+        _ => {
+            if has_opaque {
+                // The column might live in the source we couldn't enumerate.
+                // Don't risk a wrong error — skip the transform.
+                OuterQualifier::Skip
+            } else {
+                // Every source was enumerable and none carried the column. It is
+                // therefore not an outer-scope column at all (e.g. a correlated
+                // reference to a further-out scope, or resolvable only inside the
+                // subquery). Leave it for normal resolution / the guard, exactly
+                // as before.
+                OuterQualifier::LeaveUnqualified
+            }
+        }
     }
 }
 

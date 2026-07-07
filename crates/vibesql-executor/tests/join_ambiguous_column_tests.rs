@@ -769,3 +769,193 @@ fn test_view_outer_genuinely_ambiguous_column_errors() {
     exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
     assert_ambiguous(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)", "a");
 }
+
+// ---------------------------------------------------------------------------
+// Issue #5926 regression (fourth cycle): DERIVED (subquery-as-FROM) and VALUES
+// outer FROM.
+//
+// The resolver used to short-circuit to "unresolvable" whenever ANY derived
+// (subquery/VALUES) table appeared in the outer FROM, which — because
+// "unresolvable" means "leave unqualified, let the guard fire" — re-introduced
+// the exact #5870 over-error the PR exists to prevent:
+//
+//   SELECT t.v FROM (SELECT a,v FROM base) AS t WHERE a IN (SELECT a FROM t3)
+//
+// errored `ambiguous column name: a` on both paths while sqlite3 AND main return
+// `10,20`. The NOT IN / ANTI variant regressed identically.
+//
+// The fix enumerates a derived table's output columns the same way views/CTEs
+// are handled — from its explicit `AS t(x,y)` column list when present, else its
+// inner SELECT projection — and a VALUES table's columns from its explicit alias
+// list or the SQLite positional `column1, column2, …` names. The exactly-one →
+// qualify (to the derived alias) / two-or-more → error rule applies uniformly.
+// Only a genuinely unenumerable derived source (e.g. `SELECT *`) is treated as
+// opaque, and even then the transform is SKIPPED (falling back to row-by-row IN
+// evaluation, which never over-errors) rather than allowed to over-error.
+// Verified against sqlite3 3.51.0 on both the columnar (default) and row
+// (`VIBESQL_DISABLE_COLUMNAR_JOIN=1`) paths.
+// ---------------------------------------------------------------------------
+
+/// Base tables shared by the derived-table cases: `base(a, v)` feeds the derived
+/// table, `t3(a)` is the subquery table sharing the `a` column name.
+fn setup_derived_outer_db() -> Database {
+    let mut db = Database::new();
+    exec_setup(&mut db, "CREATE TABLE base(a INTEGER, v INTEGER)");
+    exec_setup(&mut db, "INSERT INTO base VALUES(1,10),(2,20),(3,30)");
+    exec_setup(&mut db, "CREATE TABLE t3(a INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t3 VALUES(1),(2)");
+    db
+}
+
+/// Derived (subquery-as-FROM) table in the outer FROM sharing a column with the
+/// subquery table → returns rows, not an ambiguity error. Only the derived table
+/// `t` exposes `a` in the outer scope (`t3` lives inside the subquery). sqlite3
+/// 3.51.0: `10,20`. (Judge's reproducer, fourth-cycle.)
+#[test]
+fn test_derived_outer_in_subquery_shared_column_not_ambiguous() {
+    let db = setup_derived_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT t.v FROM (SELECT a,v FROM base) AS t WHERE a IN (SELECT a FROM t3)"
+        ),
+        vec![10, 20],
+        "outer `a` resolves to the derived table t (t3 is inside the subquery)"
+    );
+}
+
+/// NOT IN shares the ANTI-join path; still unambiguous. `a IN t3` matches
+/// base.a=1,2; NOT IN keeps the derived row with a=3. sqlite3 3.51.0: `30`.
+#[test]
+fn test_derived_outer_not_in_subquery_shared_column_not_ambiguous() {
+    let db = setup_derived_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT t.v FROM (SELECT a,v FROM base) AS t WHERE a NOT IN (SELECT a FROM t3)"
+        ),
+        vec![30],
+        "outer `a` resolves to the derived table t; NOT IN keeps a=3"
+    );
+}
+
+/// Both derived-table shapes must hold on the row-oriented path too.
+#[test]
+fn test_derived_outer_in_and_not_in_subquery_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db = setup_derived_outer_db();
+    let in_vs = first_col_ints(
+        &db,
+        "SELECT t.v FROM (SELECT a,v FROM base) AS t WHERE a IN (SELECT a FROM t3)",
+    );
+    let not_in_vs = first_col_ints(
+        &db,
+        "SELECT t.v FROM (SELECT a,v FROM base) AS t WHERE a NOT IN (SELECT a FROM t3)",
+    );
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+
+    assert_eq!(in_vs, vec![10, 20], "row path: derived outer `a` unambiguous (IN)");
+    assert_eq!(not_in_vs, vec![30], "row path: derived outer `a` unambiguous (NOT IN)");
+}
+
+/// VALUES table in the outer FROM: SQLite exposes positional `column1, column2`.
+/// `column1 IN (SELECT a FROM t3)` selects `column2` for rows 1 and 2. sqlite3
+/// 3.51.0: `10,20`.
+#[test]
+fn test_values_outer_in_subquery_positional_columns_not_ambiguous() {
+    let db = setup_derived_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT t.column2 FROM (VALUES(1,10),(2,20),(3,30)) AS t \
+             WHERE t.column1 IN (SELECT a FROM t3)"
+        ),
+        vec![10, 20],
+        "VALUES-as-FROM positional columns resolve against the outer scope"
+    );
+}
+
+/// VALUES-as-FROM NOT IN variant. sqlite3 3.51.0: `30`. Also on the row path.
+#[test]
+fn test_values_outer_not_in_subquery_positional_columns_row_path() {
+    let db = setup_derived_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT t.column2 FROM (VALUES(1,10),(2,20),(3,30)) AS t \
+             WHERE t.column1 NOT IN (SELECT a FROM t3)"
+        ),
+        vec![30],
+    );
+
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db2 = setup_derived_outer_db();
+    let vs = first_col_ints(
+        &db2,
+        "SELECT t.column2 FROM (VALUES(1,10),(2,20),(3,30)) AS t \
+         WHERE t.column1 NOT IN (SELECT a FROM t3)",
+    );
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+    assert_eq!(vs, vec![30], "row path: VALUES-as-FROM NOT IN unambiguous");
+}
+
+/// An opaque derived table (`SELECT *`, columns not enumerable at transform time)
+/// must NOT over-error: the transform is skipped and row-by-row IN evaluation
+/// yields the correct rows, matching main's over-accepting behavior. sqlite3
+/// 3.51.0: `10,20`.
+#[test]
+fn test_opaque_derived_outer_select_star_falls_back_not_ambiguous() {
+    let db = setup_derived_outer_db();
+    assert_eq!(
+        first_col_ints(
+            &db,
+            "SELECT t.v FROM (SELECT * FROM base) AS t WHERE a IN (SELECT a FROM t3)"
+        ),
+        vec![10, 20],
+        "opaque `SELECT *` derived table falls back to row-by-row IN (no over-error)"
+    );
+
+    // Row path: same result.
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let db2 = setup_derived_outer_db();
+    let vs = first_col_ints(
+        &db2,
+        "SELECT t.v FROM (SELECT * FROM base) AS t WHERE a IN (SELECT a FROM t3)",
+    );
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+    assert_eq!(vs, vec![10, 20], "row path: opaque derived table falls back correctly");
+}
+
+/// Genuine ambiguity with a derived-table column duplicated on a second outer
+/// table must still error: `a` on both the derived table `t` and base table `t2`.
+/// sqlite3 3.51.0: `ambiguous column name: a`.
+#[test]
+fn test_derived_outer_genuinely_ambiguous_column_errors() {
+    let mut db = setup_derived_outer_db();
+    exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
+    assert_ambiguous(
+        &db,
+        "SELECT t.v FROM (SELECT a,v FROM base) AS t, t2 WHERE a IN (SELECT a FROM t3)",
+        "a",
+    );
+}
+
+/// The derived-table genuine-ambiguity error must also fire on the row path.
+#[test]
+fn test_derived_outer_genuinely_ambiguous_column_errors_row_path() {
+    std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
+    let mut db = setup_derived_outer_db();
+    exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
+    exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
+    let select =
+        parse_select("SELECT t.v FROM (SELECT a,v FROM base) AS t, t2 WHERE a IN (SELECT a FROM t3)");
+    let result = SelectExecutor::new(&db).execute(&select);
+    std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
+    match result {
+        Err(ExecutorError::AmbiguousColumnName { column_name }) => {
+            assert_eq!(column_name.to_lowercase(), "a");
+        }
+        other => panic!("expected AmbiguousColumnName on row path, got: {other:?}"),
+    }
+}
