@@ -174,42 +174,130 @@ pub fn handle_replace_conflicts(
         .is_some()
         && db.recursive_triggers();
 
-    // Fire BEFORE DELETE triggers for each conflicting row
-    // This must happen BEFORE actual deletion (SQLite semantics)
-    // The reserved rowid is active during this phase, so trigger INSERTs that try
-    // to allocate the same rowid will fail.
+    // When DELETE triggers fire, SQLite processes the conflicting rows one at a
+    // time and INTERLEAVED: for each conflict row R it runs BEFORE DELETE on R,
+    // physically removes R, then runs AFTER DELETE on R, *before* moving to the
+    // next conflict row. A trigger body that reads the table mid-statement
+    // (e.g. `SELECT count(*) FROM t`) therefore sees the table shrink between
+    // conflict deletions — item 2b (#5840). The previous implementation fired
+    // ALL BEFORE triggers, then batch-deleted every row, then fired all AFTERs,
+    // which made every trigger body observe the same stale (pre-deletion) table
+    // state. Route the trigger case through the interleaved path below; the
+    // no-trigger case keeps the faster batch path that follows.
+    //
+    // The reserved rowid is active during this phase, so trigger INSERTs that
+    // try to allocate the same rowid will fail.
     //
     // RAISE(IGNORE) in a BEFORE DELETE trigger abandons the delete of that
-    // conflicting row (#5418). We drop the row from `rows_to_delete` so it is
-    // NOT deleted; the conflicting row then survives. Because the REPLACE
-    // caller re-validates PK/UNIQUE constraints after this function returns,
-    // a surviving conflict surfaces as a UNIQUE/PK error — matching sqlite3
-    // 3.51 with `recursive_triggers=ON`, where a BEFORE DELETE RAISE(IGNORE)
-    // during REPLACE leaves the row in place and the subsequent insert fails
-    // with "UNIQUE constraint failed".
+    // conflicting row (#5418): the row is not deleted and survives. Because the
+    // REPLACE caller re-validates PK/UNIQUE constraints after this function
+    // returns, a surviving conflict surfaces as a UNIQUE/PK error — matching
+    // sqlite3 3.51 with `recursive_triggers=ON`.
     if fire_delete_triggers {
-        let mut kept = Vec::with_capacity(rows_to_delete.len());
-        for (idx, row) in rows_to_delete {
+        // If an ancestor statement is already iterating this table (an outer
+        // interleaved DELETE/UPDATE/REPLACE loop), defer our final compaction to
+        // it so we never shift the ancestor's not-yet-processed row indices.
+        // Captured BEFORE we register our own guard below.
+        let defer_compaction = crate::compaction_guard::is_iterating(table_name);
+
+        // Defer compaction across the whole loop so each row's physical index
+        // stays valid until every conflict row is processed (mirrors the DELETE
+        // executor's interleaved path, #5486). A nested DELETE fired by a
+        // trigger body on this same table also defers compaction while the
+        // guard is live.
+        let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+
+        #[cfg(feature = "mvcc_enabled")]
+        let mvcc_delete_txn_id = db.transaction_id();
+
+        let mut any_deleted = false;
+        for (idx, row) in &rows_to_delete {
+            // BEFORE(R): a RAISE(IGNORE) abandons this row's delete.
             let outcome = TriggerFirer::execute_before_triggers(
                 db,
                 table_name,
                 vibesql_ast::TriggerEvent::Delete,
-                Some(&row),
+                Some(row),
                 None,
             )?;
-            if outcome != crate::trigger_execution::TriggerOutcome::SkipRow {
-                kept.push((idx, row));
+            if outcome == crate::trigger_execution::TriggerOutcome::SkipRow {
+                continue;
+            }
+
+            // A trigger body may have already deleted R (e.g. via a nested
+            // DELETE on this table). Skip R rather than double-deleting.
+            if db.get_table(table_name).map(|t| t.is_row_deleted(*idx)).unwrap_or(true) {
+                continue;
+            }
+
+            // WAL + index maintenance for this single row (indices are still
+            // valid: compaction is deferred to the end of the loop).
+            db.emit_wal_delete(table_name, *idx as u64, row.values.to_vec());
+            let rows_refs: Vec<(usize, &vibesql_storage::Row)> = vec![(*idx, row)];
+            db.batch_update_indexes_for_delete(table_name, &rows_refs);
+            expression_index_maintenance::maintain_expression_indexes_for_delete(
+                db, table_name, row, *idx,
+            );
+            partial_index_maintenance::maintain_partial_indexes_for_delete(
+                db, table_name, row, *idx,
+            );
+
+            // delete(R): flip the deletion bitmap for just this row so the AFTER
+            // trigger (and the next conflict row's BEFORE trigger) observes R as
+            // gone. Compaction is deferred to the end of the loop.
+            {
+                let table_mut = db
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+                #[cfg(feature = "mvcc_enabled")]
+                if let Some(id) = mvcc_delete_txn_id {
+                    table_mut.stamp_row_xmax_inplace(*idx, id);
+                }
+
+                if table_mut.mark_deleted_inplace(*idx) {
+                    any_deleted = true;
+                }
+            }
+
+            // Invalidate the database-level columnar cache NOW, between the
+            // bitmap delete and the AFTER trigger (#5523), so a trigger body's
+            // `SELECT count(*) FROM t` observes the live, decremented count
+            // rather than a stale pre-delete snapshot.
+            db.invalidate_columnar_cache(table_name);
+
+            // AFTER(R): the row is already deleted; a RAISE(IGNORE) cannot
+            // un-delete it, so SkipRow is a no-op.
+            let _after_outcome = TriggerFirer::execute_after_triggers(
+                db,
+                table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                Some(row),
+                None,
+            )?;
+        }
+
+        // Compact once, after all conflict rows are processed (unless deferred
+        // to an ancestor interleaved loop). If it compacts, every row index
+        // changed and the indexes must be rebuilt.
+        if any_deleted && !defer_compaction {
+            if let Some(table_mut) = db.get_table_mut(table_name) {
+                if table_mut.compact_if_needed() {
+                    db.rebuild_indexes(table_name);
+                    expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                        db, table_name,
+                    );
+                    partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                        db, table_name,
+                    );
+                }
             }
         }
-        rows_to_delete = kept;
 
-        // Every conflicting row's delete was skipped by RAISE(IGNORE); there is
-        // nothing to delete. Return early so the caller's constraint
-        // re-validation runs against the still-conflicting table state.
-        if rows_to_delete.is_empty() {
-            return Ok(());
-        }
+        return Ok(());
     }
+
+    // ---- No DELETE triggers fire: fast batch-delete path ----
 
     // NOTE: The reserved rowid remains active during AFTER DELETE triggers.
     // For auto-allocated reservations: AFTER DELETE trigger INSERTs will fail on rowid conflict.
@@ -296,22 +384,10 @@ pub fn handle_replace_conflicts(
         db.invalidate_columnar_cache(table_name);
     }
 
-    // Fire AFTER DELETE triggers for each deleted row
-    // This must happen AFTER actual deletion (SQLite semantics)
-    if fire_delete_triggers {
-        for (_, row) in &rows_to_delete {
-            // AFTER DELETE fires once the row is already gone. A RAISE(IGNORE)
-            // here cannot un-delete it (sqlite3 3.51 leaves the row deleted),
-            // so SkipRow is a no-op — explicitly drop the must-use outcome.
-            let _after_outcome = TriggerFirer::execute_after_triggers(
-                db,
-                table_name,
-                vibesql_ast::TriggerEvent::Delete,
-                Some(row),
-                None,
-            )?;
-        }
-    }
+    // NOTE: No AFTER DELETE triggers fire on this batch path — it is only
+    // reached when `fire_delete_triggers` is false (no DELETE triggers, or
+    // `recursive_triggers` is OFF). The trigger-firing case is fully handled by
+    // the interleaved per-row path above, which returns before reaching here.
 
     Ok(())
 }
