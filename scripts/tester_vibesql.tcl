@@ -6199,6 +6199,7 @@ proc finish_test {} {
     if {$::nTest == 0 && $::nSkip == 0 && !$::file_marker_emitted} {
         set self_skip_base [file rootname [file tail [lindex $::argv 0]]]
         emit_test_detail skipped "$self_skip_base (capability self-skip)"
+        incr ::nSkip
         set ::file_marker_emitted 1
     }
 
