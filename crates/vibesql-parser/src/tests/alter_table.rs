@@ -420,9 +420,7 @@ fn test_parse_alter_table_add_column_bare_no_column_keyword_no_type() {
 fn test_parse_alter_table_add_generated_column_typed() {
     // `GENERATED ALWAYS AS (expr)` after an explicit type must populate
     // `generated_expr` on the ColumnDef (previously silently dropped).
-    let result = Parser::parse_sql(
-        "ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1)",
-    );
+    let result = Parser::parse_sql("ALTER TABLE g ADD COLUMN y INTEGER GENERATED ALWAYS AS (x+1)");
     assert!(result.is_ok(), "err: {:?}", result);
     match result.unwrap() {
         vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
@@ -469,10 +467,7 @@ fn test_parse_alter_table_add_generated_column_typeless_short_form() {
                 "generated_expr must be populated for the typeless AS short form"
             );
             // No explicit type -> BLOB affinity, like a typeless column.
-            assert!(matches!(
-                add.column_def.data_type,
-                vibesql_types::DataType::BinaryLargeObject
-            ));
+            assert!(matches!(add.column_def.data_type, vibesql_types::DataType::BinaryLargeObject));
         }
         other => panic!("Expected ADD COLUMN, got {:?}", other),
     }
@@ -489,4 +484,55 @@ fn test_parse_alter_table_add_plain_column_has_no_generated_expr() {
         }
         other => panic!("Expected ADD COLUMN, got {:?}", other),
     }
+}
+
+// ========================================================================
+// RENAME COLUMN with contextual-keyword column names (issue #5945)
+//
+// SQLite accepts contextual/fallback keywords (`m`, `key`, `level`, ...) as
+// unquoted column names in `ALTER TABLE ... RENAME COLUMN <old> TO <new>`.
+// The old and new column names now parse via `parse_column_name()`.
+// ========================================================================
+
+#[test]
+fn test_parse_rename_column_with_contextual_keyword_m() {
+    let result = Parser::parse_sql("ALTER TABLE t1 RENAME COLUMN m TO n");
+    assert!(result.is_ok(), "RENAME COLUMN m TO n should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(alter) => match alter {
+            vibesql_ast::AlterTableStmt::RenameColumn(rename) => {
+                assert_eq!(rename.old_column_name, "m");
+                assert_eq!(rename.new_column_name, "n");
+            }
+            _ => panic!("Expected RENAME COLUMN statement"),
+        },
+        _ => panic!("Expected ALTER TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_rename_column_contextual_keyword_to_contextual_keyword() {
+    // Both the old and new name may be contextual keywords.
+    for (old, new) in [("m", "level"), ("key", "m"), ("level", "key")] {
+        let sql = format!("ALTER TABLE t1 RENAME COLUMN {old} TO {new}");
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "`{sql}` should parse: {:?}", result.err());
+        match result.unwrap() {
+            vibesql_ast::Statement::AlterTable(alter) => match alter {
+                vibesql_ast::AlterTableStmt::RenameColumn(rename) => {
+                    assert_eq!(rename.old_column_name, old);
+                    assert_eq!(rename.new_column_name, new);
+                }
+                _ => panic!("Expected RENAME COLUMN statement"),
+            },
+            _ => panic!("Expected ALTER TABLE statement"),
+        }
+    }
+}
+
+#[test]
+fn test_parse_rename_column_rejects_reserved_keyword() {
+    // Truly reserved words are still rejected as unquoted column names.
+    let result = Parser::parse_sql("ALTER TABLE t1 RENAME COLUMN select TO n");
+    assert!(result.is_err(), "reserved keyword `select` must be rejected as a column name");
 }

@@ -403,9 +403,9 @@ fn parse_rename_column(
     parser: &mut crate::Parser,
     table_name: String,
 ) -> Result<AlterTableStmt, ParseError> {
-    let old_column_name = parser.parse_identifier()?;
+    let old_column_name = parser.parse_column_name()?;
     parser.expect_keyword(Keyword::To)?;
-    let new_column_name = parser.parse_identifier()?;
+    let new_column_name = parser.parse_column_name()?;
 
     Ok(AlterTableStmt::RenameColumn(RenameColumnStmt {
         table_name,

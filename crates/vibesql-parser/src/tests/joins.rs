@@ -555,3 +555,24 @@ fn test_parse_comma_without_on_still_cross_join() {
         _ => panic!("Expected SELECT"),
     }
 }
+
+#[test]
+fn test_parse_join_using_contextual_keyword_column(/* issue #5945 */) {
+    // Contextual keywords (`m`, `key`, `level`) must be accepted as unquoted
+    // column names in a JOIN ... USING (...) list, matching SQLite.
+    for name in ["m", "key", "level"] {
+        let sql = format!("SELECT * FROM t1 JOIN t2 USING ({name});");
+        let result = Parser::parse_sql(&sql);
+        assert!(result.is_ok(), "USING ({name}) should parse: {:?}", result.err());
+        match result.unwrap() {
+            vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+                vibesql_ast::FromClause::Join { using_columns, .. } => {
+                    let cols = using_columns.as_ref().expect("USING columns present");
+                    assert_eq!(cols, &vec![name.to_string()]);
+                }
+                _ => panic!("Expected JOIN"),
+            },
+            _ => panic!("Expected SELECT"),
+        }
+    }
+}

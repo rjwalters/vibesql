@@ -143,7 +143,7 @@ impl Parser {
         self.expect_token(Token::LParen)?;
 
         // Parse column name
-        let column_name = self.parse_identifier()?;
+        let column_name = self.parse_column_name()?;
 
         // Parse optional operator class (vector_l2_ops, vector_cosine_ops, vector_ip_ops)
         let metric = if let Token::Identifier(ident) = self.peek().clone() {
@@ -247,7 +247,7 @@ impl Parser {
         self.expect_token(Token::LParen)?;
 
         // Parse column name
-        let column_name = self.parse_identifier()?;
+        let column_name = self.parse_column_name()?;
 
         // Parse optional operator class (vector_l2_ops, vector_cosine_ops, vector_ip_ops)
         let metric = if let Token::Identifier(ident) = self.peek().clone() {
@@ -823,7 +823,7 @@ impl Parser {
 
             let mut cols = Vec::new();
             loop {
-                cols.push(self.parse_identifier()?);
+                cols.push(self.parse_column_name()?);
 
                 if self.peek() == &Token::Comma {
                     self.advance(); // consume ','

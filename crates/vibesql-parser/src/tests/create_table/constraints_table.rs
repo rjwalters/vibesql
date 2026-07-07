@@ -745,3 +745,103 @@ fn test_parse_foreign_key_match_missing_name_is_error() {
     let result = Parser::parse_sql("CREATE TABLE c(a, FOREIGN KEY(a) REFERENCES p MATCH)");
     assert!(result.is_err(), "MATCH without a name must be a parse error");
 }
+
+// ========================================================================
+// Contextual-keyword column names in column-list positions (issue #5945)
+//
+// SQLite accepts contextual/fallback keywords such as `m` (an HNSW index
+// parameter), `key`, and `level` as unquoted column names inside FOREIGN
+// KEY / REFERENCES / PRIMARY KEY / UNIQUE column lists. VibeSQL previously
+// rejected them because those positions called `parse_identifier()`, which
+// refuses every keyword. They now call `parse_column_name()`.
+// ========================================================================
+
+#[test]
+fn test_altercol_2_0_foreign_key_with_contextual_keyword_m() {
+    // The altercol 2.0 primary case: column `m` (HNSW contextual keyword)
+    // used in a table-level FOREIGN KEY column list.
+    let result = Parser::parse_sql("CREATE TABLE t1(a, b, c, m, FOREIGN KEY (m) REFERENCES p(q))");
+    assert!(result.is_ok(), "altercol 2.0 CREATE TABLE should parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_constraints.len(), 1);
+            match &create.table_constraints[0].kind {
+                vibesql_ast::TableConstraintKind::ForeignKey {
+                    columns,
+                    references_table,
+                    references_columns,
+                    ..
+                } => {
+                    assert_eq!(columns, &vec!["m".to_string()]);
+                    assert_eq!(references_table, "p");
+                    assert_eq!(references_columns, &vec!["q".to_string()]);
+                }
+                _ => panic!("Expected FOREIGN KEY constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_contextual_keyword_column_names_in_all_constraint_positions() {
+    // `m`, `key`, and `level` are all contextual keywords that must be usable
+    // as unquoted column names in every table-constraint column list.
+    for name in ["m", "key", "level"] {
+        let fk = format!("CREATE TABLE t(a, {name}, FOREIGN KEY ({name}) REFERENCES p({name}))");
+        assert!(
+            Parser::parse_sql(&fk).is_ok(),
+            "FOREIGN KEY/REFERENCES with column `{name}` should parse: {:?}",
+            Parser::parse_sql(&fk).err()
+        );
+
+        let pk = format!("CREATE TABLE t(a, {name}, PRIMARY KEY ({name}))");
+        assert!(
+            Parser::parse_sql(&pk).is_ok(),
+            "PRIMARY KEY with column `{name}` should parse: {:?}",
+            Parser::parse_sql(&pk).err()
+        );
+
+        let uniq = format!("CREATE TABLE t(a, {name}, UNIQUE ({name}))");
+        assert!(
+            Parser::parse_sql(&uniq).is_ok(),
+            "UNIQUE with column `{name}` should parse: {:?}",
+            Parser::parse_sql(&uniq).err()
+        );
+    }
+}
+
+#[test]
+fn test_contextual_keyword_column_name_quoted_form_still_works() {
+    // The quoted/delimited form must continue to parse and yield the same name.
+    let result =
+        Parser::parse_sql(r#"CREATE TABLE t1(a, "m", FOREIGN KEY ("m") REFERENCES p("q"))"#);
+    assert!(result.is_ok(), "quoted `m` FK column should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => match &create.table_constraints[0].kind {
+            vibesql_ast::TableConstraintKind::ForeignKey {
+                columns, references_columns, ..
+            } => {
+                assert_eq!(columns, &vec!["m".to_string()]);
+                assert_eq!(references_columns, &vec!["q".to_string()]);
+            }
+            _ => panic!("Expected FOREIGN KEY constraint"),
+        },
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_reserved_keyword_rejected_as_unquoted_fk_column_name() {
+    // Truly reserved words must still be rejected as unquoted column names in
+    // these positions (they would create grammar ambiguity). Quoting is the
+    // documented escape hatch.
+    for reserved in ["select", "not", "and", "null"] {
+        let sql = format!("CREATE TABLE t(a, FOREIGN KEY ({reserved}) REFERENCES p(q))");
+        assert!(
+            Parser::parse_sql(&sql).is_err(),
+            "reserved keyword `{reserved}` must be rejected as an unquoted FK column name"
+        );
+    }
+}
