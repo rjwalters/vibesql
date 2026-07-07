@@ -209,10 +209,27 @@ pub(super) fn execute_internal(
     // Step 3: Create expression evaluator with database reference for subquery support
     //         and optional procedural/trigger context for variable resolution
     let mut evaluator = if let Some(ctx) = trigger_context {
-        // Trigger context takes precedence (trigger statements can't have procedural context)
-        ExpressionEvaluator::with_trigger_context(schema, database, ctx)
+        // Trigger context takes precedence (trigger statements can't have procedural context).
+        // When the UPDATE also carries a WITH clause (e.g. a trigger body
+        // `WITH uset(a,b) AS (...) UPDATE t SET x=(SELECT b FROM uset WHERE a=x)`),
+        // the trigger-context constructor alone would drop `cte_results`, so the
+        // scalar subquery could not resolve the CTE. Chain the CTE context on so
+        // both trigger pseudo-vars and CTE references resolve (Gap 1 of #5941).
+        let e = ExpressionEvaluator::with_trigger_context(schema, database, ctx);
+        if let Some(ref cte_ctx) = cte_results {
+            e.with_cte_context(cte_ctx)
+        } else {
+            e
+        }
     } else if let Some(ctx) = procedural_context {
-        ExpressionEvaluator::with_procedural_context(schema, database, ctx)
+        // Likewise preserve any WITH-clause CTE context alongside the procedural
+        // context so scalar subqueries in SET expressions can reference the CTE.
+        let e = ExpressionEvaluator::with_procedural_context(schema, database, ctx);
+        if let Some(ref cte_ctx) = cte_results {
+            e.with_cte_context(cte_ctx)
+        } else {
+            e
+        }
     } else if let Some(ref cte_ctx) = cte_results {
         // Use CTE context for WITH clause support
         ExpressionEvaluator::with_database_and_cte(schema, database, cte_ctx)
