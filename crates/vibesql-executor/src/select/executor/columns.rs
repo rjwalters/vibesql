@@ -193,13 +193,13 @@ impl SelectExecutor<'_> {
                             }
                             column_names.extend(derived_cols.clone());
                         } else {
-                            // SELECT * uses table prefix when full_column_names=ON
-                            // BUT only when there's ambiguity (multiple tables or explicit alias)
-                            let has_multiple_tables = from_res.schema.table_schemas.len() > 1;
-
+                            // SELECT * uses table prefix when full_column_names=ON.
+                            // SQLite prefixes every column with its source table (or view)
+                            // name in full_column_names mode, even for a single-table query
+                            // (colname.test section 4: `SELECT * FROM tabc` -> tabc.a, ...).
                             for (_, col_name, effective_table_name) in table_columns {
                                 let display_name = match mode {
-                                    ColumnNamingMode::Full if has_multiple_tables => {
+                                    ColumnNamingMode::Full => {
                                         format!("{}.{}", effective_table_name, col_name)
                                     }
                                     _ => col_name,
@@ -233,12 +233,19 @@ impl SelectExecutor<'_> {
                                 }
                                 column_names.extend(derived_cols.clone());
                             } else {
-                                // SELECT table.* always uses just the column name, never
-                                // table-qualified This matches
-                                // SQLite behavior where full_column_names PRAGMA
-                                // does not affect wildcard expansion
+                                // SELECT table.* uses just the column name in short/expression
+                                // mode, but table-qualified (`table.column`) when
+                                // full_column_names=ON (colname.test section 4.6).
+                                // The prefix uses the schema's canonical table name, not the
+                                // qualifier as typed.
                                 for col_schema in &table_schema.columns {
-                                    column_names.push(col_schema.name.clone());
+                                    let display_name = match mode {
+                                        ColumnNamingMode::Full => {
+                                            format!("{}.{}", table_schema.name, col_schema.name)
+                                        }
+                                        _ => col_schema.name.clone(),
+                                    };
+                                    column_names.push(display_name);
                                 }
                             }
                         } else {
