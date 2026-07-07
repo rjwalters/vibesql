@@ -156,6 +156,31 @@ impl Catalog {
         self.session_id
     }
 
+    /// Returns true if this session has materialized any temporary object
+    /// (temp table, temp view, or temp trigger).
+    ///
+    /// SQLite lazily attaches the `temp` database the first time a temp object
+    /// is created; before that, `PRAGMA database_list` reports only `main`.
+    /// VibeSQL creates the `temp_<session_id>` schema eagerly at connection
+    /// open, so schema existence alone cannot stand in for "has a temp object" —
+    /// this checks for actual contents instead. Temp tables live in the
+    /// session temp schema; temp views/triggers carry `schema = Some("temp")`.
+    pub fn has_temp_objects(&self) -> bool {
+        // Temp tables: any table in the session's temp schema.
+        if self.schemas.get(&self.temp_schema_name).is_some_and(|schema| !schema.is_empty()) {
+            return true;
+        }
+        // Temp views.
+        if self.views.values().any(|v| v.is_temp()) {
+            return true;
+        }
+        // Temp triggers.
+        if self.triggers.values().any(|t| t.is_temp()) {
+            return true;
+        }
+        false
+    }
+
     /// Check if a schema name is a temp schema (matches "temp_*" pattern).
     ///
     /// This is used to identify temp schemas for special handling (e.g., not persisting them).
