@@ -229,7 +229,7 @@ fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
 /// extensions (hex, leading/trailing `.`, explicit `+`, `Infinity`, `NaN`).
 fn json5_to_json(s: &str) -> Option<String> {
     let chars: Vec<char> = s.chars().collect();
-    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::with_capacity(s.len()) };
+    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::with_capacity(s.len()), depth: 0 };
     w.skip_trivia();
     w.rewrite_value()?;
     w.skip_trivia();
@@ -239,10 +239,24 @@ fn json5_to_json(s: &str) -> Option<String> {
     Some(w.out)
 }
 
+/// Maximum object/array nesting depth accepted by the JSON5 rewriter.
+///
+/// `rewrite_value` → `rewrite_object`/`rewrite_array` → `rewrite_value` recurses
+/// once per nesting level; without a cap a deeply-nested document would overflow
+/// the thread stack and abort the whole process (a Rust stack overflow is not
+/// catchable). Matching SQLite's `SQLITE_MAX_JSON_DEPTH` (default 1000) keeps
+/// `json_valid`/`json_error_position` conformant — SQLite reports "malformed
+/// JSON" beyond this depth — while making the rewriter bounded. On exceeding the
+/// cap the rewriter returns `None` (rewrite failure), so callers observe the same
+/// "malformed JSON" outcome (`json_valid` → 0) rather than a crash.
+const MAX_JSON5_DEPTH: usize = 1000;
+
 struct Json5Rewriter<'a> {
     chars: &'a [char],
     i: usize,
     out: String,
+    /// Current object/array nesting depth; capped at [`MAX_JSON5_DEPTH`].
+    depth: usize,
 }
 
 impl Json5Rewriter<'_> {
@@ -285,8 +299,24 @@ impl Json5Rewriter<'_> {
 
     fn rewrite_value(&mut self) -> Option<()> {
         match self.peek()? {
-            '{' => self.rewrite_object(),
-            '[' => self.rewrite_array(),
+            '{' | '[' => {
+                // Containers are the only recursive case; guard nesting depth here
+                // (the single recursion funnel) so a pathological document cannot
+                // overflow the stack. Beyond the cap we return `None` — a rewrite
+                // failure — matching SQLite's "malformed JSON" past
+                // SQLITE_MAX_JSON_DEPTH.
+                if self.depth >= MAX_JSON5_DEPTH {
+                    return None;
+                }
+                self.depth += 1;
+                let r = if self.peek() == Some('{') {
+                    self.rewrite_object()
+                } else {
+                    self.rewrite_array()
+                };
+                self.depth -= 1;
+                r
+            }
             '"' | '\'' => self.rewrite_string(),
             _ => self.rewrite_scalar(),
         }
@@ -1965,7 +1995,7 @@ impl Parser<'_> {
 /// scanner to reject malformed numerics such as `-01`.
 fn is_valid_relaxed_number(token: &str) -> bool {
     let chars: Vec<char> = token.chars().collect();
-    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::new() };
+    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::new(), depth: 0 };
     w.rewrite_number().is_some() && w.i == chars.len()
 }
 
@@ -2032,6 +2062,88 @@ mod tests {
         let result = json(&[SqlValue::Varchar(input.into())]).unwrap();
         // serde_json preserves key order in minified output
         assert_eq!(result, SqlValue::Varchar(r#"{"a":{"b":[1,2,3]},"c":"test"}"#.into()));
+    }
+
+    /// Deeply-nested input must not overflow the stack. The `Json5Rewriter`
+    /// recurses once per nesting level (`rewrite_value` → `rewrite_object`/
+    /// `rewrite_array` → `rewrite_value`); without the [`MAX_JSON5_DEPTH`] guard a
+    /// ~20k-deep document SIGABRTs the whole process on a small worker-thread
+    /// stack (a Rust stack overflow is not catchable). The guard turns that into a
+    /// clean rewrite failure (`None` / "malformed JSON"), matching SQLite's
+    /// behavior past `SQLITE_MAX_JSON_DEPTH` where `json()` reports "malformed
+    /// JSON" and `json_valid` returns 0.
+    ///
+    /// The trailing comma forces the input off the strict `serde_json` fast path
+    /// (which caps recursion at 128 on its own) and through the JSON5 rewriter,
+    /// exercising exactly the recursion the guard protects.
+    #[test]
+    fn test_json5_deep_nesting_does_not_overflow_stack() {
+        // Run on a small (512 KiB) stack so an unbounded rewriter would reliably
+        // overflow — proving the guard, not just a generous main-thread stack, is
+        // what keeps this bounded.
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let depth = 20_000usize;
+                let mut s = String::with_capacity(depth * 2 + 2);
+                for _ in 0..depth {
+                    s.push('[');
+                }
+                s.push_str("1,"); // trailing comma routes through the JSON5 rewriter
+                for _ in 0..depth {
+                    s.push(']');
+                }
+
+                // The rewriter must bail with None rather than recursing to a crash.
+                assert!(
+                    json5_to_json(&s).is_none(),
+                    "deep JSON5 rewrite should fail cleanly, not overflow the stack"
+                );
+
+                // Public surface: json_valid(<deep>, 2) must return 0, and json()
+                // must report malformed JSON — never abort the process.
+                let deep = SqlValue::Varchar(s.clone().into());
+                assert_eq!(
+                    json_valid(&[deep.clone(), SqlValue::Integer(2)]).unwrap(),
+                    SqlValue::Integer(0),
+                    "json_valid(<deep>, 2) should be 0"
+                );
+                assert!(
+                    json(&[deep]).is_err(),
+                    "json(<deep>) should error (malformed JSON), not crash"
+                );
+            })
+            .expect("spawn small-stack test thread");
+        handle.join().expect("deep-nesting test thread must not abort/panic");
+    }
+
+    /// The depth guard rejects exactly at [`MAX_JSON5_DEPTH`]: a document nested to
+    /// the cap rewrites, one level deeper fails. (Uses the trailing-comma JSON5
+    /// path; the strict `serde_json` path independently caps at 128.)
+    #[test]
+    fn test_json5_depth_cap_boundary() {
+        let build = |depth: usize| {
+            let mut s = String::with_capacity(depth * 2 + 2);
+            for _ in 0..depth {
+                s.push('[');
+            }
+            s.push_str("1,");
+            for _ in 0..depth {
+                s.push(']');
+            }
+            s
+        };
+        // At the cap: the outermost container is depth 1, the innermost is depth
+        // MAX_JSON5_DEPTH — accepted.
+        assert!(
+            json5_to_json(&build(MAX_JSON5_DEPTH)).is_some(),
+            "nesting to exactly MAX_JSON5_DEPTH should rewrite"
+        );
+        // One past the cap: rejected.
+        assert!(
+            json5_to_json(&build(MAX_JSON5_DEPTH + 1)).is_none(),
+            "nesting past MAX_JSON5_DEPTH should fail the rewrite"
+        );
     }
 
     /// Leading-zero numbers are malformed under both JSON and SQLite's JSON5
