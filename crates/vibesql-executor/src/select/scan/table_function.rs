@@ -185,7 +185,7 @@ pub(crate) fn execute_table_function(
 }
 
 /// Build the derived-table schema (8 fixed columns, optionally renamed).
-fn build_schema(
+pub(crate) fn build_schema(
     name: &str,
     alias: Option<&String>,
     column_aliases: Option<&Vec<String>>,
