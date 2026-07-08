@@ -182,6 +182,20 @@ pub(super) fn eval_scalar_function(
         "JSON_EXTRACT" => sqlite_compat::json_extract(args),
         "JSON_TYPE" => sqlite_compat::json_type(args),
         "JSON_QUOTE" => sqlite_compat::json_quote(args),
+        "JSON_ARRAY_LENGTH" => sqlite_compat::json_array_length(args),
+        "JSON_REMOVE" => sqlite_compat::json_remove(args),
+        "JSON_PATCH" => sqlite_compat::json_patch(args),
+        "JSON_ERROR_POSITION" => sqlite_compat::json_error_position(args),
+        // The subtype-aware construction/mutation functions (JSON_ARRAY,
+        // JSON_OBJECT, JSON_INSERT, JSON_REPLACE, JSON_SET) are dispatched
+        // earlier in special.rs, where per-argument JSON-subtype flags are
+        // available from the AST. Reaching them here (no subtype info) still
+        // produces correct output for the common no-embedding case.
+        "JSON_ARRAY" => sqlite_compat::json_array(args, &[]),
+        "JSON_OBJECT" => sqlite_compat::json_object(args, &[]),
+        "JSON_INSERT" => sqlite_compat::json_insert(args, &[]),
+        "JSON_REPLACE" => sqlite_compat::json_replace(args, &[]),
+        "JSON_SET" => sqlite_compat::json_set(args, &[]),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),

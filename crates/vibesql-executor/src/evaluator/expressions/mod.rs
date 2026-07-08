@@ -12,5 +12,5 @@ pub(crate) mod eval;
 pub(crate) mod fulltext;
 pub(crate) mod operators;
 mod predicates;
-mod special;
+pub(crate) mod special;
 mod subqueries;

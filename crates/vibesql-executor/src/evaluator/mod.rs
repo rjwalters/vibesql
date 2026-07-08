@@ -12,7 +12,7 @@ pub(crate) mod compiled_pivot;
 mod core;
 pub mod date_format;
 pub(crate) mod expression_hash;
-mod expressions;
+pub(crate) mod expressions;
 pub(crate) mod functions;
 pub(crate) mod operators;
 #[cfg(feature = "parallel")]

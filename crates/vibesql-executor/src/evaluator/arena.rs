@@ -113,6 +113,28 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         self.interner.resolve(symbol)
     }
 
+    /// Does this arena expression carry SQLite's JSON subtype? True when it is a
+    /// direct call to a JSON function whose output is always well-formed JSON
+    /// (see `special.rs::expr_has_json_subtype` and the module note in
+    /// `json_funcs.rs`). Such results embed as JSON sub-documents.
+    fn arena_expr_has_json_subtype(&self, expr: &ArenaExpression<'arena>) -> bool {
+        if let ArenaExpression::Extended(ArenaExtendedExpr::Function { name, .. }) = expr {
+            matches!(
+                self.resolve(*name).to_ascii_lowercase().as_str(),
+                "json"
+                    | "json_array"
+                    | "json_object"
+                    | "json_insert"
+                    | "json_replace"
+                    | "json_set"
+                    | "json_remove"
+                    | "json_patch"
+            )
+        } else {
+            false
+        }
+    }
+
     /// Evaluate an arena-allocated expression against a row.
     ///
     /// # Arguments
@@ -351,16 +373,43 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         match ext {
             // Function call
             ArenaExtendedExpr::Function { name, args, character_unit } => {
-                let evaluated_args: Result<Vec<SqlValue>, _> =
-                    args.iter().map(|arg| self.eval_with_depth(arg, row)).collect();
+                let evaluated_args = args
+                    .iter()
+                    .map(|arg| self.eval_with_depth(arg, row))
+                    .collect::<Result<Vec<SqlValue>, _>>()?;
+                let name_str = self.resolve(*name);
+
+                // JSON construction/mutation functions honor the JSON subtype:
+                // an argument that is itself a JSON-producing function call must
+                // embed as a sub-document rather than a quoted string. Compute
+                // those per-argument flags from the arena AST and route to the
+                // subtype-aware implementations. (Mirrors special.rs for the
+                // non-arena evaluator.)
+                let upper = name_str.to_uppercase();
+                if matches!(
+                    upper.as_str(),
+                    "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET"
+                ) {
+                    let subtypes: Vec<bool> =
+                        args.iter().map(|a| self.arena_expr_has_json_subtype(a)).collect();
+                    use super::functions::sqlite_compat::json_funcs;
+                    return match upper.as_str() {
+                        "JSON_ARRAY" => json_funcs::json_array(&evaluated_args, &subtypes),
+                        "JSON_OBJECT" => json_funcs::json_object(&evaluated_args, &subtypes),
+                        "JSON_INSERT" => json_funcs::json_insert(&evaluated_args, &subtypes),
+                        "JSON_REPLACE" => json_funcs::json_replace(&evaluated_args, &subtypes),
+                        "JSON_SET" => json_funcs::json_set(&evaluated_args, &subtypes),
+                        _ => unreachable!(),
+                    };
+                }
+
                 let char_unit = character_unit.as_ref().map(|cu| match cu {
                     arena_ast::CharacterUnit::Characters => vibesql_ast::CharacterUnit::Characters,
                     arena_ast::CharacterUnit::Octets => vibesql_ast::CharacterUnit::Octets,
                 });
-                let name_str = self.resolve(*name);
                 super::functions::eval_scalar_function(
                     name_str,
-                    &evaluated_args?,
+                    &evaluated_args,
                     &char_unit,
                     &self.sql_mode,
                     super::SchemaExprContext::None,

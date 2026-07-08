@@ -31,7 +31,11 @@ pub(super) use conditional_funcs::ifnull;
 // Re-export conditional functions
 pub(super) use conditional_funcs::iif;
 // Re-export JSON functions
-pub(super) use json_funcs::{json, json_extract, json_quote, json_type, json_valid};
+pub(super) use json_funcs::{
+    json, json_array, json_array_length, json_error_position, json_extract, json_insert,
+    json_object, json_patch, json_quote, json_remove, json_replace, json_set, json_type,
+    json_valid,
+};
 // Re-export math/hint functions
 pub(super) use math_funcs::likelihood;
 pub(super) use math_funcs::{likely, random, unlikely};
