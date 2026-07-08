@@ -503,6 +503,86 @@ fn test_create_index_mixed_expression_no_parens_and_columns() {
     }
 }
 
+// Multi-char operators (||, <<, <=, !=, etc.) in an index column expression
+// must be detected so the column identifier is re-parsed as an expression rather
+// than choking on the trailing operator token (issue #5841). Ground truth:
+// sqlite3 3.51 accepts all of `CREATE INDEX i ON t(z||abc)`, `t(a<<2)`,
+// `t(a<=2)`, `t(a!=2)`.
+#[test]
+fn test_create_index_expression_concat_operator() {
+    let sql = "CREATE INDEX idx ON t(z||abc)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_concat_string_literal() {
+    // z||'abc' — right operand is a string literal
+    let sql = "CREATE INDEX idx ON t(z||'abc')";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 1);
+            assert!(stmt.columns[0].is_expression());
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_expression_multichar_operators() {
+    // Each of these leads with a bare column identifier followed by a multi-char
+    // operator token (Token::Operator), which previously was not detected as an
+    // expression and produced `near "<op>": syntax error`.
+    for sql in [
+        "CREATE INDEX idx ON t(a<<2)",
+        "CREATE INDEX idx ON t(a>>2)",
+        "CREATE INDEX idx ON t(a<=2)",
+        "CREATE INDEX idx ON t(a>=2)",
+        "CREATE INDEX idx ON t(a!=2)",
+        "CREATE INDEX idx ON t(a<>2)",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "Failed to parse `{sql}`: {:?}", result.err());
+        match result.unwrap() {
+            Statement::CreateIndex(stmt) => {
+                assert_eq!(stmt.columns.len(), 1, "for `{sql}`");
+                assert!(stmt.columns[0].is_expression(), "for `{sql}`");
+            }
+            other => panic!("Expected CreateIndex for `{sql}`, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_create_index_concat_expression_mixed_with_columns() {
+    // z||w expression followed by a plain DESC column must both parse.
+    let sql = "CREATE INDEX idx ON t(a||b, c DESC)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 2);
+            assert!(stmt.columns[0].is_expression());
+            assert!(!stmt.columns[1].is_expression());
+            assert_eq!(stmt.columns[1].expect_column_name(), "c");
+            assert_eq!(stmt.columns[1].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
 #[test]
 fn test_create_index_prefix_length_still_works() {
     // Ensure prefix length syntax still works: column_name(integer)
