@@ -290,7 +290,8 @@ pub fn evaluate_predicate_i64_simd(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Int64".to_string(),
@@ -454,7 +455,8 @@ pub fn evaluate_predicate_timestamp_simd(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Timestamp".to_string(),
@@ -605,7 +607,8 @@ pub fn evaluate_predicate_i32_simd(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Date".to_string(),
@@ -812,7 +815,8 @@ pub fn evaluate_predicate_f64_simd(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Float64".to_string(),
@@ -1115,7 +1119,8 @@ pub fn evaluate_predicate_i64_packed(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Int64".to_string(),
@@ -1252,7 +1257,8 @@ pub fn evaluate_predicate_i32_packed(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Date".to_string(),
@@ -1457,7 +1463,8 @@ pub fn evaluate_predicate_f64_packed(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "Float64".to_string(),

@@ -531,3 +531,97 @@ pub fn evaluate_expression_with_cached_column(
     // Multiply cached_column * expr_result (most common CSE pattern)
     apply_binary_op_to_columns(cached_col, &expr_col, &vibesql_ast::BinaryOperator::Multiply)
 }
+
+/// Materialize a resolved [`DerivedExpr`] arithmetic tree into a `ColumnArray`
+/// with *row-path-exact* semantics (issue #5994).
+///
+/// Unlike [`evaluate_expression_to_column`], which uses the batch's plain SIMD
+/// arithmetic (fast, but diverges from the row path on i64 overflow and other
+/// edge cases), this helper evaluates every element through the row-path
+/// arithmetic evaluator via `DerivedExpr::evaluate_row`. The result is a
+/// `ColumnArray::Mixed` whose values are byte-identical to what the
+/// row-at-a-time evaluator would produce (overflow -> Double fallback,
+/// division-by-zero -> NULL, NULL propagation, etc.).
+///
+/// This is the shared "materialize a derived column" building block used by
+/// the columnar filter path (computed-column WHERE predicates) and is designed
+/// to be reused by the GROUP BY expression path (issue #5995): the caller can
+/// materialize a derived grouping/aggregation column here and then feed it back
+/// into the batch as an ordinary column. It lives in this module (rather than
+/// inside `filter`) so it is visible to both consumers.
+///
+/// # Arguments
+///
+/// * `batch` - The `ColumnarBatch` whose columns the expression references (by index)
+/// * `expr` - The resolved arithmetic tree (column indices, not names)
+///
+/// # Returns
+///
+/// A `ColumnArray::Mixed` of length `batch.row_count()` holding the computed
+/// values (NULLs stored inline as `SqlValue::Null`).
+// Exposed as the shared "materialize a derived column" building block for the
+// GROUP BY expression path (issue #5995), which does not exist yet -- hence
+// `dead_code`. It is exercised by unit tests in this module.
+#[allow(dead_code)]
+pub fn materialize_derived_column(
+    batch: &ColumnarBatch,
+    expr: &crate::select::columnar::filter::DerivedExpr,
+) -> Result<ColumnArray, ExecutorError> {
+    let row_count = batch.row_count();
+    let mut values = Vec::with_capacity(row_count);
+    for row_idx in 0..row_count {
+        let mut fetch_err: Option<ExecutorError> = None;
+        let derived = {
+            let mut fetch = |col_idx: usize| -> Option<SqlValue> {
+                match batch.get_value(row_idx, col_idx) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        fetch_err = Some(e);
+                        None
+                    }
+                }
+            };
+            expr.evaluate_row(&mut fetch)
+        };
+        if let Some(e) = fetch_err {
+            return Err(e);
+        }
+        values.push(derived?);
+    }
+    Ok(ColumnArray::Mixed(Arc::new(values)))
+}
+
+#[cfg(test)]
+mod materialize_tests {
+    use vibesql_storage::Row;
+
+    use super::*;
+    use crate::select::columnar::filter::DerivedExpr;
+
+    /// `materialize_derived_column` produces row-path-exact values (including
+    /// NULL propagation) as a Mixed column (issue #5994 / #5995 shared helper).
+    #[test]
+    fn test_materialize_derived_column_parity() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(6), SqlValue::Integer(7)]),
+            Row::new(vec![SqlValue::Integer(2), SqlValue::Null]),
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(4)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let expr = DerivedExpr::BinaryOp {
+            left: Box::new(DerivedExpr::Column(0)),
+            op: vibesql_ast::BinaryOperator::Multiply,
+            right: Box::new(DerivedExpr::Column(1)),
+        };
+        let col = materialize_derived_column(&batch, &expr).unwrap();
+        match col {
+            ColumnArray::Mixed(vals) => {
+                assert_eq!(vals[0], SqlValue::Integer(42));
+                assert_eq!(vals[1], SqlValue::Null);
+                assert_eq!(vals[2], SqlValue::Integer(12));
+            }
+            other => panic!("expected Mixed column, got {other:?}"),
+        }
+    }
+}

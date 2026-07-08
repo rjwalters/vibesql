@@ -65,7 +65,55 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         // Null tests carry no literal; they are evaluated from the null bitmap
         // and must NOT be short-circuited to an all-false mask.
         ColumnPredicate::IsNull { .. } | ColumnPredicate::IsNotNull { .. } => false,
+        // Computed-column comparison handles NULL propagation per-row (a NULL
+        // derived value is non-matching); a NULL constant is caught below.
+        // Do NOT short-circuit the whole predicate to all-false here.
+        ColumnPredicate::ComputedCompare { value, .. } => matches!(value, SqlValue::Null),
     }
+}
+
+/// Evaluate a computed-column comparison over rows `[start, end)` of the batch
+/// (issue #5994). Materializes the derived arithmetic value per row via the
+/// row-path evaluator (`DerivedExpr::evaluate_row`), then compares it against
+/// the constant with the shared value-comparison semantics. A NULL derived
+/// value (from NULL/absent inputs) is non-matching, matching the row path.
+fn evaluate_computed_compare_range(
+    batch: &ColumnarBatch,
+    expr: &super::filter::DerivedExpr,
+    op: CompareOp,
+    value: &SqlValue,
+    start: usize,
+    end: usize,
+) -> Result<Vec<bool>, ExecutorError> {
+    use super::filter::evaluate_computed_compare_value;
+
+    let mut result = Vec::with_capacity(end - start);
+    for row_idx in start..end {
+        // Fetch resolves NULL/absent to SqlValue::Null so arithmetic
+        // propagates NULL; propagate real errors (e.g. missing column).
+        let mut fetch_err: Option<ExecutorError> = None;
+        let derived = {
+            let mut fetch = |col_idx: usize| -> Option<SqlValue> {
+                match batch.get_value(row_idx, col_idx) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        fetch_err = Some(e);
+                        None
+                    }
+                }
+            };
+            expr.evaluate_row(&mut fetch)
+        };
+        if let Some(e) = fetch_err {
+            return Err(e);
+        }
+        let passes = match derived {
+            Ok(d) => evaluate_computed_compare_value(&d, op, value),
+            Err(_) => false,
+        };
+        result.push(passes);
+    }
+    Ok(result)
 }
 
 /// If `predicate` is a null test (`IS NULL` / `IS NOT NULL`), evaluate it
@@ -415,6 +463,11 @@ fn evaluate_predicate_for_range(
         );
     }
 
+    // Handle computed-column comparison (issue #5994).
+    if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+        return evaluate_computed_compare_range(batch, expr, *op, value, start, end);
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -427,7 +480,8 @@ fn evaluate_predicate_for_range(
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => unreachable!(),
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => unreachable!(),
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -686,6 +740,13 @@ fn evaluate_predicate_simd_packed(
         return Ok(PackedMask::from_bool_slice(&bool_mask));
     }
 
+    // Handle computed-column comparison (issue #5994).
+    if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+        let bool_mask =
+            evaluate_computed_compare_range(batch, expr, *op, value, 0, batch.row_count())?;
+        return Ok(PackedMask::from_bool_slice(&bool_mask));
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -698,7 +759,8 @@ fn evaluate_predicate_simd_packed(
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => unreachable!(), // Handled above
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -760,6 +822,11 @@ fn evaluate_predicate_simd(
         return evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx);
     }
 
+    // Handle computed-column comparison (issue #5994).
+    if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+        return evaluate_computed_compare_range(batch, expr, *op, value, 0, batch.row_count());
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -772,7 +839,8 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => unreachable!(), // Handled above
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
