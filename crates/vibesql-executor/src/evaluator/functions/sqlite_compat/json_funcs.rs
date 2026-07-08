@@ -410,6 +410,8 @@ pub(crate) fn json_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
             .map(|segs| navigate(&value, segs).cloned().unwrap_or(serde_json::Value::Null))
             .collect();
         let arr = serde_json::Value::Array(elems);
+        // Multi-path extract echoes the source number tokens (e.g. `1e99`),
+        // so it uses serde's default formatter rather than the SQLite one.
         Ok(SqlValue::Varchar(serde_json::to_string(&arr).unwrap_or_default().into()))
     }
 }
@@ -574,6 +576,791 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         _ => Err(ExecutorError::SqliteCompatError(
             "JSON functions require string arguments".to_string(),
         )),
+    }
+}
+
+// ===========================================================================
+// Phase 2: construction and mutation functions
+// ===========================================================================
+//
+// ## The JSON subtype
+//
+// SQLite tags values produced by JSON functions (json(), json_array(),
+// json_object(), the mutation functions, etc.) with an internal *JSON subtype*.
+// When such a value is fed as an argument to another JSON function, the callee
+// embeds it as a JSON sub-document rather than quoting it as a string literal.
+// For example `json_object('ex', json('[52,3.14159]'))` yields
+// `{"ex":[52,3.14159]}` (embedded), whereas `json_object('ex', '[52,3.14159]')`
+// yields `{"ex":"[52,3.14159]"}` (quoted).
+//
+// VibeSQL evaluates arguments to plain [`SqlValue`]s before dispatch, so the
+// subtype cannot live on the value. Instead the evaluator computes, at the AST
+// call site, a per-argument boolean: it is `true` when the argument expression
+// is itself a call to a JSON function whose output is *always* well-formed JSON
+// (json, json_array, json_object, json_insert, json_replace, json_set,
+// json_remove, json_patch). These flags are threaded in as the `subtypes` slice
+// alongside `args`. When a subtype flag is set on a TEXT argument, that text is
+// parsed and embedded as a JSON sub-document; otherwise the SQL value is encoded
+// as a fresh JSON scalar (text -> JSON string, number -> JSON number, etc.).
+//
+// This mirrors SQLite for every case the mutation/construction functions need.
+// The one behavior it does not reproduce is the *conditional* subtype of
+// json_extract()/json_quote()/`->` (whose results are JSON only for container
+// nodes); those producers are deliberately not flagged, matching plain-text
+// embedding, which is what the covered conformance tests expect.
+
+/// Encode a single SQL argument as a JSON node for a construction/mutation
+/// function. `is_json` is the argument's subtype flag (see the module note): a
+/// TEXT value with the flag set is parsed as an embedded JSON sub-document.
+fn sql_value_to_json_node(
+    value: &SqlValue,
+    is_json: bool,
+) -> Result<serde_json::Value, ExecutorError> {
+    Ok(match value {
+        SqlValue::Null => serde_json::Value::Null,
+        // SQLite encodes SQL booleans as JSON integers 1/0 (json_array(true)
+        // -> [1]), matching json_quote()'s rendering.
+        SqlValue::Boolean(b) => serde_json::Value::Number(if *b { 1 } else { 0 }.into()),
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => {
+            serde_json::Value::Number((*i).into())
+        }
+        SqlValue::Smallint(i) => serde_json::Value::Number((*i as i64).into()),
+        SqlValue::Unsigned(u) => serde_json::Value::Number((*u).into()),
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => json_number_node(*f),
+        SqlValue::Float(f) => json_number_node(*f as f64),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            if is_json {
+                // Subtype-flagged text is an embedded JSON sub-document.
+                parse_json_relaxed(s.as_str()).map_err(|_| {
+                    ExecutorError::SqliteCompatError("malformed JSON".to_string())
+                })?
+            } else {
+                serde_json::Value::String(s.as_str().to_string())
+            }
+        }
+        SqlValue::Blob(_) => {
+            return Err(ExecutorError::SqliteCompatError(
+                "JSON cannot hold BLOB values".to_string(),
+            ));
+        }
+        other => serde_json::Value::String(sql_value_scalar_text(other)),
+    })
+}
+
+/// Build a JSON number node from a SQL real argument, rendering it the way
+/// SQLite renders JSON reals (keeps ".0", uses `1.0e+99`-style scientific form).
+///
+/// We rely on `arbitrary_precision`: the node stores the exact SQLite-formatted
+/// token, so `serde_json::to_string` reproduces it verbatim. Non-finite values
+/// (which SQLite rejects, and which the covered surface never produces here)
+/// fall back to a JSON null.
+fn json_number_node(f: f64) -> serde_json::Value {
+    if !f.is_finite() {
+        return serde_json::Value::Null;
+    }
+    // SqlValue::Real's Display is SQLite's JSON real format.
+    let token = SqlValue::Real(f).to_string();
+    match serde_json::from_str::<serde_json::Value>(&token) {
+        Ok(v @ serde_json::Value::Number(_)) => v,
+        _ => serde_json::Value::Null,
+    }
+}
+
+/// Parse the JSON document argument shared by the mutation functions. Returns
+/// `Ok(None)` when the argument is SQL NULL (functions propagate NULL), or an
+/// error on malformed JSON / non-text input.
+fn parse_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, ExecutorError> {
+    match value {
+        SqlValue::Null => Ok(None),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => parse_json_relaxed(s.as_str())
+            .map(Some)
+            .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string())),
+        // Numeric / boolean documents are treated as their JSON scalar form.
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => {
+            Ok(Some(serde_json::Value::Number((*i).into())))
+        }
+        SqlValue::Smallint(i) => Ok(Some(serde_json::Value::Number((*i as i64).into()))),
+        SqlValue::Unsigned(u) => Ok(Some(serde_json::Value::Number((*u).into()))),
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+            Ok(Some(json_number_node(*f)))
+        }
+        SqlValue::Float(f) => Ok(Some(json_number_node(*f as f64))),
+        SqlValue::Boolean(b) => Ok(Some(serde_json::Value::Bool(*b))),
+        _ => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
+    }
+}
+
+/// Fetch the subtype flag for the argument at `idx`, defaulting to `false` when
+/// the caller passed no (or a shorter) subtype slice.
+fn subtype_at(subtypes: &[bool], idx: usize) -> bool {
+    subtypes.get(idx).copied().unwrap_or(false)
+}
+
+/// json_array(V1, V2, ...) - build a JSON array from the argument values.
+pub(crate) fn json_array(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    let mut elems = Vec::with_capacity(args.len());
+    for (i, a) in args.iter().enumerate() {
+        elems.push(sql_value_to_json_node(a, subtype_at(subtypes, i))?);
+    }
+    let arr = serde_json::Value::Array(elems);
+    Ok(SqlValue::Varchar(serde_json::to_string(&arr).unwrap_or_default().into()))
+}
+
+/// json_object(L1, V1, L2, V2, ...) - build a JSON object.
+///
+/// Requires an even number of arguments; labels must be TEXT. Duplicate labels
+/// keep the last value (matching SQLite's object builder).
+pub(crate) fn json_object(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    if !args.len().is_multiple_of(2) {
+        return Err(ExecutorError::SqliteCompatError(
+            "json_object() requires an even number of arguments".to_string(),
+        ));
+    }
+
+    // serde_json::Map preserves insertion order (feature "preserve_order").
+    let mut map = serde_json::Map::new();
+    let mut i = 0;
+    while i < args.len() {
+        let label = match &args[i] {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str().to_string(),
+            _ => {
+                return Err(ExecutorError::SqliteCompatError(
+                    "json_object() labels must be TEXT".to_string(),
+                ));
+            }
+        };
+        let node = sql_value_to_json_node(&args[i + 1], subtype_at(subtypes, i + 1))?;
+        map.insert(label, node);
+        i += 2;
+    }
+
+    let obj = serde_json::Value::Object(map);
+    Ok(SqlValue::Varchar(serde_json::to_string(&obj).unwrap_or_default().into()))
+}
+
+/// json_array_length(X) / json_array_length(X, P) - number of elements in the
+/// array at the root (or at path P). Non-arrays return 0; NULL document or NULL
+/// path returns NULL; malformed JSON is an error.
+pub(crate) fn json_array_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.is_empty() || args.len() > 2 {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "json_array_length".to_string(),
+        });
+    }
+
+    let json_str = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        _ => {
+            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
+        }
+    };
+
+    let value = parse_json_relaxed(json_str)
+        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
+
+    let node = if args.len() == 2 {
+        match &args[1] {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                let segs = parse_sqlite_json_path(s.as_str())
+                    .map_err(ExecutorError::SqliteCompatError)?;
+                match navigate(&value, &segs) {
+                    Some(n) => n,
+                    None => return Ok(SqlValue::Null),
+                }
+            }
+            other => {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "bad JSON path: '{}'",
+                    sql_value_scalar_text(other)
+                )));
+            }
+        }
+    } else {
+        &value
+    };
+
+    let len = match node {
+        serde_json::Value::Array(arr) => arr.len() as i64,
+        _ => 0,
+    };
+    Ok(SqlValue::Integer(len))
+}
+
+/// The kind of edit a mutation function performs at a path.
+#[derive(Clone, Copy, PartialEq)]
+enum EditMode {
+    /// json_insert: only create when the target does not already exist.
+    Insert,
+    /// json_replace: only overwrite when the target already exists.
+    Replace,
+    /// json_set: create or overwrite (upsert).
+    Set,
+}
+
+/// Apply a single edit of the given `mode` at `segments` within `root`,
+/// installing `new_value`. Missing intermediate containers are created (for the
+/// Insert/Set modes) exactly as SQLite does.
+fn apply_edit(
+    root: &mut serde_json::Value,
+    segments: &[PathSegment],
+    new_value: serde_json::Value,
+    mode: EditMode,
+) {
+    if segments.is_empty() {
+        // A bare "$" replaces the whole document for replace/set; insert is a
+        // no-op because the root always exists.
+        if mode != EditMode::Insert {
+            *root = new_value;
+        }
+        return;
+    }
+
+    let (seg, rest) = (&segments[0], &segments[1..]);
+
+    if rest.is_empty() {
+        apply_leaf_edit(root, seg, new_value, mode);
+        return;
+    }
+
+    // Descend, creating an intermediate container when absent (only meaningful
+    // for insert/set; for replace a missing parent means the whole edit is a
+    // no-op).
+    match seg {
+        PathSegment::Key(k) => {
+            if !root.is_object() {
+                return;
+            }
+            let obj = root.as_object_mut().unwrap();
+            if !obj.contains_key(k) {
+                if mode == EditMode::Replace {
+                    return;
+                }
+                obj.insert(k.clone(), serde_json::Value::Object(serde_json::Map::new()));
+            }
+            if let Some(child) = obj.get_mut(k) {
+                apply_edit(child, rest, new_value, mode);
+            }
+        }
+        PathSegment::Index(n) => {
+            if let Some(arr) = root.as_array_mut() {
+                if let Some(child) = arr.get_mut(*n) {
+                    apply_edit(child, rest, new_value, mode);
+                }
+            }
+        }
+        PathSegment::IndexFromEnd(n) => {
+            if let Some(arr) = root.as_array_mut() {
+                let len = arr.len();
+                if *n >= 1 && *n <= len {
+                    let idx = len - *n;
+                    apply_edit(&mut arr[idx], rest, new_value, mode);
+                }
+            }
+        }
+    }
+}
+
+/// Apply the terminal edit (the last path segment) to `parent`.
+fn apply_leaf_edit(
+    parent: &mut serde_json::Value,
+    seg: &PathSegment,
+    new_value: serde_json::Value,
+    mode: EditMode,
+) {
+    match seg {
+        PathSegment::Key(k) => {
+            if let Some(obj) = parent.as_object_mut() {
+                let exists = obj.contains_key(k);
+                let allow = match mode {
+                    EditMode::Insert => !exists,
+                    EditMode::Replace => exists,
+                    EditMode::Set => true,
+                };
+                if allow {
+                    obj.insert(k.clone(), new_value);
+                }
+            }
+        }
+        PathSegment::Index(n) => {
+            if let Some(arr) = parent.as_array_mut() {
+                let exists = *n < arr.len();
+                match mode {
+                    EditMode::Insert => {} // existing index: no-op; SQLite does not extend here
+                    EditMode::Replace => {
+                        if exists {
+                            arr[*n] = new_value;
+                        }
+                    }
+                    EditMode::Set => {
+                        if exists {
+                            arr[*n] = new_value;
+                        }
+                    }
+                }
+            }
+        }
+        PathSegment::IndexFromEnd(n) => {
+            if let Some(arr) = parent.as_array_mut() {
+                if *n == 0 {
+                    // `$[#]` - the append slot. Insert/Set append a new element.
+                    if mode != EditMode::Replace {
+                        arr.push(new_value);
+                    }
+                } else {
+                    let len = arr.len();
+                    if *n <= len {
+                        let idx = len - *n;
+                        let allow = match mode {
+                            EditMode::Insert => false, // element exists -> no-op
+                            EditMode::Replace | EditMode::Set => true,
+                        };
+                        if allow {
+                            arr[idx] = new_value;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Shared driver for json_insert / json_replace / json_set. Applies the
+/// (path, value) pairs left-to-right; each edit feeds the next.
+fn json_mutate(
+    args: &[SqlValue],
+    subtypes: &[bool],
+    mode: EditMode,
+    fn_name: &str,
+) -> Result<SqlValue, ExecutorError> {
+    // Valid arity is odd: one document argument plus (path, value) pairs.
+    if args.is_empty() || args.len().is_multiple_of(2) {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: fn_name.to_string(),
+        });
+    }
+
+    let mut doc = match parse_json_doc_arg(&args[0])? {
+        None => return Ok(SqlValue::Null),
+        Some(v) => v,
+    };
+
+    let mut i = 1;
+    while i < args.len() {
+        // NULL path -> the whole edit pair is skipped (SQLite leaves the doc
+        // unchanged for that pair).
+        match &args[i] {
+            SqlValue::Null => {
+                i += 2;
+                continue;
+            }
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                let segs = parse_sqlite_json_path(s.as_str())
+                    .map_err(ExecutorError::SqliteCompatError)?;
+                let node = sql_value_to_json_node(&args[i + 1], subtype_at(subtypes, i + 1))?;
+                apply_edit(&mut doc, &segs, node, mode);
+            }
+            other => {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "bad JSON path: '{}'",
+                    sql_value_scalar_text(other)
+                )));
+            }
+        }
+        i += 2;
+    }
+
+    Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into()))
+}
+
+/// json_insert(X, P, V, ...) - insert V at P only if P does not already exist.
+pub(crate) fn json_insert(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    json_mutate(args, subtypes, EditMode::Insert, "json_insert")
+}
+
+/// json_replace(X, P, V, ...) - replace the value at P only if P exists.
+pub(crate) fn json_replace(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    json_mutate(args, subtypes, EditMode::Replace, "json_replace")
+}
+
+/// json_set(X, P, V, ...) - insert or replace the value at P (upsert).
+pub(crate) fn json_set(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    json_mutate(args, subtypes, EditMode::Set, "json_set")
+}
+
+/// json_remove(X, P, ...) - remove the element(s) at the given path(s).
+///
+/// Paths apply left-to-right against the evolving document; a non-existent path
+/// is a no-op. A bare `$` (with no further arguments) removes the whole document
+/// -- matching SQLite, `json_remove(X)` returns X minified.
+pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.is_empty() {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "json_remove".to_string(),
+        });
+    }
+
+    let mut doc = match parse_json_doc_arg(&args[0])? {
+        None => return Ok(SqlValue::Null),
+        Some(v) => v,
+    };
+
+    for p in &args[1..] {
+        match p {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                let segs = parse_sqlite_json_path(s.as_str())
+                    .map_err(ExecutorError::SqliteCompatError)?;
+                remove_path(&mut doc, &segs);
+            }
+            other => {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "bad JSON path: '{}'",
+                    sql_value_scalar_text(other)
+                )));
+            }
+        }
+    }
+
+    Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into()))
+}
+
+/// Remove the node at `segments` from `root` if present.
+fn remove_path(root: &mut serde_json::Value, segments: &[PathSegment]) {
+    let Some((seg, rest)) = segments.split_first() else {
+        // Empty path (`$`) removing the whole document is a no-op here; SQLite
+        // returns the document unchanged.
+        return;
+    };
+
+    if rest.is_empty() {
+        match seg {
+            PathSegment::Key(k) => {
+                if let Some(obj) = root.as_object_mut() {
+                    // shift_remove preserves the order of surviving keys.
+                    obj.shift_remove(k);
+                }
+            }
+            PathSegment::Index(n) => {
+                if let Some(arr) = root.as_array_mut() {
+                    if *n < arr.len() {
+                        arr.remove(*n);
+                    }
+                }
+            }
+            PathSegment::IndexFromEnd(n) => {
+                if let Some(arr) = root.as_array_mut() {
+                    let len = arr.len();
+                    if *n >= 1 && *n <= len {
+                        arr.remove(len - *n);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    match seg {
+        PathSegment::Key(k) => {
+            if let Some(child) = root.as_object_mut().and_then(|o| o.get_mut(k)) {
+                remove_path(child, rest);
+            }
+        }
+        PathSegment::Index(n) => {
+            if let Some(child) = root.as_array_mut().and_then(|a| a.get_mut(*n)) {
+                remove_path(child, rest);
+            }
+        }
+        PathSegment::IndexFromEnd(n) => {
+            if let Some(arr) = root.as_array_mut() {
+                let len = arr.len();
+                if *n >= 1 && *n <= len {
+                    remove_path(&mut arr[len - *n], rest);
+                }
+            }
+        }
+    }
+}
+
+/// json_patch(X, Y) - apply the RFC-7396 JSON Merge Patch Y to X.
+///
+/// NULL for either argument yields NULL. Non-object patches replace the target
+/// wholesale; object patches merge recursively with `null` members deleting.
+pub(crate) fn json_patch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 2 {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "json_patch".to_string(),
+        });
+    }
+
+    let target = match parse_json_doc_arg(&args[0])? {
+        None => return Ok(SqlValue::Null),
+        Some(v) => v,
+    };
+    let patch = match parse_json_doc_arg(&args[1])? {
+        None => return Ok(SqlValue::Null),
+        Some(v) => v,
+    };
+
+    let result = merge_patch(target, patch);
+    Ok(SqlValue::Varchar(serde_json::to_string(&result).unwrap_or_default().into()))
+}
+
+/// RFC-7396 MergePatch algorithm.
+fn merge_patch(target: serde_json::Value, patch: serde_json::Value) -> serde_json::Value {
+    match patch {
+        serde_json::Value::Object(patch_map) => {
+            // If the target is not an object, RFC-7396 starts from an empty one.
+            let mut base = match target {
+                serde_json::Value::Object(m) => m,
+                _ => serde_json::Map::new(),
+            };
+            for (k, v) in patch_map {
+                if v.is_null() {
+                    // shift_remove preserves the order of the remaining keys
+                    // (plain remove is swap_remove under preserve_order).
+                    base.shift_remove(&k);
+                } else if let Some(existing) = base.get_mut(&k) {
+                    // Update an existing key in place, keeping its position.
+                    let taken = std::mem::replace(existing, serde_json::Value::Null);
+                    *existing = merge_patch(taken, v);
+                } else {
+                    // New key -> appended at the end.
+                    base.insert(k, merge_patch(serde_json::Value::Null, v));
+                }
+            }
+            serde_json::Value::Object(base)
+        }
+        // A non-object patch replaces the target entirely.
+        other => other,
+    }
+}
+
+/// json_error_position(X) - 1-based character offset of the first JSON syntax
+/// error in X, or 0 if X parses under SQLite's relaxed (JSON5) grammar.
+///
+/// A NULL argument returns NULL. The position is computed by a small relaxed
+/// scanner that matches sqlite3's reporting on the covered conformance cases
+/// (trailing commas are accepted; a stray extra comma / missing value reports
+/// the offset of the offending token).
+pub(crate) fn json_error_position(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "json_error_position".to_string(),
+        });
+    }
+
+    let s = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        // Non-text scalars are valid JSON values -> position 0.
+        _ => return Ok(SqlValue::Integer(0)),
+    };
+
+    // Accept the relaxed superset first: if it parses, there is no error.
+    if parse_json_relaxed(s).is_ok() {
+        return Ok(SqlValue::Integer(0));
+    }
+
+    Ok(SqlValue::Integer(relaxed_json_error_offset(s)))
+}
+
+/// Scan `s` under SQLite's relaxed JSON grammar and return the 1-based character
+/// offset of the first structural error (0 if none is found by the scanner).
+fn relaxed_json_error_offset(s: &str) -> i64 {
+    let chars: Vec<char> = s.chars().collect();
+    let mut p = Parser { chars: &chars, i: 0 };
+    p.skip_ws();
+    if p.i >= p.chars.len() {
+        // Empty / all-whitespace input: SQLite reports position 1.
+        return 1;
+    }
+    match p.parse_value() {
+        Ok(()) => {
+            p.skip_ws();
+            if p.i < p.chars.len() {
+                // Trailing junk after a complete value.
+                (p.i + 1) as i64
+            } else {
+                0
+            }
+        }
+        Err(pos) => (pos + 1) as i64,
+    }
+}
+
+/// Minimal recursive-descent scanner for the relaxed JSON grammar, used only to
+/// locate the first error position for json_error_position(). On error it
+/// returns the 0-based index of the offending character.
+struct Parser<'a> {
+    chars: &'a [char],
+    i: usize,
+}
+
+impl Parser<'_> {
+    fn skip_ws(&mut self) {
+        while self.i < self.chars.len() {
+            match self.chars[self.i] {
+                ' ' | '\t' | '\n' | '\r' => self.i += 1,
+                _ => break,
+            }
+        }
+    }
+
+    fn parse_value(&mut self) -> Result<(), usize> {
+        self.skip_ws();
+        if self.i >= self.chars.len() {
+            return Err(self.i);
+        }
+        match self.chars[self.i] {
+            '{' => self.parse_object(),
+            '[' => self.parse_array(),
+            '"' | '\'' => self.parse_string(),
+            _ => self.parse_bareword_or_number(),
+        }
+    }
+
+    fn parse_object(&mut self) -> Result<(), usize> {
+        self.i += 1; // consume '{'
+        self.skip_ws();
+        if self.i < self.chars.len() && self.chars[self.i] == '}' {
+            self.i += 1;
+            return Ok(());
+        }
+        loop {
+            self.skip_ws();
+            // A stray comma / missing key is an error here.
+            if self.i >= self.chars.len() || self.chars[self.i] == ',' || self.chars[self.i] == '}'
+            {
+                return Err(self.i);
+            }
+            // Key: quoted or (relaxed) bareword.
+            if self.chars[self.i] == '"' || self.chars[self.i] == '\'' {
+                self.parse_string()?;
+            } else {
+                self.parse_bareword_or_number()?;
+            }
+            self.skip_ws();
+            if self.i >= self.chars.len() || self.chars[self.i] != ':' {
+                return Err(self.i);
+            }
+            self.i += 1; // consume ':'
+            self.parse_value()?;
+            self.skip_ws();
+            if self.i >= self.chars.len() {
+                return Err(self.i);
+            }
+            match self.chars[self.i] {
+                ',' => {
+                    self.i += 1;
+                    self.skip_ws();
+                    // Relaxed trailing comma: `,}` is allowed.
+                    if self.i < self.chars.len() && self.chars[self.i] == '}' {
+                        self.i += 1;
+                        return Ok(());
+                    }
+                    // A second comma (`,,`) is an error at this position.
+                    if self.i < self.chars.len() && self.chars[self.i] == ',' {
+                        return Err(self.i);
+                    }
+                }
+                '}' => {
+                    self.i += 1;
+                    return Ok(());
+                }
+                _ => return Err(self.i),
+            }
+        }
+    }
+
+    fn parse_array(&mut self) -> Result<(), usize> {
+        self.i += 1; // consume '['
+        self.skip_ws();
+        if self.i < self.chars.len() && self.chars[self.i] == ']' {
+            self.i += 1;
+            return Ok(());
+        }
+        loop {
+            self.skip_ws();
+            if self.i >= self.chars.len() || self.chars[self.i] == ',' || self.chars[self.i] == ']'
+            {
+                return Err(self.i);
+            }
+            self.parse_value()?;
+            self.skip_ws();
+            if self.i >= self.chars.len() {
+                return Err(self.i);
+            }
+            match self.chars[self.i] {
+                ',' => {
+                    self.i += 1;
+                    self.skip_ws();
+                    // Relaxed trailing comma: `,]` is allowed.
+                    if self.i < self.chars.len() && self.chars[self.i] == ']' {
+                        self.i += 1;
+                        return Ok(());
+                    }
+                    if self.i < self.chars.len() && self.chars[self.i] == ',' {
+                        return Err(self.i);
+                    }
+                }
+                ']' => {
+                    self.i += 1;
+                    return Ok(());
+                }
+                _ => return Err(self.i),
+            }
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<(), usize> {
+        let quote = self.chars[self.i];
+        let start = self.i;
+        self.i += 1;
+        while self.i < self.chars.len() {
+            let c = self.chars[self.i];
+            if c == '\\' {
+                self.i += 2;
+                continue;
+            }
+            if c == quote {
+                self.i += 1;
+                return Ok(());
+            }
+            self.i += 1;
+        }
+        Err(start) // unterminated string
+    }
+
+    fn parse_bareword_or_number(&mut self) -> Result<(), usize> {
+        let start = self.i;
+        while self.i < self.chars.len() {
+            match self.chars[self.i] {
+                ',' | ':' | '}' | ']' | ' ' | '\t' | '\n' | '\r' => break,
+                _ => self.i += 1,
+            }
+        }
+        if self.i == start {
+            Err(start)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1052,5 +1839,277 @@ mod tests {
     fn test_arrow_malformed_errors() {
         let e = eval_json_arrow(&SqlValue::Varchar("{bad".into()), &SqlValue::Varchar("$.a".into()), false);
         assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "malformed JSON"));
+    }
+
+    // ---- Phase 2 helpers --------------------------------------------------
+
+    fn v(s: &str) -> SqlValue {
+        SqlValue::Varchar(s.into())
+    }
+    fn txt(v: SqlValue) -> String {
+        match v {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str().to_string(),
+            other => panic!("expected text, got {:?}", other),
+        }
+    }
+
+    // ---- json_array -------------------------------------------------------
+
+    #[test]
+    fn test_json_array_basic() {
+        // sqlite3: json_array(1,2,'3',4) -> [1,2,"3",4]
+        assert_eq!(
+            txt(json_array(&[SqlValue::Integer(1), SqlValue::Integer(2), v("3"), SqlValue::Integer(4)], &[]).unwrap()),
+            r#"[1,2,"3",4]"#
+        );
+        // Empty -> []
+        assert_eq!(txt(json_array(&[], &[]).unwrap()), "[]");
+        // NULL element -> json null
+        assert_eq!(
+            txt(json_array(&[SqlValue::Integer(1), SqlValue::Null, SqlValue::Integer(4)], &[]).unwrap()),
+            "[1,null,4]"
+        );
+    }
+
+    #[test]
+    fn test_json_array_subtype_embedding() {
+        // json_array(1,null,'3',json('[4,5]'),json('{"six":7.7}'))
+        // subtype flags: only the json(...) args are JSON.
+        let args = [
+            SqlValue::Integer(1),
+            SqlValue::Null,
+            v("3"),
+            v("[4,5]"),
+            v(r#"{"six":7.7}"#),
+        ];
+        let subs = [false, false, false, true, true];
+        assert_eq!(
+            txt(json_array(&args, &subs).unwrap()),
+            r#"[1,null,"3",[4,5],{"six":7.7}]"#
+        );
+        // Without the subtype flag, the same text quotes as a string.
+        assert_eq!(
+            txt(json_array(&[v("[4,5]")], &[false]).unwrap()),
+            r#"["[4,5]"]"#
+        );
+    }
+
+    #[test]
+    fn test_json_array_float_and_bool() {
+        assert_eq!(
+            txt(json_array(&[SqlValue::Real(3.14159), SqlValue::Real(2.0)], &[]).unwrap()),
+            "[3.14159,2.0]"
+        );
+        assert_eq!(
+            txt(json_array(&[SqlValue::Boolean(true), SqlValue::Boolean(false)], &[]).unwrap()),
+            "[1,0]"
+        );
+    }
+
+    #[test]
+    fn test_json_array_blob_errors() {
+        let e = json_array(&[SqlValue::Blob(vec![0x61, 0x62])], &[]);
+        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values"));
+    }
+
+    // ---- json_object ------------------------------------------------------
+
+    #[test]
+    fn test_json_object_basic_and_order() {
+        assert_eq!(
+            txt(json_object(&[v("a"), SqlValue::Integer(1), v("b"), v("x")], &[]).unwrap()),
+            r#"{"a":1,"b":"x"}"#
+        );
+        // Insertion order preserved (non-alphabetical), matching sqlite3.
+        assert_eq!(
+            txt(json_object(&[v("b"), SqlValue::Integer(1), v("a"), SqlValue::Integer(2)], &[]).unwrap()),
+            r#"{"b":1,"a":2}"#
+        );
+    }
+
+    #[test]
+    fn test_json_object_subtype_embedding() {
+        // json_object('ex', json('[52,3.14159]')) -> {"ex":[52,3.14159]}
+        assert_eq!(
+            txt(json_object(&[v("ex"), v("[52,3.14159]")], &[false, true]).unwrap()),
+            r#"{"ex":[52,3.14159]}"#
+        );
+        // Nested object embedding: json_object('a',2,'c',json_object('e',5))
+        let inner = txt(json_object(&[v("e"), SqlValue::Integer(5)], &[]).unwrap());
+        assert_eq!(
+            txt(json_object(&[v("a"), SqlValue::Integer(2), v("c"), v(&inner)], &[false, false, false, true]).unwrap()),
+            r#"{"a":2,"c":{"e":5}}"#
+        );
+    }
+
+    #[test]
+    fn test_json_object_odd_args_error() {
+        let e = json_object(&[v("a"), SqlValue::Integer(1), v("b")], &[]);
+        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m))
+            if m == "json_object() requires an even number of arguments"));
+    }
+
+    #[test]
+    fn test_json_object_non_text_label_error() {
+        let e = json_object(&[SqlValue::Integer(1), SqlValue::Integer(2)], &[]);
+        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m))
+            if m == "json_object() labels must be TEXT"));
+        let e = json_object(&[SqlValue::Null, SqlValue::Integer(2)], &[]);
+        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m))
+            if m == "json_object() labels must be TEXT"));
+    }
+
+    // ---- json_array_length ------------------------------------------------
+
+    #[test]
+    fn test_json_array_length() {
+        assert_eq!(json_array_length(&[v("[1,2,3,4]")]).unwrap(), SqlValue::Integer(4));
+        // Non-array root -> 0
+        assert_eq!(json_array_length(&[v(r#"{"one":[1,2,3]}"#)]).unwrap(), SqlValue::Integer(0));
+        // With path
+        assert_eq!(
+            json_array_length(&[v(r#"{"one":[1,2,3]}"#), v("$.one")]).unwrap(),
+            SqlValue::Integer(3)
+        );
+        // Path to non-array -> 0
+        assert_eq!(json_array_length(&[v("[1,2,3,4]"), v("$[2]")]).unwrap(), SqlValue::Integer(0));
+        // NULL doc -> NULL
+        assert_eq!(json_array_length(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+        // Malformed -> error
+        assert!(json_array_length(&[v("bad json")]).is_err());
+    }
+
+    // ---- json_set / json_insert / json_replace ----------------------------
+
+    #[test]
+    fn test_json_set() {
+        // Overwrite existing
+        assert_eq!(txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":99,"c":4}"#);
+        // Create missing
+        assert_eq!(txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4,"e":5}"#);
+        // Embed subtype value
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.c"), v("[97,96]")], &[false, false, true]).unwrap()),
+            r#"{"a":2,"c":[97,96]}"#
+        );
+        // NULL value stores json null
+        assert_eq!(txt(json_set(&[v(r#"{"a":1}"#), v("$.a"), SqlValue::Null], &[]).unwrap()), r#"{"a":null}"#);
+    }
+
+    #[test]
+    fn test_json_insert() {
+        // Existing path -> no-op
+        assert_eq!(txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":2,"c":4}"#);
+        // Missing path -> insert
+        assert_eq!(txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4,"e":5}"#);
+        // Existing array index -> no-op
+        assert_eq!(txt(json_insert(&[v("[1,2,3]"), v("$[0]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3]");
+    }
+
+    #[test]
+    fn test_json_replace() {
+        // Existing path -> replace
+        assert_eq!(txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":99,"c":4}"#);
+        // Missing path -> no-op
+        assert_eq!(txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4}"#);
+    }
+
+    #[test]
+    fn test_json_set_append_slot() {
+        // $[#] appends
+        assert_eq!(txt(json_set(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3,99]");
+        assert_eq!(txt(json_insert(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3,99]");
+        // $[#-1] targets the last element
+        assert_eq!(txt(json_set(&[v("[1,2,3]"), v("$[#-1]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,99]");
+    }
+
+    #[test]
+    fn test_json_mutate_multi_path_left_to_right() {
+        // Two paths applied in order (json_set)
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":1}"#), v("$.b"), SqlValue::Integer(2), v("$.c"), SqlValue::Integer(3)], &[]).unwrap()),
+            r#"{"a":1,"b":2,"c":3}"#
+        );
+        // Two append slots: each feeds the next (json_insert '$[#]' twice)
+        assert_eq!(
+            txt(json_insert(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(4), v("$[#]"), SqlValue::Integer(5)], &[]).unwrap()),
+            "[1,2,3,4,5]"
+        );
+    }
+
+    #[test]
+    fn test_json_set_creates_nested() {
+        assert_eq!(txt(json_set(&[v("{}"), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()), r#"{"a":{"b":1}}"#);
+        assert_eq!(txt(json_set(&[v(r#"{"a":{}}"#), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()), r#"{"a":{"b":1}}"#);
+    }
+
+    #[test]
+    fn test_json_mutate_null_doc_and_path() {
+        assert_eq!(json_set(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
+        assert_eq!(json_insert(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
+        assert_eq!(json_replace(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
+        // NULL path -> that pair is skipped, doc unchanged
+        assert_eq!(txt(json_set(&[v(r#"{"a":1}"#), SqlValue::Null, SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":1}"#);
+    }
+
+    // ---- json_remove ------------------------------------------------------
+
+    #[test]
+    fn test_json_remove() {
+        assert_eq!(txt(json_remove(&[v("[0,1,2,3,4]"), v("$[2]")]).unwrap()), "[0,1,3,4]");
+        assert_eq!(txt(json_remove(&[v(r#"{"a":1,"b":2}"#), v("$.a")]).unwrap()), r#"{"b":2}"#);
+        // Multi-path, applied left-to-right on the evolving doc: remove [2] then [0]
+        assert_eq!(txt(json_remove(&[v("[0,1,2,3,4]"), v("$[2]"), v("$[0]")]).unwrap()), "[1,3,4]");
+        // Non-existent path -> no-op
+        assert_eq!(txt(json_remove(&[v(r#"{"a":1}"#), v("$.x")]).unwrap()), r#"{"a":1}"#);
+        // No paths -> unchanged (minified)
+        assert_eq!(txt(json_remove(&[v("[0,1,2,3,4]")]).unwrap()), "[0,1,2,3,4]");
+        // NULL doc -> NULL
+        assert_eq!(json_remove(&[SqlValue::Null, v("$.a")]).unwrap(), SqlValue::Null);
+    }
+
+    // ---- json_patch -------------------------------------------------------
+
+    #[test]
+    fn test_json_patch() {
+        assert_eq!(
+            txt(json_patch(&[v(r#"{"a":1,"b":2}"#), v(r#"{"c":3,"a":null}"#)]).unwrap()),
+            r#"{"b":2,"c":3}"#
+        );
+        assert_eq!(
+            txt(json_patch(&[v(r#"{"a":[1,2],"b":2}"#), v(r#"{"a":9}"#)]).unwrap()),
+            r#"{"a":9,"b":2}"#
+        );
+        // Recursive merge with member deletion
+        assert_eq!(
+            txt(json_patch(&[v(r#"{"a":{"x":1,"y":2}}"#), v(r#"{"a":{"y":null,"z":3}}"#)]).unwrap()),
+            r#"{"a":{"x":1,"z":3}}"#
+        );
+        // Non-object patch replaces target
+        assert_eq!(txt(json_patch(&[v(r#"{"a":1}"#), v("[1,2,3]")]).unwrap()), "[1,2,3]");
+        // Object patch over non-object target starts from {}
+        assert_eq!(txt(json_patch(&[v("[1,2]"), v(r#"{"a":1}"#)]).unwrap()), r#"{"a":1}"#);
+        // NULL either side -> NULL
+        assert_eq!(json_patch(&[SqlValue::Null, v(r#"{"a":1}"#)]).unwrap(), SqlValue::Null);
+        assert_eq!(json_patch(&[v(r#"{"a":1}"#), SqlValue::Null]).unwrap(), SqlValue::Null);
+    }
+
+    // ---- json_error_position ----------------------------------------------
+
+    #[test]
+    fn test_json_error_position() {
+        // Valid -> 0
+        assert_eq!(json_error_position(&[v(r#"{"a":1}"#)]).unwrap(), SqlValue::Integer(0));
+        // Relaxed-valid (trailing comma) -> 0, matching sqlite3
+        assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72,}"#)]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72 , }"#)]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(json_error_position(&[v(r#"["a",55,"b",72,]"#)]).unwrap(), SqlValue::Integer(0));
+        // Relaxed-valid unquoted key -> 0
+        assert_eq!(json_error_position(&[v("{a:1}")]).unwrap(), SqlValue::Integer(0));
+        // Double comma -> position of the second comma (1-based)
+        assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72,,}"#)]).unwrap(), SqlValue::Integer(16));
+        assert_eq!(json_error_position(&[v(r#"["a",55,"b",72,,]"#)]).unwrap(), SqlValue::Integer(16));
+        // NULL -> NULL
+        assert_eq!(json_error_position(&[SqlValue::Null]).unwrap(), SqlValue::Null);
     }
 }

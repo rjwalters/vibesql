@@ -193,6 +193,29 @@ impl CombinedExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // JSON construction/mutation functions honoring the JSON subtype:
+            // detect JSON-producing argument expressions from the AST so nested
+            // json()/json_array()/... results embed as sub-documents rather than
+            // quoted strings. Mirrors expressions/special.rs.
+            "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET" => {
+                let mut values = Vec::with_capacity(args.len());
+                let mut subtypes = Vec::with_capacity(args.len());
+                for arg in args {
+                    values.push(self.eval(arg, row)?);
+                    subtypes.push(
+                        crate::evaluator::expressions::special::expr_has_json_subtype(arg),
+                    );
+                }
+                use super::super::functions::sqlite_compat::json_funcs;
+                return match name.to_uppercase().as_str() {
+                    "JSON_ARRAY" => json_funcs::json_array(&values, &subtypes),
+                    "JSON_OBJECT" => json_funcs::json_object(&values, &subtypes),
+                    "JSON_INSERT" => json_funcs::json_insert(&values, &subtypes),
+                    "JSON_REPLACE" => json_funcs::json_replace(&values, &subtypes),
+                    "JSON_SET" => json_funcs::json_set(&values, &subtypes),
+                    _ => unreachable!(),
+                };
+            }
             // Handle LAST_INSERT_ROWID() and LAST_INSERT_ID() - require database access
             "LAST_INSERT_ROWID" | "LAST_INSERT_ID" => {
                 if !args.is_empty() {

@@ -162,6 +162,38 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Evaluate a JSON construction/mutation function that honors the JSON
+    /// subtype (json_array, json_object, json_insert, json_replace, json_set).
+    ///
+    /// For each argument we evaluate its value and separately compute a subtype
+    /// flag: `true` when the argument expression is a direct call to a JSON
+    /// function whose output is always well-formed JSON. Subtype-flagged TEXT
+    /// arguments embed as JSON sub-documents; everything else encodes as a fresh
+    /// JSON scalar. See the module note in `json_funcs.rs`.
+    fn eval_json_subtype_function(
+        &self,
+        name: &str,
+        args: &[vibesql_ast::Expression],
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        let mut values = Vec::with_capacity(args.len());
+        let mut subtypes = Vec::with_capacity(args.len());
+        for arg in args {
+            values.push(self.eval(arg, row)?);
+            subtypes.push(expr_has_json_subtype(arg));
+        }
+
+        use super::super::functions::sqlite_compat::json_funcs;
+        match name.to_uppercase().as_str() {
+            "JSON_ARRAY" => json_funcs::json_array(&values, &subtypes),
+            "JSON_OBJECT" => json_funcs::json_object(&values, &subtypes),
+            "JSON_INSERT" => json_funcs::json_insert(&values, &subtypes),
+            "JSON_REPLACE" => json_funcs::json_replace(&values, &subtypes),
+            "JSON_SET" => json_funcs::json_set(&values, &subtypes),
+            _ => unreachable!("eval_json_subtype_function called with {name}"),
+        }
+    }
+
     /// Evaluate function call
     pub(super) fn eval_function(
         &self,
@@ -174,6 +206,14 @@ impl ExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // JSON construction/mutation functions that honor the JSON subtype:
+            // an argument that is itself a call to a JSON-producing function
+            // embeds as a sub-document rather than a quoted string. We compute
+            // those per-argument subtype flags here (from the AST) and pass them
+            // alongside the evaluated values.
+            "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET" => {
+                return self.eval_json_subtype_function(name, args, row);
+            }
             // Handle LAST_INSERT_ROWID() and LAST_INSERT_ID() - require database access
             "LAST_INSERT_ROWID" | "LAST_INSERT_ID" => {
                 if !args.is_empty() {
@@ -283,5 +323,31 @@ impl ExpressionEvaluator<'_> {
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
         eval_scalar_function(name, &arg_values, character_unit, &sql_mode, self.schema_context)
+    }
+}
+
+/// Does this expression carry SQLite's JSON subtype?
+///
+/// True when the expression is a direct call to a JSON function whose result is
+/// always well-formed JSON text (json, json_array, json_object, and the
+/// insert/replace/set/remove/patch mutation functions). Such results embed as
+/// JSON sub-documents when passed to another JSON function. Producers with a
+/// *conditional* subtype (json_extract / json_quote / `->`) are intentionally
+/// excluded — see the module note in `json_funcs.rs`.
+pub(crate) fn expr_has_json_subtype(expr: &vibesql_ast::Expression) -> bool {
+    if let vibesql_ast::Expression::Function { name, .. } = expr {
+        matches!(
+            name.canonical(),
+            "json"
+                | "json_array"
+                | "json_object"
+                | "json_insert"
+                | "json_replace"
+                | "json_set"
+                | "json_remove"
+                | "json_patch"
+        )
+    } else {
+        false
     }
 }
