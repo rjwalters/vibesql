@@ -62,7 +62,56 @@ fn predicate_contains_null(predicate: &ColumnPredicate) -> bool {
         // Column-to-column comparisons don't have literal NULLs
         // (NULL columns are handled during evaluation)
         ColumnPredicate::ColumnCompare { .. } => false,
+        // Null tests carry no literal; they are evaluated from the null bitmap
+        // and must NOT be short-circuited to an all-false mask.
+        ColumnPredicate::IsNull { .. } | ColumnPredicate::IsNotNull { .. } => false,
     }
+}
+
+/// If `predicate` is a null test (`IS NULL` / `IS NOT NULL`), evaluate it
+/// directly from the referenced column's null bitmap over `[start, end)` and
+/// return the resulting boolean mask. Returns `None` for any other predicate.
+///
+/// The mask is derived entirely from the null bitmap — no value comparison is
+/// performed. A column with no null bitmap has no NULLs, so `IS NULL` yields an
+/// all-false mask and `IS NOT NULL` an all-true mask. `Mixed` columns store
+/// NULLs inline as `SqlValue::Null` (no bitmap), so they are resolved via
+/// `get_value` to preserve correctness.
+fn evaluate_null_predicate_range(
+    batch: &ColumnarBatch,
+    predicate: &ColumnPredicate,
+    start: usize,
+    end: usize,
+) -> Result<Option<Vec<bool>>, ExecutorError> {
+    let (column_idx, want_null) = match predicate {
+        ColumnPredicate::IsNull { column_idx } => (*column_idx, true),
+        ColumnPredicate::IsNotNull { column_idx } => (*column_idx, false),
+        _ => return Ok(None),
+    };
+
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
+
+    let range_len = end - start;
+
+    if column.is_mixed() {
+        // Mixed columns keep NULLs inline; consult get_value per row.
+        let mut mask = Vec::with_capacity(range_len);
+        for row_idx in start..end {
+            let is_null = batch.get_value(row_idx, column_idx)? == SqlValue::Null;
+            mask.push(is_null == want_null);
+        }
+        return Ok(Some(mask));
+    }
+
+    let mask = match column.null_bitmap() {
+        // No null bitmap ⇒ no NULLs: IS NULL is all-false, IS NOT NULL all-true.
+        None => vec![!want_null; range_len],
+        Some(bitmap) => bitmap[start..end].iter().map(|&is_null| is_null == want_null).collect(),
+    };
+    Ok(Some(mask))
 }
 
 /// Apply SIMD-accelerated filtering to a columnar batch
@@ -349,6 +398,11 @@ fn evaluate_predicate_for_range(
     start: usize,
     end: usize,
 ) -> Result<Vec<bool>, ExecutorError> {
+    // Handle null tests directly from the null bitmap.
+    if let Some(mask) = evaluate_null_predicate_range(batch, predicate, start, end)? {
+        return Ok(mask);
+    }
+
     // Handle ColumnCompare specially
     if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
         return evaluate_column_compare_range(
@@ -371,7 +425,9 @@ fn evaluate_predicate_for_range(
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
-        ColumnPredicate::ColumnCompare { .. } => unreachable!(),
+        ColumnPredicate::ColumnCompare { .. }
+        | ColumnPredicate::IsNull { .. }
+        | ColumnPredicate::IsNotNull { .. } => unreachable!(),
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -617,6 +673,12 @@ fn evaluate_predicate_simd_packed(
         return Ok(PackedMask::new_all_clear(batch.row_count()));
     }
 
+    // Handle null tests directly from the null bitmap.
+    if let Some(bool_mask) = evaluate_null_predicate_range(batch, predicate, 0, batch.row_count())?
+    {
+        return Ok(PackedMask::from_bool_slice(&bool_mask));
+    }
+
     // Handle ColumnCompare specially - needs two columns
     if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
         let bool_mask =
@@ -634,7 +696,9 @@ fn evaluate_predicate_simd_packed(
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
-        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
+        ColumnPredicate::ColumnCompare { .. }
+        | ColumnPredicate::IsNull { .. }
+        | ColumnPredicate::IsNotNull { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -685,6 +749,12 @@ fn evaluate_predicate_simd(
         return Ok(vec![false; batch.row_count()]);
     }
 
+    // Handle null tests directly from the null bitmap.
+    if let Some(bool_mask) = evaluate_null_predicate_range(batch, predicate, 0, batch.row_count())?
+    {
+        return Ok(bool_mask);
+    }
+
     // Handle ColumnCompare specially - needs two columns
     if let ColumnPredicate::ColumnCompare { left_column_idx, op, right_column_idx } = predicate {
         return evaluate_column_compare_simd(batch, *left_column_idx, *op, *right_column_idx);
@@ -700,7 +770,9 @@ fn evaluate_predicate_simd(
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
-        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
+        ColumnPredicate::ColumnCompare { .. }
+        | ColumnPredicate::IsNull { .. }
+        | ColumnPredicate::IsNotNull { .. } => unreachable!(), // Handled above
     };
 
     let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
@@ -1597,5 +1669,166 @@ mod tests {
         }];
         let filtered = simd_filter_batch(&batch, &predicates).unwrap();
         assert_eq!(filtered.row_count(), 2); // Rows 0 and 2
+    }
+
+    // ── IS NULL / IS NOT NULL vectorized mask tests ─────────────────────────
+
+    /// Scalar reference: evaluate a null test row-by-row via `get_value`.
+    fn scalar_null_mask(batch: &ColumnarBatch, column_idx: usize, want_null: bool) -> Vec<bool> {
+        (0..batch.row_count())
+            .map(|row_idx| {
+                let is_null = batch.get_value(row_idx, column_idx).unwrap() == SqlValue::Null;
+                is_null == want_null
+            })
+            .collect()
+    }
+
+    fn assert_null_masks_match_scalar(batch: &ColumnarBatch, column_idx: usize) {
+        let is_null_pred = ColumnPredicate::IsNull { column_idx };
+        let is_not_null_pred = ColumnPredicate::IsNotNull { column_idx };
+
+        // Vectorized (non-packed), packed, and auto paths must all agree with
+        // the scalar reference over the null bitmap.
+        let vec_is_null = simd_create_filter_mask(batch, &[is_null_pred.clone()]).unwrap();
+        let vec_is_not_null = simd_create_filter_mask(batch, &[is_not_null_pred.clone()]).unwrap();
+        assert_eq!(vec_is_null, scalar_null_mask(batch, column_idx, true));
+        assert_eq!(vec_is_not_null, scalar_null_mask(batch, column_idx, false));
+
+        let packed_is_null =
+            simd_create_filter_mask_packed(batch, &[is_null_pred]).unwrap().to_bool_vec();
+        let packed_is_not_null =
+            simd_create_filter_mask_packed(batch, &[is_not_null_pred]).unwrap().to_bool_vec();
+        assert_eq!(&packed_is_null[..batch.row_count()], &vec_is_null[..]);
+        assert_eq!(&packed_is_not_null[..batch.row_count()], &vec_is_not_null[..]);
+
+        // IS NULL and IS NOT NULL must be exact complements.
+        for (a, b) in vec_is_null.iter().zip(vec_is_not_null.iter()) {
+            assert_ne!(a, b);
+        }
+    }
+
+    #[test]
+    fn test_is_null_sparse_bitmap() {
+        // First row concrete so the column infers Int64 (not Mixed), giving a
+        // dense/sparse null bitmap with a mix of null and non-null rows.
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Integer(3)]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Integer(5)]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let is_null =
+            simd_create_filter_mask(&batch, &[ColumnPredicate::IsNull { column_idx: 0 }]).unwrap();
+        assert_eq!(is_null, vec![false, true, false, true, false]);
+        assert_null_masks_match_scalar(&batch, 0);
+    }
+
+    #[test]
+    fn test_is_null_absent_bitmap() {
+        // No NULLs at all: from_rows produces a None null bitmap. IS NULL must be
+        // all-false and IS NOT NULL all-true, computed without touching values.
+        let rows: Vec<Row> = (0..8).map(|i| Row::new(vec![SqlValue::Integer(i)])).collect();
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        assert!(batch.column(0).unwrap().null_bitmap().is_none());
+
+        let is_null =
+            simd_create_filter_mask(&batch, &[ColumnPredicate::IsNull { column_idx: 0 }]).unwrap();
+        let is_not_null =
+            simd_create_filter_mask(&batch, &[ColumnPredicate::IsNotNull { column_idx: 0 }])
+                .unwrap();
+        assert_eq!(is_null, vec![false; 8]);
+        assert_eq!(is_not_null, vec![true; 8]);
+        assert_null_masks_match_scalar(&batch, 0);
+    }
+
+    #[test]
+    fn test_is_null_all_null_bitmap() {
+        // Dense (all-true) bitmap: first row concrete then all NULL forces a
+        // bitmap; use a wider column so column 0 stays Int64.
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Null]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        let is_null =
+            simd_create_filter_mask(&batch, &[ColumnPredicate::IsNull { column_idx: 0 }]).unwrap();
+        assert_eq!(is_null, vec![false, true, true]);
+        assert_null_masks_match_scalar(&batch, 0);
+    }
+
+    #[test]
+    fn test_is_null_string_column() {
+        let rows = vec![
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("a"))]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("c"))]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        assert_null_masks_match_scalar(&batch, 0);
+    }
+
+    #[test]
+    fn test_is_null_mixed_column() {
+        // Heterogeneous values force a Mixed column (no null bitmap). The mask
+        // must still be correct via the per-row get_value path.
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Varchar(arcstr::ArcStr::from("two"))]),
+            Row::new(vec![SqlValue::Null]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        assert!(batch.column(0).unwrap().is_mixed());
+        let is_null =
+            simd_create_filter_mask(&batch, &[ColumnPredicate::IsNull { column_idx: 0 }]).unwrap();
+        assert_eq!(is_null, vec![false, false, true]);
+        assert_null_masks_match_scalar(&batch, 0);
+    }
+
+    #[test]
+    fn test_is_null_compound_and_with_value_compare() {
+        // col0 IS NOT NULL AND col1 > 10 — the null-test mask must AND with the
+        // value-comparison mask (which already treats null as non-matching).
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(20)]), // notnull & 20>10 -> T
+            Row::new(vec![SqlValue::Null, SqlValue::Integer(30)]),       // null      -> F
+            Row::new(vec![SqlValue::Integer(3), SqlValue::Integer(5)]),  // notnull & 5>10  -> F
+            Row::new(vec![SqlValue::Integer(4), SqlValue::Null]),        // col1 null -> F
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+        let predicates = vec![
+            ColumnPredicate::IsNotNull { column_idx: 0 },
+            ColumnPredicate::GreaterThan { column_idx: 1, value: SqlValue::Integer(10) },
+        ];
+        let mask = simd_create_filter_mask(&batch, &predicates).unwrap();
+        assert_eq!(mask, vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn test_is_null_full_filter_roundtrip() {
+        // simd_filter_batch (packed auto path) must materialize exactly the
+        // NULL rows for IS NULL and the non-NULL rows for IS NOT NULL.
+        let rows = vec![
+            Row::new(vec![SqlValue::Integer(1)]),
+            Row::new(vec![SqlValue::Null]),
+            Row::new(vec![SqlValue::Integer(3)]),
+            Row::new(vec![SqlValue::Null]),
+        ];
+        let batch = ColumnarBatch::from_rows(&rows).unwrap();
+
+        let only_null =
+            simd_filter_batch(&batch, &[ColumnPredicate::IsNull { column_idx: 0 }]).unwrap();
+        assert_eq!(only_null.row_count(), 2);
+        assert_eq!(only_null.get_value(0, 0).unwrap(), SqlValue::Null);
+        assert_eq!(only_null.get_value(1, 0).unwrap(), SqlValue::Null);
+
+        let only_non_null =
+            simd_filter_batch(&batch, &[ColumnPredicate::IsNotNull { column_idx: 0 }]).unwrap();
+        assert_eq!(only_non_null.row_count(), 2);
+        assert_eq!(only_non_null.get_value(0, 0).unwrap(), SqlValue::Integer(1));
+        assert_eq!(only_non_null.get_value(1, 0).unwrap(), SqlValue::Integer(3));
     }
 }

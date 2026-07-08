@@ -305,9 +305,11 @@ pub fn evaluate_predicate_string_batch(
             result
         }
 
-        // ColumnCompare is not supported for string columns in this path
-        // It's handled at a higher level in simd_filter/mod.rs
-        ColumnPredicate::ColumnCompare { .. } => {
+        // ColumnCompare and null tests are handled at a higher level in
+        // simd_filter/mod.rs; reaching a value kernel with one is a bug.
+        ColumnPredicate::ColumnCompare { .. }
+        | ColumnPredicate::IsNull { .. }
+        | ColumnPredicate::IsNotNull { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "String".to_string(),

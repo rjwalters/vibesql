@@ -89,6 +89,19 @@ pub enum ColumnPredicate {
     /// column1 op column2 (column-to-column comparison)
     /// Used for predicates like `l_commitdate < l_receiptdate` in TPC-H Q4
     ColumnCompare { left_column_idx: usize, op: CompareOp, right_column_idx: usize },
+
+    /// column IS NULL — the row matches iff the column value is NULL.
+    ///
+    /// Evaluated directly from the column's null bitmap (the mask is exactly
+    /// the bitmap; an absent bitmap yields an all-false mask), so no value
+    /// comparison is performed. See `evaluate_null_predicate_range`.
+    IsNull { column_idx: usize },
+
+    /// column IS NOT NULL — the row matches iff the column value is non-NULL.
+    ///
+    /// The complement of `IsNull`: the mask is the negation of the null bitmap
+    /// (an absent bitmap yields an all-true mask).
+    IsNotNull { column_idx: usize },
 }
 
 impl ColumnPredicate {
@@ -106,7 +119,9 @@ impl ColumnPredicate {
             | ColumnPredicate::NotEqual { column_idx, .. }
             | ColumnPredicate::Between { column_idx, .. }
             | ColumnPredicate::Like { column_idx, .. }
-            | ColumnPredicate::InList { column_idx, .. } => vec![*column_idx],
+            | ColumnPredicate::InList { column_idx, .. }
+            | ColumnPredicate::IsNull { column_idx }
+            | ColumnPredicate::IsNotNull { column_idx } => vec![*column_idx],
             ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
                 vec![*left_column_idx, *right_column_idx]
             }
@@ -221,6 +236,12 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
                 right_column_idx: find_new_idx(*right_column_idx),
             }
         }
+        ColumnPredicate::IsNull { column_idx } => {
+            ColumnPredicate::IsNull { column_idx: find_new_idx(*column_idx) }
+        }
+        ColumnPredicate::IsNotNull { column_idx } => {
+            ColumnPredicate::IsNotNull { column_idx: find_new_idx(*column_idx) }
+        }
     }
 }
 
@@ -316,6 +337,10 @@ fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &Combine
         }
         // LIKE patterns are strings; existing comparator behavior applies
         ColumnPredicate::Like { .. } => true,
+        // IS NULL / IS NOT NULL read only the column's null bitmap, so they are
+        // faithful for every column type and unaffected by collation or type
+        // affinity — always supported by the columnar path.
+        ColumnPredicate::IsNull { .. } | ColumnPredicate::IsNotNull { .. } => true,
         ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
             // Issue #5792: see above — collated columns need the full evaluator.
             !schema.column_has_non_binary_collation(*left_column_idx)
@@ -882,6 +907,25 @@ fn extract_tree_recursive(
             None
         }
 
+        // IS NULL / IS NOT NULL on a bare column: read the null bitmap directly.
+        // `negated` distinguishes the two (false = IS NULL, true = IS NOT NULL),
+        // which drives the choice of predicate variant (three-valued logic).
+        // A non-column operand has no null bitmap to consume, so decline it.
+        Expression::IsNull { expr: inner, negated } => {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+                let column_idx = schema.get_column_index(table, column)?;
+                let predicate = if *negated {
+                    ColumnPredicate::IsNotNull { column_idx }
+                } else {
+                    ColumnPredicate::IsNull { column_idx }
+                };
+                return Some(PredicateTree::Leaf(predicate));
+            }
+            None
+        }
+
         _ => None,
     }
 }
@@ -1116,6 +1160,24 @@ fn extract_predicates_recursive(
                 return Some(());
             }
             // Skip non-column IN expressions
+            Some(())
+        }
+
+        // IS NULL / IS NOT NULL on a bare column: read the null bitmap directly.
+        // Skip (don't fail) if the column is not in this scan's schema, matching
+        // the cross-table-predicate handling of the other arms.
+        Expression::IsNull { expr: inner, negated } => {
+            if let Expression::ColumnRef(col_id) = inner.as_ref() {
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+                if let Some(column_idx) = schema.get_column_index(table, column) {
+                    predicates.push(if *negated {
+                        ColumnPredicate::IsNotNull { column_idx }
+                    } else {
+                        ColumnPredicate::IsNull { column_idx }
+                    });
+                }
+            }
             Some(())
         }
 
@@ -1655,5 +1717,114 @@ mod tests {
             }
             _ => panic!("Expected GreaterThan predicate"),
         }
+    }
+
+    fn is_null_expr(column: &str, negated: bool) -> Expression {
+        Expression::IsNull {
+            expr: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                column, false,
+            ))),
+            negated,
+        }
+    }
+
+    #[test]
+    fn test_extract_is_null_tree() {
+        let schema = create_test_schema();
+
+        // col0 IS NULL -> IsNull { column_idx: 0 }
+        let tree = extract_predicate_tree(&is_null_expr("col0", false), &schema, false)
+            .expect("IS NULL should be columnar-convertible");
+        match tree {
+            PredicateTree::Leaf(ColumnPredicate::IsNull { column_idx }) => {
+                assert_eq!(column_idx, 0)
+            }
+            other => panic!("expected IsNull leaf, got {other:?}"),
+        }
+
+        // col1 IS NOT NULL -> IsNotNull { column_idx: 1 } (negated flag drives choice)
+        let tree = extract_predicate_tree(&is_null_expr("col1", true), &schema, false)
+            .expect("IS NOT NULL should be columnar-convertible");
+        match tree {
+            PredicateTree::Leaf(ColumnPredicate::IsNotNull { column_idx }) => {
+                assert_eq!(column_idx, 1)
+            }
+            other => panic!("expected IsNotNull leaf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_is_null_non_column_declined() {
+        let schema = create_test_schema();
+
+        // (1 + 2) IS NULL — non-column operand has no null bitmap to consume.
+        let expr = Expression::IsNull {
+            expr: Box::new(Expression::Literal(SqlValue::Integer(1))),
+            negated: false,
+        };
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+    }
+
+    #[test]
+    fn test_extract_is_null_compound_and() {
+        let schema = create_test_schema();
+
+        // col0 IS NULL AND col1 > 5
+        let expr = Expression::BinaryOp {
+            left: Box::new(is_null_expr("col0", false)),
+            op: BinaryOperator::And,
+            right: Box::new(comparison_expr(
+                "col1",
+                BinaryOperator::GreaterThan,
+                SqlValue::Integer(5),
+            )),
+        };
+        let tree = extract_predicate_tree(&expr, &schema, false)
+            .expect("compound IS NULL AND compare should be columnar-convertible");
+        match tree {
+            PredicateTree::And(children) => {
+                assert_eq!(children.len(), 2);
+                assert!(matches!(
+                    children[0],
+                    PredicateTree::Leaf(ColumnPredicate::IsNull { column_idx: 0 })
+                ));
+                assert!(matches!(
+                    children[1],
+                    PredicateTree::Leaf(ColumnPredicate::GreaterThan { column_idx: 1, .. })
+                ));
+            }
+            other => panic!("expected And node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_is_null_legacy_and_extractor() {
+        let schema = create_test_schema();
+
+        // Legacy AND-only extractor: col0 IS NULL AND col1 IS NOT NULL
+        let expr = Expression::BinaryOp {
+            left: Box::new(is_null_expr("col0", false)),
+            op: BinaryOperator::And,
+            right: Box::new(is_null_expr("col1", true)),
+        };
+        let predicates = extract_column_predicates(&expr, &schema, false)
+            .expect("legacy extractor should return both null-test predicates");
+        assert_eq!(predicates.len(), 2);
+        assert!(matches!(predicates[0], ColumnPredicate::IsNull { column_idx: 0 }));
+        assert!(matches!(predicates[1], ColumnPredicate::IsNotNull { column_idx: 1 }));
+    }
+
+    #[test]
+    fn test_is_null_referenced_columns_and_remap() {
+        let is_null = ColumnPredicate::IsNull { column_idx: 7 };
+        let is_not_null = ColumnPredicate::IsNotNull { column_idx: 3 };
+        assert_eq!(is_null.referenced_columns(), vec![7]);
+        assert_eq!(is_not_null.referenced_columns(), vec![3]);
+
+        // Remap against a sparse column mapping [3, 7] -> new indices 0, 1.
+        let mapping = vec![3usize, 7usize];
+        let remapped = remap_predicates(&[is_null, is_not_null], &mapping);
+        assert!(matches!(remapped[0], ColumnPredicate::IsNull { column_idx: 1 }));
+        assert!(matches!(remapped[1], ColumnPredicate::IsNotNull { column_idx: 0 }));
     }
 }

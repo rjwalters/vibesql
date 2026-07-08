@@ -301,6 +301,35 @@ impl ColumnArray {
         self.len() == 0
     }
 
+    /// Return the column's null bitmap, if one is present.
+    ///
+    /// A `Some(slice)` gives per-row null-ness (`slice[i] == true` ⇒ row `i` is
+    /// NULL). `None` means the column has no null bitmap, i.e. no row is NULL.
+    /// `Mixed` columns carry per-value `SqlValue::Null`s instead of a bitmap and
+    /// so return `None` here — callers that must treat them faithfully fall back
+    /// to `get_value`.
+    pub fn null_bitmap(&self) -> Option<&[bool]> {
+        match self {
+            Self::Int64(_, nulls) | Self::Timestamp(_, nulls) => {
+                nulls.as_ref().map(|n| n.as_slice())
+            }
+            Self::Int32(_, nulls) | Self::Date(_, nulls) => nulls.as_ref().map(|n| n.as_slice()),
+            Self::Float64(_, nulls) => nulls.as_ref().map(|n| n.as_slice()),
+            Self::Float32(_, nulls) => nulls.as_ref().map(|n| n.as_slice()),
+            Self::String(_, nulls) | Self::FixedString(_, nulls) => {
+                nulls.as_ref().map(|n| n.as_slice())
+            }
+            Self::Boolean(_, nulls) => nulls.as_ref().map(|n| n.as_slice()),
+            Self::Mixed(_) => None,
+        }
+    }
+
+    /// Whether this column stores values inline as `SqlValue` (the `Mixed`
+    /// fallback), where NULLs live in the values rather than a null bitmap.
+    pub fn is_mixed(&self) -> bool {
+        matches!(self, Self::Mixed(_))
+    }
+
     /// Get a value at the specified index as SqlValue
     pub fn get_value(&self, index: usize) -> Result<SqlValue, ExecutorError> {
         match self {
