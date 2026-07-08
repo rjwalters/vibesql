@@ -494,8 +494,12 @@ impl Parser {
                 // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
                 let column_name = self.parse_alias_name()?;
 
-                // Check if this is actually an expression (has arithmetic operator after identifier)
-                // Examples: b+1, a*2, x-y are expressions, not column names
+                // Check if this is actually an expression (has an operator after identifier)
+                // Examples: b+1, a*2, x-y, z||w are expressions, not column names.
+                // Both single-char operators (Token::Symbol) and multi-char operators
+                // (Token::Operator, e.g. `||`, `<<`, `<=`, `!=`) must be detected here so
+                // an indexed expression like `CREATE INDEX i ON t(z||w)` is parsed as an
+                // expression rather than choking on the trailing operator token.
                 if matches!(
                     self.peek(),
                     Token::Symbol('+')
@@ -508,6 +512,7 @@ impl Parser {
                         | Token::Symbol('<')
                         | Token::Symbol('>')
                         | Token::Symbol('=')
+                        | Token::Operator(_)
                 ) || matches!(self.peek(), Token::Keyword { keyword: kw, .. } if matches!(kw,
                     crate::keywords::Keyword::And
                     | crate::keywords::Keyword::Or
