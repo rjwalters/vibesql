@@ -27,6 +27,7 @@ pub mod arena_parser;
 mod keywords;
 mod lexer;
 mod parser;
+mod table_functions;
 #[cfg(test)]
 mod tests;
 mod token;

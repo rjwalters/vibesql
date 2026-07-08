@@ -50,6 +50,7 @@ mod set_operations;
 mod set_statements;
 mod string_functions;
 mod subquery;
+mod table_functions;
 mod transaction;
 mod translation;
 mod trigger;

@@ -328,6 +328,17 @@ impl Parser {
 
                 Ok(result)
             }
+            // Table-valued function in FROM position (JSON1 TVFs: json_each,
+            // json_tree). An unquoted identifier immediately followed by `(` is a
+            // TVF call only if the name is allow-listed; any other `ident(` in FROM
+            // remains a parse error (preserving prior behavior). Delimited/quoted
+            // identifiers are never TVFs — a quoted `"json_each"` is a table name.
+            Token::Identifier(name)
+                if matches!(self.peek_next(), Token::LParen)
+                    && crate::table_functions::is_table_valued_function(name) =>
+            {
+                self.parse_table_function()
+            }
             // SQLite compatibility: single-quoted strings can be used as table names
             Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_) => {
                 let table = self.parse_table_ref()?;
@@ -444,6 +455,58 @@ impl Parser {
             // (trigger1-2.1 / 2.2).
             _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
+    }
+
+    /// Parse a table-valued function reference in FROM position, e.g.
+    /// `json_each('[1,2,3]')`, `json_tree(x, '$.a')`, or
+    /// `json_each(x) AS je(k, v)`.
+    ///
+    /// The caller has already verified (via lookahead) that the current token is
+    /// an allow-listed identifier immediately followed by `(`. This method
+    /// consumes the name, the parenthesized comma-separated argument list, and an
+    /// optional `AS`-alias with an optional column-alias list. It produces
+    /// [`vibesql_ast::FromClause::TableFunction`] with the name normalized to
+    /// lowercase. No executor support exists yet — a parsed TableFunction errors
+    /// or no-ops at execution until the executor phase lands.
+    pub(crate) fn parse_table_function(&mut self) -> Result<vibesql_ast::FromClause, ParseError> {
+        // Consume the function name (already known to be an allow-listed identifier).
+        let name = match self.peek() {
+            Token::Identifier(name) => {
+                let normalized = crate::table_functions::normalized_table_valued_function(name)
+                    .unwrap_or_else(|| name.to_lowercase());
+                self.advance();
+                normalized
+            }
+            // Unreachable in practice: the caller only dispatches here after
+            // confirming an allow-listed identifier. Guard defensively anyway.
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
+        };
+
+        // Parse the parenthesized, comma-separated argument list.
+        self.expect_token(Token::LParen)?;
+        let args = if self.peek() == &Token::RParen {
+            Vec::new()
+        } else {
+            self.parse_comma_separated_list(|p| p.parse_expression())?
+        };
+        self.expect_token(Token::RParen)?;
+
+        // Optional alias: `AS je` or bare `je`, reusing the shared alias helper.
+        let alias = if self.peek_keyword(Keyword::As) {
+            self.consume_keyword(Keyword::As)?;
+            Some(self.parse_alias_name()?)
+        } else if matches!(self.peek(), Token::Identifier(_) | Token::DelimitedIdentifier(_))
+            && !self.is_join_keyword()
+        {
+            Some(self.parse_alias_name()?)
+        } else {
+            None
+        };
+
+        // Optional column-alias list: `AS je(k, v)`. Only meaningful with an alias.
+        let column_aliases = if alias.is_some() { self.parse_column_alias_list()? } else { None };
+
+        Ok(vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases })
     }
 
     /// Check if the upcoming tokens form a SQLite index hint:
