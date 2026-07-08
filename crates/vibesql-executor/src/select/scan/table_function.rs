@@ -395,15 +395,17 @@ fn dot_key(key: &str) -> String {
     }
 }
 
-/// A "simple" object key needs no quoting in a JSONPath: non-empty, starts with
-/// a letter or underscore, and contains only alphanumerics/underscores.
+/// A "simple" object key needs no quoting in a JSONPath. SQLite leaves a label
+/// unquoted only when the first char is ASCII **alphabetic** and every char is
+/// ASCII **alphanumeric** — underscore is NOT permitted anywhere and always
+/// forces quoting (e.g. `a_b` -> `$."a_b"`), matching sqlite3's fullkey/path.
 fn is_simple_key(key: &str) -> bool {
     let mut chars = key.chars();
     match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        Some(c) if c.is_ascii_alphabetic() => {}
         _ => return false,
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    chars.all(|c| c.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
@@ -619,5 +621,66 @@ mod tests {
         let rows = each_rows(r#"{"a.b":1}"#);
         assert_eq!(rows.len(), 1);
         assert_eq!(s(&rows[0].values[FULLKEY]), r#"$."a.b""#);
+    }
+
+    #[test]
+    fn is_simple_key_underscore_forces_quoting() {
+        // SQLite leaves a label unquoted only when the first char is ASCII
+        // alphabetic and every char is ASCII alphanumeric. Underscore always
+        // forces quoting, matching sqlite3 3.51 fullkey/path.
+        assert!(is_simple_key("abc"));
+        assert!(is_simple_key("a1"));
+        assert!(is_simple_key("a"));
+        // Underscore anywhere -> not simple (must be quoted).
+        assert!(!is_simple_key("a_b"), "a_b must be quoted");
+        assert!(!is_simple_key("_x"), "_x must be quoted (leading underscore)");
+        assert!(!is_simple_key("ab_"), "ab_ must be quoted (trailing underscore)");
+        // Leading digit and other punctuation also require quoting.
+        assert!(!is_simple_key("1a"));
+        assert!(!is_simple_key("a-b"));
+        assert!(!is_simple_key(""));
+    }
+
+    #[test]
+    fn each_underscore_keys_quoted_fullkey_and_path() {
+        // json_each('{"a_b":1,"_x":2,"ab_":3}'): underscore keys are quoted in
+        // fullkey; path is the base container "$" for object members.
+        let rows = each_rows(r#"{"a_b":1,"_x":2,"ab_":3}"#);
+        assert_eq!(rows.len(), 3);
+        let expected_fullkeys = [r#"$."a_b""#, r#"$."_x""#, r#"$."ab_""#];
+        for (row, fk) in rows.iter().zip(expected_fullkeys) {
+            assert_eq!(s(&row.values[FULLKEY]), fk, "each fullkey");
+            assert_eq!(s(&row.values[PATH]), "$", "each member path = base");
+        }
+    }
+
+    #[test]
+    fn tree_underscore_keys_quoted_fullkey_and_path() {
+        // json_tree('{"a_b":1,"_x":2,"ab_":3}'): root + 3 members. Underscore
+        // keys are quoted in fullkey; each member's path is the root container.
+        let rows = tree_rows(r#"{"a_b":1,"_x":2,"ab_":3}"#);
+        assert_eq!(rows.len(), 4);
+        // Root object.
+        assert_eq!(s(&rows[0].values[FULLKEY]), "$");
+        assert_eq!(s(&rows[0].values[PATH]), "$");
+        let expected_fullkeys = [r#"$."a_b""#, r#"$."_x""#, r#"$."ab_""#];
+        for (row, fk) in rows[1..].iter().zip(expected_fullkeys) {
+            assert_eq!(s(&row.values[FULLKEY]), fk, "tree fullkey");
+            assert_eq!(s(&row.values[PATH]), "$", "tree member path = parent container");
+        }
+    }
+
+    #[test]
+    fn tree_nested_underscore_key_path_carries_quoting() {
+        // Nested container under an underscore key: the child's path is the
+        // parent's (quoted) fullkey, so quoting propagates into path.
+        let rows = tree_rows(r#"{"a_b":[7]}"#);
+        // root, "a_b" (array container), "a_b"[0] = 7  => 3 rows.
+        assert_eq!(rows.len(), 3);
+        assert_eq!(s(&rows[1].values[FULLKEY]), r#"$."a_b""#);
+        assert_eq!(s(&rows[1].values[PATH]), "$");
+        // The array element's fullkey/path carry the quoted parent label.
+        assert_eq!(s(&rows[2].values[FULLKEY]), r#"$."a_b"[0]"#);
+        assert_eq!(s(&rows[2].values[PATH]), r#"$."a_b""#);
     }
 }
