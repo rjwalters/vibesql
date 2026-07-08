@@ -20,6 +20,7 @@ pub(crate) mod bloom_context;
 mod derived;
 pub(crate) mod index_scan;
 mod join_scan;
+pub(crate) mod lateral;
 mod predicates;
 mod reorder;
 mod table;
@@ -67,8 +68,36 @@ pub(super) fn execute_from_clause<F>(
 where
     F: Fn(&vibesql_ast::SelectStmt) -> Result<super::SelectResult, ExecutorError> + Copy,
 {
-    // Check if this is a multi-table join that could benefit from reordering
-    if matches!(from, vibesql_ast::FromClause::Join { .. }) {
+    // A lateral table-function dependent join (`FROM t, json_each(t.j)`) must
+    // NOT be reordered — reordering is free to move the table function ahead of
+    // the sibling whose column it references, which would break correlation.
+    // Route it through the dedicated dependent-join path instead. (ADR-0005 step
+    // 4.) Detection is cheap and only true for the narrow lateral-TVF shape.
+    if let vibesql_ast::FromClause::Join { left, right, .. } = from {
+        // Only the immediate-right-child-is-a-lateral-TVF case is handled here;
+        // a lateral TVF nested deeper in the left subtree is handled by the
+        // recursive execute_from_clause call inside the dependent join.
+        if lateral::is_lateral_table_function(right) {
+            return lateral::execute_lateral_tvf_join(
+                left,
+                right,
+                cte_results,
+                database,
+                where_clause,
+                outer_row,
+                outer_schema,
+                execute_subquery,
+            );
+        }
+    }
+
+    // Check if this is a multi-table join that could benefit from reordering.
+    // Suppress reordering entirely when a lateral table function appears
+    // anywhere in the tree (e.g. nested in the left subtree), so the optimizer
+    // can never move a lateral TVF ahead of the sibling it depends on.
+    if matches!(from, vibesql_ast::FromClause::Join { .. })
+        && !lateral::from_contains_lateral_tvf(from)
+    {
         let table_count = reorder::count_tables_in_from(from);
         // Only apply reordering if:
         // 1. We have 2-8 tables (lowered from 3 to enable TPC-H Q19 optimization)

@@ -19,11 +19,27 @@
 //! columnar path first (it falls back to the row-oriented path on the ambiguity
 //! error), so they pin the fixed behavior regardless of which path is chosen.
 
+use std::sync::Mutex;
+
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::{ExecutorError, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
+
+/// Serializes every test in this binary. Several tests toggle the process-global
+/// `VIBESQL_DISABLE_COLUMNAR_JOIN` env var to force the row-oriented join path,
+/// while the other tests run queries through `SelectExecutor`, which reads that
+/// same env var to choose columnar vs row execution. Running in parallel, one
+/// test's transient `set_var` could flip another test's execution path mid-query.
+/// The assertions here are path-invariant (both paths return the same result or
+/// the same ambiguity error), so this has not produced wrong answers, but the
+/// env race is the same hazard class that made the columnar path-assertion tests
+/// flaky (#6005). Every test acquires this mutex for its whole body so the env
+/// var is only ever mutated by one test at a time. Poisoned-lock recovery
+/// (`unwrap_or_else(|e| e.into_inner())`) keeps a panic in one test from
+/// cascading into spurious failures in the rest.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 fn parse_select(sql: &str) -> vibesql_ast::SelectStmt {
     match Parser::parse_sql(sql) {
@@ -136,6 +152,7 @@ fn setup_db() -> Database {
 /// (Was: silently resolved to a1.id and returned 2 rows.)
 #[test]
 fn test_ambiguous_unqualified_id_in_on_two_tables() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     assert_ambiguous(&db, "SELECT a1.id FROM a1 JOIN b1 ON id=aid", "id");
 }
@@ -144,6 +161,7 @@ fn test_ambiguous_unqualified_id_in_on_two_tables() {
 /// (Was: silently resolved to a1.id and returned 0 rows.)
 #[test]
 fn test_ambiguous_unqualified_id_in_on_three_tables() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     assert_ambiguous(
         &db,
@@ -155,6 +173,7 @@ fn test_ambiguous_unqualified_id_in_on_three_tables() {
 /// Predicate written in flipped order (`aid=id`) must be caught too.
 #[test]
 fn test_ambiguous_unqualified_id_in_on_flipped() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     assert_ambiguous(&db, "SELECT a1.id FROM a1 JOIN b1 ON aid=id", "id");
 }
@@ -164,6 +183,7 @@ fn test_ambiguous_unqualified_id_in_on_flipped() {
 /// row path which raises the same error.
 #[test]
 fn test_ambiguous_unqualified_id_in_comma_join_where() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     assert_ambiguous(&db, "SELECT a1.id FROM a1, b1 WHERE id=aid", "id");
 }
@@ -171,6 +191,7 @@ fn test_ambiguous_unqualified_id_in_comma_join_where() {
 /// Qualified refs in the ON clause are never ambiguous — must keep working.
 #[test]
 fn test_qualified_refs_in_on_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     let rows = run(&db, "SELECT a1.id FROM a1 JOIN b1 ON b1.aid=a1.id ORDER BY 1");
     assert_eq!(rows.len(), 2);
@@ -182,6 +203,7 @@ fn test_qualified_refs_in_on_not_ambiguous() {
 /// resolves correctly (`aid` lives only on b1).
 #[test]
 fn test_unqualified_single_table_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     let rows = run(&db, "SELECT a1.id FROM a1 JOIN b1 ON aid=a1.id ORDER BY 1");
     assert_eq!(rows.len(), 2);
@@ -192,6 +214,7 @@ fn test_unqualified_single_table_column_not_ambiguous() {
 /// Unambiguous 3-table chain (all predicates qualified/single-table) still works.
 #[test]
 fn test_unambiguous_three_table_chain() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_db();
     let rows = run(
         &db,
@@ -207,6 +230,7 @@ fn test_unambiguous_three_table_chain() {
 /// resolves to the coalesced join column, not an ambiguity error.
 #[test]
 fn test_using_join_key_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = Database::new();
     for t in ["A", "B"] {
         let schema = TableSchema::new(
@@ -238,6 +262,7 @@ fn test_using_join_key_not_ambiguous() {
 /// NATURAL-join key columns are NOT ambiguous (issue #4517).
 #[test]
 fn test_natural_join_key_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = Database::new();
     for t in ["A", "B"] {
         let schema = TableSchema::new(
@@ -265,6 +290,7 @@ fn test_natural_join_key_not_ambiguous() {
 /// is ambiguous.
 #[test]
 fn test_self_join_unqualified_key_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = Database::new();
     let t = TableSchema::with_primary_key(
         "T".to_string(),
@@ -303,6 +329,7 @@ fn test_self_join_unqualified_key_ambiguous() {
 /// column name used unqualified in an ON clause is ambiguous too.
 #[test]
 fn test_duplicate_non_pk_column_unqualified_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = Database::new();
     for (table, cols) in [("TA", vec!["w", "v"]), ("TB", vec!["w", "aw", "v"])] {
         let schema = TableSchema::new(
@@ -408,6 +435,7 @@ fn first_col_ints(db: &Database, sql: &str) -> Vec<i64> {
 /// `customers.id` in its own scope. SQLite returns {1, 2}.
 #[test]
 fn test_in_subquery_semi_join_outer_ref_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_semi_join_db();
     assert_eq!(
         first_col_ints(
@@ -432,6 +460,7 @@ fn test_in_subquery_semi_join_outer_ref_not_ambiguous() {
 /// SQLite returns {3}. Must not raise an ambiguity error on the outer `id`.
 #[test]
 fn test_not_in_subquery_anti_join_outer_ref_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_semi_join_db();
     assert_eq!(
         first_col_ints(
@@ -449,6 +478,7 @@ fn test_not_in_subquery_anti_join_outer_ref_not_ambiguous() {
 /// the same error on either path, so a transient flip cannot break them.
 #[test]
 fn test_in_and_not_in_subquery_outer_ref_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let db = setup_semi_join_db();
     let in_ids = first_col_ints(
@@ -470,6 +500,7 @@ fn test_in_and_not_in_subquery_outer_ref_row_path() {
 /// subquery-flattened tables, not real joined tables).
 #[test]
 fn test_explicit_join_still_ambiguous_after_semi_join_fix() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_semi_join_db();
     assert_ambiguous(
         &db,
@@ -583,6 +614,7 @@ fn setup_multi_table_outer_ambiguous_db() -> Database {
 /// rows and match sqlite3 `{10,10,20,20}`, NOT raise an ambiguity error.
 #[test]
 fn test_multi_table_outer_in_subquery_unique_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_multi_table_outer_db();
     assert_eq!(
         first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)"),
@@ -595,6 +627,7 @@ fn test_multi_table_outer_in_subquery_unique_column_not_ambiguous() {
 /// rows 1 and 2 (each × 2 t2 rows). NOT IN keeps t1 row 3 (× 2). sqlite3: `30,30`.
 #[test]
 fn test_multi_table_outer_not_in_subquery_unique_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_multi_table_outer_db();
     assert_eq!(
         first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a NOT IN (SELECT a FROM t3)"),
@@ -606,6 +639,7 @@ fn test_multi_table_outer_not_in_subquery_unique_column_not_ambiguous() {
 /// Same multi-table shape on the row-oriented path (columnar join disabled).
 #[test]
 fn test_multi_table_outer_in_subquery_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let db = setup_multi_table_outer_db();
     let in_vs = first_col_ints(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)");
@@ -621,6 +655,7 @@ fn test_multi_table_outer_in_subquery_row_path() {
 /// and `t2`. sqlite3 3.51.0: `Error: ambiguous column name: a`.
 #[test]
 fn test_multi_table_outer_genuinely_ambiguous_column_errors() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_multi_table_outer_ambiguous_db();
     assert_ambiguous(&db, "SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)", "a");
 }
@@ -628,6 +663,7 @@ fn test_multi_table_outer_genuinely_ambiguous_column_errors() {
 /// The genuine-ambiguity error must also fire on the row-oriented path.
 #[test]
 fn test_multi_table_outer_genuinely_ambiguous_column_errors_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let db = setup_multi_table_outer_ambiguous_db();
     let select = parse_select("SELECT t1.v FROM t1, t2 WHERE a IN (SELECT a FROM t3)");
@@ -701,6 +737,7 @@ fn setup_cte_outer_db() -> Database {
 /// it is unambiguous. sqlite3 3.51.0: `10,20`.
 #[test]
 fn test_cte_outer_in_subquery_shared_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_cte_outer_db();
     assert_eq!(
         first_col_ints(
@@ -717,6 +754,7 @@ fn test_cte_outer_in_subquery_shared_column_not_ambiguous() {
 /// sqlite3 3.51.0: `10,20`.
 #[test]
 fn test_view_outer_in_subquery_shared_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_view_outer_db();
     assert_eq!(
         first_col_ints(&db, "SELECT t1.v FROM t1 WHERE a IN (SELECT a FROM t3)"),
@@ -728,6 +766,7 @@ fn test_view_outer_in_subquery_shared_column_not_ambiguous() {
 /// Both CTE and VIEW shapes must hold on the row-oriented path too.
 #[test]
 fn test_cte_and_view_outer_in_subquery_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let cte_db = setup_cte_outer_db();
     let cte_vs = first_col_ints(
@@ -748,6 +787,7 @@ fn test_cte_and_view_outer_in_subquery_row_path() {
 /// `ambiguous column name: a`.
 #[test]
 fn test_cte_outer_genuinely_ambiguous_column_errors() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = setup_cte_outer_db();
     exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
     exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
@@ -764,6 +804,7 @@ fn test_cte_outer_genuinely_ambiguous_column_errors() {
 /// `ambiguous column name: a`.
 #[test]
 fn test_view_outer_genuinely_ambiguous_column_errors() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = setup_view_outer_db();
     exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
     exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
@@ -813,6 +854,7 @@ fn setup_derived_outer_db() -> Database {
 /// 3.51.0: `10,20`. (Judge's reproducer, fourth-cycle.)
 #[test]
 fn test_derived_outer_in_subquery_shared_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_derived_outer_db();
     assert_eq!(
         first_col_ints(
@@ -828,6 +870,7 @@ fn test_derived_outer_in_subquery_shared_column_not_ambiguous() {
 /// base.a=1,2; NOT IN keeps the derived row with a=3. sqlite3 3.51.0: `30`.
 #[test]
 fn test_derived_outer_not_in_subquery_shared_column_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_derived_outer_db();
     assert_eq!(
         first_col_ints(
@@ -842,6 +885,7 @@ fn test_derived_outer_not_in_subquery_shared_column_not_ambiguous() {
 /// Both derived-table shapes must hold on the row-oriented path too.
 #[test]
 fn test_derived_outer_in_and_not_in_subquery_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let db = setup_derived_outer_db();
     let in_vs = first_col_ints(
@@ -863,6 +907,7 @@ fn test_derived_outer_in_and_not_in_subquery_row_path() {
 /// 3.51.0: `10,20`.
 #[test]
 fn test_values_outer_in_subquery_positional_columns_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_derived_outer_db();
     assert_eq!(
         first_col_ints(
@@ -878,6 +923,7 @@ fn test_values_outer_in_subquery_positional_columns_not_ambiguous() {
 /// VALUES-as-FROM NOT IN variant. sqlite3 3.51.0: `30`. Also on the row path.
 #[test]
 fn test_values_outer_not_in_subquery_positional_columns_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_derived_outer_db();
     assert_eq!(
         first_col_ints(
@@ -905,6 +951,7 @@ fn test_values_outer_not_in_subquery_positional_columns_row_path() {
 /// 3.51.0: `10,20`.
 #[test]
 fn test_opaque_derived_outer_select_star_falls_back_not_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let db = setup_derived_outer_db();
     assert_eq!(
         first_col_ints(
@@ -931,6 +978,7 @@ fn test_opaque_derived_outer_select_star_falls_back_not_ambiguous() {
 /// sqlite3 3.51.0: `ambiguous column name: a`.
 #[test]
 fn test_derived_outer_genuinely_ambiguous_column_errors() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let mut db = setup_derived_outer_db();
     exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
     exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
@@ -944,6 +992,7 @@ fn test_derived_outer_genuinely_ambiguous_column_errors() {
 /// The derived-table genuine-ambiguity error must also fire on the row path.
 #[test]
 fn test_derived_outer_genuinely_ambiguous_column_errors_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("VIBESQL_DISABLE_COLUMNAR_JOIN", "1");
     let mut db = setup_derived_outer_db();
     exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
