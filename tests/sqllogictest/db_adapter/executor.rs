@@ -761,5 +761,8 @@ fn extract_table_names_from_from(from: &vibesql_ast::FromClause, tables: &mut Ha
         vibesql_ast::FromClause::Values { .. } => {
             // VALUES clause doesn't reference tables
         }
+        vibesql_ast::FromClause::TableFunction { .. } => {
+            // Table-valued function (json_each/json_tree) references no base table
+        }
     }
 }

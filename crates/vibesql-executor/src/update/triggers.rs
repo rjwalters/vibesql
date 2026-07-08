@@ -396,7 +396,10 @@ fn collect_view_updates_with_from(
 /// `(view CROSS JOIN t1) LEFT JOIN t2`).
 fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) -> FromClause {
     match from_clause {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => {
             FromClause::Join {
                 left: Box::new(accumulated),
                 right: Box::new(from_clause),

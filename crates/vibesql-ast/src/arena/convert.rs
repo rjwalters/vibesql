@@ -538,6 +538,16 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                         .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
                 }
             }
+            arena_select::FromClause::TableFunction { name, args, alias, column_aliases } => {
+                FromClause::TableFunction {
+                    name: self.resolve(*name),
+                    args: args.iter().map(|e| self.convert_expression(e)).collect(),
+                    alias: self.resolve_opt(*alias),
+                    column_aliases: column_aliases
+                        .as_ref()
+                        .map(|cols| cols.iter().map(|s| self.resolve(*s)).collect()),
+                }
+            }
         }
     }
 
@@ -1072,5 +1082,52 @@ mod tests {
         }
 
         assert_eq!(count_left_depth(&result), 3, "Expected 3 levels of nesting for 4 elements");
+    }
+
+    /// Verify the arena `FromClause::TableFunction` variant converts to the
+    /// standard variant with name, args, alias, and column aliases preserved.
+    #[test]
+    fn test_table_function_from_clause_round_trips() {
+        let arena = Bump::new();
+        let mut interner = ArenaInterner::new(&arena);
+        let name = interner.intern("json_tree");
+        let alias = interner.intern("jt");
+        let col_k = interner.intern("k");
+        let col_v = interner.intern("v");
+        let converter = Converter::new(&interner);
+
+        let mut args = BumpVec::new_in(&arena);
+        args.push(arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(1)));
+        args.push(arena_expr::Expression::Literal(vibesql_types::SqlValue::Integer(2)));
+
+        let mut column_aliases = BumpVec::new_in(&arena);
+        column_aliases.push(col_k);
+        column_aliases.push(col_v);
+
+        let from = arena_select::FromClause::TableFunction {
+            name,
+            args,
+            alias: Some(alias),
+            column_aliases: Some(column_aliases),
+        };
+
+        let result = converter.convert_from_clause(&from);
+        match result {
+            FromClause::TableFunction { name, args, alias, column_aliases } => {
+                assert_eq!(name, "json_tree");
+                assert_eq!(args.len(), 2);
+                assert!(matches!(
+                    args[0],
+                    Expression::Literal(vibesql_types::SqlValue::Integer(1))
+                ));
+                assert!(matches!(
+                    args[1],
+                    Expression::Literal(vibesql_types::SqlValue::Integer(2))
+                ));
+                assert_eq!(alias, Some("jt".to_string()));
+                assert_eq!(column_aliases, Some(vec!["k".to_string(), "v".to_string()]));
+            }
+            other => panic!("expected TableFunction, got {other:?}"),
+        }
     }
 }

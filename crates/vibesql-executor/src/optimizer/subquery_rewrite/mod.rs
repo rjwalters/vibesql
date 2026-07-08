@@ -191,6 +191,11 @@ fn extract_table_names(from: &Option<vibesql_ast::FromClause>) -> Vec<String> {
             vibesql_ast::FromClause::Values { alias, .. } => {
                 tables.push(alias.clone());
             }
+            vibesql_ast::FromClause::TableFunction { alias, .. } => {
+                if let Some(a) = alias {
+                    tables.push(a.clone());
+                }
+            }
         }
     }
 

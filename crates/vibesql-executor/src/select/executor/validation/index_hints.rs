@@ -92,6 +92,7 @@ fn validate_from_clause(
         }
         FromClause::Subquery { query, .. } => validate_select(query, cte_names, database),
         FromClause::Values { .. } => Ok(()),
+        FromClause::TableFunction { .. } => Ok(()),
     }
 }
 

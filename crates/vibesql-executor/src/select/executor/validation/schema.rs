@@ -434,6 +434,11 @@ fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Ve
         vibesql_ast::FromClause::Values { alias, .. } => {
             tables.push(alias.clone());
         }
+        vibesql_ast::FromClause::TableFunction { alias, .. } => {
+            if let Some(a) = alias {
+                tables.push(a.clone());
+            }
+        }
     }
 }
 

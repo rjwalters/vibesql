@@ -54,6 +54,12 @@ impl TableExtractor {
                     }
                 }
             }
+            FromClause::TableFunction { args, .. } => {
+                // Table-valued function args may contain subqueries in expressions
+                for expr in args {
+                    walk_expression(self, expr);
+                }
+            }
         }
     }
 

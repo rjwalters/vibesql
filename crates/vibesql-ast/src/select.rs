@@ -355,6 +355,24 @@ pub enum FromClause {
         /// Optional column renaming
         column_aliases: Option<Vec<String>>,
     },
+    /// Table-valued function call in the FROM clause (SQLite JSON1 TVFs).
+    /// Example: `FROM json_each('[1,2,3]')`, `FROM json_tree(x, '$.a') AS jt(k, v)`
+    ///
+    /// A table-valued function produces a relation rather than a scalar value.
+    /// The `args` are ordinary expressions; whether an argument references a
+    /// preceding FROM sibling (the LATERAL form `FROM t, json_each(t.j)`) is an
+    /// execution concern, not a parse concern — such a reference is simply a
+    /// column-reference `Expression` here.
+    TableFunction {
+        /// Function name, normalized to lowercase (e.g. `"json_each"`).
+        name: String,
+        /// Argument expressions (JSON1 TVFs take 1 or 2: value, optional path).
+        args: Vec<Expression>,
+        /// Optional table alias, e.g. `FROM json_each(x) AS je`.
+        alias: Option<String>,
+        /// Optional column renaming, e.g. `AS je(k, v)`.
+        column_aliases: Option<Vec<String>>,
+    },
 }
 
 /// JOIN types

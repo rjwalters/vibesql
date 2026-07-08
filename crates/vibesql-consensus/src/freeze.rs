@@ -1130,9 +1130,11 @@ impl<'a> Scope<'a> {
                 self.add_from(left, db);
                 self.add_from(right, db);
             }
-            // Derived tables and VALUES constructors expose columns whose
-            // types are not in the catalog.
-            FromClause::Subquery { .. } | FromClause::Values { .. } => self.opaque = true,
+            // Derived tables, VALUES constructors, and table-valued functions
+            // expose columns whose types are not in the catalog.
+            FromClause::Subquery { .. }
+            | FromClause::Values { .. }
+            | FromClause::TableFunction { .. } => self.opaque = true,
         }
     }
 
@@ -1242,7 +1244,9 @@ fn from_subquery_time_cast_violation(
     db: &vibesql_storage::Database,
 ) -> Option<String> {
     match from {
-        FromClause::Table { .. } | FromClause::Values { .. } => None,
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => None,
         FromClause::Subquery { query, .. } => query_body_time_cast_violation(query, db),
         FromClause::Join { left, right, condition, .. } => from_subquery_time_cast_violation(left, db)
             .or_else(|| from_subquery_time_cast_violation(right, db))
@@ -2176,6 +2180,12 @@ fn check_from_volatile_free(from: &FromClause) -> Result<(), String> {
                 for expr in row {
                     check_expr_volatile_free(expr, "FROM VALUES")?;
                 }
+            }
+            Ok(())
+        }
+        FromClause::TableFunction { args, .. } => {
+            for expr in args {
+                check_expr_volatile_free(expr, "FROM table function")?;
             }
             Ok(())
         }

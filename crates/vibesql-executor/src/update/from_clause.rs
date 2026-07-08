@@ -269,7 +269,10 @@ fn get_pk_column_names(schema: &TableSchema) -> Vec<String> {
 fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) -> FromClause {
     match from_clause {
         // For a simple table, just cross join
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => {
             FromClause::Join {
                 left: Box::new(accumulated),
                 right: Box::new(from_clause),

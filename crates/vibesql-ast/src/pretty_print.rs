@@ -1083,6 +1083,17 @@ impl ToSql for FromClause {
                 }
                 result
             }
+            FromClause::TableFunction { name, args, alias, column_aliases } => {
+                let args_sql: Vec<String> = args.iter().map(|e| e.to_sql()).collect();
+                let mut result = format!("{}({})", name, args_sql.join(", "));
+                if let Some(alias) = alias {
+                    result.push_str(&format!(" AS {}", format_identifier(alias)));
+                }
+                if let Some(cols) = column_aliases {
+                    result.push_str(&format!(" ({})", cols.join(", ")));
+                }
+                result
+            }
         }
     }
 }
@@ -1480,6 +1491,31 @@ mod tests {
 
         // Compact format: no spaces around symbolic operators
         assert_eq!(from.to_sql(), "orders AS o INNER JOIN customers AS c ON o.customer_id=c.id");
+    }
+
+    #[test]
+    fn test_table_function_bare() {
+        let from = FromClause::TableFunction {
+            name: "json_each".to_string(),
+            args: vec![Expression::Literal(SqlValue::Integer(123))],
+            alias: None,
+            column_aliases: None,
+        };
+        assert_eq!(from.to_sql(), "json_each(123)");
+    }
+
+    #[test]
+    fn test_table_function_with_alias_and_columns() {
+        let from = FromClause::TableFunction {
+            name: "json_tree".to_string(),
+            args: vec![
+                Expression::Literal(SqlValue::Integer(1)),
+                Expression::Literal(SqlValue::Integer(2)),
+            ],
+            alias: Some("jt".to_string()),
+            column_aliases: Some(vec!["k".to_string(), "v".to_string()]),
+        };
+        assert_eq!(from.to_sql(), "json_tree(1, 2) AS jt (k, v)");
     }
 
     #[test]

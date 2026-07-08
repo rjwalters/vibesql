@@ -30,6 +30,12 @@ fn collect_table_names(from: &vibesql_ast::FromClause, tables: &mut Vec<String>)
             // VALUES alias is required (String, not Option<String>)
             tables.push(alias.clone());
         }
+        vibesql_ast::FromClause::TableFunction { alias, .. } => {
+            // Table function alias is optional; push it only if present
+            if let Some(a) = alias {
+                tables.push(a.clone());
+            }
+        }
     }
 }
 

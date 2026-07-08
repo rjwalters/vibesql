@@ -250,6 +250,18 @@ fn columns_from_from_clause(
                 None
             }
         }
+        FromClause::TableFunction { column_aliases, .. } => {
+            if let Some(aliases) = column_aliases {
+                for a in aliases {
+                    out.insert(a.to_ascii_lowercase());
+                }
+                Some(out)
+            } else {
+                // Table-function columns can't be resolved by name without
+                // execution. Conservative: unresolved.
+                None
+            }
+        }
     }
 }
 
@@ -349,7 +361,9 @@ fn from_clause_has_outer_correlated_aggregate(
     use vibesql_ast::FromClause;
 
     match from {
-        FromClause::Table { .. } | FromClause::Values { .. } => false,
+        FromClause::Table { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
         FromClause::Join { left, right, condition, .. } => {
             from_clause_has_outer_correlated_aggregate(left, inner_scopes, database)
                 || from_clause_has_outer_correlated_aggregate(right, inner_scopes, database)
@@ -1124,6 +1138,7 @@ impl SelectExecutor<'_> {
             Some(vibesql_ast::FromClause::Join { .. }) => return None, // JOIN not allowed
             Some(vibesql_ast::FromClause::Subquery { .. }) => return None, // Subquery not allowed
             Some(vibesql_ast::FromClause::Values { .. }) => return None, // VALUES not allowed
+            Some(vibesql_ast::FromClause::TableFunction { .. }) => return None, // Table function not allowed
             None => return None,                                       // No FROM clause
         };
 

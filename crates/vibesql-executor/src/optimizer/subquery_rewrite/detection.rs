@@ -129,5 +129,9 @@ fn from_clause_has_in_subquery(from: &vibesql_ast::FromClause) -> bool {
             // Check if any expressions in VALUES rows contain IN subqueries
             rows.iter().any(|row| row.iter().any(expression_has_in_subquery))
         }
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            // Check if any table function argument contains IN subqueries
+            args.iter().any(expression_has_in_subquery)
+        }
     }
 }

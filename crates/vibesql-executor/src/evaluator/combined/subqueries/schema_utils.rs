@@ -310,8 +310,10 @@ fn find_column_affinity_in_from_clause(
             find_column_affinity_in_from_clause(column_name, left, database)
                 .or_else(|| find_column_affinity_in_from_clause(column_name, right, database))
         }
-        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => {
-            // Subqueries and VALUES don't preserve affinity easily
+        vibesql_ast::FromClause::Subquery { .. }
+        | vibesql_ast::FromClause::Values { .. }
+        | vibesql_ast::FromClause::TableFunction { .. } => {
+            // Subqueries, VALUES, and table functions don't preserve affinity easily
             None
         }
     }
@@ -364,6 +366,18 @@ fn count_columns_in_from_clause(
                 Ok(first_row.len())
             } else {
                 Ok(0) // Empty VALUES clause
+            }
+        }
+        vibesql_ast::FromClause::TableFunction { name, column_aliases, .. } => {
+            // Table function column count: use column_aliases if provided.
+            // Otherwise the schema is defined by the (not-yet-executable) function.
+            if let Some(aliases) = column_aliases {
+                Ok(aliases.len())
+            } else {
+                Err(ExecutorError::UnsupportedFeature(format!(
+                    "table function '{}' is not yet executable (JSON1 Phase 3)",
+                    name
+                )))
             }
         }
     }

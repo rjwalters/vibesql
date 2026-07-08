@@ -140,6 +140,18 @@ pub enum FromClause<'arena> {
         /// SQL:1999 Feature E051-09: Optional column renaming for derived tables
         column_aliases: Option<BumpVec<'arena, Symbol>>,
     },
+    /// Table-valued function call in the FROM clause (SQLite JSON1 TVFs).
+    /// Example: `FROM json_each('[1,2,3]')`, `FROM json_tree(x, '$.a') AS jt(k, v)`
+    TableFunction {
+        /// Function name, normalized to lowercase (e.g. `"json_each"`).
+        name: Symbol,
+        /// Argument expressions (JSON1 TVFs take 1 or 2: value, optional path).
+        args: BumpVec<'arena, Expression<'arena>>,
+        /// Optional table alias, e.g. `FROM json_each(x) AS je`.
+        alias: Option<Symbol>,
+        /// Optional column renaming, e.g. `AS je(k, v)`.
+        column_aliases: Option<BumpVec<'arena, Symbol>>,
+    },
 }
 
 /// JOIN types

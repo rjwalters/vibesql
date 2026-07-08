@@ -230,6 +230,16 @@ impl QuerySignature {
                 alias.hash(hasher);
                 column_aliases.hash(hasher);
             }
+            vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases } => {
+                "TABLE_FUNCTION".hash(hasher);
+                name.hash(hasher);
+                args.len().hash(hasher);
+                for expr in args {
+                    Self::hash_expression(expr, hasher);
+                }
+                alias.hash(hasher);
+                column_aliases.hash(hasher);
+            }
         }
     }
 
@@ -707,6 +717,16 @@ impl QuerySignature {
                 "SUBQUERY".hash(hasher);
                 Self::hash_arena_select(query, hasher);
                 alias.hash(hasher);
+            }
+            ArenaFromClause::TableFunction { name, args, alias, column_aliases } => {
+                "TABLE_FUNCTION".hash(hasher);
+                name.hash(hasher);
+                args.len().hash(hasher);
+                for expr in args.iter() {
+                    Self::hash_arena_expression(expr, hasher);
+                }
+                alias.hash(hasher);
+                column_aliases.hash(hasher);
             }
         }
     }

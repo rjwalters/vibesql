@@ -20,6 +20,7 @@ fn count_tables_in_from_clause(from: &FromClause) -> usize {
         }
         FromClause::Subquery { .. } => 1, // Subquery counts as 1 table
         FromClause::Values { .. } => 1,   // VALUES clause counts as 1 table
+        FromClause::TableFunction { .. } => 1, // Table function counts as 1 table
     }
 }
 

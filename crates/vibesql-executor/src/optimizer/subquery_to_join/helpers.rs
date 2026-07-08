@@ -88,6 +88,18 @@ fn collect_outer_sources(from: &FromClause, out: &mut Vec<OuterSource>) {
                 out.push(OuterSource::Opaque);
             }
         }
+        FromClause::TableFunction { alias, column_aliases, .. } => {
+            // A table function's exposed columns are only statically known from
+            // an explicit column-alias list; otherwise its output is opaque
+            // here (the function is not yet executable).
+            match (alias, column_aliases) {
+                (Some(effective), Some(cols)) => out.push(OuterSource::Columns {
+                    effective: effective.clone(),
+                    columns: cols.clone(),
+                }),
+                _ => out.push(OuterSource::Opaque),
+            }
+        }
     }
 }
 
@@ -298,6 +310,11 @@ pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
         }
         FromClause::Values { alias, .. } => {
             names.push(alias.clone());
+        }
+        FromClause::TableFunction { alias, .. } => {
+            if let Some(a) = alias {
+                names.push(a.clone());
+            }
         }
     }
 }

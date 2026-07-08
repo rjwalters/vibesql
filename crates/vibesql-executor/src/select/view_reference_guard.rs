@@ -250,6 +250,11 @@ fn collect_from_view_refs(
                 }
             }
         }
+        FromClause::TableFunction { args, .. } => {
+            for expr in args {
+                collect_expr_view_refs(expr, database, out);
+            }
+        }
     }
 }
 
