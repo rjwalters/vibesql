@@ -533,6 +533,7 @@ impl TargetTableChecker<'_> {
             }
             FromClause::Subquery { query, .. } => self.check_select(query),
             FromClause::Values { .. } => {}
+            FromClause::TableFunction { .. } => {}
         }
     }
 }
@@ -966,6 +967,9 @@ fn from_binds_excluded(from: &FromClause) -> bool {
         }
         FromClause::Subquery { alias, .. } | FromClause::Values { alias, .. } => {
             alias.eq_ignore_ascii_case("excluded")
+        }
+        FromClause::TableFunction { alias, .. } => {
+            alias.as_ref().is_some_and(|a| a.eq_ignore_ascii_case("excluded"))
         }
     }
 }

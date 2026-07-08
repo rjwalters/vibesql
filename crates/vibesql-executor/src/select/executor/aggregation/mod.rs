@@ -1048,8 +1048,11 @@ pub(crate) fn build_early_schema(
             Some(combined)
         }
 
-        // Subqueries, VALUES, etc. - can't easily determine schema without execution
-        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => None,
+        // Subqueries, VALUES, table functions, etc. - can't easily determine
+        // schema without execution
+        vibesql_ast::FromClause::Subquery { .. }
+        | vibesql_ast::FromClause::Values { .. }
+        | vibesql_ast::FromClause::TableFunction { .. } => None,
     }
 }
 

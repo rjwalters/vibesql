@@ -53,6 +53,9 @@ fn extract_join_on_tables(
         FromClause::Values { .. } => {
             // VALUES clauses are opaque - don't examine their internals
         }
+        FromClause::TableFunction { .. } => {
+            // Table functions are opaque - don't examine their internals
+        }
     }
 }
 

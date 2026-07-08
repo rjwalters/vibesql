@@ -81,6 +81,9 @@ fn extract_from_from_clause(from: &vibesql_ast::FromClause, tables: &mut HashSet
         vibesql_ast::FromClause::Values { .. } => {
             // VALUES clauses don't reference any tables
         }
+        vibesql_ast::FromClause::TableFunction { .. } => {
+            // Table functions (e.g. json_each) don't reference any base tables
+        }
     }
 }
 

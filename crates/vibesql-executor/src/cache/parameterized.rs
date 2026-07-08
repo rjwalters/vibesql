@@ -270,6 +270,12 @@ impl LiteralExtractor {
                     }
                 }
             }
+            vibesql_ast::FromClause::TableFunction { args, .. } => {
+                // Extract literals from table function arguments
+                for expr in args {
+                    Self::extract_from_expression(expr, literals);
+                }
+            }
         }
     }
 

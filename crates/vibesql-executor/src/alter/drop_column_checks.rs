@@ -268,7 +268,9 @@ fn collect_from_sources(
         FromClause::Join { left, right, .. } => {
             collect_from_sources(left, sim, out) && collect_from_sources(right, sim, out)
         }
-        FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
     }
 }
 

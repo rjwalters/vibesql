@@ -90,6 +90,12 @@ fn extract_table_names_recursive(from: &FromClause, tables: &mut Vec<String>) {
             // VALUES clauses are referenced by their alias
             tables.push(alias.clone());
         }
+        FromClause::TableFunction { alias, .. } => {
+            // Table functions are referenced by their alias when present
+            if let Some(a) = alias {
+                tables.push(a.clone());
+            }
+        }
     }
 }
 
@@ -245,6 +251,12 @@ fn is_from_clause_correlated(
                 row.iter().any(|expr| {
                     is_expression_correlated(expr, outer_schema, subquery_tables, database)
                 })
+            })
+        }
+        FromClause::TableFunction { args, .. } => {
+            // Table function args (e.g. json_each(t.j)) can reference outer columns
+            args.iter().any(|expr| {
+                is_expression_correlated(expr, outer_schema, subquery_tables, database)
             })
         }
     }

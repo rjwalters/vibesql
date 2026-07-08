@@ -21,9 +21,10 @@ pub(super) fn flatten_from_clause(from: &FromClause, tables: &mut Vec<TableInfo>
             flatten_from_clause(left, tables);
             flatten_from_clause(right, tables);
         }
-        // Skip subqueries and VALUES - they can't be eliminated
+        // Skip subqueries, VALUES, and table functions - they can't be eliminated
         FromClause::Subquery { .. } => {}
         FromClause::Values { .. } => {}
+        FromClause::TableFunction { .. } => {}
     }
 }
 

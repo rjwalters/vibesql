@@ -120,6 +120,7 @@ fn collect_qualified_columns_from_from(
         FromClause::Table { .. } => {}
         FromClause::Subquery { .. } => {}
         FromClause::Values { .. } => {}
+        FromClause::TableFunction { .. } => {}
         FromClause::Join { left, right, condition, .. } => {
             collect_qualified_columns_from_from(left, table_columns);
             collect_qualified_columns_from_from(right, table_columns);

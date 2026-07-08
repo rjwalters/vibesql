@@ -2090,6 +2090,22 @@ impl ExplainExecutor {
 
                 Ok(values_node)
             }
+            vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases } => {
+                let mut tvf_node = PlanNode::new("TableFunction");
+                if let Some(a) = alias {
+                    tvf_node.object = Some(format!("{} AS {}", name, a));
+                } else {
+                    tvf_node.object = Some(name.clone());
+                }
+
+                tvf_node.details.push(format!("{} arg(s)", args.len()));
+
+                if let Some(aliases) = column_aliases {
+                    tvf_node.details.push(format!("Columns: {}", aliases.join(", ")));
+                }
+
+                Ok(tvf_node)
+            }
         }
     }
 

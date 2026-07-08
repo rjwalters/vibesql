@@ -280,6 +280,11 @@ fn extract_table_prefixes(from: &vibesql_ast::FromClause) -> Vec<char> {
                     prefixes.push(c.to_ascii_lowercase());
                 }
             }
+            vibesql_ast::FromClause::TableFunction { alias, .. } => {
+                if let Some(c) = alias.as_ref().and_then(|a| a.chars().next()) {
+                    prefixes.push(c.to_ascii_lowercase());
+                }
+            }
         }
     }
     let mut prefixes = Vec::new();
@@ -319,6 +324,10 @@ pub(crate) fn from_clause_has_external_refs(
             // Check if any expression in VALUES references external columns
             rows.iter().any(|row| row.iter().any(|expr| has_external_column_refs(expr, subquery)))
         }
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            // Check if any table function argument references external columns
+            args.iter().any(|expr| has_external_column_refs(expr, subquery))
+        }
     }
 }
 
@@ -345,5 +354,8 @@ fn from_clause_contains_table(from: &vibesql_ast::FromClause, table_name: &str) 
         }
         vibesql_ast::FromClause::Subquery { alias, .. } => alias == table_name,
         vibesql_ast::FromClause::Values { alias, .. } => alias == table_name,
+        vibesql_ast::FromClause::TableFunction { alias, .. } => {
+            alias.as_ref().is_some_and(|a| a.eq_ignore_ascii_case(table_name))
+        }
     }
 }

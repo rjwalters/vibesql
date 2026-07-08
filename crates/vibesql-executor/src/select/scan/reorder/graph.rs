@@ -59,6 +59,19 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 column_aliases: column_aliases.clone(),
             });
         }
+        FromClause::TableFunction { name, alias, column_aliases, .. } => {
+            // The binding identity is the alias when present, otherwise the
+            // function name itself.
+            let bound = alias.clone().unwrap_or_else(|| name.clone());
+            tables.push(TableRef {
+                name: bound,
+                alias: alias.clone(),
+                is_cte: false,
+                is_subquery: false,
+                subquery: None,
+                column_aliases: column_aliases.clone(),
+            });
+        }
         FromClause::Join { left, right, .. } => {
             flatten_join_tree(left, tables);
             flatten_join_tree(right, tables);
@@ -69,7 +82,10 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
 /// Extract all join conditions and WHERE predicates from a FROM clause
 pub(super) fn extract_all_conditions(from: &FromClause, conditions: &mut Vec<Expression>) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => {
             // No conditions in simple table refs
         }
         FromClause::Join { left, right, condition, .. } => {
@@ -90,7 +106,10 @@ pub(super) fn extract_conditions_with_types(
     conditions: &mut Vec<JoinConditionWithType>,
 ) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => {
             // No conditions in simple table refs
         }
         FromClause::Join { left, right, join_type, condition, .. } => {

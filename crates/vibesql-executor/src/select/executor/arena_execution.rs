@@ -182,6 +182,11 @@ impl SelectExecutor<'_> {
                     "Arena execution does not support subqueries in FROM".to_string(),
                 ));
             }
+            FromClause::TableFunction { .. } => {
+                return Err(ExecutorError::UnsupportedExpression(
+                    "Arena execution does not support table functions in FROM".to_string(),
+                ));
+            }
         };
 
         // Resolve table name symbol to string

@@ -21,6 +21,8 @@ use crate::{errors::ExecutorError, schema::CombinedSchema, select::columnar};
 pub(super) fn is_columnar_supported_join(from: &FromClause) -> bool {
     match from {
         FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
+        // Table functions are not yet executable via the columnar path.
+        FromClause::TableFunction { .. } => false,
         FromClause::Join { left, right, join_type, .. } => {
             matches!(
                 join_type,
@@ -38,7 +40,10 @@ pub(super) fn is_columnar_supported_join(from: &FromClause) -> bool {
 /// null-testing predicates and would silently drop them.
 pub(super) fn has_outer_join(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
         FromClause::Join { left, right, join_type, .. } => {
             matches!(join_type, JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter)
                 || has_outer_join(left)
@@ -73,7 +78,10 @@ pub(super) fn expression_has_is_null(expr: &Expression) -> bool {
 /// We detect these cases to fall back to regular execution which handles them correctly.
 pub(super) fn has_cross_join_with_on_condition(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
         FromClause::Join { left, right, join_type, condition, using_columns, natural, .. } => {
             // CROSS JOIN with any join condition (ON, USING, or NATURAL) should fall back
             // to regular execution path which handles filtering and column deduplication
@@ -102,6 +110,13 @@ pub(super) fn flatten_join_tree_simple(from: &FromClause, tables: &mut Vec<Simpl
         }
         FromClause::Values { alias, .. } => {
             tables.push((alias.clone(), Some(alias.clone()), true));
+        }
+        FromClause::TableFunction { .. } => {
+            // Guarded by is_columnar_supported_join (returns false for TVFs), so
+            // the columnar flatten path is never reached with a table function.
+            unreachable!(
+                "table functions are not executable via the columnar path (JSON1 Phase 3)"
+            )
         }
         FromClause::Join { left, right, .. } => {
             flatten_join_tree_simple(left, tables);
@@ -133,6 +148,11 @@ pub(super) fn flatten_join_tree_with_types(
         FromClause::Values { alias, .. } => {
             tables.push(((alias.clone(), Some(alias.clone()), true), None));
         }
+        FromClause::TableFunction { .. } => {
+            unreachable!(
+                "table functions are not executable via the columnar path (JSON1 Phase 3)"
+            )
+        }
         FromClause::Join { left, right, join_type, .. } => {
             flatten_join_tree_with_types(left, tables);
             // The right side of this join node gets the join type
@@ -151,6 +171,11 @@ pub(super) fn flatten_join_tree_with_types(
                         (alias.clone(), Some(alias.clone()), true),
                         Some(join_type.clone()),
                     ));
+                }
+                FromClause::TableFunction { .. } => {
+                    unreachable!(
+                        "table functions are not executable via the columnar path (JSON1 Phase 3)"
+                    )
                 }
                 FromClause::Join { .. } => {
                     // Nested join on the right side - flatten it but mark the first
@@ -179,7 +204,10 @@ pub(super) struct EquiJoinCondition {
 /// Extract join conditions from a FROM clause (ON conditions)
 pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<EquiJoinCondition>) {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => {}
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => {}
         FromClause::Join { left, right, condition, join_type, .. } => {
             // Handle INNER, CROSS, LEFT OUTER, and RIGHT OUTER joins in columnar path
             // FULL OUTER, SEMI, and ANTI joins are not supported
@@ -222,7 +250,10 @@ pub(super) fn extract_join_conditions(from: &FromClause, conditions: &mut Vec<Eq
 /// on the columnar fast path.
 pub(super) fn join_tree_has_residual_on_conjuncts(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
         FromClause::Join { left, right, condition, join_type, .. } => {
             // Only the join types handled by the columnar path matter here;
             // unsupported types bail out earlier via is_columnar_supported_join.
@@ -534,6 +565,7 @@ pub(super) fn extract_single_table_name(from_clause: &FromClause) -> Option<Stri
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
         FromClause::Values { .. } => None, // VALUES not supported
+        FromClause::TableFunction { .. } => None, // Table functions not supported
     }
 }
 
@@ -553,6 +585,7 @@ pub(super) fn extract_table_name_and_alias(
         FromClause::Join { .. } => None, // JOINs not supported in native columnar path
         FromClause::Subquery { .. } => None, // Subqueries not supported
         FromClause::Values { .. } => None, // VALUES not supported
+        FromClause::TableFunction { .. } => None, // Table functions not supported
     }
 }
 

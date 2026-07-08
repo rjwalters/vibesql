@@ -97,6 +97,7 @@ pub(crate) fn count_tables_in_from(from: &FromClause) -> usize {
         FromClause::Table { .. } => 1,
         FromClause::Subquery { .. } => 1,
         FromClause::Values { .. } => 1,
+        FromClause::TableFunction { .. } => 1,
         FromClause::Join { left, right, .. } => {
             count_tables_in_from(left) + count_tables_in_from(right)
         }
@@ -114,7 +115,10 @@ pub(crate) fn count_tables_in_from(from: &FromClause) -> usize {
 /// where the appropriate error is raised (CROSS JOIN does not support ON clause).
 pub(crate) fn all_joins_are_cross(from: &FromClause) -> bool {
     match from {
-        FromClause::Table { .. } | FromClause::Subquery { .. } | FromClause::Values { .. } => true,
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => true,
         FromClause::Join { left, right, join_type, condition, natural, using_columns, .. } => {
             // Must be CROSS join type AND have no ON condition AND not NATURAL AND no USING
             // CROSS JOIN with ON clause is invalid and should not be reordered

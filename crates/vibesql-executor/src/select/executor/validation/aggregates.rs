@@ -1213,8 +1213,11 @@ fn collect_from_columns_recursive(
             collect_from_columns_recursive(left, database, columns)
                 && collect_from_columns_recursive(right, database, columns)
         }
-        // Subqueries / VALUES in FROM: too complex to resolve here. Bail.
-        FromClause::Subquery { .. } | FromClause::Values { .. } => false,
+        // Subqueries / VALUES / table functions in FROM: too complex to
+        // resolve here. Bail.
+        FromClause::Subquery { .. }
+        | FromClause::Values { .. }
+        | FromClause::TableFunction { .. } => false,
     }
 }
 
@@ -1934,6 +1937,12 @@ fn walk_from_for_subquery_group_by(from: &vibesql_ast::FromClause) -> Result<(),
                 for expr in row {
                     walk_expr_for_subquery_group_by(expr)?;
                 }
+            }
+            Ok(())
+        }
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            for expr in args {
+                walk_expr_for_subquery_group_by(expr)?;
             }
             Ok(())
         }

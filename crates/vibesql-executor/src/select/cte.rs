@@ -641,6 +641,11 @@ fn collect_from_table_refs(
                 }
             }
         }
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            for expr in args {
+                collect_expr_table_refs(expr, shadowed, out);
+            }
+        }
     }
 }
 
@@ -1067,6 +1072,18 @@ fn collect_from_sources(
                 qualifier: alias.clone(),
                 columns: visible_columns(columns),
             }])
+        }
+        vibesql_ast::FromClause::TableFunction { alias, column_aliases, .. } => {
+            // Only statically resolvable when both an alias and an explicit
+            // column-alias list are present; otherwise fall back to legacy
+            // naming (the function is not yet executable to derive columns).
+            match (alias, column_aliases) {
+                (Some(qualifier), Some(aliases)) => Some(vec![WildcardSource {
+                    qualifier: qualifier.clone(),
+                    columns: visible_columns(aliases.clone()),
+                }]),
+                _ => None,
+            }
         }
     }
 }
@@ -1693,6 +1710,9 @@ fn from_clause_references_table(from: &vibesql_ast::FromClause, table_name: &str
                 || condition.as_ref().map_or(false, |c| expr_references_table(c, table_name))
         }
         vibesql_ast::FromClause::Values { .. } => false,
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            args.iter().any(|expr| expr_references_table(expr, table_name))
+        }
     }
 }
 

@@ -543,5 +543,17 @@ pub(super) fn rewrite_from_clause(
                 column_aliases: column_aliases.clone(),
             }
         }
+        vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases } => {
+            // Rewrite expressions in table function arguments
+            vibesql_ast::FromClause::TableFunction {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|expr| rewrite_expression(expr, rewrite_subquery_fn))
+                    .collect(),
+                alias: alias.clone(),
+                column_aliases: column_aliases.clone(),
+            }
+        }
     }
 }

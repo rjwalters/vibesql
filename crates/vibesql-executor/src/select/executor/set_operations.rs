@@ -499,6 +499,9 @@ pub(super) fn extract_column_names_from_from(
             vibesql_ast::FromClause::Values { .. } => {
                 // VALUES clause doesn't have named columns
             }
+            vibesql_ast::FromClause::TableFunction { .. } => {
+                // Table functions have no statically known named columns here
+            }
         }
     }
 

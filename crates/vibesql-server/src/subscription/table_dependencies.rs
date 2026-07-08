@@ -129,6 +129,12 @@ fn visit_from_clause(from: &FromClause, tables: &mut HashSet<String>) {
                 }
             }
         }
+        FromClause::TableFunction { args, .. } => {
+            // Table-valued function args may contain subqueries in expressions
+            for expr in args {
+                visit_expression(expr, tables);
+            }
+        }
     }
 }
 

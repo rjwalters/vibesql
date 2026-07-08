@@ -222,6 +222,12 @@ fn bind_from_clause_mut(from: &mut FromClause, params: &[SqlValue]) {
                 }
             }
         }
+        FromClause::TableFunction { args, .. } => {
+            // Bind parameters in table function arguments
+            for expr in args {
+                bind_expression_mut(expr, params);
+            }
+        }
     }
 }
 
@@ -619,6 +625,12 @@ fn bind_from_clause_named_mut(from: &mut FromClause, params: &HashMap<String, Sq
                 for expr in row {
                     bind_expression_named_mut(expr, params);
                 }
+            }
+        }
+        FromClause::TableFunction { args, .. } => {
+            // Bind parameters in table-valued function arguments
+            for expr in args {
+                bind_expression_named_mut(expr, params);
             }
         }
     }

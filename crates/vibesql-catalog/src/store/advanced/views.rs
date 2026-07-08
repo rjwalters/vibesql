@@ -198,6 +198,9 @@ impl super::super::Catalog {
             FromClause::Subquery { query, .. } => self.select_references_table(query, table_name),
             // VALUES clauses don't reference any tables
             FromClause::Values { .. } => false,
+            // Table-valued functions (json_each/json_tree) don't reference a
+            // named base table or view.
+            FromClause::TableFunction { .. } => false,
         }
     }
 }

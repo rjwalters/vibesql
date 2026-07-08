@@ -89,7 +89,8 @@ pub(super) fn is_single_table(query: &SelectStmt) -> bool {
         Some(FromClause::Table { .. }) => true,
         Some(FromClause::Join { .. })
         | Some(FromClause::Subquery { .. })
-        | Some(FromClause::Values { .. }) => false,
+        | Some(FromClause::Values { .. })
+        | Some(FromClause::TableFunction { .. }) => false,
         None => false, // No FROM clause (e.g., SELECT 1)
     }
 }

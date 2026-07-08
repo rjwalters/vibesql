@@ -1615,6 +1615,11 @@ fn collect_tables_from_from_clause_inner(
         vibesql_ast::FromClause::Values { alias, .. } => {
             tables.insert(alias.to_lowercase());
         }
+        vibesql_ast::FromClause::TableFunction { alias, .. } => {
+            if let Some(a) = alias {
+                tables.insert(a.to_lowercase());
+            }
+        }
     }
 }
 
@@ -1651,10 +1656,12 @@ fn collect_columns_from_from_clause_inner(
             collect_columns_from_from_clause_inner(left, all_db_columns, columns);
             collect_columns_from_from_clause_inner(right, all_db_columns, columns);
         }
-        vibesql_ast::FromClause::Subquery { .. } | vibesql_ast::FromClause::Values { .. } => {
-            // For subqueries and VALUES, we don't know the columns statically
-            // But any column reference will be validated when the subquery executes
-            // So we just pass through - this is permissive but safe
+        vibesql_ast::FromClause::Subquery { .. }
+        | vibesql_ast::FromClause::Values { .. }
+        | vibesql_ast::FromClause::TableFunction { .. } => {
+            // For subqueries, VALUES, and table functions, we don't know the
+            // columns statically. But any column reference will be validated
+            // when they execute. So we just pass through - permissive but safe.
         }
     }
 }
@@ -1778,5 +1785,6 @@ fn from_clause_references_unknown_table(
             )
         }
         vibesql_ast::FromClause::Values { .. } => false,
+        vibesql_ast::FromClause::TableFunction { .. } => false,
     }
 }

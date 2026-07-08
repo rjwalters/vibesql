@@ -1078,6 +1078,13 @@ impl CreateTableExecutor {
                     alias
                 )));
             }
+            Some(vibesql_ast::FromClause::TableFunction { name, .. }) => {
+                // Table function - can't determine column names from schema
+                return Err(ExecutorError::UnsupportedFeature(format!(
+                    "CREATE TABLE AS SELECT * from table function '{}' not supported - please specify columns explicitly",
+                    name
+                )));
+            }
         }
 
         Ok(names)

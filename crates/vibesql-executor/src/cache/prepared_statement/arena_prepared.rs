@@ -278,6 +278,11 @@ where
                 visit_arena_expression(cond, visitor);
             }
         }
+        vibesql_ast::arena::FromClause::TableFunction { args, .. } => {
+            for expr in args.iter() {
+                visit_arena_expression(expr, visitor);
+            }
+        }
     }
 }
 
@@ -299,6 +304,9 @@ fn visit_arena_from_clause(
         vibesql_ast::arena::FromClause::Join { left, right, .. } => {
             visit_arena_from_clause(Some(left), tables, interner);
             visit_arena_from_clause(Some(right), tables, interner);
+        }
+        vibesql_ast::arena::FromClause::TableFunction { .. } => {
+            // Table functions do not reference any base tables
         }
     }
 }

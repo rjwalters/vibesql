@@ -188,5 +188,11 @@ where
             Some(database),
             Some(cte_results),
         ),
+        vibesql_ast::FromClause::TableFunction { name, .. } => {
+            Err(ExecutorError::UnsupportedFeature(format!(
+                "table function '{}' in FROM is not yet executable (JSON1 Phase 3)",
+                name
+            )))
+        }
     }
 }

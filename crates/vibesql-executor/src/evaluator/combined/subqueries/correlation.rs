@@ -133,6 +133,11 @@ fn extract_table_names_recursive(from: &vibesql_ast::FromClause, tables: &mut Ve
         vibesql_ast::FromClause::Values { alias, .. } => {
             tables.push(alias.clone());
         }
+        vibesql_ast::FromClause::TableFunction { alias, .. } => {
+            if let Some(a) = alias {
+                tables.push(a.clone());
+            }
+        }
     }
 }
 
@@ -271,6 +276,18 @@ fn collect_correlation_refs_from_from_clause(
                         refs,
                     );
                 }
+            }
+        }
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            // Check table function arguments for correlation refs
+            for expr in args {
+                collect_correlation_refs_from_expr(
+                    expr,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
             }
         }
     }
