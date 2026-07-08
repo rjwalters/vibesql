@@ -1284,6 +1284,18 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Parse function call.
     fn parse_function_call(&mut self, name: &str) -> Result<Expression<'arena>, ParseError> {
+        // JSONB aggregate accept-and-convert: `jsonb_group_array` /
+        // `jsonb_group_object` are text-mode aliases of their `json_group_*`
+        // counterparts (VibeSQL does not implement binary JSONB — see #5786).
+        // Normalize to the canonical `json_group_*` name so the executor's
+        // aggregate detection (which knows only the `json_*` spelling) picks
+        // them up. Mirrors the standard parser in
+        // `parser/expressions/functions/mod.rs`.
+        let name = match name.to_ascii_uppercase().as_str() {
+            "JSONB_GROUP_ARRAY" => "json_group_array",
+            "JSONB_GROUP_OBJECT" => "json_group_object",
+            _ => name,
+        };
         let name_upper = name.to_uppercase();
         let name_sym = self.intern(name);
         self.advance(); // consume function name

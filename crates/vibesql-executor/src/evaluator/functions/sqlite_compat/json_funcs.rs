@@ -184,10 +184,564 @@ fn navigate<'a>(
 
 /// Parse JSON accepting SQLite's relaxed (JSON5-ish) superset, mirroring the
 /// behavior of `json()`, `json_extract()`, and `json_type()`.
+///
+/// Strategy (in order):
+///   1. Strict `serde_json` — the fast, exact path for canonical JSON. With
+///      `arbitrary_precision` it preserves the source number token verbatim
+///      (so `json('1.50')` round-trips to `1.50`, matching SQLite).
+///   2. A JSON5 → strict-JSON pre-processor ([`json5_to_json`]) that normalizes
+///      only the JSON5-specific surface (unquoted keys, single-quoted and
+///      multi-line strings, comments, trailing commas, and the number
+///      extensions: hex, leading/trailing decimal points, explicit `+`, and
+///      `Infinity`/`NaN`). Number tokens are rewritten to the *minimal* valid
+///      JSON form SQLite emits — e.g. `.5e3` → `0.5e3`, `4.e0` → `4.0e0`,
+///      `0xABCDEF` → `11259375`, `Infinity` → `9e999` — and then handed to
+///      `serde_json`, which (again via `arbitrary_precision`) preserves that
+///      exact token. This reproduces SQLite's number rendering, which the
+///      `json5` crate cannot because it round-trips every number through `f64`.
+/// The pre-processor is authoritative for the relaxed grammar: we deliberately
+/// do *not* fall back to the `json5` crate, because it accepts constructs SQLite
+/// rejects (e.g. leading-zero integers like `-01`, which must be malformed so
+/// `json_error_position`/`json_valid` match SQLite).
 fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
-    serde_json::from_str(s)
-        .or_else(|_| json5::from_str::<serde_json::Value>(s))
-        .map_err(|_| ())
+    if let Ok(v) = serde_json::from_str(s) {
+        return Ok(v);
+    }
+    if let Some(rewritten) = json5_to_json(s) {
+        if let Ok(v) = serde_json::from_str(&rewritten) {
+            return Ok(v);
+        }
+    }
+    Err(())
+}
+
+/// Rewrite a SQLite-relaxed / JSON5 document into strict JSON text, or return
+/// `None` if the input is not well-formed under the relaxed grammar.
+///
+/// The output is fed to `serde_json` (with `arbitrary_precision`), so number
+/// tokens survive verbatim — the key reason this exists rather than deferring
+/// to the `json5` crate, which collapses every number to an `f64`.
+///
+/// Handled JSON5 surface: `//` line and `/* */` block comments; single- and
+/// double-quoted strings with JSON5 escapes (`\'`, `\v`, `\0`, `\xHH`, and
+/// backslash-newline line continuations, including U+2028/U+2029); unquoted
+/// ECMAScript identifier object keys; trailing commas; and the number
+/// extensions (hex, leading/trailing `.`, explicit `+`, `Infinity`, `NaN`).
+fn json5_to_json(s: &str) -> Option<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::with_capacity(s.len()), depth: 0 };
+    w.skip_trivia();
+    w.rewrite_value()?;
+    w.skip_trivia();
+    if w.i != w.chars.len() {
+        return None; // trailing junk
+    }
+    Some(w.out)
+}
+
+/// Maximum object/array nesting depth accepted by the JSON5 rewriter.
+///
+/// `rewrite_value` → `rewrite_object`/`rewrite_array` → `rewrite_value` recurses
+/// once per nesting level; without a cap a deeply-nested document would overflow
+/// the thread stack and abort the whole process (a Rust stack overflow is not
+/// catchable). Matching SQLite's `SQLITE_MAX_JSON_DEPTH` (default 1000) keeps
+/// `json_valid`/`json_error_position` conformant — SQLite reports "malformed
+/// JSON" beyond this depth — while making the rewriter bounded. On exceeding the
+/// cap the rewriter returns `None` (rewrite failure), so callers observe the same
+/// "malformed JSON" outcome (`json_valid` → 0) rather than a crash.
+const MAX_JSON5_DEPTH: usize = 1000;
+
+struct Json5Rewriter<'a> {
+    chars: &'a [char],
+    i: usize,
+    out: String,
+    /// Current object/array nesting depth; capped at [`MAX_JSON5_DEPTH`].
+    depth: usize,
+}
+
+impl Json5Rewriter<'_> {
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.i).copied()
+    }
+
+    /// Skip whitespace (including JSON5's extra Unicode spaces) and `//` / `/* */`
+    /// comments. Returns `false` if an unterminated block comment is seen.
+    fn skip_trivia(&mut self) -> bool {
+        loop {
+            match self.peek() {
+                Some(c) if is_json5_ws(c) => self.i += 1,
+                Some('/') if self.chars.get(self.i + 1) == Some(&'/') => {
+                    self.i += 2;
+                    while let Some(c) = self.peek() {
+                        if c == '\n' || c == '\r' || c == '\u{2028}' || c == '\u{2029}' {
+                            break;
+                        }
+                        self.i += 1;
+                    }
+                }
+                Some('/') if self.chars.get(self.i + 1) == Some(&'*') => {
+                    self.i += 2;
+                    loop {
+                        match self.peek() {
+                            None => return false, // unterminated block comment
+                            Some('*') if self.chars.get(self.i + 1) == Some(&'/') => {
+                                self.i += 2;
+                                break;
+                            }
+                            _ => self.i += 1,
+                        }
+                    }
+                }
+                _ => return true,
+            }
+        }
+    }
+
+    fn rewrite_value(&mut self) -> Option<()> {
+        match self.peek()? {
+            '{' | '[' => {
+                // Containers are the only recursive case; guard nesting depth here
+                // (the single recursion funnel) so a pathological document cannot
+                // overflow the stack. Beyond the cap we return `None` — a rewrite
+                // failure — matching SQLite's "malformed JSON" past
+                // SQLITE_MAX_JSON_DEPTH.
+                if self.depth >= MAX_JSON5_DEPTH {
+                    return None;
+                }
+                self.depth += 1;
+                let r = if self.peek() == Some('{') {
+                    self.rewrite_object()
+                } else {
+                    self.rewrite_array()
+                };
+                self.depth -= 1;
+                r
+            }
+            '"' | '\'' => self.rewrite_string(),
+            _ => self.rewrite_scalar(),
+        }
+    }
+
+    fn rewrite_object(&mut self) -> Option<()> {
+        self.out.push('{');
+        self.i += 1; // consume '{'
+        self.skip_trivia();
+        let mut first = true;
+        loop {
+            self.skip_trivia();
+            match self.peek()? {
+                '}' => {
+                    self.i += 1;
+                    self.out.push('}');
+                    return Some(());
+                }
+                ',' if !first => {
+                    // Trailing / separating comma: consume, then re-loop. A
+                    // trailing comma before '}' is dropped by the '}' arm above.
+                    self.i += 1;
+                    self.skip_trivia();
+                    if self.peek()? == '}' {
+                        self.i += 1;
+                        self.out.push('}');
+                        return Some(());
+                    }
+                    self.out.push(',');
+                    self.rewrite_member()?;
+                    first = false;
+                }
+                _ if first => {
+                    self.rewrite_member()?;
+                    first = false;
+                }
+                _ => return None, // missing comma between members
+            }
+        }
+    }
+
+    fn rewrite_member(&mut self) -> Option<()> {
+        self.skip_trivia();
+        // Key: a quoted string or an unquoted identifier.
+        match self.peek()? {
+            '"' | '\'' => self.rewrite_string()?,
+            _ => self.rewrite_identifier_key()?,
+        }
+        self.skip_trivia();
+        if self.peek()? != ':' {
+            return None;
+        }
+        self.i += 1;
+        self.out.push(':');
+        self.skip_trivia();
+        self.rewrite_value()
+    }
+
+    /// Rewrite an unquoted ECMAScript IdentifierName object key as a quoted JSON
+    /// string. The first character must be a letter, `_`, or `$`; subsequent
+    /// characters additionally allow digits. (Non-ASCII letters are accepted, as
+    /// SQLite accepts e.g. `MNO_123æxyz`.)
+    fn rewrite_identifier_key(&mut self) -> Option<()> {
+        let start = self.i;
+        let mut first = true;
+        while let Some(c) = self.peek() {
+            let ok = if first {
+                c == '_' || c == '$' || c.is_alphabetic()
+            } else {
+                c == '_' || c == '$' || c.is_alphanumeric()
+            };
+            if !ok {
+                break;
+            }
+            first = false;
+            self.i += 1;
+        }
+        if self.i == start {
+            return None;
+        }
+        self.out.push('"');
+        for &c in &self.chars[start..self.i] {
+            match c {
+                '"' => self.out.push_str("\\\""),
+                '\\' => self.out.push_str("\\\\"),
+                _ => self.out.push(c),
+            }
+        }
+        self.out.push('"');
+        Some(())
+    }
+
+    fn rewrite_array(&mut self) -> Option<()> {
+        self.out.push('[');
+        self.i += 1; // consume '['
+        let mut first = true;
+        loop {
+            self.skip_trivia();
+            match self.peek()? {
+                ']' => {
+                    self.i += 1;
+                    self.out.push(']');
+                    return Some(());
+                }
+                ',' if !first => {
+                    self.i += 1;
+                    self.skip_trivia();
+                    if self.peek()? == ']' {
+                        self.i += 1;
+                        self.out.push(']');
+                        return Some(());
+                    }
+                    self.out.push(',');
+                    self.rewrite_value()?;
+                    first = false;
+                }
+                _ if first => {
+                    self.rewrite_value()?;
+                    first = false;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    /// Rewrite a single- or double-quoted JSON5 string into a strict JSON
+    /// double-quoted string, translating JSON5-only escapes.
+    fn rewrite_string(&mut self) -> Option<()> {
+        let quote = self.peek()?;
+        self.i += 1;
+        self.out.push('"');
+        loop {
+            let c = self.peek()?;
+            match c {
+                q if q == quote => {
+                    self.i += 1;
+                    self.out.push('"');
+                    return Some(());
+                }
+                '"' => {
+                    // A double quote inside a single-quoted string must be escaped.
+                    self.out.push_str("\\\"");
+                    self.i += 1;
+                }
+                '\\' => {
+                    self.i += 1;
+                    let e = self.peek()?;
+                    match e {
+                        // Line continuation: backslash + line terminator -> the
+                        // newline is removed from the string value.
+                        '\n' => self.i += 1,
+                        '\r' => {
+                            self.i += 1;
+                            if self.peek() == Some('\n') {
+                                self.i += 1; // CRLF
+                            }
+                        }
+                        '\u{2028}' | '\u{2029}' => self.i += 1,
+                        // Escapes valid in strict JSON: pass through verbatim.
+                        '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' => {
+                            self.out.push('\\');
+                            self.out.push(e);
+                            self.i += 1;
+                        }
+                        'u' => {
+                            self.out.push('\\');
+                            self.out.push('u');
+                            self.i += 1;
+                        }
+                        // JSON5 single-quote escape -> a bare quote in JSON.
+                        '\'' => {
+                            self.out.push('\'');
+                            self.i += 1;
+                        }
+                        // JSON5 vertical tab.
+                        'v' => {
+                            self.out.push_str("\\u000b");
+                            self.i += 1;
+                        }
+                        // JSON5 \0 (NUL, when not followed by another digit).
+                        '0' if !self
+                            .chars
+                            .get(self.i + 1)
+                            .is_some_and(|d| d.is_ascii_digit()) =>
+                        {
+                            self.out.push_str("\\u0000");
+                            self.i += 1;
+                        }
+                        // JSON5 hex escape \xHH -> \u00HH.
+                        'x' => {
+                            let h1 = *self.chars.get(self.i + 1)?;
+                            let h2 = *self.chars.get(self.i + 2)?;
+                            if !h1.is_ascii_hexdigit() || !h2.is_ascii_hexdigit() {
+                                return None;
+                            }
+                            self.out.push_str("\\u00");
+                            self.out.push(h1);
+                            self.out.push(h2);
+                            self.i += 3;
+                        }
+                        _ => return None,
+                    }
+                }
+                // Raw control characters are legal inside SQLite/JSON5 string
+                // literals; escape them so the strict-JSON output stays valid.
+                c if (c as u32) < 0x20 => {
+                    match c {
+                        '\u{08}' => self.out.push_str("\\b"),
+                        '\u{09}' => self.out.push_str("\\t"),
+                        '\u{0a}' => self.out.push_str("\\n"),
+                        '\u{0c}' => self.out.push_str("\\f"),
+                        '\u{0d}' => self.out.push_str("\\r"),
+                        other => self.out.push_str(&format!("\\u{:04x}", other as u32)),
+                    }
+                    self.i += 1;
+                }
+                _ => {
+                    self.out.push(c);
+                    self.i += 1;
+                }
+            }
+        }
+    }
+
+    /// Rewrite a scalar keyword (`true`/`false`/`null`) or a JSON5 number.
+    fn rewrite_scalar(&mut self) -> Option<()> {
+        // Keyword literals.
+        for kw in ["true", "false", "null"] {
+            if self.matches_keyword(kw) {
+                self.out.push_str(kw);
+                self.i += kw.chars().count();
+                return Some(());
+            }
+        }
+        self.rewrite_number()
+    }
+
+    fn matches_keyword(&self, kw: &str) -> bool {
+        let kwc: Vec<char> = kw.chars().collect();
+        if self.i + kwc.len() > self.chars.len() {
+            return false;
+        }
+        if self.chars[self.i..self.i + kwc.len()] != kwc[..] {
+            return false;
+        }
+        // Must not be followed by an identifier character.
+        match self.chars.get(self.i + kwc.len()) {
+            Some(c) => !(c.is_alphanumeric() || *c == '_' || *c == '$'),
+            None => true,
+        }
+    }
+
+    /// Rewrite a JSON5 number token into strict JSON, preserving the token form
+    /// SQLite emits (leading/trailing decimal points normalized, `+` stripped,
+    /// hex converted to decimal, `Infinity`/`NaN` mapped to `9e999`/`null`).
+    fn rewrite_number(&mut self) -> Option<()> {
+        // Optional sign.
+        let mut sign = "";
+        if let Some(c) = self.peek() {
+            if c == '+' {
+                self.i += 1;
+            } else if c == '-' {
+                sign = "-";
+                self.i += 1;
+            }
+        }
+
+        // Infinity / NaN.
+        if self.matches_word("Infinity") {
+            self.i += "Infinity".len();
+            self.out.push_str(if sign == "-" { "-9e999" } else { "9e999" });
+            return Some(());
+        }
+        if self.matches_word("NaN") {
+            self.i += "NaN".len();
+            // SQLite renders NaN as JSON null.
+            self.out.push_str("null");
+            return Some(());
+        }
+
+        // Hexadecimal integer: 0x / 0X followed by hex digits.
+        if self.peek() == Some('0')
+            && matches!(self.chars.get(self.i + 1), Some('x') | Some('X'))
+        {
+            let hstart = self.i + 2;
+            let mut j = hstart;
+            while self.chars.get(j).is_some_and(|c| c.is_ascii_hexdigit()) {
+                j += 1;
+            }
+            if j == hstart {
+                return None;
+            }
+            let hex: String = self.chars[hstart..j].iter().collect();
+            self.i = j;
+            match u64::from_str_radix(&hex, 16) {
+                Ok(v) => {
+                    // SQLite prints -0 for a negative zero hex literal.
+                    if sign == "-" {
+                        self.out.push('-');
+                    }
+                    self.out.push_str(&v.to_string());
+                }
+                Err(_) => {
+                    // Overflow u64 -> SQLite yields (signed) infinity.
+                    self.out.push_str(if sign == "-" { "-9e999" } else { "9e999" });
+                }
+            }
+            return Some(());
+        }
+
+        // Decimal number: [digits] [ '.' [digits] ] [ ('e'|'E') [sign] digits ].
+        let int_start = self.i;
+        while self.chars.get(self.i).is_some_and(|c| c.is_ascii_digit()) {
+            self.i += 1;
+        }
+        let int_digits = self.i - int_start;
+
+        // Reject leading-zero integer parts (`01`, `00`) — invalid in both JSON
+        // and JSON5, matching SQLite (`json_valid('{"x":-01}')` -> 0). A lone `0`
+        // (optionally followed by a fraction/exponent) is fine.
+        if int_digits > 1 && self.chars[int_start] == '0' {
+            return None;
+        }
+
+        let mut has_frac = false;
+        let mut frac_digits = 0usize;
+        if self.peek() == Some('.') {
+            has_frac = true;
+            self.i += 1;
+            let fstart = self.i;
+            while self.chars.get(self.i).is_some_and(|c| c.is_ascii_digit()) {
+                self.i += 1;
+            }
+            frac_digits = self.i - fstart;
+        }
+
+        if int_digits == 0 && frac_digits == 0 {
+            return None; // no digits: not a number
+        }
+
+        // Exponent.
+        let exp_start = self.i;
+        let mut exp = String::new();
+        if matches!(self.peek(), Some('e') | Some('E')) {
+            let mut j = self.i + 1;
+            let mut esign = String::new();
+            if matches!(self.chars.get(j), Some('+') | Some('-')) {
+                esign.push(*self.chars.get(j)?);
+                j += 1;
+            }
+            let dstart = j;
+            while self.chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+                j += 1;
+            }
+            if j == dstart {
+                self.i = exp_start; // 'e' with no digits: not part of the number
+            } else {
+                exp = format!("e{}{}", esign, self.chars[dstart..j].iter().collect::<String>());
+                self.i = j;
+            }
+        }
+
+        // Build the strict-JSON mantissa, normalizing leading/trailing dots.
+        // `int_start` is the first integer digit (after any sign); the fractional
+        // digits (if any) begin just past the '.'.
+        let idigits: String =
+            self.chars[int_start..int_start + digits_len(self.chars, int_start)].iter().collect();
+        let mut mantissa = String::new();
+        if idigits.is_empty() {
+            mantissa.push('0'); // leading '.5' -> '0.5'
+        } else {
+            mantissa.push_str(&idigits);
+        }
+        if has_frac {
+            mantissa.push('.');
+            let fstart = int_start + idigits.len() + 1; // skip the '.'
+            let fdigits: String =
+                self.chars[fstart..fstart + digits_len(self.chars, fstart)].iter().collect();
+            if fdigits.is_empty() {
+                mantissa.push('0'); // trailing '4.' -> '4.0'
+            } else {
+                mantissa.push_str(&fdigits);
+            }
+        }
+
+        self.out.push_str(sign);
+        self.out.push_str(&mantissa);
+        self.out.push_str(&exp);
+        Some(())
+    }
+
+    /// Does the source at the cursor match `word` as a standalone token (not part
+    /// of a longer identifier)?
+    fn matches_word(&self, word: &str) -> bool {
+        let wc: Vec<char> = word.chars().collect();
+        if self.i + wc.len() > self.chars.len() {
+            return false;
+        }
+        if self.chars[self.i..self.i + wc.len()] != wc[..] {
+            return false;
+        }
+        match self.chars.get(self.i + wc.len()) {
+            Some(c) => !(c.is_alphanumeric() || *c == '_' || *c == '$'),
+            None => true,
+        }
+    }
+}
+
+/// Count consecutive ASCII digits in `chars` starting at `from`.
+fn digits_len(chars: &[char], from: usize) -> usize {
+    let mut n = 0;
+    while chars.get(from + n).is_some_and(|c| c.is_ascii_digit()) {
+        n += 1;
+    }
+    n
+}
+
+/// Is `c` whitespace under SQLite's relaxed / JSON5 grammar?
+fn is_json5_ws(c: char) -> bool {
+    matches!(
+        c,
+        '\u{09}' | '\u{0a}' | '\u{0b}' | '\u{0c}' | '\u{0d}' | '\u{20}'
+            | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}'
+            | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+    )
 }
 
 /// Convert an extracted JSON node into the SQL value SQLite would return from
@@ -200,10 +754,20 @@ fn json_node_to_sql_value(value: &serde_json::Value) -> SqlValue {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 SqlValue::Integer(i)
+            } else if let Some(u) = n.as_u64() {
+                // Values above i64::MAX (e.g. large hex literals) that still fit
+                // in u64.
+                SqlValue::Real(u as f64)
             } else if let Some(f) = n.as_f64() {
                 SqlValue::Real(f)
             } else {
-                SqlValue::Null
+                // With `arbitrary_precision`, out-of-f64-range tokens like the
+                // `9e999` infinity sentinel report `None` from `as_f64()`.
+                // Parse the raw token, which yields ±inf as SQLite expects.
+                match n.to_string().parse::<f64>() {
+                    Ok(f) => SqlValue::Real(f),
+                    Err(_) => SqlValue::Null,
+                }
             }
         }
         serde_json::Value::String(s) => SqlValue::Varchar(s.as_str().into()),
@@ -307,13 +871,21 @@ pub(crate) fn eval_json_arrow(
     }
 }
 
-/// json_valid(X) - return 1 if X is well-formed (strict RFC-8259) JSON, else 0.
+/// json_valid(X) / json_valid(X, FLAGS) - test whether X is well-formed JSON.
 ///
 /// A NULL argument returns NULL (matching modern SQLite; the legacy
-/// `legacy_json_valid` build returned 0). The optional second flags argument
-/// (SQLite 3.45+) is accepted but ignored for Phase 1. Note that unlike
-/// `json()`/`json_extract()`, this uses strict JSON only, so JSON5 inputs
-/// (e.g. `{a:5}`) validate as 0.
+/// `legacy_json_valid` build returned 0).
+///
+/// The optional FLAGS argument (SQLite 3.45+) selects which representations
+/// count as valid (<https://sqlite.org/json1.html#jvalid>). We honor the
+/// text-JSON bits:
+///   - `0x01`: canonical RFC-8259 JSON text
+///   - `0x02`: JSON5 text
+/// The JSONB-blob bits (`0x04`/`0x08`) never match because VibeSQL does not
+/// implement SQLite's binary JSONB representation (accept-and-convert keeps
+/// everything as text — see the Phase 4 JSONB note). Default FLAGS is `1`
+/// (canonical text only), so a JSON5 input like `{a:5}` validates as 0 unless
+/// bit `0x02` is set.
 pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.is_empty() || args.len() > 2 {
         return Err(ExecutorError::WrongNumberOfArguments {
@@ -321,12 +893,35 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         });
     }
 
+    // Resolve the flags argument (default 1 = canonical JSON text only).
+    let flags: i64 = if args.len() == 2 {
+        match &args[1] {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Integer(i) | SqlValue::Bigint(i) => *i,
+            SqlValue::Smallint(i) => *i as i64,
+            SqlValue::Unsigned(u) => *u as i64,
+            other => sql_value_scalar_text(other).parse::<i64>().unwrap_or(1),
+        }
+    } else {
+        1
+    };
+    let accept_canonical = flags & 0x01 != 0;
+    let accept_json5 = flags & 0x02 != 0;
+
     let valid = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            serde_json::from_str::<serde_json::Value>(s.as_str()).is_ok()
+            let s = s.as_str();
+            let canonical_ok =
+                accept_canonical && serde_json::from_str::<serde_json::Value>(s).is_ok();
+            // JSON5 acceptance: the relaxed parser accepts a superset that
+            // includes canonical JSON, so only consult it when the JSON5 bit is
+            // set and the strict check did not already succeed.
+            let json5_ok = accept_json5 && !canonical_ok && parse_json_relaxed(s).is_ok();
+            canonical_ok || json5_ok
         }
-        // Numeric SQL values render to valid JSON scalars.
+        // Numeric SQL values render to valid JSON scalars (accepted when either
+        // text bit is set).
         SqlValue::Integer(_)
         | SqlValue::Smallint(_)
         | SqlValue::Bigint(_)
@@ -334,8 +929,8 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         | SqlValue::Numeric(_)
         | SqlValue::Float(_)
         | SqlValue::Real(_)
-        | SqlValue::Double(_) => true,
-        // Blobs are not (text) JSON in this phase.
+        | SqlValue::Double(_) => accept_canonical || accept_json5,
+        // Blobs would only be valid under the JSONB bits, which we never accept.
         _ => false,
     };
 
@@ -551,23 +1146,36 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     match &args[0] {
         SqlValue::Null => Ok(SqlValue::Null),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            // Parse the JSON to validate it. SQLite's json() accepts a relaxed
-            // JSON5-like superset (unquoted object keys, single-quoted strings,
-            // trailing commas, comments, etc.). Try strict serde_json first for
-            // speed and exact behavior on canonical JSON, then fall back to a
-            // JSON5 parser so inputs like `{a:3}` are accepted, matching SQLite.
-            let parsed: Result<serde_json::Value, _> = serde_json::from_str(s.as_str())
-                .or_else(|_| json5::from_str::<serde_json::Value>(s.as_str()));
-            match parsed {
+            // SQLite's json() accepts a relaxed JSON5-like superset (unquoted
+            // object keys, single-quoted strings, trailing commas, comments,
+            // hex/Infinity numbers, etc.) and emits minified strict JSON.
+            //
+            // The [`json5_to_json`] pre-processor already emits minified strict
+            // JSON that preserves SQLite's number rendering exactly (e.g.
+            // `.5e3` -> `0.5e3`, `9e999` for Infinity). We prefer its output
+            // verbatim because a serde_json round-trip would rewrite exponent
+            // tokens (`0.5e3` -> `0.5e+3`) and mangle the infinity sentinel.
+            // Strict-but-non-canonical JSON (whitespace, `1.50`) still needs
+            // minifying, so fall back to a serde_json re-serialize when the
+            // pre-processor declines (which only happens for inputs the strict
+            // parser already accepts).
+            if let Some(minified) = json5_to_json(s.as_str()) {
+                // The rewriter is lenient about a few number forms serde rejects
+                // (e.g. leading-zero integers like `00`). Validate by re-parsing
+                // the strict output — but return the rewriter's *text*, not a
+                // serde round-trip, so exponent/infinity tokens stay verbatim.
+                if serde_json::from_str::<serde_json::Value>(&minified).is_ok() {
+                    return Ok(SqlValue::Varchar(minified.into()));
+                }
+            }
+            match parse_json_relaxed(s.as_str()) {
                 Ok(value) => {
-                    // Re-serialize to minified, strict JSON (compact format)
                     let minified = serde_json::to_string(&value).map_err(|e| {
                         ExecutorError::SqliteCompatError(format!("malformed JSON: {}", e))
                     })?;
                     Ok(SqlValue::Varchar(minified.into()))
                 }
                 Err(_) => {
-                    // SQLite returns "malformed JSON" for invalid JSON
                     Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()))
                 }
             }
@@ -1027,6 +1635,13 @@ pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 let segs = parse_sqlite_json_path(s.as_str())
                     .map_err(ExecutorError::SqliteCompatError)?;
+                // Removing the root ($) discards the whole document: SQLite
+                // returns NULL (e.g. `json_remove('{"x":25}','$')` -> NULL).
+                // (Note: `json_remove(X)` with *no* path argument returns X
+                // unchanged, handled by the loop simply not running.)
+                if segs.is_empty() {
+                    return Ok(SqlValue::Null);
+                }
                 remove_path(&mut doc, &segs);
             }
             other => {
@@ -1357,11 +1972,31 @@ impl Parser<'_> {
             }
         }
         if self.i == start {
-            Err(start)
-        } else {
-            Ok(())
+            return Err(start);
         }
+        // If the token looks like a number (starts with a sign, digit, or '.'),
+        // validate it under the relaxed number grammar so malformed numerics like
+        // `-01` are reported as errors here (matching SQLite's
+        // json_error_position). Other barewords (true/false/null/Infinity/NaN and
+        // unquoted-key fragments) are left as-is.
+        let first = self.chars[start];
+        if matches!(first, '+' | '-' | '.') || first.is_ascii_digit() {
+            let token: String = self.chars[start..self.i].iter().collect();
+            if !is_valid_relaxed_number(&token) {
+                return Err(start);
+            }
+        }
+        Ok(())
     }
+}
+
+/// Does `token` parse as a single valid relaxed/JSON5 number (the exact subset
+/// [`Json5Rewriter::rewrite_number`] accepts)? Used by the error-position
+/// scanner to reject malformed numerics such as `-01`.
+fn is_valid_relaxed_number(token: &str) -> bool {
+    let chars: Vec<char> = token.chars().collect();
+    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::new(), depth: 0 };
+    w.rewrite_number().is_some() && w.i == chars.len()
 }
 
 #[cfg(test)]
@@ -1429,6 +2064,142 @@ mod tests {
         assert_eq!(result, SqlValue::Varchar(r#"{"a":{"b":[1,2,3]},"c":"test"}"#.into()));
     }
 
+    /// Deeply-nested input must not overflow the stack. The `Json5Rewriter`
+    /// recurses once per nesting level (`rewrite_value` → `rewrite_object`/
+    /// `rewrite_array` → `rewrite_value`); without the [`MAX_JSON5_DEPTH`] guard a
+    /// ~20k-deep document SIGABRTs the whole process on a small worker-thread
+    /// stack (a Rust stack overflow is not catchable). The guard turns that into a
+    /// clean rewrite failure (`None` / "malformed JSON"), matching SQLite's
+    /// behavior past `SQLITE_MAX_JSON_DEPTH` where `json()` reports "malformed
+    /// JSON" and `json_valid` returns 0.
+    ///
+    /// The trailing comma forces the input off the strict `serde_json` fast path
+    /// (which caps recursion at 128 on its own) and through the JSON5 rewriter,
+    /// exercising exactly the recursion the guard protects.
+    #[test]
+    fn test_json5_deep_nesting_does_not_overflow_stack() {
+        // Run on a small (512 KiB) stack so an unbounded rewriter would reliably
+        // overflow — proving the guard, not just a generous main-thread stack, is
+        // what keeps this bounded.
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let depth = 20_000usize;
+                let mut s = String::with_capacity(depth * 2 + 2);
+                for _ in 0..depth {
+                    s.push('[');
+                }
+                s.push_str("1,"); // trailing comma routes through the JSON5 rewriter
+                for _ in 0..depth {
+                    s.push(']');
+                }
+
+                // The rewriter must bail with None rather than recursing to a crash.
+                assert!(
+                    json5_to_json(&s).is_none(),
+                    "deep JSON5 rewrite should fail cleanly, not overflow the stack"
+                );
+
+                // Public surface: json_valid(<deep>, 2) must return 0, and json()
+                // must report malformed JSON — never abort the process.
+                let deep = SqlValue::Varchar(s.clone().into());
+                assert_eq!(
+                    json_valid(&[deep.clone(), SqlValue::Integer(2)]).unwrap(),
+                    SqlValue::Integer(0),
+                    "json_valid(<deep>, 2) should be 0"
+                );
+                assert!(
+                    json(&[deep]).is_err(),
+                    "json(<deep>) should error (malformed JSON), not crash"
+                );
+            })
+            .expect("spawn small-stack test thread");
+        handle.join().expect("deep-nesting test thread must not abort/panic");
+    }
+
+    /// The depth guard rejects exactly at [`MAX_JSON5_DEPTH`]: a document nested to
+    /// the cap rewrites, one level deeper fails. (Uses the trailing-comma JSON5
+    /// path; the strict `serde_json` path independently caps at 128.)
+    #[test]
+    fn test_json5_depth_cap_boundary() {
+        let build = |depth: usize| {
+            let mut s = String::with_capacity(depth * 2 + 2);
+            for _ in 0..depth {
+                s.push('[');
+            }
+            s.push_str("1,");
+            for _ in 0..depth {
+                s.push(']');
+            }
+            s
+        };
+        // At the cap: the outermost container is depth 1, the innermost is depth
+        // MAX_JSON5_DEPTH — accepted.
+        assert!(
+            json5_to_json(&build(MAX_JSON5_DEPTH)).is_some(),
+            "nesting to exactly MAX_JSON5_DEPTH should rewrite"
+        );
+        // One past the cap: rejected.
+        assert!(
+            json5_to_json(&build(MAX_JSON5_DEPTH + 1)).is_none(),
+            "nesting past MAX_JSON5_DEPTH should fail the rewrite"
+        );
+    }
+
+    /// Leading-zero numbers are malformed under both JSON and SQLite's JSON5
+    /// (`json_valid('{"x":-01}')` -> 0, `json_error_position` non-zero).
+    #[test]
+    fn test_json5_rejects_leading_zero_numbers() {
+        for bad in [r#"{"x":-01}"#, r#"{"x":01.5}"#, r#"{"x":00}"#, r#"{"x":-00}"#] {
+            assert!(parse_json_relaxed(bad).is_err(), "should reject {bad:?}");
+            assert_eq!(
+                json_valid(&[SqlValue::Varchar(bad.into())]).unwrap(),
+                SqlValue::Integer(0),
+                "json_valid should be 0 for {bad:?}",
+            );
+        }
+        // A lone 0 (and 0.x) is fine.
+        for ok in [r#"{"x":0}"#, r#"{"x":-0}"#, r#"{"x":0.5}"#] {
+            assert!(parse_json_relaxed(ok).is_ok(), "should accept {ok:?}");
+        }
+    }
+
+    /// json_valid honors the FLAGS argument: default (or bit 0x01) accepts only
+    /// canonical JSON, bit 0x02 additionally accepts JSON5. Pinned to sqlite3.
+    #[test]
+    fn test_json_valid_flags() {
+        let json5 = SqlValue::Varchar("{a:5}".into());
+        let canon = SqlValue::Varchar(r#"{"a":5}"#.into());
+        // Default flags: JSON5 rejected, canonical accepted.
+        assert_eq!(json_valid(&[json5.clone()]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(json_valid(&[canon.clone()]).unwrap(), SqlValue::Integer(1));
+        // Flag 2 accepts JSON5.
+        assert_eq!(
+            json_valid(&[json5.clone(), SqlValue::Integer(2)]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        // Flag 1 rejects JSON5.
+        assert_eq!(
+            json_valid(&[json5, SqlValue::Integer(1)]).unwrap(),
+            SqlValue::Integer(0)
+        );
+    }
+
+    /// Removing the root path ($) discards the whole document -> NULL, while
+    /// json_remove with no path argument returns the document unchanged.
+    #[test]
+    fn test_json_remove_root_path() {
+        let doc = SqlValue::Varchar(r#"{"x":25,"y":42}"#.into());
+        assert_eq!(
+            json_remove(&[doc.clone(), SqlValue::Varchar("$".into())]).unwrap(),
+            SqlValue::Null,
+        );
+        assert_eq!(
+            json_remove(&[doc]).unwrap(),
+            SqlValue::Varchar(r#"{"x":25,"y":42}"#.into()),
+        );
+    }
+
     #[test]
     fn test_json_wrong_arg_count() {
         // No arguments
@@ -1449,6 +2220,40 @@ mod tests {
     // SQLite's json() accepts a relaxed JSON5-like syntax. These regression
     // tests cover the aggorderby-9.x cases (unquoted keys) plus the broader
     // JSON5 features, verifying we canonicalize back to strict minified JSON.
+    /// JSON5 number/comment/Infinity handling, pinned byte-for-byte to
+    /// sqlite3 3.51.0's `json()` output (the JSON5 pre-processor path).
+    #[test]
+    fn test_json5_number_and_comment_rendering() {
+        // (input, expected minified json() output) pinned to sqlite3 3.51.0.
+        for (s, want) in [
+            ("0x1A", "26"),
+            ("+Infinity", "9e999"),
+            ("-Infinity", "-9e999"),
+            ("Infinity", "9e999"),
+            ("NaN", "null"),
+            (".5", "0.5"),
+            ("1.", "1.0"),
+            ("{x: 4.}", r#"{"x":4.0}"#),
+            ("{x: 4.e0}", r#"{"x":4.0e0}"#),
+            ("{x: .5e3}", r#"{"x":0.5e3}"#),
+            ("{x: -.5e-1}", r#"{"x":-0.5e-1}"#),
+            ("+5", "5"),
+            ("{a: +0x10}", r#"{"a":16}"#),
+            ("{a: -0x10}", r#"{"a":-16}"#),
+            ("/* c */ 5", "5"),
+            ("5 // c", "5"),
+            ("{a:0x10}", r#"{"a":16}"#),
+            ("[Infinity,NaN,-Infinity]", "[9e999,null,-9e999]"),
+            ("{x:'a \"b\" c'}", r#"{"x":"a \"b\" c"}"#),
+            ("1.50", "1.50"),
+            ("{a:-0x0}", r#"{"a":-0}"#),
+            ("0xFFFFFFFFFFFFFFFF", "18446744073709551615"),
+        ] {
+            let got = json(&[SqlValue::Varchar(s.into())]).unwrap();
+            assert_eq!(got, SqlValue::Varchar(want.into()), "input {s:?}");
+        }
+    }
+
     #[test]
     fn test_json_json5_unquoted_key() {
         let result = json(&[SqlValue::Varchar("{a:3}".into())]).unwrap();
@@ -1562,7 +2367,9 @@ mod tests {
     }
 
     #[test]
-    fn test_json_valid_ignores_flags_arg() {
+    fn test_json_valid_canonical_with_flags_arg() {
+        // Flag 5 = bits 0x01 (canonical) | 0x04 (JSONB blob). Canonical text is
+        // accepted via the 0x01 bit.
         assert_eq!(
             json_valid(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Integer(5)]).unwrap(),
             SqlValue::Integer(1)

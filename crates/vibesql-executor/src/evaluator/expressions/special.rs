@@ -184,12 +184,15 @@ impl ExpressionEvaluator<'_> {
         }
 
         use super::super::functions::sqlite_compat::json_funcs;
+        // The `jsonb_*` names are text-mode aliases (accept-and-convert): they
+        // delegate to the identical `json_*` implementation. See the Phase 4
+        // JSONB note in `json_funcs.rs`.
         match name.to_uppercase().as_str() {
-            "JSON_ARRAY" => json_funcs::json_array(&values, &subtypes),
-            "JSON_OBJECT" => json_funcs::json_object(&values, &subtypes),
-            "JSON_INSERT" => json_funcs::json_insert(&values, &subtypes),
-            "JSON_REPLACE" => json_funcs::json_replace(&values, &subtypes),
-            "JSON_SET" => json_funcs::json_set(&values, &subtypes),
+            "JSON_ARRAY" | "JSONB_ARRAY" => json_funcs::json_array(&values, &subtypes),
+            "JSON_OBJECT" | "JSONB_OBJECT" => json_funcs::json_object(&values, &subtypes),
+            "JSON_INSERT" | "JSONB_INSERT" => json_funcs::json_insert(&values, &subtypes),
+            "JSON_REPLACE" | "JSONB_REPLACE" => json_funcs::json_replace(&values, &subtypes),
+            "JSON_SET" | "JSONB_SET" => json_funcs::json_set(&values, &subtypes),
             _ => unreachable!("eval_json_subtype_function called with {name}"),
         }
     }
@@ -211,7 +214,8 @@ impl ExpressionEvaluator<'_> {
             // embeds as a sub-document rather than a quoted string. We compute
             // those per-argument subtype flags here (from the AST) and pass them
             // alongside the evaluated values.
-            "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET" => {
+            "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET"
+            | "JSONB_ARRAY" | "JSONB_OBJECT" | "JSONB_INSERT" | "JSONB_REPLACE" | "JSONB_SET" => {
                 return self.eval_json_subtype_function(name, args, row);
             }
             // Handle LAST_INSERT_ROWID() and LAST_INSERT_ID() - require database access
@@ -346,6 +350,16 @@ pub(crate) fn expr_has_json_subtype(expr: &vibesql_ast::Expression) -> bool {
                 | "json_set"
                 | "json_remove"
                 | "json_patch"
+                // JSONB accept-and-convert aliases produce the same JSON text and
+                // so carry the JSON subtype too.
+                | "jsonb"
+                | "jsonb_array"
+                | "jsonb_object"
+                | "jsonb_insert"
+                | "jsonb_replace"
+                | "jsonb_set"
+                | "jsonb_remove"
+                | "jsonb_patch"
         )
     } else {
         false

@@ -129,6 +129,15 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     | "json_set"
                     | "json_remove"
                     | "json_patch"
+                    // JSONB accept-and-convert aliases produce the same JSON text.
+                    | "jsonb"
+                    | "jsonb_array"
+                    | "jsonb_object"
+                    | "jsonb_insert"
+                    | "jsonb_replace"
+                    | "jsonb_set"
+                    | "jsonb_remove"
+                    | "jsonb_patch"
             )
         } else {
             false
@@ -389,16 +398,29 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 if matches!(
                     upper.as_str(),
                     "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET"
+                        | "JSONB_ARRAY" | "JSONB_OBJECT" | "JSONB_INSERT" | "JSONB_REPLACE"
+                        | "JSONB_SET"
                 ) {
                     let subtypes: Vec<bool> =
                         args.iter().map(|a| self.arena_expr_has_json_subtype(a)).collect();
                     use super::functions::sqlite_compat::json_funcs;
+                    // `jsonb_*` are text-mode accept-and-convert aliases of `json_*`.
                     return match upper.as_str() {
-                        "JSON_ARRAY" => json_funcs::json_array(&evaluated_args, &subtypes),
-                        "JSON_OBJECT" => json_funcs::json_object(&evaluated_args, &subtypes),
-                        "JSON_INSERT" => json_funcs::json_insert(&evaluated_args, &subtypes),
-                        "JSON_REPLACE" => json_funcs::json_replace(&evaluated_args, &subtypes),
-                        "JSON_SET" => json_funcs::json_set(&evaluated_args, &subtypes),
+                        "JSON_ARRAY" | "JSONB_ARRAY" => {
+                            json_funcs::json_array(&evaluated_args, &subtypes)
+                        }
+                        "JSON_OBJECT" | "JSONB_OBJECT" => {
+                            json_funcs::json_object(&evaluated_args, &subtypes)
+                        }
+                        "JSON_INSERT" | "JSONB_INSERT" => {
+                            json_funcs::json_insert(&evaluated_args, &subtypes)
+                        }
+                        "JSON_REPLACE" | "JSONB_REPLACE" => {
+                            json_funcs::json_replace(&evaluated_args, &subtypes)
+                        }
+                        "JSON_SET" | "JSONB_SET" => {
+                            json_funcs::json_set(&evaluated_args, &subtypes)
+                        }
                         _ => unreachable!(),
                     };
                 }
