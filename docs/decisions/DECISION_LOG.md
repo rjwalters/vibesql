@@ -23,6 +23,7 @@ See `docs/templates/ADR_TEMPLATE.md` for the full template.
 | 0001 | **Language Choice: Rust** | ✅ **Accepted** | 2025-10-25 | **Rust chosen** for type safety, pattern matching, compiler feedback, and correctness focus |
 | 0002 | **Parser Strategy: Hand-Written** | ✅ **Accepted** | 2025-10-25 | **Hand-written recursive descent + Pratt parser** chosen for full control, TDD alignment, and SQL:1999 flexibility |
 | 0004 | **Consensus Library: openraft** | ✅ **Accepted** | 2026-06-11 | **openraft, single Raft group replicating the whole database** behind an engine-agnostic `ConsensusBackend` trait; sharding/HLC/distributed txns explicitly deferred |
+| 0005 | **JSON Table-Valued Functions (`json_each`/`json_tree`)** | 🕐 **Proposed** | 2026-07-07 | Feasibility spike: **GO, phased** — Phase 1 adds a `FromClause::TableFunction` variant + non-correlated `json_each`/`json_tree` (recovers ~65% of json101); lateral `FROM t, json_each(t.j)` gated to a separate Phase 2 (general LATERAL) |
 
 ## Decisions by Category
 
@@ -32,6 +33,9 @@ See `docs/templates/ADR_TEMPLATE.md` for the full template.
 
 ### Replication and Distribution
 - [ADR-0004](docs/decisions/0004-consensus-library.md) - **Consensus Library: openraft (single-group topology)** ✅ (Accepted 2026-06-11)
+
+### SQL Language / Compatibility
+- [ADR-0005](docs/decisions/0005-json-table-valued-functions.md) - **JSON Table-Valued Functions (`json_each`/`json_tree`)** 🕐 (Proposed 2026-07-07)
 
 ## Decision Process
 
@@ -67,7 +71,7 @@ Create an ADR when:
 - **ADR-0002**: Parser Strategy - Hand-Written Recursive Descent (2025-10-25)
 
 ### Pending Review
-[None yet - future ADRs will be created as architectural decisions arise]
+- **ADR-0005**: JSON Table-Valued Functions (`json_each`/`json_tree`) — feasibility spike, recommendation GO (phased) (2026-07-07)
 
 ### Superseded/Deprecated
 [None yet]
@@ -90,6 +94,6 @@ When making architectural decisions:
 
 ---
 
-**Last Updated**: 2026-06-11
-**Total ADRs**: 3 accepted, 0 pending
-**Status**: Foundation established; consensus library selected for the WAN replication track (Raft Phase A1)
+**Last Updated**: 2026-07-07
+**Total ADRs**: 3 accepted, 1 proposed
+**Status**: Foundation established; consensus library selected for the WAN replication track (Raft Phase A1); JSON TVF feasibility spike proposed (ADR-0005)
