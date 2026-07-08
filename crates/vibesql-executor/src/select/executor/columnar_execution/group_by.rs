@@ -302,34 +302,115 @@ impl SelectExecutor<'_> {
             }
         };
 
-        // Resolve group column indices
-        let group_cols: Vec<usize> = simple_exprs
-            .iter()
-            .filter_map(|expr| match expr {
+        // Positional SELECT-list validation (mirrors the single-table path,
+        // #6001). `columnar_group_by` emits result rows as
+        // `[group_keys in simple_exprs order ..., aggregates ...]` with no
+        // positional re-projection, so each non-aggregate SELECT expression must
+        // structurally equal the GROUP BY key at the SAME position. A membership
+        // check would admit a permuted SELECT list (e.g.
+        // `SELECT b, a, COUNT(*) ... GROUP BY a, b`) and transpose the emitted
+        // key columns vs the row path. Any permutation declines here and falls
+        // back to the row path, which applies correct projection.
+        {
+            use crate::select::grouping::expressions_equal;
+
+            let mut select_non_agg_exprs: Vec<&Expression> = Vec::new();
+            for item in &stmt.select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                    if !matches!(expr, Expression::AggregateFunction { .. }) {
+                        select_non_agg_exprs.push(expr);
+                    }
+                }
+            }
+
+            if select_non_agg_exprs.len() != simple_exprs.len() {
+                log::debug!(
+                    "Columnar join: skipping GROUP BY - SELECT list ({} non-aggs) doesn't match GROUP BY ({} keys)",
+                    select_non_agg_exprs.len(),
+                    simple_exprs.len()
+                );
+                return Ok(None);
+            }
+
+            for (i, select_expr) in select_non_agg_exprs.iter().enumerate() {
+                if !expressions_equal(select_expr, &simple_exprs[i]) {
+                    log::debug!(
+                        "Columnar join: skipping GROUP BY - SELECT expression at position {} does not positionally match GROUP BY key",
+                        i
+                    );
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Resolve each GROUP BY expression to a joined-batch column index.
+        //
+        // - A bare `ColumnRef` resolves directly against the combined (joined)
+        //   schema, whose column order matches the joined batch layout.
+        // - Any other expression is materialized as a *derived key column*
+        //   appended to a cloned joined batch, reusing the shared #5994
+        //   machinery: `extract_derived_expr` (the exact same numeric-arithmetic
+        //   guard the single-table GROUP BY key path and the computed-WHERE-
+        //   predicate path use) builds a combined-schema-index-resolved
+        //   `DerivedExpr`, and `materialize_derived_column` evaluates it with
+        //   row-path-exact semantics (overflow -> Double, div-by-zero -> NULL,
+        //   NULL propagation — including outer-join NULL-padded columns) into a
+        //   `ColumnArray::Mixed`. The derived column feeds the existing group-key
+        //   machinery unchanged: its `Vec<SqlValue>` hashing/equality is
+        //   identical to the row path's group-key map, so NULL keys collapse into
+        //   one group and int-vs-double keys match the row path by construction.
+        //
+        // If any grouping expression is an unsupported shape, we decline the
+        // whole query and fall back to row-oriented execution.
+        let mut keyed_batch = batch.clone();
+        let mut group_cols: Vec<usize> = Vec::with_capacity(simple_exprs.len());
+        for expr in simple_exprs {
+            match expr {
                 Expression::ColumnRef(col_id) => {
-                    schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
+                    match schema
+                        .get_column_index(col_id.table_canonical(), col_id.column_canonical())
+                    {
+                        Some(idx) => group_cols.push(idx),
+                        None => {
+                            log::debug!("Columnar join: some GROUP BY columns couldn't be resolved");
+                            return Ok(None);
+                        }
+                    }
+                }
+                other => {
+                    let Some((derived, _cols)) = columnar::extract_derived_expr(other, schema)
+                    else {
+                        log::debug!("Columnar join: some GROUP BY columns couldn't be resolved");
+                        return Ok(None);
+                    };
+                    let key_col = columnar::materialize_derived_column(&keyed_batch, &derived)?;
+                    keyed_batch.add_column(key_col)?;
+                    group_cols.push(keyed_batch.column_count() - 1);
+                }
+            }
+        }
+
+        // Extract the *aggregate* SELECT expressions only. The non-aggregate
+        // SELECT items are the GROUP BY keys (positionally validated above); they
+        // are emitted from the group-key columns, not by `extract_aggregates`
+        // (which rejects any non-aggregate expression). Result rows are laid out
+        // as `[group_keys..., aggregates...]`, so passing the group keys here
+        // would wrongly reject the whole query.
+        let agg_exprs: Vec<_> = stmt
+            .select_list
+            .iter()
+            .filter_map(|item| match item {
+                vibesql_ast::SelectItem::Expression { expr, .. }
+                    if matches!(expr, Expression::AggregateFunction { .. }) =>
+                {
+                    Some(expr.clone())
                 }
                 _ => None,
             })
             .collect();
 
-        if group_cols.len() != simple_exprs.len() {
-            log::debug!("Columnar join: some GROUP BY columns couldn't be resolved");
-            return Ok(None);
-        }
-
-        // Extract select expressions
-        let select_exprs: Vec<_> = stmt
-            .select_list
-            .iter()
-            .filter_map(|item| match item {
-                vibesql_ast::SelectItem::Expression { expr, .. } => Some(expr.clone()),
-                _ => None,
-            })
-            .collect();
-
         // Extract aggregates
-        let aggregates = match columnar::extract_aggregates(&select_exprs, schema) {
+        let aggregates = match columnar::extract_aggregates(&agg_exprs, schema) {
             Some(aggs) => aggs,
             None => {
                 log::debug!("Columnar join: failed to extract aggregates");
@@ -357,8 +438,11 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Convert to rows and run GROUP BY
-        let rows = batch.to_rows()?;
+        // Convert to rows and run GROUP BY. `keyed_batch` carries any derived key
+        // columns appended above; their `group_cols` indices address them in the
+        // materialized rows. Aggregate `agg_cols` indices still address the
+        // original (base) columns, which occupy the same leading positions.
+        let rows = keyed_batch.to_rows()?;
         let result = columnar::columnar_group_by(&rows, &group_cols, &agg_cols, None)?;
 
         log::info!("Columnar join: GROUP BY produced {} groups", result.len());

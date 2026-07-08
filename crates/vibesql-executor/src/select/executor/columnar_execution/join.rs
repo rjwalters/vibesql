@@ -184,14 +184,27 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // 2. GROUP BY with non-column expressions (Q7: GROUP BY strftime(...))
-        //    The columnar join GROUP BY path only supports simple ColumnRef keys.
+        // 2. GROUP BY key shapes the columnar join path cannot handle.
+        //    The join GROUP BY path (`execute_columnar_join_group_by`) supports
+        //    bare ColumnRef keys and numeric-arithmetic expression keys, which it
+        //    materializes as derived key columns via the shared #5994
+        //    `extract_derived_expr` / `materialize_derived_column` helpers (issue
+        //    #5995). Anything else (scalar functions like `strftime(...)`, casts,
+        //    string arithmetic) is unsupported.
+        //
+        //    This early check is a *schema-free structural* pre-filter: it bails
+        //    before the expensive table-load/hash-join work for clearly
+        //    unsupported shapes (e.g. Q7 `GROUP BY strftime(...)`) while admitting
+        //    plausible arithmetic trees. The authoritative, schema-aware decision
+        //    (numeric column types, collation, cross-table resolution) is made
+        //    later in `execute_columnar_join_group_by` via `extract_derived_expr`,
+        //    which declines any residual unsupported shape to the row path.
         if let Some(ref group_by_clause) = stmt.group_by {
             match group_by_clause.as_simple() {
                 Some(exprs) => {
-                    if exprs.iter().any(|e| !matches!(e, vibesql_ast::Expression::ColumnRef(_))) {
+                    if exprs.iter().any(|e| !group_by_key_shape_maybe_columnar(e)) {
                         log::debug!(
-                            "Columnar join: GROUP BY has non-column expressions, skipping early"
+                            "Columnar join: GROUP BY has unsupported key shapes, skipping early"
                         );
                         return Ok(None);
                     }
@@ -876,6 +889,45 @@ fn contains_unsupported_predicates(expr: &vibesql_ast::Expression) -> bool {
 fn is_columnar_join_disabled() -> bool {
     static DISABLED: OnceLock<bool> = OnceLock::new();
     *DISABLED.get_or_init(|| std::env::var("VIBESQL_DISABLE_COLUMNAR_JOIN").is_ok())
+}
+
+/// Schema-free structural pre-filter for a single GROUP BY key expression
+/// (issue #5995 join-path residual).
+///
+/// Returns `true` if the key *might* be handled by the columnar join GROUP BY
+/// path: a bare `ColumnRef`, or a numeric-arithmetic tree (`+ - * /`, unary
+/// `+`/`-`) over column references and literals — the exact structural shape the
+/// shared `extract_derived_expr` helper admits, minus the schema-aware checks
+/// (numeric column type, collation, cross-table resolution) that require the
+/// combined joined-batch schema.
+///
+/// This lets the early bail-out skip clearly-unsupported shapes (scalar
+/// functions like `strftime(...)`, casts, string concatenation) before the
+/// expensive table-load/hash-join work, while admitting plausible arithmetic
+/// keys. The authoritative decision is still made later by `extract_derived_expr`
+/// in `execute_columnar_join_group_by`, which declines to the row path if the
+/// resolved shape turns out to be unsupported.
+fn group_by_key_shape_maybe_columnar(expr: &vibesql_ast::Expression) -> bool {
+    match expr {
+        vibesql_ast::Expression::ColumnRef(_) | vibesql_ast::Expression::Literal(_) => true,
+        vibesql_ast::Expression::BinaryOp { left, op, right } => {
+            matches!(
+                op,
+                vibesql_ast::BinaryOperator::Plus
+                    | vibesql_ast::BinaryOperator::Minus
+                    | vibesql_ast::BinaryOperator::Multiply
+                    | vibesql_ast::BinaryOperator::Divide
+            ) && group_by_key_shape_maybe_columnar(left)
+                && group_by_key_shape_maybe_columnar(right)
+        }
+        vibesql_ast::Expression::UnaryOp { op, expr: inner } => {
+            matches!(
+                op,
+                vibesql_ast::UnaryOperator::Plus | vibesql_ast::UnaryOperator::Minus
+            ) && group_by_key_shape_maybe_columnar(inner)
+        }
+        _ => false,
+    }
 }
 
 /// Check if the SELECT list contains aggregate functions with arguments that
