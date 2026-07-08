@@ -704,6 +704,61 @@ mod tests {
         }
     }
 
+    /// A NULL derived value (from `a / 0`) must be excluded under `<>`
+    /// (NotEqual), not treated as "not equal to the constant" (issue #6000).
+    /// `evaluate_computed_compare_value` short-circuits a NULL derived value to
+    /// non-matching *before* the operator is considered, so `a / b <> 5` must
+    /// drop the div-by-zero rows just like `>=` does. Exercised on both sides of
+    /// the 256-row SIMD threshold.
+    #[test]
+    fn test_computed_compare_not_equal_division_by_zero_non_matching() {
+        // col0 / col1: col1 is 0 for every 5th row (=> NULL derived value),
+        // and 2 otherwise (=> 10 / 2 = 5).
+        let make_rows = |n: usize| -> Vec<Row> {
+            (0..n)
+                .map(|i| {
+                    let denom = if i % 5 == 0 { 0 } else { 2 };
+                    Row::new(vec![SqlValue::Integer(10), SqlValue::Integer(denom)])
+                })
+                .collect()
+        };
+        let div_pred = |op: CompareOp, value: SqlValue| ColumnPredicate::ComputedCompare {
+            expr: DerivedExpr::BinaryOp {
+                left: Box::new(DerivedExpr::Column(0)),
+                op: vibesql_ast::BinaryOperator::Divide,
+                right: Box::new(DerivedExpr::Column(1)),
+            },
+            op,
+            value,
+            columns: vec![0, 1],
+        };
+
+        for n in [40usize, 500usize] {
+            let rows = make_rows(n);
+            // 10 / 2 = 5, which is NOT `<> 5` (equal => excluded); 10 / 0 = NULL,
+            // which is non-matching under every operator (excluded). So no row
+            // satisfies `a / b <> 5` — crucially, the NULL div-by-zero rows are
+            // NOT swept in by `<>`.
+            let predicates = vec![div_pred(CompareOp::NotEqual, SqlValue::Integer(5))];
+            let got = apply_columnar_filter(&rows, &predicates).unwrap();
+            assert!(
+                got.is_empty(),
+                "NotEqual div-by-zero: NULL rows must be excluded, got {got:?} at n={n}"
+            );
+
+            // Sanity check that `<>` does discriminate: against a different
+            // constant, only the well-defined `5` rows match; the NULL
+            // (div-by-zero) rows stay excluded.
+            let predicates = vec![div_pred(CompareOp::NotEqual, SqlValue::Integer(999))];
+            let got = apply_columnar_filter(&rows, &predicates).unwrap();
+            let want: Vec<usize> = (0..n).filter(|i| i % 5 != 0).collect();
+            assert_eq!(
+                got, want,
+                "NotEqual should match well-defined rows only, excluding NULL div-by-zero rows at n={n}"
+            );
+        }
+    }
+
     #[test]
     fn test_filter_bitmap() {
         use vibesql_storage::Row;
