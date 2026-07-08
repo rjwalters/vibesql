@@ -1,4 +1,4 @@
-//! Regression tests for issue #5972
+//! Regression tests for issues #5972 (DELETE/UPDATE) and #5977 (INSERT)
 //!
 //! A subquery inside a RETURNING expression must be recomputed **per row, as
 //! each affected row is mutated** — it sees the incremental post-DML table
@@ -9,8 +9,8 @@
 //!
 //! Previously VibeSQL collected all affected rows, then projected RETURNING
 //! once at statement end, so every RETURNING row observed the same final
-//! database state. This module pins the per-row behavior for both DELETE and
-//! UPDATE. Subquery-free RETURNING keeps the statement-end batch path (also
+//! database state. This module pins the per-row behavior for DELETE, UPDATE,
+//! and INSERT. Subquery-free RETURNING keeps the statement-end batch path (also
 //! covered here to guard against a regression in the common case).
 //!
 //! All expected values were verified against sqlite3 3.51.0.
@@ -53,6 +53,17 @@ fn update_returning(db: &mut vibesql_storage::Database, sql: &str) -> SelectResu
     let (_count, returning) = UpdateExecutor::execute_returning(&update, db)
         .unwrap_or_else(|e| panic!("Update failed: {} -- {:?}", sql, e));
     returning.expect("RETURNING result present")
+}
+
+fn insert_returning(db: &mut vibesql_storage::Database, sql: &str) -> SelectResult {
+    let stmt = vibesql_parser::Parser::parse_sql(sql)
+        .unwrap_or_else(|e| panic!("Parse failed: {} -- {:?}", sql, e));
+    let vibesql_ast::Statement::Insert(insert) = stmt else {
+        panic!("Expected INSERT: {}", sql);
+    };
+    let outcome = InsertExecutor::execute_returning(db, &insert)
+        .unwrap_or_else(|e| panic!("Insert failed: {} -- {:?}", sql, e));
+    outcome.returning.expect("RETURNING result present")
 }
 
 /// A variant-agnostic cell used for comparisons: any SQL float variant
@@ -235,4 +246,89 @@ fn update_returning_without_subquery_unchanged() {
     seed(&mut db);
     let result = update_returning(&mut db, "UPDATE t1 SET b=b+1 WHERE a<3 RETURNING a, b");
     assert_eq!(rows(&result), vec![vec![int(1), int(11)], vec![int(2), int(21)]]);
+}
+
+/// Seed a table with three base rows for the INSERT variants: subsequent
+/// multi-row INSERTs then observe the table growing one row at a time.
+fn seed_insert(db: &mut vibesql_storage::Database) {
+    setup(db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b INT)");
+    setup(db, "INSERT INTO t1 VALUES(1,10),(2,20),(3,30)");
+}
+
+/// Issue #5977 reproduction — INSERT ... RETURNING with scalar subqueries.
+/// Each inserted row observes the table (count/sum) as of its own insertion,
+/// so count/sum grow one row at a time rather than all seeing the final state.
+///
+/// sqlite3 3.51.0 ground truth:
+///   4|4|100
+///   6|5|160
+///   8|6|240
+#[test]
+fn insert_returning_subquery_recomputes_per_row() {
+    let mut db = vibesql_storage::Database::new();
+    seed_insert(&mut db);
+    let result = insert_returning(
+        &mut db,
+        "INSERT INTO t1 VALUES(4,40),(6,60),(8,80) \
+         RETURNING a, (SELECT count(*) FROM t1), (SELECT sum(b) FROM t1)",
+    );
+    assert_eq!(
+        rows(&result),
+        vec![
+            vec![int(4), int(4), int(100)],
+            vec![int(6), int(5), int(160)],
+            vec![int(8), int(6), int(240)],
+        ]
+    );
+}
+
+/// INSERT ... RETURNING with a correlated subquery referencing the inserted
+/// value: `SELECT count(*) FROM t1 WHERE t1.a <= a` must still recompute per
+/// row against the incremental table state.
+///
+/// sqlite3 3.51.0 ground truth:
+///   4|4
+///   6|5
+///   8|6
+#[test]
+fn insert_returning_correlated_subquery_recomputes_per_row() {
+    let mut db = vibesql_storage::Database::new();
+    seed_insert(&mut db);
+    let result = insert_returning(
+        &mut db,
+        "INSERT INTO t1 VALUES(4,40),(6,60),(8,80) \
+         RETURNING a, (SELECT count(*) FROM t1 WHERE t1.a <= a)",
+    );
+    assert_eq!(
+        rows(&result),
+        vec![vec![int(4), int(4)], vec![int(6), int(5)], vec![int(8), int(6)]]
+    );
+}
+
+/// Single-row INSERT ... RETURNING with a subquery: the one returned row sees
+/// the post-insert state (count grows from 3 to 4).
+#[test]
+fn insert_returning_single_row_subquery() {
+    let mut db = vibesql_storage::Database::new();
+    seed_insert(&mut db);
+    let result = insert_returning(
+        &mut db,
+        "INSERT INTO t1 VALUES(4,40) RETURNING a, (SELECT count(*) FROM t1)",
+    );
+    assert_eq!(rows(&result), vec![vec![int(4), int(4)]]);
+}
+
+/// Subquery-free INSERT ... RETURNING keeps the statement-end batch fast path:
+/// the projected columns are just the inserted row values, unaffected by the
+/// per-row machinery (regression guard for the common case).
+#[test]
+fn insert_returning_without_subquery_unchanged() {
+    let mut db = vibesql_storage::Database::new();
+    seed_insert(&mut db);
+    let result =
+        insert_returning(&mut db, "INSERT INTO t1 VALUES(4,40),(6,60),(8,80) RETURNING a, b");
+    assert_eq!(
+        rows(&result),
+        vec![vec![int(4), int(40)], vec![int(6), int(60)], vec![int(8), int(80)]]
+    );
 }

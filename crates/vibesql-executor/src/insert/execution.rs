@@ -908,6 +908,29 @@ fn execute_insert_internal(
     let mut returned_rows: Vec<vibesql_storage::Row> = Vec::new();
     let capture_returning = stmt.returning.is_some();
 
+    // Per-row RETURNING subquery path (parity with DELETE/UPDATE, #5972/#5976).
+    // A subquery in a RETURNING expression is treated as correlated with the
+    // table being modified: it must recompute against the incremental table
+    // state after each row is inserted, so every returned row observes the
+    // count/sum/etc. as of its own insertion (returning1.test section 20).
+    // Subquery-free RETURNING keeps the cheaper statement-end batch projection
+    // with zero behavior change.
+    let returning_needs_per_row =
+        stmt.returning.as_deref().is_some_and(crate::dml_returning::returning_has_subquery);
+    // Columns and the visible-column set are derivable once (before the loop):
+    // they do not depend on per-row table state.
+    let (per_row_returning_columns, per_row_visible_columns) = if returning_needs_per_row {
+        let items = stmt.returning.as_deref().expect("returning present");
+        let visible_columns = crate::dml_returning::visible_columns(&schema);
+        let columns =
+            crate::dml_returning::derive_returning_columns(items, &schema, None, &visible_columns)?;
+        (columns, visible_columns)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    // Collected per-row projections (one per inserted row, in insertion order).
+    let mut per_row_returning_rows: Vec<vibesql_storage::Row> = Vec::new();
+
     // Check if any assertions exist - needed for rollback support
     let has_assertions = db.catalog.get_all_assertions().next().is_some();
 
@@ -925,7 +948,12 @@ fn execute_insert_internal(
     let use_batch_insert = stmt.on_duplicate_key_update.is_none()
         && !matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace))
         && !on_conflict_needs_row_dispatch
-        && !has_insert_triggers;
+        && !has_insert_triggers
+        // A RETURNING subquery must recompute per row against the incremental
+        // table state, which the batch path (all rows inserted at once) cannot
+        // provide. Force the row-by-row slow path so each row's RETURNING is
+        // projected immediately after that row is inserted.
+        && !returning_needs_per_row;
 
     // Helper to create a Row with optional explicit rowid
     let make_row = |(values, rowid): (Vec<vibesql_types::SqlValue>, Option<u64>)| match rowid {
@@ -1321,6 +1349,26 @@ fn execute_insert_internal(
                 returned_rows.push(row.clone());
             }
 
+            // Per-row RETURNING subquery projection: drop the stale row-oriented
+            // columnar snapshot so a RETURNING subquery sees this row's insertion,
+            // then project this row's RETURNING against the now-updated table
+            // state. Each returned row thus observes the incremental count/sum/etc.
+            // as of its own insertion, matching sqlite3 (returning1.test §20).
+            if returning_needs_per_row {
+                db.invalidate_columnar_cache(&storage_table_name);
+                let items = stmt.returning.as_deref().expect("returning present");
+                let projected = crate::dml_returning::project_returning_row(
+                    items,
+                    &per_row_returning_columns,
+                    &schema,
+                    db,
+                    &row,
+                    &per_row_visible_columns,
+                    cte_results.as_ref(),
+                )?;
+                per_row_returning_rows.push(projected);
+            }
+
             // Maintain expression indexes for this insert
             expression_index_maintenance::maintain_expression_indexes_for_insert(
                 db,
@@ -1470,7 +1518,19 @@ fn execute_insert_internal(
     // Project the RETURNING clause against the rows actually inserted/updated
     // (one result row per affected row, in insertion order). Zero affected
     // rows still yield an empty result with the derived column headers.
-    let returning_result = if let Some(items) = &stmt.returning {
+    let returning_result = if returning_needs_per_row {
+        // Slow path: each row was already projected against its own incremental
+        // table state inside the insert loop. Assemble the collected rows with
+        // the columns derived up front (so zero inserted rows still yields the
+        // correct empty header set).
+        Some(crate::select::SelectResult {
+            columns: per_row_returning_columns,
+            rows: per_row_returning_rows,
+        })
+    } else if let Some(items) = &stmt.returning {
+        // Fast path (subquery-free RETURNING): batch-project once against the
+        // final post-INSERT state — every row sees the same snapshot, which is
+        // correct when no subquery observes the table.
         let row_refs: Vec<&vibesql_storage::Row> = returned_rows.iter().collect();
         Some(crate::dml_returning::project_returning(
             items,
