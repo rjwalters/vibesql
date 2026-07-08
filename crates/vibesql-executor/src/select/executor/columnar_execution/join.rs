@@ -413,26 +413,34 @@ impl SelectExecutor<'_> {
         let has_group_by = stmt.group_by.is_some();
 
         if has_group_by {
-            // Execute GROUP BY aggregation
-            let result =
-                self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema);
-
-            // Apply ORDER BY to GROUP BY results if needed (#5033)
-            if let Ok(Some(rows)) = result {
-                if let Some(order_by) = &stmt.order_by {
-                    let sorted = self.apply_columnar_join_order_by(
-                        rows,
-                        order_by,
-                        &stmt.select_list,
-                        &combined_schema,
-                    )?;
-                    Ok(Some(sorted))
-                } else {
-                    Ok(Some(rows))
-                }
-            } else {
-                result
+            // Decline the columnar join GROUP BY path when the query has HAVING
+            // or ORDER BY, and fall back to the row-oriented path (#5995 review).
+            //
+            // The join GROUP BY branch does not apply HAVING at all, and
+            // `apply_columnar_join_order_by` does not correctly sort when the
+            // ORDER BY expression is a projected group key / group-key
+            // expression. Rather than emit wrong results, we conservatively
+            // decline here — exactly like the single-table columnar path
+            // declines GROUP BY + ORDER BY (see columnar_execution/mod.rs). The
+            // row path applies HAVING and ORDER BY correctly.
+            //
+            // Actually implementing HAVING and ORDER BY on the join GROUP BY
+            // path is future work, tracked separately from this PR.
+            if stmt.having.is_some() {
+                log::debug!(
+                    "Columnar join: GROUP BY with HAVING not supported, falling back to row path"
+                );
+                return Ok(None);
             }
+            if stmt.order_by.is_some() {
+                log::debug!(
+                    "Columnar join: GROUP BY with ORDER BY not supported, falling back to row path"
+                );
+                return Ok(None);
+            }
+
+            // Execute GROUP BY aggregation (no HAVING / ORDER BY on this path)
+            self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)
         } else {
             // No GROUP BY - convert to rows and apply projection
 
