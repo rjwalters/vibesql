@@ -36,11 +36,14 @@
 //! ) AS __in_agg ON o_orderkey = __in_agg.l_orderkey
 //! ```
 
-use vibesql_ast::{BinaryOperator, Expression, FromClause, JoinType, SelectItem, SelectStmt};
+use vibesql_ast::{
+    BinaryOperator, CommonTableExpr, Expression, FromClause, JoinType, SelectItem, SelectStmt,
+};
+use vibesql_storage::Database;
 
 use super::helpers::{
     get_outer_table_name, is_self_join, is_simple_single_table_self_join,
-    rewrite_column_refs_with_alias,
+    resolve_outer_column_qualifier, rewrite_column_refs_with_alias, OuterQualifier,
 };
 
 /// Result of converting an IN subquery to a join
@@ -49,12 +52,56 @@ pub(super) struct InToJoinResult {
     pub from: FromClause,
 }
 
+/// Qualify a bare outer column reference against the outer FROM scope (issues
+/// #5926 / #5870), covering every outer-FROM source kind uniformly (base table,
+/// view, CTE, derived subquery table, and `VALUES` table).
+///
+/// Returns:
+/// - `Some(expr')` — the expression to fold into the join predicate. When `expr`
+///   is an unqualified `ColumnRef` that resolves to exactly one outer source,
+///   `expr'` is that reference qualified with the source's effective name; in
+///   every other resolvable case (already qualified, not a column reference, or
+///   genuinely ambiguous / a correlated reference) `expr'` is `expr` unchanged so
+///   downstream resolution — including the ambiguity guard — behaves exactly as
+///   SQLite requires.
+/// - `None` — the outer column can only be resolved against a derived/VALUES
+///   source whose columns cannot be enumerated here. The caller must abort the
+///   IN→join transform and fall back to row-by-row evaluation, which never
+///   over-errors (preserving `main`'s behavior instead of regressing to an
+///   ambiguity error).
+fn qualify_outer_expr_in_scope(
+    expr: &Expression,
+    from: &FromClause,
+    database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
+) -> Option<Expression> {
+    if let Expression::ColumnRef(col_id) = expr {
+        if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            match resolve_outer_column_qualifier(
+                from,
+                database,
+                with_clause,
+                col_id.column_canonical(),
+            ) {
+                OuterQualifier::Qualify(qualifier) => {
+                    return Some(rewrite_column_refs_with_alias(expr, &qualifier, &qualifier));
+                }
+                OuterQualifier::Skip => return None,
+                OuterQualifier::LeaveUnqualified => {}
+            }
+        }
+    }
+    Some(expr.clone())
+}
+
 /// Try to convert an IN subquery to a SEMI or ANTI join
 pub(super) fn try_convert_in_to_join(
     from: &FromClause,
     expr: &Expression,
     subquery: &SelectStmt,
     negated: bool,
+    database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<InToJoinResult> {
     // Must have exactly one column in SELECT list
     if subquery.select_list.len() != 1 {
@@ -88,7 +135,15 @@ pub(super) fn try_convert_in_to_join(
     let is_aggregate_subquery = subquery.group_by.is_some() || subquery.having.is_some();
 
     if is_aggregate_subquery {
-        return try_convert_aggregate_in_to_join(from, expr, subquery, &subquery_column, negated);
+        return try_convert_aggregate_in_to_join(
+            from,
+            expr,
+            subquery,
+            &subquery_column,
+            negated,
+            database,
+            with_clause,
+        );
     }
 
     // Simple subquery path: requires single table in FROM clause
@@ -228,7 +283,42 @@ pub(super) fn try_convert_in_to_join(
             .as_ref()
             .map(|w| rewrite_column_refs_with_alias(w, effective_table, effective_table));
 
-        (table_alias.clone(), expr.clone(), qualified_subquery_column, qualified_subquery_where)
+        // FIX for issues #5926 / #5870: qualify the outer expression against its
+        // ORIGINAL lexical scope (the outer FROM) before it becomes the left side of
+        // the synthesized SEMI/ANTI-join predicate.
+        //
+        // Without this, an unqualified outer column such as `id` in
+        //   SELECT id FROM customers WHERE id IN (SELECT customer_id FROM orders)
+        // is folded verbatim into the join ON condition, whose combined schema now
+        // contains BOTH customers and orders. The #5870 ambiguity guard then sees
+        // `id` present in two tables and wrongly raises "ambiguous column name: id"
+        // — even though `id` was unambiguous in the outer scope where it was written
+        // (only customers was visible there; orders lives inside the subquery).
+        //
+        // SQLite scopes ambiguity to the OUTER FROM only, never the subquery tables.
+        // So we resolve which outer table the column belongs to using the catalog and
+        // qualify against exactly that table, regardless of how many tables are in the
+        // outer FROM:
+        //   - column present in exactly ONE outer table  → qualify to it (unambiguous,
+        //     even if the subquery table shares the name). Qualified refs bypass the
+        //     guard, restoring SQLite-matching results on both the row and columnar
+        //     join paths.
+        //   - column present in TWO+ outer tables         → genuinely ambiguous in the
+        //     outer scope; leave unqualified so the guard errors, matching SQLite.
+        //   - column resolvable only against a derived/VALUES table whose columns
+        //     can't be enumerated here → abort the transform (return None) and
+        //     fall back to row-by-row IN evaluation, which never over-errors.
+        //   - anything else (non-column expr, correlated reference, unresolved) →
+        //     leave unchanged.
+        let outer_expr_qualified =
+            qualify_outer_expr_in_scope(expr, from, database, with_clause)?;
+
+        (
+            table_alias.clone(),
+            outer_expr_qualified,
+            qualified_subquery_column,
+            qualified_subquery_where,
+        )
     };
 
     // Create the join condition: expr = subquery_column
@@ -305,6 +395,8 @@ fn try_convert_aggregate_in_to_join(
     subquery: &SelectStmt,
     subquery_column: &Expression,
     negated: bool,
+    database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<InToJoinResult> {
     // Extract the column name from the subquery's select list for the join condition
     // The column must be a simple column reference for us to build the join condition
@@ -336,10 +428,19 @@ fn try_convert_aggregate_in_to_join(
         column_aliases: None,
     };
 
+    // Qualify the outer expression against its outer-FROM scope (issues #5926 /
+    // #5870), same as the simple-subquery path above, so a bare outer column that
+    // is unambiguous in the outer scope is not tripped by the ambiguity guard after
+    // being folded into the synthesized predicate. If it can only be resolved
+    // against an unenumerable derived/VALUES source, abort the transform (return
+    // None) and fall back to row-by-row IN evaluation, which never over-errors.
+    let outer_expr_qualified =
+        qualify_outer_expr_in_scope(outer_expr, from, database, with_clause)?;
+
     // Create the join condition: outer_expr = __in_agg.column_name
     let join_condition = Expression::BinaryOp {
         op: BinaryOperator::Equal,
-        left: Box::new(outer_expr.clone()),
+        left: Box::new(outer_expr_qualified),
         right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
             &alias,
             false,

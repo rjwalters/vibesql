@@ -462,6 +462,19 @@ pub(super) fn resolve_join_column_indices(
         )
     };
 
+    // Ambiguity guard (issue #5870): an unqualified column that exists in 2+ joined
+    // tables (e.g. `id` in `ON id=aid`) must NOT silently resolve to the leftmost
+    // match. Returning AmbiguousColumnName makes the columnar path fall back to the
+    // row-oriented path, which raises the same error through the full evaluator —
+    // matching SQLite's "ambiguous column name: id". USING/NATURAL join keys are
+    // exempt inside is_column_ambiguous (issue #4517), so they are unaffected.
+    if left_table.is_none() && combined_schema.is_column_ambiguous(left_col) {
+        return Err(ExecutorError::AmbiguousColumnName { column_name: left_col.clone() });
+    }
+    if right_table.is_none() && combined_schema.is_column_ambiguous(right_col) {
+        return Err(ExecutorError::AmbiguousColumnName { column_name: right_col.clone() });
+    }
+
     // Find the joined-side column index in the combined schema.
     //
     // Issue #5819: the table qualifier MUST be passed through here. Dropping it

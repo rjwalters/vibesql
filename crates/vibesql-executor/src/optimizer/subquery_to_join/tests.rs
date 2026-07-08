@@ -5,6 +5,15 @@ use vibesql_types::SqlValue;
 
 use super::*;
 
+/// An empty catalog for the structural transform tests below. These tests build
+/// AST fixtures over tables that are not registered in any catalog, so outer-scope
+/// column qualification (issues #5926 / #5870) simply finds no schema and leaves
+/// the outer expression unqualified — which does not affect the join-shape
+/// assertions these tests make.
+fn empty_db() -> Database {
+    Database::new()
+}
+
 fn simple_table_from(name: &str) -> FromClause {
     FromClause::Table {
         index_hint: None,
@@ -54,7 +63,7 @@ fn test_in_subquery_to_semi_join() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created a SEMI JOIN
     assert!(transformed.where_clause.is_none(), "WHERE clause should be removed");
@@ -77,7 +86,7 @@ fn test_not_in_subquery_to_anti_join() {
         negated: true,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created an ANTI JOIN
     assert!(transformed.where_clause.is_none(), "WHERE clause should be removed");
@@ -102,7 +111,7 @@ fn test_complex_subquery_unchanged() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should be unchanged because subquery has LIMIT
     assert!(
@@ -140,7 +149,7 @@ fn test_aggregate_subquery_transforms_to_derived_table() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should be transformed: WHERE clause removed (IN -> semi-join)
     assert!(transformed.where_clause.is_none(), "Aggregate IN subquery should be transformed");
@@ -202,7 +211,7 @@ fn test_multiple_subqueries_to_joins() {
     stmt.where_clause = Some(combined_where);
 
     // Transform should extract BOTH subqueries iteratively
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have two joins (SEMI and ANTI)
     match transformed.from {
@@ -270,7 +279,7 @@ fn test_nested_in_subquery_self_join_column_qualification() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have transformed to a SEMI JOIN
     match &transformed.from {
@@ -404,7 +413,7 @@ fn test_exists_self_join_column_qualification() {
     stmt.where_clause =
         Some(Expression::Exists { subquery: Box::new(exists_subquery), negated: false });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created a SEMI JOIN
     assert!(
@@ -532,7 +541,7 @@ fn test_not_exists_self_join_column_qualification() {
         negated: true, // NOT EXISTS
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created an ANTI JOIN
     assert!(
@@ -666,7 +675,7 @@ fn test_conjunction_exists_to_semi_join() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate1, predicate2, exists_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created a SEMI JOIN
     match &transformed.from {
@@ -753,7 +762,7 @@ fn test_conjunction_not_exists_to_anti_join() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, not_exists_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created an ANTI JOIN
     match &transformed.from {
@@ -791,7 +800,7 @@ fn test_conjunction_in_to_semi_join() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created a SEMI JOIN
     match &transformed.from {
@@ -829,7 +838,7 @@ fn test_conjunction_not_in_to_anti_join() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, not_in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created an ANTI JOIN
     match &transformed.from {
@@ -878,7 +887,7 @@ fn test_conjunction_preserves_all_other_predicates() {
     stmt.where_clause =
         Some(Expression::Conjunction(vec![pred1.clone(), pred2.clone(), pred3.clone(), in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have created a SEMI JOIN
     match &transformed.from {
@@ -923,7 +932,7 @@ fn test_conjunction_multiple_subqueries_iterative() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, in_expr, not_in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // Should have two joins (nested)
     match &transformed.from {
@@ -982,8 +991,7 @@ fn row_number_over(order_by_column: &str) -> Expression {
 /// Build a single-item SELECT over `table` whose select expression is `expr`
 fn select_with_expr(table: &str, expr: Expression) -> SelectStmt {
     let mut stmt = simple_select(table, "placeholder");
-    stmt.select_list =
-        vec![SelectItem::Expression { expr, alias: None, source_text: None }];
+    stmt.select_list = vec![SelectItem::Expression { expr, alias: None, source_text: None }];
     stmt
 }
 
@@ -999,7 +1007,7 @@ fn test_in_subquery_with_window_function_not_transformed() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     // The transform must be skipped: WHERE clause keeps the IN subquery and
     // the FROM clause stays a plain table scan.
@@ -1033,7 +1041,7 @@ fn test_in_subquery_with_nested_window_function_not_transformed() {
         negated: false,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     assert!(
         matches!(transformed.where_clause, Some(Expression::In { .. })),
@@ -1057,7 +1065,7 @@ fn test_not_in_subquery_with_window_function_not_transformed() {
         negated: true,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt);
+    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
 
     assert!(
         matches!(transformed.where_clause, Some(Expression::In { negated: true, .. })),

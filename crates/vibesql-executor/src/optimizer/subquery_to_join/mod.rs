@@ -47,7 +47,8 @@ mod scalar_comparison;
 use exists::try_convert_exists_to_join;
 use in_clause::try_convert_in_to_join;
 use scalar_comparison::try_convert_scalar_comparison_to_join;
-use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
+use vibesql_ast::{BinaryOperator, CommonTableExpr, Expression, FromClause, SelectStmt};
+use vibesql_storage::Database;
 
 /// Transform a SELECT statement by converting IN/NOT IN subqueries to semi/anti-joins
 ///
@@ -56,12 +57,12 @@ use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt};
 ///
 /// The transformation is applied iteratively to handle queries with multiple subqueries
 /// (e.g., Q21 with both EXISTS and NOT EXISTS clauses).
-pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
+pub fn transform_subqueries_to_joins(stmt: &SelectStmt, database: &Database) -> SelectStmt {
     let mut result = stmt.clone();
 
     // First, recursively transform any subqueries in the WHERE clause
     if let Some(where_clause) = &result.where_clause {
-        result.where_clause = Some(transform_subqueries_in_expression(where_clause));
+        result.where_clause = Some(transform_subqueries_in_expression(where_clause, database));
     }
 
     // Only transform if we have a FROM clause and a WHERE clause
@@ -77,9 +78,12 @@ pub fn transform_subqueries_to_joins(stmt: &SelectStmt) -> SelectStmt {
 
         // Try to extract IN/NOT IN/EXISTS subqueries from WHERE clause and convert to joins
         if let Some(where_clause) = &result.where_clause {
-            if let Some((new_from, new_where)) =
-                try_extract_subqueries_to_joins(result.from.as_ref().unwrap(), where_clause)
-            {
+            if let Some((new_from, new_where)) = try_extract_subqueries_to_joins(
+                result.from.as_ref().unwrap(),
+                where_clause,
+                database,
+                stmt.with_clause.as_deref(),
+            ) {
                 // Debug output for subquery transformation
                 if std::env::var("SUBQUERY_TRANSFORM_VERBOSE").is_ok() {
                     eprintln!(
@@ -243,11 +247,11 @@ fn try_extract_scalar_comparisons_only(
 /// Converting nested IN/EXISTS would change their FROM clause structure, which would then
 /// prevent the PARENT IN/EXISTS from being converted to a join (because the parent
 /// transformation expects a simple table in the subquery's FROM clause).
-fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
+fn transform_subqueries_in_expression(expr: &Expression, database: &Database) -> Expression {
     match expr {
         Expression::In { expr: inner_expr, subquery, negated } => {
             // Transform the inner expression
-            let transformed_inner = transform_subqueries_in_expression(inner_expr);
+            let transformed_inner = transform_subqueries_in_expression(inner_expr, database);
             // Only apply scalar comparison decorrelation, NOT IN/EXISTS transformation
             // This preserves the subquery's FROM clause structure for parent transformation
             let transformed_subquery = transform_scalar_subqueries_in_stmt(subquery);
@@ -263,51 +267,53 @@ fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
             Expression::Exists { subquery: Box::new(transformed_subquery), negated: *negated }
         }
         Expression::ScalarSubquery(subquery) => {
-            let transformed_subquery = transform_subqueries_to_joins(subquery);
+            let transformed_subquery = transform_subqueries_to_joins(subquery, database);
             Expression::ScalarSubquery(Box::new(transformed_subquery))
         }
         Expression::BinaryOp { op, left, right } => Expression::BinaryOp {
             op: op.clone(),
-            left: Box::new(transform_subqueries_in_expression(left)),
-            right: Box::new(transform_subqueries_in_expression(right)),
+            left: Box::new(transform_subqueries_in_expression(left, database)),
+            right: Box::new(transform_subqueries_in_expression(right, database)),
         },
         Expression::Conjunction(children) => Expression::Conjunction(
-            children.iter().map(transform_subqueries_in_expression).collect(),
+            children.iter().map(|c| transform_subqueries_in_expression(c, database)).collect(),
         ),
         Expression::Disjunction(children) => Expression::Disjunction(
-            children.iter().map(transform_subqueries_in_expression).collect(),
+            children.iter().map(|c| transform_subqueries_in_expression(c, database)).collect(),
         ),
         Expression::UnaryOp { op, expr: inner } => Expression::UnaryOp {
             op: op.clone(),
-            expr: Box::new(transform_subqueries_in_expression(inner)),
+            expr: Box::new(transform_subqueries_in_expression(inner, database)),
         },
         Expression::IsNull { expr: inner, negated } => Expression::IsNull {
-            expr: Box::new(transform_subqueries_in_expression(inner)),
+            expr: Box::new(transform_subqueries_in_expression(inner, database)),
             negated: *negated,
         },
         Expression::Between { expr: inner, low, high, negated, symmetric } => Expression::Between {
-            expr: Box::new(transform_subqueries_in_expression(inner)),
-            low: Box::new(transform_subqueries_in_expression(low)),
-            high: Box::new(transform_subqueries_in_expression(high)),
+            expr: Box::new(transform_subqueries_in_expression(inner, database)),
+            low: Box::new(transform_subqueries_in_expression(low, database)),
+            high: Box::new(transform_subqueries_in_expression(high, database)),
             negated: *negated,
             symmetric: *symmetric,
         },
         Expression::Case { operand, when_clauses, else_result } => Expression::Case {
-            operand: operand.as_ref().map(|o| Box::new(transform_subqueries_in_expression(o))),
+            operand: operand
+                .as_ref()
+                .map(|o| Box::new(transform_subqueries_in_expression(o, database))),
             when_clauses: when_clauses
                 .iter()
                 .map(|w| vibesql_ast::CaseWhen {
                     conditions: w
                         .conditions
                         .iter()
-                        .map(transform_subqueries_in_expression)
+                        .map(|c| transform_subqueries_in_expression(c, database))
                         .collect(),
-                    result: transform_subqueries_in_expression(&w.result),
+                    result: transform_subqueries_in_expression(&w.result, database),
                 })
                 .collect(),
             else_result: else_result
                 .as_ref()
-                .map(|e| Box::new(transform_subqueries_in_expression(e))),
+                .map(|e| Box::new(transform_subqueries_in_expression(e, database))),
         },
         // For other expression types, just return as-is
         _ => expr.clone(),
@@ -318,12 +324,14 @@ fn transform_subqueries_in_expression(expr: &Expression) -> Expression {
 fn try_extract_subqueries_to_joins(
     from: &FromClause,
     where_clause: &Expression,
+    database: &Database,
+    with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<(FromClause, Option<Expression>)> {
     // Look for IN subquery at the top level or in AND branches
     match where_clause {
         // Single IN subquery
         Expression::In { expr, subquery, negated } => {
-            if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
+            if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause) {
                 return Some((result.from, None)); // Removed WHERE clause entirely
             }
             None
@@ -334,7 +342,9 @@ fn try_extract_subqueries_to_joins(
             // Try left side first - check IN, EXISTS, and scalar comparison
             match left.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                    if let Some(result) =
+                        try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
+                    {
                         // Successfully converted left IN side, keep right side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
                         // incorrectly qualifies columns from OTHER tables (not the self-join
@@ -371,7 +381,9 @@ fn try_extract_subqueries_to_joins(
             // Try right side - check IN, EXISTS, and scalar comparison
             match right.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated) {
+                    if let Some(result) =
+                        try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
+                    {
                         // Successfully converted right IN side, keep left side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
                         // incorrectly qualifies columns from OTHER tables (not the self-join
@@ -405,7 +417,7 @@ fn try_extract_subqueries_to_joins(
 
             // Try recursively on left side
             if let Some((new_left_from, new_left_where)) =
-                try_extract_subqueries_to_joins(from, left)
+                try_extract_subqueries_to_joins(from, left, database, with_clause)
             {
                 let combined_where = match new_left_where {
                     Some(new_left) => Some(Expression::BinaryOp {
@@ -420,7 +432,7 @@ fn try_extract_subqueries_to_joins(
 
             // Try recursively on right side
             if let Some((new_right_from, new_right_where)) =
-                try_extract_subqueries_to_joins(from, right)
+                try_extract_subqueries_to_joins(from, right, database, with_clause)
             {
                 let combined_where = match new_right_where {
                     Some(new_right) => Some(Expression::BinaryOp {
@@ -460,7 +472,8 @@ fn try_extract_subqueries_to_joins(
             for (i, child) in children.iter().enumerate() {
                 match child {
                     Expression::In { expr, subquery, negated } => {
-                        if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated)
+                        if let Some(result) =
+                            try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
                         {
                             // Build remaining WHERE from other children
                             let remaining: Vec<_> = children
@@ -526,7 +539,7 @@ fn try_extract_subqueries_to_joins(
             // Try recursively on each child (for nested expressions)
             for (i, child) in children.iter().enumerate() {
                 if let Some((new_from, new_child_where)) =
-                    try_extract_subqueries_to_joins(from, child)
+                    try_extract_subqueries_to_joins(from, child, database, with_clause)
                 {
                     let mut new_children: Vec<_> = children
                         .iter()

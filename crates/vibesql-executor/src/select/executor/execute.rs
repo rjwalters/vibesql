@@ -268,7 +268,8 @@ impl SelectExecutor<'_> {
         // Transform decorrelated IN/EXISTS subqueries to semi/anti-joins (#2424)
         // This enables hash-based join execution instead of row-by-row subquery evaluation
         // Converts WHERE clauses like "WHERE x IN (SELECT y FROM t)" to "SEMI JOIN t ON x = y"
-        let optimized_stmt = crate::optimizer::transform_subqueries_to_joins(&optimized_stmt);
+        let optimized_stmt =
+            crate::optimizer::transform_subqueries_to_joins(&optimized_stmt, self.database);
 
         // Execute CTEs if present and merge with outer query's CTE context
         let mut cte_results = if let Some(with_clause) = &optimized_stmt.with_clause {
