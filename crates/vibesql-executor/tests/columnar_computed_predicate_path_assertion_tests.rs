@@ -54,6 +54,18 @@ fn take_logs() -> Vec<String> {
     std::mem::take(&mut *buffer().lock().unwrap())
 }
 
+/// Serializes every test in this binary. `VIBESQL_DISABLE_COLUMNAR` is a
+/// process-global env var and the `log` capture buffer is process-global, so
+/// concurrent tests would otherwise race: one test toggling
+/// `VIBESQL_DISABLE_COLUMNAR=1` for its row-path parity run could silently
+/// disable columnar in another test's columnar run (failing that test's path
+/// assertion), and their captured logs would interleave. Every test here either
+/// toggles the env var or reads the shared buffer, so each acquires this mutex
+/// for its whole body to keep its columnar run, row-path run, and captured logs
+/// isolated. Poisoned-lock recovery (`unwrap_or_else(|e| e.into_inner())`) keeps
+/// a panic in one test from cascading into spurious failures in the rest.
+static SERIAL: Mutex<()> = Mutex::new(());
+
 fn execute_sql(db: &mut Database, sql: &str) {
     for sql_stmt in sql.split(';') {
         let trimmed = sql_stmt.trim();
@@ -113,6 +125,7 @@ fn sum_result(rows: &[vibesql_storage::Row]) -> i64 {
 
 #[test]
 fn computed_predicate_mul_takes_columnar_path_and_matches_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     init_logger();
 
     // Enough rows (>256) to exercise the SIMD streaming filter path.
@@ -149,6 +162,7 @@ fn computed_predicate_mul_takes_columnar_path_and_matches_row_path() {
 
 #[test]
 fn computed_predicate_sub_le_column_matches_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     init_logger();
 
     let mut db = Database::new();
@@ -182,6 +196,7 @@ fn computed_predicate_sub_le_column_matches_row_path() {
 /// the row path exactly.
 #[test]
 fn computed_predicate_null_propagation_matches_row_path() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     init_logger();
 
     let mut db = Database::new();
