@@ -272,17 +272,15 @@ fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) ->
         FromClause::Table { .. }
         | FromClause::Subquery { .. }
         | FromClause::Values { .. }
-        | FromClause::TableFunction { .. } => {
-            FromClause::Join {
-                left: Box::new(accumulated),
-                right: Box::new(from_clause),
-                join_type: JoinType::Cross,
-                condition: None,
-                using_columns: None,
-                natural: false,
-                alias: None,
-            }
-        }
+        | FromClause::TableFunction { .. } => FromClause::Join {
+            left: Box::new(accumulated),
+            right: Box::new(from_clause),
+            join_type: JoinType::Cross,
+            condition: None,
+            using_columns: None,
+            natural: false,
+            alias: None,
+        },
         // For a JOIN, we need to inject the accumulated clause on the left side
         FromClause::Join { left, right, join_type, condition, using_columns, natural, alias } => {
             // Recursively combine with the left side of the join

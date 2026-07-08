@@ -7,7 +7,7 @@
 //! more than 65535 times after full expansion and raises SQLite's error instead.
 
 use vibesql_ast::Statement;
-use vibesql_executor::{SelectExecutor, ExecutorError};
+use vibesql_executor::{ExecutorError, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 

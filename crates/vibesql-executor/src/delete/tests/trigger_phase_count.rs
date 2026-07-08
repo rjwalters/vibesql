@@ -44,8 +44,7 @@ fn log_values(db: &Database) -> Vec<String> {
         Statement::Select(s) => s,
         other => panic!("expected SELECT, got {other:?}"),
     };
-    let result =
-        crate::SelectExecutor::new(db).execute_with_columns(&select).expect("run select");
+    let result = crate::SelectExecutor::new(db).execute_with_columns(&select).expect("run select");
     result
         .rows
         .iter()

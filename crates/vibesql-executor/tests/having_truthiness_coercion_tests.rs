@@ -193,19 +193,14 @@ fn test_case_text_condition_with_aggregates() {
     let db = setup_abc();
     // Text condition, aggregate in THEN — forces the aggregation CASE path.
     // '1x' parses to 1 (truthy); 'x' parses to 0 (falsy). Verified in sqlite3.
-    let rows = run_query(
-        &db,
-        "SELECT CASE WHEN '1x' THEN count(*) ELSE -1 END FROM abc GROUP BY a",
-    );
+    let rows =
+        run_query(&db, "SELECT CASE WHEN '1x' THEN count(*) ELSE -1 END FROM abc GROUP BY a");
     assert_eq!(rows.len(), 3);
     for row in &rows {
         assert_eq!(row.values[0], SqlValue::Integer(1));
     }
 
-    let rows = run_query(
-        &db,
-        "SELECT CASE WHEN 'x' THEN count(*) ELSE -1 END FROM abc GROUP BY a",
-    );
+    let rows = run_query(&db, "SELECT CASE WHEN 'x' THEN count(*) ELSE -1 END FROM abc GROUP BY a");
     assert_eq!(rows.len(), 3);
     for row in &rows {
         assert_eq!(row.values[0], SqlValue::Integer(-1));
@@ -216,18 +211,14 @@ fn test_case_text_condition_with_aggregates() {
 fn test_case_numeric_and_blob_condition_with_aggregates() {
     let db = setup_abc();
     // Numeric (real) condition — previously unhandled in the aggregation CASE match
-    let rows = run_query(
-        &db,
-        "SELECT CASE WHEN 56.1 THEN count(*) ELSE -1 END FROM abc GROUP BY a",
-    );
+    let rows =
+        run_query(&db, "SELECT CASE WHEN 56.1 THEN count(*) ELSE -1 END FROM abc GROUP BY a");
     for row in &rows {
         assert_eq!(row.values[0], SqlValue::Integer(1));
     }
     // Blob condition: x'31' ("1") is truthy in sqlite3
-    let rows = run_query(
-        &db,
-        "SELECT CASE WHEN x'31' THEN count(*) ELSE -1 END FROM abc GROUP BY a",
-    );
+    let rows =
+        run_query(&db, "SELECT CASE WHEN x'31' THEN count(*) ELSE -1 END FROM abc GROUP BY a");
     for row in &rows {
         assert_eq!(row.values[0], SqlValue::Integer(1));
     }

@@ -25,8 +25,7 @@ use super::{
     index_sync::{
         detect_surviving_replace_conflict, find_conflicting_rows_for_update,
         resolve_cross_update_conflicts_for_replace, validate_cross_update_uniqueness,
-        validate_post_statement_uniqueness, validate_rowid_relocation,
-        validate_unique_relocation,
+        validate_post_statement_uniqueness, validate_rowid_relocation, validate_unique_relocation,
     },
     row_selector::RowSelector,
     triggers,
@@ -576,13 +575,7 @@ pub(super) fn execute_internal(
         // though its FINAL state is duplicate-free. The deferred validator above
         // still permits #5137 descending-shift / negation cases that sqlite3
         // accepts; this additive check only rejects what sqlite3 rejects.
-        validate_unique_relocation(
-            &updates,
-            schema,
-            table_for_check,
-            database,
-            table_name,
-        )?;
+        validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
     }
 
     // For REPLACE: handle cross-update conflicts by keeping only the last update
@@ -671,11 +664,7 @@ pub(super) fn execute_internal(
                 // the table unchanged — so detect the collision here, BEFORE any
                 // storage mutation, and abort.
                 detect_surviving_replace_conflict(
-                    &updates,
-                    schema,
-                    &abandoned,
-                    database,
-                    table_name,
+                    &updates, schema, &abandoned, database, table_name,
                 )?;
             }
 
@@ -886,10 +875,7 @@ pub(super) fn execute_internal(
             // `DELETE FROM t WHERE a = old.a + 2`. SQLite does not update a row
             // that no longer exists, so skip it rather than erroring on the
             // now-vacant storage slot.
-            if database
-                .get_table(table_name)
-                .map(|t| t.is_row_deleted(u.row_index))
-                .unwrap_or(true)
+            if database.get_table(table_name).map(|t| t.is_row_deleted(u.row_index)).unwrap_or(true)
             {
                 continue;
             }
@@ -2028,11 +2014,7 @@ fn execute_update_from(
                     // `UNIQUE constraint failed` + table-unchanged behavior by
                     // aborting before any storage mutation.
                     detect_surviving_replace_conflict(
-                        &updates,
-                        schema,
-                        &abandoned,
-                        database,
-                        table_name,
+                        &updates, schema, &abandoned, database, table_name,
                     )?;
                 }
 
@@ -2196,13 +2178,7 @@ fn execute_update_from(
 
         // Regular (non-rowid) UNIQUE / PRIMARY KEY immediate intermediate-collision
         // check (issue #5588) — see default-path call for rationale.
-        validate_unique_relocation(
-            &updates,
-            schema,
-            table_for_check,
-            database,
-            table_name,
-        )?;
+        validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
     }
 
     // Handle CASCADE updates for primary key changes
@@ -2249,10 +2225,7 @@ fn execute_update_from(
 
             // Skip rows an interleaved trigger deleted mid-statement (see the
             // matching note in `execute_internal`).
-            if database
-                .get_table(table_name)
-                .map(|t| t.is_row_deleted(u.row_index))
-                .unwrap_or(true)
+            if database.get_table(table_name).map(|t| t.is_row_deleted(u.row_index)).unwrap_or(true)
             {
                 continue;
             }
@@ -2393,14 +2366,7 @@ fn empty_returning(
         .map(|items| {
             // RETURNING does not honor the table alias (issue #5840 item 6);
             // resolve against the real table name.
-            crate::dml_returning::project_returning(
-                items,
-                schema,
-                database,
-                None,
-                &[],
-                cte_results,
-            )
+            crate::dml_returning::project_returning(items, schema, database, None, &[], cte_results)
         })
         .transpose()
 }

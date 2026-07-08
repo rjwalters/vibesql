@@ -145,10 +145,7 @@ fn derived_output_columns(stmt: &SelectStmt) -> Option<Vec<String>> {
 /// Prefers an explicit column list (`WITH cte(a, b) AS ...`), otherwise derives
 /// the names from the CTE body's projection. Returns `None` when the name is not
 /// a CTE in this WITH clause or its columns cannot be determined.
-fn cte_output_columns(
-    with_clause: Option<&[CommonTableExpr]>,
-    name: &str,
-) -> Option<Vec<String>> {
+fn cte_output_columns(with_clause: Option<&[CommonTableExpr]>, name: &str) -> Option<Vec<String>> {
     let cte = with_clause?.iter().find(|c| c.name.eq_ignore_ascii_case(name))?;
     if let Some(cols) = &cte.columns {
         return Some(cols.clone());

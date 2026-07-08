@@ -276,8 +276,7 @@ fn collect_expr_view_refs(expr: &Expression, database: &Database, out: &mut Vec<
     impl ExpressionVisitor for SubqueryCollector<'_> {
         fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
             match expr {
-                Expression::ScalarSubquery(query)
-                | Expression::Exists { subquery: query, .. } => {
+                Expression::ScalarSubquery(query) | Expression::Exists { subquery: query, .. } => {
                     collect_view_refs(query, self.database, self.out);
                     VisitResult::Skip
                 }

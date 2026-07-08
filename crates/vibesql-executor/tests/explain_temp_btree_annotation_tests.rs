@@ -282,8 +282,7 @@ fn test_order_by_not_matching_group_key_emits_both() {
 #[test]
 fn test_order_by_group_key_mixed_directions_suppressed() {
     let db = setup_db();
-    let output =
-        eqp(&db, "SELECT b, c, count(*) FROM t1 GROUP BY b, c ORDER BY b ASC, c DESC");
+    let output = eqp(&db, "SELECT b, c, count(*) FROM t1 GROUP BY b, c ORDER BY b ASC, c DESC");
 
     assert!(output.contains("USE TEMP B-TREE FOR GROUP BY"), "missing GROUP BY:\n{}", output);
     assert!(
@@ -584,11 +583,7 @@ fn test_intersect_and_except_labels() {
     );
 
     let except = eqp(&db, "SELECT a FROM u1 EXCEPT SELECT a FROM u2");
-    assert!(
-        except.contains("EXCEPT USING TEMP B-TREE"),
-        "missing EXCEPT label:\n{}",
-        except
-    );
+    assert!(except.contains("EXCEPT USING TEMP B-TREE"), "missing EXCEPT label:\n{}", except);
 }
 
 // Mixed chains label each branch independently. sqlite3 — identical:
@@ -602,8 +597,7 @@ fn test_intersect_and_except_labels() {
 #[test]
 fn test_mixed_compound_chain_labels() {
     let db = setup_compound_db();
-    let output =
-        eqp(&db, "SELECT a FROM u1 UNION ALL SELECT a FROM u2 UNION SELECT b FROM u1");
+    let output = eqp(&db, "SELECT a FROM u1 UNION ALL SELECT a FROM u2 UNION SELECT b FROM u1");
 
     assert!(output.contains("|--UNION ALL\n"), "missing bare UNION ALL branch:\n{}", output);
     assert!(
@@ -624,8 +618,7 @@ fn test_mixed_compound_chain_labels() {
 #[test]
 fn test_compound_branch_group_by_line_inside_branch() {
     let db = setup_compound_db();
-    let output =
-        eqp(&db, "SELECT a, count(*) FROM u1 GROUP BY a UNION ALL SELECT a, b FROM u2");
+    let output = eqp(&db, "SELECT a, count(*) FROM u1 GROUP BY a UNION ALL SELECT a, b FROM u2");
 
     assert_eq!(
         output,
@@ -668,8 +661,7 @@ fn test_compound_branch_distinct_line_inside_branch() {
 #[test]
 fn test_dedup_compound_derived_table_wrapped_in_coroutine() {
     let db = setup_compound_db();
-    let output =
-        eqp(&db, "SELECT * FROM (SELECT a FROM u1 UNION SELECT a FROM u2) AS q");
+    let output = eqp(&db, "SELECT * FROM (SELECT a FROM u1 UNION SELECT a FROM u2) AS q");
 
     assert_eq!(
         output,
@@ -689,8 +681,7 @@ fn test_dedup_compound_derived_table_wrapped_in_coroutine() {
 #[test]
 fn test_union_all_derived_table_not_wrapped() {
     let db = setup_compound_db();
-    let output =
-        eqp(&db, "SELECT * FROM (SELECT a FROM u1 UNION ALL SELECT a FROM u2) AS q");
+    let output = eqp(&db, "SELECT * FROM (SELECT a FROM u1 UNION ALL SELECT a FROM u2) AS q");
 
     assert!(!output.contains("CO-ROUTINE"), "UNION ALL derived must flatten:\n{}", output);
     assert!(output.contains("COMPOUND QUERY"), "missing compound block:\n{}", output);
@@ -705,8 +696,7 @@ fn test_union_all_derived_table_not_wrapped() {
 #[test]
 fn test_group_by_derived_table_wrapped_in_coroutine() {
     let db = setup_db();
-    let output =
-        eqp(&db, "SELECT * FROM (SELECT b, count(*) AS c FROM t1 GROUP BY b) AS g");
+    let output = eqp(&db, "SELECT * FROM (SELECT b, count(*) AS c FROM t1 GROUP BY b) AS g");
 
     assert_eq!(
         output,

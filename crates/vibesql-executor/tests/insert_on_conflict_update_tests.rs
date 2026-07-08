@@ -29,11 +29,7 @@ fn exec(db: &mut Database, sql: &str) -> Result<usize, vibesql_executor::Executo
 
 /// Fetch all rows of a table ordered by physical position.
 fn rows(db: &Database, table: &str) -> Vec<Vec<SqlValue>> {
-    db.get_table(table)
-        .unwrap()
-        .scan_live()
-        .map(|(_, row)| row.values.to_vec())
-        .collect()
+    db.get_table(table).unwrap().scan_live().map(|(_, row)| row.values.to_vec()).collect()
 }
 
 fn int(v: i64) -> SqlValue {
@@ -132,8 +128,7 @@ fn test_omitted_target_catches_any_conflict() {
     exec(&mut db, "CREATE TABLE t(a INT PRIMARY KEY, b INT UNIQUE, c INT)").unwrap();
     exec(&mut db, "INSERT INTO t VALUES (1, 2, 3)").unwrap();
     // Conflict on the UNIQUE b constraint; no target named.
-    exec(&mut db, "INSERT INTO t VALUES (9, 2, 4) ON CONFLICT DO UPDATE SET c=excluded.c")
-        .unwrap();
+    exec(&mut db, "INSERT INTO t VALUES (9, 2, 4) ON CONFLICT DO UPDATE SET c=excluded.c").unwrap();
     assert_eq!(rows(&db, "t"), vec![vec![int(1), int(2), int(4)]]);
 }
 
@@ -151,11 +146,7 @@ fn test_multi_row_mixed_fresh_and_conflicting() {
     assert_eq!(n, 3);
     let mut all = rows(&db, "t");
     all.sort_by(|x, y| x[0].partial_cmp(&y[0]).unwrap());
-    assert_eq!(all, vec![
-        vec![int(1), int(11)],
-        vec![int(2), int(21)],
-        vec![int(3), int(30)],
-    ]);
+    assert_eq!(all, vec![vec![int(1), int(11)], vec![int(2), int(21)], vec![int(3), int(30)],]);
 }
 
 #[test]
@@ -174,10 +165,8 @@ fn test_same_statement_double_conflict_applies_twice() {
     all.sort_by_key(|r| format!("{:?}", r[0]));
     assert_eq!(all.len(), 3);
     // 'one' was updated twice: 1 -> 2 -> 3
-    let one = all
-        .iter()
-        .find(|r| matches!(&r[0], SqlValue::Varchar(s) if s.as_str() == "one"))
-        .unwrap();
+    let one =
+        all.iter().find(|r| matches!(&r[0], SqlValue::Varchar(s) if s.as_str() == "one")).unwrap();
     assert_eq!(one[1], int(3));
 }
 
@@ -200,8 +189,8 @@ fn test_null_in_target_column_never_conflicts() {
     exec(&mut db, "CREATE TABLE t(a INT UNIQUE, b INT)").unwrap();
     exec(&mut db, "INSERT INTO t VALUES (NULL, 1)").unwrap();
     // NULLs never conflict under UNIQUE semantics: this is a fresh insert.
-    let n = exec(&mut db, "INSERT INTO t VALUES (NULL, 2) ON CONFLICT(a) DO UPDATE SET b=99")
-        .unwrap();
+    let n =
+        exec(&mut db, "INSERT INTO t VALUES (NULL, 2) ON CONFLICT(a) DO UPDATE SET b=99").unwrap();
     assert_eq!(n, 1);
     assert_eq!(rows(&db, "t").len(), 2);
 }
@@ -468,15 +457,10 @@ fn test_do_update_where_exists_subquery_false_skips() {
 fn test_do_update_excluded_unknown_column_still_errors() {
     // Top-level excluded.<unknown> keeps SQLite's prepare-time error.
     let mut db = setup_subquery_db();
-    let err = exec(
-        &mut db,
-        "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = excluded.nope",
-    )
-    .expect_err("unknown excluded column must error");
-    assert!(
-        format!("{err:?}").contains("no such column: excluded.nope"),
-        "got: {err:?}"
-    );
+    let err =
+        exec(&mut db, "INSERT INTO t VALUES (1, 0) ON CONFLICT(a) DO UPDATE SET b = excluded.nope")
+            .expect_err("unknown excluded column must error");
+    assert!(format!("{err:?}").contains("no such column: excluded.nope"), "got: {err:?}");
 }
 
 #[test]

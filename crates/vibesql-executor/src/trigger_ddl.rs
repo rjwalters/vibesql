@@ -77,9 +77,7 @@ impl TriggerExecutor {
         // These messages are produced verbatim via `Other` so the TCL conformance
         // shim passes them through unchanged.
         if is_system_table_name(&stmt.table_name) {
-            return Err(ExecutorError::Other(
-                "cannot create trigger on system table".to_string(),
-            ));
+            return Err(ExecutorError::Other("cannot create trigger on system table".to_string()));
         }
 
         // sqlite3 reports a missing CREATE TRIGGER target table in the implicit
@@ -89,10 +87,8 @@ impl TriggerExecutor {
         // trigger1-1.1.2). The trigger's schema is `Some("temp")` for
         // `CREATE TEMP TRIGGER`; in every other case the target resolves against
         // the main schema and is qualified.
-        let target_is_temp_schema = stmt
-            .schema
-            .as_deref()
-            .is_some_and(|s| s.eq_ignore_ascii_case("temp"));
+        let target_is_temp_schema =
+            stmt.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("temp"));
         let qualify_missing_table = |err: ExecutorError| -> ExecutorError {
             if target_is_temp_schema {
                 err
@@ -212,10 +208,7 @@ impl TriggerExecutor {
             // `DROP TRIGGER IF EXISTS` on a missing trigger is a no-op
             // (SQLite / SQL:2008 semantics); a bare DROP TRIGGER still errors.
             if stmt.if_exists {
-                return Ok(format!(
-                    "Trigger '{}' does not exist, skipping",
-                    stmt.trigger_name
-                ));
+                return Ok(format!("Trigger '{}' does not exist, skipping", stmt.trigger_name));
             }
             return Err(ExecutorError::TriggerNotFound(stmt.trigger_name.clone()));
         }

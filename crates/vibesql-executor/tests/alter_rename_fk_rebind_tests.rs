@@ -67,8 +67,7 @@ fn count(db: &Database, table: &str) -> i64 {
 
 /// Return the single `sql` text for the named table from `sqlite_master`.
 fn table_sql(db: &Database, table: &str) -> String {
-    let query =
-        format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'");
+    let query = format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'");
     let stmt = Parser::parse_sql(&query).expect("parse SELECT");
     let Statement::Select(select) = stmt else {
         panic!("expected SELECT");
@@ -116,10 +115,7 @@ fn rename_parent_rebinds_child_fk_metadata_and_sql_source() {
 
     // Verbatim sqlite_master.sql REFERENCES clause is rewritten to the
     // double-quoted new name, matching sqlite3.
-    assert_eq!(
-        table_sql(&db, "c"),
-        "CREATE TABLE c(x REFERENCES \"p_new\"(id) ON DELETE CASCADE)"
-    );
+    assert_eq!(table_sql(&db, "c"), "CREATE TABLE c(x REFERENCES \"p_new\"(id) ON DELETE CASCADE)");
 }
 
 #[test]
@@ -213,10 +209,7 @@ fn rename_parent_rebinds_two_fks_in_one_child() {
 fn rename_self_referential_fk_follows_rename() {
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
-    create_with_source(
-        &mut db,
-        "CREATE TABLE p(id INTEGER PRIMARY KEY, pid REFERENCES p(id))",
-    );
+    create_with_source(&mut db, "CREATE TABLE p(id INTEGER PRIMARY KEY, pid REFERENCES p(id))");
 
     alter(&mut db, "ALTER TABLE p RENAME TO p_new");
 

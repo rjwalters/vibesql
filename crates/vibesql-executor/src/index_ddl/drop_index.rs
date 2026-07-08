@@ -31,8 +31,7 @@ impl DropIndexExecutor {
         let index_metadata = all_indexes
             .iter()
             .find(|idx| {
-                idx.name == *index_name
-                    && vibesql_catalog::Catalog::is_temp_schema(idx.schema())
+                idx.name == *index_name && vibesql_catalog::Catalog::is_temp_schema(idx.schema())
             })
             .or_else(|| all_indexes.iter().find(|idx| idx.name == *index_name));
 

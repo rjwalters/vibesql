@@ -151,17 +151,10 @@ fn fk_uses_rtrim_collation_for_parent_match() {
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
-    exec_sql(
-        &mut db,
-        "CREATE TABLE p20(x VARCHAR(10) COLLATE RTRIM PRIMARY KEY, y VARCHAR(20))",
-    )
-    .unwrap();
+    exec_sql(&mut db, "CREATE TABLE p20(x VARCHAR(10) COLLATE RTRIM PRIMARY KEY, y VARCHAR(20))")
+        .unwrap();
     exec_sql(&mut db, "INSERT INTO p20 VALUES('abc', 'Alpha')").unwrap();
-    exec_sql(
-        &mut db,
-        "CREATE TABLE c21(a VARCHAR(20), b VARCHAR(10) REFERENCES p20(x))",
-    )
-    .unwrap();
+    exec_sql(&mut db, "CREATE TABLE c21(a VARCHAR(20), b VARCHAR(10) REFERENCES p20(x))").unwrap();
 
     // 'abc    ' should match parent 'abc' under RTRIM collation.
     let r = exec_sql(&mut db, "INSERT INTO c21 VALUES('alpha', 'abc    ')");
@@ -173,17 +166,9 @@ fn fk_uses_nocase_collation_for_parent_match() {
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
-    exec_sql(
-        &mut db,
-        "CREATE TABLE p_nc(x VARCHAR(10) COLLATE NOCASE PRIMARY KEY)",
-    )
-    .unwrap();
+    exec_sql(&mut db, "CREATE TABLE p_nc(x VARCHAR(10) COLLATE NOCASE PRIMARY KEY)").unwrap();
     exec_sql(&mut db, "INSERT INTO p_nc VALUES('Alpha')").unwrap();
-    exec_sql(
-        &mut db,
-        "CREATE TABLE c_nc(a VARCHAR(10) REFERENCES p_nc(x))",
-    )
-    .unwrap();
+    exec_sql(&mut db, "CREATE TABLE c_nc(a VARCHAR(10) REFERENCES p_nc(x))").unwrap();
 
     // Lowercase 'alpha' should match parent 'Alpha' under NOCASE.
     let r = exec_sql(&mut db, "INSERT INTO c_nc VALUES('alpha')");

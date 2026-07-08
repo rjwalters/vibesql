@@ -88,10 +88,7 @@ pub unsafe fn sum_f64_filtered(values: &[f64], mask: &[bool]) -> f64 {
             eq0,
             _mm256_set1_epi64x(-1), // all-1s
         ));
-        let blend_mask1 = _mm256_castsi256_pd(_mm256_xor_si256(
-            eq1,
-            _mm256_set1_epi64x(-1),
-        ));
+        let blend_mask1 = _mm256_castsi256_pd(_mm256_xor_si256(eq1, _mm256_set1_epi64x(-1)));
 
         // Blend: select value where mask is true, zero where false
         // _mm256_blendv_pd checks the sign bit of each 64-bit lane in the mask
@@ -120,9 +117,9 @@ pub unsafe fn sum_f64_filtered(values: &[f64], mask: &[bool]) -> f64 {
     // Process remaining in groups of 4 if possible
     if remainder_start + 4 <= len {
         let v = _mm256_loadu_pd(values_ptr.add(remainder_start));
-        let m_bytes = _mm_cvtsi32_si128(
-            std::ptr::read_unaligned(mask_ptr.add(remainder_start) as *const i32),
-        );
+        let m_bytes = _mm_cvtsi32_si128(std::ptr::read_unaligned(
+            mask_ptr.add(remainder_start) as *const i32
+        ));
         let m_epi32 = _mm_cvtepu8_epi32(m_bytes);
         let m_epi64 = _mm256_cvtepi32_epi64(m_epi32);
         let eq = _mm256_cmpeq_epi64(m_epi64, ones_epi64);

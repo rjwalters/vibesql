@@ -123,10 +123,7 @@ fn cascade_delete_fires_before_and_after_child_triggers_in_order() {
     exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
 
     // Verified against sqlite3 3.51.0.
-    assert_eq!(
-        audit_msgs(&db),
-        vec!["before 10", "after 10", "before 11", "after 11"]
-    );
+    assert_eq!(audit_msgs(&db), vec!["before 10", "after 10", "before 11", "after 11"]);
 }
 
 /// A child BEFORE DELETE trigger RAISE(ABORT) on a cascaded row aborts the
@@ -202,10 +199,7 @@ fn cascade_delete_child_before_raise_abort_rolls_back_in_auto_commit() {
 
     // Whole statement rolled back: parent and both children survive, including
     // child[10] that the cascade had already deleted before the abort.
-    assert_eq!(
-        query_col(&db, "SELECT id FROM parent"),
-        vec![SqlValue::Integer(1)]
-    );
+    assert_eq!(query_col(&db, "SELECT id FROM parent"), vec![SqlValue::Integer(1)]);
     assert_eq!(
         query_col(&db, "SELECT id FROM child ORDER BY id"),
         vec![SqlValue::Integer(10), SqlValue::Integer(11)]
@@ -407,10 +401,7 @@ fn cascade_delete_raise_ignore_orphan_trips_statement_end_fk_check() {
     // Auto-commit: the implicit statement savepoint rolls the whole statement
     // back on the FK violation.
     let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
-    assert!(
-        err.contains("FOREIGN KEY constraint failed"),
-        "expected FK violation, got: {err}"
-    );
+    assert!(err.contains("FOREIGN KEY constraint failed"), "expected FK violation, got: {err}");
     assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
 
     // sqlite3 3.51.0: statement rolls back — parent 1 and BOTH children
@@ -446,10 +437,7 @@ fn cascade_update_raise_ignore_orphan_trips_statement_end_fk_check() {
     exec(&mut db, "INSERT INTO child VALUES (10, 1), (11, 1)").unwrap();
 
     let err = exec(&mut db, "UPDATE parent SET id = 2 WHERE id = 1").unwrap_err();
-    assert!(
-        err.contains("FOREIGN KEY constraint failed"),
-        "expected FK violation, got: {err}"
-    );
+    assert!(err.contains("FOREIGN KEY constraint failed"), "expected FK violation, got: {err}");
     assert!(!db.in_transaction());
 
     // Statement rolled back: parent key unchanged, both child FKs unchanged.
@@ -521,10 +509,7 @@ fn cascade_delete_raise_ignore_deferred_fk_defers_orphan_to_commit() {
     exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap();
     // Mid-txn state: parent + child 10 gone, child 11 survives orphaned.
     assert_eq!(query_col(&db, "SELECT id FROM parent"), Vec::<SqlValue>::new());
-    assert_eq!(
-        query_col(&db, "SELECT id FROM child ORDER BY id"),
-        vec![SqlValue::Integer(11)]
-    );
+    assert_eq!(query_col(&db, "SELECT id FROM child ORDER BY id"), vec![SqlValue::Integer(11)]);
 
     // COMMIT catches the deferred orphan. Use the executor's CommitExecutor
     // (not the raw storage commit) so the deferred FK re-check runs.
@@ -678,10 +663,7 @@ fn set_null_raise_ignore_orphan_trips_statement_end_fk_check() {
     exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
 
     let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
-    assert!(
-        err.contains("FOREIGN KEY constraint failed"),
-        "expected FK violation, got: {err}"
-    );
+    assert!(err.contains("FOREIGN KEY constraint failed"), "expected FK violation, got: {err}");
     assert!(!db.in_transaction(), "auto-commit must not leak an open transaction");
 
     // sqlite3 3.51.0: statement rolled back — parent and child both intact,
@@ -710,10 +692,7 @@ fn set_default_raise_ignore_orphan_trips_statement_end_fk_check() {
     exec(&mut db, "INSERT INTO child VALUES (10, 1)").unwrap();
 
     let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
-    assert!(
-        err.contains("FOREIGN KEY constraint failed"),
-        "expected FK violation, got: {err}"
-    );
+    assert!(err.contains("FOREIGN KEY constraint failed"), "expected FK violation, got: {err}");
     assert!(!db.in_transaction());
 
     // Statement rolled back: parent 1 and child 10 (pid=1) both intact.
@@ -831,10 +810,7 @@ fn cascade_delete_raise_ignore_orphan_in_explicit_txn_rolls_back_statement_keeps
     // orphan, the immediate FK check raises. The statement savepoint must roll
     // the WHOLE statement back (including child 10's already-cascaded delete).
     let err = exec(&mut db, "DELETE FROM parent WHERE id = 1").unwrap_err();
-    assert!(
-        err.contains("FOREIGN KEY constraint failed"),
-        "expected FK violation, got: {err}"
-    );
+    assert!(err.contains("FOREIGN KEY constraint failed"), "expected FK violation, got: {err}");
 
     // The transaction stays OPEN (a constraint violation is statement-scoped,
     // not transaction-scoped — SQLite's default).
@@ -873,11 +849,7 @@ fn cascade_orphan_in_explicit_txn_preserves_earlier_statements() {
         "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
     )
     .unwrap();
-    exec(
-        &mut db,
-        "CREATE TABLE log (id INTEGER PRIMARY KEY)",
-    )
-    .unwrap();
+    exec(&mut db, "CREATE TABLE log (id INTEGER PRIMARY KEY)").unwrap();
     exec(
         &mut db,
         "CREATE TRIGGER child_skip BEFORE DELETE ON child WHEN OLD.id = 11 BEGIN SELECT RAISE(IGNORE); END",

@@ -327,12 +327,12 @@ pub fn live_deferred_fk_violation_count(db: &Database) -> usize {
         // sibling DELETE in the same transaction is honored — that is the
         // resolution path exercised by fkey6-1.21.
         let child_still_present = child_table.scan_live().any(|(_, child_row)| {
-            fk.column_indices.iter().enumerate().all(
-                |(i, &col_idx)| match child_row.values.get(col_idx) {
+            fk.column_indices.iter().enumerate().all(|(i, &col_idx)| {
+                match child_row.values.get(col_idx) {
                     Some(v) => v == &snapshot_fk_values[i],
                     None => false,
-                },
-            )
+                }
+            })
         });
         if !child_still_present {
             continue;

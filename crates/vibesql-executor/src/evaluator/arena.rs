@@ -310,12 +310,20 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::Wildcard => Ok(SqlValue::Null),
 
             // Current date/time functions - use scalar function path
-            ArenaExpression::CurrentDate => {
-                super::functions::eval_scalar_function("CURRENT_DATE", &[], &None, &self.sql_mode, super::SchemaExprContext::None)
-            }
-            ArenaExpression::CurrentTime { .. } => {
-                super::functions::eval_scalar_function("CURRENT_TIME", &[], &None, &self.sql_mode, super::SchemaExprContext::None)
-            }
+            ArenaExpression::CurrentDate => super::functions::eval_scalar_function(
+                "CURRENT_DATE",
+                &[],
+                &None,
+                &self.sql_mode,
+                super::SchemaExprContext::None,
+            ),
+            ArenaExpression::CurrentTime { .. } => super::functions::eval_scalar_function(
+                "CURRENT_TIME",
+                &[],
+                &None,
+                &self.sql_mode,
+                super::SchemaExprContext::None,
+            ),
             ArenaExpression::CurrentTimestamp { .. } => super::functions::eval_scalar_function(
                 "CURRENT_TIMESTAMP",
                 &[],
@@ -397,8 +405,15 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 let upper = name_str.to_uppercase();
                 if matches!(
                     upper.as_str(),
-                    "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET"
-                        | "JSONB_ARRAY" | "JSONB_OBJECT" | "JSONB_INSERT" | "JSONB_REPLACE"
+                    "JSON_ARRAY"
+                        | "JSON_OBJECT"
+                        | "JSON_INSERT"
+                        | "JSON_REPLACE"
+                        | "JSON_SET"
+                        | "JSONB_ARRAY"
+                        | "JSONB_OBJECT"
+                        | "JSONB_INSERT"
+                        | "JSONB_REPLACE"
                         | "JSONB_SET"
                 ) {
                     let subtypes: Vec<bool> =
@@ -758,9 +773,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Blob(b) => {
-                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
-            }
+            SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "LIKE requires string operands, got {:?} and {:?}",
@@ -805,9 +818,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
             SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Blob(b) => {
-                arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
-            }
+            SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "GLOB requires string operands, got {:?} and {:?}",

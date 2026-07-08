@@ -321,9 +321,7 @@ pub fn enforce_unique_indexes(
                 // violation.
                 if let Some(row_indices) = index_data.get(&key_values) {
                     let key_is_live = match table {
-                        Some(t) => {
-                            row_indices.iter().any(|&idx| t.is_row_visible(idx, &snapshot))
-                        }
+                        Some(t) => row_indices.iter().any(|&idx| t.is_row_visible(idx, &snapshot)),
                         None => !row_indices.is_empty(),
                     };
                     if key_is_live {

@@ -127,14 +127,11 @@ impl EmbeddedWindowPlan {
 
 /// Check whether an expression contains a window function anywhere within it,
 /// WITHOUT descending into subqueries (which have their own scope).
-pub(in crate::select::executor) fn expression_contains_window_function(
-    expr: &Expression,
-) -> bool {
+pub(in crate::select::executor) fn expression_contains_window_function(expr: &Expression) -> bool {
     match expr {
         Expression::WindowFunction { .. } => true,
         Expression::BinaryOp { left, right, .. } => {
-            expression_contains_window_function(left)
-                || expression_contains_window_function(right)
+            expression_contains_window_function(left) || expression_contains_window_function(right)
         }
         Expression::UnaryOp { expr, .. }
         | Expression::Cast { expr, .. }
@@ -142,21 +139,16 @@ pub(in crate::select::executor) fn expression_contains_window_function(
         | Expression::IsTruthValue { expr, .. }
         | Expression::Collate { expr, .. } => expression_contains_window_function(expr),
         Expression::IsDistinctFrom { left, right, .. } => {
-            expression_contains_window_function(left)
-                || expression_contains_window_function(right)
+            expression_contains_window_function(left) || expression_contains_window_function(right)
         }
-        Expression::Function { args, .. } => {
-            args.iter().any(expression_contains_window_function)
-        }
+        Expression::Function { args, .. } => args.iter().any(expression_contains_window_function),
         Expression::Case { operand, when_clauses, else_result } => {
             operand.as_ref().is_some_and(|e| expression_contains_window_function(e))
                 || when_clauses.iter().any(|w| {
                     w.conditions.iter().any(expression_contains_window_function)
                         || expression_contains_window_function(&w.result)
                 })
-                || else_result
-                    .as_ref()
-                    .is_some_and(|e| expression_contains_window_function(e))
+                || else_result.as_ref().is_some_and(|e| expression_contains_window_function(e))
         }
         Expression::Between { expr, low, high, .. } => {
             expression_contains_window_function(expr)
@@ -334,22 +326,13 @@ fn rewrite_embedded_expression(
             escape: escape.clone(),
         },
         Expression::Conjunction(exprs) => Expression::Conjunction(
-            exprs
-                .iter()
-                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
-                .collect(),
+            exprs.iter().map(|e| rewrite_embedded_expression(e, hidden_base, components)).collect(),
         ),
         Expression::Disjunction(exprs) => Expression::Disjunction(
-            exprs
-                .iter()
-                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
-                .collect(),
+            exprs.iter().map(|e| rewrite_embedded_expression(e, hidden_base, components)).collect(),
         ),
         Expression::RowValueConstructor(exprs) => Expression::RowValueConstructor(
-            exprs
-                .iter()
-                .map(|e| rewrite_embedded_expression(e, hidden_base, components))
-                .collect(),
+            exprs.iter().map(|e| rewrite_embedded_expression(e, hidden_base, components)).collect(),
         ),
         Expression::In { expr, subquery, negated } => Expression::In {
             expr: Box::new(rewrite_embedded_expression(expr, hidden_base, components)),

@@ -37,9 +37,9 @@ fn run(db: &mut Database, sql: &str) -> Result<String, String> {
         Statement::CreateTable(s) => {
             CreateTableExecutor::execute(&s, db).map(|_| String::new()).map_err(|e| e.to_string())
         }
-        Statement::CreateIndex(s) => CreateIndexExecutor::execute(&s, db)
-            .map(|_| String::new())
-            .map_err(|e| e.to_string()),
+        Statement::CreateIndex(s) => {
+            CreateIndexExecutor::execute(&s, db).map(|_| String::new()).map_err(|e| e.to_string())
+        }
         Statement::Insert(s) => {
             InsertExecutor::execute(db, &s).map(|_| String::new()).map_err(|e| e.to_string())
         }

@@ -158,9 +158,8 @@ pub(super) fn execute_add_constraint(
                 parent_column_indices.push(idx);
             }
 
-            let (is_deferrable, initially_deferred) = deferral
-                .map(|d| (d.is_deferrable, d.initially_deferred))
-                .unwrap_or((false, false));
+            let (is_deferrable, initially_deferred) =
+                deferral.map(|d| (d.is_deferrable, d.initially_deferred)).unwrap_or((false, false));
 
             let fk = ForeignKeyConstraint {
                 name: stmt.constraint.name.clone(),

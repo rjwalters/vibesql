@@ -349,9 +349,7 @@ fn substitute_window_functions(
                        row: &vibesql_storage::Row,
                        wm: &HashMap<WindowFunctionKey, usize>|
      -> Result<Option<Box<Expression>>, crate::errors::ExecutorError> {
-        opt.as_ref()
-            .map(|e| substitute_window_functions(e, row, wm).map(Box::new))
-            .transpose()
+        opt.as_ref().map(|e| substitute_window_functions(e, row, wm).map(Box::new)).transpose()
     };
 
     match expr {
@@ -380,17 +378,13 @@ fn substitute_window_functions(
             })
         }
         Expression::Conjunction(exprs) => {
-            let subs: Result<Vec<_>, _> = exprs
-                .iter()
-                .map(|e| substitute_window_functions(e, row, window_mapping))
-                .collect();
+            let subs: Result<Vec<_>, _> =
+                exprs.iter().map(|e| substitute_window_functions(e, row, window_mapping)).collect();
             Ok(Expression::Conjunction(subs?))
         }
         Expression::Disjunction(exprs) => {
-            let subs: Result<Vec<_>, _> = exprs
-                .iter()
-                .map(|e| substitute_window_functions(e, row, window_mapping))
-                .collect();
+            let subs: Result<Vec<_>, _> =
+                exprs.iter().map(|e| substitute_window_functions(e, row, window_mapping)).collect();
             Ok(Expression::Disjunction(subs?))
         }
         Expression::UnaryOp { expr: inner, op } => {
@@ -419,13 +413,13 @@ fn substitute_window_functions(
                     items
                         .iter()
                         .map(|item| {
-                            substitute_window_functions(&item.expr, row, window_mapping).map(
-                                |e| vibesql_ast::OrderByItem {
+                            substitute_window_functions(&item.expr, row, window_mapping).map(|e| {
+                                vibesql_ast::OrderByItem {
                                     expr: e,
                                     direction: item.direction.clone(),
                                     nulls_order: item.nulls_order,
-                                },
-                            )
+                                }
+                            })
                         })
                         .collect::<Result<Vec<_>, _>>()
                 })

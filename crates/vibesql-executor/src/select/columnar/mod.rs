@@ -49,15 +49,16 @@ mod simd_join;
 pub use aggregate::{
     columnar_group_by, columnar_group_by_batch, compute_aggregates_from_batch,
     compute_multiple_aggregates, evaluate_expression_to_column,
-    evaluate_expression_with_cached_column, extract_aggregates, AggregateOp, AggregateSource,
-    AggregateSpec,
+    evaluate_expression_with_cached_column, extract_aggregates, materialize_derived_column,
+    AggregateOp, AggregateSource, AggregateSpec,
 };
 pub use batch::{ColumnArray, ColumnarBatch};
 pub use executor::execute_columnar_batch;
 pub use filter::{
     apply_columnar_filter, apply_columnar_filter_simd_streaming, create_filter_bitmap,
     create_filter_bitmap_tree, evaluate_predicate_tree, extract_column_predicates,
-    extract_full_coverage_predicates, extract_predicate_tree, ColumnPredicate, PredicateTree,
+    extract_derived_expr, extract_full_coverage_predicates, extract_predicate_tree,
+    ColumnPredicate, DerivedExpr, PredicateTree,
 };
 use log;
 pub use scan::ColumnarScan;

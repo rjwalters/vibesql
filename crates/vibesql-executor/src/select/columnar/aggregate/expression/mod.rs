@@ -29,7 +29,10 @@ mod tests;
 
 // Re-export public API
 pub(super) use batch::compute_batch_expression_aggregate;
-pub use batch::{evaluate_expression_to_column, evaluate_expression_with_cached_column};
+pub use batch::{
+    evaluate_expression_to_column, evaluate_expression_with_cached_column,
+    materialize_derived_column,
+};
 pub(super) use vectorized::compute_expression_aggregate;
 use vibesql_ast::Expression;
 

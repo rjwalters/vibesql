@@ -93,8 +93,7 @@ impl ViewExecutor {
         // same-named temp view is dropped, and vice versa). A trigger on a
         // *different* view is left alone. See `Catalog::drop_view_triggers`
         // (view analogue of the table path in #5597).
-        let view_is_temp =
-            database.catalog.get_view(&stmt.view_name).is_some_and(|v| v.is_temp());
+        let view_is_temp = database.catalog.get_view(&stmt.view_name).is_some_and(|v| v.is_temp());
 
         // Drop the view
         let result = database.catalog.drop_view_with_behavior(&stmt.view_name, drop_behavior);

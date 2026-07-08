@@ -948,8 +948,9 @@ fn test_derived_outer_genuinely_ambiguous_column_errors_row_path() {
     let mut db = setup_derived_outer_db();
     exec_setup(&mut db, "CREATE TABLE t2(a INTEGER, w INTEGER)");
     exec_setup(&mut db, "INSERT INTO t2 VALUES(1,100),(2,200)");
-    let select =
-        parse_select("SELECT t.v FROM (SELECT a,v FROM base) AS t, t2 WHERE a IN (SELECT a FROM t3)");
+    let select = parse_select(
+        "SELECT t.v FROM (SELECT a,v FROM base) AS t, t2 WHERE a IN (SELECT a FROM t3)",
+    );
     let result = SelectExecutor::new(&db).execute(&select);
     std::env::remove_var("VIBESQL_DISABLE_COLUMNAR_JOIN");
     match result {

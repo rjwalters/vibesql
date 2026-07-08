@@ -1894,11 +1894,16 @@ fn main() {
         // write path opens a new relative gap.
         if let (Some(ref v), Some(ref s)) = (&vibesql_results, &sqlite_results) {
             let label = if write_faithful { "write-faithful" } else { "read-only" };
-            eprintln!("\n--- VibeSQL / SQLite avg-latency ratio per transaction type ({label}) ---");
+            eprintln!(
+                "\n--- VibeSQL / SQLite avg-latency ratio per transaction type ({label}) ---"
+            );
             eprintln!(
                 "(ratio > 1.0 => VibeSQL slower; same process, identical fresh DB per engine)"
             );
-            eprintln!("{:<14} {:>14} {:>14} {:>10}", "Transaction", "VibeSQL (us)", "SQLite (us)", "Ratio");
+            eprintln!(
+                "{:<14} {:>14} {:>14} {:>10}",
+                "Transaction", "VibeSQL (us)", "SQLite (us)", "Ratio"
+            );
             eprintln!("{:-<14} {:->14} {:->14} {:->10}", "", "", "", "");
 
             let print_ratio = |name: &str, v_avg: f64, v_cnt: u64, s_avg: f64, s_cnt: u64| {

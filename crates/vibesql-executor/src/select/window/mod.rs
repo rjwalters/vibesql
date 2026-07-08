@@ -108,8 +108,10 @@ pub(super) fn evaluate_window_functions(
 
         // Build mapping: WindowFunctionKey -> column index
         // Use original_window_spec for key generation to match lookups using unresolved expressions
-        let key =
-            WindowFunctionKey::from_expression(&win_func.function_spec, &win_func.original_window_spec);
+        let key = WindowFunctionKey::from_expression(
+            &win_func.function_spec,
+            &win_func.original_window_spec,
+        );
         let col_idx = base_column_count + idx;
         window_mapping.insert(key, col_idx);
     }

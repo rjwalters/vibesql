@@ -197,17 +197,16 @@ pub(crate) fn execute_index_scan(
     // just slower). #5806 first added this gate for `IndexPredicate::In`;
     // #5823 extends it to `IndexPredicate::Range` (which backs `=`, `<`, `<=`,
     // `>`, `>=`, BETWEEN). BINARY/undeclared collations keep the fast probe.
-    let index_predicate = if matches!(
-        index_predicate,
-        Some(IndexPredicate::In(_)) | Some(IndexPredicate::Range(_))
-    ) && first_indexed_column
-        .and_then(|idx_col| idx_col.column_name())
-        .is_some_and(|col_name| column_has_nonbinary_collation(&table.schema, col_name))
-    {
-        None
-    } else {
-        index_predicate
-    };
+    let index_predicate =
+        if matches!(index_predicate, Some(IndexPredicate::In(_)) | Some(IndexPredicate::Range(_)))
+            && first_indexed_column
+                .and_then(|idx_col| idx_col.column_name())
+                .is_some_and(|col_name| column_has_nonbinary_collation(&table.schema, col_name))
+        {
+            None
+        } else {
+            index_predicate
+        };
 
     // Issue #5333: when the index stores temporal keys (e.g. an expression
     // index on date()/datetime(), or a plain TIMESTAMP column index) but the

@@ -63,10 +63,7 @@ fn exec(db: &mut Database, sql: &str) {
 /// row count observed. This is the "read before the cascade" that used to leave
 /// a stale entry in the cache.
 fn prime_columnar(db: &mut Database, table: &str) -> usize {
-    db.get_columnar(table)
-        .unwrap()
-        .expect("Table should exist")
-        .row_count()
+    db.get_columnar(table).unwrap().expect("Table should exist").row_count()
 }
 
 /// Read all values of a single column from the (post-mutation) columnar cache.

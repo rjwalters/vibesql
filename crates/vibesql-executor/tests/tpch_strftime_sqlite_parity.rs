@@ -107,8 +107,8 @@ fn tpch_q7_q8_q9_match_sqlite() {
         "n1.n_name IN ('FRANCE', 'GERMANY', 'RUSSIA', 'ROMANIA', 'UNITED KINGDOM')\n         AND n2.n_name IN ('FRANCE', 'GERMANY', 'RUSSIA', 'ROMANIA', 'UNITED KINGDOM')",
     );
     assert_ne!(q7_relaxed, TPCH_Q7_SQLITE, "Q7 filter text changed; update the replacement");
-    let q8_relaxed =
-        TPCH_Q8_SQLITE.replace("AND p_type = 'ECONOMY ANODIZED STEEL'", "AND p_type LIKE '%STEEL%'");
+    let q8_relaxed = TPCH_Q8_SQLITE
+        .replace("AND p_type = 'ECONOMY ANODIZED STEEL'", "AND p_type LIKE '%STEEL%'");
     assert_ne!(q8_relaxed, TPCH_Q8_SQLITE, "Q8 filter text changed; update the replacement");
 
     let mut nonempty = 0;

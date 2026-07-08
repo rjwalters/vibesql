@@ -361,9 +361,9 @@ fn from_clause_has_outer_correlated_aggregate(
     use vibesql_ast::FromClause;
 
     match from {
-        FromClause::Table { .. }
-        | FromClause::Values { .. }
-        | FromClause::TableFunction { .. } => false,
+        FromClause::Table { .. } | FromClause::Values { .. } | FromClause::TableFunction { .. } => {
+            false
+        }
         FromClause::Join { left, right, condition, .. } => {
             from_clause_has_outer_correlated_aggregate(left, inner_scopes, database)
                 || from_clause_has_outer_correlated_aggregate(right, inner_scopes, database)
@@ -826,9 +826,11 @@ fn expr_has_column_referencing_aggregate(expr: &vibesql_ast::Expression) -> bool
             if args.iter().any(expr_has_column_referencing_aggregate) {
                 return true;
             }
-            if over.partition_by.as_ref().is_some_and(|exprs| {
-                exprs.iter().any(expr_has_column_referencing_aggregate)
-            }) {
+            if over
+                .partition_by
+                .as_ref()
+                .is_some_and(|exprs| exprs.iter().any(expr_has_column_referencing_aggregate))
+            {
                 return true;
             }
             if over.order_by.as_ref().is_some_and(|items| {
@@ -1023,9 +1025,10 @@ impl SelectExecutor<'_> {
                     vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
                 };
                 args.iter().any(|arg| self.expression_has_aggregate(arg))
-                    || over.partition_by.as_ref().is_some_and(|exprs| {
-                        exprs.iter().any(|e| self.expression_has_aggregate(e))
-                    })
+                    || over
+                        .partition_by
+                        .as_ref()
+                        .is_some_and(|exprs| exprs.iter().any(|e| self.expression_has_aggregate(e)))
                     || over.order_by.as_ref().is_some_and(|items| {
                         items.iter().any(|i| self.expression_has_aggregate(&i.expr))
                     })
@@ -1139,7 +1142,7 @@ impl SelectExecutor<'_> {
             Some(vibesql_ast::FromClause::Subquery { .. }) => return None, // Subquery not allowed
             Some(vibesql_ast::FromClause::Values { .. }) => return None, // VALUES not allowed
             Some(vibesql_ast::FromClause::TableFunction { .. }) => return None, // Table function not allowed
-            None => return None,                                       // No FROM clause
+            None => return None,                                                // No FROM clause
         };
 
         Some(table_name)

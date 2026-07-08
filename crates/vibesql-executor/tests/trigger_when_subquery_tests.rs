@@ -78,7 +78,11 @@ fn when_subquery_fires_per_subquery_result_trigger2_3_2() {
 
     // tbl is empty -> the subquery WHEN of t2 is true -> log becomes 1.
     exec(&mut db, "INSERT INTO tbl VALUES(0, 0, 0, 0);");
-    assert_eq!(query_scalar_i64(&db, "SELECT a FROM log;"), 1, "empty-table insert: t2 should fire");
+    assert_eq!(
+        query_scalar_i64(&db, "SELECT a FROM log;"),
+        1,
+        "empty-table insert: t2 should fire"
+    );
     exec(&mut db, "UPDATE log SET a = 0;");
 
     // tbl now has a row -> subquery WHEN of t2 is false, a=0 so t1 false -> log stays 0.
@@ -216,7 +220,11 @@ fn when_correlated_exists_subquery_referencing_new_5585() {
     exec(&mut db, "INSERT INTO t VALUES(4);");
 
     assert_eq!(query_scalar_i64(&db, "SELECT count(*) FROM hit;"), 2, "hit should be {{2,4}}");
-    assert_eq!(query_scalar_i64(&db, "SELECT count(*) FROM hit WHERE id = 1;"), 0, "id 1 not in other");
+    assert_eq!(
+        query_scalar_i64(&db, "SELECT count(*) FROM hit WHERE id = 1;"),
+        0,
+        "id 1 not in other"
+    );
     assert_eq!(query_scalar_i64(&db, "SELECT count(*) FROM hit WHERE id = 2;"), 1, "id 2 in other");
     assert_eq!(query_scalar_i64(&db, "SELECT count(*) FROM hit WHERE id = 4;"), 1, "id 4 in other");
 }
@@ -275,10 +283,7 @@ fn trigger_when_valid_columns_no_error_on_empty_table() {
     let mut db = Database::new();
     exec(&mut db, "CREATE TABLE t (a, b);");
     exec(&mut db, "CREATE TRIGGER tr1 BEFORE UPDATE ON t WHEN a > 0 BEGIN SELECT 1; END;");
-    exec(
-        &mut db,
-        "CREATE TRIGGER tr2 AFTER UPDATE ON t WHEN OLD.a <> NEW.a BEGIN SELECT 1; END;",
-    );
+    exec(&mut db, "CREATE TRIGGER tr2 AFTER UPDATE ON t WHEN OLD.a <> NEW.a BEGIN SELECT 1; END;");
 
     // Empty table: zero rows matched, valid WHEN clauses, must succeed with 0.
     let updated = try_update(&mut db, "UPDATE t SET a = 1;")

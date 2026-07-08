@@ -11,7 +11,10 @@ use vibesql_types::SqlValue;
 /// and only handles Literal and ColumnRef expressions. It is used as a test-only
 /// eval_fn for unit tests where the full CombinedExpressionEvaluator is not available.
 #[cfg(test)]
-pub fn evaluate_expression(expr: &Expression, row: &vibesql_storage::Row) -> Result<SqlValue, String> {
+pub fn evaluate_expression(
+    expr: &Expression,
+    row: &vibesql_storage::Row,
+) -> Result<SqlValue, String> {
     match expr {
         Expression::Literal(val) => Ok(val.clone()),
         Expression::ColumnRef(col_id) => {

@@ -701,10 +701,7 @@ pub fn coerce_value(
         // (via SqlValue's Display impl) so whole reals keep their trailing ".0"
         // (e.g. -42.0 -> "-42.0"). f64::to_string() would drop it.
         (
-            SqlValue::Numeric(_)
-            | SqlValue::Float(_)
-            | SqlValue::Real(_)
-            | SqlValue::Double(_),
+            SqlValue::Numeric(_) | SqlValue::Float(_) | SqlValue::Real(_) | SqlValue::Double(_),
             DataType::Varchar { .. },
         ) => Ok(SqlValue::Varchar(arcstr::ArcStr::from(value.to_string()))),
         (SqlValue::Boolean(b), DataType::Varchar { .. }) => {

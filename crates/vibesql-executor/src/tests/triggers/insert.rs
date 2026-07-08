@@ -319,7 +319,7 @@ fn test_insert_trigger_multi_statement_body_with_semicolon_string() {
              INSERT INTO audit_log (event) VALUES ('a;b'); \
              INSERT INTO audit_log (event) VALUES ('c'); \
              END"
-                .to_string(),
+            .to_string(),
         ),
     };
     crate::advanced_objects::execute_create_trigger(&trigger_stmt, &mut db)

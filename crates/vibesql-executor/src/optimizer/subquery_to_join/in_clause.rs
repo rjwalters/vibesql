@@ -310,8 +310,7 @@ pub(super) fn try_convert_in_to_join(
         //     fall back to row-by-row IN evaluation, which never over-errors.
         //   - anything else (non-column expr, correlated reference, unresolved) →
         //     leave unchanged.
-        let outer_expr_qualified =
-            qualify_outer_expr_in_scope(expr, from, database, with_clause)?;
+        let outer_expr_qualified = qualify_outer_expr_in_scope(expr, from, database, with_clause)?;
 
         (
             table_alias.clone(),

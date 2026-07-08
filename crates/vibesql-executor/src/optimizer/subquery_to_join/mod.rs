@@ -331,7 +331,9 @@ fn try_extract_subqueries_to_joins(
     match where_clause {
         // Single IN subquery
         Expression::In { expr, subquery, negated } => {
-            if let Some(result) = try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause) {
+            if let Some(result) =
+                try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
+            {
                 return Some((result.from, None)); // Removed WHERE clause entirely
             }
             None
@@ -342,9 +344,14 @@ fn try_extract_subqueries_to_joins(
             // Try left side first - check IN, EXISTS, and scalar comparison
             match left.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(result) =
-                        try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
-                    {
+                    if let Some(result) = try_convert_in_to_join(
+                        from,
+                        expr,
+                        subquery,
+                        *negated,
+                        database,
+                        with_clause,
+                    ) {
                         // Successfully converted left IN side, keep right side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
                         // incorrectly qualifies columns from OTHER tables (not the self-join
@@ -381,9 +388,14 @@ fn try_extract_subqueries_to_joins(
             // Try right side - check IN, EXISTS, and scalar comparison
             match right.as_ref() {
                 Expression::In { expr, subquery, negated } => {
-                    if let Some(result) =
-                        try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
-                    {
+                    if let Some(result) = try_convert_in_to_join(
+                        from,
+                        expr,
+                        subquery,
+                        *negated,
+                        database,
+                        with_clause,
+                    ) {
                         // Successfully converted right IN side, keep left side as WHERE clause
                         // Note: We no longer qualify remaining WHERE clause columns because it
                         // incorrectly qualifies columns from OTHER tables (not the self-join
@@ -472,9 +484,14 @@ fn try_extract_subqueries_to_joins(
             for (i, child) in children.iter().enumerate() {
                 match child {
                     Expression::In { expr, subquery, negated } => {
-                        if let Some(result) =
-                            try_convert_in_to_join(from, expr, subquery, *negated, database, with_clause)
-                        {
+                        if let Some(result) = try_convert_in_to_join(
+                            from,
+                            expr,
+                            subquery,
+                            *negated,
+                            database,
+                            with_clause,
+                        ) {
                             // Build remaining WHERE from other children
                             let remaining: Vec<_> = children
                                 .iter()

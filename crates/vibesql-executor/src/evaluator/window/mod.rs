@@ -31,17 +31,20 @@ pub use aggregates::{
     evaluate_group_concat_window_with_expr, evaluate_max_window, evaluate_min_window,
     evaluate_percentile_window, evaluate_sum_window, evaluate_total_window,
 };
-pub use frames::{calculate_frame, calculate_frame_with_exclusion, validate_frame, validate_range_order_by, FrameResult};
+pub use frames::{
+    calculate_frame, calculate_frame_with_exclusion, validate_frame, validate_range_order_by,
+    FrameResult,
+};
 pub use partitioning::{partition_rows, partition_rows_with_collations, Partition};
 pub use ranking::{
     evaluate_cume_dist, evaluate_cume_dist_with_collations, evaluate_dense_rank,
-    evaluate_dense_rank_with_collations, evaluate_ntile, evaluate_percent_rank,
-    evaluate_rank, evaluate_rank_with_collations, evaluate_row_number,
+    evaluate_dense_rank_with_collations, evaluate_ntile, evaluate_percent_rank, evaluate_rank,
+    evaluate_rank_with_collations, evaluate_row_number,
 };
-pub use sorting::{compare_values, compare_values_with_collation, sort_partition, sort_partition_with_collations};
-pub use value::{
-    evaluate_lag, evaluate_lead,
+pub use sorting::{
+    compare_values, compare_values_with_collation, sort_partition, sort_partition_with_collations,
 };
+pub use value::{evaluate_lag, evaluate_lead};
 
 #[cfg(test)]
 mod tests;

@@ -333,10 +333,8 @@ fn test_expression_index_functional_after_binary_reload() {
     // Create an expression index on (r + s) through the executor so the body is
     // populated with real evaluated keys at CREATE time.
     let expr = parse_index_expression("r + s");
-    let columns = vec![IndexColumn::Expression {
-        expr: Box::new(expr),
-        direction: OrderDirection::Asc,
-    }];
+    let columns =
+        vec![IndexColumn::Expression { expr: Box::new(expr), direction: OrderDirection::Asc }];
     create_expression_index(&mut db, "t3", "t3rs", &schema, &columns, false, None).unwrap();
 
     // Sanity: the index answers WHERE r+s = 3 with the two matching rows.
@@ -400,7 +398,9 @@ fn run_r_plus_s_eq_3(db: &Database) -> usize {
     let executor = SelectExecutor::new(db);
     let stmt = Parser::parse_sql("SELECT r, s FROM t3 WHERE r + s = 3").unwrap();
     match stmt {
-        vibesql_ast::Statement::Select(select_stmt) => executor.execute(&select_stmt).unwrap().len(),
+        vibesql_ast::Statement::Select(select_stmt) => {
+            executor.execute(&select_stmt).unwrap().len()
+        }
         _ => panic!("Expected SELECT statement"),
     }
 }

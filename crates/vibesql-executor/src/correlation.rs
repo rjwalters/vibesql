@@ -255,9 +255,8 @@ fn is_from_clause_correlated(
         }
         FromClause::TableFunction { args, .. } => {
             // Table function args (e.g. json_each(t.j)) can reference outer columns
-            args.iter().any(|expr| {
-                is_expression_correlated(expr, outer_schema, subquery_tables, database)
-            })
+            args.iter()
+                .any(|expr| is_expression_correlated(expr, outer_schema, subquery_tables, database))
         }
     }
 }

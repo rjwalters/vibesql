@@ -328,11 +328,10 @@ fn evaluate_window_function_for_partition(
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Vec<SqlValue>, ExecutorError> {
     // Create the eval_fn closure that uses the full evaluator
-    let eval_fn =
-        |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
-            evaluator.clear_cse_cache();
-            evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
-        };
+    let eval_fn = |expr: &Expression, row: &vibesql_storage::Row| -> Result<SqlValue, String> {
+        evaluator.clear_cse_cache();
+        evaluator.eval(expr, row).map_err(|e| format!("{:?}", e))
+    };
 
     // Handle ranking functions (they don't use frames)
     let results = match func_name.to_uppercase().as_str() {
@@ -475,7 +474,8 @@ fn evaluate_window_function_for_partition(
             for row_idx in 0..partition.len() {
                 // Evaluate offset per row (supports expressions like LAG(b, b))
                 let offset = if has_offset {
-                    let offset_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                    let offset_value = evaluator
+                        .eval(&args[1], &partition.rows[row_idx])
                         .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
                     match offset_value {
                         SqlValue::Integer(n) => Some(n),
@@ -529,7 +529,8 @@ fn evaluate_window_function_for_partition(
             for row_idx in 0..partition.len() {
                 // Evaluate offset per row (supports expressions like LEAD(b, b))
                 let offset = if has_offset {
-                    let offset_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                    let offset_value = evaluator
+                        .eval(&args[1], &partition.rows[row_idx])
                         .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
                     match offset_value {
                         SqlValue::Integer(n) => Some(n),
@@ -575,8 +576,7 @@ fn evaluate_window_function_for_partition(
                 let value = if let Some(first_idx) =
                     frame_result.included_indices(partition, order_by, &eval_fn).next()
                 {
-                    eval_fn(value_expr, &partition.rows[first_idx])
-                        .unwrap_or(SqlValue::Null)
+                    eval_fn(value_expr, &partition.rows[first_idx]).unwrap_or(SqlValue::Null)
                 } else {
                     SqlValue::Null
                 };
@@ -604,8 +604,7 @@ fn evaluate_window_function_for_partition(
                     .included_indices(partition, order_by, &eval_fn)
                     .last()
                     .map(|last_idx| {
-                        eval_fn(value_expr, &partition.rows[last_idx])
-                            .unwrap_or(SqlValue::Null)
+                        eval_fn(value_expr, &partition.rows[last_idx]).unwrap_or(SqlValue::Null)
                     })
                     .unwrap_or(SqlValue::Null);
                 results.push(value);
@@ -631,7 +630,8 @@ fn evaluate_window_function_for_partition(
             let mut results = Vec::with_capacity(partition.len());
             for row_idx in 0..partition.len() {
                 // Evaluate n argument against current row
-                let n_value = evaluator.eval(&args[1], &partition.rows[row_idx])
+                let n_value = evaluator
+                    .eval(&args[1], &partition.rows[row_idx])
                     .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
                 let n = match n_value {
                     SqlValue::Integer(n) => n,
@@ -643,9 +643,10 @@ fn evaluate_window_function_for_partition(
                 };
 
                 if n < 1 {
-                    return Err(ExecutorError::UnsupportedExpression(
-                        format!("NTH_VALUE n must be a positive integer, got {}", n),
-                    ));
+                    return Err(ExecutorError::UnsupportedExpression(format!(
+                        "NTH_VALUE n must be a positive integer, got {}",
+                        n
+                    )));
                 }
 
                 let nth_zero_based = (n - 1) as usize;
@@ -656,8 +657,7 @@ fn evaluate_window_function_for_partition(
                     .included_indices(partition, order_by, &eval_fn)
                     .nth(nth_zero_based)
                     .map(|nth_idx| {
-                        eval_fn(value_expr, &partition.rows[nth_idx])
-                            .unwrap_or(SqlValue::Null)
+                        eval_fn(value_expr, &partition.rows[nth_idx]).unwrap_or(SqlValue::Null)
                     })
                     .unwrap_or(SqlValue::Null); // NULL if frame has fewer than N rows
                 results.push(value);
@@ -671,8 +671,9 @@ fn evaluate_window_function_for_partition(
             // Evaluate function for each row in the partition
             for row_idx in 0..partition.len() {
                 // Calculate frame for this row with exclusion support
-                let frame_result =
-                    calculate_frame_with_exclusion(partition, row_idx, order_by, frame_spec, &eval_fn);
+                let frame_result = calculate_frame_with_exclusion(
+                    partition, row_idx, order_by, frame_spec, &eval_fn,
+                );
 
                 // Get the iterator of included indices (applies EXCLUDE filtering)
                 let frame_indices = frame_result.included_indices(partition, order_by, &eval_fn);
@@ -698,7 +699,13 @@ fn evaluate_window_function_for_partition(
                         } else {
                             Some(&args[0])
                         };
-                        evaluate_count_window(partition, frame_indices, arg_expr, filter, agg_eval_fn)
+                        evaluate_count_window(
+                            partition,
+                            frame_indices,
+                            arg_expr,
+                            filter,
+                            agg_eval_fn,
+                        )
                     }
                     "SUM" => {
                         if args.is_empty() {
@@ -738,7 +745,13 @@ fn evaluate_window_function_for_partition(
                                 "TOTAL requires an argument".to_string(),
                             ));
                         }
-                        evaluate_total_window(partition, frame_indices, &args[0], filter, agg_eval_fn)
+                        evaluate_total_window(
+                            partition,
+                            frame_indices,
+                            &args[0],
+                            filter,
+                            agg_eval_fn,
+                        )
                     }
                     "GROUP_CONCAT" | "STRING_AGG" => {
                         if args.is_empty() {
@@ -747,11 +760,7 @@ fn evaluate_window_function_for_partition(
                             ));
                         }
                         // Pass separator expression for per-row evaluation
-                        let separator_expr = if args.len() > 1 {
-                            Some(&args[1])
-                        } else {
-                            None
-                        };
+                        let separator_expr = if args.len() > 1 { Some(&args[1]) } else { None };
                         evaluate_group_concat_window_with_expr(
                             partition,
                             frame_indices,
@@ -833,8 +842,11 @@ fn evaluate_window_function_for_partition(
                                 SqlValue::Null => "null".to_string(),
                                 other => escape_json_str(&other.to_string()),
                             };
-                            json_entries
-                                .push(format!("{}:{}", key_str, sql_value_to_json_string(&val)));
+                            json_entries.push(format!(
+                                "{}:{}",
+                                key_str,
+                                sql_value_to_json_string(&val)
+                            ));
                         }
                         SqlValue::Varchar(format!("{{{}}}", json_entries.join(",")).into())
                     }

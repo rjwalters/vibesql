@@ -829,11 +829,7 @@ fn test_count_no_arg_window_with_group_by() {
         "T1".to_string(),
         vec![
             ColumnSchema::new("A".to_string(), DataType::Integer, false),
-            ColumnSchema::new(
-                "B".to_string(),
-                DataType::Varchar { max_length: Some(50) },
-                false,
-            ),
+            ColumnSchema::new("B".to_string(), DataType::Varchar { max_length: Some(50) }, false),
         ],
     );
     db.create_table(schema).unwrap();

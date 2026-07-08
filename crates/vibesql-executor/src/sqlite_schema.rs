@@ -821,8 +821,13 @@ mod tests {
             .unwrap();
         catalog
             .create_view(
-                ViewDefinition::new("temp_v".to_string(), None, create_minimal_select_stmt(), false)
-                    .with_schema(Some("temp".to_string())),
+                ViewDefinition::new(
+                    "temp_v".to_string(),
+                    None,
+                    create_minimal_select_stmt(),
+                    false,
+                )
+                .with_schema(Some("temp".to_string())),
             )
             .unwrap();
 
@@ -859,10 +864,7 @@ mod tests {
         assert!(master_names.contains(&"main_v".to_string()), "master should list main view");
         assert!(master_names.contains(&"main_tr".to_string()), "master should list main trigger");
         assert!(!master_names.contains(&"temp_v".to_string()), "master must exclude temp view");
-        assert!(
-            !master_names.contains(&"temp_tr".to_string()),
-            "master must exclude temp trigger"
-        );
+        assert!(!master_names.contains(&"temp_tr".to_string()), "master must exclude temp trigger");
 
         let temp_master = execute_sqlite_temp_schema_query(&catalog).unwrap();
         let temp_names = names(&temp_master);

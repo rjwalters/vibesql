@@ -331,8 +331,5 @@ fn rename_rewrites_dependent_view_text_and_query() {
     // sqlite_master text is rewritten (and the trailing `;` stripped).
     assert_eq!(object_sql(&db, "v1"), "CREATE VIEW v1 AS SELECT x, yyy, z FROM a1");
     // The view still executes: its stored query AST now names the new column.
-    assert_eq!(
-        query(&db, "SELECT z FROM v1 WHERE yyy = 'hi'"),
-        vec![vec![SqlValue::Integer(2)]]
-    );
+    assert_eq!(query(&db, "SELECT z FROM v1 WHERE yyy = 'hi'"), vec![vec![SqlValue::Integer(2)]]);
 }

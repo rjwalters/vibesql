@@ -131,11 +131,8 @@ pub(crate) fn parse_sqlite_json_path(path: &str) -> Result<Vec<PathSegment>, Str
                     if i == start {
                         return Err(bad());
                     }
-                    let n: usize = chars[start..i]
-                        .iter()
-                        .collect::<String>()
-                        .parse()
-                        .map_err(|_| bad())?;
+                    let n: usize =
+                        chars[start..i].iter().collect::<String>().parse().map_err(|_| bad())?;
                     if chars.get(i) != Some(&']') {
                         return Err(bad());
                     }
@@ -229,7 +226,8 @@ pub(crate) fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
 /// extensions (hex, leading/trailing `.`, explicit `+`, `Infinity`, `NaN`).
 fn json5_to_json(s: &str) -> Option<String> {
     let chars: Vec<char> = s.chars().collect();
-    let mut w = Json5Rewriter { chars: &chars, i: 0, out: String::with_capacity(s.len()), depth: 0 };
+    let mut w =
+        Json5Rewriter { chars: &chars, i: 0, out: String::with_capacity(s.len()), depth: 0 };
     w.skip_trivia();
     w.rewrite_value()?;
     w.skip_trivia();
@@ -497,11 +495,7 @@ impl Json5Rewriter<'_> {
                             self.i += 1;
                         }
                         // JSON5 \0 (NUL, when not followed by another digit).
-                        '0' if !self
-                            .chars
-                            .get(self.i + 1)
-                            .is_some_and(|d| d.is_ascii_digit()) =>
-                        {
+                        '0' if !self.chars.get(self.i + 1).is_some_and(|d| d.is_ascii_digit()) => {
                             self.out.push_str("\\u0000");
                             self.i += 1;
                         }
@@ -598,9 +592,7 @@ impl Json5Rewriter<'_> {
         }
 
         // Hexadecimal integer: 0x / 0X followed by hex digits.
-        if self.peek() == Some('0')
-            && matches!(self.chars.get(self.i + 1), Some('x') | Some('X'))
-        {
+        if self.peek() == Some('0') && matches!(self.chars.get(self.i + 1), Some('x') | Some('X')) {
             let hstart = self.i + 2;
             let mut j = hstart;
             while self.chars.get(j).is_some_and(|c| c.is_ascii_hexdigit()) {
@@ -738,9 +730,22 @@ fn digits_len(chars: &[char], from: usize) -> usize {
 fn is_json5_ws(c: char) -> bool {
     matches!(
         c,
-        '\u{09}' | '\u{0a}' | '\u{0b}' | '\u{0c}' | '\u{0d}' | '\u{20}'
-            | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}'
-            | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+        '\u{09}'
+            | '\u{0a}'
+            | '\u{0b}'
+            | '\u{0c}'
+            | '\u{0d}'
+            | '\u{20}'
+            | '\u{a0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
     )
 }
 
@@ -808,8 +813,7 @@ pub(crate) fn json_node_type_name(value: &serde_json::Value) -> &'static str {
 /// treated as a single object label (`$."<text>"`).
 fn arrow_operand_to_path(right: &SqlValue) -> Result<Vec<PathSegment>, ExecutorError> {
     match right {
-        SqlValue::Integer(i)
-        | SqlValue::Bigint(i) => {
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => {
             if *i >= 0 {
                 Ok(vec![PathSegment::Index(*i as usize)])
             } else {
@@ -976,18 +980,14 @@ pub(crate) fn json_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
             SqlValue::Null => return Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 resolved.push(
-                    parse_sqlite_json_path(s.as_str())
-                        .map_err(ExecutorError::SqliteCompatError)?,
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?,
                 );
             }
             other => {
                 // Non-text paths render to their text form for the error
                 // message (e.g. integer 0 -> "bad JSON path: '0'").
                 let text = sql_value_scalar_text(other);
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "bad JSON path: '{}'",
-                    text
-                )));
+                return Err(ExecutorError::SqliteCompatError(format!("bad JSON path: '{}'", text)));
             }
         }
     }
@@ -1038,8 +1038,8 @@ pub(crate) fn json_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         match &args[1] {
             SqlValue::Null => return Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                let segs = parse_sqlite_json_path(s.as_str())
-                    .map_err(ExecutorError::SqliteCompatError)?;
+                let segs =
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?;
                 match navigate(&value, &segs) {
                     Some(n) => n,
                     None => return Ok(SqlValue::Null),
@@ -1047,10 +1047,7 @@ pub(crate) fn json_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             }
             other => {
                 let text = sql_value_scalar_text(other);
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "bad JSON path: '{}'",
-                    text
-                )));
+                return Err(ExecutorError::SqliteCompatError(format!("bad JSON path: '{}'", text)));
             }
         }
     } else {
@@ -1175,9 +1172,7 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                     })?;
                     Ok(SqlValue::Varchar(minified.into()))
                 }
-                Err(_) => {
-                    Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()))
-                }
+                Err(_) => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
             }
         }
         // For non-string types, SQLite throws an error
@@ -1229,9 +1224,7 @@ fn sql_value_to_json_node(
         // SQLite encodes SQL booleans as JSON integers 1/0 (json_array(true)
         // -> [1]), matching json_quote()'s rendering.
         SqlValue::Boolean(b) => serde_json::Value::Number(if *b { 1 } else { 0 }.into()),
-        SqlValue::Integer(i) | SqlValue::Bigint(i) => {
-            serde_json::Value::Number((*i).into())
-        }
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => serde_json::Value::Number((*i).into()),
         SqlValue::Smallint(i) => serde_json::Value::Number((*i as i64).into()),
         SqlValue::Unsigned(u) => serde_json::Value::Number((*u).into()),
         SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => json_number_node(*f),
@@ -1239,9 +1232,8 @@ fn sql_value_to_json_node(
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             if is_json {
                 // Subtype-flagged text is an embedded JSON sub-document.
-                parse_json_relaxed(s.as_str()).map_err(|_| {
-                    ExecutorError::SqliteCompatError("malformed JSON".to_string())
-                })?
+                parse_json_relaxed(s.as_str())
+                    .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?
             } else {
                 serde_json::Value::String(s.as_str().to_string())
             }
@@ -1305,10 +1297,7 @@ fn subtype_at(subtypes: &[bool], idx: usize) -> bool {
 }
 
 /// json_array(V1, V2, ...) - build a JSON array from the argument values.
-pub(crate) fn json_array(
-    args: &[SqlValue],
-    subtypes: &[bool],
-) -> Result<SqlValue, ExecutorError> {
+pub(crate) fn json_array(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     let mut elems = Vec::with_capacity(args.len());
     for (i, a) in args.iter().enumerate() {
         elems.push(sql_value_to_json_node(a, subtype_at(subtypes, i))?);
@@ -1321,10 +1310,7 @@ pub(crate) fn json_array(
 ///
 /// Requires an even number of arguments; labels must be TEXT. Duplicate labels
 /// keep the last value (matching SQLite's object builder).
-pub(crate) fn json_object(
-    args: &[SqlValue],
-    subtypes: &[bool],
-) -> Result<SqlValue, ExecutorError> {
+pub(crate) fn json_object(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     if !args.len().is_multiple_of(2) {
         return Err(ExecutorError::SqliteCompatError(
             "json_object() requires an even number of arguments".to_string(),
@@ -1377,8 +1363,8 @@ pub(crate) fn json_array_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorE
         match &args[1] {
             SqlValue::Null => return Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                let segs = parse_sqlite_json_path(s.as_str())
-                    .map_err(ExecutorError::SqliteCompatError)?;
+                let segs =
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?;
                 match navigate(&value, &segs) {
                     Some(n) => n,
                     None => return Ok(SqlValue::Null),
@@ -1550,9 +1536,7 @@ fn json_mutate(
 ) -> Result<SqlValue, ExecutorError> {
     // Valid arity is odd: one document argument plus (path, value) pairs.
     if args.is_empty() || args.len().is_multiple_of(2) {
-        return Err(ExecutorError::WrongNumberOfArguments {
-            function_name: fn_name.to_string(),
-        });
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: fn_name.to_string() });
     }
 
     let mut doc = match parse_json_doc_arg(&args[0])? {
@@ -1570,8 +1554,8 @@ fn json_mutate(
                 continue;
             }
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                let segs = parse_sqlite_json_path(s.as_str())
-                    .map_err(ExecutorError::SqliteCompatError)?;
+                let segs =
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?;
                 let node = sql_value_to_json_node(&args[i + 1], subtype_at(subtypes, i + 1))?;
                 apply_edit(&mut doc, &segs, node, mode);
             }
@@ -1589,10 +1573,7 @@ fn json_mutate(
 }
 
 /// json_insert(X, P, V, ...) - insert V at P only if P does not already exist.
-pub(crate) fn json_insert(
-    args: &[SqlValue],
-    subtypes: &[bool],
-) -> Result<SqlValue, ExecutorError> {
+pub(crate) fn json_insert(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     json_mutate(args, subtypes, EditMode::Insert, "json_insert")
 }
 
@@ -1605,10 +1586,7 @@ pub(crate) fn json_replace(
 }
 
 /// json_set(X, P, V, ...) - insert or replace the value at P (upsert).
-pub(crate) fn json_set(
-    args: &[SqlValue],
-    subtypes: &[bool],
-) -> Result<SqlValue, ExecutorError> {
+pub(crate) fn json_set(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     json_mutate(args, subtypes, EditMode::Set, "json_set")
 }
 
@@ -1633,8 +1611,8 @@ pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
         match p {
             SqlValue::Null => return Ok(SqlValue::Null),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                let segs = parse_sqlite_json_path(s.as_str())
-                    .map_err(ExecutorError::SqliteCompatError)?;
+                let segs =
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?;
                 // Removing the root ($) discards the whole document: SQLite
                 // returns NULL (e.g. `json_remove('{"x":25}','$')` -> NULL).
                 // (Note: `json_remove(X)` with *no* path argument returns X
@@ -2179,10 +2157,7 @@ mod tests {
             SqlValue::Integer(1)
         );
         // Flag 1 rejects JSON5.
-        assert_eq!(
-            json_valid(&[json5, SqlValue::Integer(1)]).unwrap(),
-            SqlValue::Integer(0)
-        );
+        assert_eq!(json_valid(&[json5, SqlValue::Integer(1)]).unwrap(), SqlValue::Integer(0));
     }
 
     /// Removing the root path ($) discards the whole document -> NULL, while
@@ -2194,10 +2169,7 @@ mod tests {
             json_remove(&[doc.clone(), SqlValue::Varchar("$".into())]).unwrap(),
             SqlValue::Null,
         );
-        assert_eq!(
-            json_remove(&[doc]).unwrap(),
-            SqlValue::Varchar(r#"{"x":25,"y":42}"#.into()),
-        );
+        assert_eq!(json_remove(&[doc]).unwrap(), SqlValue::Varchar(r#"{"x":25,"y":42}"#.into()),);
     }
 
     #[test]
@@ -2326,10 +2298,7 @@ mod tests {
 
     #[test]
     fn test_parse_path_from_end() {
-        assert_eq!(
-            parse_sqlite_json_path("$[#-1]").unwrap(),
-            vec![PathSegment::IndexFromEnd(1)]
-        );
+        assert_eq!(parse_sqlite_json_path("$[#-1]").unwrap(), vec![PathSegment::IndexFromEnd(1)]);
     }
 
     #[test]
@@ -2345,10 +2314,16 @@ mod tests {
 
     #[test]
     fn test_json_valid_basic() {
-        assert_eq!(json_valid(&[SqlValue::Varchar(r#"{"a":1}"#.into())]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(
+            json_valid(&[SqlValue::Varchar(r#"{"a":1}"#.into())]).unwrap(),
+            SqlValue::Integer(1)
+        );
         assert_eq!(json_valid(&[SqlValue::Varchar("bad".into())]).unwrap(), SqlValue::Integer(0));
         // Whitespace tolerated; empty is invalid
-        assert_eq!(json_valid(&[SqlValue::Varchar("  123 ".into())]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(
+            json_valid(&[SqlValue::Varchar("  123 ".into())]).unwrap(),
+            SqlValue::Integer(1)
+        );
         assert_eq!(json_valid(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Integer(0));
     }
 
@@ -2382,27 +2357,47 @@ mod tests {
     fn test_json_extract_single_scalar_types() {
         // integer stays integral
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":1}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Integer(1)
         );
         // real
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":1.5}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":1.5}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Real(1.5)
         );
         // text unquoted
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":"hello"}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":"hello"}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Varchar("hello".into())
         );
         // boolean -> integer 1/0
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":true}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":true}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Integer(1)
         );
         // JSON null -> SQL NULL
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":null}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":null}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Null
         );
     }
@@ -2410,11 +2405,16 @@ mod tests {
     #[test]
     fn test_json_extract_container_returns_json_text() {
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$".into())]).unwrap(),
+            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$".into())])
+                .unwrap(),
             SqlValue::Varchar(r#"{"a":1}"#.into())
         );
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":[1,2]}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":[1,2]}"#.into()),
+                SqlValue::Varchar("$.a".into())
+            ])
+            .unwrap(),
             SqlValue::Varchar("[1,2]".into())
         );
     }
@@ -2422,11 +2422,19 @@ mod tests {
     #[test]
     fn test_json_extract_array_index_and_from_end() {
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":[1,2,3]}"#.into()), SqlValue::Varchar("$.a[1]".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":[1,2,3]}"#.into()),
+                SqlValue::Varchar("$.a[1]".into())
+            ])
+            .unwrap(),
             SqlValue::Integer(2)
         );
         assert_eq!(
-            json_extract(&[SqlValue::Varchar("[1,2,3]".into()), SqlValue::Varchar("$[#-1]".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar("[1,2,3]".into()),
+                SqlValue::Varchar("$[#-1]".into())
+            ])
+            .unwrap(),
             SqlValue::Integer(3)
         );
     }
@@ -2434,7 +2442,11 @@ mod tests {
     #[test]
     fn test_json_extract_missing_path_is_null() {
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.x".into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"a":1}"#.into()),
+                SqlValue::Varchar("$.x".into())
+            ])
+            .unwrap(),
             SqlValue::Null
         );
     }
@@ -2446,7 +2458,8 @@ mod tests {
                 SqlValue::Varchar(r#"{"a":1}"#.into()),
                 SqlValue::Varchar("$.a".into()),
                 SqlValue::Varchar("$.b".into()),
-            ]).unwrap(),
+            ])
+            .unwrap(),
             SqlValue::Varchar("[1,null]".into())
         );
         assert_eq!(
@@ -2454,7 +2467,8 @@ mod tests {
                 SqlValue::Varchar(r#"{"a":"x","b":"y"}"#.into()),
                 SqlValue::Varchar("$.a".into()),
                 SqlValue::Varchar("$.b".into()),
-            ]).unwrap(),
+            ])
+            .unwrap(),
             SqlValue::Varchar(r#"["x","y"]"#.into())
         );
     }
@@ -2463,7 +2477,10 @@ mod tests {
     fn test_json_extract_null_and_single_arg() {
         assert_eq!(json_extract(&[SqlValue::Null]).unwrap(), SqlValue::Null);
         // Single non-null argument yields NULL (matches SQLite).
-        assert_eq!(json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into())]).unwrap(), SqlValue::Null);
+        assert_eq!(
+            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into())]).unwrap(),
+            SqlValue::Null
+        );
         // NULL path -> NULL
         assert_eq!(
             json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Null]).unwrap(),
@@ -2474,8 +2491,11 @@ mod tests {
     #[test]
     fn test_json_extract_errors() {
         // Bare key (no '$') is a bad path
-        let e = json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("a".into())]);
-        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "bad JSON path: 'a'"));
+        let e =
+            json_extract(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("a".into())]);
+        assert!(
+            matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "bad JSON path: 'a'")
+        );
         // Malformed JSON document is an error
         let e = json_extract(&[SqlValue::Varchar("{bad".into()), SqlValue::Varchar("$.a".into())]);
         assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "malformed JSON"));
@@ -2485,14 +2505,19 @@ mod tests {
     fn test_json_extract_quoted_and_empty_keys() {
         // json101-18.2 / 18.3
         assert_eq!(
-            json_extract(&[SqlValue::Varchar(r#"{"":5}"#.into()), SqlValue::Varchar(r#"$."""#.into())]).unwrap(),
+            json_extract(&[
+                SqlValue::Varchar(r#"{"":5}"#.into()),
+                SqlValue::Varchar(r#"$."""#.into())
+            ])
+            .unwrap(),
             SqlValue::Integer(5)
         );
         assert_eq!(
             json_extract(&[
                 SqlValue::Varchar(r#"[3,{"a":4,"":[5,{"hi":6},7]},8]"#.into()),
                 SqlValue::Varchar(r#"$[1].""[1].hi"#.into()),
-            ]).unwrap(),
+            ])
+            .unwrap(),
             SqlValue::Integer(6)
         );
     }
@@ -2523,12 +2548,14 @@ mod tests {
     #[test]
     fn test_json_type_with_path() {
         assert_eq!(
-            json_type(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.a".into())]).unwrap(),
+            json_type(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.a".into())])
+                .unwrap(),
             SqlValue::Varchar("integer".into())
         );
         // non-existent path -> NULL
         assert_eq!(
-            json_type(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.x".into())]).unwrap(),
+            json_type(&[SqlValue::Varchar(r#"{"a":1}"#.into()), SqlValue::Varchar("$.x".into())])
+                .unwrap(),
             SqlValue::Null
         );
     }
@@ -2560,8 +2587,14 @@ mod tests {
             json_quote(&[SqlValue::Varchar(r#"abc"xyz"#.into())]).unwrap(),
             SqlValue::Varchar(r#""abc\"xyz""#.into())
         );
-        assert_eq!(json_quote(&[SqlValue::Integer(12345)]).unwrap(), SqlValue::Varchar("12345".into()));
-        assert_eq!(json_quote(&[SqlValue::Real(3.14159)]).unwrap(), SqlValue::Varchar("3.14159".into()));
+        assert_eq!(
+            json_quote(&[SqlValue::Integer(12345)]).unwrap(),
+            SqlValue::Varchar("12345".into())
+        );
+        assert_eq!(
+            json_quote(&[SqlValue::Real(3.14159)]).unwrap(),
+            SqlValue::Varchar("3.14159".into())
+        );
         // Real keeps a fractional part, matching SQLite (json_quote(2.0) -> 2.0)
         assert_eq!(json_quote(&[SqlValue::Real(2.0)]).unwrap(), SqlValue::Varchar("2.0".into()));
         // NULL -> unquoted "null"
@@ -2571,7 +2604,9 @@ mod tests {
     #[test]
     fn test_json_quote_blob_errors() {
         let e = json_quote(&[SqlValue::Blob(vec![0x30, 0x31])]);
-        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values"));
+        assert!(
+            matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values")
+        );
     }
 
     #[test]
@@ -2586,17 +2621,32 @@ mod tests {
     fn test_arrow_json_text_vs_sql_value() {
         // -> returns JSON text
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Varchar("$.a".into()), false).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":1}"#.into()),
+                &SqlValue::Varchar("$.a".into()),
+                false
+            )
+            .unwrap(),
             SqlValue::Varchar("1".into())
         );
         // ->> returns SQL value (integer)
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Varchar("$.a".into()), true).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":1}"#.into()),
+                &SqlValue::Varchar("$.a".into()),
+                true
+            )
+            .unwrap(),
             SqlValue::Integer(1)
         );
         // ->> on text yields unquoted string
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":"hello"}"#.into()), &SqlValue::Varchar("$.a".into()), true).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":"hello"}"#.into()),
+                &SqlValue::Varchar("$.a".into()),
+                true
+            )
+            .unwrap(),
             SqlValue::Varchar("hello".into())
         );
     }
@@ -2605,12 +2655,18 @@ mod tests {
     fn test_arrow_bare_label_and_integer_shorthand() {
         // Bare text label -> $.<label>
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Varchar("a".into()), false).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":1}"#.into()),
+                &SqlValue::Varchar("a".into()),
+                false
+            )
+            .unwrap(),
             SqlValue::Varchar("1".into())
         );
         // Integer shorthand -> $[N]
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar("[1,2,3]".into()), &SqlValue::Integer(1), true).unwrap(),
+            eval_json_arrow(&SqlValue::Varchar("[1,2,3]".into()), &SqlValue::Integer(1), true)
+                .unwrap(),
             SqlValue::Integer(2)
         );
     }
@@ -2619,16 +2675,31 @@ mod tests {
     fn test_arrow_null_and_missing() {
         // Non-existent path -> NULL for both forms
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Varchar("b".into()), false).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":1}"#.into()),
+                &SqlValue::Varchar("b".into()),
+                false
+            )
+            .unwrap(),
             SqlValue::Null
         );
         // JSON null: -> yields text "null", ->> yields SQL NULL
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":null}"#.into()), &SqlValue::Varchar("$.a".into()), false).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":null}"#.into()),
+                &SqlValue::Varchar("$.a".into()),
+                false
+            )
+            .unwrap(),
             SqlValue::Varchar("null".into())
         );
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":null}"#.into()), &SqlValue::Varchar("$.a".into()), true).unwrap(),
+            eval_json_arrow(
+                &SqlValue::Varchar(r#"{"a":null}"#.into()),
+                &SqlValue::Varchar("$.a".into()),
+                true
+            )
+            .unwrap(),
             SqlValue::Null
         );
         // NULL operands propagate
@@ -2637,14 +2708,19 @@ mod tests {
             SqlValue::Null
         );
         assert_eq!(
-            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Null, false).unwrap(),
+            eval_json_arrow(&SqlValue::Varchar(r#"{"a":1}"#.into()), &SqlValue::Null, false)
+                .unwrap(),
             SqlValue::Null
         );
     }
 
     #[test]
     fn test_arrow_malformed_errors() {
-        let e = eval_json_arrow(&SqlValue::Varchar("{bad".into()), &SqlValue::Varchar("$.a".into()), false);
+        let e = eval_json_arrow(
+            &SqlValue::Varchar("{bad".into()),
+            &SqlValue::Varchar("$.a".into()),
+            false,
+        );
         assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "malformed JSON"));
     }
 
@@ -2666,14 +2742,19 @@ mod tests {
     fn test_json_array_basic() {
         // sqlite3: json_array(1,2,'3',4) -> [1,2,"3",4]
         assert_eq!(
-            txt(json_array(&[SqlValue::Integer(1), SqlValue::Integer(2), v("3"), SqlValue::Integer(4)], &[]).unwrap()),
+            txt(json_array(
+                &[SqlValue::Integer(1), SqlValue::Integer(2), v("3"), SqlValue::Integer(4)],
+                &[]
+            )
+            .unwrap()),
             r#"[1,2,"3",4]"#
         );
         // Empty -> []
         assert_eq!(txt(json_array(&[], &[]).unwrap()), "[]");
         // NULL element -> json null
         assert_eq!(
-            txt(json_array(&[SqlValue::Integer(1), SqlValue::Null, SqlValue::Integer(4)], &[]).unwrap()),
+            txt(json_array(&[SqlValue::Integer(1), SqlValue::Null, SqlValue::Integer(4)], &[])
+                .unwrap()),
             "[1,null,4]"
         );
     }
@@ -2682,23 +2763,11 @@ mod tests {
     fn test_json_array_subtype_embedding() {
         // json_array(1,null,'3',json('[4,5]'),json('{"six":7.7}'))
         // subtype flags: only the json(...) args are JSON.
-        let args = [
-            SqlValue::Integer(1),
-            SqlValue::Null,
-            v("3"),
-            v("[4,5]"),
-            v(r#"{"six":7.7}"#),
-        ];
+        let args = [SqlValue::Integer(1), SqlValue::Null, v("3"), v("[4,5]"), v(r#"{"six":7.7}"#)];
         let subs = [false, false, false, true, true];
-        assert_eq!(
-            txt(json_array(&args, &subs).unwrap()),
-            r#"[1,null,"3",[4,5],{"six":7.7}]"#
-        );
+        assert_eq!(txt(json_array(&args, &subs).unwrap()), r#"[1,null,"3",[4,5],{"six":7.7}]"#);
         // Without the subtype flag, the same text quotes as a string.
-        assert_eq!(
-            txt(json_array(&[v("[4,5]")], &[false]).unwrap()),
-            r#"["[4,5]"]"#
-        );
+        assert_eq!(txt(json_array(&[v("[4,5]")], &[false]).unwrap()), r#"["[4,5]"]"#);
     }
 
     #[test]
@@ -2716,7 +2785,9 @@ mod tests {
     #[test]
     fn test_json_array_blob_errors() {
         let e = json_array(&[SqlValue::Blob(vec![0x61, 0x62])], &[]);
-        assert!(matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values"));
+        assert!(
+            matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values")
+        );
     }
 
     // ---- json_object ------------------------------------------------------
@@ -2729,7 +2800,8 @@ mod tests {
         );
         // Insertion order preserved (non-alphabetical), matching sqlite3.
         assert_eq!(
-            txt(json_object(&[v("b"), SqlValue::Integer(1), v("a"), SqlValue::Integer(2)], &[]).unwrap()),
+            txt(json_object(&[v("b"), SqlValue::Integer(1), v("a"), SqlValue::Integer(2)], &[])
+                .unwrap()),
             r#"{"b":1,"a":2}"#
         );
     }
@@ -2744,7 +2816,11 @@ mod tests {
         // Nested object embedding: json_object('a',2,'c',json_object('e',5))
         let inner = txt(json_object(&[v("e"), SqlValue::Integer(5)], &[]).unwrap());
         assert_eq!(
-            txt(json_object(&[v("a"), SqlValue::Integer(2), v("c"), v(&inner)], &[false, false, false, true]).unwrap()),
+            txt(json_object(
+                &[v("a"), SqlValue::Integer(2), v("c"), v(&inner)],
+                &[false, false, false, true]
+            )
+            .unwrap()),
             r#"{"a":2,"c":{"e":5}}"#
         );
     }
@@ -2791,72 +2867,135 @@ mod tests {
     #[test]
     fn test_json_set() {
         // Overwrite existing
-        assert_eq!(txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":99,"c":4}"#);
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()),
+            r#"{"a":99,"c":4}"#
+        );
         // Create missing
-        assert_eq!(txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4,"e":5}"#);
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()),
+            r#"{"a":2,"c":4,"e":5}"#
+        );
         // Embed subtype value
         assert_eq!(
-            txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.c"), v("[97,96]")], &[false, false, true]).unwrap()),
+            txt(json_set(&[v(r#"{"a":2,"c":4}"#), v("$.c"), v("[97,96]")], &[false, false, true])
+                .unwrap()),
             r#"{"a":2,"c":[97,96]}"#
         );
         // NULL value stores json null
-        assert_eq!(txt(json_set(&[v(r#"{"a":1}"#), v("$.a"), SqlValue::Null], &[]).unwrap()), r#"{"a":null}"#);
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":1}"#), v("$.a"), SqlValue::Null], &[]).unwrap()),
+            r#"{"a":null}"#
+        );
     }
 
     #[test]
     fn test_json_insert() {
         // Existing path -> no-op
-        assert_eq!(txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":2,"c":4}"#);
+        assert_eq!(
+            txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[])
+                .unwrap()),
+            r#"{"a":2,"c":4}"#
+        );
         // Missing path -> insert
-        assert_eq!(txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4,"e":5}"#);
+        assert_eq!(
+            txt(json_insert(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()),
+            r#"{"a":2,"c":4,"e":5}"#
+        );
         // Existing array index -> no-op
-        assert_eq!(txt(json_insert(&[v("[1,2,3]"), v("$[0]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3]");
+        assert_eq!(
+            txt(json_insert(&[v("[1,2,3]"), v("$[0]"), SqlValue::Integer(99)], &[]).unwrap()),
+            "[1,2,3]"
+        );
     }
 
     #[test]
     fn test_json_replace() {
         // Existing path -> replace
-        assert_eq!(txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[]).unwrap()), r#"{"a":99,"c":4}"#);
+        assert_eq!(
+            txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.a"), SqlValue::Integer(99)], &[])
+                .unwrap()),
+            r#"{"a":99,"c":4}"#
+        );
         // Missing path -> no-op
-        assert_eq!(txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":2,"c":4}"#);
+        assert_eq!(
+            txt(json_replace(&[v(r#"{"a":2,"c":4}"#), v("$.e"), SqlValue::Integer(5)], &[])
+                .unwrap()),
+            r#"{"a":2,"c":4}"#
+        );
     }
 
     #[test]
     fn test_json_set_append_slot() {
         // $[#] appends
-        assert_eq!(txt(json_set(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3,99]");
-        assert_eq!(txt(json_insert(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,3,99]");
+        assert_eq!(
+            txt(json_set(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()),
+            "[1,2,3,99]"
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(99)], &[]).unwrap()),
+            "[1,2,3,99]"
+        );
         // $[#-1] targets the last element
-        assert_eq!(txt(json_set(&[v("[1,2,3]"), v("$[#-1]"), SqlValue::Integer(99)], &[]).unwrap()), "[1,2,99]");
+        assert_eq!(
+            txt(json_set(&[v("[1,2,3]"), v("$[#-1]"), SqlValue::Integer(99)], &[]).unwrap()),
+            "[1,2,99]"
+        );
     }
 
     #[test]
     fn test_json_mutate_multi_path_left_to_right() {
         // Two paths applied in order (json_set)
         assert_eq!(
-            txt(json_set(&[v(r#"{"a":1}"#), v("$.b"), SqlValue::Integer(2), v("$.c"), SqlValue::Integer(3)], &[]).unwrap()),
+            txt(json_set(
+                &[v(r#"{"a":1}"#), v("$.b"), SqlValue::Integer(2), v("$.c"), SqlValue::Integer(3)],
+                &[]
+            )
+            .unwrap()),
             r#"{"a":1,"b":2,"c":3}"#
         );
         // Two append slots: each feeds the next (json_insert '$[#]' twice)
         assert_eq!(
-            txt(json_insert(&[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(4), v("$[#]"), SqlValue::Integer(5)], &[]).unwrap()),
+            txt(json_insert(
+                &[v("[1,2,3]"), v("$[#]"), SqlValue::Integer(4), v("$[#]"), SqlValue::Integer(5)],
+                &[]
+            )
+            .unwrap()),
             "[1,2,3,4,5]"
         );
     }
 
     #[test]
     fn test_json_set_creates_nested() {
-        assert_eq!(txt(json_set(&[v("{}"), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()), r#"{"a":{"b":1}}"#);
-        assert_eq!(txt(json_set(&[v(r#"{"a":{}}"#), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()), r#"{"a":{"b":1}}"#);
+        assert_eq!(
+            txt(json_set(&[v("{}"), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()),
+            r#"{"a":{"b":1}}"#
+        );
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":{}}"#), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()),
+            r#"{"a":{"b":1}}"#
+        );
     }
 
     #[test]
     fn test_json_mutate_null_doc_and_path() {
-        assert_eq!(json_set(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
-        assert_eq!(json_insert(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
-        assert_eq!(json_replace(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(), SqlValue::Null);
+        assert_eq!(
+            json_set(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(),
+            SqlValue::Null
+        );
+        assert_eq!(
+            json_insert(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(),
+            SqlValue::Null
+        );
+        assert_eq!(
+            json_replace(&[SqlValue::Null, v("$.a"), SqlValue::Integer(1)], &[]).unwrap(),
+            SqlValue::Null
+        );
         // NULL path -> that pair is skipped, doc unchanged
-        assert_eq!(txt(json_set(&[v(r#"{"a":1}"#), SqlValue::Null, SqlValue::Integer(5)], &[]).unwrap()), r#"{"a":1}"#);
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":1}"#), SqlValue::Null, SqlValue::Integer(5)], &[]).unwrap()),
+            r#"{"a":1}"#
+        );
     }
 
     // ---- json_remove ------------------------------------------------------
@@ -2909,13 +3048,22 @@ mod tests {
         assert_eq!(json_error_position(&[v(r#"{"a":1}"#)]).unwrap(), SqlValue::Integer(0));
         // Relaxed-valid (trailing comma) -> 0, matching sqlite3
         assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72,}"#)]).unwrap(), SqlValue::Integer(0));
-        assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72 , }"#)]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(
+            json_error_position(&[v(r#"{"a":55,"b":72 , }"#)]).unwrap(),
+            SqlValue::Integer(0)
+        );
         assert_eq!(json_error_position(&[v(r#"["a",55,"b",72,]"#)]).unwrap(), SqlValue::Integer(0));
         // Relaxed-valid unquoted key -> 0
         assert_eq!(json_error_position(&[v("{a:1}")]).unwrap(), SqlValue::Integer(0));
         // Double comma -> position of the second comma (1-based)
-        assert_eq!(json_error_position(&[v(r#"{"a":55,"b":72,,}"#)]).unwrap(), SqlValue::Integer(16));
-        assert_eq!(json_error_position(&[v(r#"["a",55,"b",72,,]"#)]).unwrap(), SqlValue::Integer(16));
+        assert_eq!(
+            json_error_position(&[v(r#"{"a":55,"b":72,,}"#)]).unwrap(),
+            SqlValue::Integer(16)
+        );
+        assert_eq!(
+            json_error_position(&[v(r#"["a",55,"b",72,,]"#)]).unwrap(),
+            SqlValue::Integer(16)
+        );
         // NULL -> NULL
         assert_eq!(json_error_position(&[SqlValue::Null]).unwrap(), SqlValue::Null);
     }

@@ -219,8 +219,7 @@ impl SelectExecutor<'_> {
                 // 2. Resolve positional/alias references against SELECT list and re-check.
                 //    Catches `GROUP BY 1` referencing a window-function SELECT item, e.g.
                 //    `SELECT sum(a) OVER() FROM t1 GROUP BY 1` (window1.test 47.2).
-                let resolved =
-                    resolve_group_by_alias(group_expr, &stmt.select_list, term_index)?;
+                let resolved = resolve_group_by_alias(group_expr, &stmt.select_list, term_index)?;
                 if let Some(window_name) =
                     crate::select::executor::validation::find_window_function_in_expression(
                         &resolved,
@@ -322,8 +321,7 @@ impl SelectExecutor<'_> {
         //   SELECT max(b) OVER (ORDER BY max(c)) FROM t GROUP BY b
         // where the window's ORDER BY references an aggregate output that must be
         // computed per group. See issue #5106.
-        let window_aggregates =
-            crate::select::order::extract_window_aggregates(&stmt.select_list);
+        let window_aggregates = crate::select::order::extract_window_aggregates(&stmt.select_list);
 
         // Column pruning optimization (#4355, #4377)
         // After JOIN completes, project only the columns needed for aggregation.

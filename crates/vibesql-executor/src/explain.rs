@@ -921,17 +921,13 @@ impl ExplainExecutor {
         let group_key: Option<Vec<&Expression>> =
             stmt.group_by.as_ref().map(|g| g.as_simple()).and_then(|simple| {
                 simple.map(|exprs| {
-                    exprs
-                        .iter()
-                        .map(|e| Self::resolve_output_expr(e, &stmt.select_list))
-                        .collect()
+                    exprs.iter().map(|e| Self::resolve_output_expr(e, &stmt.select_list)).collect()
                 })
             });
         // The index-delivered group order (as written or permuted into an
         // index's column order); `Some` exactly when the GROUP BY temp line
         // is suppressed.
-        let group_index_order: Option<Vec<vibesql_ast::OrderByItem>> = if stmt.group_by.is_some()
-        {
+        let group_index_order: Option<Vec<vibesql_ast::OrderByItem>> = if stmt.group_by.is_some() {
             group_key.as_ref().and_then(|key| {
                 Self::group_key_index_order(
                     stmt.from.as_ref(),
@@ -948,11 +944,8 @@ impl ExplainExecutor {
         // when an index delivers the SELECT-list order — but never when a
         // GROUP BY intervenes (`SELECT DISTINCT a FROM t GROUP BY a` with an
         // index on `a` still shows the DISTINCT line; verified live).
-        let distinct_key: Option<Vec<&Expression>> = if stmt.distinct {
-            Self::distinct_key_exprs(&stmt.select_list)
-        } else {
-            None
-        };
+        let distinct_key: Option<Vec<&Expression>> =
+            if stmt.distinct { Self::distinct_key_exprs(&stmt.select_list) } else { None };
         // The index-delivered SELECT-list order for DISTINCT; `Some` exactly
         // when the DISTINCT temp line is suppressed.
         let distinct_index_order: Option<Vec<vibesql_ast::OrderByItem>> =
@@ -987,10 +980,8 @@ impl ExplainExecutor {
                     // a constant (and NOT itself indexed, e.g. `a=0` over
                     // `t1bc(b,c)`) does not look like a competing access path that
                     // would otherwise block riding the ordering index.
-                    let removed_columns: Vec<String> = removed
-                        .iter()
-                        .filter_map(|e| Self::distinct_key_column_name(e))
-                        .collect();
+                    let removed_columns: Vec<String> =
+                        removed.iter().filter_map(|e| Self::distinct_key_column_name(e)).collect();
                     let reduced_where = Self::where_without_pinned_columns(
                         stmt.where_clause.as_ref(),
                         &removed_columns,
@@ -1555,9 +1546,8 @@ impl ExplainExecutor {
         use vibesql_types::SqlValue;
 
         let ordinal = match expr {
-            Expression::Literal(SqlValue::Integer(n)) | Expression::Literal(SqlValue::Bigint(n)) => {
-                Some(*n)
-            }
+            Expression::Literal(SqlValue::Integer(n))
+            | Expression::Literal(SqlValue::Bigint(n)) => Some(*n),
             Expression::Literal(SqlValue::Smallint(n)) => Some(i64::from(*n)),
             _ => None,
         };
@@ -1735,8 +1725,7 @@ impl ExplainExecutor {
         order_by.len() == exprs.len()
             && order_by.iter().zip(exprs).all(|(item, expr)| {
                 item.nulls_order.is_none()
-                    && (!require_asc
-                        || item.direction == vibesql_ast::OrderDirection::Asc)
+                    && (!require_asc || item.direction == vibesql_ast::OrderDirection::Asc)
                     && Self::resolve_output_expr(&item.expr, select_list) == *expr
             })
     }
@@ -2577,7 +2566,13 @@ impl ExplainExecutor {
                 // Keep conjuncts that reference the outer table but not the inner
                 // table (so the OR, which references the inner table, is dropped).
                 let mut inner_cols = HashSet::new();
-                Self::collect_table_columns(other, inner_ref, inner_name, database, &mut inner_cols);
+                Self::collect_table_columns(
+                    other,
+                    inner_ref,
+                    inner_name,
+                    database,
+                    &mut inner_cols,
+                );
                 if inner_cols.is_empty()
                     && Self::expr_references_table(other, outer_ref, outer_name, database)
                 {
@@ -2824,8 +2819,7 @@ impl ExplainExecutor {
                 database,
             );
             idx_node
-        } else if is_pk_lookup
-            && Self::is_rowid_equality_lookup(table_name, where_clause, database)
+        } else if is_pk_lookup && Self::is_rowid_equality_lookup(table_name, where_clause, database)
         {
             // No regular/skip/ordering index applies, but the WHERE clause has a
             // top-level equality on the single-column INTEGER PRIMARY KEY (rowid

@@ -460,11 +460,8 @@ pub(super) fn rewrite_views_for_column_rename(
         // so a view still tracks the rename either way.
         let old_text = view.sql_definition.clone().unwrap_or_else(|| {
             use vibesql_ast::pretty_print::ToSql;
-            let cols = view
-                .columns
-                .as_ref()
-                .map(|c| format!("({})", c.join(", ")))
-                .unwrap_or_default();
+            let cols =
+                view.columns.as_ref().map(|c| format!("({})", c.join(", "))).unwrap_or_default();
             format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
         });
         let new_text = rewrite_column_refs_in_trigger_sql(
@@ -486,9 +483,8 @@ pub(super) fn rewrite_views_for_column_rename(
     // `query` AST (so view execution resolves the new column) and store both the
     // AST and the verbatim `sql_definition`.
     for (name, new_text) in pending {
-        let stmt = vibesql_parser::parse_with_arena_fallback(&new_text).map_err(|e| {
-            ExecutorError::Other(format!("error in view {}: {}", name, e))
-        })?;
+        let stmt = vibesql_parser::parse_with_arena_fallback(&new_text)
+            .map_err(|e| ExecutorError::Other(format!("error in view {}: {}", name, e)))?;
         if let vibesql_ast::Statement::CreateView(cv) = stmt {
             if let Some(view) = database.catalog.get_view_mut(&name) {
                 view.query = *cv.query;

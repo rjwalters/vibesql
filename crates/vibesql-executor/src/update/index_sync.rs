@@ -153,8 +153,7 @@ pub(super) fn detect_surviving_replace_conflict(
     if let Some(pk_indices) = schema.get_primary_key_indices() {
         let mut surviving_pks: HashSet<Vec<SqlValue>> = HashSet::new();
         for (_, row) in surviving_conflict_rows {
-            let pk: Vec<SqlValue> =
-                pk_indices.iter().map(|&i| row.values[i].clone()).collect();
+            let pk: Vec<SqlValue> = pk_indices.iter().map(|&i| row.values[i].clone()).collect();
             if !pk.contains(&SqlValue::Null) {
                 surviving_pks.insert(pk);
             }
@@ -367,10 +366,8 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
                 continue;
             }
 
-            let pk_values: Vec<SqlValue> = pk_indices
-                .iter()
-                .map(|&idx| update.new_row.values[idx].clone())
-                .collect();
+            let pk_values: Vec<SqlValue> =
+                pk_indices.iter().map(|&idx| update.new_row.values[idx].clone()).collect();
 
             // Skip NULL PKs
             if pk_values.contains(&SqlValue::Null) {
@@ -397,10 +394,8 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
                 continue;
             }
 
-            let unique_values: Vec<SqlValue> = unique_indices
-                .iter()
-                .map(|&idx| update.new_row.values[idx].clone())
-                .collect();
+            let unique_values: Vec<SqlValue> =
+                unique_indices.iter().map(|&idx| update.new_row.values[idx].clone()).collect();
 
             // Skip if any value is NULL
             if unique_values.contains(&SqlValue::Null) {
@@ -501,12 +496,9 @@ pub(super) fn validate_post_statement_uniqueness(
                         // should have already caught. Fall through to error for safety.
                     }
 
-                    let pk_col_names: Vec<String> =
-                        schema.primary_key.as_ref().unwrap().clone();
-                    let qualified_cols: Vec<String> = pk_col_names
-                        .iter()
-                        .map(|col| format!("{}.{}", schema.name, col))
-                        .collect();
+                    let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
+                    let qualified_cols: Vec<String> =
+                        pk_col_names.iter().map(|col| format!("{}.{}", schema.name, col)).collect();
                     return Err(ExecutorError::ConstraintViolation(format!(
                         "UNIQUE constraint failed: {}",
                         qualified_cols.join(", ")
@@ -560,10 +552,8 @@ pub(super) fn validate_post_statement_uniqueness(
                 }
                 let unique_col_names: Vec<String> =
                     schema.unique_constraints[constraint_idx].clone();
-                let qualified_cols: Vec<String> = unique_col_names
-                    .iter()
-                    .map(|col| format!("{}.{}", schema.name, col))
-                    .collect();
+                let qualified_cols: Vec<String> =
+                    unique_col_names.iter().map(|col| format!("{}.{}", schema.name, col)).collect();
                 return Err(ExecutorError::ConstraintViolation(format!(
                     "UNIQUE constraint failed: {}",
                     qualified_cols.join(", ")
@@ -612,8 +602,7 @@ pub(super) fn validate_post_statement_uniqueness(
         // Build map of (updated_row_index -> new index key values) for this index
         let mut updated_new_key: HashMap<usize, Vec<SqlValue>> = HashMap::new();
         for u in updates {
-            let nk: Vec<SqlValue> =
-                col_idxs.iter().map(|&i| u.new_row.values[i].clone()).collect();
+            let nk: Vec<SqlValue> = col_idxs.iter().map(|&i| u.new_row.values[i].clone()).collect();
             updated_new_key.insert(u.row_index, nk);
         }
 
@@ -664,9 +653,7 @@ pub(super) fn validate_post_statement_uniqueness(
                 let columns_str = index_metadata
                     .columns
                     .iter()
-                    .map(|col| {
-                        format!("{}.{}", table_name, col.column_name().unwrap_or("?"))
-                    })
+                    .map(|col| format!("{}.{}", table_name, col.column_name().unwrap_or("?")))
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(ExecutorError::ConstraintViolation(format!(
@@ -787,10 +774,8 @@ pub(super) fn validate_rowid_relocation(
     //
     // `occupied` starts as every live row's effective rowid. Updated rows that do
     // NOT move keep their slot here untouched.
-    let mut occupied: HashSet<u64> = table
-        .scan_live()
-        .filter_map(|(i, row)| effective_rowid(row, i))
-        .collect();
+    let mut occupied: HashSet<u64> =
+        table.scan_live().filter_map(|(i, row)| effective_rowid(row, i)).collect();
 
     // Process relocations in ascending OLD-rowid order — sqlite3 visits rows in
     // rowid order, so this reproduces its intermediate states (and the
@@ -894,65 +879,64 @@ pub(super) fn validate_unique_relocation(
     // Run the shared immediate intermediate-collision algorithm for one key
     // space (a set of column indices forming a UNIQUE/PK key). `conflict_label`
     // is the already-qualified `table.col[, table.col...]` string sqlite3 emits.
-    let check_key_space =
-        |col_idxs: &[usize], conflict_label: &str| -> Result<(), ExecutorError> {
-            if col_idxs.is_empty() {
-                return Ok(());
-            }
+    let check_key_space = |col_idxs: &[usize], conflict_label: &str| -> Result<(), ExecutorError> {
+        if col_idxs.is_empty() {
+            return Ok(());
+        }
 
-            let key_of = |row: &Row| -> Vec<SqlValue> {
-                col_idxs.iter().map(|&i| row.values[i].clone()).collect()
-            };
-
-            // Relocations that actually change this key, ordered by old rowid.
-            // (order_rowid, old_key, new_key). NULL handling is applied during
-            // the scan below, not here, so a move to/from NULL still vacates.
-            let mut relocations: Vec<(u64, Vec<SqlValue>, Vec<SqlValue>)> = Vec::new();
-            for u in updates {
-                let old_key = key_of(&u.old_row);
-                let new_key = key_of(&u.new_row);
-                if old_key == new_key {
-                    continue; // no-op for this key space
-                }
-                relocations.push((order_rowid(&u.old_row, u.row_index), old_key, new_key));
-            }
-            if relocations.is_empty() {
-                return Ok(());
-            }
-
-            // `occupied` is every live row's current (non-NULL) key. A key that
-            // contains NULL is never inserted because NULL != NULL in SQL — such
-            // rows neither occupy nor conflict.
-            let mut occupied: HashSet<Vec<SqlValue>> = table
-                .scan_live()
-                .map(|(_, row)| key_of(row))
-                .filter(|k| !k.contains(&SqlValue::Null))
-                .collect();
-
-            // Ascending old-rowid order reproduces sqlite3's intermediate states
-            // and the +1/-1 (and rowid-order) asymmetry.
-            relocations.sort_by_key(|&(order, _, _)| order);
-
-            for (_order, old_key, new_key) in relocations {
-                // Vacate the old key first (no-op if it held a NULL and so was
-                // never in `occupied`).
-                if !old_key.contains(&SqlValue::Null) {
-                    occupied.remove(&old_key);
-                }
-                // Occupying a NULL-containing key never conflicts.
-                if new_key.contains(&SqlValue::Null) {
-                    continue;
-                }
-                if !occupied.insert(new_key) {
-                    return Err(ExecutorError::ConstraintViolation(format!(
-                        "UNIQUE constraint failed: {}",
-                        conflict_label
-                    )));
-                }
-            }
-
-            Ok(())
+        let key_of = |row: &Row| -> Vec<SqlValue> {
+            col_idxs.iter().map(|&i| row.values[i].clone()).collect()
         };
+
+        // Relocations that actually change this key, ordered by old rowid.
+        // (order_rowid, old_key, new_key). NULL handling is applied during
+        // the scan below, not here, so a move to/from NULL still vacates.
+        let mut relocations: Vec<(u64, Vec<SqlValue>, Vec<SqlValue>)> = Vec::new();
+        for u in updates {
+            let old_key = key_of(&u.old_row);
+            let new_key = key_of(&u.new_row);
+            if old_key == new_key {
+                continue; // no-op for this key space
+            }
+            relocations.push((order_rowid(&u.old_row, u.row_index), old_key, new_key));
+        }
+        if relocations.is_empty() {
+            return Ok(());
+        }
+
+        // `occupied` is every live row's current (non-NULL) key. A key that
+        // contains NULL is never inserted because NULL != NULL in SQL — such
+        // rows neither occupy nor conflict.
+        let mut occupied: HashSet<Vec<SqlValue>> = table
+            .scan_live()
+            .map(|(_, row)| key_of(row))
+            .filter(|k| !k.contains(&SqlValue::Null))
+            .collect();
+
+        // Ascending old-rowid order reproduces sqlite3's intermediate states
+        // and the +1/-1 (and rowid-order) asymmetry.
+        relocations.sort_by_key(|&(order, _, _)| order);
+
+        for (_order, old_key, new_key) in relocations {
+            // Vacate the old key first (no-op if it held a NULL and so was
+            // never in `occupied`).
+            if !old_key.contains(&SqlValue::Null) {
+                occupied.remove(&old_key);
+            }
+            // Occupying a NULL-containing key never conflicts.
+            if new_key.contains(&SqlValue::Null) {
+                continue;
+            }
+            if !occupied.insert(new_key) {
+                return Err(ExecutorError::ConstraintViolation(format!(
+                    "UNIQUE constraint failed: {}",
+                    conflict_label
+                )));
+            }
+        }
+
+        Ok(())
+    };
 
     // 1. PRIMARY KEY — but skip the rowid-alias (IPK) column, which
     //    `validate_rowid_relocation` already handles immediately. A composite PK

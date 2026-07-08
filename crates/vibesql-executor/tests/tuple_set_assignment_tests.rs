@@ -80,11 +80,8 @@ fn update_tuple_set_subquery() {
 fn update_tuple_set_subquery_empty_yields_nulls() {
     // SQLite: a subquery that returns no rows assigns NULL to every target.
     let mut db = setup();
-    run_update(
-        &mut db,
-        "UPDATE t SET (b, c) = (SELECT b, c FROM t WHERE a = 999) WHERE a = 1",
-    )
-    .expect("update");
+    run_update(&mut db, "UPDATE t SET (b, c) = (SELECT b, c FROM t WHERE a = 999) WHERE a = 1")
+        .expect("update");
     let r = row(&db, 1);
     assert_eq!(r[1], SqlValue::Null);
     assert_eq!(r[2], SqlValue::Null);

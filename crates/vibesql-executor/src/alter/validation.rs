@@ -21,10 +21,7 @@ pub(super) fn is_sqlite_schema_table(name: &str) -> bool {
 /// (case-insensitive). Used to reject `DROP COLUMN` of a UNIQUE column, matching
 /// SQLite's `cannot drop UNIQUE column` rejection.
 pub(super) fn column_in_unique_constraint(schema: &TableSchema, column: &str) -> bool {
-    schema
-        .unique_constraints
-        .iter()
-        .any(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(column)))
+    schema.unique_constraints.iter().any(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(column)))
 }
 
 /// Whether `index` references `column` — either directly (a plain indexed
@@ -45,10 +42,7 @@ pub(super) fn index_references_column(index: &IndexMetadata, column: &str) -> bo
         return true;
     }
     // A partial-index predicate can also reference the column.
-    index
-        .where_clause
-        .as_ref()
-        .is_some_and(|expr| expression_references_column(expr, column))
+    index.where_clause.as_ref().is_some_and(|expr| expression_references_column(expr, column))
 }
 
 /// Recursively test whether `expr` contains a reference to the (unqualified)

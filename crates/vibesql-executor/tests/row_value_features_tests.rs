@@ -395,20 +395,8 @@ fn left_join_row_value_on_null_extends() {
     make_t1_t2(&mut db);
     // rowvalue.test 12.1: {1 2 {} {} x}. The ON row-value never matches, so the
     // t2 columns null-extend and the t1 row is preserved.
-    let rows = query_rows(
-        &db,
-        "SELECT a, b, x, y, 'x' FROM t1 LEFT JOIN t2 ON (a,b)=(x,y)",
-    );
-    assert_eq!(
-        rows,
-        vec![vec![
-            I(1),
-            I(2),
-            SqlValue::Null,
-            SqlValue::Null,
-            txt("x"),
-        ]]
-    );
+    let rows = query_rows(&db, "SELECT a, b, x, y, 'x' FROM t1 LEFT JOIN t2 ON (a,b)=(x,y)");
+    assert_eq!(rows, vec![vec![I(1), I(2), SqlValue::Null, SqlValue::Null, txt("x"),]]);
 }
 
 #[test]
@@ -416,10 +404,8 @@ fn right_join_row_value_on_null_extends() {
     let mut db = vibesql_storage::Database::new();
     make_t1_t2(&mut db);
     // rowvalue.test 12.2: {1 2 - -}. t1 is the preserved side of the RIGHT JOIN.
-    let rows = query_rows(
-        &db,
-        "SELECT t1.a, t1.b, t2.x, t2.y FROM t2 RIGHT JOIN t1 ON (a,b)=(x,y)",
-    );
+    let rows =
+        query_rows(&db, "SELECT t1.a, t1.b, t2.x, t2.y FROM t2 RIGHT JOIN t1 ON (a,b)=(x,y)");
     assert_eq!(rows, vec![vec![I(1), I(2), SqlValue::Null, SqlValue::Null]]);
 }
 

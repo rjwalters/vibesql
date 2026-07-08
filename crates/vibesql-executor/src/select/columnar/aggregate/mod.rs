@@ -17,6 +17,7 @@ mod group_by;
 // Re-export public types and functions to maintain API compatibility
 pub use expression::{
     evaluate_expression_to_column, evaluate_expression_with_cached_column, extract_aggregates,
+    materialize_derived_column,
 };
 pub use group_by::columnar_group_by;
 // SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path

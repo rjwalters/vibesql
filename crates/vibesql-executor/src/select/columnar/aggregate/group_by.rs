@@ -996,6 +996,99 @@ mod batch_tests {
         }
     }
 
+    /// Issue #5995: a derived grouping key materialized as a `ColumnArray::Mixed`
+    /// (the output of `materialize_derived_column`) groups correctly through the
+    /// `GroupKeySpec::Generic` path. NULL keys collapse into a single group and
+    /// numeric key values hash/compare via `SqlValue` exactly as the row path's
+    /// `Vec<SqlValue>` group-key map does.
+    #[test]
+    fn test_columnar_group_by_batch_mixed_derived_key() {
+        use std::sync::Arc;
+
+        // A base value column (index 0) and a derived Mixed key column (index 1).
+        // Derived keys: [2, NULL, 2, NULL, 5, 2] -> groups: {2:[0,2,5], NULL:[1,3], 5:[4]}
+        let value_col = ColumnArray::Int64(Arc::new(vec![10, 20, 30, 40, 50, 60]), None);
+        let key_col = ColumnArray::Mixed(Arc::new(vec![
+            SqlValue::Integer(2),
+            SqlValue::Null,
+            SqlValue::Integer(2),
+            SqlValue::Null,
+            SqlValue::Integer(5),
+            SqlValue::Integer(2),
+        ]));
+        let mut batch = ColumnarBatch::new(2);
+        batch.add_column(value_col).unwrap();
+        batch.add_column(key_col).unwrap();
+
+        let group_cols = vec![1]; // group by the derived Mixed key
+        let agg_cols = vec![(0, AggregateOp::Sum)];
+        let result = columnar_group_by_batch(&batch, &group_cols, &agg_cols).unwrap();
+
+        // Three groups: key=2 (10+30+60=100), key=5 (50), key=NULL (20+40=60).
+        assert_eq!(result.len(), 3, "expected 3 groups (2, 5, NULL)");
+
+        // Find each group by its key value and check the aggregate.
+        let find = |k: &SqlValue| -> Option<i64> {
+            result.iter().find(|r| &r.values[0] == k).map(|r| match &r.values[1] {
+                SqlValue::Integer(v) => *v,
+                other => panic!("unexpected agg value: {other:?}"),
+            })
+        };
+        assert_eq!(find(&SqlValue::Integer(2)), Some(100), "group key=2 sum");
+        assert_eq!(find(&SqlValue::Integer(5)), Some(50), "group key=5 sum");
+        assert_eq!(find(&SqlValue::Null), Some(60), "NULL keys form one group");
+    }
+
+    /// Issue #5995: an integer key (`Integer(3)`) and a float key (`Double(3.0)`)
+    /// in a derived Mixed column group according to `SqlValue` hash/eq — the same
+    /// semantics the row path's group map uses. This asserts the batch path is
+    /// consistent with a direct `Vec<SqlValue>` (row-path) grouping of the same
+    /// key values, so the two paths never diverge on int-vs-double keys.
+    #[test]
+    fn test_columnar_group_by_batch_mixed_int_vs_double_key_matches_row_path() {
+        use std::sync::Arc;
+
+        let keys = vec![
+            SqlValue::Integer(3),
+            SqlValue::Double(3.0),
+            SqlValue::Integer(3),
+            SqlValue::Double(4.0),
+        ];
+        let vals = vec![1i64, 2, 4, 8];
+
+        // Batch path via Mixed derived key column.
+        let value_col = ColumnArray::Int64(Arc::new(vals.clone()), None);
+        let key_col = ColumnArray::Mixed(Arc::new(keys.clone()));
+        let mut batch = ColumnarBatch::new(2);
+        batch.add_column(value_col).unwrap();
+        batch.add_column(key_col).unwrap();
+        let batch_result = columnar_group_by_batch(&batch, &[1], &[(0, AggregateOp::Sum)]).unwrap();
+
+        // Reference: group the same keys via a plain Vec<SqlValue> map (this is
+        // exactly how the row path keys its groups).
+        let mut ref_map: AHashMap<Vec<SqlValue>, i64> = AHashMap::new();
+        for (k, v) in keys.iter().zip(vals.iter()) {
+            *ref_map.entry(vec![k.clone()]).or_insert(0) += v;
+        }
+
+        assert_eq!(
+            batch_result.len(),
+            ref_map.len(),
+            "batch group count must match row-path (Vec<SqlValue>) group count"
+        );
+        for row in &batch_result {
+            let key = vec![row.values[0].clone()];
+            let expected = ref_map.get(&key).unwrap_or_else(|| {
+                panic!("batch produced a group {key:?} the row-path map does not have")
+            });
+            let got = match &row.values[1] {
+                SqlValue::Integer(v) => *v,
+                other => panic!("unexpected agg value: {other:?}"),
+            };
+            assert_eq!(got, *expected, "sum mismatch for key {key:?}");
+        }
+    }
+
     /// Multi-column group keys sort lexicographically by the full key prefix.
     #[test]
     fn test_columnar_group_by_multi_key_order() {

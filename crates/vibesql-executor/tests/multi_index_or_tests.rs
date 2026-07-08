@@ -22,7 +22,8 @@ use vibesql_types::SqlValue;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn run_stmt(db: &mut vibesql_storage::Database, sql: &str) {
-    let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse {sql}: {e:?}"));
+    let stmt =
+        vibesql_parser::Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse {sql}: {e:?}"));
     match stmt {
         vibesql_ast::Statement::CreateTable(c) => {
             vibesql_executor::CreateTableExecutor::execute(&c, db).unwrap();
@@ -326,11 +327,7 @@ fn oracle_property_test_multi_index_or_matches_reference() {
         for _ in 0..branch_count {
             let col = if rng.random_bool(0.5) { 'c' } else { 'd' };
             // 1-in-4 IS NULL, else equality on a small value.
-            let val = if rng.random_range(0..4) == 0 {
-                None
-            } else {
-                Some(rng.random_range(0..6))
-            };
+            let val = if rng.random_range(0..4) == 0 { None } else { Some(rng.random_range(0..6)) };
             branches.push((col, val));
         }
         // Force both columns to appear at least once so >=2 distinct indexes
@@ -342,7 +339,8 @@ fn oracle_property_test_multi_index_or_matches_reference() {
             branches[0].0 = 'c';
         }
 
-        let residual_b_gt = if rng.random_bool(0.5) { Some(rng.random_range(0..2000)) } else { None };
+        let residual_b_gt =
+            if rng.random_bool(0.5) { Some(rng.random_range(0..2000)) } else { None };
         let pred = OraclePredicate { branches, residual_b_gt };
 
         let sql = pred.to_sql();

@@ -83,8 +83,7 @@ impl CombinedExpressionEvaluator<'_> {
                         // Delegate to the shared SQLite truthiness helper
                         // (numerics non-zero, strings/blobs via the
                         // leading-numeric parse, NULL falsy). (#5856)
-                        let is_truthy =
-                            super::super::operators::is_truthy(&condition_result);
+                        let is_truthy = super::super::operators::is_truthy(&condition_result);
                         if is_truthy {
                             return self.eval(&when_clause.result, row);
                         }
@@ -203,9 +202,8 @@ impl CombinedExpressionEvaluator<'_> {
                 let mut subtypes = Vec::with_capacity(args.len());
                 for arg in args {
                     values.push(self.eval(arg, row)?);
-                    subtypes.push(
-                        crate::evaluator::expressions::special::expr_has_json_subtype(arg),
-                    );
+                    subtypes
+                        .push(crate::evaluator::expressions::special::expr_has_json_subtype(arg));
                 }
                 use super::super::functions::sqlite_compat::json_funcs;
                 // `jsonb_*` are text-mode accept-and-convert aliases of `json_*`.
