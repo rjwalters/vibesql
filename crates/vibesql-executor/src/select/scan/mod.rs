@@ -23,6 +23,7 @@ mod join_scan;
 mod predicates;
 mod reorder;
 mod table;
+pub(crate) mod table_function;
 pub(crate) mod values;
 
 /// Execute a FROM clause (table, join, or subquery) and return combined schema and rows
@@ -188,11 +189,17 @@ where
             Some(database),
             Some(cte_results),
         ),
-        vibesql_ast::FromClause::TableFunction { name, .. } => {
-            Err(ExecutorError::UnsupportedFeature(format!(
-                "table function '{}' in FROM is not yet executable (JSON1 Phase 3)",
-                name
-            )))
+        vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases } => {
+            table_function::execute_table_function(
+                name,
+                args,
+                alias.as_ref(),
+                column_aliases.as_ref(),
+                database,
+                cte_results,
+                outer_row,
+                outer_schema,
+            )
         }
     }
 }

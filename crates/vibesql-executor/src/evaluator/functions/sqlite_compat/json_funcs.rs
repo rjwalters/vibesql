@@ -152,7 +152,7 @@ pub(crate) fn parse_sqlite_json_path(path: &str) -> Result<Vec<PathSegment>, Str
 
 /// Navigate a parsed JSON value along a path, returning the referenced node if
 /// it exists (a JSON `null` node still counts as existing).
-fn navigate<'a>(
+pub(crate) fn navigate<'a>(
     value: &'a serde_json::Value,
     segments: &[PathSegment],
 ) -> Option<&'a serde_json::Value> {
@@ -203,7 +203,7 @@ fn navigate<'a>(
 /// do *not* fall back to the `json5` crate, because it accepts constructs SQLite
 /// rejects (e.g. leading-zero integers like `-01`, which must be malformed so
 /// `json_error_position`/`json_valid` match SQLite).
-fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
+pub(crate) fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
     if let Ok(v) = serde_json::from_str(s) {
         return Ok(v);
     }
@@ -747,7 +747,7 @@ fn is_json5_ws(c: char) -> bool {
 /// Convert an extracted JSON node into the SQL value SQLite would return from
 /// `->>` or single-path `json_extract` (text unquoted, numbers native, booleans
 /// as integers, JSON null as SQL NULL, containers as JSON text).
-fn json_node_to_sql_value(value: &serde_json::Value) -> SqlValue {
+pub(crate) fn json_node_to_sql_value(value: &serde_json::Value) -> SqlValue {
     match value {
         serde_json::Value::Null => SqlValue::Null,
         serde_json::Value::Bool(b) => SqlValue::Integer(if *b { 1 } else { 0 }),
@@ -778,12 +778,12 @@ fn json_node_to_sql_value(value: &serde_json::Value) -> SqlValue {
 
 /// Render an extracted JSON node as JSON text (used by `->` and by the
 /// multi-path `json_extract` array form).
-fn json_node_to_json_text(value: &serde_json::Value) -> String {
+pub(crate) fn json_node_to_json_text(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_default()
 }
 
 /// The SQLite JSON type name for a node.
-fn json_node_type_name(value: &serde_json::Value) -> &'static str {
+pub(crate) fn json_node_type_name(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Null => "null",
         serde_json::Value::Bool(true) => "true",
