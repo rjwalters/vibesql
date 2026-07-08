@@ -153,6 +153,19 @@ where
                 return evaluate_column_compare(*op, left_val, right_val);
             }
 
+            // Handle computed-column comparison: materialize the derived value
+            // from the referenced columns using the row-path arithmetic
+            // evaluator, then compare (issue #5994).
+            if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+                let mut fetch = |idx: usize| get_value(idx).cloned();
+                return match expr.evaluate_row(&mut fetch) {
+                    Ok(derived) => evaluate_computed_compare_value(&derived, *op, value),
+                    // An arithmetic error (should not occur for admitted
+                    // numeric arithmetic) is treated as non-matching.
+                    Err(_) => false,
+                };
+            }
+
             // Handle null tests specially - they read null-ness directly instead
             // of failing on NULL like value comparisons do. `get_value` returns
             // None for an absent value and Some(SqlValue::Null) for a stored
@@ -181,7 +194,8 @@ where
                 // Handled above.
                 ColumnPredicate::ColumnCompare { .. }
                 | ColumnPredicate::IsNull { .. }
-                | ColumnPredicate::IsNotNull { .. } => unreachable!(),
+                | ColumnPredicate::IsNotNull { .. }
+                | ColumnPredicate::ComputedCompare { .. } => unreachable!(),
             };
 
             if let Some(value) = get_value(column_idx) {
@@ -361,7 +375,27 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             // Return false as fallback (this path shouldn't be hit)
             false
         }
+        // ComputedCompare needs to materialize the derived expression from
+        // multiple columns; it cannot be evaluated from a single value here.
+        // Handled by evaluate_computed_compare / the tree evaluator instead.
+        ColumnPredicate::ComputedCompare { .. } => false,
     }
+}
+
+/// Compare a materialized derived value against the predicate's constant using
+/// the same value-comparison semantics as [`evaluate_column_compare`]
+/// (issue #5994). A NULL derived value (from NULL/absent inputs) is
+/// non-matching, matching the row path.
+pub fn evaluate_computed_compare_value(
+    derived: &SqlValue,
+    op: CompareOp,
+    value: &SqlValue,
+) -> bool {
+    // NULL derived value ⇒ comparison is UNKNOWN ⇒ non-matching.
+    if matches!(derived, SqlValue::Null) || matches!(value, SqlValue::Null) {
+        return false;
+    }
+    evaluate_column_compare(op, Some(derived), Some(value))
 }
 
 /// Whether a resolved column value represents SQL NULL.

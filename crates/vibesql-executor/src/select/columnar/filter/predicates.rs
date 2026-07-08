@@ -2,7 +2,7 @@ use vibesql_ast::{BinaryOperator, Expression, UnaryOperator};
 use vibesql_types::{DataType, SqlMode, SqlValue, TypeAffinity};
 
 use super::comparison::parse_date_string;
-use crate::{evaluator::ExpressionEvaluator, schema::CombinedSchema};
+use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator, schema::CombinedSchema};
 
 /// Comparison operator for column-to-column predicates
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +13,130 @@ pub enum CompareOp {
     GreaterThanOrEqual,
     Equal,
     NotEqual,
+}
+
+impl CompareOp {
+    /// Build a `CompareOp` from a binary comparison operator, if the operator
+    /// is one of the six comparison operators. Returns `None` otherwise.
+    fn from_binary_operator(op: &BinaryOperator) -> Option<CompareOp> {
+        Some(match op {
+            BinaryOperator::LessThan => CompareOp::LessThan,
+            BinaryOperator::GreaterThan => CompareOp::GreaterThan,
+            BinaryOperator::LessThanOrEqual => CompareOp::LessThanOrEqual,
+            BinaryOperator::GreaterThanOrEqual => CompareOp::GreaterThanOrEqual,
+            BinaryOperator::Equal => CompareOp::Equal,
+            BinaryOperator::NotEqual => CompareOp::NotEqual,
+            _ => return None,
+        })
+    }
+
+    /// Reverse the operand order of the comparison, so that `value op column`
+    /// becomes the equivalent `column reversed(op) value`. Equality and
+    /// inequality are symmetric and unchanged.
+    fn reversed(self) -> CompareOp {
+        match self {
+            CompareOp::LessThan => CompareOp::GreaterThan,
+            CompareOp::GreaterThan => CompareOp::LessThan,
+            CompareOp::LessThanOrEqual => CompareOp::GreaterThanOrEqual,
+            CompareOp::GreaterThanOrEqual => CompareOp::LessThanOrEqual,
+            CompareOp::Equal => CompareOp::Equal,
+            CompareOp::NotEqual => CompareOp::NotEqual,
+        }
+    }
+}
+
+/// An arithmetic expression tree over columns and constants, resolved to
+/// column *indices* (not names) so it can be evaluated against a columnar
+/// batch and remapped alongside other predicates during selective column
+/// extraction.
+///
+/// This is the left-hand side of a [`ColumnPredicate::ComputedCompare`]. It is
+/// deliberately restricted to the numeric arithmetic that the row path and the
+/// columnar path evaluate identically (see `extract_derived_expr`): column
+/// references, numeric literals, unary minus, and `+ - * /` binary operators.
+/// Scalar functions, casts, and string/date arithmetic are intentionally
+/// excluded in Phase 1 (issue #5994) and fall back to the row path.
+#[derive(Debug, Clone)]
+pub enum DerivedExpr {
+    /// A reference to a batch column by index.
+    Column(usize),
+    /// A constant literal value.
+    Literal(SqlValue),
+    /// A binary arithmetic operation (`+`, `-`, `*`, `/`).
+    BinaryOp { left: Box<DerivedExpr>, op: BinaryOperator, right: Box<DerivedExpr> },
+    /// Unary negation (`-x`).
+    Negate(Box<DerivedExpr>),
+}
+
+impl DerivedExpr {
+    /// Append every column index referenced anywhere in the tree to `out`.
+    fn collect_columns(&self, out: &mut Vec<usize>) {
+        match self {
+            DerivedExpr::Column(idx) => out.push(*idx),
+            DerivedExpr::Literal(_) => {}
+            DerivedExpr::BinaryOp { left, right, .. } => {
+                left.collect_columns(out);
+                right.collect_columns(out);
+            }
+            DerivedExpr::Negate(inner) => inner.collect_columns(out),
+        }
+    }
+
+    /// Return a copy of the tree with every column index remapped through
+    /// `remap` (used when the batch is selectively extracted and columns are
+    /// renumbered).
+    fn remap<F: Fn(usize) -> usize + Copy>(&self, remap: F) -> DerivedExpr {
+        match self {
+            DerivedExpr::Column(idx) => DerivedExpr::Column(remap(*idx)),
+            DerivedExpr::Literal(v) => DerivedExpr::Literal(v.clone()),
+            DerivedExpr::BinaryOp { left, op, right } => DerivedExpr::BinaryOp {
+                left: Box::new(left.remap(remap)),
+                op: *op,
+                right: Box::new(right.remap(remap)),
+            },
+            DerivedExpr::Negate(inner) => DerivedExpr::Negate(Box::new(inner.remap(remap))),
+        }
+    }
+
+    /// Evaluate the arithmetic tree for a single row against `get_value`,
+    /// which returns the column value at a given index (or `None` when the
+    /// value is absent). Uses the row-path arithmetic evaluator
+    /// (`eval_binary_op_static`) so that overflow, division-by-zero, and NULL
+    /// propagation match the row path exactly (issue #5994 correctness bar).
+    ///
+    /// Returns `SqlValue::Null` if any referenced column value is NULL or
+    /// absent (NULL propagation), matching the row path.
+    pub fn evaluate_row<F>(&self, get_value: &mut F) -> Result<SqlValue, ExecutorError>
+    where
+        F: FnMut(usize) -> Option<SqlValue>,
+    {
+        match self {
+            DerivedExpr::Column(idx) => Ok(get_value(*idx).unwrap_or(SqlValue::Null)),
+            DerivedExpr::Literal(v) => Ok(v.clone()),
+            DerivedExpr::BinaryOp { left, op, right } => {
+                let left_val = left.evaluate_row(get_value)?;
+                let right_val = right.evaluate_row(get_value)?;
+                ExpressionEvaluator::eval_binary_op_static(
+                    &left_val,
+                    op,
+                    &right_val,
+                    SqlMode::default(),
+                )
+            }
+            DerivedExpr::Negate(inner) => {
+                let inner_val = inner.evaluate_row(get_value)?;
+                if matches!(inner_val, SqlValue::Null) {
+                    return Ok(SqlValue::Null);
+                }
+                ExpressionEvaluator::eval_binary_op_static(
+                    &SqlValue::Integer(0),
+                    &BinaryOperator::Minus,
+                    &inner_val,
+                    SqlMode::default(),
+                )
+            }
+        }
+    }
 }
 
 /// A predicate tree representing complex logical expressions
@@ -102,6 +226,17 @@ pub enum ColumnPredicate {
     /// The complement of `IsNull`: the mask is the negation of the null bitmap
     /// (an absent bitmap yields an all-true mask).
     IsNotNull { column_idx: usize },
+
+    /// `<numeric-arith-over-columns> op value` — a comparison whose left-hand
+    /// side is a computed arithmetic expression over one or more columns
+    /// (issue #5994). The derived value is materialized per row via the
+    /// row-path arithmetic evaluator (`DerivedExpr::evaluate_row`) and compared
+    /// against `value`; a NULL derived value (from NULL/absent inputs) is
+    /// non-matching, matching the row path.
+    ///
+    /// `columns` caches the referenced column indices so `referenced_columns`
+    /// stays O(1) to serve; it is kept in sync with `expr` on remap.
+    ComputedCompare { expr: DerivedExpr, op: CompareOp, value: SqlValue, columns: Vec<usize> },
 }
 
 impl ColumnPredicate {
@@ -125,6 +260,7 @@ impl ColumnPredicate {
             ColumnPredicate::ColumnCompare { left_column_idx, right_column_idx, .. } => {
                 vec![*left_column_idx, *right_column_idx]
             }
+            ColumnPredicate::ComputedCompare { columns, .. } => columns.clone(),
         }
     }
 }
@@ -242,6 +378,18 @@ fn remap_predicate(predicate: &ColumnPredicate, column_mapping: &[usize]) -> Col
         ColumnPredicate::IsNotNull { column_idx } => {
             ColumnPredicate::IsNotNull { column_idx: find_new_idx(*column_idx) }
         }
+        ColumnPredicate::ComputedCompare { expr, op, value, columns } => {
+            let new_expr = expr.remap(find_new_idx);
+            let mut new_columns: Vec<usize> = columns.iter().map(|c| find_new_idx(*c)).collect();
+            new_columns.sort_unstable();
+            new_columns.dedup();
+            ColumnPredicate::ComputedCompare {
+                expr: new_expr,
+                op: *op,
+                value: value.clone(),
+                columns: new_columns,
+            }
+        }
     }
 }
 
@@ -350,7 +498,37 @@ fn predicate_supported_by_columnar(predicate: &ColumnPredicate, schema: &Combine
                     schema.get_column_type_by_index(*right_column_idx),
                 )
         }
+        // Issue #5994: a computed-column comparison is only ever produced by
+        // `extract_derived_expr`, which already restricts the operand columns
+        // to numeric, non-collated types and the operators to numeric
+        // arithmetic. The derived value is compared numerically via the
+        // row-path evaluator, so no collation applies. Re-verify the guard
+        // defensively: every referenced column must be numeric and BINARY.
+        ColumnPredicate::ComputedCompare { columns, .. } => columns.iter().all(|&col_idx| {
+            !schema.column_has_non_binary_collation(col_idx)
+                && column_type_is_numeric(schema.get_column_type_by_index(col_idx))
+        }),
     }
+}
+
+/// Whether a column's declared type is one of the numeric types over which
+/// [`DerivedExpr`] arithmetic is faithful to the row path (issue #5994).
+/// Unknown types (e.g. outer-scope references) are declined conservatively.
+fn column_type_is_numeric(t: Option<&DataType>) -> bool {
+    matches!(
+        t,
+        Some(
+            DataType::Integer
+                | DataType::Smallint
+                | DataType::Bigint
+                | DataType::Unsigned
+                | DataType::Real
+                | DataType::DoublePrecision
+                | DataType::Float { .. }
+                | DataType::Numeric { .. }
+                | DataType::Decimal { .. }
+        )
+    )
 }
 
 /// Whether a column's declared type is a temporal type
@@ -615,6 +793,157 @@ fn flatten_and_tree(tree: &PredicateTree, out: &mut Vec<ColumnPredicate>) -> Opt
     }
 }
 
+/// The numeric arithmetic operators over which [`DerivedExpr`] evaluation is
+/// faithful to the row path (issue #5994): `+`, `-`, `*`, `/`.
+fn is_supported_derived_operator(op: &BinaryOperator) -> bool {
+    matches!(
+        op,
+        BinaryOperator::Plus
+            | BinaryOperator::Minus
+            | BinaryOperator::Multiply
+            | BinaryOperator::Divide
+    )
+}
+
+/// Try to convert an expression into a [`DerivedExpr`] arithmetic tree over
+/// numeric columns and constants (issue #5994).
+///
+/// Returns `Some((expr, columns))` only when:
+/// - every leaf is either a numeric column reference (a bare `ColumnRef` in
+///   this scan's schema whose declared type is numeric — see
+///   [`column_type_is_numeric`]) or a numeric constant (folded via
+///   [`try_fold_constant`]);
+/// - every operator is one of `+ - * /` (or unary minus);
+/// - the tree references at least one column (a fully-constant tree is not a
+///   computed-column predicate — it would fold to a literal and take the plain
+///   column-vs-constant path).
+///
+/// Any other shape — scalar functions, casts, string/date arithmetic, columns
+/// from another table, non-numeric columns — returns `None`, so the caller
+/// declines pushdown and the WHERE clause falls back to the row path. This
+/// narrow guard is what keeps overflow/division/NULL semantics matching the
+/// row path: only arithmetic the row-path evaluator handles identically is
+/// admitted.
+fn extract_derived_expr(
+    expr: &Expression,
+    schema: &CombinedSchema,
+) -> Option<(DerivedExpr, Vec<usize>)> {
+    fn build(expr: &Expression, schema: &CombinedSchema) -> Option<DerivedExpr> {
+        match expr {
+            Expression::ColumnRef(col_id) => {
+                // Only bare, single-table column references with a numeric type.
+                if col_id.schema_canonical().is_some() {
+                    return None;
+                }
+                let table = col_id.table_canonical();
+                let column = col_id.column_canonical();
+                let column_idx = schema.get_column_index(table, column)?;
+                // Collated columns compare with collation semantics the numeric
+                // arithmetic path does not model; decline them.
+                if schema.column_has_non_binary_collation(column_idx) {
+                    return None;
+                }
+                if !column_type_is_numeric(schema.get_column_type_by_index(column_idx)) {
+                    return None;
+                }
+                Some(DerivedExpr::Column(column_idx))
+            }
+            Expression::Literal(_) | Expression::BinaryOp { .. } => {
+                // A subtree that folds to a numeric constant becomes a Literal.
+                if let Some(folded) = try_fold_constant(expr) {
+                    if is_numeric_value(&folded) {
+                        return Some(DerivedExpr::Literal(folded));
+                    }
+                    // A constant that isn't numeric (e.g. a string) can't take
+                    // the numeric arithmetic path.
+                    return None;
+                }
+                // Non-constant BinaryOp: must be a supported arithmetic op over
+                // supported operands.
+                if let Expression::BinaryOp { left, op, right } = expr {
+                    if !is_supported_derived_operator(op) {
+                        return None;
+                    }
+                    let left_d = build(left, schema)?;
+                    let right_d = build(right, schema)?;
+                    return Some(DerivedExpr::BinaryOp {
+                        left: Box::new(left_d),
+                        op: *op,
+                        right: Box::new(right_d),
+                    });
+                }
+                None
+            }
+            Expression::UnaryOp { op: UnaryOperator::Minus, expr: inner } => {
+                Some(DerivedExpr::Negate(Box::new(build(inner, schema)?)))
+            }
+            Expression::UnaryOp { op: UnaryOperator::Plus, expr: inner } => build(inner, schema),
+            _ => None,
+        }
+    }
+
+    let derived = build(expr, schema)?;
+    let mut columns = Vec::new();
+    derived.collect_columns(&mut columns);
+    columns.sort_unstable();
+    columns.dedup();
+    // Require at least one column: a fully-constant tree is not a
+    // computed-column predicate.
+    if columns.is_empty() {
+        return None;
+    }
+    Some((derived, columns))
+}
+
+/// Try to build a [`ColumnPredicate::ComputedCompare`] leaf from a binary
+/// comparison whose left or right operand is a computed numeric arithmetic
+/// tree over columns and the other operand folds to a numeric constant
+/// (issue #5994).
+///
+/// Handles both `<arith> op const` and `const op <arith>` (reversing the
+/// operator for the latter). Returns `None` if neither side is a supported
+/// derived expression, if the other side is not a numeric constant, or if `op`
+/// is not a comparison operator.
+fn try_computed_compare(
+    left: &Expression,
+    op: &BinaryOperator,
+    right: &Expression,
+    schema: &CombinedSchema,
+) -> Option<ColumnPredicate> {
+    let compare_op = CompareOp::from_binary_operator(op)?;
+
+    // Try: <derived-arith> op const
+    if let Some((derived, columns)) = extract_derived_expr(left, schema) {
+        if let Some(value) = try_fold_constant(right) {
+            if is_numeric_value(&value) {
+                return Some(ColumnPredicate::ComputedCompare {
+                    expr: derived,
+                    op: compare_op,
+                    value,
+                    columns,
+                });
+            }
+        }
+        return None;
+    }
+
+    // Try: const op <derived-arith>  (reverse the comparison operator)
+    if let Some((derived, columns)) = extract_derived_expr(right, schema) {
+        if let Some(value) = try_fold_constant(left) {
+            if is_numeric_value(&value) {
+                return Some(ColumnPredicate::ComputedCompare {
+                    expr: derived,
+                    op: compare_op.reversed(),
+                    value,
+                    columns,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 /// Try to fold a constant expression to a literal value
 ///
 /// Handles simple arithmetic expressions like `1+2`, `10-5`, `2*3`, etc.
@@ -808,6 +1137,12 @@ fn extract_tree_recursive(
                         right_column_idx: right_idx,
                     }));
                 }
+            }
+
+            // Try: <numeric-arith-over-cols> op const  (or const op <arith>)
+            // Issue #5994: computed-column comparison on the columnar path.
+            if let Some(predicate) = try_computed_compare(left, op, right, schema) {
+                return Some(PredicateTree::Leaf(predicate));
             }
 
             None
@@ -1051,6 +1386,13 @@ fn extract_predicates_recursive(
                     }
                     return Some(());
                 }
+            }
+
+            // Try: <numeric-arith-over-cols> op const  (or const op <arith>)
+            // Issue #5994: computed-column comparison on the columnar path.
+            if let Some(predicate) = try_computed_compare(left, op, right, schema) {
+                predicates.push(predicate);
+                return Some(());
             }
 
             // Skip other unsupported expressions
@@ -1826,5 +2168,178 @@ mod tests {
         let remapped = remap_predicates(&[is_null, is_not_null], &mapping);
         assert!(matches!(remapped[0], ColumnPredicate::IsNull { column_idx: 1 }));
         assert!(matches!(remapped[1], ColumnPredicate::IsNotNull { column_idx: 0 }));
+    }
+
+    // ---- Issue #5994: computed-column comparison extraction ----
+
+    fn col(name: &str) -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(name, false))
+    }
+
+    fn binop(left: Expression, op: BinaryOperator, right: Expression) -> Expression {
+        Expression::BinaryOp { left: Box::new(left), op, right: Box::new(right) }
+    }
+
+    /// `col0 * col1 > 100` extracts a ComputedCompare referencing both columns.
+    #[test]
+    fn test_extract_computed_compare_mul_over_columns() {
+        let schema = create_test_schema();
+        // col0 * col1 > 100
+        let expr = binop(
+            binop(col("col0"), BinaryOperator::Multiply, col("col1")),
+            BinaryOperator::GreaterThan,
+            Expression::Literal(SqlValue::Integer(100)),
+        );
+
+        let tree = extract_predicate_tree(&expr, &schema, false)
+            .expect("computed-column comparison should extract on the tree path");
+        match tree {
+            PredicateTree::Leaf(ColumnPredicate::ComputedCompare {
+                op,
+                ref value,
+                ref columns,
+                ..
+            }) => {
+                assert_eq!(op, CompareOp::GreaterThan);
+                assert_eq!(*value, SqlValue::Integer(100));
+                assert_eq!(*columns, vec![0, 1]);
+            }
+            other => panic!("expected ComputedCompare leaf, got {other:?}"),
+        }
+
+        // Legacy extractor produces the same predicate.
+        let preds = extract_column_predicates(&expr, &schema, false)
+            .expect("legacy extractor should also produce ComputedCompare");
+        assert_eq!(preds.len(), 1);
+        assert!(matches!(preds[0], ColumnPredicate::ComputedCompare { .. }));
+        assert_eq!(preds[0].referenced_columns(), vec![0, 1]);
+    }
+
+    /// `const op <arith>` reverses the comparison operator.
+    #[test]
+    fn test_extract_computed_compare_reversed() {
+        let schema = create_test_schema();
+        // 100 < col0 - col1   ==>   (col0 - col1) > 100
+        let expr = binop(
+            Expression::Literal(SqlValue::Integer(100)),
+            BinaryOperator::LessThan,
+            binop(col("col0"), BinaryOperator::Minus, col("col1")),
+        );
+        let tree = extract_predicate_tree(&expr, &schema, false).expect("should extract");
+        match tree {
+            PredicateTree::Leaf(ColumnPredicate::ComputedCompare { op, ref value, .. }) => {
+                assert_eq!(op, CompareOp::GreaterThan);
+                assert_eq!(*value, SqlValue::Integer(100));
+            }
+            other => panic!("expected ComputedCompare leaf, got {other:?}"),
+        }
+    }
+
+    /// Remapping a ComputedCompare renumbers both the cached column list and
+    /// the embedded DerivedExpr column indices.
+    #[test]
+    fn test_computed_compare_remap() {
+        let schema = create_test_schema();
+        let expr = binop(
+            binop(col("col0"), BinaryOperator::Plus, col("col1")),
+            BinaryOperator::LessThanOrEqual,
+            Expression::Literal(SqlValue::Integer(5)),
+        );
+        let preds = extract_column_predicates(&expr, &schema, false).unwrap();
+        let mapping = vec![0usize, 1usize];
+        let remapped = remap_predicates(&preds, &mapping);
+        match &remapped[0] {
+            ColumnPredicate::ComputedCompare { columns, expr, .. } => {
+                assert_eq!(*columns, vec![0, 1]);
+                let mut cols = Vec::new();
+                expr.collect_columns(&mut cols);
+                cols.sort_unstable();
+                cols.dedup();
+                assert_eq!(cols, vec![0, 1]);
+            }
+            other => panic!("expected ComputedCompare, got {other:?}"),
+        }
+    }
+
+    /// Unsupported operators (e.g. modulo) and non-numeric operands decline
+    /// extraction so the WHERE clause falls back to the row path.
+    #[test]
+    fn test_computed_compare_declines_unsupported() {
+        let schema = create_test_schema();
+
+        // Modulo is not one of + - * / — decline (falls through to None).
+        let expr = binop(
+            binop(col("col0"), BinaryOperator::Modulo, col("col1")),
+            BinaryOperator::Equal,
+            Expression::Literal(SqlValue::Integer(0)),
+        );
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+
+        // Non-numeric constant on the compared side declines.
+        let expr = binop(
+            binop(col("col0"), BinaryOperator::Plus, col("col1")),
+            BinaryOperator::Equal,
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("x"))),
+        );
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+    }
+
+    /// A string column in the arithmetic tree declines (numeric-only Phase 1).
+    #[test]
+    fn test_computed_compare_declines_non_numeric_column() {
+        let schema = TableSchema::new(
+            "t".to_string(),
+            vec![
+                ColumnSchema::new("n".to_string(), DataType::Integer, false),
+                ColumnSchema::new("s".to_string(), DataType::Varchar { max_length: None }, true),
+            ],
+        );
+        let schema = CombinedSchema::from_table("t".to_string(), schema);
+        // n * s > 1  — s is a string column, decline.
+        let expr = binop(
+            binop(col("n"), BinaryOperator::Multiply, col("s")),
+            BinaryOperator::GreaterThan,
+            Expression::Literal(SqlValue::Integer(1)),
+        );
+        assert!(extract_predicate_tree(&expr, &schema, false).is_none());
+    }
+
+    /// The DerivedExpr evaluator matches the row-path arithmetic semantics,
+    /// including NULL propagation and i64-overflow → Double fallback.
+    #[test]
+    fn test_derived_expr_evaluate_row_parity() {
+        // (col0 * col1) with col0=6, col1=7 => 42 (Integer)
+        let expr = DerivedExpr::BinaryOp {
+            left: Box::new(DerivedExpr::Column(0)),
+            op: BinaryOperator::Multiply,
+            right: Box::new(DerivedExpr::Column(1)),
+        };
+        let mut vals = |idx: usize| match idx {
+            0 => Some(SqlValue::Integer(6)),
+            1 => Some(SqlValue::Integer(7)),
+            _ => None,
+        };
+        assert_eq!(expr.evaluate_row(&mut vals).unwrap(), SqlValue::Integer(42));
+
+        // NULL propagation: any NULL input => NULL derived value.
+        let mut vals_null = |idx: usize| match idx {
+            0 => Some(SqlValue::Integer(6)),
+            1 => Some(SqlValue::Null),
+            _ => None,
+        };
+        assert_eq!(expr.evaluate_row(&mut vals_null).unwrap(), SqlValue::Null);
+
+        // i64 overflow: i64::MAX * 2 must fall back to Double (row-path parity),
+        // never wrap or panic.
+        let mut vals_ovf = |idx: usize| match idx {
+            0 => Some(SqlValue::Integer(i64::MAX)),
+            1 => Some(SqlValue::Integer(2)),
+            _ => None,
+        };
+        let result = expr.evaluate_row(&mut vals_ovf).unwrap();
+        assert!(
+            matches!(result, SqlValue::Double(_) | SqlValue::Float(_) | SqlValue::Numeric(_)),
+            "overflow must fall back to float, got {result:?}"
+        );
     }
 }

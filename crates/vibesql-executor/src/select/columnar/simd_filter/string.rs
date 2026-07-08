@@ -309,7 +309,8 @@ pub fn evaluate_predicate_string_batch(
         // simd_filter/mod.rs; reaching a value kernel with one is a bug.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => {
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => {
             return Err(ExecutorError::ColumnarTypeMismatch {
                 operation: "column-to-column comparison".to_string(),
                 left_type: "String".to_string(),

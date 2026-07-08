@@ -402,6 +402,16 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
         };
     }
 
+    // Computed-column comparison: materialize the derived value from the row's
+    // columns via the row-path arithmetic evaluator, then compare (issue #5994).
+    if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+        let mut fetch = |idx: usize| row.get(idx).cloned();
+        return match expr.evaluate_row(&mut fetch) {
+            Ok(derived) => filter::evaluate_computed_compare_value(&derived, *op, value),
+            Err(_) => false,
+        };
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -415,7 +425,8 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
         // Handled above.
         ColumnPredicate::ColumnCompare { .. }
         | ColumnPredicate::IsNull { .. }
-        | ColumnPredicate::IsNotNull { .. } => unreachable!(),
+        | ColumnPredicate::IsNotNull { .. }
+        | ColumnPredicate::ComputedCompare { .. } => unreachable!(),
     };
 
     match row.get(column_idx) {

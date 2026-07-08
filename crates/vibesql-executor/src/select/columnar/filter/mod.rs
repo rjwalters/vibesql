@@ -11,10 +11,14 @@ mod predicates;
 
 // Re-export public types and functions
 pub(super) use comparison::parse_date_string;
-pub use evaluation::{evaluate_column_compare, evaluate_predicate, evaluate_predicate_tree};
+pub use evaluation::{
+    evaluate_column_compare, evaluate_computed_compare_value, evaluate_predicate,
+    evaluate_predicate_tree,
+};
 pub use predicates::{
     collect_referenced_columns, extract_column_predicates, extract_full_coverage_predicates,
-    extract_predicate_tree, remap_predicates, ColumnPredicate, CompareOp, PredicateTree,
+    extract_predicate_tree, remap_predicates, ColumnPredicate, CompareOp, DerivedExpr,
+    PredicateTree,
 };
 
 use crate::{
@@ -108,6 +112,24 @@ where
                 continue;
             }
 
+            // Handle computed-column comparison: materialize the derived value
+            // from the referenced columns via the row-path arithmetic
+            // evaluator, then compare (issue #5994).
+            if let ColumnPredicate::ComputedCompare { expr, op, value, .. } = predicate {
+                let mut fetch = |idx: usize| get_value(row_idx, idx).cloned();
+                let passes = match expr.evaluate_row(&mut fetch) {
+                    Ok(derived) => {
+                        evaluation::evaluate_computed_compare_value(&derived, *op, value)
+                    }
+                    Err(_) => false,
+                };
+                if !passes {
+                    bitmap[row_idx] = false;
+                    break;
+                }
+                continue;
+            }
+
             // Handle null tests specially - they read null-ness directly instead
             // of failing on NULL like value comparisons do. `get_value` returns
             // None for an absent value and Some(SqlValue::Null) for a stored NULL.
@@ -139,7 +161,8 @@ where
                 // Handled above.
                 ColumnPredicate::ColumnCompare { .. }
                 | ColumnPredicate::IsNull { .. }
-                | ColumnPredicate::IsNotNull { .. } => unreachable!(),
+                | ColumnPredicate::IsNotNull { .. }
+                | ColumnPredicate::ComputedCompare { .. } => unreachable!(),
             };
 
             if let Some(value) = get_value(row_idx, column_idx) {
@@ -543,6 +566,142 @@ mod tests {
         assert!(evaluate_predicate(&pred, &SqlValue::Double(0.07)));
         assert!(!evaluate_predicate(&pred, &SqlValue::Double(0.04)));
         assert!(!evaluate_predicate(&pred, &SqlValue::Double(0.08)));
+    }
+
+    // ---- Issue #5994: computed-column comparison parity ----
+
+    use predicates::DerivedExpr;
+
+    /// Build a `ComputedCompare` for `col0 * col1 op value`.
+    fn mul_compare(op: CompareOp, value: SqlValue) -> ColumnPredicate {
+        ColumnPredicate::ComputedCompare {
+            expr: DerivedExpr::BinaryOp {
+                left: Box::new(DerivedExpr::Column(0)),
+                op: vibesql_ast::BinaryOperator::Multiply,
+                right: Box::new(DerivedExpr::Column(1)),
+            },
+            op,
+            value,
+            columns: vec![0, 1],
+        }
+    }
+
+    /// Reference: row-by-row `col0 * col1 > 100` using i128 to avoid overflow
+    /// ambiguity in the oracle (real i64 overflow is covered separately).
+    fn reference_mul_gt(rows: &[Row], threshold: i64) -> Vec<usize> {
+        rows.iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                let a = match r.get(0) {
+                    Some(SqlValue::Integer(v)) => Some(*v as i128),
+                    _ => None,
+                }?;
+                let b = match r.get(1) {
+                    Some(SqlValue::Integer(v)) => Some(*v as i128),
+                    _ => None,
+                }?;
+                if a * b > threshold as i128 {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Both sides of the SIMD row-count threshold (256) must produce the same
+    /// result as a scalar row-by-row reference for `col0 * col1 > 100`.
+    #[test]
+    fn test_computed_compare_simd_vs_reference_both_thresholds() {
+        for n in [50usize, 1000usize] {
+            let rows: Vec<Row> = (0..n)
+                .map(|i| {
+                    Row::new(vec![
+                        SqlValue::Integer((i % 20) as i64),
+                        SqlValue::Integer((i % 13) as i64),
+                    ])
+                })
+                .collect();
+            let predicates = vec![mul_compare(CompareOp::GreaterThan, SqlValue::Integer(100))];
+            let got = apply_columnar_filter(&rows, &predicates).unwrap();
+            let want = reference_mul_gt(&rows, 100);
+            assert_eq!(got, want, "mismatch at n={n} (threshold boundary)");
+        }
+    }
+
+    /// A NULL in any input column makes the derived value NULL, which is
+    /// non-matching — exactly like the row path.
+    #[test]
+    fn test_computed_compare_null_propagation() {
+        // 400 rows to force the SIMD streaming path.
+        let rows: Vec<Row> = (0..400)
+            .map(|i| {
+                let a = if i % 7 == 0 { SqlValue::Null } else { SqlValue::Integer(11) };
+                Row::new(vec![a, SqlValue::Integer(11)])
+            })
+            .collect();
+        // 11 * 11 = 121 > 100 for non-null rows; NULL rows must not match.
+        let predicates = vec![mul_compare(CompareOp::GreaterThan, SqlValue::Integer(100))];
+        let got = apply_columnar_filter(&rows, &predicates).unwrap();
+        let want: Vec<usize> = (0..400).filter(|i| i % 7 != 0).collect();
+        assert_eq!(got, want);
+    }
+
+    /// i64 overflow in the derived value must fall back to a float result and
+    /// compare correctly (parity with the row path), never wrap or panic. Runs
+    /// on the SIMD path (>256 rows).
+    #[test]
+    fn test_computed_compare_overflow_parity() {
+        let rows: Vec<Row> = (0..300)
+            .map(|i| {
+                if i == 0 {
+                    // i64::MAX * 2 overflows i64; row path yields a large Double
+                    // that is > 0, so this row matches `> 0`.
+                    Row::new(vec![SqlValue::Integer(i64::MAX), SqlValue::Integer(2)])
+                } else {
+                    Row::new(vec![SqlValue::Integer(0), SqlValue::Integer(0)])
+                }
+            })
+            .collect();
+        let predicates = vec![mul_compare(CompareOp::GreaterThan, SqlValue::Integer(0))];
+        let got = apply_columnar_filter(&rows, &predicates).unwrap();
+        // Only row 0 (the overflow row) has a positive product; the rest are 0.
+        assert_eq!(got, vec![0]);
+    }
+
+    /// The scalar (small-batch) path and the SIMD (large-batch) path agree on
+    /// the same logical data for a division predicate (integer division by a
+    /// column that may be zero => NULL => non-matching, per row-path parity).
+    #[test]
+    fn test_computed_compare_division_by_zero_non_matching() {
+        // col0 / col1 predicate where col1 is 0 for some rows.
+        let make_rows = |n: usize| -> Vec<Row> {
+            (0..n)
+                .map(|i| {
+                    let denom = if i % 5 == 0 { 0 } else { 2 };
+                    Row::new(vec![SqlValue::Integer(10), SqlValue::Integer(denom)])
+                })
+                .collect()
+        };
+        let div_pred = |op: CompareOp, value: SqlValue| ColumnPredicate::ComputedCompare {
+            expr: DerivedExpr::BinaryOp {
+                left: Box::new(DerivedExpr::Column(0)),
+                op: vibesql_ast::BinaryOperator::Divide,
+                right: Box::new(DerivedExpr::Column(1)),
+            },
+            op,
+            value,
+            columns: vec![0, 1],
+        };
+
+        for n in [40usize, 500usize] {
+            let rows = make_rows(n);
+            // 10 / 2 = 5 >= 1 (matches); 10 / 0 = NULL (non-matching).
+            let predicates = vec![div_pred(CompareOp::GreaterThanOrEqual, SqlValue::Integer(1))];
+            let got = apply_columnar_filter(&rows, &predicates).unwrap();
+            let want: Vec<usize> = (0..n).filter(|i| i % 5 != 0).collect();
+            assert_eq!(got, want, "division-by-zero parity failed at n={n}");
+        }
     }
 
     #[test]
