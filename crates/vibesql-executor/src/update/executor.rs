@@ -850,6 +850,18 @@ pub(super) fn execute_internal(
     // updated; a RAISE(IGNORE) there cannot revert it (sqlite3 3.51 keeps the
     // modified row), so SkipRow is a no-op for AFTER.
     let mut index_updates = Vec::new();
+
+    // When a RETURNING expression contains a subquery, that subquery must be
+    // recomputed per row as each row's NEW state is applied (it observes the
+    // incremental post-UPDATE table state), matching SQLite's correlated-
+    // subquery treatment (returning1.test section 20). Detect this up front so
+    // the common subquery-free RETURNING keeps the cheap batch path with zero
+    // behavior change. `per_row_returning`, when `Some`, holds the fully
+    // projected RETURNING result and suppresses the statement-end projection.
+    let returning_needs_per_row =
+        stmt.returning.as_deref().is_some_and(crate::dml_returning::returning_has_subquery);
+    let mut per_row_returning: Option<crate::select::SelectResult> = None;
+
     if has_triggers {
         // Register this table as under interleaved iteration so a nested DELETE
         // on it (fired by a row trigger below) defers compaction — compacting
@@ -957,6 +969,52 @@ pub(super) fn execute_internal(
         // dropped) so RETURNING / change-count reflect SQLite semantics.
         let applied: HashSet<usize> = index_updates.iter().map(|(idx, ..)| *idx).collect();
         updates.retain(|u| applied.contains(&u.row_index));
+    } else if returning_needs_per_row {
+        // No triggers, but RETURNING contains a subquery: apply each row's NEW
+        // state, then project that row's RETURNING against the now-updated table
+        // so subqueries recompute after each step. Applying and projecting are
+        // interleaved (the batch fast path below cannot express this because it
+        // projects only once, after every row is already updated).
+        let items = stmt.returning.as_deref().expect("returning present");
+        let visible_columns = crate::dml_returning::visible_columns(schema);
+        let columns =
+            crate::dml_returning::derive_returning_columns(items, schema, None, &visible_columns)?;
+        let mut result_rows: Vec<Row> = Vec::with_capacity(updates.len());
+
+        for u in &updates {
+            {
+                let table_mut = database
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                table_mut
+                    .update_row_selective(u.row_index, u.new_row.clone(), &u.changed_columns)
+                    .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+            }
+
+            // Drop the stale database-level columnar snapshot so the RETURNING
+            // subquery sees this row's applied NEW values.
+            database.invalidate_columnar_cache(table_name);
+
+            let projected = crate::dml_returning::project_returning_row(
+                items,
+                &columns,
+                schema,
+                database,
+                &u.new_row,
+                &visible_columns,
+                cte_results.as_ref(),
+            )?;
+            result_rows.push(projected);
+
+            index_updates.push((
+                u.row_index,
+                u.old_row.clone(),
+                u.new_row.clone(),
+                u.changed_columns.clone(),
+            ));
+        }
+
+        per_row_returning = Some(crate::select::SelectResult { columns, rows: result_rows });
     } else {
         // No triggers: apply all updates in one batch borrow.
         let table_mut = database
@@ -1050,7 +1108,10 @@ pub(super) fn execute_internal(
     // succeeds — the opposite of WHERE/SET resolution (see returning1.test
     // 7.7/7.8, issue #5840 item 6). Pass `None` so RETURNING resolves
     // qualified references against the real table name, not the alias.
-    let returning = if let Some(items) = &stmt.returning {
+    let returning = if let Some(per_row) = per_row_returning {
+        // Already projected per row (subquery-bearing RETURNING).
+        Some(per_row)
+    } else if let Some(items) = &stmt.returning {
         let new_rows: Vec<&Row> = updates.iter().map(|u| &u.new_row).collect();
         Some(crate::dml_returning::project_returning(
             items,
