@@ -5746,6 +5746,23 @@ proc check_single_capability {cap} {
     # Check if capability is supported
     set is_supported [expr {$cap ni $unsupported_caps}]
 
+    # json102 special case (#5989): the JSON table-valued-function block
+    #   ifcapable vtab { ... FROM t, json_each(t.j) ... }
+    # is gated on `vtab` purely because SQLite implements json_each/json_tree
+    # as eponymous virtual tables. VibeSQL implements them natively as
+    # FROM-clause functions (non-correlated in #5988, lateral/dependent-join in
+    # #5989), so the block's queries — `FROM user, json_each(user.phone)`,
+    # `FROM big, json_tree(big.json[,'$.path'])`, etc. — run without any real
+    # virtual-table machinery. The block contains NO `CREATE VIRTUAL TABLE` /
+    # fts / rtree / wholenumber usage, so treating `vtab` as capable for this
+    # one file un-gates the JSON TVF tests without enabling genuinely
+    # unsupported vtab features elsewhere. Mirrors the file-scoped where4
+    # `ifcapable` exception above.
+    if {$cap eq "vtab" && [info exists ::current_test_file_basename] \
+            && $::current_test_file_basename eq "json102"} {
+        set is_supported 1
+    }
+
     if {$negate} {
         return [expr {!$is_supported}]
     }
