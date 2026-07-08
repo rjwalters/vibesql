@@ -281,6 +281,99 @@ fn group_by_mixed_column_and_expression_keys_match_row_path() {
     assert_eq!(columnar, row, "columnar GROUP BY (col, expr) result must equal row path");
 }
 
+/// Debug marker emitted when the SELECT list permutes the GROUP BY key order,
+/// forcing a positional-mismatch decline to the row path (Judge feedback on
+/// #6001). `columnar_group_by_batch` emits key columns in GROUP BY order with no
+/// re-projection, so a permuted SELECT list would transpose the output columns.
+const POSITIONAL_DECLINE: &str = "does not positionally match GROUP BY key";
+
+fn assert_row_path_via_positional_decline(logs: &[String]) {
+    let joined = logs.join("\n");
+    assert!(
+        logs.iter().any(|l| l.contains(POSITIONAL_DECLINE)),
+        "expected columnar to decline (positional mismatch) and fall back to the row path:\n{joined}"
+    );
+    assert!(
+        !logs.iter().any(|l| l.contains(COLUMNAR_COMPLETED) && l.contains("group_by=true")),
+        "columnar GROUP BY must NOT run for a permuted SELECT list (would transpose columns):\n{joined}"
+    );
+}
+
+/// REGRESSION (Judge #6001): permuted EXPRESSION keys. The Judge's exact repro:
+/// `SELECT a*b, a+b, COUNT(*) FROM t GROUP BY a+b, a*b` — the SELECT-list key
+/// order is the reverse of the GROUP BY key order. Before the positional-check
+/// fix, the old `.any()` membership validation admitted this query into the
+/// columnar path, which emits key columns in GROUP BY order (`a+b, a*b`) with no
+/// re-projection, transposing columns 0 and 1 vs the row path (`a*b, a+b`).
+///
+/// With the fix, the positional check declines (SELECT expr 0 `a*b` != GROUP BY
+/// key 0 `a+b`) and the query runs on the row path, so the result is correct.
+/// We assert both the decline (via log) AND parity with `VIBESQL_DISABLE_COLUMNAR=1`.
+#[test]
+fn group_by_permuted_expression_keys_match_row_path() {
+    init_logger();
+
+    let mut db = Database::new();
+    setup(&mut db, 1000);
+
+    let sql = "SELECT a * b, a + b, COUNT(*) FROM t GROUP BY a + b, a * b";
+    let (columnar, row, logs) = run_both(&db, sql);
+
+    // The permuted SELECT list must decline the columnar fast path.
+    assert_row_path_via_positional_decline(&logs);
+    // And the (row-path) answer must be correct: column 0 = a*b, column 1 = a+b.
+    assert_eq!(
+        columnar, row,
+        "permuted expression-key SELECT list must match row path (no transposed columns)"
+    );
+}
+
+/// REGRESSION (Judge #6001, drive-by): permuted BARE-COLUMN keys.
+/// `SELECT b, a, COUNT(*) FROM t GROUP BY a, b` — same transposition hazard as
+/// the expression case but with bare columns. This case was ALSO wrong on the
+/// columnar path before the fix (the old `.any()` membership check admitted it,
+/// and `columnar_group_by_batch` emits keys in GROUP BY order `a, b` while the
+/// SELECT list wants `b, a`). The positional check now declines it to the row
+/// path. We assert the decline AND parity.
+#[test]
+fn group_by_permuted_bare_column_keys_match_row_path() {
+    init_logger();
+
+    let mut db = Database::new();
+    setup(&mut db, 1000);
+
+    let sql = "SELECT b, a, COUNT(*) FROM t GROUP BY a, b";
+    let (columnar, row, logs) = run_both(&db, sql);
+
+    assert_row_path_via_positional_decline(&logs);
+    assert_eq!(
+        columnar, row,
+        "permuted bare-column SELECT list must match row path (no transposed columns)"
+    );
+}
+
+/// The MATCHING-ORDER multi-key case must STILL take the columnar fast path
+/// (the positional-check fix must not over-decline aligned queries).
+/// `SELECT a+b, a*b, COUNT(*) FROM t GROUP BY a+b, a*b` — SELECT list order
+/// equals GROUP BY key order, so it stays columnar and matches the row path.
+#[test]
+fn group_by_aligned_multi_expression_keys_stay_columnar() {
+    init_logger();
+
+    let mut db = Database::new();
+    setup(&mut db, 1000);
+
+    let sql = "SELECT a + b, a * b, COUNT(*) FROM t GROUP BY a + b, a * b";
+    let (columnar, row, logs) = run_both(&db, sql);
+
+    // Aligned order must NOT decline — the columnar GROUP BY must run.
+    assert_columnar_group_by_ran(&logs);
+    assert_eq!(
+        columnar, row,
+        "aligned multi-expression-key GROUP BY must stay columnar and match row path"
+    );
+}
+
 /// Unsupported grouping-key shape (a scalar function) must still fall back to
 /// the row path (no silent wrong answer), and the fallback marker is emitted.
 #[test]
