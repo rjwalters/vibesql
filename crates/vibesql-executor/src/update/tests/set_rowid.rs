@@ -143,11 +143,8 @@ fn set_rowid_swap_errors_intermediate_collision() {
     ddl(&mut db, "INSERT INTO t VALUES(10)"); // rowid 1
     ddl(&mut db, "INSERT INTO t VALUES(20)"); // rowid 2
 
-    let err = update(
-        &mut db,
-        "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END",
-    )
-    .unwrap_err();
+    let err = update(&mut db, "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END")
+        .unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: t.rowid"),
         "expected rowid UNIQUE error for swap, got: {}",
@@ -313,8 +310,8 @@ fn set_ipk_swap_errors_intermediate_collision() {
     ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
     ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
 
-    let err = update(&mut db, "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 1 END")
-        .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 1 END").unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: t.k"),
         "expected IPK UNIQUE error for swap, got: {}",
@@ -337,11 +334,8 @@ fn set_rowid_alias_ipk_swap_errors() {
     ddl(&mut db, "INSERT INTO t VALUES(1, 'a')");
     ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
 
-    let err = update(
-        &mut db,
-        "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END",
-    )
-    .unwrap_err();
+    let err = update(&mut db, "UPDATE t SET rowid = CASE rowid WHEN 1 THEN 2 WHEN 2 THEN 1 END")
+        .unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: t.k"),
         "expected IPK UNIQUE error for rowid-alias swap, got: {}",
@@ -359,11 +353,9 @@ fn set_ipk_three_cycle_errors() {
     ddl(&mut db, "INSERT INTO t VALUES(2, 'b')");
     ddl(&mut db, "INSERT INTO t VALUES(3, 'c')");
 
-    let err = update(
-        &mut db,
-        "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 3 WHEN 3 THEN 1 END",
-    )
-    .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE t SET k = CASE k WHEN 1 THEN 2 WHEN 2 THEN 3 WHEN 3 THEN 1 END")
+            .unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: t.k"),
         "expected IPK UNIQUE error for 3-cycle, got: {}",
@@ -407,10 +399,7 @@ fn set_ipk_minus_one_cascade_ok() {
     let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
     let got: Vec<(i64, String)> =
         rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
-    assert_eq!(
-        got,
-        vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]
-    );
+    assert_eq!(got, vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]);
 }
 
 /// Relocating an IPK row into a free gap (no collision at any step) succeeds.
@@ -445,10 +434,7 @@ fn set_ipk_self_noop_ok() {
     let rows = select(&mut db, "SELECT k, v FROM t ORDER BY k");
     let got: Vec<(i64, String)> =
         rows.iter().map(|r| (int(&r.values[0]), text(&r.values[1]))).collect();
-    assert_eq!(
-        got,
-        vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]
-    );
+    assert_eq!(got, vec![(1, "a".to_string()), (2, "b".to_string()), (3, "c".to_string())]);
 }
 
 /// Issue #5588: a single-statement swap on a regular (non-rowid) UNIQUE column
@@ -470,8 +456,8 @@ fn regular_unique_column_swap_errors_intermediate_collision() {
     ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
     ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
 
-    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
-        .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END").unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: u.k"),
         "expected regular-UNIQUE swap to error immediately, got: {}",
@@ -596,10 +582,8 @@ fn triggerc_7_5_relocate_in_before_trigger() {
 
     // Table state matches sqlite3 exactly: the nested SET-rowid relocate applied.
     let t7 = select(&mut db, "SELECT rowid, a, b FROM t7 ORDER BY rowid");
-    let got: Vec<(i64, i64, i64)> = t7
-        .iter()
-        .map(|r| (int(&r.values[0]), int(&r.values[1]), int(&r.values[2])))
-        .collect();
+    let got: Vec<(i64, i64, i64)> =
+        t7.iter().map(|r| (int(&r.values[0]), int(&r.values[1]), int(&r.values[2]))).collect();
     assert_eq!(got, vec![(2, 3, 4), (3, 5, 7), (8, 1, 2)]);
 
     // Both AFTER triggers fire, in sqlite3 3.51.0 order: the nested UPDATE's
@@ -607,13 +591,7 @@ fn triggerc_7_5_relocate_in_before_trigger() {
     // trigger body), then the outer UPDATE's AFTER trigger logs "after fired 3->3".
     let t8 = select(&mut db, "SELECT x FROM t8 ORDER BY rowid");
     let log: Vec<String> = t8.iter().map(|r| text(&r.values[0])).collect();
-    assert_eq!(
-        log,
-        vec![
-            "after fired 1->8".to_string(),
-            "after fired 3->3".to_string()
-        ]
-    );
+    assert_eq!(log, vec!["after fired 1->8".to_string(), "after fired 3->3".to_string()]);
 }
 
 /// triggerD-1.3/1.4 (issue #5599): an *ordinary* user column literally named
@@ -853,8 +831,8 @@ fn regular_unique_reuse_before_free_errors() {
     ddl(&mut db, "INSERT INTO u VALUES(1, 20)");
     ddl(&mut db, "INSERT INTO u VALUES(2, 10)");
 
-    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 20 THEN 10 WHEN 10 THEN 99 END")
-        .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 20 THEN 10 WHEN 10 THEN 99 END").unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: u.k"),
         "expected reuse-before-free UNIQUE error, got: {}",
@@ -951,8 +929,8 @@ fn user_unique_index_swap_errors() {
     ddl(&mut db, "INSERT INTO u VALUES(1, 10)");
     ddl(&mut db, "INSERT INTO u VALUES(2, 20)");
 
-    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
-        .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END").unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: u.k"),
         "expected user-UNIQUE-index swap error, got: {}",
@@ -988,8 +966,8 @@ fn regular_unique_swap_errors_virtual_rowid_table() {
     ddl(&mut db, "INSERT INTO u VALUES('a', 10)");
     ddl(&mut db, "INSERT INTO u VALUES('b', 20)");
 
-    let err = update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END")
-        .unwrap_err();
+    let err =
+        update(&mut db, "UPDATE u SET k = CASE k WHEN 10 THEN 20 WHEN 20 THEN 10 END").unwrap_err();
     assert!(
         err.to_string().contains("UNIQUE constraint failed: u.k"),
         "expected virtual-rowid table UNIQUE swap error, got: {}",

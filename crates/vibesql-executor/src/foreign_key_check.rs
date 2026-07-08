@@ -49,13 +49,10 @@ pub fn detect_fk_mismatch(
 /// Resolve the FK's parent-side column indices, preferring `parent_column_names`
 /// over the cached `parent_column_indices` (which may carry placeholder zeros
 /// when the parent did not yet exist at FK creation time).
-fn resolve_parent_indices(
-    parent: &TableSchema,
-    fk: &ForeignKeyConstraint,
-) -> Vec<usize> {
+fn resolve_parent_indices(parent: &TableSchema, fk: &ForeignKeyConstraint) -> Vec<usize> {
     // Names available and non-empty — resolve lazily.
-    let names_usable = !fk.parent_column_names.is_empty()
-        && fk.parent_column_names.iter().any(|n| !n.is_empty());
+    let names_usable =
+        !fk.parent_column_names.is_empty() && fk.parent_column_names.iter().any(|n| !n.is_empty());
     if names_usable {
         let by_name: Vec<Option<usize>> = fk
             .parent_column_names
@@ -89,11 +86,7 @@ fn resolve_parent_indices(
 
 /// True when the parent table exposes a PK / UNIQUE / non-partial UNIQUE INDEX
 /// that exactly covers the supplied column set.
-fn parent_has_matching_key(
-    db: &Database,
-    parent: &TableSchema,
-    parent_indices: &[usize],
-) -> bool {
+fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: &[usize]) -> bool {
     if parent_indices.is_empty() {
         return false;
     }
@@ -214,10 +207,7 @@ fn sql_value_as_text(v: &vibesql_types::SqlValue) -> Option<&str> {
 /// stale placeholder indices left behind after a SQL-dump reload do not
 /// cause us to read collation from the wrong column. Missing parent tables
 /// or out-of-range indices yield `None`.
-pub fn parent_collations_for_fk(
-    db: &Database,
-    fk: &ForeignKeyConstraint,
-) -> Vec<Option<String>> {
+pub fn parent_collations_for_fk(db: &Database, fk: &ForeignKeyConstraint) -> Vec<Option<String>> {
     if let Some(parent) = db.catalog.get_table(&fk.parent_table) {
         let indices = resolve_parent_indices(parent, fk);
         indices
@@ -234,10 +224,7 @@ pub fn parent_collations_for_fk(
 /// row-existence comparisons aligned with mismatch detection so that they
 /// agree on what "the parent FK columns" mean even after a SQL-dump reload
 /// reordered children before parents.
-pub fn resolved_parent_indices_for_fk(
-    db: &Database,
-    fk: &ForeignKeyConstraint,
-) -> Vec<usize> {
+pub fn resolved_parent_indices_for_fk(db: &Database, fk: &ForeignKeyConstraint) -> Vec<usize> {
     if let Some(parent) = db.catalog.get_table(&fk.parent_table) {
         resolve_parent_indices(parent, fk)
     } else {
@@ -327,9 +314,9 @@ pub(crate) fn check_fk_row_existence(
     // Parent table is required for the existence scan. Caller has already
     // confirmed schema mismatch is OK (and a mismatch error path would
     // have returned before reaching this helper).
-    let parent_table = db.get_table(&fk.parent_table).ok_or_else(|| {
-        crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
-    })?;
+    let parent_table = db
+        .get_table(&fk.parent_table)
+        .ok_or_else(|| crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone()))?;
 
     let parent_collations = parent_collations_for_fk(db, fk);
     let parent_indices = resolved_parent_indices_for_fk(db, fk);
@@ -395,16 +382,16 @@ pub(crate) fn check_fk_row_existence(
     // candidate row participates as a whole row in its own FK check.
     if fk.parent_table.eq_ignore_ascii_case(table_name) {
         let row_matches = |candidate: &[vibesql_types::SqlValue]| -> bool {
-            parent_indices.iter().zip(fk_values).enumerate().all(
-                |(i, (&parent_idx, fk_val))| match candidate.get(parent_idx) {
+            parent_indices.iter().zip(fk_values).enumerate().all(|(i, (&parent_idx, fk_val))| {
+                match candidate.get(parent_idx) {
                     Some(parent_val) => fk_values_equal(
                         fk_val,
                         parent_val,
                         parent_collations.get(i).and_then(|c| c.as_deref()),
                     ),
                     None => false,
-                },
-            )
+                }
+            })
         };
         if row_matches(full_row_values) || batch_full_rows.iter().any(|r| row_matches(r)) {
             return Ok(FkRowCheck::Ok);
@@ -533,11 +520,8 @@ mod tests {
             ColumnSchema::new("id".to_string(), DataType::Integer, false),
             ColumnSchema::new("pid".to_string(), DataType::Integer, true),
         ];
-        let mut c = TableSchema::with_primary_key(
-            "c".to_string(),
-            child_columns,
-            vec!["id".to_string()],
-        );
+        let mut c =
+            TableSchema::with_primary_key("c".to_string(), child_columns, vec!["id".to_string()]);
         c.foreign_keys.push(child_fk.clone());
         db.create_table(c).unwrap();
 

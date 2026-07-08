@@ -824,7 +824,13 @@ fn is_supported_derived_operator(op: &BinaryOperator) -> bool {
 /// narrow guard is what keeps overflow/division/NULL semantics matching the
 /// row path: only arithmetic the row-path evaluator handles identically is
 /// admitted.
-fn extract_derived_expr(
+///
+/// This is shared with the columnar GROUP BY expression-key path (issue #5995):
+/// a `GROUP BY <expr>` that this function admits can be materialized as a
+/// derived key column via [`super::super::aggregate::materialize_derived_column`]
+/// and fed into the existing hash-grouping machinery, keeping grouping-key
+/// arithmetic in lockstep with computed WHERE predicates.
+pub fn extract_derived_expr(
     expr: &Expression,
     schema: &CombinedSchema,
 ) -> Option<(DerivedExpr, Vec<usize>)> {

@@ -170,9 +170,10 @@ fn bare_subquery_inner_has_outer_aggregate(expr: &vibesql_ast::Expression) -> bo
                 | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
             };
             args.iter().any(bare_subquery_inner_has_outer_aggregate)
-                || over.partition_by.as_ref().is_some_and(|exprs| {
-                    exprs.iter().any(bare_subquery_inner_has_outer_aggregate)
-                })
+                || over
+                    .partition_by
+                    .as_ref()
+                    .is_some_and(|exprs| exprs.iter().any(bare_subquery_inner_has_outer_aggregate))
                 || over.order_by.as_ref().is_some_and(|items| {
                     items.iter().any(|i| bare_subquery_inner_has_outer_aggregate(&i.expr))
                 })

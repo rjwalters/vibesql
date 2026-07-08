@@ -76,10 +76,7 @@ fn reopen_binary(db: &Database, tag: &str) -> Database {
 
 fn assert_not_null_error(res: Result<(), String>, table_col: &str) {
     let err = res.expect_err("expected NOT NULL constraint violation");
-    assert!(
-        err.contains("NOT NULL constraint failed"),
-        "expected NOT NULL error, got: {err}"
-    );
+    assert!(err.contains("NOT NULL constraint failed"), "expected NOT NULL error, got: {err}");
     assert!(err.contains(table_col), "expected `{table_col}` in error, got: {err}");
 }
 
@@ -135,7 +132,8 @@ fn explicit_default_keyword_gets_default() {
     // VibeSQL-only assertion, not a differential one.)
     let mut db = Database::new();
     create_with_source(&mut db, "CREATE TABLE t(a INT DEFAULT 5 NOT NULL, b INT)");
-    exec(&mut db, "INSERT INTO t(a, b) VALUES(DEFAULT, 1)").expect("VALUES(DEFAULT) should succeed");
+    exec(&mut db, "INSERT INTO t(a, b) VALUES(DEFAULT, 1)")
+        .expect("VALUES(DEFAULT) should succeed");
     assert_eq!(scalar(&db, "SELECT a FROM t"), vibesql_types::SqlValue::Integer(5));
 }
 
@@ -149,10 +147,7 @@ fn multi_row_mixed_explicit_null_aborts() {
     // sqlite3: INSERT INTO t(a,b) VALUES(10,1),(NULL,2) -> NOT NULL constraint failed: t.a
     let mut db = Database::new();
     create_with_source(&mut db, "CREATE TABLE t(a INT DEFAULT 5 NOT NULL, b INT)");
-    assert_not_null_error(
-        exec(&mut db, "INSERT INTO t(a, b) VALUES(10, 1), (NULL, 2)"),
-        "t.a",
-    );
+    assert_not_null_error(exec(&mut db, "INSERT INTO t(a, b) VALUES(10, 1), (NULL, 2)"), "t.a");
     // Statement aborts atomically; no partial rows survive.
     assert_eq!(count(&db, "t"), 0);
 }
@@ -204,10 +199,7 @@ fn enforcement_survives_reload() {
     assert_eq!(scalar(&reloaded, "SELECT a FROM t"), vibesql_types::SqlValue::Integer(5));
 
     // Explicit NULL is still rejected after reopen.
-    assert_not_null_error(
-        exec(&mut reloaded, "INSERT INTO t(a, b) VALUES(NULL, 2)"),
-        "t.a",
-    );
+    assert_not_null_error(exec(&mut reloaded, "INSERT INTO t(a, b) VALUES(NULL, 2)"), "t.a");
     // Omitted column still receives the default after reopen.
     exec(&mut reloaded, "INSERT INTO t(b) VALUES(3)").expect("omitted insert after reload");
     assert_eq!(

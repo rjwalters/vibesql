@@ -28,7 +28,9 @@ impl InsertExecutor {
         // just this statement, RAISE(FAIL) keeps its partial changes, and
         // RAISE(ROLLBACK) rolls back the whole transaction.
         let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(db, may_fire, |db| execution::execute_insert(db, stmt))
+        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
+            execution::execute_insert(db, stmt)
+        })
     }
 
     /// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)

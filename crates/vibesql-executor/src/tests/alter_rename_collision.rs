@@ -43,10 +43,7 @@ fn rename_onto_existing_table_matches_sqlite_message() {
 
     let err = exec(&mut db, "ALTER TABLE a RENAME TO b").unwrap_err();
     assert_eq!(err, ExecutorError::RenameTargetExists("b".to_string()));
-    assert_eq!(
-        err.to_string(),
-        "there is already another table or index with this name: b"
-    );
+    assert_eq!(err.to_string(), "there is already another table or index with this name: b");
 
     // The failed rename must leave the original table intact.
     assert!(db.get_table("a").is_some(), "source table should survive a failed rename");
@@ -60,10 +57,7 @@ fn rename_onto_existing_index_matches_sqlite_message() {
 
     let err = exec(&mut db, "ALTER TABLE a RENAME TO idx").unwrap_err();
     assert_eq!(err, ExecutorError::RenameTargetExists("idx".to_string()));
-    assert_eq!(
-        err.to_string(),
-        "there is already another table or index with this name: idx"
-    );
+    assert_eq!(err.to_string(), "there is already another table or index with this name: idx");
 
     assert!(db.get_table("a").is_some(), "source table should survive a failed rename");
 }

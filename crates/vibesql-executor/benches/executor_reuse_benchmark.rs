@@ -117,13 +117,7 @@ fn median(values: &[f64]) -> f64 {
 }
 
 /// Measure one query both ways across `trials` interleaved trials and print the ratio.
-fn measure(
-    label: &str,
-    sql: &str,
-    db: &vibesql_storage::Database,
-    iters: usize,
-    trials: usize,
-) {
+fn measure(label: &str, sql: &str, db: &vibesql_storage::Database, iters: usize, trials: usize) {
     let stmt = parse_select(sql);
 
     // Correctness gate: reuse must be equivalent to fresh construction.
@@ -154,10 +148,7 @@ fn measure(
     println!("  Trials (median of): {trials}");
     println!("  Without reuse:      {without_med:>12.0} queries/sec (median)");
     println!("  With reuse:         {with_med:>12.0} queries/sec (median)");
-    println!(
-        "  Relative speedup:   {ratio:.4}x  ({:+.2}%)",
-        (ratio - 1.0) * 100.0
-    );
+    println!("  Relative speedup:   {ratio:.4}x  ({:+.2}%)", (ratio - 1.0) * 100.0);
     if (ratio - 1.0).abs() < 0.03 {
         println!("  Verdict:            NULL RESULT (within +/-3% noise band)");
     } else if ratio > 1.0 {
@@ -172,8 +163,7 @@ fn main() {
         env::var("EXEC_REUSE_ITERS").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000);
     let trials: usize =
         env::var("EXEC_REUSE_TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(7);
-    let scale: f64 =
-        env::var("EXEC_REUSE_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
+    let scale: f64 = env::var("EXEC_REUSE_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(0.01);
 
     eprintln!("=== Executor Reuse Microbenchmark (issue #5758) ===");
     eprintln!("Loading TPC-C database (SF {scale})...");

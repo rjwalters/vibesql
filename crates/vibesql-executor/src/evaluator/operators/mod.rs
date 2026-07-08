@@ -95,11 +95,9 @@ impl OperatorRegistry {
             L2Distance => VectorOps::l2_distance(left, right),
 
             // JSON operators (-> returns JSON text, ->> returns SQL value)
-            JsonExtract => {
-                crate::evaluator::functions::sqlite_compat::json_funcs::eval_json_arrow(
-                    left, right, false,
-                )
-            }
+            JsonExtract => crate::evaluator::functions::sqlite_compat::json_funcs::eval_json_arrow(
+                left, right, false,
+            ),
             JsonExtractText => {
                 crate::evaluator::functions::sqlite_compat::json_funcs::eval_json_arrow(
                     left, right, true,

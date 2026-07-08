@@ -142,9 +142,7 @@ impl RecursionGuard {
                 // SQLITE_MAX_TRIGGER_DEPTH (1000) on native targets via on-demand
                 // stack growth; see the stack-safety note on
                 // MAX_TRIGGER_RECURSION_DEPTH.
-                Err(ExecutorError::Other(
-                    "too many levels of trigger recursion".to_string(),
-                ))
+                Err(ExecutorError::Other("too many levels of trigger recursion".to_string()))
             } else {
                 depth.set(current + 1);
                 Ok(RecursionGuard)
@@ -312,12 +310,7 @@ impl<'a> TriggerContext<'a> {
             column_name: column.to_string(),
             table_name: self.table_schema.name.clone(),
             searched_tables: vec![self.table_schema.name.clone()],
-            available_columns: self
-                .table_schema
-                .columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect(),
+            available_columns: self.table_schema.columns.iter().map(|c| c.name.clone()).collect(),
         })
     }
 }
@@ -858,8 +851,7 @@ impl TriggerFirer {
                 // and a body like `SELECT CASE WHEN NEW.id = 1 THEN raise(IGNORE)
                 // END` failed at fire time with "Column reference requires FROM
                 // clause".
-                let executor =
-                    crate::SelectExecutor::new_with_trigger_context(db, trigger_context);
+                let executor = crate::SelectExecutor::new_with_trigger_context(db, trigger_context);
                 executor.execute_with_columns(select_stmt)?;
                 Ok(())
             }
@@ -949,8 +941,7 @@ impl TriggerFirer {
                 }
 
                 // A RAISE(IGNORE) in any trigger abandons the current row.
-                if Self::execute_trigger(db, &trigger, old_row, new_row)?
-                    == TriggerOutcome::SkipRow
+                if Self::execute_trigger(db, &trigger, old_row, new_row)? == TriggerOutcome::SkipRow
                 {
                     return Ok(TriggerOutcome::SkipRow);
                 }
@@ -1065,8 +1056,7 @@ impl TriggerFirer {
                     }
                 }
 
-                if Self::execute_trigger(db, &trigger, old_row, new_row)?
-                    == TriggerOutcome::SkipRow
+                if Self::execute_trigger(db, &trigger, old_row, new_row)? == TriggerOutcome::SkipRow
                 {
                     return Ok(TriggerOutcome::SkipRow);
                 }

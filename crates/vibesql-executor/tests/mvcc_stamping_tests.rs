@@ -161,7 +161,10 @@ fn delete_in_txn_off_state_keeps_xmax_none() {
     let xmax = row.xmax;
     db.commit_transaction().unwrap();
 
-    assert_eq!(xmax, None, "with mvcc_enabled OFF, DELETE must leave xmax = None even inside a txn");
+    assert_eq!(
+        xmax, None,
+        "with mvcc_enabled OFF, DELETE must leave xmax = None even inside a txn"
+    );
 }
 
 #[cfg(not(feature = "mvcc_enabled"))]
@@ -205,10 +208,7 @@ fn insert_in_txn_stamps_xmin_with_current_txn_id() {
     let rows = raw_rows(&db, "USERS");
     assert_eq!(rows.len(), 2, "two rows inserted");
     for row in rows {
-        assert_eq!(
-            row.xmin, txn_id,
-            "every newly INSERTed row must carry xmin = current_txn_id"
-        );
+        assert_eq!(row.xmin, txn_id, "every newly INSERTed row must carry xmin = current_txn_id");
         assert_eq!(row.xmax, None, "new rows must have xmax = None");
     }
 
@@ -301,10 +301,7 @@ fn batch_insert_in_txn_stamps_all_rows_with_same_xmin() {
     exec(&mut db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(50))");
     db.begin_transaction().unwrap();
     let txn_id = db.transaction_id().unwrap();
-    exec(
-        &mut db,
-        "INSERT INTO users VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')",
-    );
+    exec(&mut db, "INSERT INTO users VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e')");
 
     let rows: Vec<Row> = raw_rows(&db, "USERS").to_vec();
     db.commit_transaction().unwrap();
@@ -380,14 +377,9 @@ fn second_transaction_sees_committed_rows_with_first_xmin() {
     db.commit_transaction().unwrap();
 
     let rows = raw_rows(&db, "USERS");
-    let alice = rows
-        .iter()
-        .find(|r| matches!(r.values.first(), Some(SqlValue::Integer(1))))
-        .unwrap();
-    let bob = rows
-        .iter()
-        .find(|r| matches!(r.values.first(), Some(SqlValue::Integer(2))))
-        .unwrap();
+    let alice =
+        rows.iter().find(|r| matches!(r.values.first(), Some(SqlValue::Integer(1)))).unwrap();
+    let bob = rows.iter().find(|r| matches!(r.values.first(), Some(SqlValue::Integer(2)))).unwrap();
     assert_eq!(alice.xmin, txn1, "Alice's xmin should still reflect the inserter");
     assert_eq!(bob.xmin, txn2, "Bob's xmin should reflect his own inserter");
 }

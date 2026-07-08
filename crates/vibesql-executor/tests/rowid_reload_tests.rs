@@ -243,8 +243,7 @@ fn replace_conflict_delete_survives_crash_via_wal_replay() {
         .expect("t1 must exist after recovery");
     let table = recovered.get_table(&table_name).expect("recovered table");
 
-    let live: Vec<Vec<SqlValue>> =
-        table.scan_live().map(|(_, r)| r.values.to_vec()).collect();
+    let live: Vec<Vec<SqlValue>> = table.scan_live().map(|(_, r)| r.values.to_vec()).collect();
     assert_eq!(
         live,
         vec![vec![int(11), int(33)]],

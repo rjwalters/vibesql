@@ -327,7 +327,11 @@ CREATE INDEX idx_dept ON employees (dept Asc);
         exec_one(&mut db, "COMMIT");
 
         // After the drop transaction commits, no tbl* tables remain.
-        assert!(db.list_tables().is_empty(), "all tables should be dropped: {:?}", db.list_tables());
+        assert!(
+            db.list_tables().is_empty(),
+            "all tables should be dropped: {:?}",
+            db.list_tables()
+        );
 
         // Save and reload via the engine's own replay path. The dump must reload
         // cleanly — no duplicate / stale CREATE TABLE for a dropped table.
@@ -517,7 +521,8 @@ INSERT INTO sqlite_t3 VALUES (1, 2, 3);
         // CREATE TABLE with a reserved `sqlite_` name is still rejected. Only the
         // trusted load/replay path bypasses the guard.
         let mut db = Database::new();
-        let stmt = vibesql_parser::Parser::parse_sql("CREATE TABLE sqlite_foo (x INTEGER)").unwrap();
+        let stmt =
+            vibesql_parser::Parser::parse_sql("CREATE TABLE sqlite_foo (x INTEGER)").unwrap();
         if let vibesql_ast::Statement::CreateTable(s) = stmt {
             let err = CreateTableExecutor::execute(&s, &mut db).unwrap_err();
             assert_eq!(err.to_string(), "object name reserved for internal use: sqlite_foo");

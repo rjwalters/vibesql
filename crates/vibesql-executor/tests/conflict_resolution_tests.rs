@@ -614,7 +614,10 @@ fn test_insert_on_conflict_do_nothing_primary_key() {
         ]]),
         conflict_clause: None,
         on_conflict: vec![OnConflictClause {
-            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column { name: "id".to_string(), collation: None }]),
+            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column {
+                name: "id".to_string(),
+                collation: None,
+            }]),
             target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,
@@ -698,7 +701,10 @@ fn test_insert_on_conflict_do_nothing_no_conflict() {
         ]]),
         conflict_clause: None,
         on_conflict: vec![OnConflictClause {
-            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column { name: "id".to_string(), collation: None }]),
+            conflict_target: Some(vec![vibesql_ast::ConflictTargetItem::Column {
+                name: "id".to_string(),
+                collation: None,
+            }]),
             target_where: None,
             target_inexact: false,
             action: OnConflictAction::DoNothing,

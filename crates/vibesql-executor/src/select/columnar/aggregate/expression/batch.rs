@@ -559,10 +559,9 @@ pub fn evaluate_expression_with_cached_column(
 ///
 /// A `ColumnArray::Mixed` of length `batch.row_count()` holding the computed
 /// values (NULLs stored inline as `SqlValue::Null`).
-// Exposed as the shared "materialize a derived column" building block for the
-// GROUP BY expression path (issue #5995), which does not exist yet -- hence
-// `dead_code`. It is exercised by unit tests in this module.
-#[allow(dead_code)]
+// Shared "materialize a derived column" building block, consumed by the
+// columnar filter path (computed-column WHERE predicates, issue #5994) and the
+// columnar GROUP BY expression-key path (issue #5995).
 pub fn materialize_derived_column(
     batch: &ColumnarBatch,
     expr: &crate::select::columnar::filter::DerivedExpr,

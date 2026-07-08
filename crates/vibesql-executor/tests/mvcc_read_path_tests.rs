@@ -171,11 +171,7 @@ fn snapshot_isolation_select_sees_stable_view_across_concurrent_commit() {
 
     // After #5207, the txn must see its own write.
     let after_update = balance(&mut db);
-    assert_eq!(
-        after_update,
-        Some(150),
-        "#5207: a txn must see its own UPDATE in subsequent reads"
-    );
+    assert_eq!(after_update, Some(150), "#5207: a txn must see its own UPDATE in subsequent reads");
 
     exec(&mut db, "COMMIT");
 }
@@ -213,10 +209,7 @@ fn fk_deferred_replay_uses_commit_time_snapshot() {
     //
     // This validates `capture_commit_time_snapshot` is wired in.
     let mut db = Database::new();
-    exec(
-        &mut db,
-        "CREATE TABLE parent (id INTEGER PRIMARY KEY)",
-    );
+    exec(&mut db, "CREATE TABLE parent (id INTEGER PRIMARY KEY)");
     exec(
         &mut db,
         "CREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)",

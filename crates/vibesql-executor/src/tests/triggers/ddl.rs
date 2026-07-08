@@ -162,7 +162,10 @@ fn test_duplicate_trigger_already_exists_echoes_source_quoting() {
             "CREATE TRIGGER \"tr1\" DELETE ON t1 BEGIN SELECT 1; END;",
             "Trigger '\"tr1\"' already exists",
         ),
-        ("CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;", "Trigger '[tr1]' already exists"),
+        (
+            "CREATE TRIGGER [tr1] DELETE ON t1 BEGIN SELECT 1; END;",
+            "Trigger '[tr1]' already exists",
+        ),
     ];
 
     for (dup_sql, expected) in cases {
@@ -270,8 +273,9 @@ fn test_create_temp_trigger_missing_table_is_not_qualified() {
     // Asserted against VibeSQL's raw `Table '<name>' not found` wording (see the
     // sibling test above for why).
     let mut db = Database::new();
-    let stmt =
-        parse_create_trigger("CREATE TEMP TRIGGER trig UPDATE ON no_such_table BEGIN SELECT 1; END;");
+    let stmt = parse_create_trigger(
+        "CREATE TEMP TRIGGER trig UPDATE ON no_such_table BEGIN SELECT 1; END;",
+    );
     let err = crate::advanced_objects::execute_create_trigger(&stmt, &mut db)
         .expect_err("CREATE TEMP TRIGGER on a missing table must be rejected");
     assert_eq!(err.to_string(), "Table 'no_such_table' not found");
@@ -345,8 +349,11 @@ fn test_drop_trigger() {
     assert!(db.catalog.get_trigger("my_trigger").is_some());
 
     // Drop the trigger
-    let drop_stmt =
-        DropTriggerStmt { trigger_name: "my_trigger".to_string(), cascade: false, if_exists: false };
+    let drop_stmt = DropTriggerStmt {
+        trigger_name: "my_trigger".to_string(),
+        cascade: false,
+        if_exists: false,
+    };
 
     let result = crate::advanced_objects::execute_drop_trigger(&drop_stmt, &mut db);
     assert!(result.is_ok(), "Failed to drop trigger: {:?}", result.err());

@@ -91,10 +91,7 @@ fn save_and_reload(db: &Database, tag: &str) -> Database {
     let path = std::env::temp_dir().join(format!(
         "vibesql_5568_{tag}_{}_{}.sql",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
     ));
     db.save_sql_dump(&path).expect("save_sql_dump failed");
     let dump = read_sql_dump(&path).expect("read_sql_dump failed");
@@ -135,10 +132,7 @@ fn same_batch_index_persists_and_is_usable_after_reload() {
     );
     // ...attached to the correct table...
     assert!(
-        reloaded
-            .list_indexes_for_table("t")
-            .iter()
-            .any(|i| i.eq_ignore_ascii_case("ix")),
+        reloaded.list_indexes_for_table("t").iter().any(|i| i.eq_ignore_ascii_case("ix")),
         "reloaded index not associated with table t"
     );
     // ...and usable: a predicate on the indexed column returns the right rows.
@@ -163,10 +157,7 @@ fn same_batch_quoted_index_name_roundtrips() {
     let reloaded = save_and_reload(&db, "quoted");
 
     assert!(
-        reloaded
-            .list_indexes()
-            .iter()
-            .any(|i| i.eq_ignore_ascii_case("x1 (b asc, c asc)")),
+        reloaded.list_indexes().iter().any(|i| i.eq_ignore_ascii_case("x1 (b asc, c asc)")),
         "quoted same-batch index lost on reload; indexes: {:?}",
         reloaded.list_indexes()
     );
@@ -213,10 +204,7 @@ fn separate_batch_index_still_persists() {
     let reloaded = save_and_reload(&db, "separate");
 
     assert!(
-        reloaded
-            .list_indexes()
-            .iter()
-            .any(|i| i.eq_ignore_ascii_case("ix_later")),
+        reloaded.list_indexes().iter().any(|i| i.eq_ignore_ascii_case("ix_later")),
         "separately-created index lost on reload; indexes: {:?}",
         reloaded.list_indexes()
     );

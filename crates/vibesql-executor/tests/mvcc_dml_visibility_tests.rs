@@ -72,15 +72,15 @@ fn enable_fks(db: &mut Database) {
 fn try_exec(db: &mut Database, sql: &str) -> Result<(), String> {
     let stmt = Parser::parse_sql(sql).map_err(|e| format!("{:?}", e))?;
     match stmt {
-        Statement::Insert(s) => InsertExecutor::execute(db, &s)
-            .map(|_| ())
-            .map_err(|e| format!("{:?}", e)),
-        Statement::Update(s) => UpdateExecutor::execute(&s, db)
-            .map(|_| ())
-            .map_err(|e| format!("{:?}", e)),
-        Statement::Delete(s) => DeleteExecutor::execute(&s, db)
-            .map(|_| ())
-            .map_err(|e| format!("{:?}", e)),
+        Statement::Insert(s) => {
+            InsertExecutor::execute(db, &s).map(|_| ()).map_err(|e| format!("{:?}", e))
+        }
+        Statement::Update(s) => {
+            UpdateExecutor::execute(&s, db).map(|_| ()).map_err(|e| format!("{:?}", e))
+        }
+        Statement::Delete(s) => {
+            DeleteExecutor::execute(&s, db).map(|_| ()).map_err(|e| format!("{:?}", e))
+        }
         other => panic!("try_exec only supports INSERT/UPDATE/DELETE, got {:?}", other),
     }
 }

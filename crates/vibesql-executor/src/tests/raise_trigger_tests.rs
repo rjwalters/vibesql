@@ -578,8 +578,8 @@ fn autocommit_multirow_unique_violation_rolls_back_whole_statement() {
     exec_ok(&mut db, "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)");
     exec_ok(&mut db, "INSERT INTO t (id, v) VALUES (1, 10)");
 
-    let err = exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2,20),(3,30),(1,99),(4,40)")
-        .unwrap_err();
+    let err =
+        exec_dml(&mut db, "INSERT INTO t (id, v) VALUES (2,20),(3,30),(1,99),(4,40)").unwrap_err();
     assert!(err.to_string().contains("UNIQUE"), "expected UNIQUE error, got {err}");
 
     assert!(!db.in_transaction());
@@ -873,8 +873,7 @@ fn raise_ignore_in_instead_of_delete_abandons_row() {
          END",
     );
 
-    exec_dml(&mut db, "DELETE FROM vw")
-        .expect("RAISE(IGNORE) in INSTEAD OF DELETE must not error");
+    exec_dml(&mut db, "DELETE FROM vw").expect("RAISE(IGNORE) in INSTEAD OF DELETE must not error");
 
     // Base unchanged: every row's view delete was abandoned.
     assert_eq!(ints(&db, "base", "id"), vec![1, 2]);
@@ -1043,10 +1042,7 @@ fn base_table_trigger_when_clause_still_works() {
 
 /// Run `SELECT <cols> FROM <table> ORDER BY <order_by>` and return the rows'
 /// raw `SqlValue` cells — exercising the live read path a client would see.
-fn select_rows(
-    db: &vibesql_storage::Database,
-    sql: &str,
-) -> Vec<Vec<SqlValue>> {
+fn select_rows(db: &vibesql_storage::Database, sql: &str) -> Vec<Vec<SqlValue>> {
     let stmt =
         Parser::parse_sql(sql).unwrap_or_else(|e| panic!("Failed to parse {:?}: {:?}", sql, e));
     match stmt {
@@ -1212,10 +1208,7 @@ fn replace_with_raise_ignore_before_delete_errors_and_leaves_table_unchanged() {
     exec_ok(&mut db, "CREATE TRIGGER bd BEFORE DELETE ON t BEGIN SELECT raise(IGNORE); END");
 
     let result = exec_dml(&mut db, "INSERT OR REPLACE INTO t (id, v) VALUES (1, 99)");
-    assert!(
-        result.is_err(),
-        "the IGNORE'd conflicting row still collides on the PK -> error"
-    );
+    assert!(result.is_err(), "the IGNORE'd conflicting row still collides on the PK -> error");
 
     assert_eq!(
         select_rows(&db, "SELECT id, v FROM t ORDER BY id"),
@@ -1557,10 +1550,7 @@ fn procedural_insert_raise_abort_undoes_statement_keeps_txn() {
     exec_dml_procedural(&mut db, "INSERT INTO t (id, v) VALUES (3, 'after')").expect("stmt 3 ok");
     db.commit_transaction().expect("COMMIT");
 
-    assert_eq!(
-        select_rows(&db, "SELECT id FROM t ORDER BY id"),
-        vec![vec![ipk(1)], vec![ipk(3)]],
-    );
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), vec![vec![ipk(1)], vec![ipk(3)]],);
 }
 
 /// RAISE(ROLLBACK) through the procedural-context INSERT entry point: the whole
@@ -1579,10 +1569,7 @@ fn procedural_insert_raise_rollback_aborts_whole_txn() {
     }
 
     assert!(!db.in_transaction(), "ROLLBACK must end the transaction");
-    assert_eq!(
-        select_rows(&db, "SELECT id FROM t ORDER BY id"),
-        Vec::<Vec<SqlValue>>::new(),
-    );
+    assert_eq!(select_rows(&db, "SELECT id FROM t ORDER BY id"), Vec::<Vec<SqlValue>>::new(),);
 }
 
 /// RAISE(ABORT) vs RAISE(FAIL) through the procedural-context INSERT entry point

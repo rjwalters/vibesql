@@ -557,11 +557,7 @@ impl DeleteExecutor {
                 // trigger1-1.10's `DELETE FROM t WHERE a = old.a + 2`). SQLite
                 // processes such a row only once, so skip it here — its BEFORE/
                 // AFTER triggers do not fire a second time.
-                if database
-                    .get_table(table_name)
-                    .map(|t| t.is_row_deleted(*idx))
-                    .unwrap_or(true)
-                {
+                if database.get_table(table_name).map(|t| t.is_row_deleted(*idx)).unwrap_or(true) {
                     continue;
                 }
 

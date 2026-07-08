@@ -172,12 +172,11 @@ impl<'a> ExecutionContext<'a> {
         // context (a trigger body cannot run inside a stored procedure body), but
         // we still allow it to compose with outer_rows, set below.
         if let Some(trigger_ctx) = self.trigger_context {
-            let mut evaluator =
-                CombinedExpressionEvaluator::with_database_and_trigger_context(
-                    self.schema,
-                    self.database,
-                    trigger_ctx,
-                );
+            let mut evaluator = CombinedExpressionEvaluator::with_database_and_trigger_context(
+                self.schema,
+                self.database,
+                trigger_ctx,
+            );
             if let Some(outer_rows) = self.outer_rows {
                 evaluator.set_outer_rows(outer_rows);
             }

@@ -214,7 +214,10 @@ fn test_with_update_cte_in_set_and_where() {
     let mut db = vibesql_storage::Database::new();
     run_stmt(&mut db, "CREATE TABLE t(a INTEGER)");
     run_stmt(&mut db, "INSERT INTO t VALUES(1),(2)");
-    run_stmt(&mut db, "WITH c AS (SELECT 1 AS k) UPDATE t SET a = a*10 WHERE a = (SELECT k FROM c)");
+    run_stmt(
+        &mut db,
+        "WITH c AS (SELECT 1 AS k) UPDATE t SET a = a*10 WHERE a = (SELECT k FROM c)",
+    );
     assert_eq!(
         query(&db, "SELECT a FROM t ORDER BY a"),
         vec![vec![SqlValue::Integer(2)], vec![SqlValue::Integer(10)]]

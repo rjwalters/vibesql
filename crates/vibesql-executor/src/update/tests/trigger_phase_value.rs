@@ -50,8 +50,7 @@ fn log_values(db: &Database) -> Vec<String> {
         Statement::Select(s) => s,
         other => panic!("expected SELECT, got {other:?}"),
     };
-    let result =
-        crate::SelectExecutor::new(db).execute_with_columns(&select).expect("run select");
+    let result = crate::SelectExecutor::new(db).execute_with_columns(&select).expect("run select");
     result
         .rows
         .iter()
@@ -222,8 +221,7 @@ fn no_trigger_update_applies_all_rows() {
         Statement::Select(s) => s,
         other => panic!("expected SELECT, got {other:?}"),
     };
-    let result =
-        crate::SelectExecutor::new(&db).execute_with_columns(&select).expect("run select");
+    let result = crate::SelectExecutor::new(&db).execute_with_columns(&select).expect("run select");
     // sum=110+120+130=360, max=130, count=3
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].values[0], SqlValue::Integer(360));

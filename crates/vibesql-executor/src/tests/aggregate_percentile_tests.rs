@@ -173,8 +173,8 @@ fn test_percentile_fraction_consistency() {
 
     let err = execute_sql(&mut db, "SELECT percentile(x, 15+0.1*id) FROM t1").unwrap_err();
     assert_eq!(err, "the fraction argument to percentile() is not the same for all input rows");
-    let err = execute_sql(&mut db, "SELECT percentile_cont(x, (15+0.1*id)*0.01) FROM t1")
-        .unwrap_err();
+    let err =
+        execute_sql(&mut db, "SELECT percentile_cont(x, (15+0.1*id)*0.01) FROM t1").unwrap_err();
     assert_eq!(
         err,
         "the fraction argument to percentile_cont() is not the same for all input rows"
@@ -306,16 +306,12 @@ fn test_median_group_by() {
     )
     .unwrap();
 
-    let rows = execute_sql(
-        &mut db,
-        "SELECT vendorId, median(price) FROM products GROUP BY 1 ORDER BY 1",
-    )
-    .unwrap();
+    let rows =
+        execute_sql(&mut db, "SELECT vendorId, median(price) FROM products GROUP BY 1 ORDER BY 1")
+            .unwrap();
     assert_eq!(rows.len(), 4);
-    let got: Vec<(String, String)> = rows
-        .iter()
-        .map(|r| (r.values[0].to_string(), r.values[1].to_string()))
-        .collect();
+    let got: Vec<(String, String)> =
+        rows.iter().map(|r| (r.values[0].to_string(), r.values[1].to_string())).collect();
     assert_eq!(
         got,
         vec![

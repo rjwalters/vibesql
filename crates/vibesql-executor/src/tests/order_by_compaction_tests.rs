@@ -17,9 +17,7 @@ use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
 use crate::select::SelectExecutor;
-use crate::{
-    CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor,
-};
+use crate::{CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor};
 
 fn create_test_db() -> Database {
     let mut db = Database::new();
@@ -93,11 +91,7 @@ fn test_order_by_pk_after_mid_statement_compaction_5524() {
     let ordered_asc = query(&db, "SELECT a, b FROM t1 ORDER BY a");
     let ordered_desc = query(&db, "SELECT a, b FROM t1 ORDER BY a DESC");
 
-    assert_eq!(
-        count as usize,
-        unordered.len(),
-        "count(*) must match unordered row count"
-    );
+    assert_eq!(count as usize, unordered.len(), "count(*) must match unordered row count");
 
     // The core assertion: the index-ordered scan must return the same live
     // rows as the unordered scan.
@@ -128,10 +122,7 @@ fn test_order_by_pk_after_delete_compaction_with_gaps_5524() {
     let mut db = create_test_db();
 
     exec(&mut db, "CREATE TABLE t2(a INT PRIMARY KEY, b)");
-    exec(
-        &mut db,
-        "INSERT INTO t2 VALUES (10,'a'),(20,'b'),(30,'c'),(40,'d'),(50,'e')",
-    );
+    exec(&mut db, "INSERT INTO t2 VALUES (10,'a'),(20,'b'),(30,'c'),(40,'d'),(50,'e')");
     // Delete a majority to force compaction (> 50% deleted).
     exec(&mut db, "DELETE FROM t2 WHERE a IN (10, 30, 50)");
 
@@ -168,10 +159,7 @@ fn test_order_by_secondary_index_after_compaction_5524() {
     )
     .unwrap();
 
-    exec(
-        &mut db,
-        "INSERT INTO t3 VALUES (1,50,'x'),(2,40,'y'),(3,30,'z'),(4,20,'w'),(5,10,'v')",
-    );
+    exec(&mut db, "INSERT INTO t3 VALUES (1,50,'x'),(2,40,'y'),(3,30,'z'),(4,20,'w'),(5,10,'v')");
     // Delete majority -> compaction, then both PK and secondary index must be
     // rebuilt to the post-compaction positions.
     exec(&mut db, "DELETE FROM t3 WHERE a IN (1, 2, 3)");
@@ -199,10 +187,7 @@ fn test_order_by_pk_after_partial_delete_no_compaction_5524() {
     let mut db = create_test_db();
 
     exec(&mut db, "CREATE TABLE t4(a INT PRIMARY KEY, b)");
-    exec(
-        &mut db,
-        "INSERT INTO t4 VALUES (1,'a'),(2,'b'),(3,'c'),(4,'d'),(5,'e')",
-    );
+    exec(&mut db, "INSERT INTO t4 VALUES (1,'a'),(2,'b'),(3,'c'),(4,'d'),(5,'e')");
     // Delete a single row (minority -> no compaction, just a tombstone).
     exec(&mut db, "DELETE FROM t4 WHERE a = 3");
 

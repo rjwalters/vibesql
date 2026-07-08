@@ -280,8 +280,7 @@ mod tests {
     }
 
     fn td(a: &str, b: &str) -> SqlValue {
-        timediff(&[text(a), text(b)], SchemaExprContext::None)
-            .expect("timediff should not error")
+        timediff(&[text(a), text(b)], SchemaExprContext::None).expect("timediff should not error")
     }
 
     fn assert_real(value: SqlValue, expected: f64) {
@@ -506,8 +505,14 @@ mod tests {
 
     #[test]
     fn test_timediff_null_and_invalid() {
-        assert_eq!(timediff(&[SqlValue::Null, text("2024-01-01")], SchemaExprContext::None).unwrap(), SqlValue::Null);
-        assert_eq!(timediff(&[text("2024-01-01"), SqlValue::Null], SchemaExprContext::None).unwrap(), SqlValue::Null);
+        assert_eq!(
+            timediff(&[SqlValue::Null, text("2024-01-01")], SchemaExprContext::None).unwrap(),
+            SqlValue::Null
+        );
+        assert_eq!(
+            timediff(&[text("2024-01-01"), SqlValue::Null], SchemaExprContext::None).unwrap(),
+            SqlValue::Null
+        );
         assert_eq!(td("garbage", "2024-01-01"), SqlValue::Null);
         assert_eq!(td("2024-01-01", "garbage"), SqlValue::Null);
     }

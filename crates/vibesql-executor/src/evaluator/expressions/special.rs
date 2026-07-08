@@ -79,8 +79,7 @@ impl ExpressionEvaluator<'_> {
                         // Delegate to the shared SQLite truthiness helper
                         // (numerics non-zero, strings/blobs via the
                         // leading-numeric parse, NULL falsy). (#5856)
-                        let is_truthy =
-                            super::super::operators::is_truthy(&condition_result);
+                        let is_truthy = super::super::operators::is_truthy(&condition_result);
                         if is_truthy {
                             return self.eval(&when_clause.result, row);
                         }

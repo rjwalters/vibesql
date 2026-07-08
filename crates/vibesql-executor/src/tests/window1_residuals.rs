@@ -148,11 +148,9 @@ fn test_misuse_of_aggregate_in_union_arm() {
     execute_sql(&mut db, "CREATE TABLE t0(a)").unwrap();
 
     // Misuse lives in the *second* UNION arm; must error even with an empty table.
-    let err = execute_sql(
-        &mut db,
-        "SELECT a FROM t0 WHERE (a,1)=(SELECT 2,2 UNION SELECT sum(a),1)",
-    )
-    .unwrap_err();
+    let err =
+        execute_sql(&mut db, "SELECT a FROM t0 WHERE (a,1)=(SELECT 2,2 UNION SELECT sum(a),1)")
+            .unwrap_err();
     assert!(
         err.to_string().contains("misuse of aggregate"),
         "expected misuse-of-aggregate error, got: {err}"
@@ -198,10 +196,8 @@ fn test_from_bearing_union_arm_with_aggregate_not_flagged() {
     execute_sql(&mut db, "INSERT INTO t0 VALUES(2)").unwrap();
 
     // The aggregate in the second arm has its own FROM — NOT a misuse.
-    let rows = execute_sql(
-        &mut db,
-        "SELECT a FROM t0 WHERE a=(SELECT 2 UNION SELECT sum(a) FROM t0)",
-    );
+    let rows =
+        execute_sql(&mut db, "SELECT a FROM t0 WHERE a=(SELECT 2 UNION SELECT sum(a) FROM t0)");
     assert!(rows.is_ok(), "FROM-bearing UNION arm must not be flagged: {rows:?}");
 }
 

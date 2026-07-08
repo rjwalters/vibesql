@@ -137,8 +137,14 @@ fn temp_table_and_index_listed_in_temp_master() {
 
     let (_, rows) = select(&db, "SELECT name FROM sqlite_temp_master ORDER BY name");
     let listed = names(&rows);
-    assert!(listed.contains(&"t".to_string()), "temp table t should be in sqlite_temp_master: {listed:?}");
-    assert!(listed.contains(&"i".to_string()), "temp index i should be in sqlite_temp_master: {listed:?}");
+    assert!(
+        listed.contains(&"t".to_string()),
+        "temp table t should be in sqlite_temp_master: {listed:?}"
+    );
+    assert!(
+        listed.contains(&"i".to_string()),
+        "temp index i should be in sqlite_temp_master: {listed:?}"
+    );
 }
 
 /// sqlite3 parity: temp objects are absent from `sqlite_master`.
@@ -150,8 +156,14 @@ fn temp_index_absent_from_sqlite_master() {
 
     let (_, rows) = select(&db, "SELECT name FROM sqlite_master");
     let listed = names(&rows);
-    assert!(!listed.contains(&"t".to_string()), "temp table must NOT be in sqlite_master: {listed:?}");
-    assert!(!listed.contains(&"i".to_string()), "temp index must NOT be in sqlite_master: {listed:?}");
+    assert!(
+        !listed.contains(&"t".to_string()),
+        "temp table must NOT be in sqlite_master: {listed:?}"
+    );
+    assert!(
+        !listed.contains(&"i".to_string()),
+        "temp index must NOT be in sqlite_master: {listed:?}"
+    );
 }
 
 /// A main-table index stays in `sqlite_master` and is absent from temp_master.
@@ -165,7 +177,10 @@ fn main_index_in_master_not_temp_master() {
     assert!(names(&master).contains(&"mi".to_string()), "main index should be in sqlite_master");
 
     let (_, temp) = select(&db, "SELECT name FROM sqlite_temp_master");
-    assert!(!names(&temp).contains(&"mi".to_string()), "main index must NOT be in sqlite_temp_master");
+    assert!(
+        !names(&temp).contains(&"mi".to_string()),
+        "main index must NOT be in sqlite_temp_master"
+    );
 }
 
 /// Count the rows of a single-column COUNT(*) result.
@@ -208,8 +223,7 @@ fn sql_level_same_name_index_across_schemas_coexist() {
     // Both indexes are registered in their respective schemas' master tables.
     let (_, master) = select(&db, "SELECT name FROM sqlite_master WHERE type='index'");
     assert!(names(&master).contains(&"ix".to_string()), "main.ix must be in sqlite_master");
-    let (_, temp_master) =
-        select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
+    let (_, temp_master) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
     assert!(
         names(&temp_master).contains(&"ix".to_string()),
         "temp.ix must be in sqlite_temp_master"
@@ -227,8 +241,7 @@ fn sql_level_same_name_index_across_schemas_coexist() {
     // leaves main.ix intact (matching sqlite3's name resolution).
     exec_drop_index(&mut db, "DROP INDEX ix");
 
-    let (_, temp_after) =
-        select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
+    let (_, temp_after) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='index'");
     assert!(
         !names(&temp_after).contains(&"ix".to_string()),
         "unqualified DROP INDEX must remove the temp index first"
@@ -308,7 +321,10 @@ fn temp_trigger_dropped_with_temp_table_view_remains() {
 
     // Before the drop: both the trigger and the view are surfaced by temp_master.
     let (_, before) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='trigger'");
-    assert!(names(&before).contains(&"tr".to_string()), "temp trigger should be listed before drop");
+    assert!(
+        names(&before).contains(&"tr".to_string()),
+        "temp trigger should be listed before drop"
+    );
     let (_, before_v) = select(&db, "SELECT name FROM sqlite_temp_master WHERE type='view'");
     assert!(names(&before_v).contains(&"v".to_string()), "temp view should be listed before drop");
 

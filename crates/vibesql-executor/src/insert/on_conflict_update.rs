@@ -251,10 +251,8 @@ fn collect_unique_candidates(
     // PK and table-level UNIQUE constraint key-parts carry no explicit index
     // collation, so their effective collation is the column's declared
     // collation (else `binary`).
-    let column_key_part = |idx: usize| KeyPart::Column {
-        idx,
-        collation: effective_key_collation(schema, idx, None),
-    };
+    let column_key_part =
+        |idx: usize| KeyPart::Column { idx, collation: effective_key_collation(schema, idx, None) };
 
     if let Some(pk) = schema.get_primary_key_indices() {
         if !pk.is_empty() {
@@ -339,7 +337,10 @@ enum ResolvedTargetItem<'a> {
     /// A column index plus the target's *explicit* `COLLATE` (normalized
     /// lowercase), or `None` when the target column has no explicit collation
     /// (issue #5921).
-    Column { idx: usize, collation: Option<String> },
+    Column {
+        idx: usize,
+        collation: Option<String>,
+    },
     Expr(&'a Expression),
 }
 
@@ -1006,10 +1007,8 @@ impl ExpressionMutVisitor for UpsertColumnSubstituter<'_> {
             return expr;
         }
         if let Expression::ColumnRef(ref id) = expr {
-            let is_excluded = id
-                .table_canonical()
-                .map(|q| q.eq_ignore_ascii_case("excluded"))
-                .unwrap_or(false);
+            let is_excluded =
+                id.table_canonical().map(|q| q.eq_ignore_ascii_case("excluded")).unwrap_or(false);
             if !is_excluded {
                 // Real-table or unqualified ref: the evaluator resolves it
                 // (existing row at top level, subquery scoping inside).

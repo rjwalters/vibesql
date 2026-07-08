@@ -763,7 +763,11 @@ fn test_negative_explicit_rowid_then_implicit_insert() {
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Bigint(-1));
     assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Integer(5));
-    assert_eq!(rows[1].values[0], vibesql_types::SqlValue::Bigint(0), "sqlite3 allocates 0 after -1");
+    assert_eq!(
+        rows[1].values[0],
+        vibesql_types::SqlValue::Bigint(0),
+        "sqlite3 allocates 0 after -1"
+    );
     assert_eq!(rows[1].values[1], vibesql_types::SqlValue::Integer(6));
 
     // The negative rowid is addressable.
@@ -795,7 +799,11 @@ fn test_negative_rowid_batch_null_autoassign() {
     exec(&mut db2, "INSERT INTO t VALUES(2)");
     let rows2 = query(&db2, "SELECT rowid, x FROM t ORDER BY rowid");
     assert_eq!(rows2[0].values[0], vibesql_types::SqlValue::Bigint(-5));
-    assert_eq!(rows2[1].values[0], vibesql_types::SqlValue::Bigint(-4), "sqlite3 allocates -4 after -5");
+    assert_eq!(
+        rows2[1].values[0],
+        vibesql_types::SqlValue::Bigint(-4),
+        "sqlite3 allocates -4 after -5"
+    );
 }
 
 /// REPLACE INTO on a negative INTEGER PRIMARY KEY (the rowid alias) must not

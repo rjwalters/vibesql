@@ -16,9 +16,9 @@ pub use evaluation::{
     evaluate_predicate_tree,
 };
 pub use predicates::{
-    collect_referenced_columns, extract_column_predicates, extract_full_coverage_predicates,
-    extract_predicate_tree, remap_predicates, ColumnPredicate, CompareOp, DerivedExpr,
-    PredicateTree,
+    collect_referenced_columns, extract_column_predicates, extract_derived_expr,
+    extract_full_coverage_predicates, extract_predicate_tree, remap_predicates, ColumnPredicate,
+    CompareOp, DerivedExpr, PredicateTree,
 };
 
 use crate::{

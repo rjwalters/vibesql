@@ -190,10 +190,7 @@ fn update_or_replace_multi_unique_conflict_without_rowid() {
     // Only the updated row remains.
     let rows = sorted_rows(&db, "SELECT a, b, c FROM t");
     assert_eq!(rows.len(), 1);
-    assert_eq!(
-        rows[0],
-        vec![SqlValue::Integer(1), SqlValue::Integer(20), SqlValue::Integer(300)]
-    );
+    assert_eq!(rows[0], vec![SqlValue::Integer(1), SqlValue::Integer(20), SqlValue::Integer(300)]);
 
     // Both conflicting rows' DELETE triggers fired (order-independent check).
     let mut log = text_column(&db, "SELECT t FROM log");

@@ -105,8 +105,12 @@ pub(super) fn execute_update_on_view(
     // the row's operation is skipped.)
     for (old_row, new_row) in &updates {
         for trigger in &triggers {
-            if crate::TriggerFirer::execute_trigger(database, trigger, Some(old_row), Some(new_row))?
-                == crate::TriggerOutcome::SkipRow
+            if crate::TriggerFirer::execute_trigger(
+                database,
+                trigger,
+                Some(old_row),
+                Some(new_row),
+            )? == crate::TriggerOutcome::SkipRow
             {
                 break;
             }
@@ -399,17 +403,15 @@ fn combine_with_from_clause(accumulated: FromClause, from_clause: FromClause) ->
         FromClause::Table { .. }
         | FromClause::Subquery { .. }
         | FromClause::Values { .. }
-        | FromClause::TableFunction { .. } => {
-            FromClause::Join {
-                left: Box::new(accumulated),
-                right: Box::new(from_clause),
-                join_type: JoinType::Cross,
-                condition: None,
-                using_columns: None,
-                natural: false,
-                alias: None,
-            }
-        }
+        | FromClause::TableFunction { .. } => FromClause::Join {
+            left: Box::new(accumulated),
+            right: Box::new(from_clause),
+            join_type: JoinType::Cross,
+            condition: None,
+            using_columns: None,
+            natural: false,
+            alias: None,
+        },
         FromClause::Join { left, right, join_type, condition, using_columns, natural, alias } => {
             let new_left = combine_with_from_clause(accumulated, *left);
             FromClause::Join {

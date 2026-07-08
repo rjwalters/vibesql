@@ -334,15 +334,14 @@ fn cascade_delete(
             continue;
         }
 
-        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
-            |(i, (cv, pv))| {
+        let matches =
+            child_fk_values.iter().zip(parent_key_values).enumerate().all(|(i, (cv, pv))| {
                 crate::foreign_key_check::fk_values_equal(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
                 )
-            },
-        );
+            });
         if matches {
             rows_to_delete.push(child_row.clone());
         }
@@ -484,15 +483,14 @@ fn set_null(
             continue;
         }
 
-        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
-            |(i, (cv, pv))| {
+        let matches =
+            child_fk_values.iter().zip(parent_key_values).enumerate().all(|(i, (cv, pv))| {
                 crate::foreign_key_check::fk_values_equal(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
                 )
-            },
-        );
+            });
         if matches {
             let old_row = child_row.clone();
             // Create updated row with FK columns set to NULL
@@ -580,15 +578,14 @@ fn set_default(
             continue;
         }
 
-        let matches = child_fk_values.iter().zip(parent_key_values).enumerate().all(
-            |(i, (cv, pv))| {
+        let matches =
+            child_fk_values.iter().zip(parent_key_values).enumerate().all(|(i, (cv, pv))| {
                 crate::foreign_key_check::fk_values_equal(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
                 )
-            },
-        );
+            });
         if matches {
             let old_row = child_row.clone();
             // Create updated row with FK columns set to default values

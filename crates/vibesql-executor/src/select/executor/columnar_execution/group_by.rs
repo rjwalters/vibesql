@@ -58,24 +58,64 @@ impl SelectExecutor<'_> {
             )
         })?;
 
-        let group_cols: Vec<usize> = simple_exprs
-            .iter()
-            .filter_map(|expr| {
-                match expr {
-                    vibesql_ast::Expression::ColumnRef(col_id) => {
-                        schema.get_column_index(col_id.table_canonical(), col_id.column_canonical())
+        // Resolve each GROUP BY expression to a batch column index.
+        //
+        // - A bare `ColumnRef` resolves directly to its base column index.
+        // - Any other expression is materialized as a *derived key column*
+        //   appended to a cloned batch, reusing the shared #5994 machinery:
+        //   `extract_derived_expr` (the exact same numeric-arithmetic guard the
+        //   computed-WHERE-predicate path uses) builds an index-resolved
+        //   `DerivedExpr`, and `materialize_derived_column` evaluates it with
+        //   row-path-exact semantics (overflow -> Double, div-by-zero -> NULL,
+        //   NULL propagation) into a `ColumnArray::Mixed`. The resulting column
+        //   feeds the existing GroupKey/GroupKeySpec hashing machinery unchanged
+        //   (Mixed key columns take the Generic key path, whose Vec<SqlValue>
+        //   hashing/equality is identical to the row path's group-key map).
+        //
+        // If any grouping expression is an unsupported shape, we decline the
+        // whole query and fall back to row-oriented execution (unchanged
+        // behavior). No new expression-evaluation code is introduced here.
+        let mut keyed_batch = filtered_batch;
+        let mut group_cols: Vec<usize> = Vec::with_capacity(simple_exprs.len());
+        for expr in simple_exprs {
+            match expr {
+                vibesql_ast::Expression::ColumnRef(col_id) => {
+                    match schema
+                        .get_column_index(col_id.table_canonical(), col_id.column_canonical())
+                    {
+                        Some(idx) => group_cols.push(idx),
+                        None => {
+                            log::debug!(
+                                "GROUP BY column reference could not be resolved, falling back to row-oriented"
+                            );
+                            return Err(ExecutorError::Other(
+                                "GROUP BY with non-column expressions not supported in columnar path"
+                                    .to_string(),
+                            ));
+                        }
                     }
-                    _ => None, // Only simple column references supported for now
                 }
-            })
-            .collect();
+                other => {
+                    // Attempt to materialize the grouping expression as a derived
+                    // key column using the shared #5994 helper.
+                    let Some((derived, _cols)) = columnar::extract_derived_expr(other, schema)
+                    else {
+                        log::debug!(
+                            "GROUP BY contains non-column expressions, falling back to row-oriented"
+                        );
+                        return Err(ExecutorError::Other(
+                            "GROUP BY with non-column expressions not supported in columnar path"
+                                .to_string(),
+                        ));
+                    };
 
-        if group_cols.len() != simple_exprs.len() {
-            log::debug!("GROUP BY contains non-column expressions, falling back to row-oriented");
-            return Err(ExecutorError::Other(
-                "GROUP BY with non-column expressions not supported in columnar path".to_string(),
-            ));
+                    let key_col = columnar::materialize_derived_column(&keyed_batch, &derived)?;
+                    keyed_batch.add_column(key_col)?;
+                    group_cols.push(keyed_batch.column_count() - 1);
+                }
+            }
         }
+        let filtered_batch = keyed_batch;
 
         // Phase 3: Handle expression aggregates by pre-computing them as new columns
         // This enables TPC-H Q1 style queries with SUM(col * expr) to use SIMD GROUP BY

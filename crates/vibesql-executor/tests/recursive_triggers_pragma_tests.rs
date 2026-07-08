@@ -119,10 +119,7 @@ fn off_still_fires_distinct_nested_trigger() {
         "CREATE TRIGGER ta AFTER INSERT ON a BEGIN \
          INSERT INTO b VALUES(new.x); INSERT INTO log VALUES('ta'); END",
     );
-    exec(
-        &mut db,
-        "CREATE TRIGGER tb AFTER INSERT ON b BEGIN INSERT INTO log VALUES('tb'); END",
-    );
+    exec(&mut db, "CREATE TRIGGER tb AFTER INSERT ON b BEGIN INSERT INTO log VALUES('tb'); END");
 
     exec(&mut db, "INSERT INTO a VALUES(1)");
 

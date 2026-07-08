@@ -279,8 +279,7 @@ fn test_duplicate_table_programmatic_ast_falls_back_to_normalized_name() {
     stmt.name_source = None;
     CreateTableExecutor::execute(&stmt, &mut db).expect("first create should succeed");
 
-    let err =
-        CreateTableExecutor::execute(&stmt, &mut db).expect_err("duplicate must be rejected");
+    let err = CreateTableExecutor::execute(&stmt, &mut db).expect_err("duplicate must be rejected");
     // schema-qualified fallback (e.g. "public.tbl1" / "main.tbl1").
     let msg = err.to_string();
     assert!(msg.ends_with("tbl1' already exists"), "unexpected fallback message: {msg}");

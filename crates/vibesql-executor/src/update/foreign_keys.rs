@@ -81,13 +81,11 @@ impl ForeignKeyValidator {
                     parent_table.scan_visible(&snapshot).any(|(_, parent_row)| {
                         parent_indices.iter().zip(&fk_values).enumerate().all(
                             |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                                Some(parent_val) => {
-                                    crate::foreign_key_check::fk_values_equal(
-                                        fk_val,
-                                        parent_val,
-                                        parent_collations.get(i).and_then(|c| c.as_deref()),
-                                    )
-                                }
+                                Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                                    fk_val,
+                                    parent_val,
+                                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                                ),
                                 None => false,
                             },
                         )
@@ -99,13 +97,11 @@ impl ForeignKeyValidator {
                     parent_table.scan().iter().any(|parent_row| {
                         parent_indices.iter().zip(&fk_values).enumerate().all(
                             |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                                Some(parent_val) => {
-                                    crate::foreign_key_check::fk_values_equal(
-                                        fk_val,
-                                        parent_val,
-                                        parent_collations.get(i).and_then(|c| c.as_deref()),
-                                    )
-                                }
+                                Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                                    fk_val,
+                                    parent_val,
+                                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                                ),
                                 None => false,
                             },
                         )
@@ -232,8 +228,7 @@ impl ForeignKeyValidator {
                 // Resolve parent-side collations before borrowing the
                 // child table so the FK comparison honors NOCASE/RTRIM
                 // on the parent key (#5147).
-                let parent_collations =
-                    crate::foreign_key_check::parent_collations_for_fk(db, fk);
+                let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
                 // Get the child table and find matching rows.
                 //
@@ -253,17 +248,15 @@ impl ForeignKeyValidator {
                         .iter()
                         .map(|&col_idx| child_row.values[col_idx].clone())
                         .collect();
-                    child_fk_values
-                        .iter()
-                        .zip(&old_parent_key_values)
-                        .enumerate()
-                        .all(|(i, (cv, pv))| {
+                    child_fk_values.iter().zip(&old_parent_key_values).enumerate().all(
+                        |(i, (cv, pv))| {
                             crate::foreign_key_check::fk_values_equal(
                                 cv,
                                 pv,
                                 parent_collations.get(i).and_then(|c| c.as_deref()),
                             )
-                        })
+                        },
+                    )
                 };
                 let matching_rows: Vec<(usize, vibesql_storage::Row)> = {
                     #[cfg(feature = "mvcc_enabled")]

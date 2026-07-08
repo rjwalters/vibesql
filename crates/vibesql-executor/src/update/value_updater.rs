@@ -47,9 +47,9 @@ impl<'a> ValueUpdater<'a> {
                     .columns
                     .iter()
                     .map(|name| {
-                        self.schema.get_column_index(name).ok_or_else(|| {
-                            ExecutorError::NoSuchColumn { column_ref: name.clone() }
-                        })
+                        self.schema
+                            .get_column_index(name)
+                            .ok_or_else(|| ExecutorError::NoSuchColumn { column_ref: name.clone() })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let values = self.evaluator.eval_row_value(
