@@ -238,28 +238,23 @@ where
 
     // Merge the left schema with the table-function schema so downstream
     // column resolution (WHERE over both sides, projection) sees both. When the
-    // left side produced no rows we never evaluated the TVF; build the schema
-    // from an empty evaluation so the result still has the correct shape.
+    // left side produced no rows we never evaluated the TVF; build the fixed
+    // output schema directly so the result still has the correct shape.
     let tvf_schema = match tvf_schema {
         Some(s) => s,
         None => {
-            // No left rows: evaluate the TVF once with a NULL-yielding context to
-            // recover the fixed output schema (the argument may not resolve, but
-            // the schema builder only needs name/alias/column_aliases).
-            super::table_function::execute_table_function(
+            // No left rows: the result is empty, so no argument evaluation is
+            // needed (or possible — a correlated argument like `t.j` has no left
+            // row to resolve against). Build the fixed 8-column schema directly
+            // rather than calling execute_table_function, which would evaluate
+            // the argument against a NULL context and error on the correlated
+            // column reference (issue #5989 empty-left defect). A bad
+            // column-alias count is still surfaced as an error here.
+            super::table_function::build_schema(
                 name,
-                args,
                 alias.as_ref(),
                 column_aliases.as_ref(),
-                database,
-                cte_results,
-                None,
-                None,
-            )
-            .map(|r| r.schema)
-            // If even the schema-only evaluation fails (e.g. a bad column-alias
-            // count), surface that error.
-            ?
+            )?
         }
     };
 
