@@ -9,12 +9,11 @@ use std::sync::OnceLock;
 use vibesql_ast::{FromClause, JoinType, SelectItem};
 
 use super::join_helpers::{
-    build_combined_schema, expression_has_is_null, extract_equijoin_conditions,
-    extract_join_conditions, extract_non_join_predicates, flatten_join_tree_simple,
-    flatten_join_tree_with_types, has_cross_join_with_on_condition, has_outer_join,
-    is_column_in_table, is_column_in_tables, is_columnar_supported_join,
-    join_tree_has_residual_on_conjuncts, resolve_join_column_indices, where_clause_fully_covered,
-    EquiJoinCondition,
+    build_combined_schema, extract_equijoin_conditions, extract_join_conditions,
+    extract_non_join_predicates, flatten_join_tree_simple, flatten_join_tree_with_types,
+    has_cross_join_with_on_condition, is_column_in_table, is_column_in_tables,
+    is_columnar_supported_join, join_tree_has_residual_on_conjuncts, resolve_join_column_indices,
+    where_clause_fully_covered, EquiJoinCondition,
 };
 use crate::{
     errors::ExecutorError,
@@ -137,21 +136,14 @@ impl SelectExecutor<'_> {
             return Ok(None);
         }
 
-        // Outer joins with IS NULL / IS NOT NULL in WHERE clause need row-oriented execution.
-        // The columnar SIMD filter does not support null-testing predicates (IS NULL / IS NOT NULL),
-        // so they are silently dropped during predicate extraction. For outer joins this causes
-        // incorrect results — e.g., anti-join pattern `LEFT JOIN ... WHERE t2.col IS NULL` would
-        // return all rows instead of only unmatched rows.
-        if has_outer_join(from_clause) {
-            if let Some(ref where_clause) = stmt.where_clause {
-                if expression_has_is_null(where_clause) {
-                    log::debug!(
-                        "Columnar join: outer join with IS NULL/IS NOT NULL in WHERE, falling back"
-                    );
-                    return Ok(None);
-                }
-            }
-        }
+        // Null-testing WHERE predicates (IS NULL / IS NOT NULL) on outer joins —
+        // e.g. the anti-join pattern `LEFT JOIN ... WHERE r.col IS NULL` — are
+        // now vectorized by the columnar filter (issue #5993). They round-trip
+        // through `extract_column_predicates` into `ColumnPredicate::IsNull` /
+        // `IsNotNull`, which read the joined batch's null bitmap (NULL-padded
+        // unmatched rows included), so no guardrail fallback is needed here.
+        // `where_clause_fully_covered` below still forces the row path for any
+        // WHERE shape the columnar pipeline cannot fully consume.
 
         // Flatten the join tree to get all tables with their join types
         let mut table_refs_with_types = Vec::new();

@@ -390,6 +390,18 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
         );
     }
 
+    // Null tests read null-ness directly. `row.get` returns None for an absent
+    // column and Some(SqlValue::Null) for a stored NULL; both are NULL here.
+    if let ColumnPredicate::IsNull { column_idx } | ColumnPredicate::IsNotNull { column_idx } =
+        predicate
+    {
+        let is_null = matches!(row.get(*column_idx), None | Some(SqlValue::Null));
+        return match predicate {
+            ColumnPredicate::IsNull { .. } => is_null,
+            _ => !is_null,
+        };
+    }
+
     let column_idx = match predicate {
         ColumnPredicate::LessThan { column_idx, .. }
         | ColumnPredicate::GreaterThan { column_idx, .. }
@@ -400,7 +412,10 @@ fn evaluate_predicate(row: &Row, predicate: &ColumnPredicate) -> bool {
         | ColumnPredicate::Between { column_idx, .. }
         | ColumnPredicate::Like { column_idx, .. }
         | ColumnPredicate::InList { column_idx, .. } => *column_idx,
-        ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
+        // Handled above.
+        ColumnPredicate::ColumnCompare { .. }
+        | ColumnPredicate::IsNull { .. }
+        | ColumnPredicate::IsNotNull { .. } => unreachable!(),
     };
 
     match row.get(column_idx) {

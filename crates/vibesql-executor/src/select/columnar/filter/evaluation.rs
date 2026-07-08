@@ -153,6 +153,20 @@ where
                 return evaluate_column_compare(*op, left_val, right_val);
             }
 
+            // Handle null tests specially - they read null-ness directly instead
+            // of failing on NULL like value comparisons do. `get_value` returns
+            // None for an absent value and Some(SqlValue::Null) for a stored
+            // NULL; both are NULL for the purpose of IS [NOT] NULL.
+            match predicate {
+                ColumnPredicate::IsNull { column_idx } => {
+                    return value_is_null(get_value(*column_idx));
+                }
+                ColumnPredicate::IsNotNull { column_idx } => {
+                    return !value_is_null(get_value(*column_idx));
+                }
+                _ => {}
+            }
+
             // Get the column value and evaluate the leaf predicate
             let column_idx = match predicate {
                 ColumnPredicate::LessThan { column_idx, .. }
@@ -164,7 +178,10 @@ where
                 | ColumnPredicate::Between { column_idx, .. }
                 | ColumnPredicate::Like { column_idx, .. }
                 | ColumnPredicate::InList { column_idx, .. } => *column_idx,
-                ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
+                // Handled above.
+                ColumnPredicate::ColumnCompare { .. }
+                | ColumnPredicate::IsNull { .. }
+                | ColumnPredicate::IsNotNull { .. } => unreachable!(),
             };
 
             if let Some(value) = get_value(column_idx) {
@@ -332,6 +349,11 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
                 matches
             }
         }
+        // Null tests read null-ness, not the value. A non-NULL `value` reaches
+        // this arm (the caller resolved it), so IS NULL is false and IS NOT
+        // NULL is true; a stored NULL is still handled defensively.
+        ColumnPredicate::IsNull { .. } => matches!(value, SqlValue::Null),
+        ColumnPredicate::IsNotNull { .. } => !matches!(value, SqlValue::Null),
         // ColumnCompare should be handled by evaluate_column_compare, not here
         // This case is included for exhaustiveness but shouldn't be reached in normal use
         ColumnPredicate::ColumnCompare { .. } => {
@@ -340,6 +362,14 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             false
         }
     }
+}
+
+/// Whether a resolved column value represents SQL NULL.
+///
+/// `None` (the value is absent from the row) and `Some(SqlValue::Null)` (a
+/// stored NULL) are both NULL for the purpose of IS [NOT] NULL.
+fn value_is_null(value: Option<&SqlValue>) -> bool {
+    matches!(value, None | Some(SqlValue::Null))
 }
 
 // NOTE: The old like_match() function was removed in favor of

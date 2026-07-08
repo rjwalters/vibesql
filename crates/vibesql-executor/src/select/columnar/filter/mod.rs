@@ -108,6 +108,24 @@ where
                 continue;
             }
 
+            // Handle null tests specially - they read null-ness directly instead
+            // of failing on NULL like value comparisons do. `get_value` returns
+            // None for an absent value and Some(SqlValue::Null) for a stored NULL.
+            if let ColumnPredicate::IsNull { column_idx }
+            | ColumnPredicate::IsNotNull { column_idx } = predicate
+            {
+                let is_null = matches!(
+                    get_value(row_idx, *column_idx),
+                    None | Some(vibesql_types::SqlValue::Null)
+                );
+                let want_null = matches!(predicate, ColumnPredicate::IsNull { .. });
+                if is_null != want_null {
+                    bitmap[row_idx] = false;
+                    break;
+                }
+                continue;
+            }
+
             let column_idx = match predicate {
                 ColumnPredicate::LessThan { column_idx, .. } => *column_idx,
                 ColumnPredicate::GreaterThan { column_idx, .. } => *column_idx,
@@ -118,7 +136,10 @@ where
                 ColumnPredicate::Between { column_idx, .. } => *column_idx,
                 ColumnPredicate::Like { column_idx, .. } => *column_idx,
                 ColumnPredicate::InList { column_idx, .. } => *column_idx,
-                ColumnPredicate::ColumnCompare { .. } => unreachable!(), // Handled above
+                // Handled above.
+                ColumnPredicate::ColumnCompare { .. }
+                | ColumnPredicate::IsNull { .. }
+                | ColumnPredicate::IsNotNull { .. } => unreachable!(),
             };
 
             if let Some(value) = get_value(row_idx, column_idx) {
