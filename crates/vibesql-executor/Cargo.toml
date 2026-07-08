@@ -36,7 +36,6 @@ arcstr = "1.2"
 #                           `34.5e+6`) through parse+serialize, so mutation
 #                           functions round-trip untouched numbers verbatim.
 serde_json = { version = "1.0", features = ["preserve_order", "arbitrary_precision"] }
-json5 = "1.3"
 tokio = { version = "1.0", features = ["sync"] }
 rand = "0.10"
 md-5 = "0.11"
