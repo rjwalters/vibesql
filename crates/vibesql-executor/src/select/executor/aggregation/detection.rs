@@ -447,6 +447,12 @@ fn expression_in_scope_chain_has_outer_correlated_aggregate(
                     | "PERCENTILE"
                     | "PERCENTILE_CONT"
                     | "PERCENTILE_DISC"
+                    | "STDDEV"
+                    | "STDDEV_SAMP"
+                    | "STDDEV_POP"
+                    | "VARIANCE"
+                    | "VAR_SAMP"
+                    | "VAR_POP"
             ) =>
         {
             let upper = name.to_uppercase();
@@ -784,6 +790,12 @@ fn expr_has_column_referencing_aggregate(expr: &vibesql_ast::Expression) -> bool
                     | "PERCENTILE"
                     | "PERCENTILE_CONT"
                     | "PERCENTILE_DISC"
+                    | "STDDEV"
+                    | "STDDEV_SAMP"
+                    | "STDDEV_POP"
+                    | "VARIANCE"
+                    | "VAR_SAMP"
+                    | "VAR_POP"
             ) =>
         {
             // Old Function variant aggregate. min/max with >1 args are scalar.
@@ -946,7 +958,8 @@ impl SelectExecutor<'_> {
                 let is_aggregate = match name_upper.as_str() {
                     "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG"
                     | "JSON_GROUP_ARRAY" | "MD5SUM" | "MEDIAN" | "PERCENTILE"
-                    | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
+                    | "PERCENTILE_CONT" | "PERCENTILE_DISC" | "STDDEV" | "STDDEV_SAMP"
+                    | "STDDEV_POP" | "VARIANCE" | "VAR_SAMP" | "VAR_POP" => true,
                     "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
                     _ => false,
                 };

@@ -78,6 +78,16 @@ pub fn compute_column_aggregate(
     col_idx: usize,
     op: AggregateOp,
 ) -> Result<SqlValue, ExecutorError> {
+    // STDDEV/VARIANCE use the shared Welford kernel (which handles every
+    // supported column type) so the columnar result matches the row path
+    // bit-for-bit; the SIMD i64/f64 helpers below only cover SUM/AVG/MIN/MAX.
+    if let AggregateOp::Variance { sample } = op {
+        return super::super::aggregate::compute_batch_variance(batch, col_idx, false, sample);
+    }
+    if let AggregateOp::StdDev { sample } = op {
+        return super::super::aggregate::compute_batch_variance(batch, col_idx, true, sample);
+    }
+
     let column = batch.column(col_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
         column_index: col_idx,
         batch_columns: batch.column_count(),
@@ -141,6 +151,11 @@ pub fn compute_i64_aggregate(
                     reason: "empty set".to_string(),
                 }
             }),
+            AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+                Err(crate::errors::ExecutorError::UnsupportedExpression(
+                    "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+                ))
+            }
         };
     }
 
@@ -195,6 +210,11 @@ pub fn compute_i64_aggregate(
             }
             Ok(max.map(SqlValue::Integer).unwrap_or(SqlValue::Null))
         }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 
@@ -239,6 +259,11 @@ pub fn compute_f64_aggregate(
                     reason: "empty set".to_string(),
                 }
             }),
+            AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+                Err(crate::errors::ExecutorError::UnsupportedExpression(
+                    "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+                ))
+            }
         };
     }
 
@@ -291,6 +316,11 @@ pub fn compute_f64_aggregate(
                 }
             }
             Ok(max.map(SqlValue::Double).unwrap_or(SqlValue::Null))
+        }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
         }
     }
 }
@@ -375,6 +405,11 @@ pub fn compute_mixed_aggregate(
                 });
             }
             Ok(result.unwrap_or(SqlValue::Null))
+        }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
         }
     }
 }

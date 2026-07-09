@@ -126,6 +126,11 @@ pub fn compute_expression_aggregate_batch(
             Ok(if count > 0 { SqlValue::Double(sum / count as f64) } else { SqlValue::Null })
         }
         AggregateOp::Min | AggregateOp::Max => Ok(min_max.unwrap_or(SqlValue::Null)),
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 

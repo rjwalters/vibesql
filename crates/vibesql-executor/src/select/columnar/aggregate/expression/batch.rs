@@ -416,6 +416,11 @@ fn aggregate_f64_array(
             let max = non_null_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             Ok(SqlValue::Double(max))
         }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 
@@ -463,6 +468,11 @@ fn aggregate_i64_array(
         AggregateOp::Max => {
             let max = *non_null_values.iter().max().unwrap();
             Ok(SqlValue::Integer(max))
+        }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
         }
     }
 }

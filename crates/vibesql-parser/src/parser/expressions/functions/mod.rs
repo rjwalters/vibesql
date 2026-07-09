@@ -165,6 +165,12 @@ impl Parser {
                 | "PERCENTILE"
                 | "PERCENTILE_CONT"
                 | "PERCENTILE_DISC"
+                | "STDDEV"
+                | "STDDEV_SAMP"
+                | "STDDEV_POP"
+                | "VARIANCE"
+                | "VAR_SAMP"
+                | "VAR_POP"
         );
 
         // Parse optional DISTINCT or ALL for potential aggregate functions
@@ -471,6 +477,8 @@ impl Parser {
         // GROUP_CONCAT accepts 1 or 2 arguments (expr, separator)
         let is_aggregate = match function_name_upper.as_str() {
             "COUNT" | "SUM" | "AVG" | "TOTAL" => true,
+            // STDDEV / VARIANCE statistical aggregates (all six SQL spellings).
+            "STDDEV" | "STDDEV_SAMP" | "STDDEV_POP" | "VARIANCE" | "VAR_SAMP" | "VAR_POP" => true,
             "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
             "JSON_GROUP_ARRAY" => true,                       // JSON aggregate function
             // percentile.c family - arg counts validated by the executor so

@@ -363,5 +363,10 @@ fn compute_scalar_aggregate(
 
             Ok(result_value.unwrap_or(SqlValue::Null))
         }
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }

@@ -63,6 +63,15 @@ pub fn simd_aggregate_i64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
+    // STDDEV/VARIANCE are not SIMD-vectorized (Welford is inherently serial);
+    // the dispatcher in `aggregate::compute_columnar_aggregate` routes them to
+    // the scalar path, so they must never reach the SIMD kernels.
+    if matches!(op, AggregateOp::Variance { .. } | AggregateOp::StdDev { .. }) {
+        return Err(ExecutorError::UnsupportedExpression(
+            "STDDEV/VARIANCE are not supported on the SIMD aggregate path".to_string(),
+        ));
+    }
+
     // DEFAULT_BATCH_SIZE (1024) provides good SIMD throughput while fitting in cache
     let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
     let mut original_type: Option<SqlValue> = None;
@@ -131,6 +140,8 @@ pub fn simd_aggregate_i64(
                         }
                     }
                     AggregateOp::Count => {} // Just count, no SIMD needed
+                    // Unreachable: guarded at fn entry.
+                    AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {}
                 }
                 batch.clear();
             }
@@ -154,6 +165,8 @@ pub fn simd_aggregate_i64(
                 }
             }
             AggregateOp::Count => {}
+            // Unreachable: guarded at fn entry.
+            AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {}
         }
     }
 
@@ -183,6 +196,12 @@ pub fn simd_aggregate_i64(
             _ => SqlValue::Bigint(max),
         }),
         AggregateOp::Count => Ok(SqlValue::Integer(count)),
+        // Unreachable: guarded at fn entry.
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on the SIMD aggregate path".to_string(),
+            ))
+        }
     }
 }
 
@@ -206,6 +225,14 @@ pub fn simd_aggregate_f64(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
+    // STDDEV/VARIANCE are not SIMD-vectorized (see `simd_aggregate_i64`); they
+    // are dispatched to the scalar path and must never reach the SIMD kernels.
+    if matches!(op, AggregateOp::Variance { .. } | AggregateOp::StdDev { .. }) {
+        return Err(ExecutorError::UnsupportedExpression(
+            "STDDEV/VARIANCE are not supported on the SIMD aggregate path".to_string(),
+        ));
+    }
+
     // DEFAULT_BATCH_SIZE (1024) provides good SIMD throughput while fitting in cache
     let mut batch = Vec::with_capacity(DEFAULT_BATCH_SIZE);
     let mut count = 0i64;
@@ -261,6 +288,8 @@ pub fn simd_aggregate_f64(
                         }
                     }
                     AggregateOp::Count => {} // Just count, no SIMD needed
+                    // Unreachable: guarded at fn entry.
+                    AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {}
                 }
                 batch.clear();
             }
@@ -284,6 +313,8 @@ pub fn simd_aggregate_f64(
                 }
             }
             AggregateOp::Count => {}
+            // Unreachable: guarded at fn entry.
+            AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {}
         }
     }
 
@@ -302,6 +333,12 @@ pub fn simd_aggregate_f64(
         AggregateOp::Min => Ok(SqlValue::Double(min)),
         AggregateOp::Max => Ok(SqlValue::Double(max)),
         AggregateOp::Count => Ok(SqlValue::Integer(count)),
+        // Unreachable: guarded at fn entry.
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on the SIMD aggregate path".to_string(),
+            ))
+        }
     }
 }
 
