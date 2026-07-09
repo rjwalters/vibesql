@@ -52,6 +52,7 @@
 
 mod cse;
 mod group_by;
+mod group_order;
 mod having;
 mod join;
 mod join_helpers;
@@ -588,12 +589,12 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // Skip native columnar for GROUP BY with ORDER BY
-        // The columnar GROUP BY path doesn't preserve ordering
-        if has_group_by && stmt.order_by.is_some() {
-            log::debug!("Native columnar: skipping - GROUP BY with ORDER BY not supported");
-            return Ok(None);
-        }
+        // GROUP BY + ORDER BY is now supported on the columnar path (Issue #6009).
+        // The grouped result is materialized as `[group_keys..., aggregates...]`
+        // rows, and a terminal ORDER BY is applied positionally after HAVING (see
+        // the ORDER BY application below, near the LIMIT/OFFSET handling). If an
+        // ORDER BY term cannot be resolved to an output column, that step declines
+        // to the row path — so no unsupported shape is silently mis-sorted.
 
         // Skip native columnar for GROUP BY with complex SELECT expressions
         // The columnar GROUP BY path produces [group_key..., agg...] rows directly,
@@ -857,10 +858,41 @@ impl SelectExecutor<'_> {
             stmt.having.is_some()
         );
 
+        // Apply terminal ORDER BY on the grouped result (Issue #6009).
+        //
+        // The grouped result is `[group_keys..., aggregates...]` rows, aligned
+        // positionally with the SELECT list (validated above). `apply_group_by_order_by`
+        // resolves each ORDER BY term to an output column and sorts positionally
+        // using the shared sort machinery — matching the row path exactly for NULL
+        // ordering, affinity, and collation. If any ORDER BY term can't be resolved
+        // to an output column, it returns None and we fall back to the row path.
+        //
+        // ORDER BY only reorders rows, so it is applied for the GROUP BY path
+        // (multiple result rows). The non-GROUP-BY aggregation path yields a single
+        // row, where ORDER BY is a no-op, so we leave that path unchanged.
+        let ordered_result = if has_group_by {
+            if let Some(order_by) = &stmt.order_by {
+                match group_order::apply_group_by_order_by(result, order_by, &stmt.select_list) {
+                    Some(sorted) => sorted,
+                    None => {
+                        log::debug!(
+                            "Native columnar: GROUP BY ORDER BY term not resolvable to an output column, falling back to row-oriented"
+                        );
+                        return Ok(None);
+                    }
+                }
+            } else {
+                result
+            }
+        } else {
+            result
+        };
+
         // Apply LIMIT/OFFSET to the result
         let limit = crate::select::helpers::evaluate_limit(&stmt.limit, self.database)?;
         let offset = crate::select::helpers::evaluate_offset(&stmt.offset, self.database)?;
-        let final_result = crate::select::helpers::apply_limit_offset(result, limit, offset);
+        let final_result =
+            crate::select::helpers::apply_limit_offset(ordered_result, limit, offset);
 
         Ok(Some(final_result))
     }
