@@ -196,6 +196,16 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Evaluate `subtype(X)` — SQLite's runtime JSON subtype probe. Delegates
+    /// the structural subtype rules to [`crate::evaluator::json_subtype`].
+    pub(crate) fn eval_subtype(
+        &self,
+        args: &[vibesql_ast::Expression],
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        crate::evaluator::json_subtype::eval_subtype(args, &|e| self.eval(e, row))
+    }
+
     /// Evaluate function call
     pub(super) fn eval_function(
         &self,
@@ -208,6 +218,9 @@ impl ExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // subtype(X): runtime JSON subtype probe, computed structurally from
+            // the argument expression + its evaluated value.
+            "SUBTYPE" => return self.eval_subtype(args, row),
             // JSON construction/mutation functions that honor the JSON subtype:
             // an argument that is itself a call to a JSON-producing function
             // embeds as a sub-document rather than a quoted string. We compute

@@ -171,9 +171,18 @@ mod tests {
     }
 
     #[test]
+    fn test_iif_two_arg_form() {
+        // SQLite `iif(X, Y)` — implicit ELSE NULL (2-arg form is valid).
+        assert_eq!(
+            iif(&[SqlValue::Boolean(true), SqlValue::Integer(1)]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(iif(&[SqlValue::Boolean(false), SqlValue::Integer(1)]).unwrap(), SqlValue::Null);
+    }
+
+    #[test]
     fn test_iif_invalid_arity() {
-        // Even argument count is rejected
-        assert!(iif(&[SqlValue::Boolean(true), SqlValue::Integer(1)]).is_err());
+        // Even argument counts >= 4 are rejected (CASE-chain must be odd).
         assert!(iif(&[
             SqlValue::Boolean(true),
             SqlValue::Integer(1),
@@ -181,8 +190,9 @@ mod tests {
             SqlValue::Integer(2),
         ])
         .is_err());
-        // Fewer than 3 arguments is rejected
+        // One argument and zero arguments are rejected.
         assert!(iif(&[SqlValue::Boolean(true)]).is_err());
+        assert!(iif(&[]).is_err());
     }
 
     #[test]

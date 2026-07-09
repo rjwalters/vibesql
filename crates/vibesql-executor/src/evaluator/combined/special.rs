@@ -192,6 +192,11 @@ impl CombinedExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // subtype(X): runtime JSON subtype probe (see
+            // crate::evaluator::json_subtype).
+            "SUBTYPE" => {
+                return crate::evaluator::json_subtype::eval_subtype(args, &|e| self.eval(e, row));
+            }
             // JSON construction/mutation functions honoring the JSON subtype:
             // detect JSON-producing argument expressions from the AST so nested
             // json()/json_array()/... results embed as sub-documents rather than

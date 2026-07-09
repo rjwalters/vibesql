@@ -1213,12 +1213,18 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 // embedding, which is what the covered conformance tests expect.
 
 /// Encode a single SQL argument as a JSON node for a construction/mutation
-/// function. `is_json` is the argument's subtype flag (see the module note): a
-/// TEXT value with the flag set is parsed as an embedded JSON sub-document.
+/// function. `is_json` is the argument's AST-derived subtype flag (see the
+/// module note): a TEXT value with the flag set is parsed as an embedded JSON
+/// sub-document. A value that already carries the JSON subtype at runtime —
+/// signalled by [`SqlValue::Character`], see [`sql_value_is_json_subtyped`] —
+/// embeds as JSON regardless of the AST flag, so a container `value` column
+/// from json_each/json_tree round-trips through an opaque column reference
+/// (json101-5.10).
 fn sql_value_to_json_node(
     value: &SqlValue,
     is_json: bool,
 ) -> Result<serde_json::Value, ExecutorError> {
+    let is_json = is_json || sql_value_is_json_subtyped(value);
     Ok(match value {
         SqlValue::Null => serde_json::Value::Null,
         // SQLite encodes SQL booleans as JSON integers 1/0 (json_array(true)
@@ -1290,8 +1296,40 @@ fn parse_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, Exe
     }
 }
 
-/// Fetch the subtype flag for the argument at `idx`, defaulting to `false` when
-/// the caller passed no (or a shorter) subtype slice.
+/// Does this runtime value already carry SQLite's JSON "J" subtype?
+///
+/// VibeSQL does not add a distinct subtype tag to [`SqlValue`]; instead the
+/// json_each/json_tree table functions signal the JSON subtype on TEXT
+/// container values (arrays/objects) by emitting them as [`SqlValue::Character`]
+/// rather than [`SqlValue::Varchar`] (see `node_value_column` in
+/// `select/scan/table_function.rs`). The two text variants are interoperable
+/// everywhere else, so only the JSON construction/mutation functions read this
+/// marker.
+///
+/// To keep the marker from mis-firing on an ordinary fixed-width `CHAR(n)`
+/// column (which also materialises as [`SqlValue::Character`]), the value must
+/// *also* be well-formed JSON of container type (array/object) — exactly the
+/// nodes json_each/json_tree tag. This distinguishes json101-5.10
+/// (`json_tree('[1,2,3]')`.value, a container -> `{"a":[1,2,3]}`) from
+/// json101-5.11 (a JSON string atom -> `{"a":"[1,2,3]"}`, still quoted).
+pub(crate) fn sql_value_is_json_subtyped(value: &SqlValue) -> bool {
+    match value {
+        SqlValue::Character(s) => {
+            matches!(
+                parse_json_relaxed(s.as_str()),
+                Ok(serde_json::Value::Array(_)) | Ok(serde_json::Value::Object(_))
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Fetch the subtype flag for the argument at `idx`, OR-ing the AST-derived flag
+/// (the caller's `subtypes` slice) with a runtime check on the evaluated value:
+/// a value that already carries the JSON subtype (see
+/// [`sql_value_is_json_subtyped`]) embeds as JSON even when the argument
+/// expression is an opaque column reference. Defaults to `false` when the
+/// caller passed no (or a shorter) subtype slice.
 fn subtype_at(subtypes: &[bool], idx: usize) -> bool {
     subtypes.get(idx).copied().unwrap_or(false)
 }
@@ -2768,6 +2806,41 @@ mod tests {
         assert_eq!(txt(json_array(&args, &subs).unwrap()), r#"[1,null,"3",[4,5],{"six":7.7}]"#);
         // Without the subtype flag, the same text quotes as a string.
         assert_eq!(txt(json_array(&[v("[4,5]")], &[false]).unwrap()), r#"["[4,5]"]"#);
+    }
+
+    #[test]
+    fn test_sql_value_is_json_subtyped_marker() {
+        // A Character container value carries the runtime JSON subtype.
+        assert!(sql_value_is_json_subtyped(&SqlValue::Character("[1,2,3]".into())));
+        assert!(sql_value_is_json_subtyped(&SqlValue::Character(r#"{"a":1}"#.into())));
+        // A Character scalar string does NOT (json101-5.11: "[1,2,3]" atom).
+        assert!(!sql_value_is_json_subtyped(&SqlValue::Character("hello".into())));
+        assert!(!sql_value_is_json_subtyped(&SqlValue::Character("123".into())));
+        // Varchar never carries the marker (plain text).
+        assert!(!sql_value_is_json_subtyped(&SqlValue::Varchar("[1,2,3]".into())));
+        // Non-text values never carry it.
+        assert!(!sql_value_is_json_subtyped(&SqlValue::Integer(1)));
+        assert!(!sql_value_is_json_subtyped(&SqlValue::Null));
+    }
+
+    #[test]
+    fn test_json_insert_embeds_runtime_subtyped_value() {
+        // json101-5.10: a container `value` column (Character marker) embeds as
+        // JSON even though its AST subtype flag is false (opaque column ref).
+        let doc = v("{}");
+        let path = v("$.a");
+        let container = SqlValue::Character("[1,2,3]".into());
+        assert_eq!(
+            txt(json_insert(&[doc.clone(), path.clone(), container], &[false, false, false])
+                .unwrap()),
+            r#"{"a":[1,2,3]}"#
+        );
+        // json101-5.11: a plain-text (Varchar) string value stays quoted.
+        let string_val = v("[1,2,3]");
+        assert_eq!(
+            txt(json_insert(&[doc, path, string_val], &[false, false, false]).unwrap()),
+            r#"{"a":"[1,2,3]"}"#
+        );
     }
 
     #[test]

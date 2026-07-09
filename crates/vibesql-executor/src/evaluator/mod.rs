@@ -14,6 +14,7 @@ pub mod date_format;
 pub(crate) mod expression_hash;
 pub(crate) mod expressions;
 pub(crate) mod functions;
+pub(crate) mod json_subtype;
 pub(crate) mod operators;
 #[cfg(feature = "parallel")]
 pub(crate) mod parallel;

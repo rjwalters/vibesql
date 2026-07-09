@@ -249,9 +249,20 @@ fn is_container(node: &serde_json::Value) -> bool {
 
 /// The `value` column rendering for a node: scalars use SQLite's `->>`-style
 /// scalar value; containers use their minified JSON text.
+///
+/// A container's `value` carries SQLite's JSON "J" subtype (per the 2024-02-16
+/// json_tree/json_each regression fix, sqlite.org forumpost/ecb94cd210): when
+/// such a value is fed to a JSON construction function it embeds as a
+/// sub-document rather than being quoted as a string (json101-5.10 vs 5.11).
+/// VibeSQL does not carry a distinct subtype tag on `SqlValue`, so it signals
+/// the JSON subtype on TEXT container values by emitting them as
+/// [`SqlValue::Character`] instead of [`SqlValue::Varchar`]. Both variants are
+/// interoperable text everywhere else (display, comparison, `typeof`), so the
+/// marker is invisible to all other consumers; only the JSON construction
+/// functions read it (see `json_funcs::sql_value_is_json_subtyped`).
 fn node_value_column(node: &serde_json::Value) -> SqlValue {
     if is_container(node) {
-        SqlValue::Varchar(json_node_to_json_text(node).into())
+        SqlValue::Character(json_node_to_json_text(node).into())
     } else {
         json_node_to_sql_value(node)
     }
