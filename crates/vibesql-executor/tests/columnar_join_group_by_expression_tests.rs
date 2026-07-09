@@ -152,14 +152,6 @@ fn run_both_unsorted(
     (columnar, row, logs)
 }
 
-/// Decline marker emitted when the join GROUP BY branch bails to the row path
-/// because the query has a HAVING clause (the join path does not apply HAVING).
-const HAVING_DECLINE: &str = "GROUP BY with HAVING not supported";
-/// Decline marker emitted when the join GROUP BY branch bails to the row path
-/// because the query has an ORDER BY clause (the join path does not sort
-/// projected group keys correctly).
-const ORDER_BY_DECLINE: &str = "GROUP BY with ORDER BY not supported";
-
 /// Row-fallback marker: a joined GROUP BY key couldn't be resolved to a column.
 const ROW_FALLBACK: &str = "Columnar join: some GROUP BY columns couldn't be resolved";
 /// Positive marker emitted only when the columnar join path produced the result.
@@ -210,10 +202,7 @@ fn join_group_by_sum_expression_takes_columnar_path_and_matches_row_path() {
         let (columnar, row, logs) = run_both(&db, sql);
 
         assert_columnar_join_group_by_ran(&logs);
-        assert_eq!(
-            columnar, row,
-            "columnar join GROUP BY a+b result must equal row path (n={n})"
-        );
+        assert_eq!(columnar, row, "columnar join GROUP BY a+b result must equal row path (n={n})");
     }
 }
 
@@ -277,8 +266,7 @@ fn join_group_by_left_outer_null_keys_match_row_path() {
     }
     execute_sql(&mut db, &ins);
 
-    let sql =
-        "SELECT l.a + r.d, SUM(l.c) FROM l LEFT JOIN r ON l.k = r.k GROUP BY l.a + r.d";
+    let sql = "SELECT l.a + r.d, SUM(l.c) FROM l LEFT JOIN r ON l.k = r.k GROUP BY l.a + r.d";
     let (columnar, row, logs) = run_both(&db, sql);
 
     assert_columnar_join_group_by_ran(&logs);
@@ -347,15 +335,11 @@ fn join_group_by_mixed_column_and_expression_keys_match_row_path() {
     let mut db = Database::new();
     setup_inner(&mut db, 600);
 
-    let sql =
-        "SELECT l.a, l.b + l.c, COUNT(*) FROM l JOIN r ON l.k = r.k GROUP BY l.a, l.b + l.c";
+    let sql = "SELECT l.a, l.b + l.c, COUNT(*) FROM l JOIN r ON l.k = r.k GROUP BY l.a, l.b + l.c";
     let (columnar, row, logs) = run_both(&db, sql);
 
     assert_columnar_join_group_by_ran(&logs);
-    assert_eq!(
-        columnar, row,
-        "columnar join GROUP BY (col, expr) result must equal row path"
-    );
+    assert_eq!(columnar, row, "columnar join GROUP BY (col, expr) result must equal row path");
 }
 
 // --- Positional SELECT-list validation (the transposition hazard) ------------
@@ -473,32 +457,26 @@ fn join_group_by_unsupported_expression_falls_back() {
     );
 }
 
-// --- HAVING / ORDER BY fallback (must decline to the row path) ----------------
+// --- HAVING / ORDER BY on the columnar join GROUP BY path (Issue #6009) --------
 //
-// The join GROUP BY branch does not apply HAVING and does not correctly sort
-// projected group keys for ORDER BY. It must therefore DECLINE these shapes and
-// fall back to the row path, which applies both correctly. These tests assert
-// the decline marker is emitted (proving the fallback is taken) AND compare
-// results against the row path WITHOUT sorting (so ordering bugs cannot hide).
+// The join GROUP BY branch now applies HAVING (via the shared columnar HAVING
+// filter) and a terminal ORDER BY (via the shared positional resolver), instead
+// of declining to the row path (which is what PR #6003 did). These tests assert
+// the columnar join path IS taken (positive marker, no positional/resolve
+// decline) AND compare results against the row path WITHOUT sorting (so ordering
+// bugs cannot hide — the pre-sorting harness that masked the #6003 ordering bug
+// must not return).
+//
+// A HAVING clause that references a *bare* (non-aggregate) GROUP BY column is not
+// supported by the columnar HAVING filter and correctly declines to the row path;
+// that case is covered separately below.
 
-fn assert_declined_not_columnar(logs: &[String], decline_marker: &str) {
-    let joined = logs.join("\n");
-    assert!(
-        logs.iter().any(|l| l.contains(decline_marker)),
-        "expected join GROUP BY to decline via {decline_marker:?} and fall back to the row path:\n{joined}"
-    );
-    assert!(
-        !logs.iter().any(|l| l.contains(COLUMNAR_JOIN_SUCCEEDED)),
-        "columnar join GROUP BY must NOT run for this shape (would drop HAVING / mis-order):\n{joined}"
-    );
-}
-
-/// HAVING on a bare-column join GROUP BY. The columnar join path does not apply
-/// HAVING, so it must decline to the row path. Before the #5995-review fix the
-/// columnar path returned unfiltered groups (e.g. it included `a=7, COUNT=1`).
-/// Compare WITHOUT sorting.
+/// HAVING with an aggregate predicate on a bare-column join GROUP BY. The
+/// columnar HAVING filter handles aggregate predicates, so this now runs on the
+/// columnar join path (Issue #6009). a=7 appears exactly once, so
+/// HAVING COUNT(*) > 1 must exclude it. Compare WITHOUT sorting.
 #[test]
-fn join_group_by_having_bare_column_declines_and_matches_row_path() {
+fn join_group_by_having_aggregate_runs_columnar_and_matches_row_path() {
     init_logger();
 
     let mut db = Database::new();
@@ -512,15 +490,11 @@ fn join_group_by_having_bare_column_declines_and_matches_row_path() {
     execute_sql(&mut db, "INSERT INTO r VALUES (0,100),(1,200),(2,300),(3,400)");
 
     // a=7 appears exactly once, so HAVING COUNT(*) > 1 must exclude it.
-    let sql =
-        "SELECT l.a, COUNT(*) FROM l JOIN r ON l.k = r.k GROUP BY l.a HAVING COUNT(*) > 1";
+    let sql = "SELECT l.a, COUNT(*) FROM l JOIN r ON l.k = r.k GROUP BY l.a HAVING COUNT(*) > 1";
     let (columnar, row, logs) = run_both_unsorted(&db, sql);
 
-    assert_declined_not_columnar(&logs, HAVING_DECLINE);
-    assert_eq!(
-        columnar, row,
-        "HAVING on a join GROUP BY must match the row path (HAVING applied)"
-    );
+    assert_columnar_join_group_by_ran(&logs);
+    assert_eq!(columnar, row, "HAVING on a join GROUP BY must match the row path (HAVING applied)");
     // Guard: the singleton group must actually be filtered out.
     assert!(
         !columnar.iter().any(|r| r[0] == SqlValue::Integer(7)),
@@ -528,10 +502,10 @@ fn join_group_by_having_bare_column_declines_and_matches_row_path() {
     );
 }
 
-/// HAVING on an *expression*-key join GROUP BY — same decline-to-row-path
-/// requirement for the derived-key shape this PR adds.
+/// HAVING on an *expression*-key join GROUP BY — aggregate predicate runs on the
+/// columnar path and matches the row path.
 #[test]
-fn join_group_by_having_expression_key_declines_and_matches_row_path() {
+fn join_group_by_having_expression_key_runs_columnar_and_matches_row_path() {
     init_logger();
 
     let mut db = Database::new();
@@ -548,18 +522,48 @@ fn join_group_by_having_expression_key_declines_and_matches_row_path() {
                GROUP BY l.a + l.k HAVING SUM(l.c) > 60";
     let (columnar, row, logs) = run_both_unsorted(&db, sql);
 
-    assert_declined_not_columnar(&logs, HAVING_DECLINE);
+    assert_columnar_join_group_by_ran(&logs);
+    assert_eq!(columnar, row, "HAVING on an expression-key join GROUP BY must match the row path");
+}
+
+/// HAVING referencing a *bare* GROUP BY column (not an aggregate) is unsupported
+/// by the columnar HAVING filter and must decline to the row path (which handles
+/// it). Result must still be correct. Compare WITHOUT sorting.
+#[test]
+fn join_group_by_having_bare_column_declines_and_matches_row_path() {
+    init_logger();
+
+    let mut db = Database::new();
+    execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
+    execute_sql(&mut db, "CREATE TABLE r (k INTEGER, d INTEGER)");
+    execute_sql(
+        &mut db,
+        "INSERT INTO l VALUES (0,3,10),(1,3,20),(2,5,30),(3,5,40),\
+         (0,3,50),(1,7,60),(2,3,70),(3,5,80)",
+    );
+    execute_sql(&mut db, "INSERT INTO r VALUES (0,100),(1,200),(2,300),(3,400)");
+
+    // HAVING l.a > 3 references a bare GROUP BY column -> columnar HAVING filter
+    // declines -> row path. Result must match and be correct.
+    let sql = "SELECT l.a, COUNT(*) FROM l JOIN r ON l.k = r.k GROUP BY l.a HAVING l.a > 3";
+    let (columnar, row, _logs) = run_both_unsorted(&db, sql);
+
     assert_eq!(
         columnar, row,
-        "HAVING on an expression-key join GROUP BY must match the row path"
+        "HAVING on a bare GROUP BY column must produce correct (row-path) results"
+    );
+    // Guard: only groups with a > 3 survive.
+    assert!(
+        columnar.iter().all(|r| matches!(r[0], SqlValue::Integer(v) if v > 3)),
+        "HAVING l.a > 3 must keep only a>3 groups: {columnar:?}"
     );
 }
 
-/// ORDER BY on an expression-key join GROUP BY — the Judge's exact repro.
-/// Compare in EMITTED ORDER (no sort): the columnar path emitted keys in raw
-/// group order; it must now decline and match the row path's sorted order.
+/// ORDER BY on an expression-key join GROUP BY — the #6003 repro. Runs on the
+/// columnar path now and matches the row path's sorted order in EMITTED ORDER
+/// (no sort by the harness).
 #[test]
-fn join_group_by_order_by_expression_key_declines_and_matches_row_path() {
+fn join_group_by_order_by_expression_key_runs_columnar_and_matches_row_path() {
     init_logger();
 
     let mut db = Database::new();
@@ -576,7 +580,7 @@ fn join_group_by_order_by_expression_key_declines_and_matches_row_path() {
                GROUP BY l.a + l.k ORDER BY l.a + l.k";
     let (columnar, row, logs) = run_both_unsorted(&db, sql);
 
-    assert_declined_not_columnar(&logs, ORDER_BY_DECLINE);
+    assert_columnar_join_group_by_ran(&logs);
     assert_eq!(
         columnar, row,
         "ORDER BY on an expression-key join GROUP BY must match the row path IN EMITTED ORDER"
@@ -596,10 +600,10 @@ fn join_group_by_order_by_expression_key_declines_and_matches_row_path() {
     );
 }
 
-/// ORDER BY on a *bare-column* join GROUP BY — the second Judge repro. Compare
-/// in emitted order.
+/// ORDER BY on a *bare-column* join GROUP BY — the second #6003 repro. Runs
+/// columnar and matches emitted order.
 #[test]
-fn join_group_by_order_by_bare_column_declines_and_matches_row_path() {
+fn join_group_by_order_by_bare_column_runs_columnar_and_matches_row_path() {
     init_logger();
 
     let mut db = Database::new();
@@ -615,7 +619,7 @@ fn join_group_by_order_by_bare_column_declines_and_matches_row_path() {
     let sql = "SELECT l.a, SUM(l.c) FROM l JOIN r ON l.k = r.k GROUP BY l.a ORDER BY l.a";
     let (columnar, row, logs) = run_both_unsorted(&db, sql);
 
-    assert_declined_not_columnar(&logs, ORDER_BY_DECLINE);
+    assert_columnar_join_group_by_ran(&logs);
     assert_eq!(
         columnar, row,
         "ORDER BY on a bare-column join GROUP BY must match the row path IN EMITTED ORDER"
@@ -628,10 +632,31 @@ fn join_group_by_order_by_bare_column_declines_and_matches_row_path() {
     );
 }
 
-/// LEFT JOIN with NULL-padded derived keys plus ORDER BY: the NULL-key group and
-/// ORDER BY together must still route to the row path and match in emitted order.
+/// HAVING then ORDER BY together on a join GROUP BY: HAVING filters, then ORDER BY
+/// sorts the survivors, all on the columnar path.
 #[test]
-fn join_group_by_left_outer_null_keys_with_order_by_declines_and_matches_row_path() {
+fn join_group_by_having_then_order_by_runs_columnar_and_matches_row_path() {
+    init_logger();
+
+    let mut db = Database::new();
+    setup_inner(&mut db, 800);
+
+    let sql = "SELECT l.a, SUM(l.c) FROM l JOIN r ON l.k = r.k \
+               GROUP BY l.a HAVING SUM(l.c) > 100 ORDER BY SUM(l.c) DESC";
+    let (columnar, row, logs) = run_both_unsorted(&db, sql);
+
+    assert_columnar_join_group_by_ran(&logs);
+    assert_eq!(
+        columnar, row,
+        "HAVING + ORDER BY on a join GROUP BY must match the row path IN EMITTED ORDER"
+    );
+}
+
+/// LEFT JOIN with NULL-padded derived keys plus ORDER BY: the #6003 repro. The
+/// NULL-key group and ORDER BY together now run on the columnar path and match
+/// the row path in emitted order — NULL keys sort first ascending (SQLite).
+#[test]
+fn join_group_by_left_outer_null_keys_with_order_by_runs_columnar_and_matches_row_path() {
     init_logger();
 
     let mut db = Database::new();
@@ -652,9 +677,16 @@ fn join_group_by_left_outer_null_keys_with_order_by_declines_and_matches_row_pat
                GROUP BY l.a + r.d ORDER BY l.a + r.d";
     let (columnar, row, logs) = run_both_unsorted(&db, sql);
 
-    assert_declined_not_columnar(&logs, ORDER_BY_DECLINE);
+    assert_columnar_join_group_by_ran(&logs);
     assert_eq!(
         columnar, row,
         "LEFT JOIN NULL-key GROUP BY with ORDER BY must match the row path in emitted order"
+    );
+    // The NULL-key group (unmatched LEFT rows -> l.a + NULL = NULL) must sort
+    // first ascending.
+    assert_eq!(
+        columnar.first().map(|r| &r[0]),
+        Some(&SqlValue::Null),
+        "NULL derived group key must sort first ascending: {columnar:?}"
     );
 }

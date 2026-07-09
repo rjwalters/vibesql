@@ -123,6 +123,13 @@ fn evaluate_expr_on_result_row(
                 AggregateSource::CountStar
             } else if args.len() == 1 {
                 match &args[0] {
+                    // `COUNT(*)` parses as a ColumnRef whose canonical name is
+                    // "*", not `Expression::Wildcard`. `extract_aggregates`
+                    // records it as `CountStar`, so HAVING must resolve it the
+                    // same way to match the computed aggregate spec (Issue #6009).
+                    Expression::ColumnRef(col_id) if col_id.column_canonical() == "*" => {
+                        AggregateSource::CountStar
+                    }
                     Expression::ColumnRef(col_id) => {
                         if let Some(idx) = schema
                             .get_column_index(col_id.table_canonical(), col_id.column_canonical())

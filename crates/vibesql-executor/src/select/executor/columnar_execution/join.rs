@@ -413,34 +413,85 @@ impl SelectExecutor<'_> {
         let has_group_by = stmt.group_by.is_some();
 
         if has_group_by {
-            // Decline the columnar join GROUP BY path when the query has HAVING
-            // or ORDER BY, and fall back to the row-oriented path (#5995 review).
+            // Join-path GROUP BY, now with terminal HAVING + ORDER BY (Issue #6009).
             //
-            // The join GROUP BY branch does not apply HAVING at all, and
-            // `apply_columnar_join_order_by` does not correctly sort when the
-            // ORDER BY expression is a projected group key / group-key
-            // expression. Rather than emit wrong results, we conservatively
-            // decline here — exactly like the single-table columnar path
-            // declines GROUP BY + ORDER BY (see columnar_execution/mod.rs). The
-            // row path applies HAVING and ORDER BY correctly.
-            //
-            // Actually implementing HAVING and ORDER BY on the join GROUP BY
-            // path is future work, tracked separately from this PR.
-            if stmt.having.is_some() {
-                log::debug!(
-                    "Columnar join: GROUP BY with HAVING not supported, falling back to row path"
-                );
-                return Ok(None);
-            }
-            if stmt.order_by.is_some() {
-                log::debug!(
-                    "Columnar join: GROUP BY with ORDER BY not supported, falling back to row path"
-                );
-                return Ok(None);
-            }
+            // The grouped result is `[group_keys..., aggregates...]` positional
+            // rows — the same layout as the single-table path. We therefore reuse
+            // the single-table HAVING filter (`having::apply_having_filter`) and
+            // the shared positional ORDER BY resolver (`group_order`), which sort
+            // by reading already-computed output values rather than re-evaluating
+            // expressions against the base-table schema. The old
+            // `apply_columnar_join_order_by` mis-sorted projected/derived group
+            // keys because it evaluated ORDER BY against the combined schema
+            // layout, not the grouped-result layout (the #6003 bug); the
+            // positional resolver fixes that.
+            let (group_rows, group_col_count, aggregates) = match self
+                .execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)?
+            {
+                Some(result) => result,
+                None => return Ok(None),
+            };
 
-            // Execute GROUP BY aggregation (no HAVING / ORDER BY on this path)
-            self.execute_columnar_join_group_by(stmt, &filtered_batch, &combined_schema)
+            // Apply HAVING if present, reusing the single-table columnar filter.
+            let after_having = if let Some(having_expr) = &stmt.having {
+                log::debug!(
+                    "Columnar join: applying HAVING filter to {} groups ({} group cols, {} aggregates)",
+                    group_rows.len(),
+                    group_col_count,
+                    aggregates.len()
+                );
+                match super::having::apply_having_filter(
+                    group_rows,
+                    having_expr,
+                    group_col_count,
+                    &aggregates,
+                    &combined_schema,
+                ) {
+                    Ok(rows) => rows,
+                    // HAVING references a plain (non-aggregate) GROUP BY column, a
+                    // DISTINCT aggregate, or an otherwise unsupported shape — fall
+                    // back to the row path, which handles all of these.
+                    Err(ExecutorError::UnsupportedFeature(msg))
+                        if msg.contains("not supported in columnar")
+                            || msg.contains("not found in computed aggregates") =>
+                    {
+                        log::debug!("Columnar join: HAVING falling back to row-oriented: {}", msg);
+                        return Ok(None);
+                    }
+                    Err(ExecutorError::Other(msg))
+                        if msg.contains("not supported in columnar")
+                            || msg.contains("not supported in columnar path")
+                            || msg.contains("not found in computed aggregates")
+                            || msg.contains("falling back to row-based") =>
+                    {
+                        log::debug!("Columnar join: HAVING falling back to row-oriented: {}", msg);
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else {
+                group_rows
+            };
+
+            // Apply terminal ORDER BY positionally. If any ORDER BY term can't be
+            // resolved to an output column, decline to the row path.
+            if let Some(order_by) = &stmt.order_by {
+                match super::group_order::apply_group_by_order_by(
+                    after_having,
+                    order_by,
+                    &stmt.select_list,
+                ) {
+                    Some(sorted) => Ok(Some(sorted)),
+                    None => {
+                        log::debug!(
+                            "Columnar join: GROUP BY ORDER BY term not resolvable to an output column, falling back to row-oriented"
+                        );
+                        Ok(None)
+                    }
+                }
+            } else {
+                Ok(Some(after_having))
+            }
         } else {
             // No GROUP BY - convert to rows and apply projection
 
@@ -929,10 +980,8 @@ fn group_by_key_shape_maybe_columnar(expr: &vibesql_ast::Expression) -> bool {
                 && group_by_key_shape_maybe_columnar(right)
         }
         vibesql_ast::Expression::UnaryOp { op, expr: inner } => {
-            matches!(
-                op,
-                vibesql_ast::UnaryOperator::Plus | vibesql_ast::UnaryOperator::Minus
-            ) && group_by_key_shape_maybe_columnar(inner)
+            matches!(op, vibesql_ast::UnaryOperator::Plus | vibesql_ast::UnaryOperator::Minus)
+                && group_by_key_shape_maybe_columnar(inner)
         }
         _ => false,
     }

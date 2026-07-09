@@ -282,15 +282,29 @@ impl SelectExecutor<'_> {
     }
 
     /// Execute GROUP BY aggregation on a joined columnar batch
+    /// Execute a join-path GROUP BY, returning the grouped result rows along with
+    /// the metadata needed to apply HAVING / ORDER BY at the call site.
+    ///
+    /// On success returns `Some((rows, group_col_count, aggregates))` where:
+    /// - `rows` are `[group_keys..., aggregates...]` positional result rows,
+    /// - `group_col_count` is the number of leading group-key columns,
+    /// - `aggregates` are the extracted aggregate specs (in the same order as the
+    ///   aggregate columns in each row), which `having::apply_having_filter` needs
+    ///   to map aggregate references to result-row positions (Issue #6009).
+    ///
+    /// Returns `Ok(None)` to decline to the row-oriented path.
     pub(in crate::select::executor) fn execute_columnar_join_group_by(
         &self,
         stmt: &vibesql_ast::SelectStmt,
         batch: &columnar::ColumnarBatch,
         schema: &CombinedSchema,
-    ) -> Result<Option<Vec<vibesql_storage::Row>>, ExecutorError> {
+    ) -> Result<
+        Option<(Vec<vibesql_storage::Row>, usize, Vec<columnar::AggregateSpec>)>,
+        ExecutorError,
+    > {
         let group_by_clause = match stmt.group_by.as_ref() {
             Some(g) => g,
-            None => return Ok(Some(batch.to_rows()?)),
+            None => return Ok(Some((batch.to_rows()?, 0, Vec::new()))),
         };
 
         // Only support simple GROUP BY
@@ -372,7 +386,9 @@ impl SelectExecutor<'_> {
                     {
                         Some(idx) => group_cols.push(idx),
                         None => {
-                            log::debug!("Columnar join: some GROUP BY columns couldn't be resolved");
+                            log::debug!(
+                                "Columnar join: some GROUP BY columns couldn't be resolved"
+                            );
                             return Ok(None);
                         }
                     }
@@ -446,6 +462,6 @@ impl SelectExecutor<'_> {
         let result = columnar::columnar_group_by(&rows, &group_cols, &agg_cols, None)?;
 
         log::info!("Columnar join: GROUP BY produced {} groups", result.len());
-        Ok(Some(result))
+        Ok(Some((result, group_cols.len(), aggregates)))
     }
 }
