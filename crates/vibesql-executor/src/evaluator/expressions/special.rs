@@ -175,14 +175,36 @@ impl ExpressionEvaluator<'_> {
         args: &[vibesql_ast::Expression],
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use super::super::functions::sqlite_compat::json_funcs;
+        use crate::evaluator::json_subtype::{
+            data_type_is_string, expr_runtime_json_subtype_eligible,
+        };
+
+        // Resolve whether a bare column reference is declared with a real string
+        // type (CHAR/VARCHAR). Such reads must never pick up the runtime JSON
+        // subtype marker (issue #6007): a `CHAR(n)` column holding
+        // container-shaped text quotes, while a dynamically-typed json_each /
+        // json_tree `value` column stays eligible (json101-5.10).
+        let column_is_declared_string = |_table: Option<&str>, column: &str| -> bool {
+            self.schema
+                .get_column(column)
+                .map(|c| data_type_is_string(&c.data_type))
+                .unwrap_or(false)
+        };
+
         let mut values = Vec::with_capacity(args.len());
         let mut subtypes = Vec::with_capacity(args.len());
         for arg in args {
-            values.push(self.eval(arg, row)?);
-            subtypes.push(expr_has_json_subtype(arg));
+            let value = self.eval(arg, row)?;
+            // AST-derived subtype OR a runtime container marker on an eligible
+            // (non-string-column) argument.
+            let is_json = expr_has_json_subtype(arg)
+                || (expr_runtime_json_subtype_eligible(arg, &column_is_declared_string)
+                    && json_funcs::sql_value_is_json_subtyped(&value));
+            subtypes.push(is_json);
+            values.push(value);
         }
 
-        use super::super::functions::sqlite_compat::json_funcs;
         // The `jsonb_*` names are text-mode aliases (accept-and-convert): they
         // delegate to the identical `json_*` implementation. See the Phase 4
         // JSONB note in `json_funcs.rs`.
@@ -194,6 +216,27 @@ impl ExpressionEvaluator<'_> {
             "JSON_SET" | "JSONB_SET" => json_funcs::json_set(&values, &subtypes),
             _ => unreachable!("eval_json_subtype_function called with {name}"),
         }
+    }
+
+    /// Evaluate `subtype(X)` — SQLite's runtime JSON subtype probe. Delegates
+    /// the structural subtype rules to [`crate::evaluator::json_subtype`].
+    pub(crate) fn eval_subtype(
+        &self,
+        args: &[vibesql_ast::Expression],
+        row: &vibesql_storage::Row,
+    ) -> Result<vibesql_types::SqlValue, ExecutorError> {
+        use crate::evaluator::json_subtype::data_type_is_string;
+        let column_is_declared_string = |_table: Option<&str>, column: &str| -> bool {
+            self.schema
+                .get_column(column)
+                .map(|c| data_type_is_string(&c.data_type))
+                .unwrap_or(false)
+        };
+        crate::evaluator::json_subtype::eval_subtype(
+            args,
+            &|e| self.eval(e, row),
+            &column_is_declared_string,
+        )
     }
 
     /// Evaluate function call
@@ -208,6 +251,9 @@ impl ExpressionEvaluator<'_> {
         match name.to_uppercase().as_str() {
             "COALESCE" => return self.eval_coalesce_lazy(args, row),
             "NULLIF" => return self.eval_nullif_lazy(args, row),
+            // subtype(X): runtime JSON subtype probe, computed structurally from
+            // the argument expression + its evaluated value.
+            "SUBTYPE" => return self.eval_subtype(args, row),
             // JSON construction/mutation functions that honor the JSON subtype:
             // an argument that is itself a call to a JSON-producing function
             // embeds as a sub-document rather than a quoted string. We compute

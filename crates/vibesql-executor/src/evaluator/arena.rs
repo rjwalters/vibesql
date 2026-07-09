@@ -144,6 +144,143 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         }
     }
 
+    /// Is this arena argument expression eligible to carry the *runtime* JSON
+    /// subtype marker? A bare read of a column declared with a real string type
+    /// (CHAR/VARCHAR) is not eligible — its container-shaped text quotes rather
+    /// than embedding (issue #6007). Arena mirror of
+    /// [`crate::evaluator::json_subtype::expr_runtime_json_subtype_eligible`].
+    fn arena_expr_runtime_json_subtype_eligible(&self, expr: &ArenaExpression<'arena>) -> bool {
+        if let ArenaExpression::ColumnRef { table, column, .. } = expr {
+            let column_str = self.resolve(*column);
+            let table_str = table.map(|t| self.resolve(t));
+            let declared_string = self
+                .schema
+                .get_column_index(table_str, column_str)
+                .and_then(|idx| self.schema.get_column_type_by_index(idx))
+                .map(crate::evaluator::json_subtype::data_type_is_string)
+                .unwrap_or(false);
+            !declared_string
+        } else {
+            true
+        }
+    }
+
+    /// Structurally determine whether an arena expression evaluates to a
+    /// JSON-subtyped value in the current row. Arena mirror of
+    /// [`crate::evaluator::json_subtype`]; see that module for the rules.
+    fn arena_expr_json_subtype(
+        &self,
+        expr: &ArenaExpression<'arena>,
+        row: &Row,
+    ) -> Result<bool, ExecutorError> {
+        use vibesql_ast::BinaryOperator;
+        Ok(match expr {
+            ArenaExpression::BinaryOp { op: BinaryOperator::JsonExtract, .. } => {
+                !matches!(self.eval(expr, row)?, SqlValue::Null)
+            }
+            ArenaExpression::BinaryOp { op: BinaryOperator::JsonExtractText, .. } => false,
+            ArenaExpression::Extended(ArenaExtendedExpr::Function { name, args, .. }) => {
+                let canon = self.resolve(*name).to_ascii_lowercase();
+                if self.arena_expr_has_json_subtype(expr) {
+                    !matches!(self.eval(expr, row)?, SqlValue::Null)
+                } else if matches!(canon.as_str(), "json_extract" | "jsonb_extract" | "json_quote")
+                {
+                    crate::evaluator::json_subtype::value_is_json_container(&self.eval(expr, row)?)
+                } else if matches!(canon.as_str(), "if" | "iif") {
+                    match self.arena_selected_conditional_branch(args, row)? {
+                        Some(branch) => self.arena_expr_json_subtype(branch, row)?,
+                        None => false,
+                    }
+                } else if matches!(canon.as_str(), "coalesce" | "ifnull") {
+                    let mut result = false;
+                    for arg in args.iter() {
+                        if !matches!(self.eval(arg, row)?, SqlValue::Null) {
+                            result = self.arena_expr_json_subtype(arg, row)?;
+                            break;
+                        }
+                    }
+                    result
+                } else if canon == "nullif" && args.len() == 2 {
+                    self.arena_expr_json_subtype(&args[0], row)?
+                } else {
+                    false
+                }
+            }
+            ArenaExpression::Extended(ArenaExtendedExpr::Case {
+                operand,
+                when_clauses,
+                else_result,
+            }) => {
+                match self.arena_selected_case_branch(
+                    operand.as_deref(),
+                    when_clauses,
+                    else_result.as_deref(),
+                    row,
+                )? {
+                    Some(branch) => self.arena_expr_json_subtype(branch, row)?,
+                    None => false,
+                }
+            }
+            _ => {
+                self.arena_expr_runtime_json_subtype_eligible(expr)
+                    && crate::evaluator::functions::sqlite_compat::json_funcs::sql_value_is_json_subtyped(
+                        &self.eval(expr, row)?,
+                    )
+            }
+        })
+    }
+
+    /// Arena mirror of the `if`/`iif` branch-selection used by subtype recovery.
+    fn arena_selected_conditional_branch<'e>(
+        &self,
+        args: &'e [ArenaExpression<'arena>],
+        row: &Row,
+    ) -> Result<Option<&'e ArenaExpression<'arena>>, ExecutorError> {
+        use crate::evaluator::operators::is_truthy;
+        let mut i = 0;
+        while i + 1 < args.len() {
+            if is_truthy(&self.eval(&args[i], row)?) {
+                return Ok(Some(&args[i + 1]));
+            }
+            i += 2;
+        }
+        if !args.len().is_multiple_of(2) {
+            Ok(Some(&args[args.len() - 1]))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Arena mirror of the CASE branch-selection used by subtype recovery.
+    fn arena_selected_case_branch<'e>(
+        &self,
+        operand: Option<&'e ArenaExpression<'arena>>,
+        when_clauses: &'e [arena_ast::CaseWhen<'arena>],
+        else_result: Option<&'e ArenaExpression<'arena>>,
+        row: &Row,
+    ) -> Result<Option<&'e ArenaExpression<'arena>>, ExecutorError> {
+        use crate::evaluator::operators::is_truthy;
+        let operand_val = match operand {
+            Some(op) => Some(self.eval(op, row)?),
+            None => None,
+        };
+        for wc in when_clauses.iter() {
+            for cond in wc.conditions.iter() {
+                let matched = match &operand_val {
+                    Some(ov) => {
+                        let cv = self.eval(cond, row)?;
+                        crate::evaluator::core::values_are_equal(ov, &cv)
+                    }
+                    None => is_truthy(&self.eval(cond, row)?),
+                };
+                if matched {
+                    return Ok(Some(&wc.result));
+                }
+            }
+        }
+        Ok(else_result)
+    }
+
     /// Evaluate an arena-allocated expression against a row.
     ///
     /// # Arguments
@@ -403,6 +540,22 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 // subtype-aware implementations. (Mirrors special.rs for the
                 // non-arena evaluator.)
                 let upper = name_str.to_uppercase();
+                // subtype(X): runtime JSON subtype probe, computed structurally
+                // from the argument expression + its evaluated value. Mirrors
+                // crate::evaluator::json_subtype for the arena AST.
+                if upper == "SUBTYPE" {
+                    if args.len() != 1 {
+                        return Err(ExecutorError::WrongNumberOfArguments {
+                            function_name: "subtype".to_string(),
+                        });
+                    }
+                    let is_json = self.arena_expr_json_subtype(&args[0], row)?;
+                    return Ok(SqlValue::Integer(if is_json {
+                        crate::evaluator::json_subtype::JSON_SUBTYPE_TAG
+                    } else {
+                        0
+                    }));
+                }
                 if matches!(
                     upper.as_str(),
                     "JSON_ARRAY"
@@ -416,9 +569,16 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         | "JSONB_REPLACE"
                         | "JSONB_SET"
                 ) {
-                    let subtypes: Vec<bool> =
-                        args.iter().map(|a| self.arena_expr_has_json_subtype(a)).collect();
                     use super::functions::sqlite_compat::json_funcs;
+                    // AST-derived subtype OR a runtime container marker on an
+                    // eligible (non-string-column) argument (issue #6007).
+                    let mut subtypes: Vec<bool> = Vec::with_capacity(args.len());
+                    for (i, a) in args.iter().enumerate() {
+                        let is_json = self.arena_expr_has_json_subtype(a)
+                            || (self.arena_expr_runtime_json_subtype_eligible(a)
+                                && json_funcs::sql_value_is_json_subtyped(&evaluated_args[i]));
+                        subtypes.push(is_json);
+                    }
                     // `jsonb_*` are text-mode accept-and-convert aliases of `json_*`.
                     return match upper.as_str() {
                         "JSON_ARRAY" | "JSONB_ARRAY" => {
