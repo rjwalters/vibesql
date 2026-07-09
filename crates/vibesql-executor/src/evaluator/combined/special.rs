@@ -195,7 +195,19 @@ impl CombinedExpressionEvaluator<'_> {
             // subtype(X): runtime JSON subtype probe (see
             // crate::evaluator::json_subtype).
             "SUBTYPE" => {
-                return crate::evaluator::json_subtype::eval_subtype(args, &|e| self.eval(e, row));
+                use crate::evaluator::json_subtype::data_type_is_string;
+                let column_is_declared_string = |table: Option<&str>, column: &str| -> bool {
+                    self.schema
+                        .get_column_index(table, column)
+                        .and_then(|idx| self.schema.get_column_type_by_index(idx))
+                        .map(data_type_is_string)
+                        .unwrap_or(false)
+                };
+                return crate::evaluator::json_subtype::eval_subtype(
+                    args,
+                    &|e| self.eval(e, row),
+                    &column_is_declared_string,
+                );
             }
             // JSON construction/mutation functions honoring the JSON subtype:
             // detect JSON-producing argument expressions from the AST so nested
@@ -203,14 +215,36 @@ impl CombinedExpressionEvaluator<'_> {
             // quoted strings. Mirrors expressions/special.rs.
             "JSON_ARRAY" | "JSON_OBJECT" | "JSON_INSERT" | "JSON_REPLACE" | "JSON_SET"
             | "JSONB_ARRAY" | "JSONB_OBJECT" | "JSONB_INSERT" | "JSONB_REPLACE" | "JSONB_SET" => {
+                use super::super::functions::sqlite_compat::json_funcs;
+                use crate::evaluator::json_subtype::{
+                    data_type_is_string, expr_runtime_json_subtype_eligible,
+                };
+
+                // A bare read of a declared CHAR/VARCHAR column must never pick
+                // up the runtime JSON subtype marker (issue #6007); a
+                // dynamically-typed json_each / json_tree `value` column stays
+                // eligible (json101-5.10).
+                let column_is_declared_string = |table: Option<&str>, column: &str| -> bool {
+                    self.schema
+                        .get_column_index(table, column)
+                        .and_then(|idx| self.schema.get_column_type_by_index(idx))
+                        .map(data_type_is_string)
+                        .unwrap_or(false)
+                };
+
                 let mut values = Vec::with_capacity(args.len());
                 let mut subtypes = Vec::with_capacity(args.len());
                 for arg in args {
-                    values.push(self.eval(arg, row)?);
-                    subtypes
-                        .push(crate::evaluator::expressions::special::expr_has_json_subtype(arg));
+                    let value = self.eval(arg, row)?;
+                    let is_json =
+                        crate::evaluator::expressions::special::expr_has_json_subtype(arg)
+                            || (expr_runtime_json_subtype_eligible(
+                                arg,
+                                &column_is_declared_string,
+                            ) && json_funcs::sql_value_is_json_subtyped(&value));
+                    subtypes.push(is_json);
+                    values.push(value);
                 }
-                use super::super::functions::sqlite_compat::json_funcs;
                 // `jsonb_*` are text-mode accept-and-convert aliases of `json_*`.
                 return match name.to_uppercase().as_str() {
                     "JSON_ARRAY" | "JSONB_ARRAY" => json_funcs::json_array(&values, &subtypes),

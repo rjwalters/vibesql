@@ -20,9 +20,11 @@
 //!   subtype of the branch actually selected at runtime (recurses; covers
 //!   json102-1620's `subtype(if(json_valid(x), x->y))`).
 //! - anything else: the value's own runtime subtype marker (see
-//!   [`json_funcs::sql_value_is_json_subtyped`]), which lets a container `value`
-//!   column from json_each/json_tree keep its subtype through an opaque column
-//!   reference (json101-5.10).
+//!   [`json_funcs::sql_value_is_json_subtyped`]) — but only when the argument
+//!   expression is *eligible* (see [`expr_runtime_json_subtype_eligible`]). This
+//!   lets a container `value` column from json_each/json_tree keep its subtype
+//!   through an opaque column reference (json101-5.10) while an ordinary
+//!   `CHAR(n)` column read never picks it up (issue #6007).
 //!
 //! The three evaluator front-ends (`ExpressionEvaluator`,
 //! `CombinedExpressionEvaluator`, and the arena evaluator) all delegate here via
@@ -77,24 +79,84 @@ pub(crate) fn value_is_json_container(value: &SqlValue) -> bool {
     }
 }
 
+/// Is the argument expression eligible to carry the *runtime* JSON subtype
+/// marker (see [`json_funcs::sql_value_is_json_subtyped`])?
+///
+/// The runtime marker rides on [`SqlValue::Character`], which is also how an
+/// ordinary fixed-width `CHAR(n)` column materialises. To keep the marker from
+/// mis-firing on a CHAR column holding container-shaped text (issue #6007), a
+/// bare read of a column declared with a real string type (CHAR/VARCHAR) is
+/// *not* eligible: its value quotes even when it parses as a JSON container,
+/// matching SQLite. Everything else — literals, function results, arithmetic,
+/// and dynamically-typed columns such as a json_each/json_tree `value` column
+/// (declared `DataType::Null`) — stays eligible, so json101-5.10 still embeds
+/// the container.
+///
+/// `column_is_declared_string` resolves a column reference (by its optional
+/// table qualifier + canonical name) to `true` when the column's *declared*
+/// type is a real string type. It returns `false` for dynamically-typed
+/// (TVF/derived) columns and for unresolved references, both of which remain
+/// eligible.
+pub(crate) fn expr_runtime_json_subtype_eligible<R>(
+    expr: &Expression,
+    column_is_declared_string: &R,
+) -> bool
+where
+    R: Fn(Option<&str>, &str) -> bool,
+{
+    match expr {
+        Expression::ColumnRef(col) => {
+            !column_is_declared_string(col.table_canonical(), col.column_canonical())
+        }
+        _ => true,
+    }
+}
+
+/// Does this declared column type quote container-shaped text (i.e. is it a real
+/// string type: CHAR/VARCHAR/CLOB)? A `CHAR(n)` column read must never pick up
+/// the runtime JSON subtype marker (issue #6007).
+pub(crate) fn data_type_is_string(ty: &vibesql_types::DataType) -> bool {
+    use vibesql_types::DataType;
+    matches!(
+        ty,
+        DataType::Character { .. }
+            | DataType::Varchar { .. }
+            | DataType::CharacterLargeObject
+            | DataType::Name
+    )
+}
+
 /// Evaluate `subtype(X)`: `Integer(74)` when the argument carries the JSON
 /// subtype at runtime, `Integer(0)` otherwise. `eval` evaluates a sub-expression
 /// against the current row using the caller's evaluator.
-pub(crate) fn eval_subtype<F>(args: &[Expression], eval: &F) -> Result<SqlValue, ExecutorError>
+/// `column_is_declared_string` resolves whether a column reference is declared
+/// with a real string type (used to gate the runtime marker; see
+/// [`expr_runtime_json_subtype_eligible`] and issue #6007).
+pub(crate) fn eval_subtype<F, R>(
+    args: &[Expression],
+    eval: &F,
+    column_is_declared_string: &R,
+) -> Result<SqlValue, ExecutorError>
 where
     F: Fn(&Expression) -> Result<SqlValue, ExecutorError>,
+    R: Fn(Option<&str>, &str) -> bool,
 {
     if args.len() != 1 {
         return Err(ExecutorError::WrongNumberOfArguments { function_name: "subtype".to_string() });
     }
-    let is_json = expr_json_subtype(&args[0], eval)?;
+    let is_json = expr_json_subtype(&args[0], eval, column_is_declared_string)?;
     Ok(SqlValue::Integer(if is_json { JSON_SUBTYPE_TAG } else { 0 }))
 }
 
 /// Structurally determine whether `expr` evaluates to a JSON-subtyped value.
-fn expr_json_subtype<F>(expr: &Expression, eval: &F) -> Result<bool, ExecutorError>
+fn expr_json_subtype<F, R>(
+    expr: &Expression,
+    eval: &F,
+    column_is_declared_string: &R,
+) -> Result<bool, ExecutorError>
 where
     F: Fn(&Expression) -> Result<SqlValue, ExecutorError>,
+    R: Fn(Option<&str>, &str) -> bool,
 {
     Ok(match expr {
         // `->` always yields the JSON subtype for a non-NULL result; `->>`
@@ -111,20 +173,20 @@ where
                 value_is_json_container(&eval(expr)?)
             } else if matches!(canon, "if" | "iif") {
                 match selected_conditional_branch(args, eval)? {
-                    Some(branch) => expr_json_subtype(branch, eval)?,
+                    Some(branch) => expr_json_subtype(branch, eval, column_is_declared_string)?,
                     None => false,
                 }
             } else if matches!(canon, "coalesce" | "ifnull") {
                 let mut result = false;
                 for arg in args {
                     if !matches!(eval(arg)?, SqlValue::Null) {
-                        result = expr_json_subtype(arg, eval)?;
+                        result = expr_json_subtype(arg, eval, column_is_declared_string)?;
                         break;
                     }
                 }
                 result
             } else if canon == "nullif" && args.len() == 2 {
-                expr_json_subtype(&args[0], eval)?
+                expr_json_subtype(&args[0], eval, column_is_declared_string)?
             } else {
                 false
             }
@@ -136,13 +198,18 @@ where
                 else_result.as_deref(),
                 eval,
             )? {
-                Some(branch) => expr_json_subtype(branch, eval)?,
+                Some(branch) => expr_json_subtype(branch, eval, column_is_declared_string)?,
                 None => false,
             }
         }
         // A runtime value already carrying the subtype marker (a container
-        // `value` column from json_each/json_tree reached via a column ref).
-        _ => json_funcs::sql_value_is_json_subtyped(&eval(expr)?),
+        // `value` column from json_each/json_tree reached via a column ref) —
+        // but only when the argument expression is eligible, so a plain
+        // `CHAR(n)` column read never reports the JSON subtype (issue #6007).
+        _ => {
+            expr_runtime_json_subtype_eligible(expr, column_is_declared_string)
+                && json_funcs::sql_value_is_json_subtyped(&eval(expr)?)
+        }
     })
 }
 
@@ -255,8 +322,19 @@ mod tests {
         }
     }
 
+    /// Test stub: no column is treated as declared-string, so every argument
+    /// stays eligible for the runtime marker. The CHAR-column disqualification
+    /// is exercised end-to-end by the executor integration tests instead
+    /// (`json_char_column_subtype_tests.rs`).
+    fn no_string_columns(_table: Option<&str>, _column: &str) -> bool {
+        false
+    }
+
     fn is_json(expr: Expression) -> bool {
-        matches!(eval_subtype(&[expr], &eval_expr).unwrap(), SqlValue::Integer(74))
+        matches!(
+            eval_subtype(&[expr], &eval_expr, &no_string_columns).unwrap(),
+            SqlValue::Integer(74)
+        )
     }
 
     #[test]
@@ -350,8 +428,12 @@ mod tests {
 
     #[test]
     fn subtype_wrong_arity_errors() {
-        assert!(eval_subtype(&[], &eval_expr).is_err());
-        assert!(eval_subtype(&[lit(SqlValue::Integer(1)), lit(SqlValue::Integer(2))], &eval_expr)
-            .is_err());
+        assert!(eval_subtype(&[], &eval_expr, &no_string_columns).is_err());
+        assert!(eval_subtype(
+            &[lit(SqlValue::Integer(1)), lit(SqlValue::Integer(2))],
+            &eval_expr,
+            &no_string_columns
+        )
+        .is_err());
     }
 }

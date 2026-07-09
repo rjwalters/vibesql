@@ -1213,18 +1213,30 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 // embedding, which is what the covered conformance tests expect.
 
 /// Encode a single SQL argument as a JSON node for a construction/mutation
-/// function. `is_json` is the argument's AST-derived subtype flag (see the
-/// module note): a TEXT value with the flag set is parsed as an embedded JSON
-/// sub-document. A value that already carries the JSON subtype at runtime —
-/// signalled by [`SqlValue::Character`], see [`sql_value_is_json_subtyped`] —
-/// embeds as JSON regardless of the AST flag, so a container `value` column
-/// from json_each/json_tree round-trips through an opaque column reference
-/// (json101-5.10).
+/// function. `is_json` is the argument's subtype flag (see the module note): a
+/// TEXT value with the flag set is parsed as an embedded JSON sub-document.
+///
+/// The flag combines two sources, both computed by the caller before dispatch
+/// (see the per-front-end `eval_json_subtype_function` helpers):
+///
+/// 1. an *AST-derived* flag — the argument expression is itself a call to a
+///    JSON-producing function whose output is always well-formed JSON; and
+/// 2. a *runtime* flag — the evaluated value already carries the JSON subtype
+///    marker ([`sql_value_is_json_subtyped`]) **and** the argument expression is
+///    eligible to carry it (it is not a read of a declared CHAR/VARCHAR column;
+///    see `expr_runtime_json_subtype_eligible`). This lets a container `value`
+///    column from json_each/json_tree embed through an opaque column reference
+///    (json101-5.10) without an ordinary fixed-width `CHAR(n)` column whose text
+///    happens to parse as a JSON container being silently embedded unquoted
+///    (issue #6007 regression).
+///
+/// Because the eligibility gate lives at the call site (where the argument
+/// expression is available), this function no longer inspects the value's
+/// runtime marker itself — the caller has already folded it into `is_json`.
 fn sql_value_to_json_node(
     value: &SqlValue,
     is_json: bool,
 ) -> Result<serde_json::Value, ExecutorError> {
-    let is_json = is_json || sql_value_is_json_subtyped(value);
     Ok(match value {
         SqlValue::Null => serde_json::Value::Null,
         // SQLite encodes SQL booleans as JSON integers 1/0 (json_array(true)
@@ -1306,12 +1318,25 @@ fn parse_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, Exe
 /// everywhere else, so only the JSON construction/mutation functions read this
 /// marker.
 ///
-/// To keep the marker from mis-firing on an ordinary fixed-width `CHAR(n)`
-/// column (which also materialises as [`SqlValue::Character`]), the value must
-/// *also* be well-formed JSON of container type (array/object) — exactly the
-/// nodes json_each/json_tree tag. This distinguishes json101-5.10
-/// (`json_tree('[1,2,3]')`.value, a container -> `{"a":[1,2,3]}`) from
-/// json101-5.11 (a JSON string atom -> `{"a":"[1,2,3]"}`, still quoted).
+/// The `Character` variant is also how an ordinary fixed-width `CHAR(n)` column
+/// materialises, so this predicate alone cannot tell a TVF container apart from
+/// a CHAR column holding container-shaped text (issue #6007). Two guards keep
+/// the marker from mis-firing:
+///
+/// 1. the value must be well-formed JSON of container type (array/object) —
+///    exactly the nodes json_each/json_tree tag (checked here); and
+/// 2. the *argument expression* must be eligible — it must not be a read of a
+///    column declared with a real string type (CHAR/VARCHAR). That gate lives
+///    at the call site in `expr_runtime_json_subtype_eligible`, because only
+///    there is the argument expression (and its declared schema type) known.
+///    A `CHAR(20)` (or snug `CHAR(7)`) column read is therefore *not* eligible
+///    and its container-shaped text quotes as SQLite does, while a json_tree
+///    `value` column (declared dynamic/NULL type) stays eligible.
+///
+/// This distinguishes json101-5.10 (`json_tree('[1,2,3]')`.value, a container ->
+/// `{"a":[1,2,3]}`) from json101-5.11 (a JSON string atom -> `{"a":"[1,2,3]"}`,
+/// still quoted) and from `SELECT json_insert('{}','$.a',c) FROM t` over a CHAR
+/// column (`{"a":"[1,2,3]"}`, quoted — matching SQLite 3.51).
 pub(crate) fn sql_value_is_json_subtyped(value: &SqlValue) -> bool {
     match value {
         SqlValue::Character(s) => {
@@ -2824,21 +2849,31 @@ mod tests {
     }
 
     #[test]
-    fn test_json_insert_embeds_runtime_subtyped_value() {
-        // json101-5.10: a container `value` column (Character marker) embeds as
-        // JSON even though its AST subtype flag is false (opaque column ref).
+    fn test_json_insert_embeds_when_subtype_flag_set() {
+        // The low-level `json_insert` embeds a TEXT argument as a JSON
+        // sub-document exactly when its subtype flag is `true`, and quotes it
+        // otherwise — the flag is the single source of truth.
+        //
+        // Deciding whether a runtime `SqlValue::Character` container marker sets
+        // that flag is now the caller's job (the evaluator folds
+        // `sql_value_is_json_subtyped` into the flag *only* for eligible
+        // argument expressions, so a `CHAR(n)` column read never embeds — see
+        // issue #6007 and `tests/json_char_column_subtype_tests.rs`). This unit
+        // test therefore drives the flag explicitly.
         let doc = v("{}");
         let path = v("$.a");
+        // json101-5.10 shape: flag set (a container value column) -> embed.
         let container = SqlValue::Character("[1,2,3]".into());
         assert_eq!(
-            txt(json_insert(&[doc.clone(), path.clone(), container], &[false, false, false])
+            txt(json_insert(&[doc.clone(), path.clone(), container], &[false, false, true])
                 .unwrap()),
             r#"{"a":[1,2,3]}"#
         );
-        // json101-5.11: a plain-text (Varchar) string value stays quoted.
-        let string_val = v("[1,2,3]");
+        // json101-5.11 shape / CHAR-column shape: flag clear -> quote, even for a
+        // `Character` value whose text parses as a JSON container.
+        let char_container = SqlValue::Character("[1,2,3]".into());
         assert_eq!(
-            txt(json_insert(&[doc, path, string_val], &[false, false, false]).unwrap()),
+            txt(json_insert(&[doc, path, char_container], &[false, false, false]).unwrap()),
             r#"{"a":"[1,2,3]"}"#
         );
     }

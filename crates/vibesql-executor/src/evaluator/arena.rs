@@ -144,6 +144,27 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         }
     }
 
+    /// Is this arena argument expression eligible to carry the *runtime* JSON
+    /// subtype marker? A bare read of a column declared with a real string type
+    /// (CHAR/VARCHAR) is not eligible — its container-shaped text quotes rather
+    /// than embedding (issue #6007). Arena mirror of
+    /// [`crate::evaluator::json_subtype::expr_runtime_json_subtype_eligible`].
+    fn arena_expr_runtime_json_subtype_eligible(&self, expr: &ArenaExpression<'arena>) -> bool {
+        if let ArenaExpression::ColumnRef { table, column, .. } = expr {
+            let column_str = self.resolve(*column);
+            let table_str = table.map(|t| self.resolve(t));
+            let declared_string = self
+                .schema
+                .get_column_index(table_str, column_str)
+                .and_then(|idx| self.schema.get_column_type_by_index(idx))
+                .map(crate::evaluator::json_subtype::data_type_is_string)
+                .unwrap_or(false);
+            !declared_string
+        } else {
+            true
+        }
+    }
+
     /// Structurally determine whether an arena expression evaluates to a
     /// JSON-subtyped value in the current row. Arena mirror of
     /// [`crate::evaluator::json_subtype`]; see that module for the rules.
@@ -201,9 +222,10 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 }
             }
             _ => {
-                crate::evaluator::functions::sqlite_compat::json_funcs::sql_value_is_json_subtyped(
-                    &self.eval(expr, row)?,
-                )
+                self.arena_expr_runtime_json_subtype_eligible(expr)
+                    && crate::evaluator::functions::sqlite_compat::json_funcs::sql_value_is_json_subtyped(
+                        &self.eval(expr, row)?,
+                    )
             }
         })
     }
@@ -547,9 +569,16 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                         | "JSONB_REPLACE"
                         | "JSONB_SET"
                 ) {
-                    let subtypes: Vec<bool> =
-                        args.iter().map(|a| self.arena_expr_has_json_subtype(a)).collect();
                     use super::functions::sqlite_compat::json_funcs;
+                    // AST-derived subtype OR a runtime container marker on an
+                    // eligible (non-string-column) argument (issue #6007).
+                    let mut subtypes: Vec<bool> = Vec::with_capacity(args.len());
+                    for (i, a) in args.iter().enumerate() {
+                        let is_json = self.arena_expr_has_json_subtype(a)
+                            || (self.arena_expr_runtime_json_subtype_eligible(a)
+                                && json_funcs::sql_value_is_json_subtyped(&evaluated_args[i]));
+                        subtypes.push(is_json);
+                    }
                     // `jsonb_*` are text-mode accept-and-convert aliases of `json_*`.
                     return match upper.as_str() {
                         "JSON_ARRAY" | "JSONB_ARRAY" => {
