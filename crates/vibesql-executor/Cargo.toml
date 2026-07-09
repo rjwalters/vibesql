@@ -29,6 +29,10 @@ log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 ahash = "0.8"
 arcstr = "1.2"
+# SIMD-accelerated substring / byte search for the columnar general LIKE matcher
+# (literal-run search between wildcards). Already resolved transitively at 2.8.x;
+# promoted to a direct dependency here (issue #6011).
+memchr = "2.8"
 # The SQLite JSON1 functions (json_object/json_set/json_patch/...) need two
 # serde_json behaviors to match sqlite3 byte-for-byte:
 #   * preserve_order    - keep object keys in insertion order
