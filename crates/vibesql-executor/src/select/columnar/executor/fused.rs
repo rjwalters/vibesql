@@ -194,6 +194,11 @@ fn compute_fused_i64_aggregate(
                 operation: "MAX".to_string(),
                 reason: "no rows pass filter".to_string(),
             }),
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 
@@ -234,6 +239,11 @@ fn compute_fused_f64_aggregate(
                 operation: "MAX".to_string(),
                 reason: "no rows pass filter".to_string(),
             }),
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 

@@ -238,6 +238,26 @@ fn max_f64_indexed(values: &[f64], indices: &[usize], nulls: Option<&[bool]>) ->
     }
 }
 
+/// Welford STDDEV/VARIANCE over `f64`-projected values at specific indices.
+///
+/// `project` maps each index to `Some(x)` for a non-NULL numeric value or
+/// `None` to skip it. Shares the finalize math with the row path so per-group
+/// columnar variance matches the row path bit-for-bit.
+#[inline]
+fn variance_indexed<F>(indices: &[usize], is_stddev: bool, sample: bool, mut project: F) -> SqlValue
+where
+    F: FnMut(usize) -> Option<f64>,
+{
+    use crate::select::grouping::{welford_finalize, welford_update};
+    let (mut count, mut mean, mut m2) = (0i64, 0.0f64, 0.0f64);
+    for &idx in indices {
+        if let Some(x) = project(idx) {
+            welford_update(&mut count, &mut mean, &mut m2, x);
+        }
+    }
+    welford_finalize(count, m2, is_stddev, sample)
+}
+
 /// Compute aggregate using indices (O(group_size) instead of O(total_rows))
 fn compute_group_aggregate_indexed(
     batch: &ColumnarBatch,
@@ -283,6 +303,24 @@ fn compute_group_aggregate_indexed(
                         operation: "MAX".to_string(),
                         reason: "empty group".to_string(),
                     }),
+                AggregateOp::Variance { sample } => {
+                    Ok(variance_indexed(indices, false, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
+                AggregateOp::StdDev { sample } => {
+                    Ok(variance_indexed(indices, true, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
             }
         }
 
@@ -318,6 +356,24 @@ fn compute_group_aggregate_indexed(
                         operation: "MAX".to_string(),
                         reason: "empty group".to_string(),
                     }),
+                AggregateOp::Variance { sample } => {
+                    Ok(variance_indexed(indices, false, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i])
+                        }
+                    }))
+                }
+                AggregateOp::StdDev { sample } => {
+                    Ok(variance_indexed(indices, true, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i])
+                        }
+                    }))
+                }
             }
         }
 
@@ -391,6 +447,12 @@ fn compute_group_aggregate_indexed(
                         }
                     }
                     Ok(max_val.map(SqlValue::Double).unwrap_or(SqlValue::Null))
+                }
+                AggregateOp::Variance { sample } => {
+                    Ok(variance_indexed(indices, false, sample, |i| sqlvalue_to_f64(&values[i])))
+                }
+                AggregateOp::StdDev { sample } => {
+                    Ok(variance_indexed(indices, true, sample, |i| sqlvalue_to_f64(&values[i])))
                 }
             }
         }
@@ -487,6 +549,24 @@ fn compute_group_aggregate_indexed(
                         operation: "MAX".to_string(),
                         reason: "empty group".to_string(),
                     }),
+                AggregateOp::Variance { sample } => {
+                    Ok(variance_indexed(indices, false, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
+                AggregateOp::StdDev { sample } => {
+                    Ok(variance_indexed(indices, true, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
             }
         }
 
@@ -539,6 +619,24 @@ fn compute_group_aggregate_indexed(
                         operation: "MAX".to_string(),
                         reason: "empty group".to_string(),
                     }),
+                AggregateOp::Variance { sample } => {
+                    Ok(variance_indexed(indices, false, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
+                AggregateOp::StdDev { sample } => {
+                    Ok(variance_indexed(indices, true, sample, |i| {
+                        if null_slice.is_some_and(|ns| ns[i]) {
+                            None
+                        } else {
+                            Some(values[i] as f64)
+                        }
+                    }))
+                }
             }
         }
 

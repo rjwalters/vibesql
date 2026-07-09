@@ -358,6 +358,55 @@ pub(super) fn compare_for_min_max(a: &SqlValue, b: &SqlValue) -> bool {
     ordering == Ordering::Less
 }
 
+/// Convert a numeric [`SqlValue`] to `f64` for statistical aggregation.
+///
+/// Returns `None` for NULL and non-numeric values, which are skipped (matching
+/// the AVG / row-path STDDEV semantics).
+#[inline]
+fn stat_value_as_f64(value: &SqlValue) -> Option<f64> {
+    match value {
+        SqlValue::Integer(v) => Some(*v as f64),
+        SqlValue::Bigint(v) => Some(*v as f64),
+        SqlValue::Smallint(v) => Some(*v as f64),
+        SqlValue::Unsigned(v) => Some(*v as f64),
+        SqlValue::Float(v) => Some(*v as f64),
+        SqlValue::Real(v) => Some(*v),
+        SqlValue::Double(v) => Some(*v),
+        SqlValue::Numeric(v) => Some(*v),
+        _ => None,
+    }
+}
+
+/// Compute STDDEV / VARIANCE on a column using Welford's online algorithm.
+///
+/// Shares the exact accumulate/finalize math with the row path
+/// (`select::grouping::welford_update` / `welford_finalize`) so the columnar
+/// and row results agree bit-for-bit. NULL / non-numeric values are skipped.
+pub(super) fn compute_variance(
+    scan: &ColumnarScan,
+    column_idx: usize,
+    is_stddev: bool,
+    sample: bool,
+    filter_bitmap: Option<&[bool]>,
+) -> Result<SqlValue, ExecutorError> {
+    use crate::select::grouping::{welford_finalize, welford_update};
+
+    let (mut count, mut mean, mut m2) = (0i64, 0.0f64, 0.0f64);
+    for (row_idx, value_opt) in scan.column(column_idx).enumerate() {
+        if let Some(bitmap) = filter_bitmap {
+            if !bitmap.get(row_idx).copied().unwrap_or(false) {
+                continue;
+            }
+        }
+        if let Some(value) = value_opt {
+            if let Some(x) = stat_value_as_f64(value) {
+                welford_update(&mut count, &mut mean, &mut m2, x);
+            }
+        }
+    }
+    Ok(welford_finalize(count, m2, is_stddev, sample))
+}
+
 /// Compute an aggregate on a column (dispatcher for all aggregate types)
 pub(super) fn compute_columnar_aggregate_impl(
     scan: &ColumnarScan,
@@ -371,6 +420,12 @@ pub(super) fn compute_columnar_aggregate_impl(
         AggregateOp::Avg => compute_avg(scan, column_idx, filter_bitmap),
         AggregateOp::Min => compute_min(scan, column_idx, filter_bitmap),
         AggregateOp::Max => compute_max(scan, column_idx, filter_bitmap),
+        AggregateOp::Variance { sample } => {
+            compute_variance(scan, column_idx, false, sample, filter_bitmap)
+        }
+        AggregateOp::StdDev { sample } => {
+            compute_variance(scan, column_idx, true, sample, filter_bitmap)
+        }
     }
 }
 
@@ -666,6 +721,79 @@ pub(super) fn compute_batch_max(
     }
 }
 
+/// Compute STDDEV / VARIANCE directly on a ColumnarBatch column.
+///
+/// Uses Welford's algorithm (shared with the row path) over the non-NULL
+/// numeric values of the column. Int64 / Float64 / Int32 / Float32 arrays and
+/// the Mixed fallback are supported; other column types report an unsupported
+/// error so the caller declines to the row path.
+pub(crate) fn compute_batch_variance(
+    batch: &ColumnarBatch,
+    column_idx: usize,
+    is_stddev: bool,
+    sample: bool,
+) -> Result<SqlValue, ExecutorError> {
+    use crate::select::grouping::{welford_finalize, welford_update};
+
+    let column = batch.column(column_idx).ok_or_else(|| ExecutorError::ColumnarColumnNotFound {
+        column_index: column_idx,
+        batch_columns: batch.column_count(),
+    })?;
+
+    let (mut count, mut mean, mut m2) = (0i64, 0.0f64, 0.0f64);
+    let mut fold = |x: f64| welford_update(&mut count, &mut mean, &mut m2, x);
+
+    match column {
+        ColumnArray::Int64(values, nulls) => match nulls {
+            Some(mask) => values.iter().zip(mask.iter()).for_each(|(&v, &is_null)| {
+                if !is_null {
+                    fold(v as f64);
+                }
+            }),
+            None => values.iter().for_each(|&v| fold(v as f64)),
+        },
+        ColumnArray::Int32(values, nulls) => match nulls {
+            Some(mask) => values.iter().zip(mask.iter()).for_each(|(&v, &is_null)| {
+                if !is_null {
+                    fold(v as f64);
+                }
+            }),
+            None => values.iter().for_each(|&v| fold(v as f64)),
+        },
+        ColumnArray::Float64(values, nulls) => match nulls {
+            Some(mask) => values.iter().zip(mask.iter()).for_each(|(&v, &is_null)| {
+                if !is_null {
+                    fold(v);
+                }
+            }),
+            None => values.iter().for_each(|&v| fold(v)),
+        },
+        ColumnArray::Float32(values, nulls) => match nulls {
+            Some(mask) => values.iter().zip(mask.iter()).for_each(|(&v, &is_null)| {
+                if !is_null {
+                    fold(v as f64);
+                }
+            }),
+            None => values.iter().for_each(|&v| fold(v as f64)),
+        },
+        ColumnArray::Mixed(values) => {
+            for value in values.iter() {
+                if let Some(x) = stat_value_as_f64(value) {
+                    fold(x);
+                }
+            }
+        }
+        _ => {
+            return Err(ExecutorError::UnsupportedExpression(format!(
+                "Cannot compute STDDEV/VARIANCE on column type: {:?}",
+                column.data_type()
+            )));
+        }
+    }
+
+    Ok(welford_finalize(count, m2, is_stddev, sample))
+}
+
 /// Compute batch aggregate (dispatcher for all aggregate types)
 pub(super) fn compute_batch_aggregate(
     batch: &ColumnarBatch,
@@ -678,6 +806,10 @@ pub(super) fn compute_batch_aggregate(
         AggregateOp::Avg => compute_batch_avg(batch, column_idx),
         AggregateOp::Min => compute_batch_min(batch, column_idx),
         AggregateOp::Max => compute_batch_max(batch, column_idx),
+        AggregateOp::Variance { sample } => {
+            compute_batch_variance(batch, column_idx, false, sample)
+        }
+        AggregateOp::StdDev { sample } => compute_batch_variance(batch, column_idx, true, sample),
     }
 }
 

@@ -91,6 +91,13 @@ pub fn extract_aggregates(
                     "AVG" => AggregateOp::Avg,
                     "MIN" => AggregateOp::Min,
                     "MAX" => AggregateOp::Max,
+                    // STDDEV / VARIANCE statistical aggregates. Bare STDDEV /
+                    // VARIANCE default to the sample estimator, matching the
+                    // row-path `AggregateAccumulator`; only *_POP is population.
+                    "VARIANCE" | "VAR_SAMP" => AggregateOp::Variance { sample: true },
+                    "VAR_POP" => AggregateOp::Variance { sample: false },
+                    "STDDEV" | "STDDEV_SAMP" => AggregateOp::StdDev { sample: true },
+                    "STDDEV_POP" => AggregateOp::StdDev { sample: false },
                     _ => return None, // Unsupported aggregate function
                 };
 

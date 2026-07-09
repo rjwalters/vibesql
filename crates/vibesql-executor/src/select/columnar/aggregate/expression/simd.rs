@@ -55,6 +55,11 @@ pub fn try_simd_aggregate(
         AggregateOp::Avg => aggregate_avg(rows, expr, schema),
         AggregateOp::Min => aggregate_min(&result_array),
         AggregateOp::Max => aggregate_max(&result_array),
+        AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => {
+            Err(crate::errors::ExecutorError::UnsupportedExpression(
+                "STDDEV/VARIANCE are not supported on this columnar path".to_string(),
+            ))
+        }
     }
 }
 

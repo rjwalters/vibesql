@@ -17,7 +17,8 @@ mod parallel_sink;
 
 // Re-export public API
 pub(crate) use aggregates::{
-    compare_sql_values, compare_sql_values_with_collation, AggregateAccumulator,
+    compare_sql_values, compare_sql_values_with_collation, welford_finalize, welford_update,
+    AggregateAccumulator,
 };
 pub(crate) use grouping_sets::expressions_equal;
 pub(super) use grouping_sets::{

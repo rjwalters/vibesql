@@ -19,6 +19,7 @@ pub use expression::{
     evaluate_expression_to_column, evaluate_expression_with_cached_column, extract_aggregates,
     materialize_derived_column,
 };
+pub(crate) use functions::compute_batch_variance;
 pub use group_by::columnar_group_by;
 // SIMD-accelerated GROUP BY for ColumnarBatch - used in native columnar execution path
 pub use group_by::columnar_group_by_batch;
@@ -37,6 +38,16 @@ pub enum AggregateOp {
     Avg,
     Min,
     Max,
+    /// VARIANCE / VAR_SAMP (sample: true) or VAR_POP (sample: false).
+    /// Computed with Welford's algorithm to match the row path bit-for-bit.
+    Variance {
+        sample: bool,
+    },
+    /// STDDEV / STDDEV_SAMP (sample: true) or STDDEV_POP (sample: false).
+    /// The square root of the corresponding [`AggregateOp::Variance`].
+    StdDev {
+        sample: bool,
+    },
 }
 
 /// Source of data for an aggregate - either a simple column or an expression
@@ -81,8 +92,12 @@ pub fn compute_columnar_aggregate(
     op: AggregateOp,
     filter_bitmap: Option<&[bool]>,
 ) -> Result<SqlValue, ExecutorError> {
-    // Try SIMD path for numeric columns (5-10x speedup via LLVM auto-vectorization)
-    {
+    // Try SIMD path for numeric columns (5-10x speedup via LLVM auto-vectorization).
+    //
+    // Welford-style STDDEV/VARIANCE is not handled by the SIMD kernels (they
+    // only implement SUM/AVG/MIN/MAX/COUNT), so those ops always take the
+    // scalar path below, which carries the numerically-stable accumulator.
+    if !matches!(op, AggregateOp::Variance { .. } | AggregateOp::StdDev { .. }) {
         use super::simd_aggregate::{
             can_use_simd_for_column, simd_aggregate_f64, simd_aggregate_i64,
         };

@@ -74,6 +74,35 @@ pub enum AggregateAccumulator {
     },
     /// MD5SUM - Compute MD5 hash of concatenated values (SQLite TCL test compatible)
     Md5sum { values: Vec<String>, distinct: bool, seen: Option<HashSet<String>> },
+    /// STDDEV / VARIANCE family - statistical dispersion aggregates.
+    ///
+    /// Computed with Welford's online algorithm for numerical stability
+    /// (avoids the catastrophic cancellation of the naive sum-of-squares
+    /// approach on large-magnitude / near-constant columns).
+    ///
+    /// Semantics (matching PostgreSQL/MySQL/Oracle and the six SQL spellings):
+    /// - `VARIANCE` / `VAR_SAMP` / `STDDEV` / `STDDEV_SAMP` use the sample
+    ///   estimator (divisor `n - 1`); bare `STDDEV`/`VARIANCE` default to the
+    ///   sample form, consistent with the common SQL-engine convention.
+    /// - `VAR_POP` / `STDDEV_POP` use the population estimator (divisor `n`).
+    /// - NULL and non-numeric inputs are skipped (do not affect `n`).
+    /// - Result is NULL when there are no non-NULL inputs; sample variants are
+    ///   additionally NULL when `n < 2` (population variants yield 0.0 at n == 1).
+    /// - `is_stddev` selects the square-root (STDDEV) vs raw-variance result.
+    Variance {
+        /// Count of non-NULL numeric values seen so far.
+        count: i64,
+        /// Running mean (Welford).
+        mean: f64,
+        /// Running sum of squares of differences from the mean (Welford M2).
+        m2: f64,
+        /// true = STDDEV (sqrt of variance); false = VARIANCE.
+        is_stddev: bool,
+        /// true = sample estimator (n-1); false = population estimator (n).
+        sample: bool,
+        distinct: bool,
+        seen: Option<HashSet<vibesql_types::SqlValue>>,
+    },
     /// PERCENTILE family - median(Y), percentile(Y,P), percentile_cont(Y,F),
     /// percentile_disc(Y,F). Semantics match SQLite's percentile.c extension:
     /// collect all non-NULL Y values, sort, then interpolate at
@@ -148,6 +177,23 @@ impl AggregateAccumulator {
                 distinct,
                 seen: if distinct { Some(HashSet::new()) } else { None },
             }),
+            "STDDEV" | "STDDEV_SAMP" | "STDDEV_POP" | "VARIANCE" | "VAR_SAMP" | "VAR_POP" => {
+                let upper = function_name.to_uppercase();
+                let is_stddev = upper.starts_with("STDDEV");
+                // Bare STDDEV/VARIANCE default to the sample estimator (n-1),
+                // matching PostgreSQL/MySQL/Oracle. Only the explicit *_POP
+                // spellings use the population estimator (n).
+                let sample = !upper.ends_with("_POP");
+                Ok(AggregateAccumulator::Variance {
+                    count: 0,
+                    mean: 0.0,
+                    m2: 0.0,
+                    is_stddev,
+                    sample,
+                    distinct,
+                    seen,
+                })
+            }
             "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => {
                 let upper = function_name.to_uppercase();
                 let (mx_frac, discrete, is_median, name) = match upper.as_str() {
@@ -420,6 +466,33 @@ impl AggregateAccumulator {
                 self.accumulate_percentile(value, None);
             }
 
+            // STDDEV / VARIANCE - Welford's online algorithm over non-NULL
+            // numeric values (NULL / non-numeric inputs are skipped).
+            AggregateAccumulator::Variance {
+                ref mut count,
+                ref mut mean,
+                ref mut m2,
+                distinct,
+                seen,
+                ..
+            } => {
+                if value.is_null() {
+                    return;
+                }
+                let Some(x) = sql_value_to_f64(value) else {
+                    // Non-numeric values are skipped (same as AVG).
+                    return;
+                };
+                if *distinct {
+                    let seen_set = seen.as_mut().unwrap();
+                    if seen_set.contains(value) {
+                        return;
+                    }
+                    seen_set.insert(value.clone());
+                }
+                welford_update(count, mean, m2, x);
+            }
+
             // MD5SUM - collects string values for MD5 hashing (like GROUP_CONCAT)
             AggregateAccumulator::Md5sum { ref mut values, distinct, seen } => {
                 // Skip NULL values like GROUP_CONCAT
@@ -681,6 +754,9 @@ impl AggregateAccumulator {
                     v1 + (v2 - v1) * (ix - i1 as f64)
                 };
                 Ok(vibesql_types::SqlValue::Double(vx))
+            }
+            AggregateAccumulator::Variance { count, mean: _, m2, is_stddev, sample, .. } => {
+                Ok(welford_finalize(*count, *m2, *is_stddev, *sample))
             }
             AggregateAccumulator::Md5sum { values, .. } => {
                 use md5::{Digest, Md5};
@@ -1017,6 +1093,56 @@ impl AggregateAccumulator {
                 v1.extend(v2);
             }
 
+            // STDDEV / VARIANCE: merge two Welford accumulators using the
+            // parallel-combination formula (Chan et al.). For DISTINCT, merge
+            // the seen sets and recompute from scratch to keep semantics exact.
+            (
+                AggregateAccumulator::Variance {
+                    count: c1,
+                    mean: mean1,
+                    m2: m2_1,
+                    distinct: d1,
+                    seen: seen1,
+                    ..
+                },
+                AggregateAccumulator::Variance {
+                    count: c2,
+                    mean: mean2,
+                    m2: m2_2,
+                    distinct: d2,
+                    seen: seen2,
+                    ..
+                },
+            ) => {
+                if *d1 != d2 {
+                    return Err(crate::errors::ExecutorError::UnsupportedExpression(
+                        "Cannot combine STDDEV/VARIANCE with different DISTINCT flags".into(),
+                    ));
+                }
+
+                if *d1 {
+                    // DISTINCT: merge seen sets, then recompute (count, mean, m2)
+                    // over the deduplicated union so no value is counted twice.
+                    if let (Some(s1_set), Some(s2_set)) = (seen1, seen2) {
+                        s1_set.extend(s2_set);
+                        let (mut nc, mut nmean, mut nm2) = (0i64, 0.0f64, 0.0f64);
+                        for val in s1_set.iter() {
+                            if let Some(x) = sql_value_to_f64(val) {
+                                welford_update(&mut nc, &mut nmean, &mut nm2, x);
+                            }
+                        }
+                        *c1 = nc;
+                        *mean1 = nmean;
+                        *m2_1 = nm2;
+                    }
+                } else {
+                    let (nc, nmean, nm2) = welford_merge(*c1, *mean1, *m2_1, c2, mean2, m2_2);
+                    *c1 = nc;
+                    *mean1 = nmean;
+                    *m2_1 = nm2;
+                }
+            }
+
             // MD5SUM: Merge value lists
             (
                 AggregateAccumulator::Md5sum { values: v1, distinct: d1, seen: seen1 },
@@ -1082,6 +1208,76 @@ fn add_sql_values(
     use crate::evaluator::operators::OperatorRegistry;
 
     OperatorRegistry::eval_binary_op(a, &BinaryOperator::Plus, b, vibesql_types::SqlMode::default())
+}
+
+/// One step of Welford's online mean/variance algorithm.
+///
+/// Updates `(count, mean, m2)` in place with a new observation `x`, where `m2`
+/// is the running sum of squared deviations from the mean. Numerically stable
+/// for large-magnitude and near-constant inputs (unlike naive sum-of-squares).
+///
+/// Shared by the row-path `AggregateAccumulator::Variance` and the columnar
+/// STDDEV/VARIANCE kernels so both paths agree bit-for-bit.
+#[inline]
+pub(crate) fn welford_update(count: &mut i64, mean: &mut f64, m2: &mut f64, x: f64) {
+    *count += 1;
+    let delta = x - *mean;
+    *mean += delta / *count as f64;
+    let delta2 = x - *mean;
+    *m2 += delta * delta2;
+}
+
+/// Merge two independent Welford accumulators (Chan et al. parallel formula).
+///
+/// Returns the combined `(count, mean, m2)`. Used to fold per-partition or
+/// per-thread partial variance state into a single result.
+#[inline]
+fn welford_merge(
+    c1: i64,
+    mean1: f64,
+    m2_1: f64,
+    c2: i64,
+    mean2: f64,
+    m2_2: f64,
+) -> (i64, f64, f64) {
+    if c1 == 0 {
+        return (c2, mean2, m2_2);
+    }
+    if c2 == 0 {
+        return (c1, mean1, m2_1);
+    }
+    let n = c1 + c2;
+    let delta = mean2 - mean1;
+    let mean = mean1 + delta * (c2 as f64) / (n as f64);
+    let m2 = m2_1 + m2_2 + delta * delta * (c1 as f64) * (c2 as f64) / (n as f64);
+    (n, mean, m2)
+}
+
+/// Turn a completed Welford `(count, m2)` state into the final STDDEV/VARIANCE
+/// `SqlValue`, honoring sample-vs-population and stddev-vs-variance semantics.
+///
+/// - No non-NULL inputs (`count == 0`) → NULL.
+/// - Sample estimator with `count < 2` → NULL (undefined `n - 1` divisor).
+/// - Population estimator with `count == 1` → 0.0.
+/// - Result is always REAL (`SqlValue::Double`), matching AVG.
+#[inline]
+pub(crate) fn welford_finalize(
+    count: i64,
+    m2: f64,
+    is_stddev: bool,
+    sample: bool,
+) -> vibesql_types::SqlValue {
+    if count == 0 {
+        return vibesql_types::SqlValue::Null;
+    }
+    let divisor = if sample { count - 1 } else { count };
+    if divisor <= 0 {
+        // Sample variance/stddev of a single value is undefined → NULL.
+        return vibesql_types::SqlValue::Null;
+    }
+    let variance = m2 / divisor as f64;
+    let result = if is_stddev { variance.sqrt() } else { variance };
+    vibesql_types::SqlValue::Double(result)
 }
 
 /// Convert SqlValue to f64 for numeric operations
@@ -1963,5 +2159,180 @@ mod tests {
                 pair[1]
             );
         }
+    }
+
+    // ===================================================================
+    // STDDEV / VARIANCE (row-path AggregateAccumulator) tests
+    // ===================================================================
+
+    /// Finalize an aggregate over the given values and extract the Double result
+    /// (or None when the result is NULL).
+    fn stat(function_name: &str, values: &[SqlValue]) -> Option<f64> {
+        let mut acc = AggregateAccumulator::new(function_name, false).unwrap();
+        for v in values {
+            acc.accumulate(v);
+        }
+        match acc.finalize().unwrap() {
+            SqlValue::Double(d) => Some(d),
+            SqlValue::Null => None,
+            other => panic!("unexpected result {other:?} for {function_name}"),
+        }
+    }
+
+    fn ints(vs: &[i64]) -> Vec<SqlValue> {
+        vs.iter().map(|&v| SqlValue::Integer(v)).collect()
+    }
+
+    #[test]
+    fn test_variance_known_values() {
+        // Classic reference dataset {2,4,4,4,5,5,7,9}:
+        //   population variance = 4.0, sample variance = 32/7 ≈ 4.571428...
+        let data = ints(&[2, 4, 4, 4, 5, 5, 7, 9]);
+
+        let var_pop = stat("VAR_POP", &data).unwrap();
+        assert!((var_pop - 4.0).abs() < 1e-9, "VAR_POP = {var_pop}");
+
+        let var_samp = stat("VAR_SAMP", &data).unwrap();
+        assert!((var_samp - (32.0 / 7.0)).abs() < 1e-9, "VAR_SAMP = {var_samp}");
+
+        // Bare VARIANCE defaults to sample.
+        let variance = stat("VARIANCE", &data).unwrap();
+        assert!((variance - var_samp).abs() < 1e-12, "VARIANCE must equal VAR_SAMP");
+
+        let std_pop = stat("STDDEV_POP", &data).unwrap();
+        assert!((std_pop - 2.0).abs() < 1e-9, "STDDEV_POP = {std_pop}");
+
+        let std_samp = stat("STDDEV_SAMP", &data).unwrap();
+        assert!((std_samp - (32.0f64 / 7.0).sqrt()).abs() < 1e-9, "STDDEV_SAMP = {std_samp}");
+
+        // Bare STDDEV defaults to sample.
+        let stddev = stat("STDDEV", &data).unwrap();
+        assert!((stddev - std_samp).abs() < 1e-12, "STDDEV must equal STDDEV_SAMP");
+    }
+
+    #[test]
+    fn test_variance_empty_is_null() {
+        for f in ["STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP"] {
+            assert_eq!(stat(f, &[]), None, "{f} over empty set must be NULL");
+        }
+    }
+
+    #[test]
+    fn test_variance_single_value() {
+        let data = ints(&[42]);
+        // Sample variants: undefined at n=1 → NULL.
+        assert_eq!(stat("VAR_SAMP", &data), None);
+        assert_eq!(stat("STDDEV_SAMP", &data), None);
+        assert_eq!(stat("VARIANCE", &data), None);
+        assert_eq!(stat("STDDEV", &data), None);
+        // Population variants: 0.0 at n=1.
+        assert_eq!(stat("VAR_POP", &data), Some(0.0));
+        assert_eq!(stat("STDDEV_POP", &data), Some(0.0));
+    }
+
+    #[test]
+    fn test_variance_skips_nulls() {
+        // NULLs must not affect the count or the result.
+        let with_nulls = vec![
+            SqlValue::Integer(2),
+            SqlValue::Null,
+            SqlValue::Integer(4),
+            SqlValue::Null,
+            SqlValue::Integer(4),
+            SqlValue::Integer(4),
+            SqlValue::Integer(5),
+            SqlValue::Integer(5),
+            SqlValue::Integer(7),
+            SqlValue::Integer(9),
+        ];
+        let clean = ints(&[2, 4, 4, 4, 5, 5, 7, 9]);
+        assert_eq!(stat("VAR_POP", &with_nulls), stat("VAR_POP", &clean));
+        assert_eq!(stat("STDDEV_SAMP", &with_nulls), stat("STDDEV_SAMP", &clean));
+    }
+
+    #[test]
+    fn test_variance_all_null_is_null() {
+        let data = vec![SqlValue::Null, SqlValue::Null, SqlValue::Null];
+        assert_eq!(stat("VAR_POP", &data), None);
+        assert_eq!(stat("STDDEV_POP", &data), None);
+        assert_eq!(stat("VAR_SAMP", &data), None);
+    }
+
+    #[test]
+    fn test_variance_real_and_mixed_numeric_inputs() {
+        // Real / Double / Numeric all fold into the same f64 accumulator.
+        let data = vec![
+            SqlValue::Double(1.0),
+            SqlValue::Real(2.0),
+            SqlValue::Numeric(3.0),
+            SqlValue::Integer(4),
+        ];
+        // Population variance of {1,2,3,4}: mean 2.5, m2 = 5.0, /4 = 1.25.
+        let var_pop = stat("VAR_POP", &data).unwrap();
+        assert!((var_pop - 1.25).abs() < 1e-9, "VAR_POP = {var_pop}");
+        // Sample variance: 5.0 / 3 ≈ 1.6666...
+        let var_samp = stat("VAR_SAMP", &data).unwrap();
+        assert!((var_samp - (5.0 / 3.0)).abs() < 1e-9, "VAR_SAMP = {var_samp}");
+    }
+
+    #[test]
+    fn test_variance_numerical_stability_large_offset() {
+        // Welford avoids catastrophic cancellation: adding a large constant
+        // offset to every value must not change the variance.
+        let base = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let offset = 1.0e9_f64;
+        let plain: Vec<SqlValue> = base.iter().map(|&v| SqlValue::Double(v)).collect();
+        let shifted: Vec<SqlValue> = base.iter().map(|&v| SqlValue::Double(v + offset)).collect();
+
+        let v_plain = stat("VAR_POP", &plain).unwrap();
+        let v_shifted = stat("VAR_POP", &shifted).unwrap();
+        assert!(
+            (v_plain - v_shifted).abs() < 1e-6,
+            "variance must be shift-invariant: {v_plain} vs {v_shifted}"
+        );
+    }
+
+    #[test]
+    fn test_variance_combine_matches_single_pass() {
+        // The parallel Welford merge (combine) must agree with a single-pass
+        // accumulation over the concatenated data.
+        let left = ints(&[10, 12, 23, 23]);
+        let right = ints(&[16, 23, 21, 16]);
+
+        let mut acc_all = AggregateAccumulator::new("VAR_SAMP", false).unwrap();
+        for v in left.iter().chain(right.iter()) {
+            acc_all.accumulate(v);
+        }
+        let single = acc_all.finalize().unwrap();
+
+        let mut acc_l = AggregateAccumulator::new("VAR_SAMP", false).unwrap();
+        for v in &left {
+            acc_l.accumulate(v);
+        }
+        let mut acc_r = AggregateAccumulator::new("VAR_SAMP", false).unwrap();
+        for v in &right {
+            acc_r.accumulate(v);
+        }
+        acc_l.combine(acc_r).unwrap();
+        let merged = acc_l.finalize().unwrap();
+
+        match (single, merged) {
+            (SqlValue::Double(a), SqlValue::Double(b)) => {
+                assert!((a - b).abs() < 1e-9, "combine {b} != single-pass {a}");
+            }
+            other => panic!("unexpected results: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_variance_distinct_dedups() {
+        // VAR_POP(DISTINCT ...) over {2,2,4,4,4} == VAR_POP over {2,4}.
+        let mut acc = AggregateAccumulator::new("VAR_POP", true).unwrap();
+        for v in ints(&[2, 2, 4, 4, 4]) {
+            acc.accumulate(&v);
+        }
+        let distinct = acc.finalize().unwrap();
+        // Population variance of {2,4}: mean 3, m2 = 2, /2 = 1.0.
+        assert!(matches!(distinct, SqlValue::Double(d) if (d - 1.0).abs() < 1e-9));
     }
 }

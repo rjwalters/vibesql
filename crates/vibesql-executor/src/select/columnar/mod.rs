@@ -367,6 +367,8 @@ pub fn fast_aggregate_on_rows(
                     acc.max_f64.map(SqlValue::Double).unwrap_or(SqlValue::Null)
                 }
             }
+            // STDDEV/VARIANCE unsupported on the bench-only fast path
+            AggregateOp::Variance { .. } | AggregateOp::StdDev { .. } => SqlValue::Null,
         })
         .collect();
 

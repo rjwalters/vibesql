@@ -27,7 +27,8 @@ pub(super) fn evaluate(
     let name_upper = name.to_uppercase();
     let is_aggregate = match name_upper.as_str() {
         "COUNT" | "SUM" | "AVG" | "TOTAL" | "GROUP_CONCAT" | "STRING_AGG" | "JSON_GROUP_ARRAY"
-        | "MD5SUM" | "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
+        | "MD5SUM" | "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" | "STDDEV"
+        | "STDDEV_SAMP" | "STDDEV_POP" | "VARIANCE" | "VAR_SAMP" | "VAR_POP" => true,
         "MIN" | "MAX" => args.len() <= 1, // multi-arg min/max are scalar functions
         _ => false,
     };

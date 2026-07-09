@@ -27,6 +27,12 @@ pub fn is_aggregate_function(name: &str) -> bool {
             | "PERCENTILE"
             | "PERCENTILE_CONT"
             | "PERCENTILE_DISC"
+            | "STDDEV"
+            | "STDDEV_SAMP"
+            | "STDDEV_POP"
+            | "VARIANCE"
+            | "VAR_SAMP"
+            | "VAR_POP"
     )
 }
 
