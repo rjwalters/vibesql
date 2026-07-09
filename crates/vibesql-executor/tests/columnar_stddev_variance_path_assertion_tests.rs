@@ -15,81 +15,17 @@
 //! `SERIAL` mutex (PR #6006 pattern) because `VIBESQL_DISABLE_COLUMNAR` and the
 //! log buffer are process-global.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        if record.level() <= Level::Debug {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes every test in this binary: `VIBESQL_DISABLE_COLUMNAR` and the log
-/// capture buffer are both process-global. PR #6006 pattern.
-static SERIAL: Mutex<()> = Mutex::new(());
+mod common;
+use common::{execute_sql, init_logger, run_select, take_logs, SERIAL};
 
 /// Row-fallback marker (single-table path): the columnar runtime declined.
 const ROW_FALLBACK: &str = "Standard columnar runtime fallback to row-oriented";
 /// Positive marker emitted only when the native columnar path completes.
 const COLUMNAR_COMPLETED: &str = "Native columnar execution completed";
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<vibesql_storage::Row> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed")
-    } else {
-        panic!("Expected SELECT");
-    }
-}
 
 /// Coerce a numeric SqlValue to f64 for epsilon comparison; NULL → None.
 fn as_f64(v: &SqlValue) -> Option<f64> {
@@ -189,7 +125,7 @@ const SPELLINGS: [&str; 6] =
 #[test]
 fn flat_stddev_variance_all_spellings_columnar_parity() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     for f in SPELLINGS {
@@ -201,7 +137,7 @@ fn flat_stddev_variance_all_spellings_columnar_parity() {
 #[test]
 fn mixed_select_list_removes_whole_query_drop() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     // A SELECT list combining supported aggregates with a statistical aggregate
@@ -212,7 +148,7 @@ fn mixed_select_list_removes_whole_query_drop() {
 #[test]
 fn group_by_stddev_variance_all_spellings_columnar_parity() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 900);
     for f in SPELLINGS {
@@ -223,7 +159,7 @@ fn group_by_stddev_variance_all_spellings_columnar_parity() {
 #[test]
 fn group_by_mixed_aggregates_columnar_parity() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 900);
     columnar_matches_row(
@@ -235,7 +171,7 @@ fn group_by_mixed_aggregates_columnar_parity() {
 #[test]
 fn stddev_variance_with_where_filter_columnar_parity() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     // WHERE filtering must apply before the statistical aggregate.
@@ -245,7 +181,7 @@ fn stddev_variance_with_where_filter_columnar_parity() {
 #[test]
 fn stddev_variance_single_value_group_edge_cases() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     // Each group has exactly one row: sample variants → NULL, population → 0.0.
     execute_sql(&mut db, "CREATE TABLE s (g INTEGER, v INTEGER)");
@@ -260,7 +196,7 @@ fn stddev_variance_single_value_group_edge_cases() {
 #[test]
 fn stddev_variance_null_handling_columnar_parity() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE nn (g INTEGER, v INTEGER)");
     let mut ins = String::new();
@@ -285,7 +221,7 @@ fn stddev_variance_null_handling_columnar_parity() {
 #[test]
 fn stddev_variance_large_magnitude_stability() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE big (v DOUBLE)");
     let mut ins = String::new();

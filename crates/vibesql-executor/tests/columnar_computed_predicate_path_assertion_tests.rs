@@ -16,83 +16,11 @@
 //! This test installs a process-global `log` logger, so it lives in its own
 //! test binary to avoid clashing with other integration tests.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        if record.level() <= Level::Info {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes every test in this binary. `VIBESQL_DISABLE_COLUMNAR` is a
-/// process-global env var and the `log` capture buffer is process-global, so
-/// concurrent tests would otherwise race: one test toggling
-/// `VIBESQL_DISABLE_COLUMNAR=1` for its row-path parity run could silently
-/// disable columnar in another test's columnar run (failing that test's path
-/// assertion), and their captured logs would interleave. Every test here either
-/// toggles the env var or reads the shared buffer, so each acquires this mutex
-/// for its whole body to keep its columnar run, row-path run, and captured logs
-/// isolated. Poisoned-lock recovery (`unwrap_or_else(|e| e.into_inner())`) keeps
-/// a panic in one test from cascading into spurious failures in the rest.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<vibesql_storage::Row> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed")
-    } else {
-        panic!("Expected SELECT");
-    }
-}
+mod common;
+use common::{execute_sql, init_logger, run_select, take_logs, SERIAL};
 
 /// Row-fallback marker: the WHERE clause could not be represented columnarly.
 const ROW_FALLBACK: &str = "WHERE clause contains unsupported predicates";
@@ -126,7 +54,7 @@ fn sum_result(rows: &[vibesql_storage::Row]) -> i64 {
 #[test]
 fn computed_predicate_mul_takes_columnar_path_and_matches_row_path() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Info);
 
     // Enough rows (>256) to exercise the SIMD streaming filter path.
     let mut db = Database::new();
@@ -163,7 +91,7 @@ fn computed_predicate_mul_takes_columnar_path_and_matches_row_path() {
 #[test]
 fn computed_predicate_sub_le_column_matches_row_path() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Info);
 
     let mut db = Database::new();
     setup(&mut db, 800);
@@ -197,7 +125,7 @@ fn computed_predicate_sub_le_column_matches_row_path() {
 #[test]
 fn computed_predicate_null_propagation_matches_row_path() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Info);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE u (a INTEGER, b INTEGER)");

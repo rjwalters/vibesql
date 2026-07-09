@@ -30,82 +30,12 @@
 //! and the capture buffer are process-global, so a SERIAL mutex serializes the
 //! columnar-vs-row runs (PR #6006 precedent).
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        // Capture Debug and above: the fallback marker is a debug! line and the
-        // positive marker is an info! line.
-        if record.level() <= Level::Debug {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes the columnar-vs-row runs across tests. `VIBESQL_DISABLE_COLUMNAR`
-/// is a process-global env var and the `log` capture buffer is process-global,
-/// so concurrent tests would otherwise race. Holding this mutex for the whole
-/// `run_both` keeps each test's two runs and their captured logs isolated.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<Vec<SqlValue>> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        let rows =
-            vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed");
-        rows.into_iter().map(|r| r.values.to_vec()).collect()
-    } else {
-        panic!("Expected SELECT");
-    }
-}
+mod common;
+use common::{execute_sql, init_logger, run_select_values as run_select, take_logs, SERIAL};
 
 /// Run the same query on both the columnar path and the row path
 /// (`VIBESQL_DISABLE_COLUMNAR=1`) and return `(columnar_rows, row_rows, logs)`.
@@ -176,7 +106,7 @@ fn setup_words(db: &mut Database, n: usize) {
 /// row path exactly. Runs on both sides of the SIMD row threshold (256).
 #[test]
 fn general_like_takes_columnar_path_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     // `%a%b%` (interior), `_`-bearing, and mixed `%_` — all classify General.
     // (Single-word `%x%` shapes classify as Contains and take a different
@@ -213,7 +143,7 @@ fn general_like_takes_columnar_path_and_matches_row_path() {
 /// NOT LIKE — identical to the row path.
 #[test]
 fn general_like_null_handling_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE t (id INTEGER, s TEXT)");
@@ -242,7 +172,7 @@ fn general_like_null_handling_matches_row_path() {
 /// must all match the row path.
 #[test]
 fn general_like_edge_cases_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE t (id INTEGER, s TEXT)");
@@ -275,7 +205,7 @@ fn general_like_edge_cases_match_row_path() {
 /// `_` must consume exactly one (possibly multi-byte) Unicode character.
 #[test]
 fn general_like_non_ascii_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE t (id INTEGER, s TEXT)");
@@ -304,7 +234,7 @@ fn general_like_non_ascii_matches_row_path() {
 /// the row path — it must not error.
 #[test]
 fn general_like_blob_affinity_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE b (id INTEGER, data BLOB)");

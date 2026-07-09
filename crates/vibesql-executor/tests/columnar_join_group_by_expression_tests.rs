@@ -30,83 +30,12 @@
 //! This test installs a process-global `log` logger, so it lives in its own
 //! test binary to avoid clashing with other integration tests.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        // Capture Debug and above (in `log`'s ordering Debug > Info, so
-        // `<= Level::Debug` includes Info): the row-fallback and positional-
-        // decline markers are `debug!` lines; the positive "succeeded" marker is
-        // an `info!` line.
-        if record.level() <= Level::Debug {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes the columnar-vs-row runs across tests. `VIBESQL_DISABLE_COLUMNAR_JOIN`
-/// is a process-global env var and the `log` capture buffer is process-global,
-/// so concurrent tests would otherwise race.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<Vec<SqlValue>> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        let rows =
-            vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed");
-        rows.into_iter().map(|r| r.values.to_vec()).collect()
-    } else {
-        panic!("Expected SELECT");
-    }
-}
+mod common;
+use common::{execute_sql, init_logger, run_select_values as run_select, take_logs, SERIAL};
 
 /// Run the same query on both the columnar-join path and the row path
 /// (`VIBESQL_DISABLE_COLUMNAR_JOIN=1`) and return `(columnar_rows, row_rows, logs)`.
@@ -192,7 +121,7 @@ fn setup_inner(db: &mut Database, n: i64) {
 /// the row path exactly. Runs both sides of the SIMD row threshold.
 #[test]
 fn join_group_by_sum_expression_takes_columnar_path_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     for n in [50i64, 1000i64] {
         let mut db = Database::new();
@@ -210,7 +139,7 @@ fn join_group_by_sum_expression_takes_columnar_path_and_matches_row_path() {
 /// — also runs columnar and matches the row path.
 #[test]
 fn join_group_by_product_count_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 800);
@@ -227,7 +156,7 @@ fn join_group_by_product_count_matches_row_path() {
 /// correctly. This exercises the qualified-name -> joined-batch-index resolution.
 #[test]
 fn join_group_by_cross_table_expression_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 600);
@@ -248,7 +177,7 @@ fn join_group_by_cross_table_expression_matches_row_path() {
 /// case from the acceptance criteria.
 #[test]
 fn join_group_by_left_outer_null_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -282,7 +211,7 @@ fn join_group_by_left_outer_null_keys_match_row_path() {
 /// grouping is identical by construction. This asserts that parity holds.
 #[test]
 fn join_group_by_overflow_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a BIGINT, b BIGINT, c INTEGER)");
@@ -310,7 +239,7 @@ fn join_group_by_overflow_keys_match_row_path() {
 /// GROUP BY on an expression key returns no groups, same as the row path.
 #[test]
 fn join_group_by_empty_result_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, b INTEGER, c INTEGER)");
@@ -330,7 +259,7 @@ fn join_group_by_empty_result_matches_row_path() {
 /// row path.
 #[test]
 fn join_group_by_mixed_column_and_expression_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 600);
@@ -370,7 +299,7 @@ fn assert_row_path_via_positional_decline(logs: &[String]) {
 /// path (`a*b, a+b`). The positional check declines to the row path.
 #[test]
 fn join_group_by_permuted_expression_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 1000);
@@ -393,7 +322,7 @@ fn join_group_by_permuted_expression_keys_match_row_path() {
 /// columnar path. The positional check now declines it to the row path.
 #[test]
 fn join_group_by_permuted_bare_column_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 1000);
@@ -412,7 +341,7 @@ fn join_group_by_permuted_bare_column_keys_match_row_path() {
 /// fast path (the positional-check must not over-decline aligned queries).
 #[test]
 fn join_group_by_aligned_multi_expression_keys_stay_columnar() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 1000);
@@ -432,7 +361,7 @@ fn join_group_by_aligned_multi_expression_keys_stay_columnar() {
 /// fall back to the row path (no silent wrong answer).
 #[test]
 fn join_group_by_unsupported_expression_falls_back() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, b TEXT, c INTEGER)");
@@ -477,7 +406,7 @@ fn join_group_by_unsupported_expression_falls_back() {
 /// HAVING COUNT(*) > 1 must exclude it. Compare WITHOUT sorting.
 #[test]
 fn join_group_by_having_aggregate_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -506,7 +435,7 @@ fn join_group_by_having_aggregate_runs_columnar_and_matches_row_path() {
 /// columnar path and matches the row path.
 #[test]
 fn join_group_by_having_expression_key_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -531,7 +460,7 @@ fn join_group_by_having_expression_key_runs_columnar_and_matches_row_path() {
 /// it). Result must still be correct. Compare WITHOUT sorting.
 #[test]
 fn join_group_by_having_bare_column_declines_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -564,7 +493,7 @@ fn join_group_by_having_bare_column_declines_and_matches_row_path() {
 /// (no sort by the harness).
 #[test]
 fn join_group_by_order_by_expression_key_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -604,7 +533,7 @@ fn join_group_by_order_by_expression_key_runs_columnar_and_matches_row_path() {
 /// columnar and matches emitted order.
 #[test]
 fn join_group_by_order_by_bare_column_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");
@@ -636,7 +565,7 @@ fn join_group_by_order_by_bare_column_runs_columnar_and_matches_row_path() {
 /// sorts the survivors, all on the columnar path.
 #[test]
 fn join_group_by_having_then_order_by_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup_inner(&mut db, 800);
@@ -657,7 +586,7 @@ fn join_group_by_having_then_order_by_runs_columnar_and_matches_row_path() {
 /// the row path in emitted order — NULL keys sort first ascending (SQLite).
 #[test]
 fn join_group_by_left_outer_null_keys_with_order_by_runs_columnar_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE l (k INTEGER, a INTEGER, c INTEGER)");

@@ -12,80 +12,18 @@
 //! This test installs a process-global `log` logger, so it lives in its own
 //! test binary to avoid clashing with other integration tests.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 
-/// Captures every log message into a shared buffer.
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        if record.level() <= Level::Info {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    // set_logger is idempotent across the binary; ignore "already set".
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<vibesql_storage::Row> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed")
-    } else {
-        panic!("Expected SELECT");
-    }
-}
+mod common;
+use common::{execute_sql, init_logger, run_select, take_logs};
 
 /// The retired guardrail's fallback marker (must never appear post-#5993).
 const GUARDRAIL_FALLBACK: &str = "IS NULL/IS NOT NULL in WHERE, falling back";
 
 #[test]
 fn anti_join_is_null_takes_columnar_path() {
-    init_logger();
+    init_logger(Level::Info);
 
     // Left ids 1..=600; right matches even ids only. Large enough to exercise
     // the columnar join + SIMD filter path.
