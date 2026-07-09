@@ -26,83 +26,12 @@
 //! This test installs a process-global `log` logger, so it lives in its own
 //! test binary to avoid clashing with other integration tests.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        // Capture Debug and above: the row-fallback marker is a debug! line.
-        if record.level() <= Level::Debug {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes the columnar-vs-row runs across tests. `VIBESQL_DISABLE_COLUMNAR`
-/// is a process-global env var and the `log` capture buffer is process-global,
-/// so concurrent tests would otherwise race (one test's row-path env var could
-/// disable columnar in another test's columnar run, and their logs would
-/// interleave). Holding this mutex for the whole `run_both` keeps each test's
-/// two runs and their captured logs isolated.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<Vec<SqlValue>> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        let rows =
-            vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed");
-        rows.into_iter().map(|r| r.values.to_vec()).collect()
-    } else {
-        panic!("Expected SELECT");
-    }
-}
+mod common;
+use common::{execute_sql, init_logger, run_select_values as run_select, take_logs, SERIAL};
 
 /// Run the same query on both the columnar path and the row path
 /// (`VIBESQL_DISABLE_COLUMNAR=1`) and return `(columnar_rows, row_rows, logs)`.
@@ -154,7 +83,7 @@ fn setup(db: &mut Database, n: i64) {
 /// the row path exactly. Runs both sides of the SIMD row threshold (256).
 #[test]
 fn group_by_sum_expression_takes_columnar_path_and_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     for n in [50i64, 1000i64] {
         let mut db = Database::new();
@@ -172,7 +101,7 @@ fn group_by_sum_expression_takes_columnar_path_and_matches_row_path() {
 /// columnar and matches the row path.
 #[test]
 fn group_by_product_count_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup(&mut db, 800);
@@ -189,7 +118,7 @@ fn group_by_product_count_matches_row_path() {
 /// the row path.
 #[test]
 fn group_by_expression_null_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE u (a INTEGER, b INTEGER, c INTEGER)");
@@ -221,7 +150,7 @@ fn group_by_expression_null_keys_match_row_path() {
 /// so grouping is identical by construction. This asserts that parity holds.
 #[test]
 fn group_by_expression_overflow_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE o (a BIGINT, b BIGINT, c INTEGER)");
@@ -253,7 +182,7 @@ fn group_by_expression_overflow_keys_match_row_path() {
 /// as the row path.
 #[test]
 fn group_by_expression_empty_table_matches_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE e (a INTEGER, b INTEGER, c INTEGER)");
@@ -269,7 +198,7 @@ fn group_by_expression_empty_table_matches_row_path() {
 /// (`GROUP BY a, b + c`) still runs columnar and matches the row path.
 #[test]
 fn group_by_mixed_column_and_expression_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup(&mut db, 600);
@@ -311,7 +240,7 @@ fn assert_row_path_via_positional_decline(logs: &[String]) {
 /// We assert both the decline (via log) AND parity with `VIBESQL_DISABLE_COLUMNAR=1`.
 #[test]
 fn group_by_permuted_expression_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup(&mut db, 1000);
@@ -337,7 +266,7 @@ fn group_by_permuted_expression_keys_match_row_path() {
 /// path. We assert the decline AND parity.
 #[test]
 fn group_by_permuted_bare_column_keys_match_row_path() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup(&mut db, 1000);
@@ -358,7 +287,7 @@ fn group_by_permuted_bare_column_keys_match_row_path() {
 /// equals GROUP BY key order, so it stays columnar and matches the row path.
 #[test]
 fn group_by_aligned_multi_expression_keys_stay_columnar() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     setup(&mut db, 1000);
@@ -378,7 +307,7 @@ fn group_by_aligned_multi_expression_keys_stay_columnar() {
 /// the row path (no silent wrong answer), and the fallback marker is emitted.
 #[test]
 fn group_by_unsupported_expression_falls_back() {
-    init_logger();
+    init_logger(Level::Debug);
 
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE s (a INTEGER, b TEXT, c INTEGER)");

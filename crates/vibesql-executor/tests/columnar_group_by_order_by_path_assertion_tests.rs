@@ -17,83 +17,16 @@
 //! binary. Every test acquires the `SERIAL` mutex (PR #6006 pattern) because
 //! `VIBESQL_DISABLE_COLUMNAR` and the log buffer are process-global.
 
-use std::sync::{Mutex, OnceLock};
-
-use log::{Level, LevelFilter, Log, Metadata, Record};
-use vibesql_executor::{CreateTableExecutor, InsertExecutor};
-use vibesql_parser::Parser;
+use log::Level;
 use vibesql_storage::Database;
 
-struct CaptureLogger;
-
-static LOG_BUFFER: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-fn buffer() -> &'static Mutex<Vec<String>> {
-    LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-impl Log for CaptureLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-    fn log(&self, record: &Record) {
-        if record.level() <= Level::Debug {
-            buffer().lock().unwrap().push(format!("{}", record.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-static LOGGER: CaptureLogger = CaptureLogger;
-
-fn init_logger() {
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(LevelFilter::Debug);
-}
-
-fn take_logs() -> Vec<String> {
-    std::mem::take(&mut *buffer().lock().unwrap())
-}
-
-/// Serializes every test in this binary: `VIBESQL_DISABLE_COLUMNAR` and the log
-/// capture buffer are both process-global, so concurrent tests would race
-/// (one test's row-path toggle could disable columnar in another's columnar
-/// run; captured logs would interleave). PR #6006 pattern. Poisoned-lock
-/// recovery keeps one panicking test from cascading failures.
-static SERIAL: Mutex<()> = Mutex::new(());
+mod common;
+use common::{execute_sql, init_logger, run_select, take_logs, SERIAL};
 
 /// Row-fallback marker (single-table path): the columnar runtime declined.
 const ROW_FALLBACK: &str = "Standard columnar runtime fallback to row-oriented";
 /// Positive marker emitted only when the native columnar path completes.
 const COLUMNAR_COMPLETED: &str = "Native columnar execution completed";
-
-fn execute_sql(db: &mut Database, sql: &str) {
-    for sql_stmt in sql.split(';') {
-        let trimmed = sql_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let stmt = Parser::parse_sql(trimmed).expect("Failed to parse SQL");
-        match stmt {
-            vibesql_ast::Statement::CreateTable(s) => {
-                CreateTableExecutor::execute(&s, db).expect("CREATE TABLE failed");
-            }
-            vibesql_ast::Statement::Insert(s) => {
-                InsertExecutor::execute(db, &s).expect("INSERT failed");
-            }
-            other => panic!("Unsupported statement type: {:?}", other),
-        }
-    }
-}
-
-fn run_select(db: &Database, sql: &str) -> Vec<vibesql_storage::Row> {
-    let stmt = Parser::parse_sql(sql).expect("Failed to parse SELECT");
-    if let vibesql_ast::Statement::Select(select_stmt) = stmt {
-        vibesql_executor::SelectExecutor::new(db).execute(&select_stmt).expect("SELECT failed")
-    } else {
-        panic!("Expected SELECT");
-    }
-}
 
 /// Compare two row sets in EMITTED ORDER (no sorting either side).
 fn assert_rows_eq_in_order(
@@ -160,7 +93,7 @@ fn setup(db: &mut Database, n: i64) {
 #[test]
 fn group_by_order_by_bare_key_asc() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     columnar_matches_row_ordered(&db, "SELECT a, SUM(v) FROM t GROUP BY a ORDER BY a");
@@ -169,7 +102,7 @@ fn group_by_order_by_bare_key_asc() {
 #[test]
 fn group_by_order_by_bare_key_desc() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     columnar_matches_row_ordered(&db, "SELECT a, SUM(v) FROM t GROUP BY a ORDER BY a DESC");
@@ -178,7 +111,7 @@ fn group_by_order_by_bare_key_desc() {
 #[test]
 fn group_by_order_by_aggregate_desc() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     // ORDER BY an aggregate that appears in the SELECT list.
@@ -188,7 +121,7 @@ fn group_by_order_by_aggregate_desc() {
 #[test]
 fn group_by_order_by_ordinal_position() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     // ORDER BY 2 references the aggregate (second output column).
@@ -198,7 +131,7 @@ fn group_by_order_by_ordinal_position() {
 #[test]
 fn group_by_order_by_multi_key() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 900);
     // Two group keys, multi-key ORDER BY with mixed direction.
@@ -211,7 +144,7 @@ fn group_by_order_by_multi_key() {
 #[test]
 fn group_by_order_by_derived_key_expression() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 900);
     // Derived-key GROUP BY (#6001-style): ORDER BY must resolve to the derived
@@ -225,7 +158,7 @@ fn group_by_order_by_derived_key_expression() {
 #[test]
 fn group_by_having_then_order_by() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 900);
     // HAVING filters groups, then ORDER BY sorts the survivors — verifies the
@@ -251,7 +184,7 @@ fn group_by_having_then_order_by() {
 #[test]
 fn group_by_order_by_null_keys_first_ascending() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE n (k INTEGER, v INTEGER)");
     let mut ins = String::new();
@@ -302,7 +235,7 @@ fn group_by_order_by_null_keys_first_ascending() {
 #[test]
 fn group_by_order_by_text_affinity_key() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     execute_sql(&mut db, "CREATE TABLE tx (k TEXT, v INTEGER)");
     let keys = ["banana", "apple", "cherry", "Apple", "10", "2"];
@@ -323,7 +256,7 @@ fn group_by_order_by_text_affinity_key() {
 #[test]
 fn group_by_order_by_unresolvable_term_falls_back_and_is_correct() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger();
+    init_logger(Level::Debug);
     let mut db = Database::new();
     setup(&mut db, 600);
     let _ = take_logs();
