@@ -19,6 +19,7 @@
 mod blob_funcs;
 mod conditional_funcs;
 pub(crate) mod json_funcs;
+pub(crate) mod jsonb;
 mod math_funcs;
 mod pattern_funcs;
 mod string_funcs;
@@ -34,7 +35,7 @@ pub(super) use conditional_funcs::iif;
 pub(super) use json_funcs::{
     json, json_array, json_array_length, json_error_position, json_extract, json_insert,
     json_object, json_patch, json_quote, json_remove, json_replace, json_set, json_type,
-    json_valid,
+    json_valid, jsonb, jsonb_extract, jsonb_patch, jsonb_remove,
 };
 // Re-export math/hint functions
 pub(super) use math_funcs::likelihood;

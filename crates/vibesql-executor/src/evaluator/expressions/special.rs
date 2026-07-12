@@ -205,15 +205,21 @@ impl ExpressionEvaluator<'_> {
             values.push(value);
         }
 
-        // The `jsonb_*` names are text-mode aliases (accept-and-convert): they
-        // delegate to the identical `json_*` implementation. See the Phase 4
-        // JSONB note in `json_funcs.rs`.
+        // The `json_*` names emit JSON text; the `jsonb_*` names emit SQLite's
+        // binary JSONB representation as a Blob (Stage 1 of #6008). Both build
+        // the same JSON node with identical subtype handling; only the output
+        // encoding differs.
         match name.to_uppercase().as_str() {
-            "JSON_ARRAY" | "JSONB_ARRAY" => json_funcs::json_array(&values, &subtypes),
-            "JSON_OBJECT" | "JSONB_OBJECT" => json_funcs::json_object(&values, &subtypes),
-            "JSON_INSERT" | "JSONB_INSERT" => json_funcs::json_insert(&values, &subtypes),
-            "JSON_REPLACE" | "JSONB_REPLACE" => json_funcs::json_replace(&values, &subtypes),
-            "JSON_SET" | "JSONB_SET" => json_funcs::json_set(&values, &subtypes),
+            "JSON_ARRAY" => json_funcs::json_array(&values, &subtypes),
+            "JSONB_ARRAY" => json_funcs::jsonb_array(&values, &subtypes),
+            "JSON_OBJECT" => json_funcs::json_object(&values, &subtypes),
+            "JSONB_OBJECT" => json_funcs::jsonb_object(&values, &subtypes),
+            "JSON_INSERT" => json_funcs::json_insert(&values, &subtypes),
+            "JSONB_INSERT" => json_funcs::jsonb_insert(&values, &subtypes),
+            "JSON_REPLACE" => json_funcs::json_replace(&values, &subtypes),
+            "JSONB_REPLACE" => json_funcs::jsonb_replace(&values, &subtypes),
+            "JSON_SET" => json_funcs::json_set(&values, &subtypes),
+            "JSONB_SET" => json_funcs::jsonb_set(&values, &subtypes),
             _ => unreachable!("eval_json_subtype_function called with {name}"),
         }
     }
