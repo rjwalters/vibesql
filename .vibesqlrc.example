@@ -33,6 +33,26 @@ format = "table"
 # Default: true
 auto_save = true
 
+# Write-Ahead Log (WAL) durability for file-backed databases.
+# When true, committed DDL and DML survive an unclean shutdown (crash, SIGKILL,
+# power loss) by replaying the WAL from the last checkpoint on open.
+# Default: true
+# wal = true
+
+# Busy timeout (milliseconds) for the exclusive inter-process database lock.
+# A second session opening the same file-backed database waits up to this long
+# before failing with "database is locked". 0 = fail immediately.
+# Default: 5000
+# lock_timeout_ms = 5000
+
+# Number of checkpoint files to retain in <stem>-checkpoints/ after each save.
+# Each \save / clean exit writes a new checkpoint; the oldest are pruned so the
+# archive does not grow unboundedly. Keeping more than 1 lets --recover-fallback
+# fall back to an older checkpoint. A value of 0 is clamped to 1 so the newest
+# checkpoint always survives.
+# Default: 2
+# keep_checkpoints = 2
+
 # ============================================================================
 # History Settings
 # ============================================================================

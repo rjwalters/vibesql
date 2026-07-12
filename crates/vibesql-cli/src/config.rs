@@ -65,6 +65,23 @@ pub struct DatabaseConfig {
     /// SQLite-compatible error `database is locked`. `0` = fail immediately.
     #[serde(default = "default_lock_timeout_ms")]
     pub lock_timeout_ms: u64,
+
+    /// Number of checkpoint files to retain in `<stem>-checkpoints/` after a
+    /// successful `\save` / clean-exit checkpoint (issue #6023).
+    ///
+    /// Each checkpoint on save writes a new `checkpoint_*.vchk`; without
+    /// pruning the archive grows unboundedly (thousands of files over a long
+    /// session). After the new checkpoint is durably written and the WAL is
+    /// truncated, the CLI removes the oldest checkpoints so at most
+    /// `keep_checkpoints` (plus the one just written) remain.
+    ///
+    /// Defaults to `2` (matching
+    /// `vibesql_storage::wal::scheduler::DEFAULT_KEEP_CHECKPOINTS`). Keeping
+    /// more than 1 lets `--recover-fallback` fall back to an older checkpoint
+    /// when the newest is unreadable. A configured value of `0` is clamped to
+    /// `1` so the newest checkpoint always survives.
+    #[serde(default = "default_keep_checkpoints")]
+    pub keep_checkpoints: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +131,11 @@ fn default_lock_timeout_ms() -> u64 {
     5000
 }
 
+fn default_keep_checkpoints() -> usize {
+    // Matches vibesql_storage::wal::scheduler::DEFAULT_KEEP_CHECKPOINTS.
+    2
+}
+
 impl Default for DisplayConfig {
     fn default() -> Self {
         DisplayConfig { format: default_format() }
@@ -128,6 +150,7 @@ impl Default for DatabaseConfig {
             sql_mode: default_sql_mode(),
             wal: default_true(),
             lock_timeout_ms: default_lock_timeout_ms(),
+            keep_checkpoints: default_keep_checkpoints(),
         }
     }
 }
@@ -235,6 +258,29 @@ lock_timeout_ms = 250
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.database.lock_timeout_ms, 250);
+    }
+
+    #[test]
+    fn test_keep_checkpoints_defaults_when_unspecified() {
+        // A config that omits `keep_checkpoints` must parse with the default of
+        // 2 (issue #6023), matching DEFAULT_KEEP_CHECKPOINTS in vibesql-storage.
+        let toml_str = r#"
+[database]
+wal = true
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.database.keep_checkpoints, 2);
+        assert_eq!(Config::default().database.keep_checkpoints, 2);
+    }
+
+    #[test]
+    fn test_keep_checkpoints_override_parses() {
+        let toml_str = r#"
+[database]
+keep_checkpoints = 5
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.database.keep_checkpoints, 5);
     }
 
     #[test]
