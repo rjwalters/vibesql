@@ -56,7 +56,10 @@ fn apply_collation<'a>(
 /// - ASC/DESC direction handling
 ///
 /// Returns `Ordering::Less`, `Equal`, or `Greater` for use with sort functions.
-pub(super) fn compare_rows_by_sort_keys(keys_a: &[SortKey], keys_b: &[SortKey]) -> Ordering {
+pub(in crate::select) fn compare_rows_by_sort_keys(
+    keys_a: &[SortKey],
+    keys_b: &[SortKey],
+) -> Ordering {
     for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in keys_a.iter().zip(keys_b.iter())
     {
         // Determine NULL ordering:

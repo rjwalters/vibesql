@@ -315,60 +315,12 @@ impl SelectExecutor<'_> {
             rows_with_keys.push((row, sort_keys));
         }
 
-        // Sort using the sort keys with NULLS FIRST/LAST handling
+        // Sort using the shared ORDER BY comparator so NULL placement, collation, and
+        // direction handling stay consistent with the non-aggregate and join paths.
+        // The default (no explicit NULLS clause) rule is SQLite's: NULL is the smallest
+        // value, so it sorts first for ASC and last for DESC (#6014).
         rows_with_keys.sort_by(|(_, keys_a), (_, keys_b)| {
-            use vibesql_types::SqlValue;
-
-            use crate::select::grouping::compare_sql_values_with_collation;
-
-            for ((val_a, dir, nulls_order, collation), (val_b, _, _, _)) in
-                keys_a.iter().zip(keys_b.iter())
-            {
-                // Handle NULLS FIRST/LAST
-                let (a_is_null, b_is_null) =
-                    (matches!(val_a, SqlValue::Null), matches!(val_b, SqlValue::Null));
-                if a_is_null || b_is_null {
-                    if a_is_null && b_is_null {
-                        continue; // Both null, consider equal for this key
-                    }
-                    // Determine if nulls should sort first or last based on NULLS order and
-                    // direction
-                    let nulls_first = match nulls_order {
-                        Some(vibesql_ast::NullsOrder::First) => true,
-                        Some(vibesql_ast::NullsOrder::Last) => false,
-                        None => {
-                            // Default: NULLS LAST for ASC, NULLS FIRST for DESC
-                            matches!(dir, vibesql_ast::OrderDirection::Desc)
-                        }
-                    };
-                    return if a_is_null {
-                        if nulls_first {
-                            std::cmp::Ordering::Less
-                        } else {
-                            std::cmp::Ordering::Greater
-                        }
-                    } else if nulls_first {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        std::cmp::Ordering::Less
-                    };
-                }
-
-                let collation_str = collation.as_deref();
-                let cmp = match dir {
-                    vibesql_ast::OrderDirection::Asc => {
-                        compare_sql_values_with_collation(val_a, val_b, collation_str)
-                    }
-                    vibesql_ast::OrderDirection::Desc => {
-                        compare_sql_values_with_collation(val_a, val_b, collation_str).reverse()
-                    }
-                };
-
-                if cmp != std::cmp::Ordering::Equal {
-                    return cmp;
-                }
-            }
-            std::cmp::Ordering::Equal
+            crate::select::order::compare_rows_by_sort_keys(keys_a, keys_b)
         });
 
         // Extract rows without sort keys

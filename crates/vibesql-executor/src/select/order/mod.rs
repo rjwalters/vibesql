@@ -18,6 +18,7 @@ use super::grouping;
 use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 // Re-export public API
+pub(in crate::select) use comparison::compare_rows_by_sort_keys;
 pub(crate) use position::{
     extract_column_position, validate_column_position, ColumnPositionResult,
 };
@@ -28,7 +29,7 @@ pub(crate) use resolution::{
 };
 
 /// Sort key for ORDER BY: (value, direction, nulls_order, collation)
-pub(super) type SortKey = (
+pub(in crate::select) type SortKey = (
     vibesql_types::SqlValue,
     vibesql_ast::OrderDirection,
     Option<vibesql_ast::NullsOrder>,
