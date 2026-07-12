@@ -207,6 +207,7 @@ make analyze
 # Individual analysis
 make analyze-tests        # SQLLogicTest conformance
 make analyze-benchmarks   # TPC-H, TPC-DS, TPC-C, Sysbench results
-```<!-- BEGIN LOOM ORCHESTRATION -->
+
+<!-- BEGIN LOOM ORCHESTRATION -->
 This repository uses [Loom](https://github.com/rjwalters/loom) for AI-powered development orchestration. See `.loom/CLAUDE.md` for the full guide (roles, labels, worktrees, configuration).
 <!-- END LOOM ORCHESTRATION -->

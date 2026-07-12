@@ -4,17 +4,19 @@
 # Or manually: gh label create/edit commands
 
 # Core Workflow States
+- name: loom:triage
+  description: New issue awaiting Curator enhancement
+  color: "9CA3AF"  # gray-400 - neutral initial state
+
 - name: loom:issue
   description: Approved for work by human (ready for Builder to claim)
   color: "3B82F6"  # blue-500
 
-- name: loom:building
-  description: Builder is implementing this issue
-  color: "1d76db"  # blue
-
-- name: loom:in-progress
-  description: "Issue: Worker implementing | PR: Reviewer reviewing or Worker addressing feedback"
-  color: "F59E0B"  # amber-500
+# DEPRECATED: loom:in-progress removed (use role-specific labels)
+# - loom:building (Builder implementing issue)
+# - loom:curating (Curator enhancing issue)
+# - loom:reviewing (Judge reviewing PR)
+# - loom:treating (Doctor fixing bug/PR feedback)
 
 # Role-Specific Workflow Labels
 - name: loom:building
@@ -37,6 +39,10 @@
   description: PR ready for Judge to review
   color: "10B981"  # emerald-500
 
+- name: loom:changes-requested
+  description: "PR requires changes before re-review (Judge requested modifications)"
+  color: "F59E0B"  # amber-500 - matches other "action required" labels
+
 - name: loom:pr
   description: PR approved by Judge, ready for human to merge
   color: "3B82F6"  # blue-500
@@ -51,7 +57,7 @@
   color: "9333EA"  # purple (violet-600)
 
 - name: loom:curated
-  description: Enhanced by Curator, awaiting human approval
+  description: "Curator-enriched. Additive marker; coexists with loom:issue (highest-quality state for Builders)"
   color: "10B981"  # emerald-500
 
 # Status Labels
@@ -62,3 +68,25 @@
 - name: loom:urgent
   description: Critical/blocking issue requiring immediate attention
   color: "DC2626"  # red-600
+
+# Epic Labels
+- name: loom:epic
+  description: Multi-phase epic proposal (decomposes into implementation issues)
+  color: "7C3AED"  # violet-600 - distinguishes from regular proposals
+
+- name: loom:epic-phase
+  description: Issue is part of an epic phase (references parent epic)
+  color: "8B5CF6"  # violet-500 - lighter variant for child issues
+
+# Tier Labels (Goal Alignment)
+- name: tier:goal-advancing
+  description: Directly implements a milestone deliverable or unblocks goal work
+  color: "0E8A16"  # green - highest priority
+
+- name: tier:goal-supporting
+  description: Infrastructure, testing, or docs for milestone features
+  color: "FBCA04"  # yellow - medium priority
+
+- name: tier:maintenance
+  description: Cleanup, refactoring, or improvements not tied to current goals
+  color: "D4C5F9"  # purple - lower priority

@@ -22,11 +22,7 @@ Cargo.lock
 # Testing
 *.profdata
 *.profraw
-.loom/state.json
-.loom/worktrees/
 .loom/sweep-checkpoint/
-.loom/*.log
-.loom/*.sock
 lcov.info
 conformance_test_output.log
 validation_run.log
@@ -129,3 +125,7 @@ profile-*.json.gz
 .loom/claude-config/
 .loom/logs/
 .loom/spawn-loop-state.json
+.loom/worktrees/
+.loom/state.json
+.loom/*.log
+.loom/*.sock
