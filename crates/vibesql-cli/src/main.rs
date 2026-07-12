@@ -268,6 +268,11 @@ fn main() -> anyhow::Result<()> {
         // the same file-backed database waits up to this long, then fails
         // with the SQLite-compatible `database is locked`.
         lock_timeout_ms: config.database.lock_timeout_ms,
+        // Checkpoint archive retention (issue #6023): after each successful
+        // save-time checkpoint, prune the oldest checkpoints so the
+        // `<stem>-checkpoints/` directory does not grow unboundedly. Clamped to
+        // a minimum of 1 downstream so the newest checkpoint always survives.
+        keep_checkpoints: config.database.keep_checkpoints,
     };
 
     if let Some(cmd) = args.command {

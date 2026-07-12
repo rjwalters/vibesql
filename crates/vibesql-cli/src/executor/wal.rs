@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use vibesql_storage::{
     wal::{
         truncate_wal, CheckpointWriter, PersistenceConfig, PersistenceEngine, RecoveryConfig,
-        RecoveryManager,
+        RecoveryManager, DEFAULT_KEEP_CHECKPOINTS,
     },
     Database, StorageError,
 };
@@ -94,6 +94,10 @@ impl WalPaths {
 pub struct WalState {
     paths: WalPaths,
     checkpoint_writer: CheckpointWriter,
+    /// Number of checkpoint files to retain after each successful checkpoint
+    /// (issue #6023). Clamped to a minimum of 1 at construction so the newest
+    /// checkpoint always survives pruning.
+    keep_checkpoints: usize,
 }
 
 impl WalState {
@@ -107,7 +111,7 @@ impl WalState {
     /// wrapper is used by the in-crate tests.)
     #[allow(dead_code)]
     pub fn open(db_path: &str) -> Result<(Database, WalState), StorageError> {
-        Self::open_with_base(db_path, None, false)
+        Self::open_with_base(db_path, None, false, DEFAULT_KEEP_CHECKPOINTS)
     }
 
     /// Like [`WalState::open`], with two additions for issue #5807:
@@ -124,6 +128,7 @@ impl WalState {
         db_path: &str,
         base: Option<Database>,
         recover_fallback: bool,
+        keep_checkpoints: usize,
     ) -> Result<(Database, WalState), StorageError> {
         let paths = WalPaths::derive(db_path);
 
@@ -178,7 +183,14 @@ impl WalState {
 
         let checkpoint_writer = CheckpointWriter::new(&paths.checkpoint_dir)?;
 
-        Ok((db, WalState { paths, checkpoint_writer }))
+        // Clamp to a minimum of 1: `keep_checkpoints = 0` would otherwise prune
+        // every checkpoint (including the newest) after a save, leaving nothing
+        // for recovery to load. Keeping at least the newest checkpoint upholds
+        // the fail-closed recovery policy (#5807/#5850). Documented for the CLI
+        // knob in `.vibesqlrc.example` and `DatabaseConfig::keep_checkpoints`.
+        let keep_checkpoints = keep_checkpoints.max(1);
+
+        Ok((db, WalState { paths, checkpoint_writer, keep_checkpoints }))
     }
 
     /// Create a checkpoint of the current database state and truncate the WAL
@@ -189,6 +201,10 @@ impl WalState {
     ///   2. Serializes the in-memory database to uncompressed binary bytes.
     ///   3. Writes a checkpoint at the engine's current LSN.
     ///   4. Truncates the WAL up to that LSN.
+    ///   5. Prunes old checkpoints, keeping the `keep_checkpoints` most recent
+    ///      (issue #6023) so the archive does not grow unboundedly. This runs
+    ///      only after steps 1–4 succeed; a pruning failure is logged, not
+    ///      propagated, so a successful checkpoint is never reported as failed.
     ///
     /// **Fail-safe invariant (issue #5832):** the WAL is truncated in step 4
     /// only after steps 1–3 all succeed. Any failure — serialization error,
@@ -216,6 +232,40 @@ impl WalState {
         //    zero safety buffer: the checkpoint fully captures state at this LSN.
         if self.paths.wal_path.exists() {
             truncate_wal(&self.paths.wal_path, checkpoint_lsn, Some(0))?;
+        }
+
+        // 5. Prune old checkpoints (issue #6023). This runs ONLY after the new
+        //    checkpoint is durably written AND the WAL has been truncated, so
+        //    pruning can never remove a checkpoint the WAL still depends on and
+        //    the newest checkpoint is always present (fail-closed recovery,
+        //    #5807/#5850). `keep_checkpoints` is clamped to >= 1 at construction.
+        //
+        //    A cleanup failure is a logged warning, NOT a checkpoint failure:
+        //    the durable checkpoint + truncated WAL already succeeded, so the
+        //    save must still return Ok.
+        //
+        //    Success is logged via `log::debug!` (not stderr): a routine save
+        //    must stay silent on stderr — an existing contract that other tests
+        //    rely on — and the CLI installs no `log` backend, so this is a
+        //    no-op for end users but observable if one is attached. A *failure*
+        //    is surfaced loudly on stderr, since the CLI would otherwise discard
+        //    a `log::warn!` and the operator must know pruning did not happen.
+        match self.checkpoint_writer.cleanup_old_checkpoints(self.keep_checkpoints) {
+            Ok(removed) if removed > 0 => {
+                log::debug!(
+                    "Pruned {removed} old checkpoint(s), keeping the {} most recent in {}",
+                    self.keep_checkpoints,
+                    self.paths.checkpoint_dir.display()
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!(
+                    "WARNING: failed to prune old checkpoints in {} (checkpoint itself succeeded): {}",
+                    self.paths.checkpoint_dir.display(),
+                    e
+                );
+            }
         }
 
         Ok(())

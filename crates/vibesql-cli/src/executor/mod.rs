@@ -197,11 +197,22 @@ pub struct DbOpenOptions {
     /// to this long before failing with `database is locked`. `0` = fail
     /// immediately.
     pub lock_timeout_ms: u64,
+    /// Number of checkpoint files to retain after a successful checkpoint
+    /// (`[database] keep_checkpoints`, default 2). After each `\save` /
+    /// clean-exit checkpoint the oldest archived checkpoints are pruned so the
+    /// `<stem>-checkpoints/` directory does not grow unboundedly (issue #6023).
+    /// Clamped to a minimum of 1 so the newest checkpoint always survives.
+    pub keep_checkpoints: usize,
 }
 
 impl Default for DbOpenOptions {
     fn default() -> Self {
-        DbOpenOptions { wal: false, recover_fallback: false, lock_timeout_ms: 5000 }
+        DbOpenOptions {
+            wal: false,
+            recover_fallback: false,
+            lock_timeout_ms: 5000,
+            keep_checkpoints: 2,
+        }
     }
 }
 
@@ -300,15 +311,15 @@ impl SqlExecutor {
                     None
                 };
 
-                let (mut db, wal_state) =
-                    wal::WalState::open_with_base(db_path, base, options.recover_fallback)
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "Failed to open WAL-backed database at {}: {}",
-                                db_path,
-                                e
-                            )
-                        })?;
+                let (mut db, wal_state) = wal::WalState::open_with_base(
+                    db_path,
+                    base,
+                    options.recover_fallback,
+                    options.keep_checkpoints,
+                )
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to open WAL-backed database at {}: {}", db_path, e)
+                })?;
                 // Rebuild expression-index bodies that the snapshot loader left
                 // empty (it cannot evaluate index expressions). Without this an
                 // expression index would silently return zero rows after reopen.
