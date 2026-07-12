@@ -211,6 +211,60 @@ fn test_invalid_date_component() {
     assert!(result.is_err());
 }
 
+// ----------------------------------------------------------------------------
+// Calendar-invalid dates (issue #6022)
+// Date::new() must reject dates that are in-range component-wise but do not
+// exist on the calendar (wrong day-for-month, non-leap Feb 29). These must be
+// rejected both via Date::new() directly and via the FromStr / Timestamp paths.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_invalid_date_feb30() {
+    // February never has 30 days, in any year.
+    assert!(Date::new(2024, 2, 30).is_err());
+    assert!(Date::new(2023, 2, 30).is_err());
+    assert!("2024-02-30".parse::<Date>().is_err());
+    assert!("2024-02-30T12:00:00".parse::<Timestamp>().is_err());
+}
+
+#[test]
+fn test_invalid_date_feb29_non_leap_year() {
+    // 2023 is not a leap year, so Feb 29 does not exist.
+    assert!(Date::new(2023, 2, 29).is_err());
+    assert!("2023-02-29".parse::<Date>().is_err());
+    assert!("2023-02-29T12:00:00".parse::<Timestamp>().is_err());
+
+    // 1900 is divisible by 100 but not 400 -> not a leap year.
+    assert!(Date::new(1900, 2, 29).is_err());
+    assert!("1900-02-29".parse::<Date>().is_err());
+
+    // Sanity: 2000 IS a leap year (divisible by 400).
+    assert!(Date::new(2000, 2, 29).is_ok());
+}
+
+#[test]
+fn test_invalid_date_apr31() {
+    // April has 30 days, so the 31st does not exist. Same for the other
+    // 30-day months (Jun, Sep, Nov).
+    assert!(Date::new(2024, 4, 31).is_err());
+    assert!(Date::new(2024, 6, 31).is_err());
+    assert!(Date::new(2024, 9, 31).is_err());
+    assert!(Date::new(2024, 11, 31).is_err());
+    assert!("2024-04-31".parse::<Date>().is_err());
+    assert!("2024-04-31T00:00:00".parse::<Timestamp>().is_err());
+
+    // Sanity: 31-day months still accept the 31st.
+    assert!(Date::new(2024, 1, 31).is_ok());
+    assert!(Date::new(2024, 12, 31).is_ok());
+}
+
+#[test]
+fn test_valid_leap_day_via_date_new() {
+    // Direct Date::new() confirmation that a valid leap day is accepted
+    // (complements test_leap_year_date which goes through the Timestamp path).
+    assert!(Date::new(2024, 2, 29).is_ok());
+}
+
 #[test]
 fn test_invalid_time_component() {
     let result = "2025-11-10T25:00:00".parse::<Timestamp>();

@@ -234,10 +234,12 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             let year = i32::from_le_bytes(year_buf);
             let month = month_buf[0];
             let day = day_buf[0];
-            Ok(SqlValue::Date(
-                vibesql_types::Date::new(year, month, day)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-            ))
+            // Lenient deserialization: reconstruct exactly what was stored.
+            // Databases written before Date::new() became calendar-strict may
+            // contain invalid dates (e.g. 2024-02-30); routing through the
+            // strict Date::new() here would make those files unreadable on
+            // recovery. See Date::from_parts_unchecked for the full rationale.
+            Ok(SqlValue::Date(vibesql_types::Date::from_parts_unchecked(year, month, day)))
         }
         tags::TIME => {
             let mut hour_buf = [0u8; 1];
@@ -273,9 +275,13 @@ pub fn deserialize_value<R: Read>(reader: &mut R) -> io::Result<SqlValue> {
             reader.read_exact(&mut minute_buf)?;
             reader.read_exact(&mut second_buf)?;
             reader.read_exact(&mut nano_buf)?;
-            let date =
-                vibesql_types::Date::new(i32::from_le_bytes(year_buf), month_buf[0], day_buf[0])
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            // Lenient deserialization for stored bytes; see the DATE arm above
+            // and Date::from_parts_unchecked for the compatibility rationale.
+            let date = vibesql_types::Date::from_parts_unchecked(
+                i32::from_le_bytes(year_buf),
+                month_buf[0],
+                day_buf[0],
+            );
             let time = vibesql_types::Time::new(
                 hour_buf[0],
                 minute_buf[0],
