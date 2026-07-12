@@ -37,6 +37,7 @@ pub mod persistence;
 pub mod pipeline;
 mod privilege_checker;
 pub mod procedural;
+pub mod pragma_compile_options;
 pub mod profiling;
 mod raise_scope;
 mod revoke;

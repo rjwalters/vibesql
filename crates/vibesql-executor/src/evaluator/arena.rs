@@ -421,19 +421,102 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 }
 
                 if let Some(col_index) = self.get_column_index_cached(table_str, column_str) {
-                    row.get(col_index)
+                    return row
+                        .get(col_index)
                         .cloned()
-                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index })
-                } else {
-                    Err(ExecutorError::ColumnNotFound {
-                        column_name: column_str.to_string(),
-                        table_name: table_str
-                            .map(|t| t.to_string())
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        searched_tables: self.schema.table_names(),
-                        available_columns: self.get_available_columns(),
-                    })
+                        .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index });
                 }
+
+                // SQLite compatibility: Handle ROWID pseudo-column.
+                // ROWID, _rowid_, and oid are aliases that return the row's unique
+                // identifier. This mirrors the resolution already implemented in
+                // `combined/eval.rs` and `expressions/eval.rs`. Real columns take
+                // precedence (checked above), so we only reach here for the
+                // pseudo-column. WITHOUT ROWID tables and VIEWs do NOT have the
+                // rowid pseudo-column (#4953, #5492); TVF-derived FROM items have no
+                // tracked row-id and therefore fall back to NULL (#6019).
+                let column_lower = column_str.to_ascii_lowercase();
+                if column_lower == "rowid" || column_lower == "_rowid_" || column_lower == "oid" {
+                    let table_id = table_str.map(vibesql_catalog::TableIdentifier::from);
+
+                    // WITHOUT ROWID tables (#4953) and VIEWs (#5492) both lack the
+                    // rowid pseudo-column and must error.
+                    if let Some(ref table_id) = table_id {
+                        if let Some((_, table_schema)) = self.schema.table_schemas.get(table_id) {
+                            if table_schema.without_rowid || table_schema.is_view {
+                                return Err(ExecutorError::ColumnNotFound {
+                                    column_name: column_str.to_string(),
+                                    table_name: table_id.display().to_string(),
+                                    searched_tables: vec![table_id.display().to_string()],
+                                    available_columns: table_schema
+                                        .columns
+                                        .iter()
+                                        .map(|c| c.name.clone())
+                                        .collect(),
+                                });
+                            }
+                        }
+                    } else {
+                        // Unqualified rowid - if any table in scope is WITHOUT ROWID
+                        // or a VIEW (neither has a rowid), error.
+                        for (tid, (_, table_schema)) in &self.schema.table_schemas {
+                            if table_schema.without_rowid || table_schema.is_view {
+                                return Err(ExecutorError::ColumnNotFound {
+                                    column_name: column_str.to_string(),
+                                    table_name: tid.display().to_string(),
+                                    searched_tables: self.schema.table_names(),
+                                    available_columns: table_schema
+                                        .columns
+                                        .iter()
+                                        .map(|c| c.name.clone())
+                                        .collect(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Issue #4536: an INTEGER PRIMARY KEY column is an alias for
+                    // rowid; return that column's value.
+                    if let Some(ref table_id) = table_id {
+                        if let Some((start_idx, table_schema)) =
+                            self.schema.table_schemas.get(table_id)
+                        {
+                            if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
+                                let combined_idx = start_idx + ipk_col_idx;
+                                return row.get(combined_idx).cloned().ok_or(
+                                    ExecutorError::ColumnIndexOutOfBounds { index: combined_idx },
+                                );
+                            }
+                        }
+                    } else {
+                        for (start_idx, table_schema) in self.schema.table_schemas.values() {
+                            if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
+                                let combined_idx = start_idx + ipk_col_idx;
+                                return row.get(combined_idx).cloned().ok_or(
+                                    ExecutorError::ColumnIndexOutOfBounds { index: combined_idx },
+                                );
+                            }
+                        }
+                    }
+
+                    // No IPK alias - fall back to tracked row-id (handles single-table
+                    // and multi-table/JOIN rows, #4370).
+                    if let Some(row_id) = row.get_row_id_for_table(table_str) {
+                        return Ok(SqlValue::Bigint(row_id as i64));
+                    }
+                    // ROWID not available (e.g. a TVF-derived FROM item) - return NULL,
+                    // matching SQLite's behavior for derived tables.
+                    return Ok(SqlValue::Null);
+                }
+
+                Err(ExecutorError::ColumnNotFound {
+                    column_name: column_str.to_string(),
+                    table_name: table_str
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    searched_tables: self.schema.table_names(),
+                    available_columns: self.get_available_columns(),
+                })
             }
 
             // Binary operation

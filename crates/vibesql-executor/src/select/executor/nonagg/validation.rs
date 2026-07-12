@@ -13,6 +13,9 @@ use std::collections::HashMap;
 
 use crate::{
     errors::ExecutorError,
+    pragma_compile_options::{
+        get_pragma_compile_options_table_schema, is_pragma_compile_options_table,
+    },
     schema::CombinedSchema,
     select::cte::CteResult,
     sqlite_schema::{
@@ -230,6 +233,11 @@ fn compute_single_select_column_count(
                     count += get_sqlite_schema_table_schema().columns.len();
                     continue;
                 }
+                // #6019: pragma_compile_options eponymous system table.
+                if is_pragma_compile_options_table(qualifier) {
+                    count += get_pragma_compile_options_table_schema().columns.len();
+                    continue;
+                }
                 // Check for views before regular tables
                 if let Some(view) = database.catalog.get_view(qualifier) {
                     count += compute_select_list_column_count(&view.query, database, cte_results)?;
@@ -272,6 +280,10 @@ fn count_columns_in_from_clause(
             // #5513: sqlite_temp_master shares the same column shape.
             if is_sqlite_schema_table(name) || is_sqlite_temp_schema_table(name) {
                 return Ok(get_sqlite_schema_table_schema().columns.len());
+            }
+            // #6019: pragma_compile_options eponymous system table.
+            if is_pragma_compile_options_table(name) {
+                return Ok(get_pragma_compile_options_table_schema().columns.len());
             }
             // Check for views before regular tables
             if let Some(view) = database.catalog.get_view(name) {

@@ -24,6 +24,10 @@ use crate::{
         execute_information_schema_query, get_information_schema_table_schema, parse_qualified_name,
     },
     optimizer::PredicatePlan,
+    pragma_compile_options::{
+        execute_pragma_compile_options_query, get_pragma_compile_options_table_schema,
+        is_pragma_compile_options_table,
+    },
     privilege_checker::PrivilegeChecker,
     schema::CombinedSchema,
     select::{
@@ -377,6 +381,21 @@ pub(crate) fn execute_table_scan(
 
         // sqlite_temp_master shares sqlite_master's column shape.
         let table_schema = get_sqlite_schema_table_schema();
+
+        let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
+        let table_schema = apply_column_aliases(table_schema, column_aliases)?;
+        let schema = CombinedSchema::from_table(effective_name, table_schema);
+
+        return Ok(super::FromResult::from_rows(schema, result.rows));
+    }
+
+    // Check if it's the pragma_compile_options eponymous system table (#6019).
+    // Referenced with bare-identifier FROM syntax; VibeSQL advertises no
+    // compile-time options, so this yields the correct single-column shape with
+    // zero rows.
+    if is_pragma_compile_options_table(table_name) {
+        let result = execute_pragma_compile_options_query()?;
+        let table_schema = get_pragma_compile_options_table_schema();
 
         let effective_name = alias.cloned().unwrap_or_else(|| table_name.to_string());
         let table_schema = apply_column_aliases(table_schema, column_aliases)?;
