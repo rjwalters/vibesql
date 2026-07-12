@@ -169,24 +169,10 @@ fn group_by_having_then_order_by() {
     );
 }
 
-/// NULL group key ordering. The columnar GROUP BY + ORDER BY path must place a
-/// NULL group key FIRST for `ORDER BY k ASC`, matching SQLite (NULLs are the
-/// smallest value).
-///
-/// NOTE ON PARITY: the *row-oriented* aggregate ORDER BY path has a PRE-EXISTING
-/// bug where it places NULL group keys LAST for ASC (verified: a plain
-/// non-aggregate `ORDER BY k ASC` correctly puts NULL first, but the GROUP BY
-/// aggregate ORDER BY path puts NULL last — non-SQLite). This is independent of
-/// the columnar work here and is NOT fixed by this PR (out of scope). Because the
-/// row path is wrong for this case, we assert the columnar path against the
-/// SQLite-correct order directly rather than blind row-path parity. Filed as a
-/// follow-up (see PR description).
-#[test]
-fn group_by_order_by_null_keys_first_ascending() {
-    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    init_logger(Level::Debug);
-    let mut db = Database::new();
-    execute_sql(&mut db, "CREATE TABLE n (k INTEGER, v INTEGER)");
+/// Populate `n(k INTEGER, v INTEGER)` with 400 rows where `k` is NULL every 7th
+/// row (the data shape from issue #6014's repro), then GROUP BY `k`.
+fn setup_null_keyed(db: &mut Database) {
+    execute_sql(db, "CREATE TABLE n (k INTEGER, v INTEGER)");
     let mut ins = String::new();
     for i in 0..400i64 {
         if i % 7 == 0 {
@@ -195,22 +181,26 @@ fn group_by_order_by_null_keys_first_ascending() {
             ins.push_str(&format!("INSERT INTO n VALUES ({}, {});", i % 4, (i % 11) + 1));
         }
     }
-    execute_sql(&mut db, &ins);
+    execute_sql(db, &ins);
     let _ = take_logs();
+}
 
-    // Path assertion: columnar path is taken.
-    let sql = "SELECT k, SUM(v) FROM n GROUP BY k ORDER BY k ASC";
-    let cols = run_select(&db, sql);
-    let logs = take_logs();
-    let joined = logs.join("\n");
-    assert!(
-        !joined.contains(ROW_FALLBACK),
-        "row-fallback marker emitted for NULL-key GROUP BY ORDER BY:\n{joined}"
-    );
-    assert!(
-        logs.iter().any(|l| l.contains(COLUMNAR_COMPLETED)),
-        "expected native columnar execution for NULL-key GROUP BY ORDER BY:\n{joined}"
-    );
+/// NULL group key ordering, ASC (#6014). The columnar and row-oriented aggregate
+/// GROUP BY + ORDER BY paths must BOTH place a NULL group key FIRST for
+/// `ORDER BY k ASC`, matching SQLite (NULL is the smallest value). Prior to the
+/// #6014 fix the row path inverted the default NULL placement (NULL last on ASC);
+/// this now asserts row/columnar parity in emitted order rather than documenting
+/// the discrepancy.
+#[test]
+fn group_by_order_by_null_keys_first_ascending() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    init_logger(Level::Debug);
+    let mut db = Database::new();
+    setup_null_keyed(&mut db);
+
+    // Row/columnar parity in emitted order (both must match SQLite semantics).
+    let cols =
+        columnar_matches_row_ordered(&db, "SELECT k, SUM(v) FROM n GROUP BY k ORDER BY k ASC");
 
     // SQLite-correct order: NULL group key sorts first ascending.
     assert_eq!(
@@ -230,6 +220,41 @@ fn group_by_order_by_null_keys_first_ascending() {
     let mut sorted = non_null_keys.clone();
     sorted.sort();
     assert_eq!(non_null_keys, sorted, "non-NULL group keys must be ascending: {non_null_keys:?}");
+}
+
+/// NULL group key ordering, DESC (#6014). Mirror of the ASC test: both paths must
+/// place a NULL group key LAST for `ORDER BY k DESC`, matching SQLite (NULL is the
+/// smallest value, so it sorts last under DESC). Prior to the #6014 fix the row
+/// path put NULL first on DESC (direction-inverted default placement).
+#[test]
+fn group_by_order_by_null_keys_last_descending() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    init_logger(Level::Debug);
+    let mut db = Database::new();
+    setup_null_keyed(&mut db);
+
+    // Row/columnar parity in emitted order (both must match SQLite semantics).
+    let cols =
+        columnar_matches_row_ordered(&db, "SELECT k, SUM(v) FROM n GROUP BY k ORDER BY k DESC");
+
+    // SQLite-correct order: NULL group key sorts last descending.
+    assert_eq!(
+        cols.last().map(|r| &r.values[0]),
+        Some(&vibesql_types::SqlValue::Null),
+        "expected NULL group key to sort last descending (SQLite semantics); got {cols:?}"
+    );
+    // The leading group keys (before the trailing NULL) must be in descending order.
+    let non_null_keys: Vec<i64> = cols
+        .iter()
+        .take(cols.len().saturating_sub(1))
+        .map(|r| match &r.values[0] {
+            vibesql_types::SqlValue::Integer(v) => *v,
+            other => panic!("unexpected non-integer group key: {other:?}"),
+        })
+        .collect();
+    let mut sorted = non_null_keys.clone();
+    sorted.sort_by(|a, b| b.cmp(a));
+    assert_eq!(non_null_keys, sorted, "non-NULL group keys must be descending: {non_null_keys:?}");
 }
 
 #[test]
