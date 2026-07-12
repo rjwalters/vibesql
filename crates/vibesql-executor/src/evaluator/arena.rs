@@ -181,10 +181,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::BinaryOp { op: BinaryOperator::JsonExtractText, .. } => false,
             ArenaExpression::Extended(ArenaExtendedExpr::Function { name, args, .. }) => {
                 let canon = self.resolve(*name).to_ascii_lowercase();
-                if self.arena_expr_has_json_subtype(expr) {
+                // `json_quote` always returns valid JSON text and SQLite tags it
+                // with subtype 74 unconditionally, so for `subtype()` recovery it
+                // is an unconditional producer. (It is deliberately not an
+                // *embedding* producer in `arena_expr_has_json_subtype`, so its
+                // quoted output keeps quoting when passed to another JSON func.)
+                if self.arena_expr_has_json_subtype(expr) || canon == "json_quote" {
                     !matches!(self.eval(expr, row)?, SqlValue::Null)
-                } else if matches!(canon.as_str(), "json_extract" | "jsonb_extract" | "json_quote")
-                {
+                } else if matches!(canon.as_str(), "json_extract" | "jsonb_extract") {
                     crate::evaluator::json_subtype::value_is_json_container(&self.eval(expr, row)?)
                 } else if matches!(canon.as_str(), "if" | "iif") {
                     match self.arena_selected_conditional_branch(args, row)? {
@@ -218,6 +222,27 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     row,
                 )? {
                     Some(branch) => self.arena_expr_json_subtype(branch, row)?,
+                    None => false,
+                }
+            }
+            // `CAST(inner AS <text type>)` preserves the JSON subtype of `inner`
+            // (`CAST(json('[1,2]') AS TEXT)` is still subtype 74). A non-text cast
+            // drops the subtype. Arena mirror of the standard evaluator.
+            ArenaExpression::Extended(ArenaExtendedExpr::Cast { expr: inner, data_type })
+                if crate::evaluator::json_subtype::data_type_is_string(data_type) =>
+            {
+                self.arena_expr_json_subtype(inner, row)?
+            }
+            // Scalar subquery with a single projected expression: recurse into
+            // that projected expression, so `subtype((SELECT json('[1,2]')))`
+            // reports the subtype of `json('[1,2]')`. Best-effort: an evaluation
+            // error on the projected expression yields no subtype rather than
+            // propagating.
+            ArenaExpression::Extended(ArenaExtendedExpr::ScalarSubquery(select)) => {
+                match self.arena_single_projected_expression(select) {
+                    Some(projected) => {
+                        self.arena_expr_json_subtype(projected, row).unwrap_or(false)
+                    }
                     None => false,
                 }
             }
@@ -279,6 +304,24 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             }
         }
         Ok(else_result)
+    }
+
+    /// Return the single projected expression of an arena scalar subquery, or
+    /// `None` when the projection is not exactly one plain expression (a
+    /// wildcard, a set operation, or a multi-column projection all disqualify).
+    /// Arena mirror of
+    /// [`crate::evaluator::json_subtype`]'s `single_projected_expression`.
+    fn arena_single_projected_expression<'e>(
+        &self,
+        select: &'e arena_ast::SelectStmt<'arena>,
+    ) -> Option<&'e ArenaExpression<'arena>> {
+        if select.set_operation.is_some() {
+            return None;
+        }
+        match select.select_list.as_slice() {
+            [arena_ast::SelectItem::Expression { expr, .. }] => Some(expr),
+            _ => None,
+        }
     }
 
     /// Evaluate an arena-allocated expression against a row.
