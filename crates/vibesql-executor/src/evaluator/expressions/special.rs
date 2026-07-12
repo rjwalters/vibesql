@@ -381,14 +381,19 @@ impl ExpressionEvaluator<'_> {
     }
 }
 
-/// Does this expression carry SQLite's JSON subtype?
+/// Does this expression's result embed as a JSON sub-document when passed to
+/// another JSON function?
 ///
-/// True when the expression is a direct call to a JSON function whose result is
-/// always well-formed JSON text (json, json_array, json_object, and the
-/// insert/replace/set/remove/patch mutation functions). Such results embed as
-/// JSON sub-documents when passed to another JSON function. Producers with a
-/// *conditional* subtype (json_extract / json_quote / `->`) are intentionally
-/// excluded — see the module note in `json_funcs.rs`.
+/// True when the expression is a direct call to a JSON function whose result is a
+/// well-formed JSON document — either JSON *text* (`json`, `json_array`,
+/// `json_object`, and the text insert/replace/set/remove/patch mutation
+/// functions) or a JSONB *blob* (`jsonb*`), which decodes back to the same JSON
+/// document when embedded. Such results embed as JSON sub-documents when passed to
+/// another JSON function. This *embedding* signal is distinct from `subtype()`
+/// reporting (`json_subtype.rs`): a JSONB blob embeds correctly here yet reports
+/// `subtype()` 0. Producers with a *conditional* subtype (json_extract /
+/// json_quote / `->`) are intentionally excluded — see the module note in
+/// `json_funcs.rs`.
 pub(crate) fn expr_has_json_subtype(expr: &vibesql_ast::Expression) -> bool {
     if let vibesql_ast::Expression::Function { name, .. } = expr {
         matches!(
@@ -401,8 +406,12 @@ pub(crate) fn expr_has_json_subtype(expr: &vibesql_ast::Expression) -> bool {
                 | "json_set"
                 | "json_remove"
                 | "json_patch"
-                // JSONB accept-and-convert aliases produce the same JSON text and
-                // so carry the JSON subtype too.
+                // JSONB functions emit real `SqlValue::Blob` output (Stage 1,
+                // #6035); that blob decodes back to the same JSON document when
+                // embedded as an argument to another JSON function, so they carry
+                // the JSON subtype for *embedding* purposes here. (This is a
+                // distinct mechanism from `subtype()` reporting in
+                // `json_subtype.rs`, where the BLOB producers are 0.)
                 | "jsonb"
                 | "jsonb_array"
                 | "jsonb_object"

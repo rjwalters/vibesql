@@ -10,14 +10,22 @@
 //!
 //! - `->` (`JsonExtract`): JSON subtype whenever the result is non-NULL.
 //! - `->>` (`JsonExtractText`): never JSON subtype.
-//! - `json()`, `json_array()`, `json_object()`, `json_quote()`, and the insert/
-//!   replace/set/remove/patch mutation functions (plus `jsonb_*` aliases): JSON
+//! - `json()`, `json_array()`, `json_object()`, `json_quote()`, and the text
+//!   insert/replace/set/remove/patch mutation functions, plus the two
+//!   pure-construction `jsonb` builders `jsonb_array()` / `jsonb_object()`: JSON
 //!   subtype whenever the result is non-NULL. `json_quote()` always returns valid
 //!   JSON text and SQLite tags it with subtype 74 unconditionally, so — for
 //!   `subtype()` purposes — it is an unconditional JSON producer here. (It is
 //!   deliberately *not* treated as an embedding producer in `special.rs` /
 //!   `arena.rs`, which keeps json_quote's quoted result quoting when passed into
 //!   another JSON function.)
+//!   The BLOB-emitting `jsonb()` / `jsonb_insert/replace/set/remove/patch()`
+//!   functions are deliberately *excluded*: since Stage 1 they emit real
+//!   `SqlValue::Blob` output, and SQLite does not tag a JSONB BLOB result with the
+//!   JSON subtype the way it tags their text counterparts — `subtype()` on any of
+//!   them is `0` (matching sqlite3 3.51). `jsonb_array()` / `jsonb_object()` are
+//!   the sole exceptions: they take no BLOB input and SQLite keeps their subtype
+//!   at 74.
 //! - `json_extract()`: conditional — JSON subtype only when the result is a JSON
 //!   container (array/object), matching SQLite's behaviour of tagging only
 //!   container extractions.
@@ -63,6 +71,13 @@ pub(crate) const JSON_SUBTYPE_TAG: i64 = 74;
 /// producer set in `special.rs` / `arena.rs` — json_quote is intentionally not an
 /// embedding producer there, so its quoted output keeps quoting when passed into
 /// another JSON function.
+///
+/// The BLOB-emitting `jsonb()` / `jsonb_insert/replace/set/remove/patch()`
+/// functions are intentionally absent: since Stage 1 (#6035) they emit real
+/// `SqlValue::Blob` output, and SQLite does not tag a JSONB BLOB result with the
+/// runtime JSON subtype — `subtype()` on any of them is `0`, matching sqlite3
+/// 3.51. Only the two pure-construction builders that take no BLOB input,
+/// `jsonb_array()` / `jsonb_object()`, keep subtype 74, so they remain listed.
 fn is_unconditional_json_producer(name: &str) -> bool {
     matches!(
         name,
@@ -75,14 +90,8 @@ fn is_unconditional_json_producer(name: &str) -> bool {
             | "json_set"
             | "json_remove"
             | "json_patch"
-            | "jsonb"
             | "jsonb_array"
             | "jsonb_object"
-            | "jsonb_insert"
-            | "jsonb_replace"
-            | "jsonb_set"
-            | "jsonb_remove"
-            | "jsonb_patch"
     )
 }
 
@@ -616,6 +625,28 @@ mod tests {
         assert!(is_json(lit(SqlValue::Character("[1,2,3]".into()))));
         // A scalar-string Character (json101-5.11 atom) is not.
         assert!(!is_json(lit(SqlValue::Character("hello".into()))));
+    }
+
+    #[test]
+    fn blob_jsonb_functions_are_not_unconditional_producers() {
+        // Issue #6033: since Stage 1 these emit real SqlValue::Blob and sqlite3
+        // 3.51 reports subtype 0 for them, so they must NOT be classified as
+        // unconditional JSON producers.
+        for name in
+            ["jsonb", "jsonb_insert", "jsonb_replace", "jsonb_set", "jsonb_remove", "jsonb_patch"]
+        {
+            assert!(
+                !is_unconditional_json_producer(name),
+                "{name} should not be an unconditional JSON producer (BLOB output => subtype 0)"
+            );
+        }
+        // The two pure-construction builders take no BLOB input and keep subtype
+        // 74, so they remain producers.
+        assert!(is_unconditional_json_producer("jsonb_array"));
+        assert!(is_unconditional_json_producer("jsonb_object"));
+        // Text-JSON producers are unaffected.
+        assert!(is_unconditional_json_producer("json"));
+        assert!(is_unconditional_json_producer("json_insert"));
     }
 
     #[test]

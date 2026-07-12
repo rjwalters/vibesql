@@ -113,10 +113,14 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
         self.interner.resolve(symbol)
     }
 
-    /// Does this arena expression carry SQLite's JSON subtype? True when it is a
-    /// direct call to a JSON function whose output is always well-formed JSON
-    /// (see `special.rs::expr_has_json_subtype` and the module note in
-    /// `json_funcs.rs`). Such results embed as JSON sub-documents.
+    /// Does this arena expression's result embed as a JSON sub-document when
+    /// passed to another JSON function? True when it is a direct call to a JSON
+    /// function whose output is a well-formed JSON document — JSON text or a JSONB
+    /// blob (which decodes back to the same document when embedded). This
+    /// *embedding* signal is distinct from `subtype()` reporting: a JSONB blob
+    /// embeds correctly yet reports `subtype()` 0 (see
+    /// `special.rs::expr_has_json_subtype`, `json_subtype.rs`, and the module note
+    /// in `json_funcs.rs`).
     fn arena_expr_has_json_subtype(&self, expr: &ArenaExpression<'arena>) -> bool {
         if let ArenaExpression::Extended(ArenaExtendedExpr::Function { name, .. }) = expr {
             matches!(
@@ -129,7 +133,9 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     | "json_set"
                     | "json_remove"
                     | "json_patch"
-                    // JSONB accept-and-convert aliases produce the same JSON text.
+                    // JSONB functions emit a real BLOB (Stage 1, #6035) that
+                    // decodes back to the same JSON document when embedded — so
+                    // they embed correctly here, though `subtype()` on them is 0.
                     | "jsonb"
                     | "jsonb_array"
                     | "jsonb_object"
