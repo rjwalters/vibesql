@@ -353,3 +353,73 @@ fn test_like_null_value() {
         vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alice"))
     );
 }
+
+/// Issue #6016: end-to-end row-path check that a single multi-byte character
+/// does not spuriously satisfy `%__`. Previously the '%' skip loop landed
+/// mid-UTF-8-character, letting a following `_` "eat" a continuation byte as a
+/// whole character, so 'ሴ' matched '%__'. The divergence table (SQLite ground
+/// truth): '%__' -> 0, '%___' -> 0, '__' -> 0, '_' -> 1.
+#[test]
+fn test_like_multibyte_percent_underscore_row_path_issue_6016() {
+    fn count_matching(pattern: &str) -> usize {
+        let mut db = vibesql_storage::Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "test".to_string(),
+            vec![vibesql_catalog::ColumnSchema::new(
+                "s".to_string(),
+                vibesql_types::DataType::Varchar { max_length: Some(50) },
+                false,
+            )],
+        );
+        db.create_table(schema).unwrap();
+        // "ሴ" (U+1234) is a single 3-byte UTF-8 character.
+        db.insert_row(
+            "test",
+            vibesql_storage::Row::new(vec![vibesql_types::SqlValue::Varchar(
+                arcstr::ArcStr::from("\u{1234}"),
+            )]),
+        )
+        .unwrap();
+
+        let executor = SelectExecutor::new(&db);
+        let stmt = vibesql_ast::SelectStmt {
+            with_clause: None,
+            set_operation: None,
+            values: None,
+            distinct: false,
+            select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
+            from: Some(vibesql_ast::FromClause::Table {
+                index_hint: None,
+                quoted: false,
+                name: "test".to_string(),
+                alias: None,
+                column_aliases: None,
+            }),
+            where_clause: Some(vibesql_ast::Expression::Like {
+                expr: Box::new(vibesql_ast::Expression::ColumnRef(
+                    vibesql_ast::ColumnIdentifier::simple("s", false),
+                )),
+                pattern: Box::new(vibesql_ast::Expression::Literal(
+                    vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(pattern)),
+                )),
+                negated: false,
+                escape: None,
+            }),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            into_table: None,
+            into_variables: None,
+        };
+        executor.execute(&stmt).unwrap().len()
+    }
+
+    assert_eq!(count_matching("%__"), 0, "'ሴ' LIKE '%__' must not match");
+    assert_eq!(count_matching("%___"), 0, "'ሴ' LIKE '%___' must not match");
+    assert_eq!(count_matching("__"), 0, "'ሴ' LIKE '__' must not match");
+    assert_eq!(count_matching("_"), 1, "'ሴ' LIKE '_' must match");
+    assert_eq!(count_matching("%_"), 1, "'ሴ' LIKE '%_' must match");
+}
