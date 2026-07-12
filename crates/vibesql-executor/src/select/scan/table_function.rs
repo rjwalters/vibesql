@@ -32,9 +32,12 @@
 use crate::{
     errors::ExecutorError,
     evaluator::{
-        functions::sqlite_compat::json_funcs::{
-            json_node_to_json_text, json_node_to_sql_value, json_node_type_name, navigate,
-            parse_json_relaxed, parse_sqlite_json_path,
+        functions::sqlite_compat::{
+            json_funcs::{
+                json_node_to_json_text, json_node_to_sql_value, json_node_type_name, navigate,
+                parse_json_relaxed, parse_sqlite_json_path,
+            },
+            jsonb::decode as decode_jsonb_blob,
         },
         CombinedExpressionEvaluator,
     },
@@ -128,17 +131,23 @@ pub(crate) fn execute_table_function(
 
     // A NULL json argument yields zero rows (SQLite: `json_each(NULL)` -> 0
     // rows). Same for a NULL path.
-    let json_str = match &json_value {
+    //
+    // A BLOB argument is a JSONB document (produced by jsonb()/jsonb_*()): decode
+    // it directly into the expansion root. A malformed/non-JSONB blob is an error
+    // (SQLite: `json_each(x'abcd')` -> "malformed JSON"), never silent zero rows.
+    let root = match &json_value {
         SqlValue::Null => return Ok(super::FromResult::from_rows(schema, vec![])),
-        other => sqlvalue_as_json_text(other),
+        SqlValue::Blob(bytes) => decode_jsonb_blob(bytes)
+            .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?,
+        other => {
+            let json_str = match sqlvalue_as_json_text(other) {
+                Some(s) => s,
+                None => return Ok(super::FromResult::from_rows(schema, vec![])),
+            };
+            parse_json_relaxed(&json_str)
+                .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?
+        }
     };
-    let json_str = match json_str {
-        Some(s) => s,
-        None => return Ok(super::FromResult::from_rows(schema, vec![])),
-    };
-
-    let root = parse_json_relaxed(&json_str)
-        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
 
     // Resolve the optional path argument. The path is applied to the root; the
     // referenced node becomes the expansion root. The `base_path` string is the

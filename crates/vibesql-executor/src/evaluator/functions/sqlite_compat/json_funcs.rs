@@ -879,15 +879,15 @@ pub(crate) fn eval_json_arrow(
 /// `legacy_json_valid` build returned 0).
 ///
 /// The optional FLAGS argument (SQLite 3.45+) selects which representations
-/// count as valid (<https://sqlite.org/json1.html#jvalid>). We honor the
-/// text-JSON bits:
+/// count as valid (<https://sqlite.org/json1.html#jvalid>). We honor:
 ///   - `0x01`: canonical RFC-8259 JSON text
 ///   - `0x02`: JSON5 text
-/// The JSONB-blob bits (`0x04`/`0x08`) never match because VibeSQL does not
-/// implement SQLite's binary JSONB representation (accept-and-convert keeps
-/// everything as text — see the Phase 4 JSONB note). Default FLAGS is `1`
-/// (canonical text only), so a JSON5 input like `{a:5}` validates as 0 unless
-/// bit `0x02` is set.
+///   - `0x04`/`0x08`: JSONB blob (a BLOB argument validates when it decodes as a
+///     well-formed JSONB document via [`super::jsonb::decode`])
+/// Default FLAGS is `1` (canonical text only), so a JSON5 input like `{a:5}`
+/// validates as 0 unless bit `0x02` is set, and a JSONB blob validates as 0
+/// unless bit `0x04` or `0x08` is set (SQLite's documented default-flags
+/// semantics).
 pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.is_empty() || args.len() > 2 {
         return Err(ExecutorError::WrongNumberOfArguments {
@@ -909,6 +909,9 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     };
     let accept_canonical = flags & 0x01 != 0;
     let accept_json5 = flags & 0x02 != 0;
+    // Bits 0x04 and 0x08 both select JSONB-blob validation (SQLite: "The input is
+    // JSONB" / "The input is text or JSONB").
+    let accept_jsonb = flags & 0x0c != 0;
 
     let valid = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
@@ -932,7 +935,9 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         | SqlValue::Float(_)
         | SqlValue::Real(_)
         | SqlValue::Double(_) => accept_canonical || accept_json5,
-        // Blobs would only be valid under the JSONB bits, which we never accept.
+        // A BLOB validates only under the JSONB bits, and only when it decodes as
+        // a well-formed JSONB document (a non-JSONB blob like x'abcd' is invalid).
+        SqlValue::Blob(bytes) => accept_jsonb && super::jsonb::decode(bytes).is_some(),
         _ => false,
     };
 
@@ -1115,7 +1120,10 @@ pub(crate) fn json_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// json_quote(X) - render a SQL scalar as a JSON value.
 ///
 /// Strings are double-quoted with interior characters escaped; numbers render
-/// as-is; SQL NULL becomes the unquoted text `null`; BLOBs are an error.
+/// as-is; SQL NULL becomes the unquoted text `null`. A JSONB blob (produced by
+/// jsonb()/jsonb_*()) is decoded and rendered as its canonical JSON text
+/// (SQLite: `json_quote(jsonb('[1,2]'))` -> `[1,2]`); any other (non-JSONB) blob
+/// is an error.
 pub(crate) fn json_quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     if args.len() != 1 {
         return Err(ExecutorError::WrongNumberOfArguments {
@@ -1141,11 +1149,16 @@ pub(crate) fn json_quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             serde_json::to_string(&serde_json::Value::String(s.as_str().to_string()))
                 .unwrap_or_default()
         }
-        SqlValue::Blob(_) => {
-            return Err(ExecutorError::SqliteCompatError(
-                "JSON cannot hold BLOB values".to_string(),
-            ));
-        }
+        SqlValue::Blob(bytes) => match super::jsonb::decode(bytes) {
+            // A well-formed JSONB blob decodes and re-renders as canonical JSON
+            // text (SQLite: `json_quote(jsonb('[1,2]'))` -> `[1,2]`).
+            Some(node) => json_node_to_json_text(&node),
+            None => {
+                return Err(ExecutorError::SqliteCompatError(
+                    "JSON cannot hold BLOB values".to_string(),
+                ));
+            }
+        },
         other => {
             // Fall back to a textual scalar rendering for remaining types.
             sql_value_scalar_text(other)
@@ -2454,6 +2467,32 @@ mod tests {
         assert_eq!(json_valid(&[json5, SqlValue::Integer(1)]).unwrap(), SqlValue::Integer(0));
     }
 
+    #[test]
+    fn test_json_valid_jsonb_blob_flags() {
+        let node: serde_json::Value = serde_json::from_str(r#"{"a":1}"#).unwrap();
+        let blob = SqlValue::Blob(super::super::jsonb::encode(&node));
+        // Default flags (canonical text only): a JSONB blob validates as 0,
+        // matching SQLite's documented default-flags semantics.
+        assert_eq!(json_valid(&[blob.clone()]).unwrap(), SqlValue::Integer(0));
+        // Flag bit 0x04 selects JSONB validation -> 1.
+        assert_eq!(
+            json_valid(&[blob.clone(), SqlValue::Integer(4)]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        // Flag 5 (0x01 | 0x04) also accepts the JSONB blob (json101-5.2b).
+        assert_eq!(
+            json_valid(&[blob.clone(), SqlValue::Integer(5)]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        // Flag bit 0x08 selects JSONB validation too.
+        assert_eq!(json_valid(&[blob, SqlValue::Integer(8)]).unwrap(), SqlValue::Integer(1));
+        // A non-JSONB blob is invalid even with the JSONB bit set.
+        assert_eq!(
+            json_valid(&[SqlValue::Blob(vec![0xab, 0xcd]), SqlValue::Integer(5)]).unwrap(),
+            SqlValue::Integer(0)
+        );
+    }
+
     /// Removing the root path ($) discards the whole document -> NULL, while
     /// json_remove with no path argument returns the document unchanged.
     #[test]
@@ -2896,10 +2935,39 @@ mod tests {
     }
 
     #[test]
-    fn test_json_quote_blob_errors() {
+    fn test_json_quote_non_jsonb_blob_errors() {
+        // A blob that does not decode as JSONB is still an error.
         let e = json_quote(&[SqlValue::Blob(vec![0x30, 0x31])]);
         assert!(
             matches!(e, Err(ExecutorError::SqliteCompatError(ref m)) if m == "JSON cannot hold BLOB values")
+        );
+    }
+
+    #[test]
+    fn test_json_quote_jsonb_blob_renders_canonical_text() {
+        // A JSONB blob decodes and renders as its canonical JSON text (matching
+        // SQLite: json_quote(jsonb('[1,2]')) -> [1,2]).
+        let arr: serde_json::Value = serde_json::from_str("[1,2]").unwrap();
+        assert_eq!(
+            json_quote(&[SqlValue::Blob(super::super::jsonb::encode(&arr))]).unwrap(),
+            SqlValue::Varchar("[1,2]".into())
+        );
+        let obj: serde_json::Value = serde_json::from_str(r#"{"a":1}"#).unwrap();
+        assert_eq!(
+            json_quote(&[SqlValue::Blob(super::super::jsonb::encode(&obj))]).unwrap(),
+            SqlValue::Varchar(r#"{"a":1}"#.into())
+        );
+        // A JSONB scalar string re-renders as a quoted JSON string.
+        let s: serde_json::Value = serde_json::Value::String("hello".into());
+        assert_eq!(
+            json_quote(&[SqlValue::Blob(super::super::jsonb::encode(&s))]).unwrap(),
+            SqlValue::Varchar(r#""hello""#.into())
+        );
+        // A JSONB scalar number re-renders bare.
+        let n: serde_json::Value = serde_json::from_str("5").unwrap();
+        assert_eq!(
+            json_quote(&[SqlValue::Blob(super::super::jsonb::encode(&n))]).unwrap(),
+            SqlValue::Varchar("5".into())
         );
     }
 
