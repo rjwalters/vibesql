@@ -250,3 +250,48 @@ fn general_like_blob_affinity_matches_row_path() {
     let (columnar, row, _logs) = run_both(&db, sql);
     assert_eq!(columnar, row, "BLOB LIKE must match row path (returns false, not error)");
 }
+
+/// Issue #6016: `%` + multi-byte character + trailing `_` must agree between the
+/// row and columnar paths, and match SQLite. Previously the row path's `%` skip
+/// loop landed mid-UTF-8-character so a single 'ሴ' spuriously satisfied `%__`
+/// (row said 1, columnar/SQLite say 0). This asserts cross-path parity for the
+/// full divergence table plus a bounded sweep of `%`/`_` patterns over 1/2/3/4-
+/// byte text characters.
+#[test]
+fn multibyte_percent_underscore_matches_row_path_issue_6016() {
+    init_logger(Level::Debug);
+
+    let mut db = Database::new();
+    execute_sql(&mut db, "CREATE TABLE t (id INTEGER, s TEXT)");
+    // Single-character rows for each of the 1/2/3/4-byte UTF-8 representatives,
+    // plus a couple of two-character strings to exercise `%` skipping across a
+    // whole multi-byte character.
+    let samples = ["a", "é", "ሴ", "😀", "aሴ", "ሴ😀", "aé"];
+    let mut ins = String::new();
+    for (i, s) in samples.iter().enumerate() {
+        ins.push_str(&format!("INSERT INTO t VALUES ({i}, '{s}');"));
+    }
+    execute_sql(&mut db, &ins);
+
+    // The exact divergence table (against single-char 'ሴ' row) plus general
+    // `_`/`%` shapes. Each pattern carries a `_` and/or multiple `%`, so it
+    // classifies General and routes through the matcher under test.
+    let patterns = [
+        "%__",   // divergence-table case: must be 0 for single-char rows
+        "%___",  //
+        "%_",    // one-or-more, then exactly one char
+        "_%",    // exactly one char, then anything
+        "%_%",   // at least one char anywhere
+        "_%_",   // at least two chars
+        "%ሴ%_",  // literal multi-byte char, then trailing _
+        "a%_",   // ASCII prefix then %_ (aሴ etc.)
+        "%😀%_", // 4-byte literal then trailing _
+    ];
+    for p in patterns {
+        let sql = format!("SELECT COUNT(*), SUM(id) FROM t WHERE s LIKE '{p}'");
+        let (columnar, row, _logs) = run_both(&db, &sql);
+        // The essential guarantee is cross-path parity; do not assert the path
+        // (some short patterns may classify differently), only that results agree.
+        assert_eq!(columnar, row, "multibyte %/_ parity failed for pattern={p:?} (issue #6016)");
+    }
+}

@@ -158,17 +158,32 @@ fn like_match_with_elements(
 
     match &pattern[pattern_pos] {
         PatternElement::AnySequence => {
-            // % matches zero or more characters
-            for skip in 0..=(text.len() - text_pos) {
+            // % matches zero or more characters.
+            //
+            // The skip cursor must advance one whole UTF-8 character at a time so
+            // that every recursive attempt starts on a character boundary. Stepping
+            // by raw byte offsets (0..=len) can leave the cursor mid-character on a
+            // continuation byte; a following `_` (AnyChar) would then call
+            // utf8_char_len on that continuation byte, which falls through to its
+            // "advance by 1" fallback and manufactures fake 1-byte "characters" out
+            // of continuation bytes, producing spurious matches (issue #6016).
+            let mut skip_pos = text_pos;
+            loop {
                 if like_match_with_elements(
                     text,
                     pattern,
-                    text_pos + skip,
+                    skip_pos,
                     pattern_pos + 1,
                     case_sensitive,
                 ) {
                     return true;
                 }
+                if skip_pos >= text.len() {
+                    break;
+                }
+                // Advance by one whole UTF-8 character to keep the cursor on a
+                // character boundary.
+                skip_pos += utf8_char_len(text[skip_pos]);
             }
             false
         }
@@ -417,18 +432,28 @@ fn like_match_recursive(
 
     match pattern_char {
         b'%' => {
-            // % matches zero or more characters
-            // Try matching with % consuming 0 chars, 1 char, 2 chars, etc.
-            for skip in 0..=(text.len() - text_pos) {
-                if like_match_recursive(
-                    text,
-                    pattern,
-                    text_pos + skip,
-                    pattern_pos + 1,
-                    case_sensitive,
-                ) {
+            // % matches zero or more characters.
+            //
+            // The skip cursor must advance one whole UTF-8 character at a time so
+            // that every recursive attempt starts on a character boundary. Stepping
+            // by raw byte offsets (0..=len) can leave the cursor mid-character on a
+            // continuation byte; a following `_` would then call utf8_char_len on
+            // that continuation byte, which falls through to its "advance by 1"
+            // fallback and manufactures fake 1-byte "characters" out of continuation
+            // bytes, producing spurious matches (issue #6016). Advancing whole
+            // characters here restores the "cursor always on a char boundary"
+            // invariant that the columnar GeneralMatcher already upholds.
+            let mut skip_pos = text_pos;
+            loop {
+                if like_match_recursive(text, pattern, skip_pos, pattern_pos + 1, case_sensitive) {
                     return true;
                 }
+                if skip_pos >= text.len() {
+                    break;
+                }
+                // Advance by one whole UTF-8 character to keep the cursor on a
+                // character boundary.
+                skip_pos += utf8_char_len(text[skip_pos]);
             }
             false
         }
@@ -574,6 +599,154 @@ mod tests {
         let escape_char = '\u{1234}';
         let pattern = "a\u{1234}_c";
         assert!(like_match("a_c", pattern, false, Some(escape_char)));
+    }
+
+    #[test]
+    fn test_like_match_multibyte_percent_underscore_issue_6016() {
+        // Issue #6016: row-path LIKE mishandled '%' + multi-byte char + trailing '_'.
+        // 'ሴ' (U+1234) is a single 3-byte UTF-8 character (0xE1 0x88 0xB4).
+        // The '%' skip loop used raw byte offsets, so it could land mid-character
+        // on a continuation byte; a following '_' then treated that continuation
+        // byte as a whole 1-byte "character", so 'ሴ' spuriously satisfied '__'.
+        //
+        // The divergence table from the issue (SQLite ground truth in comments):
+        let s = "\u{1234}"; // "ሴ"
+        assert!(!like_match(s, "%__", false, None), "'ሴ' LIKE '%__' must be false");
+        assert!(!like_match(s, "%___", false, None), "'ሴ' LIKE '%___' must be false");
+        assert!(!like_match(s, "__", false, None), "'ሴ' LIKE '__' must be false");
+        assert!(like_match(s, "_", false, None), "'ሴ' LIKE '_' must be true");
+
+        // A single '%' plus one '_' correctly matches the one-character string.
+        assert!(like_match(s, "%_", false, None), "'ሴ' LIKE '%_' must be true");
+        assert!(like_match(s, "%", false, None), "'ሴ' LIKE '%' must be true");
+        assert!(like_match(s, "_%", false, None), "'ሴ' LIKE '_%' must be true");
+    }
+
+    #[test]
+    fn test_like_match_multibyte_percent_underscore_escape_path_issue_6016() {
+        // Route the same cases through the escape-aware code path
+        // (like_match_with_elements / PatternElement::AnySequence), which had an
+        // identical byte-skip loop. Supplying an escape char that never appears in
+        // the pattern exercises that path without changing wildcard semantics.
+        let s = "\u{1234}"; // "ሴ"
+        let esc = Some('\\');
+        assert!(!like_match(s, "%__", false, esc), "escape-path 'ሴ' LIKE '%__' must be false");
+        assert!(!like_match(s, "%___", false, esc), "escape-path 'ሴ' LIKE '%___' must be false");
+        assert!(!like_match(s, "__", false, esc), "escape-path 'ሴ' LIKE '__' must be false");
+        assert!(like_match(s, "_", false, esc), "escape-path 'ሴ' LIKE '_' must be true");
+        assert!(like_match(s, "%_", false, esc), "escape-path 'ሴ' LIKE '%_' must be true");
+
+        // Escaped wildcard interacting with multi-byte text: a\_ where _ is a
+        // literal underscore should NOT match a multi-byte char after 'a'.
+        assert!(like_match("a_", r"a\_", false, esc));
+        assert!(!like_match("a\u{1234}", r"a\_", false, esc));
+        // But '%' + escaped-literal '_' against multi-byte-then-underscore text.
+        assert!(like_match("\u{1234}_", r"%\_", false, esc));
+        assert!(!like_match("\u{1234}\u{1234}", r"%\_", false, esc));
+    }
+
+    /// A reference LIKE matcher operating on whole Unicode `char`s. This encodes
+    /// the SQLite semantics ('%' = zero-or-more chars, '_' = exactly one char,
+    /// case-insensitive for ASCII letters) directly over `char`s so it cannot
+    /// suffer the byte-boundary bug. Used as ground truth for the parity sweep.
+    fn reference_like(text: &str, pattern: &str) -> bool {
+        let t: Vec<char> = text.chars().collect();
+        let p: Vec<char> = pattern.chars().collect();
+        fn rec(t: &[char], p: &[char], ti: usize, pi: usize) -> bool {
+            if pi >= p.len() {
+                return ti >= t.len();
+            }
+            match p[pi] {
+                '%' => {
+                    let mut k = ti;
+                    loop {
+                        if rec(t, p, k, pi + 1) {
+                            return true;
+                        }
+                        if k >= t.len() {
+                            return false;
+                        }
+                        k += 1;
+                    }
+                }
+                '_' => {
+                    if ti >= t.len() {
+                        return false;
+                    }
+                    rec(t, p, ti + 1, pi + 1)
+                }
+                pc => {
+                    if ti >= t.len() {
+                        return false;
+                    }
+                    let tc = t[ti];
+                    let matches = if pc.is_ascii_alphabetic() && tc.is_ascii_alphabetic() {
+                        pc.eq_ignore_ascii_case(&tc)
+                    } else {
+                        pc == tc
+                    };
+                    matches && rec(t, p, ti + 1, pi + 1)
+                }
+            }
+        }
+        rec(&t, &p, 0, 0)
+    }
+
+    #[test]
+    fn test_like_match_bounded_parity_sweep_issue_6016() {
+        // Bounded parity sweep: alphabet of 1/2/3/4-byte UTF-8 representatives,
+        // crossed with the wildcard pattern alphabet {%, _}, patterns up to
+        // length 3, over text strings up to length 3. Assert the row path agrees
+        // with the char-based reference matcher (SQLite semantics) everywhere.
+        let text_alphabet = ['a', '\u{00E9}', '\u{1234}', '\u{1F600}']; // a é ሴ 😀
+        let pattern_alphabet = ['%', '_'];
+
+        // Build all text strings of length 0..=3 over the text alphabet.
+        let mut texts: Vec<String> = vec![String::new()];
+        for _ in 0..3 {
+            let mut next = Vec::new();
+            for base in &texts {
+                for &c in &text_alphabet {
+                    let mut s = base.clone();
+                    s.push(c);
+                    next.push(s);
+                }
+            }
+            texts.extend(next);
+        }
+
+        // Build all wildcard patterns of length 0..=3 over {%, _}.
+        let mut patterns: Vec<String> = vec![String::new()];
+        for _ in 0..3 {
+            let mut next = Vec::new();
+            for base in &patterns {
+                for &c in &pattern_alphabet {
+                    let mut s = base.clone();
+                    s.push(c);
+                    next.push(s);
+                }
+            }
+            patterns.extend(next);
+        }
+
+        let mut mismatches = Vec::new();
+        for pat in &patterns {
+            for txt in &texts {
+                let got = like_match(txt, pat, false, None);
+                let expected = reference_like(txt, pat);
+                if got != expected {
+                    mismatches.push(format!(
+                        "text={txt:?} pattern={pat:?}: row-path={got} expected={expected}"
+                    ));
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "row-path LIKE diverged from reference on {} case(s):\n{}",
+            mismatches.len(),
+            mismatches.join("\n")
+        );
     }
 
     #[test]
