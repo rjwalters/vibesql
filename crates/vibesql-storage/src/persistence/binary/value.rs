@@ -209,6 +209,12 @@ mod tests {
             SqlValue::Varchar(arcstr::ArcStr::from("test")),
             SqlValue::Boolean(true),
             SqlValue::Float(3.14),
+            // Issue #6033: JSONB blobs are stored as SqlValue::Blob and must
+            // round-trip through the shared codec byte-for-byte (a JSONB-style
+            // header byte plus embedded NUL / high bytes a text codec would
+            // mangle), including the empty-blob edge case.
+            SqlValue::Blob(vec![0x8B, 0x00, 0xFF, 0x77, 0x36]),
+            SqlValue::Blob(Vec::new()),
         ];
 
         let mut buf = Vec::new();

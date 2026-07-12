@@ -726,3 +726,107 @@ impl ColumnData {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod blob_roundtrip_tests {
+    //! Issue #6033 (Stage 3): JSONB blobs are stored as `SqlValue::Blob` and the
+    //! columnar path must preserve their bytes exactly through scan (and, by
+    //! extension, checkpoint reload, which serializes `ColumnData` through the
+    //! same `Vec<u8>` representation with no text coercion). These tests encode
+    //! the byte-exactness the curator verified manually with a 2000-row table.
+
+    use super::*;
+    use crate::columnar::builder::ColumnBuilder;
+    use crate::columnar::table::ColumnarTable;
+    use crate::columnar::types::ColumnTypeClass;
+    use crate::Row;
+
+    /// A representative spread of blob payloads, including a JSONB-style header
+    /// byte (0x8B) as produced by `jsonb('[...]')`, an empty blob, and a blob
+    /// containing embedded NUL and high bytes that a text codec would mangle.
+    fn sample_blobs(n: usize) -> Vec<Vec<u8>> {
+        (0..n)
+            .map(|i| {
+                let b = (i % 256) as u8;
+                vec![0x8B, b, 0x00, 0xFF, b.wrapping_add(1), b.wrapping_mul(3)]
+            })
+            .collect()
+    }
+
+    /// Direct `ColumnData::Blob` scan path: bytes pushed through the builder come
+    /// back out of `ColumnData::get` byte-identical (no re-encode; `get` clones
+    /// the stored `Vec<u8>`).
+    #[test]
+    fn column_data_blob_scan_is_byte_identical() {
+        let blobs = sample_blobs(2000);
+        let mut builder = ColumnBuilder::new(ColumnTypeClass::Blob, blobs.len());
+        for b in &blobs {
+            builder.push(&SqlValue::Blob(b.clone())).unwrap();
+        }
+        let column = builder.build();
+        assert_eq!(column.len(), blobs.len());
+
+        for (i, expected) in blobs.iter().enumerate() {
+            assert!(!column.is_null(i), "row {i} must be non-null");
+            match column.get(i) {
+                SqlValue::Blob(got) => assert_eq!(
+                    &got, expected,
+                    "blob bytes at row {i} must survive the columnar scan byte-identically"
+                ),
+                other => panic!("row {i}: expected Blob, got {other:?}"),
+            }
+        }
+    }
+
+    /// A NULL blob round-trips as NULL, and a zero-length blob stays a
+    /// zero-length blob (not conflated with NULL).
+    #[test]
+    fn column_data_blob_null_and_empty_are_distinct() {
+        let mut builder = ColumnBuilder::new(ColumnTypeClass::Blob, 3);
+        builder.push(&SqlValue::Blob(vec![0x8B, 0x01])).unwrap();
+        builder.push(&SqlValue::Null).unwrap();
+        builder.push(&SqlValue::Blob(Vec::new())).unwrap();
+        let column = builder.build();
+
+        assert!(!column.is_null(0));
+        assert_eq!(column.get(0), SqlValue::Blob(vec![0x8B, 0x01]));
+        assert!(column.is_null(1), "explicit NULL blob must stay NULL");
+        assert!(!column.is_null(2), "empty blob is not NULL");
+        assert_eq!(column.get(2), SqlValue::Blob(Vec::new()));
+    }
+
+    /// Full `ColumnarTable::from_rows` -> `to_rows` round-trip over a
+    /// columnar-sized table (2000 rows) with a Blob column: every blob comes back
+    /// byte-identical. This exercises the same conversion path a large table
+    /// takes on the way into columnar storage.
+    #[test]
+    fn columnar_table_blob_column_roundtrip_2000_rows() {
+        let blobs = sample_blobs(2000);
+        let rows: Vec<Row> = blobs
+            .iter()
+            .enumerate()
+            .map(|(i, b)| Row::new(vec![SqlValue::Integer(i as i64), SqlValue::Blob(b.clone())]))
+            .collect();
+        let names = vec!["id".to_string(), "doc".to_string()];
+
+        let table = ColumnarTable::from_rows(&rows, &names).unwrap();
+
+        // The inferred column type must be Blob (not String/text).
+        match table.get_column("doc") {
+            Some(ColumnData::Blob { .. }) => {}
+            other => panic!("expected a Blob column for 'doc', got {other:?}"),
+        }
+
+        let out = table.to_rows();
+        assert_eq!(out.len(), rows.len());
+        for (i, (row, expected)) in out.iter().zip(blobs.iter()).enumerate() {
+            match row.get(1) {
+                Some(SqlValue::Blob(got)) => assert_eq!(
+                    got, expected,
+                    "blob bytes at row {i} must survive from_rows/to_rows byte-identically"
+                ),
+                other => panic!("row {i}: expected Blob, got {other:?}"),
+            }
+        }
+    }
+}
