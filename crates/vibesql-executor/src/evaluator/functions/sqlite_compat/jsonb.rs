@@ -210,8 +210,13 @@ fn decode_node(bytes: &[u8]) -> Option<(Value, usize)> {
         _ => unreachable!("size class is a 4-bit value"),
     };
 
-    let payload = bytes.get(header_len..header_len + payload_len)?;
-    let total = header_len + payload_len;
+    // `payload_len` comes straight from an attacker-controlled size field (up to
+    // `u64::MAX` for the 8-byte size class), so guard the addition: an overflow
+    // here would panic under debug/overflow-checks and only "accidentally" wrap
+    // to a rejected range in release. `checked_add` turns both cases into the
+    // clean malformed-JSONB error (`None`).
+    let total = header_len.checked_add(payload_len)?;
+    let payload = bytes.get(header_len..total)?;
 
     let node = match ty {
         JSONB_NULL => Value::Null,
@@ -495,6 +500,40 @@ mod tests {
         let mut bytes = enc("[1]");
         bytes.push(0xff);
         assert!(decode(&bytes).is_none());
+    }
+
+    /// Regression for the decoder-overflow defect: a crafted 8-byte size-class
+    /// (`0xf0`) header advertising `u64::MAX` bytes of payload must return the
+    /// clean malformed-JSONB error (`None`), NOT panic. Before the `checked_add`
+    /// guard, `header_len + payload_len` overflowed `usize`, which panics under
+    /// debug/`cargo test` (overflow-checks on) and only wrapped-to-`None` by
+    /// accident in release. This test must therefore pass in a DEBUG build.
+    #[test]
+    fn decode_rejects_size_class_15_overflow_without_panic() {
+        // `x'f0ffffffffffffffff'` — type nibble 0 (NULL) with size class 15 and
+        // an all-ones 8-byte length. Reproduces the exact reported SQL:
+        //   SELECT json_extract(x'f0ffffffffffffffff', '$')
+        assert!(decode(&hex("f0ffffffffffffffff")).is_none());
+    }
+
+    /// Nearby hostile inputs around the size-class boundaries: a 4-byte size
+    /// class (`0xe0`) advertising a huge length, and a truncated size prefix
+    /// where the header claims a wide size class but the length bytes are cut
+    /// off. All must decode to `None` rather than panicking or over-reading.
+    #[test]
+    fn decode_rejects_hostile_size_prefixes() {
+        // Size class 14 (`0xe0`), 4-byte length = 0xffffffff, no payload bytes.
+        assert!(decode(&hex("e0ffffffff")).is_none());
+        // Size class 15 with a *truncated* 8-byte length prefix (only 4 bytes).
+        assert!(decode(&hex("f0ffffffff")).is_none());
+        // Size class 14 with a truncated 4-byte length prefix (only 2 bytes).
+        assert!(decode(&hex("e0ffff")).is_none());
+        // Size class 13 (`0xd0`, 2-byte length) claiming 0xffff bytes, none present.
+        assert!(decode(&hex("d0ffff")).is_none());
+        // Size class 12 (`0xc0`, 1-byte length) claiming 0xff bytes, none present.
+        assert!(decode(&hex("c0ff")).is_none());
+        // A container (ARRAY, type 11) with a size-class-15 overflow length.
+        assert!(decode(&hex("fbffffffffffffffff")).is_none());
     }
 
     fn hex(s: &str) -> Vec<u8> {
