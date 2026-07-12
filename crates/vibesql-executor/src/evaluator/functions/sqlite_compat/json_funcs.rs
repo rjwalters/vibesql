@@ -851,17 +851,15 @@ pub(crate) fn eval_json_arrow(
         return Ok(SqlValue::Null);
     }
 
-    let json_str = match left {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+    let value = match left {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
         _ => {
             return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
         }
     };
 
     let path = arrow_operand_to_path(right)?;
-
-    let value = parse_json_relaxed(json_str)
-        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
 
     match navigate(&value, &path) {
         Some(node) => {
@@ -960,15 +958,13 @@ pub(crate) fn json_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
         return Ok(SqlValue::Null);
     }
 
-    let json_str = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+    let value = match &args[0] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
         _ => {
             return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
         }
     };
-
-    let value = parse_json_relaxed(json_str)
-        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
 
     let paths = &args[1..];
 
@@ -1011,6 +1007,67 @@ pub(crate) fn json_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
     }
 }
 
+/// jsonb_extract(X, P, ...) - like json_extract but returns JSONB blobs for
+/// results that json_extract would render as JSON text.
+///
+/// A single path selecting a *scalar* returns the SQL value (same as
+/// json_extract); a single path selecting a *container* (array/object) returns a
+/// JSONB blob; the multi-path form returns a JSONB-encoded array. NULL document /
+/// NULL path / missing path propagate NULL exactly like json_extract.
+pub(crate) fn jsonb_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.is_empty() {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: "jsonb_extract".to_string(),
+        });
+    }
+
+    if matches!(args[0], SqlValue::Null) || args.len() == 1 {
+        return Ok(SqlValue::Null);
+    }
+
+    let value = match &args[0] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
+        _ => {
+            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
+        }
+    };
+
+    let paths = &args[1..];
+    let mut resolved: Vec<Vec<PathSegment>> = Vec::with_capacity(paths.len());
+    for p in paths {
+        match p {
+            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                resolved.push(
+                    parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?,
+                );
+            }
+            other => {
+                let text = sql_value_scalar_text(other);
+                return Err(ExecutorError::SqliteCompatError(format!("bad JSON path: '{}'", text)));
+            }
+        }
+    }
+
+    if resolved.len() == 1 {
+        match navigate(&value, &resolved[0]) {
+            // Containers become JSONB blobs; scalars stay SQL values.
+            Some(node @ (serde_json::Value::Array(_) | serde_json::Value::Object(_))) => {
+                Ok(SqlValue::Blob(super::jsonb::encode(node)))
+            }
+            Some(node) => Ok(json_node_to_sql_value(node)),
+            None => Ok(SqlValue::Null),
+        }
+    } else {
+        let elems: Vec<serde_json::Value> = resolved
+            .iter()
+            .map(|segs| navigate(&value, segs).cloned().unwrap_or(serde_json::Value::Null))
+            .collect();
+        Ok(SqlValue::Blob(super::jsonb::encode(&serde_json::Value::Array(elems))))
+    }
+}
+
 /// json_type(X) / json_type(X, P) - the SQLite type name of a JSON value.
 ///
 /// One argument reports the root type; two arguments evaluate the path first.
@@ -1023,16 +1080,14 @@ pub(crate) fn json_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         });
     }
 
-    let json_str = match &args[0] {
+    let value = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
         _ => {
             return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
         }
     };
-
-    let value = parse_json_relaxed(json_str)
-        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
 
     let node = if args.len() == 2 {
         match &args[1] {
@@ -1175,11 +1230,41 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 Err(_) => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
             }
         }
+        // A JSONB blob argument (from jsonb()/jsonb_*()) is decoded and rendered
+        // as minified JSON text, matching SQLite's `json(<jsonb>)`.
+        SqlValue::Blob(bytes) => {
+            let value = jsonb_blob_to_node(bytes)?;
+            Ok(SqlValue::Varchar(serde_json::to_string(&value).unwrap_or_default().into()))
+        }
         // For non-string types, SQLite throws an error
         _ => Err(ExecutorError::SqliteCompatError(
             "JSON functions require string arguments".to_string(),
         )),
     }
+}
+
+/// jsonb(X) - validate/parse X and return SQLite's binary JSONB representation.
+///
+/// Text (canonical or JSON5-relaxed) is parsed and re-encoded as a JSONB blob;
+/// an existing JSONB blob is decoded and re-encoded (canonicalized). A NULL
+/// argument propagates NULL. This is the BLOB-producing counterpart of `json()`.
+pub(crate) fn jsonb(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 1 {
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: "jsonb".to_string() });
+    }
+
+    let node = match &args[0] {
+        SqlValue::Null => return Ok(SqlValue::Null),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
+        _ => {
+            return Err(ExecutorError::SqliteCompatError(
+                "JSON functions require string arguments".to_string(),
+            ));
+        }
+    };
+
+    Ok(SqlValue::Blob(super::jsonb::encode(&node)))
 }
 
 // ===========================================================================
@@ -1256,10 +1341,18 @@ fn sql_value_to_json_node(
                 serde_json::Value::String(s.as_str().to_string())
             }
         }
-        SqlValue::Blob(_) => {
-            return Err(ExecutorError::SqliteCompatError(
-                "JSON cannot hold BLOB values".to_string(),
-            ));
+        SqlValue::Blob(bytes) => {
+            // A JSONB blob (produced by jsonb()/jsonb_*()) embeds as its decoded
+            // JSON sub-document, mirroring SQLite treating a JSONB argument as
+            // JSON. Non-JSONB blobs remain an error ("JSON cannot hold BLOB").
+            match super::jsonb::decode(bytes) {
+                Some(node) => node,
+                None => {
+                    return Err(ExecutorError::SqliteCompatError(
+                        "JSON cannot hold BLOB values".to_string(),
+                    ));
+                }
+            }
         }
         other => serde_json::Value::String(sql_value_scalar_text(other)),
     })
@@ -1284,6 +1377,26 @@ fn json_number_node(f: f64) -> serde_json::Value {
     }
 }
 
+/// Parse a read-only JSON *document* argument that may be either JSON text or a
+/// JSONB blob (produced by `jsonb()`/`jsonb_*()`), returning the parsed node.
+///
+/// Used by the read-only accessors (`json`, `json_extract`, `json_type`,
+/// `json_array_length`, `->`/`->>`) so a JSONB blob flows through them exactly
+/// like the equivalent JSON text. Text is parsed with the relaxed/JSON5 grammar
+/// ([`parse_json_relaxed`]); a JSONB blob is decoded via [`super::jsonb::decode`].
+/// Any malformed input yields the SQLite-compatible `malformed JSON` error.
+fn json_text_or_blob_to_node(json_str: &str) -> Result<serde_json::Value, ExecutorError> {
+    parse_json_relaxed(json_str)
+        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))
+}
+
+/// Decode a JSONB blob document into its JSON node, mapping failure to the
+/// SQLite-compatible `malformed JSON` error.
+fn jsonb_blob_to_node(bytes: &[u8]) -> Result<serde_json::Value, ExecutorError> {
+    super::jsonb::decode(bytes)
+        .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))
+}
+
 /// Parse the JSON document argument shared by the mutation functions. Returns
 /// `Ok(None)` when the argument is SQL NULL (functions propagate NULL), or an
 /// error on malformed JSON / non-text input.
@@ -1304,6 +1417,12 @@ fn parse_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, Exe
         }
         SqlValue::Float(f) => Ok(Some(json_number_node(*f as f64))),
         SqlValue::Boolean(b) => Ok(Some(serde_json::Value::Bool(*b))),
+        // A JSONB blob (produced by jsonb()/jsonb_*()) decodes back to its JSON
+        // document so mutation functions accept a JSONB document argument.
+        SqlValue::Blob(bytes) => match super::jsonb::decode(bytes) {
+            Some(node) => Ok(Some(node)),
+            None => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
+        },
         _ => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
     }
 }
@@ -1359,14 +1478,28 @@ fn subtype_at(subtypes: &[bool], idx: usize) -> bool {
     subtypes.get(idx).copied().unwrap_or(false)
 }
 
-/// json_array(V1, V2, ...) - build a JSON array from the argument values.
-pub(crate) fn json_array(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
+/// Build the JSON array node for `json_array` / `jsonb_array`.
+fn json_array_node(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<serde_json::Value, ExecutorError> {
     let mut elems = Vec::with_capacity(args.len());
     for (i, a) in args.iter().enumerate() {
         elems.push(sql_value_to_json_node(a, subtype_at(subtypes, i))?);
     }
-    let arr = serde_json::Value::Array(elems);
+    Ok(serde_json::Value::Array(elems))
+}
+
+/// json_array(V1, V2, ...) - build a JSON array from the argument values.
+pub(crate) fn json_array(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
+    let arr = json_array_node(args, subtypes)?;
     Ok(SqlValue::Varchar(serde_json::to_string(&arr).unwrap_or_default().into()))
+}
+
+/// jsonb_array(V1, V2, ...) - like json_array but returns a JSONB blob.
+pub(crate) fn jsonb_array(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
+    let arr = json_array_node(args, subtypes)?;
+    Ok(SqlValue::Blob(super::jsonb::encode(&arr)))
 }
 
 /// json_object(L1, V1, L2, V2, ...) - build a JSON object.
@@ -1374,6 +1507,24 @@ pub(crate) fn json_array(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValu
 /// Requires an even number of arguments; labels must be TEXT. Duplicate labels
 /// keep the last value (matching SQLite's object builder).
 pub(crate) fn json_object(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
+    let obj = json_object_node(args, subtypes)?;
+    Ok(SqlValue::Varchar(serde_json::to_string(&obj).unwrap_or_default().into()))
+}
+
+/// jsonb_object(L1, V1, ...) - like json_object but returns a JSONB blob.
+pub(crate) fn jsonb_object(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    let obj = json_object_node(args, subtypes)?;
+    Ok(SqlValue::Blob(super::jsonb::encode(&obj)))
+}
+
+/// Build the JSON object node for `json_object` / `jsonb_object`.
+fn json_object_node(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<serde_json::Value, ExecutorError> {
     if !args.len().is_multiple_of(2) {
         return Err(ExecutorError::SqliteCompatError(
             "json_object() requires an even number of arguments".to_string(),
@@ -1397,8 +1548,7 @@ pub(crate) fn json_object(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlVal
         i += 2;
     }
 
-    let obj = serde_json::Value::Object(map);
-    Ok(SqlValue::Varchar(serde_json::to_string(&obj).unwrap_or_default().into()))
+    Ok(serde_json::Value::Object(map))
 }
 
 /// json_array_length(X) / json_array_length(X, P) - number of elements in the
@@ -1411,16 +1561,14 @@ pub(crate) fn json_array_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorE
         });
     }
 
-    let json_str = match &args[0] {
+    let value = match &args[0] {
         SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
         _ => {
             return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
         }
     };
-
-    let value = parse_json_relaxed(json_str)
-        .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
 
     let node = if args.len() == 2 {
         match &args[1] {
@@ -1597,13 +1745,40 @@ fn json_mutate(
     mode: EditMode,
     fn_name: &str,
 ) -> Result<SqlValue, ExecutorError> {
+    match json_mutate_node(args, subtypes, mode, fn_name)? {
+        None => Ok(SqlValue::Null),
+        Some(doc) => Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into())),
+    }
+}
+
+/// JSONB-returning counterpart of [`json_mutate`].
+fn jsonb_mutate(
+    args: &[SqlValue],
+    subtypes: &[bool],
+    mode: EditMode,
+    fn_name: &str,
+) -> Result<SqlValue, ExecutorError> {
+    match json_mutate_node(args, subtypes, mode, fn_name)? {
+        None => Ok(SqlValue::Null),
+        Some(doc) => Ok(SqlValue::Blob(super::jsonb::encode(&doc))),
+    }
+}
+
+/// Shared driver producing the mutated document node (or `None` for a NULL
+/// document argument). Both the text and JSONB entry points serialize this.
+fn json_mutate_node(
+    args: &[SqlValue],
+    subtypes: &[bool],
+    mode: EditMode,
+    fn_name: &str,
+) -> Result<Option<serde_json::Value>, ExecutorError> {
     // Valid arity is odd: one document argument plus (path, value) pairs.
     if args.is_empty() || args.len().is_multiple_of(2) {
         return Err(ExecutorError::WrongNumberOfArguments { function_name: fn_name.to_string() });
     }
 
     let mut doc = match parse_json_doc_arg(&args[0])? {
-        None => return Ok(SqlValue::Null),
+        None => return Ok(None),
         Some(v) => v,
     };
 
@@ -1632,12 +1807,20 @@ fn json_mutate(
         i += 2;
     }
 
-    Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into()))
+    Ok(Some(doc))
 }
 
 /// json_insert(X, P, V, ...) - insert V at P only if P does not already exist.
 pub(crate) fn json_insert(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     json_mutate(args, subtypes, EditMode::Insert, "json_insert")
+}
+
+/// jsonb_insert(X, P, V, ...) - like json_insert but returns a JSONB blob.
+pub(crate) fn jsonb_insert(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    jsonb_mutate(args, subtypes, EditMode::Insert, "jsonb_insert")
 }
 
 /// json_replace(X, P, V, ...) - replace the value at P only if P exists.
@@ -1648,9 +1831,22 @@ pub(crate) fn json_replace(
     json_mutate(args, subtypes, EditMode::Replace, "json_replace")
 }
 
+/// jsonb_replace(X, P, V, ...) - like json_replace but returns a JSONB blob.
+pub(crate) fn jsonb_replace(
+    args: &[SqlValue],
+    subtypes: &[bool],
+) -> Result<SqlValue, ExecutorError> {
+    jsonb_mutate(args, subtypes, EditMode::Replace, "jsonb_replace")
+}
+
 /// json_set(X, P, V, ...) - insert or replace the value at P (upsert).
 pub(crate) fn json_set(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
     json_mutate(args, subtypes, EditMode::Set, "json_set")
+}
+
+/// jsonb_set(X, P, V, ...) - like json_set but returns a JSONB blob.
+pub(crate) fn jsonb_set(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue, ExecutorError> {
+    jsonb_mutate(args, subtypes, EditMode::Set, "jsonb_set")
 }
 
 /// json_remove(X, P, ...) - remove the element(s) at the given path(s).
@@ -1659,6 +1855,23 @@ pub(crate) fn json_set(args: &[SqlValue], subtypes: &[bool]) -> Result<SqlValue,
 /// is a no-op. A bare `$` (with no further arguments) removes the whole document
 /// -- matching SQLite, `json_remove(X)` returns X minified.
 pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match json_remove_node(args)? {
+        None => Ok(SqlValue::Null),
+        Some(doc) => Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into())),
+    }
+}
+
+/// jsonb_remove(X, P, ...) - like json_remove but returns a JSONB blob.
+pub(crate) fn jsonb_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match json_remove_node(args)? {
+        None => Ok(SqlValue::Null),
+        Some(doc) => Ok(SqlValue::Blob(super::jsonb::encode(&doc))),
+    }
+}
+
+/// Shared driver producing the pruned document node (or `None` for a NULL
+/// result). Both the text and JSONB entry points serialize this.
+fn json_remove_node(args: &[SqlValue]) -> Result<Option<serde_json::Value>, ExecutorError> {
     if args.is_empty() {
         return Err(ExecutorError::WrongNumberOfArguments {
             function_name: "json_remove".to_string(),
@@ -1666,13 +1879,13 @@ pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
     }
 
     let mut doc = match parse_json_doc_arg(&args[0])? {
-        None => return Ok(SqlValue::Null),
+        None => return Ok(None),
         Some(v) => v,
     };
 
     for p in &args[1..] {
         match p {
-            SqlValue::Null => return Ok(SqlValue::Null),
+            SqlValue::Null => return Ok(None),
             SqlValue::Varchar(s) | SqlValue::Character(s) => {
                 let segs =
                     parse_sqlite_json_path(s.as_str()).map_err(ExecutorError::SqliteCompatError)?;
@@ -1681,7 +1894,7 @@ pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
                 // (Note: `json_remove(X)` with *no* path argument returns X
                 // unchanged, handled by the loop simply not running.)
                 if segs.is_empty() {
-                    return Ok(SqlValue::Null);
+                    return Ok(None);
                 }
                 remove_path(&mut doc, &segs);
             }
@@ -1694,7 +1907,7 @@ pub(crate) fn json_remove(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> 
         }
     }
 
-    Ok(SqlValue::Varchar(serde_json::to_string(&doc).unwrap_or_default().into()))
+    Ok(Some(doc))
 }
 
 /// Remove the node at `segments` from `root` if present.
@@ -1759,6 +1972,25 @@ fn remove_path(root: &mut serde_json::Value, segments: &[PathSegment]) {
 /// NULL for either argument yields NULL. Non-object patches replace the target
 /// wholesale; object patches merge recursively with `null` members deleting.
 pub(crate) fn json_patch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match json_patch_node(args)? {
+        None => Ok(SqlValue::Null),
+        Some(result) => {
+            Ok(SqlValue::Varchar(serde_json::to_string(&result).unwrap_or_default().into()))
+        }
+    }
+}
+
+/// jsonb_patch(X, Y) - like json_patch but returns a JSONB blob.
+pub(crate) fn jsonb_patch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match json_patch_node(args)? {
+        None => Ok(SqlValue::Null),
+        Some(result) => Ok(SqlValue::Blob(super::jsonb::encode(&result))),
+    }
+}
+
+/// Shared driver producing the merged document node (or `None` for a NULL
+/// result). Both the text and JSONB entry points serialize this.
+fn json_patch_node(args: &[SqlValue]) -> Result<Option<serde_json::Value>, ExecutorError> {
     if args.len() != 2 {
         return Err(ExecutorError::WrongNumberOfArguments {
             function_name: "json_patch".to_string(),
@@ -1766,16 +1998,15 @@ pub(crate) fn json_patch(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     }
 
     let target = match parse_json_doc_arg(&args[0])? {
-        None => return Ok(SqlValue::Null),
+        None => return Ok(None),
         Some(v) => v,
     };
     let patch = match parse_json_doc_arg(&args[1])? {
-        None => return Ok(SqlValue::Null),
+        None => return Ok(None),
         Some(v) => v,
     };
 
-    let result = merge_patch(target, patch);
-    Ok(SqlValue::Varchar(serde_json::to_string(&result).unwrap_or_default().into()))
+    Ok(Some(merge_patch(target, patch)))
 }
 
 /// RFC-7396 MergePatch algorithm.

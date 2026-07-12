@@ -1632,6 +1632,16 @@ fn validate_function_exists(name: &str, database: &Database) -> Result<(), Execu
         "JSON_GROUP_OBJECT",
         "JSON_EACH",
         "JSON_TREE",
+        // JSONB functions (binary JSON representation)
+        "JSONB",
+        "JSONB_ARRAY",
+        "JSONB_OBJECT",
+        "JSONB_EXTRACT",
+        "JSONB_PATCH",
+        "JSONB_REMOVE",
+        "JSONB_REPLACE",
+        "JSONB_SET",
+        "JSONB_INSERT",
         // Window functions (also valid as regular aggregates in some contexts)
         "ROW_NUMBER",
         "RANK",

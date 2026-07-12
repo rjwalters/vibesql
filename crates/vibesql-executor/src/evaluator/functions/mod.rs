@@ -178,31 +178,40 @@ pub(super) fn eval_scalar_function(
 
         // JSON functions (SQLite JSON1 extension)
         //
-        // JSONB accept-and-convert: VibeSQL does not implement SQLite's binary
-        // JSONB format. Every `jsonb_*` name is a text-mode alias of its `json_*`
-        // counterpart, producing JSON-subtype-tagged TEXT rather than a BLOB (see
-        // the Phase 4 decision on #5786). The observable text output matches
-        // SQLite; the only divergence is `typeof()` (text vs blob), which the
-        // covered conformance tests never assert.
-        "JSON" | "JSONB" => sqlite_compat::json(args),
+        // The `json_*` names produce JSON *text*; the `jsonb`/`jsonb_*` names
+        // produce SQLite's binary JSONB representation as a `SqlValue::Blob`
+        // (Stage 1 of #6008). The text-mode consumers accept a JSONB blob
+        // argument (decoding it back to a JSON node) so nested `jsonb(...)`
+        // arguments keep working.
+        "JSON" => sqlite_compat::json(args),
+        "JSONB" => sqlite_compat::jsonb(args),
         "JSON_VALID" => sqlite_compat::json_valid(args),
-        "JSON_EXTRACT" | "JSONB_EXTRACT" => sqlite_compat::json_extract(args),
+        "JSON_EXTRACT" => sqlite_compat::json_extract(args),
+        "JSONB_EXTRACT" => sqlite_compat::jsonb_extract(args),
         "JSON_TYPE" => sqlite_compat::json_type(args),
         "JSON_QUOTE" => sqlite_compat::json_quote(args),
         "JSON_ARRAY_LENGTH" => sqlite_compat::json_array_length(args),
-        "JSON_REMOVE" | "JSONB_REMOVE" => sqlite_compat::json_remove(args),
-        "JSON_PATCH" | "JSONB_PATCH" => sqlite_compat::json_patch(args),
+        "JSON_REMOVE" => sqlite_compat::json_remove(args),
+        "JSONB_REMOVE" => sqlite_compat::jsonb_remove(args),
+        "JSON_PATCH" => sqlite_compat::json_patch(args),
+        "JSONB_PATCH" => sqlite_compat::jsonb_patch(args),
         "JSON_ERROR_POSITION" => sqlite_compat::json_error_position(args),
         // The subtype-aware construction/mutation functions (JSON_ARRAY,
-        // JSON_OBJECT, JSON_INSERT, JSON_REPLACE, JSON_SET) are dispatched
-        // earlier in special.rs, where per-argument JSON-subtype flags are
-        // available from the AST. Reaching them here (no subtype info) still
-        // produces correct output for the common no-embedding case.
-        "JSON_ARRAY" | "JSONB_ARRAY" => sqlite_compat::json_array(args, &[]),
-        "JSON_OBJECT" | "JSONB_OBJECT" => sqlite_compat::json_object(args, &[]),
-        "JSON_INSERT" | "JSONB_INSERT" => sqlite_compat::json_insert(args, &[]),
-        "JSON_REPLACE" | "JSONB_REPLACE" => sqlite_compat::json_replace(args, &[]),
-        "JSON_SET" | "JSONB_SET" => sqlite_compat::json_set(args, &[]),
+        // JSON_OBJECT, JSON_INSERT, JSON_REPLACE, JSON_SET and their JSONB
+        // variants) are dispatched earlier in special.rs / arena.rs, where
+        // per-argument JSON-subtype flags are available from the AST. Reaching
+        // them here (no subtype info) still produces correct output for the
+        // common no-embedding case; the JSONB variants emit a Blob.
+        "JSON_ARRAY" => sqlite_compat::json_array(args, &[]),
+        "JSONB_ARRAY" => sqlite_compat::json_funcs::jsonb_array(args, &[]),
+        "JSON_OBJECT" => sqlite_compat::json_object(args, &[]),
+        "JSONB_OBJECT" => sqlite_compat::json_funcs::jsonb_object(args, &[]),
+        "JSON_INSERT" => sqlite_compat::json_insert(args, &[]),
+        "JSONB_INSERT" => sqlite_compat::json_funcs::jsonb_insert(args, &[]),
+        "JSON_REPLACE" => sqlite_compat::json_replace(args, &[]),
+        "JSONB_REPLACE" => sqlite_compat::json_funcs::jsonb_replace(args, &[]),
+        "JSON_SET" => sqlite_compat::json_set(args, &[]),
+        "JSONB_SET" => sqlite_compat::json_funcs::jsonb_set(args, &[]),
 
         // Type conversion functions
         "TO_NUMBER" => conversion::to_number(args),
