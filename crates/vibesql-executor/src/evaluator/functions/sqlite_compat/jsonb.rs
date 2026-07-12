@@ -1,13 +1,18 @@
-//! SQLite JSONB binary encoding (and its decode inverse).
+//! SQLite JSONB binary encoding and decoding.
 //!
 //! SQLite's `jsonb()` / `jsonb_*()` functions return the document in SQLite's
 //! on-disk *JSONB* binary format rather than as JSON text. This module encodes a
 //! parsed JSON node ([`serde_json::Value`], the same node type `json_funcs.rs`
-//! operates on) into a byte-for-byte compatible JSONB blob, and provides the
-//! inverse decode so a JSONB blob produced here can be fed back into the
+//! operates on) into a byte-for-byte compatible JSONB blob (bit-compatible with
+//! SQLite 3.51's on-disk format), and provides the inverse decode so JSONB
+//! blobs — whether produced here or supplied externally (e.g. read back from a
+//! column, or passed as a function argument) — feed cleanly into the
 //! text-mode JSON functions (`json()`, `json_extract()`, the mutation functions,
-//! …) without a regression while the full external JSONB reader is still being
-//! built (Stage 2, #6032).
+//! `json_each()`/`json_tree()`, …). JSONB round-trips byte-identically through
+//! WAL/checkpoint persistence and columnar storage, and `subtype()` on
+//! BLOB-emitting `jsonb*` functions matches SQLite (no text-JSON subtype).
+//! This closes out the JSONB binary-format work tracked by the parent decision
+//! (#6008) across Stages 1-4 (#6035, #6036, #6037).
 //!
 //! ## Wire format (confirmed against `sqlite/src/json.c` and json102 ground truth)
 //!
