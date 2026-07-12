@@ -185,6 +185,13 @@ pub(crate) fn execute_table_function(
 }
 
 /// Build the derived-table schema (8 fixed columns, optionally renamed).
+///
+/// Known follow-ups surfaced once json101.test's tail runs (#6019), tracked
+/// separately and intentionally NOT addressed here:
+/// - The hidden `json` input column of json_each/json_tree is not exposed, so
+///   `jx.json` fails (json101-5.5/5.6).
+/// - `id`/`parent` numbering diverges from SQLite (json101-15.100..130).
+/// See the issue's follow-up list for details.
 pub(crate) fn build_schema(
     name: &str,
     alias: Option<&String>,
@@ -220,7 +227,10 @@ pub(crate) fn build_schema(
     // Table name defaults to the function name so `json_each.value` resolves
     // when no explicit alias is given (SQLite behavior).
     let table_name = alias.map(|a| a.to_string()).unwrap_or_else(|| name.to_string());
-    Ok(CombinedSchema::from_derived_table(table_name, column_names, column_types))
+    // Use the TVF constructor (not `from_derived_table`) so the implicit `rowid`
+    // pseudo-column resolves to NULL instead of erroring like a FROM-subquery
+    // (#6019).
+    Ok(CombinedSchema::from_table_function(table_name, column_names, column_types))
 }
 
 /// Coerce a non-NULL SQL value into the JSON *text* it represents for TVF input

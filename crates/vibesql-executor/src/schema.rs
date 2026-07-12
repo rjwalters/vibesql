@@ -248,6 +248,57 @@ impl CombinedSchema {
         }
     }
 
+    /// Create a combined schema for a table-valued function FROM item
+    /// (`json_each(...)`, `json_tree(...)`).
+    ///
+    /// Unlike [`Self::from_derived_table`], the synthesized schema is **not**
+    /// marked as a view. In SQLite these TVFs expose an implicit `rowid`
+    /// pseudo-column (`SELECT jx.rowid FROM json_tree(...) AS jx` succeeds),
+    /// whereas a FROM-subquery has no rowid and must error on `rowid` (#5492).
+    /// Because a TVF row carries no tracked row-id, the pseudo-column resolves to
+    /// NULL rather than erroring — sufficient for json101-5.3..5.8, whose WHERE
+    /// clauses filter every row out so the projected `rowid` is never
+    /// materialized (#6019).
+    pub fn from_table_function(
+        alias: String,
+        column_names: Vec<String>,
+        column_types: Vec<vibesql_types::DataType>,
+    ) -> Self {
+        let total_columns = column_names.len();
+
+        let columns: Vec<vibesql_catalog::ColumnSchema> = column_names
+            .into_iter()
+            .zip(column_types)
+            .map(|(name, data_type)| vibesql_catalog::ColumnSchema {
+                name,
+                data_type,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: false,
+            })
+            .collect();
+
+        // NOTE: deliberately not `set_is_view(true)` — see doc comment above.
+        let schema = vibesql_catalog::TableSchema::new(alias.clone(), columns);
+        let mut table_schemas = HashMap::new();
+        let table_id = TableIdentifier::unquoted(&alias);
+        table_schemas.insert(table_id, (0, schema));
+        CombinedSchema {
+            table_schemas,
+            total_columns,
+            hidden_columns: HashSet::new(),
+            outer_schema: None,
+            duplicate_aliases: HashSet::new(),
+            joined_columns: HashSet::new(),
+            using_coalesce_indices: HashMap::new(),
+            column_replacement_map: HashMap::new(),
+            alias_tables: HashSet::new(),
+            shadowed_tables: HashMap::new(),
+        }
+    }
+
     /// Add an alias for a parenthesized join expression.
     ///
     /// This is used for expressions like `(t1 JOIN t2) AS j1` where `j1` becomes an
@@ -1413,6 +1464,30 @@ mod tests {
         assert!(schema.get_column_index(Some("SUBQ"), "col1").is_some());
         assert!(schema.get_column_index(Some("subq"), "col1").is_some());
         assert!(schema.get_column_index(Some("Subq"), "col1").is_some());
+    }
+
+    /// #6019: a table-valued-function FROM item is NOT marked as a view, so its
+    /// implicit `rowid` pseudo-column resolves (to NULL, no tracked row-id)
+    /// rather than erroring like a FROM-subquery derived table.
+    #[test]
+    fn test_from_table_function_is_not_view() {
+        let tvf = CombinedSchema::from_table_function(
+            "jx".to_string(),
+            vec!["key".to_string(), "value".to_string()],
+            vec![DataType::Null, DataType::Null],
+        );
+        let (_, ts) = tvf.table_schemas.get(&TableIdentifier::unquoted("jx")).unwrap();
+        assert!(!ts.is_view, "TVF schema must not be a view (rowid must not error)");
+        assert!(!ts.without_rowid, "TVF schema must not be WITHOUT ROWID");
+
+        // Contrast: a FROM-subquery derived table IS a view (#5492).
+        let derived = CombinedSchema::from_derived_table(
+            "subq".to_string(),
+            vec!["x".to_string()],
+            vec![DataType::Integer],
+        );
+        let (_, ds) = derived.table_schemas.get(&TableIdentifier::unquoted("subq")).unwrap();
+        assert!(ds.is_view, "derived-table schema must remain a view");
     }
 
     // ==========================================================================
