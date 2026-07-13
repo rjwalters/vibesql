@@ -114,6 +114,7 @@ fn collect_window_functions_from_expression(
             // Wildcard doesn't contain window functions
         }
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::ColumnRef(_)
         | Expression::PseudoVariable { .. }
         | Expression::SessionVariable { .. } => {

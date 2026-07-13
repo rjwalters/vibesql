@@ -379,6 +379,7 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
 
         // Expressions that don't reference columns
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)

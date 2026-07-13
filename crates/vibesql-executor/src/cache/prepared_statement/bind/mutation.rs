@@ -256,6 +256,7 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
 
         // Leaf nodes: nothing to do
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate
@@ -652,6 +653,7 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
 
         // Leaf nodes: nothing to do
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate

@@ -317,13 +317,17 @@ pub fn execute_update_from_join(
                     projected_offset += n;
                 }
                 AssignmentProjPlan::SubqueryOnce { output_arity, corr_refs, subquery } => {
-                    // Substitute each projected correlation input as a literal.
-                    let mut literal_map: HashMap<CorrKey, SqlValue> =
+                    // Substitute each projected correlation input as a literal,
+                    // carrying the outer column's declared collation (issue #6105)
+                    // so collation-sensitive comparisons inside the now-uncorrelated
+                    // subquery still use that collation rather than reverting to
+                    // BINARY.
+                    let mut literal_map: HashMap<CorrKey, (SqlValue, Option<String>)> =
                         HashMap::with_capacity(corr_refs.len());
                     for (k, corr) in corr_refs.iter().enumerate() {
                         let value =
                             row.values.get(projected_offset + k).cloned().unwrap_or(SqlValue::Null);
-                        literal_map.insert(corr.key.clone(), value);
+                        literal_map.insert(corr.key.clone(), (value, corr.collation.clone()));
                     }
                     projected_offset += corr_refs.len();
 
@@ -469,6 +473,13 @@ struct CorrKey {
 struct CorrRef {
     key: CorrKey,
     expr: Expression,
+    /// The outer column's *declared* collating sequence, if any (issue #6105).
+    /// When the substituted value replaces this ref as a literal, this collation
+    /// is carried on the resulting node so collation-sensitive comparisons inside
+    /// the (now uncorrelated) subquery still use the column's collation rather
+    /// than silently reverting to BINARY. `None` (and an explicit `"BINARY"`)
+    /// means default BINARY — a plain literal is emitted.
+    collation: Option<String>,
 }
 
 /// How an UPDATE…FROM assignment maps its projected synthetic columns to the
@@ -492,6 +503,32 @@ impl AssignmentProjPlan {
             AssignmentProjPlan::DirectColumns(n) => *n,
             AssignmentProjPlan::SubqueryOnce { output_arity, .. } => *output_arity,
         }
+    }
+}
+
+/// Resolve the *declared* collating sequence of an outer column reference
+/// (issue #6105) so it can be carried on the substituted literal.
+///
+/// - Qualified (`t.c`): looks the column up in table `t`'s schema.
+/// - Unqualified (`c`): finds the first outer table declaring a column `c`
+///   (mirroring the resolution used to classify the ref as outer above).
+///
+/// Returns the column's declared collation (`None` = default BINARY). A collation
+/// that names BINARY is treated as BINARY by the caller (a plain literal).
+fn outer_column_collation(
+    table: &Option<String>,
+    column: &str,
+    outer_tables: &HashMap<String, TableSchema>,
+) -> Option<String> {
+    match table {
+        Some(t) => outer_tables
+            .get(&t.to_lowercase())
+            .and_then(|schema| schema.get_column(column))
+            .and_then(|col| col.collation.clone()),
+        None => outer_tables
+            .values()
+            .find_map(|schema| schema.get_column(column))
+            .and_then(|col| col.collation.clone()),
     }
 }
 
@@ -684,7 +721,8 @@ fn collect_outer_refs_in_expr(
             if is_outer {
                 let key = CorrKey { table: table.clone(), column: column.clone() };
                 if seen.insert(key.clone()) {
-                    refs.push(CorrRef { key, expr: expr.clone() });
+                    let collation = outer_column_collation(&table, &column, outer_tables);
+                    refs.push(CorrRef { key, expr: expr.clone(), collation });
                 }
             }
         }
@@ -978,7 +1016,7 @@ fn window_function_parts(
 /// inside an inner subquery of the tuple RHS is also substituted.
 fn substitute_column_literals(
     expr: &Expression,
-    literals: &HashMap<CorrKey, SqlValue>,
+    literals: &HashMap<CorrKey, (SqlValue, Option<String>)>,
 ) -> Expression {
     use vibesql_ast::CaseWhen;
     match expr {
@@ -988,7 +1026,24 @@ fn substitute_column_literals(
                 column: id.column_canonical().to_string(),
             };
             match literals.get(&key) {
-                Some(value) => Expression::Literal(value.clone()),
+                // Carry the outer column's collation onto the substituted value
+                // (issue #6105). The result is a `CollatedLiteral` — an
+                // *implicit* collating operand behaving exactly like the original
+                // column reference under datatype3 §7.1 rule 2 (left-operand
+                // precedence), NOT an explicit `COLLATE` (rule 1).
+                //
+                // This holds even for a BINARY column (no declared collation):
+                // a `CollatedLiteral{collation:"BINARY"}` is still a *collating
+                // operand*, so when it is the left operand its default BINARY
+                // blocks the right operand's implicit collation — exactly as a
+                // real column would. Emitting a bare `Expression::Literal` here
+                // (which is NOT a collating operand) would wrongly let the right
+                // operand's collation win, e.g. `outer_binary_col = inner_nocase`
+                // would compare NOCASE instead of SQLite's BINARY.
+                Some((value, declared)) => Expression::CollatedLiteral {
+                    value: value.clone(),
+                    collation: declared.clone().unwrap_or_else(|| "BINARY".to_string()),
+                },
                 None => expr.clone(),
             }
         }
@@ -1101,7 +1156,7 @@ fn substitute_column_literals(
 /// Substitute correlation literals inside a window function's args / FILTER.
 fn substitute_column_literals_in_window_spec(
     spec: &vibesql_ast::WindowFunctionSpec,
-    literals: &HashMap<CorrKey, SqlValue>,
+    literals: &HashMap<CorrKey, (SqlValue, Option<String>)>,
 ) -> vibesql_ast::WindowFunctionSpec {
     use vibesql_ast::WindowFunctionSpec;
     match spec {
@@ -1126,7 +1181,7 @@ fn substitute_column_literals_in_window_spec(
 /// as-is (they do not carry correlation refs for the shapes this path handles).
 fn substitute_column_literals_in_over(
     over: &vibesql_ast::WindowSpec,
-    literals: &HashMap<CorrKey, SqlValue>,
+    literals: &HashMap<CorrKey, (SqlValue, Option<String>)>,
 ) -> vibesql_ast::WindowSpec {
     let mut cloned = over.clone();
     cloned.partition_by = over
@@ -1151,7 +1206,7 @@ fn substitute_column_literals_in_over(
 /// path handles.
 fn substitute_column_literals_in_select(
     select: &SelectStmt,
-    literals: &HashMap<CorrKey, SqlValue>,
+    literals: &HashMap<CorrKey, (SqlValue, Option<String>)>,
 ) -> SelectStmt {
     let mut cloned = select.clone();
     cloned.select_list = select
@@ -1370,6 +1425,7 @@ fn substitute_pseudo_vars(
             Expression::Literal(value)
         }
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)

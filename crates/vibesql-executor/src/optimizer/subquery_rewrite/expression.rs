@@ -471,6 +471,7 @@ pub(super) fn rewrite_expression_with_context(
 
         // Literals, column refs, and special expressions don't need rewriting
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate

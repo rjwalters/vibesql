@@ -279,6 +279,11 @@ impl ToSql for Expression {
     fn to_sql(&self) -> String {
         match self {
             Expression::Literal(value) => value.to_sql(),
+            // Internal-only node (see Expression::CollatedLiteral). Its collation
+            // is implicit, but for display we render it like an explicit COLLATE.
+            Expression::CollatedLiteral { value, collation } => {
+                format!("{} COLLATE {}", value.to_sql(), collation)
+            }
 
             Expression::Placeholder(_) => "?".to_string(),
 

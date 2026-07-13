@@ -188,6 +188,7 @@ impl ExpressionHasher {
 
             // Literals and placeholders are deterministic
             vibesql_ast::Expression::Literal(_)
+            | vibesql_ast::Expression::CollatedLiteral { .. }
             | vibesql_ast::Expression::Placeholder(_)
             | vibesql_ast::Expression::NumberedPlaceholder(_)
             | vibesql_ast::Expression::NamedPlaceholder(_) => true,
@@ -244,6 +245,14 @@ impl ExpressionHasher {
             vibesql_ast::Expression::Literal(val) => {
                 // Hash the SQL value
                 Self::hash_sql_value(val, hasher);
+            }
+
+            // Internal collation-carrying literal (issue #6105): hash both the
+            // value and the collation so two CollatedLiterals differing only in
+            // collation compare unequal.
+            vibesql_ast::Expression::CollatedLiteral { value, collation } => {
+                Self::hash_sql_value(value, hasher);
+                collation.hash(hasher);
             }
 
             vibesql_ast::Expression::ColumnRef(col_id) => {

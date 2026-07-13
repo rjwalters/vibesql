@@ -694,6 +694,7 @@ fn validate_expression_column_refs(
 
         // Literals and other simple expressions - no column refs to validate
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

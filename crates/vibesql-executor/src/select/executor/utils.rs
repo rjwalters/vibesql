@@ -115,6 +115,7 @@ fn find_from_less_column_ref(expr: &vibesql_ast::Expression, count_pseudo: bool)
 
         // These don't contain column references:
         vibesql_ast::Expression::Literal(_) => None,
+        vibesql_ast::Expression::CollatedLiteral { .. } => None,
         vibesql_ast::Expression::Wildcard => None,
         vibesql_ast::Expression::ScalarSubquery(_) => None, // Subquery has its own scope
         vibesql_ast::Expression::Exists { .. } => None,     // Subquery has its own scope

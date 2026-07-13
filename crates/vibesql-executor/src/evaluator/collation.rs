@@ -70,6 +70,15 @@ pub(crate) fn operand_column_collation(
         // An explicit COLLATE makes this a collating operand carrying that name.
         Expression::Collate { collation, .. } => Some(Some(collation.clone())),
         Expression::ColumnRef(col_id) => Some(column_collation(col_id)),
+        // A substituted outer column (issue #6105) is a collating operand
+        // carrying the column's *implicit* declared collation — it behaves like
+        // a `ColumnRef`, participating in rule 2 (left-operand precedence),
+        // NOT like an explicit COLLATE (rule 1). A BINARY collation is surfaced
+        // as `Some(None)` so a left-operand's default BINARY still blocks the
+        // right operand, mirroring a real column.
+        Expression::CollatedLiteral { collation, .. } => {
+            Some((!collation.eq_ignore_ascii_case("binary")).then(|| collation.clone()))
+        }
         Expression::UnaryOp { op: UnaryOperator::Plus, expr } => {
             operand_column_collation(expr, column_collation)
         }
@@ -133,6 +142,11 @@ pub(crate) fn resolve_expression_collation(
         Expression::Collate { collation, .. } => Some(collation.clone()),
         // Column reference - the column's declared collation (implicit).
         Expression::ColumnRef(col_id) => column_collation(col_id),
+        // A substituted outer column (issue #6105) carries the column's
+        // implicit declared collation (BINARY reported as `None`).
+        Expression::CollatedLiteral { collation, .. } => {
+            (!collation.eq_ignore_ascii_case("binary")).then(|| collation.clone())
+        }
         // Unary `+` and CAST are transparent: `+a` and `CAST(a AS TEXT)`
         // are still "a column" for collation purposes (datatype3 §7.1 rule 2).
         Expression::UnaryOp { op: UnaryOperator::Plus, expr } => {

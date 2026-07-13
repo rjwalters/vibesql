@@ -231,6 +231,7 @@ pub(crate) fn has_external_column_refs(expr: &Expression, subquery: &SelectStmt)
 
         // Literals and special expressions don't reference columns
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

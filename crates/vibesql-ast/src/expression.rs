@@ -11,6 +11,32 @@ pub enum Expression {
     /// Literal value (42, 'hello', TRUE, NULL)
     Literal(SqlValue),
 
+    /// A literal value that carries an *implicit* collating sequence, as if it
+    /// were a column reference with that declared collation.
+    ///
+    /// This variant is produced internally (never by the parser) when an outer
+    /// column reference is substituted as a literal into an uncorrelated
+    /// subquery — e.g. the single-evaluation `UPDATE … SET (a,b) = (SELECT …)`
+    /// tuple path (issues #6086/#6099/#6105). A bare [`Expression::Literal`]
+    /// carries no collation, so substituting a `COLLATE NOCASE` column as a
+    /// plain literal would silently revert collation-sensitive comparisons to
+    /// BINARY.
+    ///
+    /// Crucially the collation is **implicit** (column-like), *not* an explicit
+    /// `COLLATE` operator: it participates in SQLite's datatype3 §7.1 rule 2
+    /// (left-operand precedence, default BINARY of a left column blocks
+    /// fallback to the right) rather than rule 1 (explicit COLLATE anywhere
+    /// wins). Wrapping the literal in [`Expression::Collate`] instead would
+    /// wrongly flip left-precedence comparisons such as
+    /// `inner_binary_col = outer_nocase_col`, which SQLite compares as BINARY.
+    ///
+    /// It evaluates exactly to `value`; only its collation contribution differs
+    /// from a bare literal.
+    CollatedLiteral {
+        value: SqlValue,
+        collation: String,
+    },
+
     /// Parameter placeholder (?) for prepared statements
     /// The index is 0-based and assigned in order of appearance in the SQL
     /// Example: WHERE id = ? AND name = ? -> Placeholder(0), Placeholder(1)
