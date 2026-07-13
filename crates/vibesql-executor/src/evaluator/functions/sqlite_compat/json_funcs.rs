@@ -2373,10 +2373,73 @@ pub(crate) fn json_error_position(args: &[SqlValue]) -> Result<SqlValue, Executo
     Ok(SqlValue::Integer(relaxed_json_error_offset(s)))
 }
 
+/// Iterative, stack-safe pre-scan for [`relaxed_json_error_offset`]: return the
+/// 1-based **character** offset of the first `{`/`[` that pushes object/array
+/// nesting past [`MAX_JSON5_DEPTH`], or `None` if the whole input stays within
+/// the cap.
+///
+/// The recursive-descent [`Parser`] below descends once per nesting level on the
+/// native call stack, so on adversarially deep input (e.g. 20k `[`) it would
+/// overflow and abort the process (a Rust stack overflow is not catchable). This
+/// gate runs first and, when the cap is exceeded, lets the caller report the
+/// offending bracket's offset **without ever recursing** — the same defense the
+/// canonical/`json()` paths already use via [`json_nesting_within_cap`]
+/// (issue #6056/#6119).
+///
+/// Semantics match SQLite (`src/json.c`: `if(++iDepth>JSON_MAX_DEPTH){ iErr=i; }`,
+/// and `json_error_position` returns `iErr+1`): the reported position is the
+/// opening bracket at depth `MAX_JSON5_DEPTH + 1`. Brackets inside string
+/// literals are ignored by skipping `"..."` / `'...'` runs (honoring `\`
+/// escapes), mirroring the recursive parser's string handling so the two agree
+/// on structural depth.
+fn first_over_cap_bracket_offset(chars: &[char]) -> Option<i64> {
+    let mut depth: usize = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '"' | '\'' => {
+                let quote = chars[i];
+                i += 1;
+                while i < chars.len() {
+                    match chars[i] {
+                        '\\' => i += 2, // skip the escaped char
+                        c if c == quote => {
+                            i += 1;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+            }
+            '{' | '[' => {
+                depth += 1;
+                if depth > MAX_JSON5_DEPTH {
+                    // 1-based offset of this opening bracket.
+                    return Some((i + 1) as i64);
+                }
+                i += 1;
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 /// Scan `s` under SQLite's relaxed JSON grammar and return the 1-based character
 /// offset of the first structural error (0 if none is found by the scanner).
 fn relaxed_json_error_offset(s: &str) -> i64 {
     let chars: Vec<char> = s.chars().collect();
+    // Stack-safety gate: bail out iteratively before the recursive-descent
+    // Parser can descend past MAX_JSON5_DEPTH and overflow the native stack on
+    // hostile deep input. When nesting exceeds the cap, report the offending
+    // bracket's offset (matching SQLite's SQLITE_MAX_JSON_DEPTH reporting).
+    if let Some(pos) = first_over_cap_bracket_offset(&chars) {
+        return pos;
+    }
     let mut p = Parser { chars: &chars, i: 0 };
     p.skip_ws();
     if p.i >= p.chars.len() {
@@ -4232,5 +4295,109 @@ mod tests {
         );
         // NULL -> NULL
         assert_eq!(json_error_position(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+    }
+
+    /// `json_error_position`'s error-locating fallback is a recursive-descent
+    /// [`Parser`] that descends once per nesting level on the native call stack.
+    /// Without the iterative depth gate ([`first_over_cap_bracket_offset`]),
+    /// adversarially deep input that fails the relaxed parse (and so reaches the
+    /// scanner) would overflow the stack and abort the whole process — a Rust
+    /// stack overflow is not catchable. Run on a small (512 KiB) stack so an
+    /// ungated recursive scan would reliably crash, proving the gate — not a
+    /// generous main-thread stack — is what keeps this bounded (issue #6119).
+    #[test]
+    fn test_json_error_position_deep_does_not_overflow_stack() {
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let depth = 20_000usize;
+
+                // Unterminated deep nesting: fails the relaxed parse, so control
+                // falls through to the recursive scanner — exactly the path the
+                // gate protects. The gate reports the bracket at MAX+1 instead of
+                // recursing.
+                let open_only = SqlValue::Varchar(("[".repeat(depth)).into());
+                assert_eq!(
+                    json_error_position(&[open_only]).unwrap(),
+                    SqlValue::Integer((MAX_JSON5_DEPTH + 1) as i64),
+                    "deep unterminated input must report the over-cap bracket, not crash"
+                );
+
+                // Deep-but-otherwise-parseable-looking garbage (invalid char at
+                // the center) also routes through the scanner; still no crash.
+                let mut garbage = "[".repeat(depth);
+                garbage.push('@');
+                let garbage = SqlValue::Varchar(garbage.into());
+                assert_eq!(
+                    json_error_position(&[garbage]).unwrap(),
+                    SqlValue::Integer((MAX_JSON5_DEPTH + 1) as i64),
+                    "deep garbage must report the over-cap bracket, not crash"
+                );
+            })
+            .expect("spawn small-stack test thread");
+        handle.join().expect("deep json_error_position test thread must not abort/panic");
+    }
+
+    /// Depth-cap semantics for `json_error_position`, pinned to the same
+    /// [`MAX_JSON5_DEPTH`] (1000) that `json_valid` / `json()` use (issue #6056):
+    /// a document nested exactly to the cap has no error (0); one level deeper
+    /// reports the 1-based offset of the opening bracket that exceeds the cap —
+    /// mirroring SQLite's `src/json.c` (`iErr = i` when `++iDepth > JSON_MAX_DEPTH`,
+    /// returned as `iErr + 1`).
+    #[test]
+    fn test_json_error_position_depth_cap() {
+        // Arrays: the (MAX+1)th '[' is at 1-based char offset MAX+1.
+        let at_cap_arr = format!("{}1{}", "[".repeat(MAX_JSON5_DEPTH), "]".repeat(MAX_JSON5_DEPTH));
+        assert_eq!(
+            json_error_position(&[SqlValue::Varchar(at_cap_arr.into())]).unwrap(),
+            SqlValue::Integer(0),
+            "array nested exactly to the cap is error-free"
+        );
+        let over_arr =
+            format!("{}1{}", "[".repeat(MAX_JSON5_DEPTH + 1), "]".repeat(MAX_JSON5_DEPTH + 1));
+        assert_eq!(
+            json_error_position(&[SqlValue::Varchar(over_arr.into())]).unwrap(),
+            SqlValue::Integer((MAX_JSON5_DEPTH + 1) as i64),
+            "array one past the cap reports the over-cap '[' offset"
+        );
+
+        // Objects: each `{"a":` is 5 chars, so the (MAX+1)th '{' opens at 1-based
+        // offset MAX*5 + 1.
+        let at_cap_obj =
+            format!("{}1{}", r#"{"a":"#.repeat(MAX_JSON5_DEPTH), "}".repeat(MAX_JSON5_DEPTH));
+        assert_eq!(
+            json_error_position(&[SqlValue::Varchar(at_cap_obj.into())]).unwrap(),
+            SqlValue::Integer(0),
+            "object nested exactly to the cap is error-free"
+        );
+        let over_obj = format!(
+            "{}1{}",
+            r#"{"a":"#.repeat(MAX_JSON5_DEPTH + 1),
+            "}".repeat(MAX_JSON5_DEPTH + 1)
+        );
+        assert_eq!(
+            json_error_position(&[SqlValue::Varchar(over_obj.into())]).unwrap(),
+            SqlValue::Integer((MAX_JSON5_DEPTH * 5 + 1) as i64),
+            "object one past the cap reports the over-cap '{{' offset"
+        );
+    }
+
+    /// The iterative gate must not count brackets that appear inside string
+    /// literals (single- or double-quoted, honoring backslash escapes), so a
+    /// shallow document padded with bracket-laden strings is not spuriously
+    /// flagged as over-cap.
+    #[test]
+    fn test_first_over_cap_ignores_brackets_in_strings() {
+        // A single shallow object whose value is a string full of brackets.
+        let payload = "[".repeat(MAX_JSON5_DEPTH + 50);
+        let doc: Vec<char> = format!(r#"{{"k":"{payload}"}}"#).chars().collect();
+        assert_eq!(
+            first_over_cap_bracket_offset(&doc),
+            None,
+            "brackets inside a string literal must not count toward nesting depth"
+        );
+        // Escaped quote inside the string keeps the scanner in string state.
+        let doc2: Vec<char> = r#"{"k":"a\"[[[[[b"}"#.chars().collect();
+        assert_eq!(first_over_cap_bracket_offset(&doc2), None);
     }
 }
