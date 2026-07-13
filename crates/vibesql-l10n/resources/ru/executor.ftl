@@ -79,6 +79,11 @@ executor-parse-error = Ошибка разбора: { $message }
 executor-subquery-returned-multiple-rows = Скалярный подзапрос вернул { $actual } строк, ожидалось { $expected }
 executor-subquery-column-count-mismatch = Подзапрос вернул { $actual } столбцов, ожидалось { $expected }
 executor-column-count-mismatch = Производный список столбцов содержит { $provided } столбцов, но запрос возвращает { $expected } столбцов
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

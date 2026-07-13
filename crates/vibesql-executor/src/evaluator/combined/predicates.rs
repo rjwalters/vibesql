@@ -601,12 +601,18 @@ impl CombinedExpressionEvaluator<'_> {
 
         let mut found_unknown = false;
         for candidate in values {
+            // A non-row-value candidate (e.g. the bare `4` in
+            // `(1,2) IN ((1,2), 4, (5,6))`) has arity 1; SQLite reports the
+            // arity mismatch, not a generic misuse.
             let cand_exprs = match candidate {
-                vibesql_ast::Expression::RowValueConstructor(cand) => cand,
-                _ => return Err(ExecutorError::RowValueMisused),
+                vibesql_ast::Expression::RowValueConstructor(cand) => cand.as_slice(),
+                other => std::slice::from_ref(other),
             };
             if cand_exprs.len() != arity {
-                return Err(ExecutorError::RowValueMisused);
+                return Err(ExecutorError::InElementArity {
+                    expected: arity,
+                    actual: cand_exprs.len(),
+                });
             }
 
             // Per-element collation and affinity, mirroring row-value `=`.

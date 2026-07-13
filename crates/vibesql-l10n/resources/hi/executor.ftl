@@ -79,6 +79,11 @@ executor-parse-error = पार्स त्रुटि: { $message }
 executor-subquery-returned-multiple-rows = स्केलर सबक्वेरी ने { $actual } पंक्तियां लौटाईं, अपेक्षित { $expected }
 executor-subquery-column-count-mismatch = सबक्वेरी ने { $actual } कॉलम लौटाए, अपेक्षित { $expected }
 executor-column-count-mismatch = व्युत्पन्न कॉलम सूची में { $provided } कॉलम हैं लेकिन क्वेरी { $expected } कॉलम उत्पन्न करती है
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

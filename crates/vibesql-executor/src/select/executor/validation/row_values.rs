@@ -189,11 +189,22 @@ fn walk(expr: &Expression) -> Result<(), ExecutorError> {
                 if elems.len() > 1 {
                     validate_elements_scalar(elems)?;
                     for value in values {
-                        match value {
-                            Expression::RowValueConstructor(cand) if cand.len() == elems.len() => {
+                        // A candidate row value must have the same arity as the
+                        // LHS tuple; a mismatch (including a bare scalar, which
+                        // has arity 1) is SQLite's
+                        // "IN(...) element has N term(s) - expected M".
+                        let cand_arity = match value {
+                            Expression::RowValueConstructor(cand) => {
                                 validate_elements_scalar(cand)?;
+                                cand.len()
                             }
-                            _ => return Err(ExecutorError::RowValueMisused),
+                            _ => 1,
+                        };
+                        if cand_arity != elems.len() {
+                            return Err(ExecutorError::InElementArity {
+                                expected: elems.len(),
+                                actual: cand_arity,
+                            });
                         }
                     }
                     return Ok(());
@@ -400,9 +411,19 @@ mod tests {
     fn row_value_in_list_shapes() {
         let expr = where_expr_of("SELECT * FROM t WHERE (a,b) IN ((1,2),(3,4))");
         assert!(validate_row_value_usage(&expr).is_ok());
-        // Mismatched candidate arity
+        // Mismatched candidate arity: SQLite reports the element-arity error
+        // ("IN(...) element has N term(s) - expected M"), not a generic misuse.
         let expr = where_expr_of("SELECT * FROM t WHERE (a,b) IN ((1,2,3))");
-        assert!(matches!(validate_row_value_usage(&expr), Err(ExecutorError::RowValueMisused)));
+        assert!(matches!(
+            validate_row_value_usage(&expr),
+            Err(ExecutorError::InElementArity { expected: 2, actual: 3 })
+        ));
+        // A bare-scalar candidate has arity 1.
+        let expr = where_expr_of("SELECT * FROM t WHERE (a,b) IN ((1,2),4)");
+        assert!(matches!(
+            validate_row_value_usage(&expr),
+            Err(ExecutorError::InElementArity { expected: 2, actual: 1 })
+        ));
     }
 
     #[test]

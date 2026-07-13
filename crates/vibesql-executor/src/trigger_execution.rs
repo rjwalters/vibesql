@@ -457,6 +457,49 @@ impl TriggerFirer {
         Ok(())
     }
 
+    /// Validate scalar-subquery arity inside trigger body statements at DML
+    /// prepare time (#6046).
+    ///
+    /// SQLite resolves and validates a trigger's body statements when the firing
+    /// DML statement is prepared, *before* deciding whether any row matches — so
+    /// a body `SELECT (SELECT c0,c1 FROM t0) FROM t0` (a multi-column subquery in
+    /// a scalar position) errors `sub-select returns 2 columns - expected 1` even
+    /// when the target table is empty and the trigger never actually fires
+    /// (rowvalue.test 28.10). VibeSQL only executes trigger bodies when the
+    /// trigger fires, so this pass reproduces the prepare-time check for the
+    /// SELECT statements in each matching trigger's body.
+    ///
+    /// Only errors that must surface with zero matched rows are propagated; any
+    /// other outcome (including subqueries whose arity cannot be determined
+    /// statically) is left to the per-row execution path.
+    pub fn validate_trigger_bodies_for_event(
+        db: &Database,
+        table_name: &str,
+        event: TriggerEvent,
+        dml_schema: Option<&str>,
+    ) -> Result<(), ExecutorError> {
+        let triggers = db
+            .catalog
+            .get_triggers_for_table_in_schema(table_name, Some(event), dml_schema)
+            .filter(|trigger| trigger.enabled)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for trigger in &triggers {
+            let sql = match &trigger.triggered_action {
+                vibesql_ast::TriggerAction::RawSql(sql) => sql,
+            };
+            let statements = Self::parse_trigger_sql(sql)?;
+            for statement in &statements {
+                if let vibesql_ast::Statement::Select(select) = statement {
+                    validate_select_scalar_subquery_arity(select, db)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check if an UPDATE OF trigger should fire based on which columns changed
     ///
     /// # Arguments
@@ -1112,4 +1155,29 @@ impl TriggerFirer {
 
         Ok(TriggerOutcome::Proceed)
     }
+}
+
+/// Validate scalar-subquery arity for a SELECT statement appearing in a trigger
+/// body (#6046). A bare multi-column subquery in the SELECT list, or a
+/// multi-column subquery compared against a scalar in the WHERE clause, is a
+/// prepare-time error in SQLite (`sub-select returns N columns - expected 1`).
+///
+/// This mirrors the top-level SELECT prepare-time check in
+/// `select::executor::execute`, but is applied to trigger-body statements up
+/// front so the error surfaces even when the trigger never fires (empty table).
+fn validate_select_scalar_subquery_arity(
+    select: &vibesql_ast::SelectStmt,
+    database: &Database,
+) -> Result<(), ExecutorError> {
+    for item in &select.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            if let vibesql_ast::Expression::ScalarSubquery(_) = expr {
+                crate::select::validate_value_subquery_arity(expr, database)?;
+            }
+        }
+    }
+    if let Some(where_expr) = &select.where_clause {
+        crate::select::validate_predicate_subquery_arity(where_expr, database)?;
+    }
+    Ok(())
 }

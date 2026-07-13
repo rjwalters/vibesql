@@ -79,6 +79,11 @@ executor-parse-error = 解析错误：{ $message }
 executor-subquery-returned-multiple-rows = 标量子查询返回了 { $actual } 行，预期为 { $expected } 行
 executor-subquery-column-count-mismatch = 子查询返回了 { $actual } 列，预期为 { $expected } 列
 executor-column-count-mismatch = 派生列列表有 { $provided } 列，但查询生成了 { $expected } 列
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # 约束错误

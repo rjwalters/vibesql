@@ -79,6 +79,11 @@ executor-parse-error = Erro de análise: { $message }
 executor-subquery-returned-multiple-rows = Subconsulta escalar retornou { $actual } linhas, esperada { $expected }
 executor-subquery-column-count-mismatch = Subconsulta retornou { $actual } colunas, esperadas { $expected }
 executor-column-count-mismatch = Lista de colunas derivadas possui { $provided } colunas, mas a consulta produz { $expected } colunas
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Erros de Restrição

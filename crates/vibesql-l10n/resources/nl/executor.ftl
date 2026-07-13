@@ -79,6 +79,11 @@ executor-parse-error = Parseerfout: { $message }
 executor-subquery-returned-multiple-rows = Scalaire subquery retourneerde { $actual } rijen, verwacht { $expected }
 executor-subquery-column-count-mismatch = Subquery retourneerde { $actual } kolommen, verwacht { $expected }
 executor-column-count-mismatch = Afgeleide kolommenlijst heeft { $provided } kolommen maar query produceert { $expected } kolommen
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

@@ -79,6 +79,11 @@ executor-parse-error = Помилка парсингу: { $message }
 executor-subquery-returned-multiple-rows = Скалярний підзапит повернув { $actual } рядків, очікувався { $expected }
 executor-subquery-column-count-mismatch = Підзапит повернув { $actual } колонок, очікувалось { $expected }
 executor-column-count-mismatch = Похідний список колонок має { $provided } колонок, але запит повертає { $expected } колонок
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

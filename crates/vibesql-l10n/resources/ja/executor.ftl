@@ -79,6 +79,11 @@ executor-parse-error = 解析エラー: { $message }
 executor-subquery-returned-multiple-rows = スカラーサブクエリが { $actual } 行を返しました（期待値: { $expected }）
 executor-subquery-column-count-mismatch = サブクエリが { $actual } カラムを返しました（期待値: { $expected }）
 executor-column-count-mismatch = 派生カラムリストには { $provided } カラムがありますが、クエリは { $expected } カラムを生成します
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # 制約エラー
