@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use instant::SystemTime;
-use rand::RngExt;
 
 use super::{histogram::BucketStrategy, ColumnStatistics, SampleMetadata, SamplingConfig};
 

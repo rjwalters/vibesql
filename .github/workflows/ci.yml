@@ -105,6 +105,26 @@ jobs:
         run: cargo check -p vibesql-wasm-bindings --lib --target wasm32-unknown-unknown
 
   # ============================================================================
+  # Storage feature-matrix check - catches breakage in opendal-gated blob code
+  # that the default feature set never compiles (e.g., the opendal 0.58 bump
+  # removed Operator::finish). Cheap `cargo check` only, no build/test.
+  # See issue #6081 for the regression that motivated this job.
+  # ============================================================================
+  storage-features-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: storage-features
+
+      - name: Check opendal-gated storage backends
+        run: cargo check -p vibesql-storage --features storage-all
+
+  # ============================================================================
   # Extended validation tests (TPC-DS, SQLLogicTest, PostgreSQL, TCL) have been
   # moved to ci-extended.yml for manual dispatch. Run before merging significant
   # PRs with: gh workflow run ci-extended.yml

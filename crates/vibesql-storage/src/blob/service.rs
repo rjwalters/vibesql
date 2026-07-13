@@ -76,7 +76,7 @@ impl BlobStorageService {
 
         let builder = services::Fs::default().root(root);
 
-        Operator::new(builder).map(|op| op.finish()).map_err(|e| {
+        Operator::new(builder).map_err(|e| {
             StorageError::Other(format!("Failed to create filesystem operator: {}", e))
         })
     }
@@ -114,7 +114,6 @@ impl BlobStorageService {
         }
 
         Operator::new(builder)
-            .map(|op| op.finish())
             .map_err(|e| StorageError::Other(format!("Failed to create S3 operator: {}", e)))
     }
 
@@ -141,7 +140,6 @@ impl BlobStorageService {
         }
 
         Operator::new(builder)
-            .map(|op| op.finish())
             .map_err(|e| StorageError::Other(format!("Failed to create GCS operator: {}", e)))
     }
 
@@ -172,7 +170,6 @@ impl BlobStorageService {
         }
 
         Operator::new(builder)
-            .map(|op| op.finish())
             .map_err(|e| StorageError::Other(format!("Failed to create Azure operator: {}", e)))
     }
 
@@ -182,7 +179,6 @@ impl BlobStorageService {
         let builder = services::Memory::default();
 
         Operator::new(builder)
-            .map(|op| op.finish())
             .map_err(|e| StorageError::Other(format!("Failed to create memory operator: {}", e)))
     }
 
