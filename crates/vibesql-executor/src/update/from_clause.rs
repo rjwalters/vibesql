@@ -110,17 +110,49 @@ pub fn execute_update_from_join(
     // firing row. This avoids needing to thread trigger context through the
     // entire scan/join expression-evaluation stack — the synthetic SELECT
     // sees only literal values plus column refs from the joined tables.
+    //
+    // Issue #6047: a *tuple* assignment `SET (a, b, …) = (row-value | subquery)`
+    // is a single AST `Assignment` whose `value` is a row-valued expression
+    // (a `RowValueConstructor` or a multi-column `ScalarSubquery`). Projecting
+    // it as one `__set_i__` scalar item would route the row value through the
+    // ordinary scalar evaluator, which correctly rejects a >1-column result
+    // ("sub-select returns N columns - expected 1"). Instead, expand a tuple
+    // assignment into one select item per target column so each output column
+    // is an ordinary scalar computed in the join context (correlation-safe:
+    // the subquery variant keeps its FROM/WHERE, only its select-list is
+    // narrowed to the single projected column). `set_values_per_assignment`
+    // records how many output columns each assignment contributes so the
+    // unpacking below (and `apply_update_from_matches`) can flatten positionally.
+    let mut set_values_per_assignment: Vec<usize> = Vec::with_capacity(stmt.assignments.len());
     for (i, assignment) in stmt.assignments.iter().enumerate() {
-        let expr = match trigger_context {
-            Some(ctx) => substitute_pseudo_vars(&assignment.value, ctx)?,
-            None => assignment.value.clone(),
-        };
-        select_list.push(SelectItem::Expression {
-            expr,
-            alias: Some(format!("__set_{}__", i)),
-            source_text: None,
-        });
+        if assignment.is_tuple() {
+            let col_exprs = tuple_assignment_column_exprs(assignment)?;
+            for (j, expr) in col_exprs.into_iter().enumerate() {
+                let expr = match trigger_context {
+                    Some(ctx) => substitute_pseudo_vars(&expr, ctx)?,
+                    None => expr,
+                };
+                select_list.push(SelectItem::Expression {
+                    expr,
+                    alias: Some(format!("__set_{}_{}__", i, j)),
+                    source_text: None,
+                });
+            }
+            set_values_per_assignment.push(assignment.columns.len());
+        } else {
+            let expr = match trigger_context {
+                Some(ctx) => substitute_pseudo_vars(&assignment.value, ctx)?,
+                None => assignment.value.clone(),
+            };
+            select_list.push(SelectItem::Expression {
+                expr,
+                alias: Some(format!("__set_{}__", i)),
+                source_text: None,
+            });
+            set_values_per_assignment.push(1);
+        }
     }
+    let total_set_columns: usize = set_values_per_assignment.iter().sum();
 
     // Build FROM clause: target_table [alias], from_clause1, from_clause2, ...
     let target_from = FromClause::Table {
@@ -181,8 +213,10 @@ pub fn execute_update_from_join(
     let rows = executor.execute(&select_stmt)?;
 
     // Build a map from identifier values to SET values
-    // Key: either rowid (as single-element vec) or PK column values
-    let num_assignments = stmt.assignments.len();
+    // Key: either rowid (as single-element vec) or PK column values.
+    // `set_values` is a positional flattening of every SET column: single-column
+    // assignments contribute one value, tuple assignments contribute one value
+    // per target column (issue #6047).
     let mut id_to_set_values: HashMap<Vec<SqlValue>, Vec<SqlValue>> = HashMap::new();
 
     for row in rows {
@@ -201,8 +235,8 @@ pub fn execute_update_from_join(
             continue;
         }
 
-        // Extract SET values
-        let set_values: Vec<SqlValue> = (0..num_assignments)
+        // Extract SET values (flattened across all assignments; see above)
+        let set_values: Vec<SqlValue> = (0..total_set_columns)
             .map(|i| row.values.get(num_id_columns + i).cloned().unwrap_or(SqlValue::Null))
             .collect();
 
@@ -252,6 +286,68 @@ pub fn execute_update_from_join(
     }
 
     Ok(UpdateFromJoinResult { matched_rows })
+}
+
+/// Expand a tuple assignment's row-valued RHS into one scalar expression per
+/// target column, for projection into the synthetic UPDATE…FROM SELECT
+/// (issue #6047).
+///
+/// A tuple assignment `SET (a, b, …) = value` has a single row-valued `value`
+/// whose elements map positionally onto `assignment.columns`. To evaluate each
+/// target column as an ordinary scalar in the join context we need a per-column
+/// expression:
+///
+/// - `RowValueConstructor([e0, e1, …])` → the elements directly (`e0`, `e1`, …).
+///   Arity is validated against the column list here so a mismatch reports the
+///   SQLite "N columns assigned M values" error rather than a downstream shape
+///   error.
+/// - `ScalarSubquery(sub)` → one cloned subquery per column, each with its
+///   select-list narrowed to the single projected item. This preserves
+///   correlation (FROM/WHERE and the column expression are retained) and
+///   first-row semantics while yielding a single scalar column per output. A
+///   subquery whose select-list can't be split by simple index (e.g. it
+///   contains a `*` wildcard, or its arity can't be matched to the column
+///   count) is left intact so the ordinary evaluator raises the correct error.
+fn tuple_assignment_column_exprs(
+    assignment: &Assignment,
+) -> Result<Vec<Expression>, ExecutorError> {
+    let expected = assignment.columns.len();
+    match &assignment.value {
+        Expression::RowValueConstructor(elems) => {
+            if elems.len() != expected {
+                return Err(ExecutorError::ColumnsAssignedValues {
+                    columns: expected,
+                    values: elems.len(),
+                });
+            }
+            Ok(elems.clone())
+        }
+        Expression::ScalarSubquery(sub) => {
+            // Only split when the select-list is a plain list of expressions
+            // matching the target arity (no wildcards). Otherwise leave the
+            // subquery whole in every slot and let the scalar evaluator report
+            // the arity mismatch (matching the non-split fallback below).
+            let can_split = sub.select_list.len() == expected
+                && sub.select_list.iter().all(|item| matches!(item, SelectItem::Expression { .. }));
+            if can_split {
+                Ok((0..expected)
+                    .map(|j| {
+                        let mut narrowed = (**sub).clone();
+                        narrowed.select_list = vec![sub.select_list[j].clone()];
+                        Expression::ScalarSubquery(Box::new(narrowed))
+                    })
+                    .collect())
+            } else {
+                // Fall back to projecting the whole subquery for each column;
+                // the scalar evaluator will surface the correct arity error.
+                Ok(vec![assignment.value.clone(); expected])
+            }
+        }
+        // Any other RHS for a multi-column target is a misuse per SQLite
+        // (e.g. `SET (a, b) = 1`). Project it once per column and let the
+        // scalar evaluator handle it consistently with the non-FROM path.
+        _ => Ok(vec![assignment.value.clone(); expected]),
+    }
 }
 
 /// Get the PRIMARY KEY column names for a table
@@ -315,7 +411,43 @@ pub(super) fn apply_update_from_matches(
         let mut changed_columns = HashSet::new();
         let mut updates_pk = false;
 
-        for (i, assignment) in assignments.iter().enumerate() {
+        // `m.set_values` is a positional flattening of every SET column: a
+        // single-column assignment consumes one value, a tuple assignment
+        // consumes one value per target column (issue #6047). Track the running
+        // offset into `set_values` as we walk assignments.
+        let mut value_offset = 0usize;
+
+        for assignment in assignments {
+            // Tuple assignment `(a, b, …) = (row-value | subquery)`: consume one
+            // computed value per target column, in order.
+            if assignment.is_tuple() {
+                for col_name in &assignment.columns {
+                    let value = m.set_values.get(value_offset).cloned().unwrap_or(SqlValue::Null);
+                    value_offset += 1;
+
+                    let col_index = target_schema.get_column_index(col_name).ok_or_else(|| {
+                        ExecutorError::NoSuchColumn { column_ref: col_name.clone() }
+                    })?;
+                    let coerced_value = crate::insert::validation::coerce_value(
+                        value,
+                        &target_schema.columns[col_index].data_type,
+                    )?;
+                    new_row
+                        .set(col_index, coerced_value)
+                        .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+                    changed_columns.insert(col_index);
+                    if let Some(ref pk) = pk_indices {
+                        if pk.contains(&col_index) {
+                            updates_pk = true;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let value = m.set_values.get(value_offset).cloned().unwrap_or(SqlValue::Null);
+            value_offset += 1;
+
             // Handle rowid assignment specially
             let col_name_lower = assignment.column.to_lowercase();
             let is_rowid =
@@ -325,7 +457,7 @@ pub(super) fn apply_update_from_matches(
                 // Handle rowid update
                 if let Some(ipk_col_idx) = target_schema.rowid_alias_column {
                     new_row
-                        .set(ipk_col_idx, m.set_values[i].clone())
+                        .set(ipk_col_idx, value)
                         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
                     changed_columns.insert(ipk_col_idx);
                     if pk_indices.as_ref().is_some_and(|pk| pk.contains(&ipk_col_idx)) {
@@ -333,7 +465,7 @@ pub(super) fn apply_update_from_matches(
                     }
                 } else {
                     // Update virtual rowid
-                    let new_rowid = match &m.set_values[i] {
+                    let new_rowid = match &value {
                         SqlValue::Integer(id) => *id as u64,
                         SqlValue::Bigint(id) => *id as u64,
                         other => {
@@ -356,7 +488,7 @@ pub(super) fn apply_update_from_matches(
 
             // Coerce value to column type
             let coerced_value = crate::insert::validation::coerce_value(
-                m.set_values[i].clone(),
+                value,
                 &target_schema.columns[col_index].data_type,
             )?;
 
