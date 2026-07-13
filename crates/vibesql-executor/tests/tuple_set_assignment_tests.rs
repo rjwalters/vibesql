@@ -213,3 +213,91 @@ fn update_from_single_column_assignment_unaffected() {
     let r = t2_first_row(&db);
     assert_eq!(r[0], SqlValue::Integer(2000));
 }
+
+// ---------------------------------------------------------------------------
+// Single-evaluation semantics for a tuple *subquery* RHS (issue #6086).
+//
+// A splittable multi-column subquery must be evaluated ONCE per matched row and
+// its row tuple distributed positionally, not re-executed per target column.
+// Re-execution both diverged from SQLite for independent non-deterministic
+// projections (`SET (a,b)=(SELECT random(), random())` → a=b) and wasted work.
+// ---------------------------------------------------------------------------
+
+/// Run an arbitrary DDL/DML statement, panicking on any parse/exec error. Used
+/// to build the source tables the #6086 tests need beyond `setup_from`.
+fn exec(db: &mut Database, sql: &str) {
+    match Parser::parse_sql(sql).expect("parse") {
+        vibesql_ast::Statement::CreateTable(ct) => {
+            CreateTableExecutor::execute(&ct, db).expect("create");
+        }
+        vibesql_ast::Statement::Insert(ins) => {
+            InsertExecutor::execute(db, &ins).expect("insert");
+        }
+        vibesql_ast::Statement::Update(u) => {
+            UpdateExecutor::execute(&u, db).expect("update");
+        }
+        other => panic!("unexpected statement: {other:?}"),
+    }
+}
+
+/// `SET (a, b) = (SELECT random(), random())` must evaluate the subquery once,
+/// so the two independent `random()` calls yield different values (a != b),
+/// matching SQLite. Previously both narrowed subqueries collapsed through the
+/// result cache and produced a == b. Probabilistic but effectively certain for
+/// 64-bit random integers.
+#[test]
+fn update_from_tuple_set_subquery_random_is_evaluated_once() {
+    let mut db = setup_from();
+    run_update(&mut db, "UPDATE t2 SET (a, b) = (SELECT random(), random()) FROM t1")
+        .expect("update");
+    let r = t2_first_row(&db);
+    assert_ne!(r[0], r[1], "independent random() projections must differ (single-eval)");
+    assert_ne!(r[0], SqlValue::Null);
+    assert_ne!(r[1], SqlValue::Null);
+}
+
+/// A tuple subquery over a table with `ORDER BY ... LIMIT 1` returning a 2-tuple
+/// is evaluated once and both columns come from the SAME chosen row (single
+/// first-row semantics), matching SQLite (`10, 20`).
+#[test]
+fn update_from_tuple_set_subquery_ordered_limit_single_row() {
+    let mut db = setup_from();
+    exec(&mut db, "CREATE TABLE src(p, q)");
+    exec(&mut db, "INSERT INTO src VALUES(10, 20)");
+    exec(&mut db, "INSERT INTO src VALUES(30, 40)");
+    run_update(&mut db, "UPDATE t2 SET (a, b) = (SELECT p, q FROM src ORDER BY p LIMIT 1) FROM t1")
+        .expect("update");
+    let r = t2_first_row(&db);
+    assert_eq!(r[0], SqlValue::Integer(10));
+    assert_eq!(r[1], SqlValue::Integer(20));
+}
+
+/// A tuple subquery over a table whose WHERE correlates on a FROM-table column
+/// resolves against the join row, evaluated once. `t1.x = 1000` selects the
+/// matching `src` row `(30, 40)`; the subquery-local `src.k` refs are untouched.
+#[test]
+fn update_from_tuple_set_subquery_correlated_on_from_column() {
+    let mut db = setup_from();
+    exec(&mut db, "CREATE TABLE src(k, p, q)");
+    exec(&mut db, "INSERT INTO src VALUES(999, 10, 20)");
+    exec(&mut db, "INSERT INTO src VALUES(1000, 30, 40)");
+    run_update(&mut db, "UPDATE t2 SET (a, b) = (SELECT p, q FROM src WHERE src.k = t1.x) FROM t1")
+        .expect("update");
+    let r = t2_first_row(&db);
+    assert_eq!(r[0], SqlValue::Integer(30));
+    assert_eq!(r[1], SqlValue::Integer(40));
+}
+
+/// An empty correlated tuple subquery yields a row of NULLs (SQLite semantics),
+/// evaluated once.
+#[test]
+fn update_from_tuple_set_subquery_correlated_empty_yields_nulls() {
+    let mut db = setup_from();
+    exec(&mut db, "CREATE TABLE src(k, p, q)");
+    exec(&mut db, "INSERT INTO src VALUES(1, 10, 20)");
+    run_update(&mut db, "UPDATE t2 SET (a, b) = (SELECT p, q FROM src WHERE src.k = t1.x) FROM t1")
+        .expect("update");
+    let r = t2_first_row(&db);
+    assert_eq!(r[0], SqlValue::Null);
+    assert_eq!(r[1], SqlValue::Null);
+}
