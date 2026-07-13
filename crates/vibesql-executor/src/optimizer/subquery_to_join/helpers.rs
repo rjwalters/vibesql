@@ -4,7 +4,7 @@
 //! - Collecting and detecting table names (for self-join detection)
 //! - Qualifying and rewriting column references
 
-use vibesql_ast::{CommonTableExpr, Expression, FromClause, SelectItem, SelectStmt};
+use vibesql_ast::{CommonTableExpr, Expression, FromClause, JoinType, SelectItem, SelectStmt};
 use vibesql_storage::Database;
 
 /// One source directly reachable in the outer FROM clause, described in the terms
@@ -290,6 +290,51 @@ pub(super) fn resolve_outer_column_qualifier(
     }
 }
 
+/// Collect outer-FROM sources together with whether each source can be
+/// *null-extended* by an enclosing outer join.
+///
+/// A base column declared `NOT NULL` in the catalog is only guaranteed non-NULL
+/// in the outer query's row stream if the source it comes from can never be
+/// null-extended. An outer join synthesizes all-NULL rows for its optional side:
+/// `LEFT JOIN` null-extends the right side, `RIGHT JOIN` the left, `FULL JOIN`
+/// both. `INNER`/`CROSS` joins (and single-table FROMs) never null-extend, so
+/// their columns keep their catalog nullability.
+///
+/// `nullable` on each pushed source is `true` when the source sits on the
+/// null-extended side of some enclosing outer join and therefore must NOT be
+/// trusted as non-NULL even if the catalog says `NOT NULL`.
+fn collect_outer_sources_with_nullability(
+    from: &FromClause,
+    nullable: bool,
+    out: &mut Vec<(OuterSource, bool)>,
+) {
+    match from {
+        FromClause::Join { left, right, join_type, .. } => {
+            // Determine which side(s) an outer join can null-extend. A source is
+            // nullable if it was already on a nullable path OR it is on the
+            // optional side of this join.
+            let (left_nullable, right_nullable) = match join_type {
+                JoinType::LeftOuter => (nullable, true),
+                JoinType::RightOuter => (true, nullable),
+                JoinType::FullOuter => (true, true),
+                // Inner/Cross never null-extend; Semi/Anti keep only left rows
+                // (right side is not projected), so propagate the incoming flag.
+                JoinType::Inner | JoinType::Cross | JoinType::Semi | JoinType::Anti => {
+                    (nullable, nullable)
+                }
+            };
+            collect_outer_sources_with_nullability(left, left_nullable, out);
+            collect_outer_sources_with_nullability(right, right_nullable, out);
+        }
+        // Leaf sources: reuse the flat collector, then tag each with `nullable`.
+        _ => {
+            let mut leaves = Vec::new();
+            collect_outer_sources(from, &mut leaves);
+            out.extend(leaves.into_iter().map(|s| (s, nullable)));
+        }
+    }
+}
+
 /// Whether a bare/qualified outer column reference resolves to exactly one
 /// base-table source in the outer FROM whose corresponding column is provably
 /// non-NULL (declared `NOT NULL`, or the `INTEGER PRIMARY KEY` rowid alias).
@@ -301,23 +346,36 @@ pub(super) fn resolve_outer_column_qualifier(
 /// *catalog-resolvable base table* source (not a view, derived/VALUES source, or
 /// an ambiguous multi-source match). Any uncertainty returns `false`, which keeps
 /// the caller on the NULL-correct row-by-row path.
+///
+/// Crucially the resolution is **join-type-aware**: a `NOT NULL` catalog column
+/// on the null-extended side of an enclosing `LEFT`/`RIGHT`/`FULL` outer join is
+/// null-extended in the join output and therefore is *not* provably non-NULL.
+/// Such columns are rejected here so the caller stays on the NULL-correct
+/// row-by-row path (see issue #6109 LEFT-JOIN regression).
 pub(super) fn outer_column_is_provably_non_null(
     from: &FromClause,
     database: &Database,
     column: &str,
 ) -> bool {
-    let mut sources = Vec::new();
-    collect_outer_sources(from, &mut sources);
+    let mut annotated = Vec::new();
+    collect_outer_sources_with_nullability(from, false, &mut annotated);
 
     let mut owner_real_name: Option<String> = None;
     let mut match_count = 0usize;
 
-    for source in &sources {
+    for (source, nullable) in &annotated {
         match source {
             OuterSource::Named { real_name, .. } => {
                 if source_has_column(real_name, column, database, None) {
                     match_count += 1;
-                    owner_real_name.get_or_insert_with(|| real_name.clone());
+                    // A column that reaches us only through the null-extended
+                    // side of an outer join is NULL-able in the join output no
+                    // matter what the catalog says: refuse the non-NULL proof.
+                    if *nullable {
+                        owner_real_name = None;
+                    } else {
+                        owner_real_name.get_or_insert_with(|| real_name.clone());
+                    }
                 }
             }
             OuterSource::Columns { columns, .. } => {
