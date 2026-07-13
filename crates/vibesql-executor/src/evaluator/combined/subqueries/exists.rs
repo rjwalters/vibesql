@@ -45,7 +45,7 @@ impl CombinedExpressionEvaluator<'_> {
         };
 
         let merged_row = if merged_schema.is_some() {
-            Some(build_merged_outer_row(row, self.outer_row))
+            Some(build_merged_outer_row(row, self.schema, self.outer_row, self.outer_schema))
         } else {
             None
         };

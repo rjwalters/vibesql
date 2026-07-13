@@ -153,7 +153,8 @@ impl CombinedExpressionEvaluator<'_> {
                 // This can happen if correlation columns aren't in outer schema
                 // Fall through to execute without caching
                 let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
-                let merged_row = build_merged_outer_row(row, self.outer_row);
+                let merged_row =
+                    build_merged_outer_row(row, self.schema, self.outer_row, self.outer_schema);
                 let select_executor = if let Some(outer_rows) = self.outer_rows {
                     // Pass outer_rows for outer-correlated aggregates (issue #4930)
                     if let Some(cte_ctx) = self.cte_context {
@@ -199,7 +200,8 @@ impl CombinedExpressionEvaluator<'_> {
             // where the middle SELECT has no FROM but needs to pass outer context to innermost.
             // FIX for issue #4618 (subquery-3.3.4)
             let merged_schema = build_merged_outer_schema(self.schema, self.outer_schema);
-            let merged_row = build_merged_outer_row(row, self.outer_row);
+            let merged_row =
+                build_merged_outer_row(row, self.schema, self.outer_row, self.outer_schema);
             let select_executor = if let Some(outer_rows) = self.outer_rows {
                 // Pass outer_rows for outer-correlated aggregates (issue #4930)
                 if let Some(cte_ctx) = self.cte_context {
@@ -263,7 +265,7 @@ impl CombinedExpressionEvaluator<'_> {
             };
 
             let merged_row = if has_outer_context {
-                Some(build_merged_outer_row(row, self.outer_row))
+                Some(build_merged_outer_row(row, self.schema, self.outer_row, self.outer_schema))
             } else {
                 None
             };
