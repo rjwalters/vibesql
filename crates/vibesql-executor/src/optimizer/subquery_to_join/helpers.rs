@@ -290,6 +290,76 @@ pub(super) fn resolve_outer_column_qualifier(
     }
 }
 
+/// Whether a bare/qualified outer column reference resolves to exactly one
+/// base-table source in the outer FROM whose corresponding column is provably
+/// non-NULL (declared `NOT NULL`, or the `INTEGER PRIMARY KEY` rowid alias).
+///
+/// Used by the `NOT IN` → ANTI-join NULL-safety gate (issue #6109) to prove the
+/// outer left-hand-side can never be NULL even after earlier IN→join rewrites have
+/// turned the outer FROM into a join. Resolution mirrors
+/// [`resolve_outer_column_qualifier`]: the column must be carried by exactly one
+/// *catalog-resolvable base table* source (not a view, derived/VALUES source, or
+/// an ambiguous multi-source match). Any uncertainty returns `false`, which keeps
+/// the caller on the NULL-correct row-by-row path.
+pub(super) fn outer_column_is_provably_non_null(
+    from: &FromClause,
+    database: &Database,
+    column: &str,
+) -> bool {
+    let mut sources = Vec::new();
+    collect_outer_sources(from, &mut sources);
+
+    let mut owner_real_name: Option<String> = None;
+    let mut match_count = 0usize;
+
+    for source in &sources {
+        match source {
+            OuterSource::Named { real_name, .. } => {
+                if source_has_column(real_name, column, database, None) {
+                    match_count += 1;
+                    owner_real_name.get_or_insert_with(|| real_name.clone());
+                }
+            }
+            OuterSource::Columns { columns, .. } => {
+                if columns.iter().any(|c| c.eq_ignore_ascii_case(column)) {
+                    // An explicit alias-column source (derived/VALUES/`AS t(..)`):
+                    // we cannot prove non-NULL from a catalog, so bail out.
+                    match_count += 1;
+                    owner_real_name = None;
+                }
+            }
+            OuterSource::Opaque => {}
+        }
+    }
+
+    if match_count != 1 {
+        return false;
+    }
+    let real_name = match owner_real_name {
+        Some(n) => n,
+        None => return false,
+    };
+    let table = match database.get_table(&real_name) {
+        Some(t) => t,
+        None => return false,
+    };
+    if table.schema.is_view {
+        return false;
+    }
+    // INTEGER PRIMARY KEY (rowid alias) columns are never NULL.
+    if let Some(pk_idx) = table.schema.get_integer_primary_key_index() {
+        if let Some(pk_col) = table.schema.columns.get(pk_idx) {
+            if pk_col.name.eq_ignore_ascii_case(column) {
+                return true;
+            }
+        }
+    }
+    match table.schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(column)) {
+        Some(c) => !c.nullable,
+        None => false,
+    }
+}
+
 /// Extract all table names from a FROM clause (for self-join detection)
 pub(super) fn collect_table_names(from: &FromClause, names: &mut Vec<String>) {
     match from {

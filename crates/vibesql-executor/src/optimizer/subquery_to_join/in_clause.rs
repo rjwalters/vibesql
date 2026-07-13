@@ -43,7 +43,8 @@ use vibesql_storage::Database;
 
 use super::helpers::{
     get_outer_table_name, is_self_join, is_simple_single_table_self_join,
-    resolve_outer_column_qualifier, rewrite_column_refs_with_alias, OuterQualifier,
+    outer_column_is_provably_non_null, resolve_outer_column_qualifier,
+    rewrite_column_refs_with_alias, OuterQualifier,
 };
 
 /// Result of converting an IN subquery to a join
@@ -151,6 +152,119 @@ fn single_outer_rowid_table(from: &FromClause, database: &Database) -> Option<St
     }
 }
 
+/// Whether the subquery's single projection column can be proven to never yield
+/// a NULL value, given the subquery body.
+///
+/// This gates the `NOT IN` → ANTI-join rewrite (issue #6109). Per SQL three-valued
+/// logic, `x NOT IN (S)` is UNKNOWN (never TRUE) whenever `S` contains a NULL and
+/// `x` does not equal any non-NULL member, so a `NOT IN` whose subquery result can
+/// contain NULL must return **no rows** for that `x`. A plain ANTI join instead
+/// emits the complementary rows — it is only equivalent to `NOT IN` when the right
+/// side is provably free of NULLs. When we cannot prove the projection is
+/// non-NULL, the caller aborts the transform (returns `None`) and falls back to
+/// row-by-row `eval_in_subquery`, which already implements the three-valued
+/// semantics correctly.
+///
+/// A projection is provably non-NULL when it is:
+/// - a non-NULL literal; or
+/// - a bare column reference to a base table column that is either declared
+///   `NOT NULL` or is the `INTEGER PRIMARY KEY` rowid alias (rowids are never
+///   NULL). Note that a *composite* or non-INTEGER `PRIMARY KEY` column is **not**
+///   sufficient: SQLite (and VibeSQL) permit NULLs in such columns, so we must not
+///   treat them as non-NULL here.
+///
+/// Everything else (arbitrary expressions, function calls, nullable columns,
+/// columns from a derived/joined/VALUES source, the bare `rowid` pseudo-column,
+/// etc.) is treated conservatively as possibly-NULL. The bare rowid case is
+/// intentionally excluded because determining the owning table here would
+/// duplicate the outer-qualification logic; falling back to row-by-row is always
+/// correct.
+fn subquery_projection_is_provably_non_null(
+    projection: &Expression,
+    subquery: &SelectStmt,
+    database: &Database,
+) -> bool {
+    // Only reason about a subquery whose FROM is exactly one base table.
+    let table_name = match &subquery.from {
+        Some(FromClause::Table { name, .. }) => name.as_str(),
+        _ => return false,
+    };
+    expression_is_provably_non_null(projection, table_name, database)
+}
+
+/// Whether the outer `NOT IN` left-hand-side expression can be proven to never be
+/// NULL, given the outer FROM clause.
+///
+/// This is the *second half* of the NULL-safety gate for the `NOT IN` → ANTI-join
+/// rewrite (issue #6109). A plain ANTI join keeps a row of the left input whenever
+/// that row has no join partner on the right. But `NULL NOT IN (S)` is never TRUE
+/// for a non-empty `S` (it is UNKNOWN) and is TRUE only for an empty `S` — neither
+/// of which an equality-based ANTI join models: `NULL = v` is never TRUE, so the
+/// ANTI join *keeps* every NULL-LHS row unconditionally. The ANTI join therefore
+/// matches `NOT IN` only when the left side is also provably free of NULLs.
+///
+/// We prove non-NULL only for the simple, common case where the outer FROM is a
+/// single base table and the LHS is a non-NULL literal or a `NOT NULL` /
+/// `INTEGER PRIMARY KEY` column of that table. Anything else (multi-table FROM,
+/// joins, derived/VALUES sources, nullable columns, arbitrary expressions) is
+/// treated conservatively as possibly-NULL, aborting the rewrite in favor of the
+/// NULL-correct row-by-row path.
+fn outer_expr_is_provably_non_null(expr: &Expression, from: &FromClause, database: &Database) -> bool {
+    match expr {
+        Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
+        // Resolve the column against the whole outer FROM scope (which may already
+        // be a join from an earlier IN→SEMI/ANTI rewrite) and check its declared
+        // nullability. The bare `rowid`/`_rowid_`/`oid` pseudo-column is not a real
+        // catalog column, so it will not resolve and is conservatively treated as
+        // possibly-NULL — falling back to the row-by-row path, which is correct.
+        Expression::ColumnRef(col_id) => {
+            outer_column_is_provably_non_null(from, database, col_id.column_canonical())
+        }
+        _ => false,
+    }
+}
+
+/// Shared core: whether `expr` is provably non-NULL when evaluated against the
+/// single base table `table_name`.
+///
+/// A value is provably non-NULL when it is a non-NULL literal, or a bare/qualified
+/// column reference to a column of `table_name` that is either the
+/// `INTEGER PRIMARY KEY` rowid alias (rowids are never NULL) or declared
+/// `NOT NULL`. A *composite* or non-INTEGER `PRIMARY KEY` column is deliberately
+/// NOT treated as non-NULL: SQLite (and VibeSQL) permit NULLs there. The bare
+/// `rowid` pseudo-column and all other expression shapes are treated
+/// conservatively as possibly-NULL.
+fn expression_is_provably_non_null(expr: &Expression, table_name: &str, database: &Database) -> bool {
+    match expr {
+        Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
+        Expression::ColumnRef(col_id) => {
+            let table = match database.get_table(table_name) {
+                Some(t) => t,
+                None => return false,
+            };
+            // Views and derived shapes are out of scope for this proof.
+            if table.schema.is_view {
+                return false;
+            }
+            let column = col_id.column_canonical();
+            // INTEGER PRIMARY KEY (rowid alias) columns are never NULL.
+            if let Some(pk_idx) = table.schema.get_integer_primary_key_index() {
+                if let Some(pk_col) = table.schema.columns.get(pk_idx) {
+                    if pk_col.name.eq_ignore_ascii_case(column) {
+                        return true;
+                    }
+                }
+            }
+            // Otherwise require an explicit NOT NULL declaration.
+            match table.schema.columns.iter().find(|c| c.name.eq_ignore_ascii_case(column)) {
+                Some(c) => !c.nullable,
+                None => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 /// Try to convert an IN subquery to a SEMI or ANTI join
 pub(super) fn try_convert_in_to_join(
     from: &FromClause,
@@ -169,6 +283,30 @@ pub(super) fn try_convert_in_to_join(
         SelectItem::Expression { expr, .. } => expr.clone(),
         _ => return None,
     };
+
+    // NULL-safety gate for NOT IN (issue #6109).
+    //
+    // `x NOT IN (S)` cannot become a plain ANTI join unless BOTH sides are provably
+    // free of NULLs, because an equality-based ANTI join diverges from three-valued
+    // `NOT IN` at each NULL:
+    //   - NULL in the subquery `S`: when `S` yields a NULL and `x` matches no
+    //     non-NULL member, `x NOT IN (S)` is UNKNOWN → the row is dropped; but an
+    //     ANTI join *keeps* it (no equal partner on the right). So the subquery
+    //     projection must be provably non-NULL.
+    //   - NULL on the left (`x`): `NULL NOT IN (S)` is UNKNOWN for non-empty `S`
+    //     (row dropped) and TRUE only for empty `S`; but `NULL = v` is never TRUE,
+    //     so an ANTI join *always* keeps a NULL-LHS row. So the outer LHS must be
+    //     provably non-NULL too.
+    // If we cannot prove both, abort the transform so the caller falls back to
+    // row-by-row `eval_in_subquery`, which implements the correct three-valued
+    // semantics. (Plain `IN` → SEMI join is unaffected: for IN, a NULL on either
+    // side simply never matches, which the SEMI join already models correctly.)
+    if negated
+        && (!subquery_projection_is_provably_non_null(&subquery_column, subquery, database)
+            || !outer_expr_is_provably_non_null(expr, from, database))
+    {
+        return None;
+    }
 
     // Skip if the subquery's SELECT expression contains a window function (issue #5231).
     // Window functions are computed over the subquery's entire result set, so hoisting

@@ -14,6 +14,39 @@ fn empty_db() -> Database {
     Database::new()
 }
 
+/// A catalog with `orders` and `lineitem` whose join-key columns are declared
+/// `NOT NULL`. The `NOT IN` → ANTI-join rewrite is only valid when the subquery
+/// projection is provably non-NULL (issue #6109); these structural tests assert
+/// that the ANTI join IS produced, so their subquery projection column must be
+/// non-nullable in the catalog. (An unregistered / nullable column correctly
+/// suppresses the ANTI rewrite in favor of row-by-row three-valued evaluation.)
+fn tpch_db() -> Database {
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+    use vibesql_types::DataType;
+
+    let mut db = Database::new();
+
+    let orders_cols = vec![
+        ColumnSchema::new("o_orderkey".to_string(), DataType::Integer, false),
+        ColumnSchema::new("o_custkey".to_string(), DataType::Integer, false),
+        ColumnSchema::new("o_orderstatus".to_string(), DataType::Integer, true),
+        ColumnSchema::new("o_totalprice".to_string(), DataType::Integer, true),
+    ];
+    db.create_table(TableSchema::new("orders".to_string(), orders_cols)).unwrap();
+
+    let lineitem_cols = vec![
+        ColumnSchema::new("l_orderkey".to_string(), DataType::Integer, false),
+        ColumnSchema::new("l_quantity".to_string(), DataType::Integer, true),
+    ];
+    db.create_table(TableSchema::new("lineitem".to_string(), lineitem_cols)).unwrap();
+
+    let supplier_cols =
+        vec![ColumnSchema::new("s_suppkey".to_string(), DataType::Integer, false)];
+    db.create_table(TableSchema::new("supplier".to_string(), supplier_cols)).unwrap();
+
+    db
+}
+
 fn simple_table_from(name: &str) -> FromClause {
     FromClause::Table {
         index_hint: None,
@@ -86,7 +119,7 @@ fn test_not_in_subquery_to_anti_join() {
         negated: true,
     });
 
-    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
 
     // Should have created an ANTI JOIN
     assert!(transformed.where_clause.is_none(), "WHERE clause should be removed");
@@ -95,6 +128,93 @@ fn test_not_in_subquery_to_anti_join() {
             assert!(matches!(join_type, JoinType::Anti), "Should be ANTI join");
         }
         _ => panic!("Expected JOIN in FROM clause"),
+    }
+}
+
+/// Regression for issue #6109: `NOT IN` over a *nullable* subquery projection
+/// must NOT be rewritten to an ANTI join. A plain ANTI join emits the
+/// complementary rows, but SQL three-valued logic requires `x NOT IN (S)` to
+/// yield no rows once `S` contains a NULL and `x` matches no non-NULL member.
+/// The transform must abort (leave the WHERE clause intact) so execution falls
+/// back to row-by-row `eval_in_subquery`, which is NULL-correct.
+#[test]
+fn test_not_in_nullable_projection_is_not_rewritten() {
+    let mut stmt = simple_select("lineitem", "l_orderkey");
+    // Subquery projects `l_quantity`, which is nullable in `tpch_db()`.
+    let subquery = simple_select("lineitem", "l_quantity");
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("l_orderkey")),
+        subquery: Box::new(subquery),
+        negated: true,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
+
+    // The rewrite must be suppressed: WHERE clause stays, FROM stays a plain table.
+    assert!(
+        transformed.where_clause.is_some(),
+        "NOT IN over a nullable projection must not be converted to an ANTI join"
+    );
+    assert!(
+        !matches!(transformed.from, Some(FromClause::Join { .. })),
+        "FROM must remain a plain table (no ANTI join synthesized)"
+    );
+}
+
+/// Regression for issue #6109 (NULL on the left-hand side): `NOT IN` whose outer
+/// LHS column is *nullable* must NOT be rewritten to an ANTI join, even when the
+/// subquery projection is non-NULL. `NULL = v` is never TRUE, so an ANTI join
+/// unconditionally keeps every NULL-LHS row, whereas `NULL NOT IN (non-empty S)`
+/// is UNKNOWN and must drop the row. The transform must abort so row-by-row
+/// evaluation applies the three-valued semantics.
+#[test]
+fn test_not_in_nullable_outer_lhs_is_not_rewritten() {
+    // `o_orderstatus` is nullable in `tpch_db()`; the subquery projection
+    // (`l_orderkey`) is NOT NULL, so only the LHS gate should suppress the rewrite.
+    let mut stmt = simple_select("orders", "o_orderstatus");
+    let subquery = simple_select("lineitem", "l_orderkey");
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("o_orderstatus")),
+        subquery: Box::new(subquery),
+        negated: true,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
+
+    assert!(
+        transformed.where_clause.is_some(),
+        "NOT IN with a nullable outer LHS must not be converted to an ANTI join"
+    );
+    assert!(
+        !matches!(transformed.from, Some(FromClause::Join { .. })),
+        "FROM must remain a plain table (no ANTI join synthesized)"
+    );
+}
+
+/// Companion to the above: `IN` (not negated) over the same nullable projection
+/// is still safely rewritten to a SEMI join — the NULL-safety gate only applies
+/// to the negated (`NOT IN`) path, since a NULL on the right of a SEMI join
+/// simply never matches (issue #6109).
+#[test]
+fn test_in_nullable_projection_still_semi_join() {
+    let mut stmt = simple_select("lineitem", "l_orderkey");
+    let subquery = simple_select("lineitem", "l_quantity");
+
+    stmt.where_clause = Some(Expression::In {
+        expr: Box::new(column_ref("l_orderkey")),
+        subquery: Box::new(subquery),
+        negated: false,
+    });
+
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
+
+    match transformed.from {
+        Some(FromClause::Join { join_type, .. }) => {
+            assert!(matches!(join_type, JoinType::Semi), "IN should still be a SEMI join");
+        }
+        _ => panic!("Expected SEMI JOIN in FROM clause for IN over nullable projection"),
     }
 }
 
@@ -211,7 +331,7 @@ fn test_multiple_subqueries_to_joins() {
     stmt.where_clause = Some(combined_where);
 
     // Transform should extract BOTH subqueries iteratively
-    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
 
     // Should have two joins (SEMI and ANTI)
     match transformed.from {
@@ -838,7 +958,7 @@ fn test_conjunction_not_in_to_anti_join() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, not_in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
 
     // Should have created an ANTI JOIN
     match &transformed.from {
@@ -932,7 +1052,7 @@ fn test_conjunction_multiple_subqueries_iterative() {
 
     stmt.where_clause = Some(Expression::Conjunction(vec![predicate, in_expr, not_in_expr]));
 
-    let transformed = transform_subqueries_to_joins(&stmt, &empty_db());
+    let transformed = transform_subqueries_to_joins(&stmt, &tpch_db());
 
     // Should have two joins (nested)
     match &transformed.from {
