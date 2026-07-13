@@ -35,6 +35,38 @@ fn format_float_for_text_comparison(n: f64) -> String {
     }
 }
 
+/// Resolve the rowid of `table_name` within a single outer scope described by
+/// `schema` (a [`CombinedSchema`] level) and its aligned `row` (issue #6087).
+///
+/// The scope is only considered if it actually contains the table. Resolution
+/// order mirrors the inner-scope rowid logic: an INTEGER PRIMARY KEY column is a
+/// rowid alias, so its value (read from `row` at the schema's `start_idx +
+/// rowid_alias_column`) wins; otherwise the row's tracked rowid for the table is
+/// used. WITHOUT ROWID tables and VIEWs have neither and yield `None`.
+fn rowid_from_scope(
+    schema: &crate::schema::CombinedSchema,
+    row: &vibesql_storage::Row,
+    table_name: &str,
+) -> Option<SqlValue> {
+    let table_id = vibesql_catalog::TableIdentifier::from(table_name);
+    let (start_idx, table_schema) = schema.table_schemas.get(&table_id)?;
+
+    // WITHOUT ROWID tables and VIEWs have no rowid pseudo-column.
+    if table_schema.without_rowid || table_schema.is_view {
+        return None;
+    }
+
+    // INTEGER PRIMARY KEY is an alias for rowid; its column value IS the rowid.
+    if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
+        if let Some(value) = row.get(start_idx + ipk_col_idx) {
+            return Some(value.clone());
+        }
+    }
+
+    // Otherwise use the tracked rowid for this table.
+    row.get_row_id_for_table(Some(table_name)).map(|id| SqlValue::Bigint(id as i64))
+}
+
 impl CombinedExpressionEvaluator<'_> {
     /// Get the SQLite type affinity of an expression if it's a column reference.
     ///
@@ -121,6 +153,55 @@ impl CombinedExpressionEvaluator<'_> {
                 return table_schema.columns[col_offset].collation.clone();
             }
         }
+        None
+    }
+
+    /// Resolve an outer-table rowid reference from the correlation chain (issue #6087).
+    ///
+    /// A correlated subquery may reference the outer query's rowid, e.g.
+    /// `SELECT y FROM d2 WHERE d2.rowid = d1.rowid` where `d1` is the *outer*
+    /// table. `d1` is not present in this evaluator's own `self.schema`, so the
+    /// normal rowid resolution (which only consults `self.schema` + the inner
+    /// `row`) cannot find it and would return NULL — binding the correlated
+    /// reference to nothing and yielding the first outer row's result for every
+    /// outer row. This walks the outer scopes — the immediate parent
+    /// (`outer_row` + `outer_schema`) and then the `outer_context` chain — and
+    /// returns the rowid of `table` from the first scope that both contains the
+    /// table and carries a resolvable rowid for it.
+    ///
+    /// `table` must be a qualified table name; an unqualified `rowid` inside a
+    /// correlated subquery resolves to the subquery's own tables and never
+    /// reaches here.
+    fn resolve_outer_rowid(&self, table: Option<&str>) -> Option<SqlValue> {
+        let table_name = table?;
+
+        // Try the immediate parent scope: outer_row + outer_schema.
+        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
+            if let Some(value) = rowid_from_scope(outer_schema, outer_row, table_name) {
+                return Some(value);
+            }
+        }
+
+        // Walk the outer_context chain (grandparent scopes and beyond) so
+        // deeply nested correlated subqueries can still reach an ancestor's
+        // outer-table rowid.
+        let mut current_context = self.outer_context;
+        while let Some(ctx) = current_context {
+            if let Some(ctx_row) = ctx.outer_row {
+                // The context's own inner schema/row form one enclosing scope.
+                if let Some(value) = rowid_from_scope(ctx.schema, ctx_row, table_name) {
+                    return Some(value);
+                }
+                // The context's outer_schema (its parent) forms the next.
+                if let Some(ctx_outer_schema) = ctx.outer_schema {
+                    if let Some(value) = rowid_from_scope(ctx_outer_schema, ctx_row, table_name) {
+                        return Some(value);
+                    }
+                }
+            }
+            current_context = ctx.outer_context;
+        }
+
         None
     }
 
@@ -583,6 +664,32 @@ impl CombinedExpressionEvaluator<'_> {
                     if self.get_column_index_cached(table, column).is_none() {
                         // Check if the table is WITHOUT ROWID - if so, error
                         let table_id = table.map(vibesql_catalog::TableIdentifier::from);
+
+                        // Correlated outer-table rowid (issue #6087). When the
+                        // rowid is qualified by a table that is NOT one of this
+                        // scope's own tables (e.g. `d1.rowid` inside
+                        // `SELECT y FROM d2 WHERE d2.rowid = d1.rowid` where `d1`
+                        // is the *outer* table), it must resolve against the outer
+                        // row, not the inner one. Resolving it here — before the
+                        // inner-row fallbacks below — is essential: the inner
+                        // row's single `row_id` field answers
+                        // `get_row_id_for_table(Some("d1"))` for ANY table name, so
+                        // the fallback at the end of this block would otherwise
+                        // bind `d1.rowid` to the *inner* d2 row's rowid, making the
+                        // correlated predicate `d2.rowid = d1.rowid` trivially true
+                        // for every inner row and returning the first outer row's
+                        // result to all outer rows (rowvalue9 4.tn.4 / 4.tn.6).
+                        if let Some(ref table_id) = table_id {
+                            if !self.schema.table_schemas.contains_key(table_id) {
+                                if let Some(value) = self.resolve_outer_rowid(table) {
+                                    return Ok(value);
+                                }
+                                // Table is not in this scope and has no resolvable
+                                // outer rowid: fall through to NULL (matching the
+                                // derived-table behavior at the end of this block).
+                                return Ok(vibesql_types::SqlValue::Null);
+                            }
+                        }
                         if let Some(ref table_id) = table_id {
                             if let Some((_, table_schema)) = self.schema.table_schemas.get(table_id)
                             {
