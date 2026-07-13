@@ -1775,6 +1775,52 @@ proc is_script_failed_summary {line} {
     return [regexp {^Error:\s+[0-9]} $line]
 }
 
+proc is_bare_transaction_closer {sql} {
+    # True when every top-level statement in $sql is a bare transaction closer
+    # (COMMIT / COMMIT TRANSACTION / END / END TRANSACTION / ROLLBACK /
+    # ROLLBACK TRANSACTION), i.e. $sql closes a transaction but contains NO
+    # result-producing statement of its own.
+    #
+    # The shim defers a batched transaction's statements to a single CLI process
+    # that flushes at the closing COMMIT/END/ROLLBACK. SQLite's real `execsql
+    # COMMIT` returns {} — the batched statements already returned their own rows
+    # at their individual execsql calls, and COMMIT itself yields no rows. But
+    # the shim's flush replays the WHOLE batch through one process, so the flush
+    # output carries every replayed statement's rows plus any trailing status
+    # cell; parse_result of that leaks the batch dump into COMMIT's return value
+    # (fuzz-5.3 got a trailing "ok", fuzz-7.4 got the entire batched-row dump).
+    # When the flushing statement is ONLY a closer, the caller returns {} instead
+    # of the replayed batch output. See #6097 (split off from #6073).
+    #
+    # A body that closes a transaction AND carries a trailing result-producing
+    # statement (e.g. "... ; SELECT ...; COMMIT" or the close-then-reopen split
+    # bodies) is NOT a bare closer, so it still returns its real rows. We mask
+    # trigger bodies and string literals (as count_cli_statements does) so ';'
+    # inside them never splits a statement, then require every non-empty
+    # top-level segment to be a bare closer keyword.
+    set masked [mask_string_literals [mask_trigger_bodies $sql]]
+    set len [string length $masked]
+    set start 0
+    set saw_stmt 0
+    for {set i 0} {$i <= $len} {incr i} {
+        if {$i == $len || [string index $masked $i] eq ";"} {
+            set seg [string trim [string range $sql $start [expr {$i - 1}]]]
+            set start [expr {$i + 1}]
+            if {$seg eq ""} {
+                continue
+            }
+            set saw_stmt 1
+            set seg_upper [string toupper $seg]
+            if {$seg_upper ne "COMMIT" && $seg_upper ne "COMMIT TRANSACTION" &&
+                $seg_upper ne "END" && $seg_upper ne "END TRANSACTION" &&
+                $seg_upper ne "ROLLBACK" && $seg_upper ne "ROLLBACK TRANSACTION"} {
+                return 0
+            }
+        }
+    }
+    return $saw_stmt
+}
+
 proc select_error_line_for_stmt {output min_index} {
     # Return the first "Error executing statement N: ..." line whose N is >=
     # $min_index (the CLI index at which the NEW statement begins). Lower-N error
@@ -2481,6 +2527,19 @@ proc execsql {sql {db ""}} {
             error [translate_error_to_sqlite $result]
         }
         set parsed [parse_result $result $tolerate_err]
+        # When the statement that closes this batched transaction is ONLY a
+        # transaction closer (bare COMMIT / END / ROLLBACK, no trailing
+        # result-producing statement), SQLite's real `execsql COMMIT` returns
+        # {} — the batched statements already returned their own rows at their
+        # individual execsql calls. The flush above replayed the WHOLE batch
+        # through one process, so $parsed carries the replayed batch's rows (and
+        # any trailing status cell). Discard it and return {} so the harness sees
+        # what SQLite would (#6097; fuzz-5.3 / fuzz-7.4). Bodies that close AND
+        # carry a trailing SELECT still return their real rows.
+        if {[is_bare_transaction_closer $sql]} {
+            update_sqlite_counters $sql {}
+            return {}
+        }
         update_sqlite_counters $sql $parsed
         return $parsed
     } elseif {$begin_count > 0 && $end_count > 0 && $begin_count == $end_count} {
