@@ -1754,6 +1754,27 @@ proc count_cli_statements {sql} {
     return $n
 }
 
+proc is_script_failed_summary {line} {
+    # True when $line is the CLI's aggregate script-mode summary error
+    # ("N statements failed" — the `script-failed-error` l10n string, emitted as
+    # the process-level "Error: N statements failed"), rather than a specific,
+    # per-statement failure. That summary is only a roll-up count of the
+    # "Error executing statement N: <msg>" lines above it; it carries none of the
+    # specific error text that the fuzz.test allowlist matches, so it must never
+    # be attributed to a single statement (#6073).
+    #
+    # The multi-process shim always runs the CLI under the default en-US locale,
+    # so the line is literally "Error: <digits> statements failed". We key on the
+    # locale-independent structural signature instead of the localized wording:
+    # the summary is the only "Error:" line whose message begins with a bare
+    # count digit. Every genuine unattributable error the CLI emits as "Error:"
+    # (parse errors, "no such table", etc.) begins with a letter, and specific
+    # per-statement failures use the distinct "Error executing statement N:"
+    # form — so "^Error:\s+\d" isolates the summary without false positives.
+    set line [string trim $line]
+    return [regexp {^Error:\s+[0-9]} $line]
+}
+
 proc select_error_line_for_stmt {output min_index} {
     # Return the first "Error executing statement N: ..." line whose N is >=
     # $min_index (the CLI index at which the NEW statement begins). Lower-N error
@@ -1884,9 +1905,27 @@ proc trial_check_in_transaction {new_sql} {
             # surface it. Otherwise only earlier statements re-fired and the new
             # statement ran cleanly: return without raising so the caller batches
             # it normally.
+            #
+            # EXCLUDE the CLI's aggregate summary line "Error: N statements
+            # failed" (the `script-failed-error` l10n string). That line is the
+            # roll-up count of the per-statement "Error executing statement N"
+            # failures already emitted above — NOT an independent, unattributable
+            # error. In the fuzz.test 5.2/7.2 transactions every already-batched
+            # statement re-fires its (already-attributed) error on trial replay,
+            # so the only "Error:" line left after the numbered lines is this
+            # summary. Treating it as a genuine new failure surfaced the generic
+            # "N statements failed" text to do_fuzzy_test's allowlist matcher,
+            # which contains none of SQLite's specific substrings ("table",
+            # "datatype mismatch", "no such col", ...) — so the harness recorded
+            # a spurious Got:0/Expected:1 for a statement that in fact ran cleanly
+            # on the trial DB (#6073). Skip it so the new statement batches
+            # normally, exactly as when no "Error:" line is present at all.
             foreach line [split $result "\n"] {
                 set line [string trim $line]
                 if {[regexp {^Error: } $line]} {
+                    if {[is_script_failed_summary $line]} {
+                        continue
+                    }
                     set new_err $line
                     break
                 }
