@@ -22,15 +22,50 @@
 //! and is left untouched (the evaluator and the `row_values` validator cover
 //! those shapes). Nested sub-expressions are left to the runtime check.
 //!
-//! ## Context-sensitive messages (matching SQLite 3.51)
+//! ## Shape-based messages (matching SQLite 3.51)
+//!
+//! SQLite chooses between the two error messages by the *shape* of the
+//! expression, not by the statement type. The distinction is comparison vs
+//! `IN`: a plain scalar on one side of a *comparison* against a multi-column
+//! subquery is `row value misused`, whereas a scalar on the left of an `IN`
+//! whose subquery projects more than one column is the arity error
+//! `sub-select returns N columns - expected 1`. A bare multi-column subquery
+//! standing alone in a value position is likewise the arity error.
+//!
+//! Crucially, the *comparison* shape reports `row value misused` in **both**
+//! SELECT WHERE and UPDATE/DELETE WHERE — there is no SELECT-vs-DML split.
+//! Verified against sqlite3 3.51.0:
+//!
+//! ```text
+//! SELECT * FROM t WHERE a < (SELECT b, 2 FROM t);   -- row value misused
+//! UPDATE t SET a=1  WHERE a < (SELECT b, 2 FROM t);  -- row value misused
+//! DELETE FROM t     WHERE a < (SELECT b, 2 FROM t);  -- row value misused
+//! UPDATE t SET a=1  WHERE a IN (SELECT b, 2 FROM t); -- sub-select returns 2 columns
+//! ```
+//!
+//! The table below records what each validator *currently emits*. The
+//! predicate (WHERE/HAVING/ON) and `IN` rows are byte-parity with sqlite3 3.51;
+//! two value-position and one DML-predicate row are marked `[divergent]` — they
+//! reflect VibeSQL's present behavior, which does not yet match SQLite's
+//! `row value misused` for that sub-shape. Those divergences are pre-existing
+//! and out of scope here (the SELECT WHERE / HAVING / ON walk added below is
+//! sqlite-faithful).
 //!
 //! | Context                    | shape                       | message           |
 //! |----------------------------|-----------------------------|-------------------|
 //! | value (SELECT item, SET)   | bare `(SELECT a,b)`         | arity error       |
 //! |                            | `(SELECT a,b) <op> scalar`  | row value misused |
-//! |                            | `scalar <op> (SELECT a,b)`  | arity error       |
-//! | predicate (WHERE)          | `col <op> (SELECT a,b)`     | arity error       |
-//! |                            | `(SELECT a,b) <op> col`     | arity error       |
+//! |                            | `scalar <op> (SELECT a,b)`  | arity error `[divergent: sqlite says row value misused]` |
+//! | comparison (WHERE/HAVING/ON) | `scalar <op> (SELECT a,b)` | row value misused |
+//! |                            | `(SELECT a,b) <op> scalar`  | row value misused |
+//! | `IN` (any WHERE)           | `scalar IN (SELECT a,b)`    | arity error       |
+//!
+//! Note: [`validate_predicate_expr`] (the UPDATE/DELETE WHERE walker) still
+//! raises the *arity* error for the comparison shape rather than
+//! `row value misused` `[divergent]`; aligning that DML path (and the value
+//! sub-shape above) with SQLite's `row value misused` is a separate,
+//! pre-existing question tracked outside this module (it does not affect the
+//! SELECT WHERE / HAVING / ON walk below).
 
 use vibesql_ast::{BinaryOperator, Expression};
 
@@ -193,20 +228,28 @@ fn in_lhs_arity(expr: &Expression, database: &vibesql_storage::Database) -> Opti
     }
 }
 
-/// Validate a `WHERE` predicate of a top-level `SELECT`.
+/// Validate a boolean predicate of a top-level `SELECT` — a `WHERE`, `HAVING`,
+/// or `JOIN ... ON` condition.
 ///
-/// SQLite's SELECT-WHERE handling differs from the UPDATE/DELETE WHERE rule
-/// covered by [`validate_predicate_expr`]: a scalar compared against a
-/// multi-column subquery in a SELECT WHERE is reported as `row value misused`,
-/// whereas the same shape in an UPDATE/DELETE WHERE is the arity error
-/// `sub-select returns N columns - expected 1`. (Verified against sqlite3 3.51:
-/// `SELECT * FROM t WHERE a < (SELECT b, 2)` → `row value misused`, while the
-/// UPDATE/DELETE forms give the arity error — see `rowvalue4.test` 8.2 and
-/// `rowvalue.test` 15.3/15.4.)
+/// For the *comparison* shape (`scalar <op> (SELECT a,b)`), SQLite reports
+/// `row value misused`. This is **not** a SELECT-vs-DML distinction: the same
+/// comparison shape reports `row value misused` in an UPDATE/DELETE WHERE too
+/// (verified against sqlite3 3.51 — see the module header). The arity error
+/// `sub-select returns N columns - expected 1` comes from the `IN` shape
+/// (`scalar IN (SELECT a,b)`), which this walk detects while descending.
+///
+/// All three SELECT predicate positions behave identically (verified against
+/// sqlite3 3.51.0, all over an empty table):
+///
+/// ```text
+/// SELECT a FROM t WHERE  a < (SELECT b, 2 FROM t);                 -- row value misused
+/// SELECT a FROM t GROUP BY a HAVING a < (SELECT b, 2 FROM t);       -- row value misused
+/// SELECT t.a FROM t JOIN u ON t.a < (SELECT b, 2 FROM t);           -- row value misused
+/// ```
 ///
 /// The check is a prepare-time walk so the misuse surfaces even when the target
-/// table is empty and the WHERE predicate is never evaluated. In addition to
-/// the top-level scalar-vs-subquery shape, the walk descends into nested
+/// table is empty and the predicate is never evaluated. In addition to the
+/// top-level scalar-vs-subquery shape, the walk descends into nested
 /// scalar-subquery bodies so a deep arity misuse such as
 /// `(a,b) > (SELECT 2 IN (SELECT 2,2), 2)` (`rowvalue9.test` 8.2, where the
 /// inner `2 IN (SELECT 2,2)` compares a scalar against a 2-column subquery) is

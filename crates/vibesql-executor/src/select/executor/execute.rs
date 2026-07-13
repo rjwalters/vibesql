@@ -169,6 +169,54 @@ impl SelectExecutor<'_> {
         }
         if let Some(having_expr) = &stmt.having {
             super::validation::validate_row_value_usage(having_expr)?;
+            // Scalar-subquery arity / row-value misuse in a HAVING clause
+            // behaves identically to the SELECT WHERE case: `a < (SELECT b,2)`
+            // is `row value misused` at prepare time even over an empty table
+            // (sqlite3 3.51). Mirror the WHERE walk (#6101). Only the top-level
+            // statement is inspected; nested subqueries reach their own check.
+            if self.outer_schema.is_none() && self.subquery_depth == 0 {
+                super::validation::validate_select_where_subquery_arity(
+                    having_expr,
+                    self.database,
+                )?;
+            }
+        }
+        // JOIN ... ON conditions share the SELECT-predicate arity rule: a scalar
+        // compared against a multi-column subquery is `row value misused` at
+        // prepare time even over an empty table (sqlite3 3.51, #6101). Walk every
+        // ON condition in the (possibly nested) FROM tree.
+        if self.outer_schema.is_none() && self.subquery_depth == 0 {
+            if let Some(from) = &stmt.from {
+                Self::for_each_join_condition(from, &mut |cond| {
+                    super::validation::validate_select_where_subquery_arity(cond, self.database)
+                })?;
+            }
+        }
+
+        // Validate COLLATE names in the remaining clauses (#6110): ORDER BY,
+        // GROUP BY, HAVING, and JOIN ... ON. The SELECT-list and WHERE clause
+        // are already validated in `validate_select_columns_with_context`, but
+        // an unknown collating sequence named in any other clause must likewise
+        // error at prepare time (`no such collation sequence: <name>`), even
+        // over an empty table. Each nested subquery validates its own clauses
+        // through its own `execute`, so this walks only this statement's clauses.
+        if let Some(order_by) = stmt.order_by.as_deref() {
+            for item in order_by {
+                super::validation::validate_collation_names(&item.expr)?;
+            }
+        }
+        if let Some(group_by) = &stmt.group_by {
+            for expr in group_by.all_expressions() {
+                super::validation::validate_collation_names(expr)?;
+            }
+        }
+        if let Some(having_expr) = &stmt.having {
+            super::validation::validate_collation_names(having_expr)?;
+        }
+        if let Some(from) = &stmt.from {
+            Self::for_each_join_condition(from, &mut |cond| {
+                super::validation::validate_collation_names(cond)
+            })?;
         }
         if let Some(order_by) = stmt.order_by.as_deref() {
             for item in order_by {
@@ -354,6 +402,26 @@ impl SelectExecutor<'_> {
         }
 
         Ok(result)
+    }
+
+    /// Invoke `f` on every `JOIN ... ON` condition reachable within a
+    /// (possibly nested) FROM clause. Used to run prepare-time predicate
+    /// validation over ON conditions the same way it runs over WHERE / HAVING.
+    fn for_each_join_condition<F>(
+        from: &vibesql_ast::FromClause,
+        f: &mut F,
+    ) -> Result<(), ExecutorError>
+    where
+        F: FnMut(&vibesql_ast::Expression) -> Result<(), ExecutorError>,
+    {
+        if let vibesql_ast::FromClause::Join { left, right, condition, .. } = from {
+            Self::for_each_join_condition(left, f)?;
+            Self::for_each_join_condition(right, f)?;
+            if let Some(cond) = condition {
+                f(cond)?;
+            }
+        }
+        Ok(())
     }
 
     /// Execute a SELECT statement and return an iterator over results
