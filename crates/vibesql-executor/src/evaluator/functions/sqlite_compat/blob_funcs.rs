@@ -273,7 +273,13 @@ fn format_float_for_quote(n: f64) -> String {
             "-9.0e+999".to_string()
         }
     } else {
-        n.to_string()
+        // Finite values must render through the SqlValue Display impl
+        // (format_f64), not the raw f64 `to_string()`. Rust's `f64::to_string`
+        // emits shortest-round-trip *fixed-point* text (e.g. a 300-digit
+        // expansion for 1e300), whereas SQLite's quote() uses %!.15g
+        // ("1.0e+300", "2.0"). Display already matches sqlite3 3.51, so route
+        // finite reals through it for parity.
+        SqlValue::Double(n).to_string()
     }
 }
 

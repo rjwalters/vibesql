@@ -1454,10 +1454,16 @@ fn sql_value_to_string(value: &vibesql_types::SqlValue) -> String {
         vibesql_types::SqlValue::Bigint(i) => i.to_string(),
         vibesql_types::SqlValue::Smallint(i) => i.to_string(),
         vibesql_types::SqlValue::Unsigned(u) => u.to_string(),
-        vibesql_types::SqlValue::Numeric(n) => n.to_string(),
-        vibesql_types::SqlValue::Real(r) => r.to_string(),
-        vibesql_types::SqlValue::Double(d) => d.to_string(),
-        vibesql_types::SqlValue::Float(f) => f.to_string(),
+        // Floating-point values must render through the SqlValue Display impl
+        // (format_f64/format_f32), not the raw f64/f32 `to_string()`. Rust's
+        // `f64::to_string` emits shortest-round-trip *fixed-point* text
+        // (e.g. "2" for 2.0, a 300-digit expansion for 1e300), whereas SQLite's
+        // group_concat/TEXT rendering uses %!.15g ("2.0", "1.0e+300"). Display
+        // already matches sqlite3 3.51, so route floats through it for parity.
+        vibesql_types::SqlValue::Numeric(_)
+        | vibesql_types::SqlValue::Real(_)
+        | vibesql_types::SqlValue::Double(_)
+        | vibesql_types::SqlValue::Float(_) => value.to_string(),
         vibesql_types::SqlValue::Boolean(b) => {
             if *b {
                 "1".to_string()

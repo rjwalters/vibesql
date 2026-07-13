@@ -191,9 +191,18 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
                 vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                // Floats render through the SqlValue Display impl (%!.15g), not
+                // the raw f64/f32 `to_string()`, so `1e300 LIKE '1.0e+300'`
+                // matches SQLite (fixed-point expansion would never match).
+                vibesql_types::SqlValue::Float(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Float(f).to_string())
+                }
+                vibesql_types::SqlValue::Double(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Double(f).to_string())
+                }
+                vibesql_types::SqlValue::Real(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Real(f).to_string())
+                }
                 // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
                 vibesql_types::SqlValue::Boolean(b) => {
                     arcstr::ArcStr::from(if b { "1" } else { "0" })
@@ -217,9 +226,15 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
                 vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Float(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Float(f).to_string())
+                }
+                vibesql_types::SqlValue::Double(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Double(f).to_string())
+                }
+                vibesql_types::SqlValue::Real(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Real(f).to_string())
+                }
                 // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
                 vibesql_types::SqlValue::Boolean(b) => {
                     arcstr::ArcStr::from(if b { "1" } else { "0" })
@@ -321,9 +336,17 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
                 vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                // Floats render through the SqlValue Display impl (%!.15g), not
+                // the raw f64/f32 `to_string()`, matching SQLite's GLOB coercion.
+                vibesql_types::SqlValue::Float(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Float(*f).to_string())
+                }
+                vibesql_types::SqlValue::Double(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Double(*f).to_string())
+                }
+                vibesql_types::SqlValue::Real(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Real(*f).to_string())
+                }
                 vibesql_types::SqlValue::Boolean(b) => {
                     arcstr::ArcStr::from(if *b { "1" } else { "0" })
                 }
@@ -346,9 +369,15 @@ pub(super) fn evaluate(
                 vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
                 vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
                 vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Float(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Float(*f).to_string())
+                }
+                vibesql_types::SqlValue::Double(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Double(*f).to_string())
+                }
+                vibesql_types::SqlValue::Real(f) => {
+                    arcstr::ArcStr::from(vibesql_types::SqlValue::Real(*f).to_string())
+                }
                 vibesql_types::SqlValue::Boolean(b) => {
                     arcstr::ArcStr::from(if *b { "1" } else { "0" })
                 }
