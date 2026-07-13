@@ -79,7 +79,8 @@ def get_latest_run() -> Optional[Dict]:
     """
     rows = query_db("""
         SELECT run_id, started_at, completed_at, git_commit,
-               total_files, total_tests, passed, failed, skipped, parse_errors
+               total_files, total_tests, passed, failed, skipped, parse_errors,
+               machine_tag
         FROM tcl_test_runs
         WHERE run_id = COALESCE(
             (SELECT MAX(run_id) FROM tcl_test_results),
@@ -92,6 +93,11 @@ def get_latest_run() -> Optional[Dict]:
         return None
 
     row = rows[0]
+    # machine_tag is a nullable/newer column: guard against short rows from a
+    # legacy DB where the SELECT fell back to fewer columns.
+    machine_tag = row[10] if len(row) > 10 else None
+    if machine_tag in ("", "NULL"):
+        machine_tag = None
     return {
         "run_id": int(row[0]) if row[0] else 0,
         "started_at": row[1],
@@ -103,6 +109,7 @@ def get_latest_run() -> Optional[Dict]:
         "failed": int(row[7]) if row[7] else 0,
         "skipped": int(row[8]) if row[8] else 0,
         "parse_errors": int(row[9]) if row[9] else 0,
+        "machine_tag": machine_tag,
     }
 
 
@@ -269,6 +276,8 @@ def export_tcl_results(output_dir: Optional[Path] = None, verbose: bool = False)
             "skipped": latest_run["skipped"],
             "pass_rate": round(latest_run["passed"] / (latest_run["total_tests"] - latest_run["skipped"]) * 100, 1)
                 if latest_run["total_tests"] > latest_run["skipped"] else 0.0,
+            # machine_tag: which host produced this run (None -> "unknown/local")
+            "machine_tag": latest_run.get("machine_tag"),
         },
         "categories": get_results_by_category(run_id),
         "by_file": get_results_by_file(run_id),

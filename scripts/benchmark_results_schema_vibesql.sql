@@ -14,7 +14,11 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     passed_queries INTEGER,
     failed_queries INTEGER,
     timeout_queries INTEGER,
-    notes TEXT
+    notes TEXT,
+    -- machine_tag: identifies the host that produced this run so localhost
+    -- numbers can be distinguished from dedicated-hardware runs. Nullable;
+    -- historical rows read back as NULL ("unknown/local").
+    machine_tag TEXT
 );
 
 -- TPC-C Results: Transaction-specific metrics for OLTP workloads
