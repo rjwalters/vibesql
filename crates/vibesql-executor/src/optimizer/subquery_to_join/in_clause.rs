@@ -77,6 +77,30 @@ fn qualify_outer_expr_in_scope(
 ) -> Option<Expression> {
     if let Expression::ColumnRef(col_id) = expr {
         if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {
+            // The bare `rowid`/`_rowid_`/`oid` pseudo-column is not a real column
+            // on any outer source, so `resolve_outer_column_qualifier` finds zero
+            // matches and returns `LeaveUnqualified`. Folding a bare `rowid` into
+            // the synthesized SEMI/ANTI-join ON condition then breaks: in the
+            // join's combined schema (outer table + subquery table) an unqualified
+            // `rowid` no longer resolves to the outer table's rowid and evaluates
+            // to NULL, so the predicate never matches and the whole IN filter
+            // drops every row (issue #6088; rowvalue9 5.2/5.3).
+            //
+            // Qualify it against the single outer table that actually owns a
+            // rowid. If the outer scope is anything other than exactly one
+            // rowid-bearing base table (multiple tables, a WITHOUT ROWID table, a
+            // view, or a derived/VALUES source), abort the transform and fall back
+            // to row-by-row `eval_in_subquery`, which resolves the bare rowid
+            // against the scanned table correctly.
+            if is_rowid_pseudo_column(col_id.column_canonical()) {
+                return match single_outer_rowid_table(from, database) {
+                    Some(table) => {
+                        Some(rewrite_column_refs_with_alias(expr, &table, &table))
+                    }
+                    None => None,
+                };
+            }
+
             match resolve_outer_column_qualifier(
                 from,
                 database,
@@ -92,6 +116,39 @@ fn qualify_outer_expr_in_scope(
         }
     }
     Some(expr.clone())
+}
+
+/// Whether `column` is one of SQLite's rowid pseudo-column spellings.
+fn is_rowid_pseudo_column(column: &str) -> bool {
+    column.eq_ignore_ascii_case("rowid")
+        || column.eq_ignore_ascii_case("_rowid_")
+        || column.eq_ignore_ascii_case("oid")
+}
+
+/// Resolve the effective name of the single outer-FROM base table that owns a
+/// rowid, or `None` if the outer scope is not exactly one rowid-bearing base
+/// table.
+///
+/// Used to qualify a bare `rowid` LHS before it becomes the left side of a
+/// synthesized SEMI/ANTI-join predicate (issue #6088). Returns `None` — signaling
+/// the caller to abort the IN→join transform and fall back to row-by-row
+/// evaluation — when the outer FROM is a join/multiple tables (a bare rowid would
+/// be ambiguous), a WITHOUT ROWID table or a view (no rowid pseudo-column), or a
+/// derived/VALUES source (no rowid, and its effective name is not a base table).
+fn single_outer_rowid_table(from: &FromClause, database: &Database) -> Option<String> {
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            let table = database.get_table(name)?;
+            // WITHOUT ROWID tables and views have no rowid pseudo-column.
+            if table.schema.without_rowid || table.schema.is_view {
+                return None;
+            }
+            Some(alias.clone().unwrap_or_else(|| name.clone()))
+        }
+        // Joins/multiple tables → a bare rowid is ambiguous; derived/VALUES
+        // sources have no rowid. In all these cases fall back to row-by-row.
+        _ => None,
+    }
 }
 
 /// Try to convert an IN subquery to a SEMI or ANTI join
