@@ -19,6 +19,23 @@ pub(crate) enum ColumnPositionResult {
     NotAPosition,
 }
 
+/// True when `value` can be a positional ORDER BY / GROUP BY column ordinal.
+///
+/// SQLite only treats an integer ORDER BY / GROUP BY term as a positional
+/// column ordinal when its magnitude fits in a signed 32-bit int — i.e.
+/// `-2147483647 ..= 2147483647` (`|value| <= i32::MAX`). A literal outside that
+/// range — e.g. `ORDER BY -2147483648`, `ORDER BY -2147483649`, or
+/// `ORDER BY 4294967296` — is parsed as an ordinary constant expression
+/// instead, so no positional range check applies and the query runs (ordering
+/// by a constant is a no-op). Note `i32::MIN` (`-2147483648`) is deliberately
+/// excluded: SQLite treats it as a constant, not an ordinal. This mirrors
+/// SQLite's `resolveOrderByTermToExprList` behaviour and keeps VibeSQL from
+/// raising a spurious "term out of range" error for out-of-range ordinals
+/// (#6071).
+fn fits_ordinal_width(value: i64) -> bool {
+    value.unsigned_abs() <= i32::MAX as u64
+}
+
 /// Extracts a numeric column position from an ORDER BY expression.
 ///
 /// Handles:
@@ -26,11 +43,20 @@ pub(crate) enum ColumnPositionResult {
 /// - `ORDER BY +N` - Unary plus with integer → Position(N) (#4418)
 /// - `ORDER BY -N` - Unary minus with integer → Negative(N)
 /// - Other expressions → NotAPosition
+///
+/// An integer literal whose value does not fit in a signed 32-bit int is NOT a
+/// column ordinal (SQLite treats it as a constant expression); such terms
+/// classify as [`ColumnPositionResult::NotAPosition`] so no range check runs
+/// (#6071).
 pub(crate) fn extract_column_position(expr: &vibesql_ast::Expression) -> ColumnPositionResult {
     match expr {
         // Direct integer literal: ORDER BY 1, ORDER BY 2, etc.
         vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) => {
-            ColumnPositionResult::Position(*pos)
+            if fits_ordinal_width(*pos) {
+                ColumnPositionResult::Position(*pos)
+            } else {
+                ColumnPositionResult::NotAPosition
+            }
         }
         // Unary operator with integer
         vibesql_ast::Expression::UnaryOp { op, expr } => {
@@ -39,9 +65,16 @@ pub(crate) fn extract_column_position(expr: &vibesql_ast::Expression) -> ColumnP
             {
                 match op {
                     // ORDER BY +N: treat as ORDER BY N (#4418)
-                    vibesql_ast::UnaryOperator::Plus => ColumnPositionResult::Position(*pos),
-                    // ORDER BY -N: always invalid
-                    vibesql_ast::UnaryOperator::Minus => ColumnPositionResult::Negative(*pos),
+                    vibesql_ast::UnaryOperator::Plus if fits_ordinal_width(*pos) => {
+                        ColumnPositionResult::Position(*pos)
+                    }
+                    // ORDER BY -N: an in-range negative ordinal is always out
+                    // of range (< 1); a negative literal whose magnitude exceeds
+                    // i32::MAX (e.g. -2147483648, -2147483649) is a constant
+                    // expression, not an ordinal.
+                    vibesql_ast::UnaryOperator::Minus if fits_ordinal_width(*pos) => {
+                        ColumnPositionResult::Negative(*pos)
+                    }
                     _ => ColumnPositionResult::NotAPosition,
                 }
             } else {
@@ -324,4 +357,100 @@ pub(crate) fn count_select_columns(
         }
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_ast::{Expression, UnaryOperator};
+    use vibesql_types::SqlValue;
+
+    fn int_lit(n: i64) -> Expression {
+        Expression::Literal(SqlValue::Integer(n))
+    }
+
+    fn unary(op: UnaryOperator, n: i64) -> Expression {
+        Expression::UnaryOp { op, expr: Box::new(int_lit(n)) }
+    }
+
+    #[test]
+    fn positive_literals_within_i32_are_positions() {
+        assert!(matches!(extract_column_position(&int_lit(1)), ColumnPositionResult::Position(1)));
+        assert!(matches!(
+            extract_column_position(&int_lit(i32::MAX as i64)),
+            ColumnPositionResult::Position(2147483647)
+        ));
+    }
+
+    #[test]
+    fn zero_is_a_position_and_validated_out_of_range() {
+        // ORDER BY 0 is an ordinal candidate; range validation rejects it.
+        assert!(matches!(extract_column_position(&int_lit(0)), ColumnPositionResult::Position(0)));
+    }
+
+    #[test]
+    fn unary_plus_within_i32_is_a_position() {
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Plus, 2)),
+            ColumnPositionResult::Position(2)
+        ));
+    }
+
+    #[test]
+    fn small_negative_is_negative_ordinal() {
+        // ORDER BY -1 / -2 are in-range ordinal candidates (always invalid,
+        // reported as out of range by validation).
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Minus, 1)),
+            ColumnPositionResult::Negative(1)
+        ));
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Minus, i32::MAX as i64)),
+            ColumnPositionResult::Negative(2147483647)
+        ));
+    }
+
+    #[test]
+    fn positive_literal_above_i32_max_is_not_a_position() {
+        // 2147483648 exceeds i32::MAX: SQLite treats it as a constant
+        // expression, not an ordinal (#6071) — no range check applies.
+        assert!(matches!(
+            extract_column_position(&int_lit(i32::MAX as i64 + 1)),
+            ColumnPositionResult::NotAPosition
+        ));
+        assert!(matches!(
+            extract_column_position(&int_lit(4_294_967_297)),
+            ColumnPositionResult::NotAPosition
+        ));
+    }
+
+    #[test]
+    fn negative_literal_at_or_below_i32_min_is_not_a_position() {
+        // -2147483648 (i32::MIN) and -2147483649 exceed the ordinal magnitude
+        // (|value| > i32::MAX): constant expressions, not ordinals (#6071).
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Minus, i32::MAX as i64 + 1)),
+            ColumnPositionResult::NotAPosition
+        ));
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Minus, 2_147_483_649)),
+            ColumnPositionResult::NotAPosition
+        ));
+        assert!(matches!(
+            extract_column_position(&unary(UnaryOperator::Minus, 9_999_999_999_999)),
+            ColumnPositionResult::NotAPosition
+        ));
+    }
+
+    #[test]
+    fn fits_ordinal_width_boundaries() {
+        assert!(fits_ordinal_width(0));
+        assert!(fits_ordinal_width(1));
+        assert!(fits_ordinal_width(i32::MAX as i64)); // 2147483647
+        assert!(fits_ordinal_width(-(i32::MAX as i64))); // -2147483647
+        assert!(!fits_ordinal_width(i32::MAX as i64 + 1)); // 2147483648
+        assert!(!fits_ordinal_width(i32::MIN as i64)); // -2147483648
+        assert!(!fits_ordinal_width(i64::MAX));
+        assert!(!fits_ordinal_width(i64::MIN));
+    }
 }
