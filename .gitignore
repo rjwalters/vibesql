@@ -129,3 +129,8 @@ profile-*.json.gz
 .loom/state.json
 .loom/*.log
 .loom/*.sock
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
