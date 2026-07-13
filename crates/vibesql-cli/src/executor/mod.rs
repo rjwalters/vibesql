@@ -130,6 +130,17 @@ fn format_sql_value(v: &SqlValue) -> String {
                 "0".to_string()
             }
         }
+        // TEXT values are rendered to the client like SQLite's
+        // sqlite3_column_text(): the returned string terminates at the first
+        // embedded NUL byte. This is the MEM_Zero / OP_ToText behavior that
+        // makes CAST(zeroblob(N) AS text) surface as an empty string and
+        // CAST(x'4142004344' AS text) surface as "AB" (fuzz-1.8). The stored
+        // value keeps all its bytes (hex()/quote() still see them); only this
+        // client text-rendering boundary truncates.
+        SqlValue::Varchar(s) | SqlValue::Character(s) => match s.find('\0') {
+            Some(nul_idx) => s[..nul_idx].to_string(),
+            None => s.to_string(),
+        },
         _ => format!("{}", v),
     }
 }
