@@ -49,10 +49,13 @@ pub(crate) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Bigint(i) => Cow::Owned(i.to_string()),
         SqlValue::Smallint(i) => Cow::Owned(i.to_string()),
         SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
-        SqlValue::Real(r) => Cow::Owned(r.to_string()),
-        SqlValue::Double(d) => Cow::Owned(d.to_string()),
-        SqlValue::Numeric(n) => Cow::Owned(n.to_string()),
-        SqlValue::Float(f) => Cow::Owned(f.to_string()),
+        // Floats coerce through the SqlValue Display impl (%!.15g), not the raw
+        // f64/f32 `to_string()`. SQLite compares against the %!.15g rendering, so
+        // `2.0 LIKE '2.0'` is true and `1e300 LIKE '1.0e+300'` is true.
+        SqlValue::Real(_)
+        | SqlValue::Double(_)
+        | SqlValue::Numeric(_)
+        | SqlValue::Float(_) => Cow::Owned(args[1].to_string()),
         SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
         other => Cow::Owned(other.to_string()),
     };
@@ -127,10 +130,12 @@ pub(crate) fn glob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Bigint(i) => Cow::Owned(i.to_string()),
         SqlValue::Smallint(i) => Cow::Owned(i.to_string()),
         SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
-        SqlValue::Real(r) => Cow::Owned(r.to_string()),
-        SqlValue::Double(d) => Cow::Owned(d.to_string()),
-        SqlValue::Numeric(n) => Cow::Owned(n.to_string()),
-        SqlValue::Float(f) => Cow::Owned(f.to_string()),
+        // Floats coerce through the SqlValue Display impl (%!.15g), not the raw
+        // f64/f32 `to_string()`, matching SQLite's GLOB coercion.
+        SqlValue::Real(_)
+        | SqlValue::Double(_)
+        | SqlValue::Numeric(_)
+        | SqlValue::Float(_) => Cow::Owned(args[1].to_string()),
         SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
         other => Cow::Owned(other.to_string()),
     };
