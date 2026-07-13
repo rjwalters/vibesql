@@ -668,6 +668,7 @@ mod tests {
             table_schemas: std::collections::HashMap::new(),
             total_columns: 0,
             hidden_columns: std::collections::HashSet::new(),
+            always_hidden_columns: std::collections::HashSet::new(),
             outer_schema: None,
             duplicate_aliases: std::collections::HashSet::new(),
             joined_columns: std::collections::HashSet::new(),

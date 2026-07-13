@@ -474,6 +474,7 @@ fn build_schema_from_tables(
             table_schemas,
             total_columns,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),

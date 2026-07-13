@@ -110,6 +110,13 @@ pub(crate) fn project_row_combined(
                                     continue;
                                 }
 
+                                // Always-hidden (SQLITE_HIDDEN-style TVF) columns are
+                                // excluded from wildcard expansion unconditionally,
+                                // with no replacement lookup (issue #6050).
+                                if schema.is_column_always_hidden(abs_idx) {
+                                    continue;
+                                }
+
                                 // Check if column should be included
                                 let should_include = if schema.is_column_hidden(abs_idx) {
                                     schema.get_column_replacement(abs_idx).is_some()
@@ -246,9 +253,16 @@ pub(crate) fn project_row_combined(
                             end_index
                         };
 
-                        // Extract the columns for this table
+                        // Extract the columns for this table, skipping always-hidden
+                        // (SQLITE_HIDDEN-style TVF) columns so `table.*` excludes
+                        // json/root just like `SELECT *` does (issue #6050).
                         if start_index < effective_end && effective_end <= row.values.len() {
-                            values.extend(row.values[start_index..effective_end].iter().cloned());
+                            for abs_idx in start_index..effective_end {
+                                if schema.is_column_always_hidden(abs_idx) {
+                                    continue;
+                                }
+                                values.push(row.values[abs_idx].clone());
+                            }
                         }
                         // If indices are out of bounds, this might be an error, but we'll be silent
                         // for now

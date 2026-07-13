@@ -202,6 +202,14 @@ impl SelectExecutor<'_> {
                                         continue;
                                     }
 
+                                    // Always-hidden (SQLITE_HIDDEN-style TVF) columns
+                                    // are excluded from wildcard expansion
+                                    // unconditionally, with no replacement lookup
+                                    // (issue #6050).
+                                    if from_res.schema.is_column_always_hidden(abs_idx) {
+                                        continue;
+                                    }
+
                                     // For hidden columns, check if they have a replacement or coalesce
                                     if from_res.schema.is_column_hidden(abs_idx) {
                                         let has_replacement = from_res
@@ -265,12 +273,24 @@ impl SelectExecutor<'_> {
                         // TableKey lookup is case-insensitive
                         let result = from_res.schema.get_table(qualifier).cloned();
 
-                        if let Some((_start_index, table_schema)) = result {
+                        if let Some((start_index, table_schema)) = result {
+                            // Always-hidden (SQLITE_HIDDEN-style TVF) columns are
+                            // excluded from `table.*` expansion too, matching SQLite
+                            // (issue #6050). Count only the visible columns for the
+                            // derived-column-list arity check.
+                            let visible_count = table_schema
+                                .columns
+                                .iter()
+                                .enumerate()
+                                .filter(|(col_idx, _)| {
+                                    !from_res.schema.is_column_always_hidden(start_index + col_idx)
+                                })
+                                .count();
                             // Apply derived column list if present
                             if let Some(derived_cols) = alias {
-                                if derived_cols.len() != table_schema.columns.len() {
+                                if derived_cols.len() != visible_count {
                                     return Err(ExecutorError::ColumnCountMismatch {
-                                        expected: table_schema.columns.len(),
+                                        expected: visible_count,
                                         provided: derived_cols.len(),
                                     });
                                 }
@@ -281,7 +301,14 @@ impl SelectExecutor<'_> {
                                 // full_column_names=ON (colname.test section 4.6).
                                 // The prefix uses the schema's canonical table name, not the
                                 // qualifier as typed.
-                                for col_schema in &table_schema.columns {
+                                for (col_idx, col_schema) in table_schema.columns.iter().enumerate()
+                                {
+                                    if from_res
+                                        .schema
+                                        .is_column_always_hidden(start_index + col_idx)
+                                    {
+                                        continue;
+                                    }
                                     let display_name = match wildcard_mode {
                                         ColumnNamingMode::Full => {
                                             format!("{}.{}", table_schema.name, col_schema.name)

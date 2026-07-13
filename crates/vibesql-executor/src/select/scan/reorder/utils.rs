@@ -168,6 +168,7 @@ pub(super) fn build_reordered_schema(
         table_schemas: new_table_schemas,
         total_columns: current_position,
         hidden_columns: std::collections::HashSet::new(),
+        always_hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
         duplicate_aliases: std::collections::HashSet::new(),
         joined_columns: std::collections::HashSet::new(),

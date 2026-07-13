@@ -9,6 +9,11 @@
 //! key, value, type, atom, id, parent, fullkey, path
 //! ```
 //!
+//! plus two `SQLITE_HIDDEN` columns — `json` (the original input document,
+//! echoed verbatim on every row) and `root` (the path argument, default `"$"`).
+//! Both are resolvable by explicit reference (`jx.json`, `WHERE root = '$'`) but
+//! excluded from `SELECT *` / `pragma_table_info` (issue #6050).
+//!
 //! - `json_each` yields one row per *immediate* child of the (possibly
 //!   path-navigated) value; a scalar value yields exactly one row.
 //! - `json_tree` performs a depth-first walk emitting one row per node,
@@ -45,8 +50,15 @@ use crate::{
 };
 use vibesql_types::{DataType, SqlValue};
 
-/// The eight columns exposed by `json_each` / `json_tree`, in order.
+/// The eight *visible* columns exposed by `json_each` / `json_tree`, in order.
+/// The two trailing hidden columns (`json`, `root`) are appended by
+/// [`build_schema`] and are not part of this array so the `#[cfg(test)]`
+/// column-index constants (KEY..PATH) and `column_aliases` arity remain unchanged.
 const TVF_COLUMNS: [&str; 8] = ["key", "value", "type", "atom", "id", "parent", "fullkey", "path"];
+
+/// The two trailing `SQLITE_HIDDEN` columns (`json`, `root`) appended after the
+/// eight visible columns. Their absolute indices in the emitted rows are 8 and 9.
+const TVF_HIDDEN_COLUMNS: [&str; 2] = ["json", "root"];
 
 /// Execute a JSON table-valued function (`json_each` / `json_tree`) in FROM
 /// position, returning the expanded 8-column relation.
@@ -135,17 +147,33 @@ pub(crate) fn execute_table_function(
     // A BLOB argument is a JSONB document (produced by jsonb()/jsonb_*()): decode
     // it directly into the expansion root. A malformed/non-JSONB blob is an error
     // (SQLite: `json_each(x'abcd')` -> "malformed JSON"), never silent zero rows.
+    // The `json` hidden column echoes the *original* input document verbatim
+    // (issue #6050). SQLite returns the input argument as-supplied — for a TEXT
+    // argument this preserves the original whitespace/formatting exactly, so
+    // `json_each(t.j).json == t.j` byte-for-byte (json101-5.5/5.6 compare with
+    // `<>`). For a JSONB blob the text form of the decoded document is used; for
+    // a non-text scalar its JSON scalar token is used.
+    let mut json_column_text: Option<String> = None;
     let root = match &json_value {
         SqlValue::Null => return Ok(super::FromResult::from_rows(schema, vec![])),
-        SqlValue::Blob(bytes) => decode_jsonb_blob(bytes)
-            .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?,
+        SqlValue::Blob(bytes) => {
+            let node = decode_jsonb_blob(bytes)
+                .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
+            // JSONB blob: echo the decoded document as normalized JSON text
+            // (the raw blob is not valid text to echo).
+            json_column_text = Some(json_node_to_json_text(&node));
+            node
+        }
         other => {
             let json_str = match sqlvalue_as_json_text(other) {
                 Some(s) => s,
                 None => return Ok(super::FromResult::from_rows(schema, vec![])),
             };
-            parse_json_relaxed(&json_str)
-                .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?
+            let node = parse_json_relaxed(&json_str)
+                .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
+            // Echo the input text verbatim (preserves original whitespace).
+            json_column_text = Some(json_str);
+            node
         }
     };
 
@@ -190,23 +218,44 @@ pub(crate) fn execute_table_function(
         );
     }
 
+    // Append the two hidden columns to every emitted row. Both are loop-invariant
+    // per TVF call (issue #6050):
+    // - `json`: the *original outer* input document, echoed verbatim on every row
+    //   regardless of any path navigation (SQLite echoes the outer input, not the
+    //   navigated subtree). Captured above so original whitespace is preserved.
+    // - `root`: the path argument string as given (default `"$"` when omitted).
+    let json_text = match json_column_text {
+        Some(s) => SqlValue::Varchar(s.into()),
+        None => SqlValue::Null,
+    };
+    let root_path = SqlValue::Varchar(base_path.as_str().into());
+    for row in &mut rows {
+        row.values.push(json_text.clone());
+        row.values.push(root_path.clone());
+    }
+
     Ok(super::FromResult::from_rows(schema, rows))
 }
 
-/// Build the derived-table schema (8 fixed columns, optionally renamed).
+/// Build the derived-table schema: 8 visible columns (optionally renamed) plus
+/// the two trailing `SQLITE_HIDDEN` columns `json`/`root`.
 ///
-/// Known follow-ups surfaced once json101.test's tail runs (#6019), tracked
-/// separately and intentionally NOT addressed here:
-/// - The hidden `json` input column of json_each/json_tree is not exposed, so
-///   `jx.json` fails (json101-5.5/5.6).
+/// The `json`/`root` columns are marked always-hidden on the schema so they are
+/// excluded from `SELECT *` / `table.*` / `pragma_table_info` but remain
+/// resolvable via explicit reference — matching SQLite's virtual-table hidden
+/// columns (issue #6050). Their names are fixed (`json`, `root`) even when a
+/// `column_aliases` list renames the eight visible columns; `column_aliases`
+/// only counts against the eight visible columns, so its arity check is
+/// unchanged.
+///
+/// Remaining known follow-up (tracked separately, NOT addressed here):
 /// - `id`/`parent` numbering diverges from SQLite (json101-15.100..130).
-/// See the issue's follow-up list for details.
 pub(crate) fn build_schema(
     name: &str,
     alias: Option<&String>,
     column_aliases: Option<&Vec<String>>,
 ) -> Result<CombinedSchema, ExecutorError> {
-    let column_names: Vec<String> = match column_aliases {
+    let mut column_names: Vec<String> = match column_aliases {
         Some(aliases) => {
             if aliases.len() != TVF_COLUMNS.len() {
                 return Err(ExecutorError::ColumnCountMismatch {
@@ -218,10 +267,12 @@ pub(crate) fn build_schema(
         }
         None => TVF_COLUMNS.iter().map(|s| s.to_string()).collect(),
     };
+    // Append the fixed hidden-column names (not affected by `column_aliases`).
+    column_names.extend(TVF_HIDDEN_COLUMNS.iter().map(|s| s.to_string()));
 
     // Column types mirror SQLite: key/value/atom are dynamic (declared NULL so
     // the derived schema treats them permissively), type/fullkey/path are text,
-    // id/parent are integers.
+    // id/parent are integers. The trailing json/root hidden columns are text.
     let column_types = vec![
         DataType::Null,                         // key
         DataType::Null,                         // value
@@ -231,6 +282,8 @@ pub(crate) fn build_schema(
         DataType::Bigint,                       // parent
         DataType::Varchar { max_length: None }, // fullkey
         DataType::Varchar { max_length: None }, // path
+        DataType::Null,                         // json (hidden; echoes input document)
+        DataType::Varchar { max_length: None }, // root (hidden; path argument)
     ];
 
     // Table name defaults to the function name so `json_each.value` resolves
@@ -239,7 +292,12 @@ pub(crate) fn build_schema(
     // Use the TVF constructor (not `from_derived_table`) so the implicit `rowid`
     // pseudo-column resolves to NULL instead of erroring like a FROM-subquery
     // (#6019).
-    Ok(CombinedSchema::from_table_function(table_name, column_names, column_types))
+    let mut schema = CombinedSchema::from_table_function(table_name, column_names, column_types);
+    // Mark json (index 8) and root (index 9) as always-hidden from SELECT *.
+    for hidden_idx in TVF_COLUMNS.len()..TVF_COLUMNS.len() + TVF_HIDDEN_COLUMNS.len() {
+        schema.always_hide_column(hidden_idx);
+    }
+    Ok(schema)
 }
 
 /// Coerce a non-NULL SQL value into the JSON *text* it represents for TVF input

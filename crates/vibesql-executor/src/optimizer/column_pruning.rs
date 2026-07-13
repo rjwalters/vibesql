@@ -539,6 +539,7 @@ pub fn remap_schema(
         table_schemas: new_table_schemas,
         total_columns: projection_indices.len(),
         hidden_columns: std::collections::HashSet::new(),
+        always_hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
         duplicate_aliases: std::collections::HashSet::new(),
         joined_columns: std::collections::HashSet::new(),
