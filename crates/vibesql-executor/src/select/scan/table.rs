@@ -393,7 +393,14 @@ pub(crate) fn execute_table_scan(
     // Referenced with bare-identifier FROM syntax; VibeSQL advertises no
     // compile-time options, so this yields the correct single-column shape with
     // zero rows.
-    if is_pragma_compile_options_table(table_name) {
+    //
+    // A real user table of the same name takes precedence (#6030): SQLite's
+    // eponymous virtual tables are shadowed by a same-named real table, and
+    // `pragma_*` names are not reserved at CREATE TABLE time. Probe the catalog
+    // first (case-insensitive, matching `is_pragma_compile_options_table`'s
+    // folding) and only fall through to the synthetic zero-row table when no
+    // real table exists.
+    if is_pragma_compile_options_table(table_name) && database.get_table(table_name).is_none() {
         let result = execute_pragma_compile_options_query()?;
         let table_schema = get_pragma_compile_options_table_schema();
 

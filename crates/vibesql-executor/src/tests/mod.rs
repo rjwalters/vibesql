@@ -104,6 +104,7 @@ mod operator_edge_cases;
 mod order_by_compaction_tests;
 mod order_by_index_optimization_tests;
 mod phase3_join_optimization;
+mod pragma_compile_options_shadowing_tests;
 mod predicate_pushdown;
 mod predicate_tests;
 mod prefix_index_tests;
