@@ -1314,6 +1314,7 @@ impl<'arena> ArenaParser<'arena> {
                 | "GROUP_CONCAT"
                 | "STRING_AGG"
                 | "TOTAL"
+                | "JSON_GROUP_OBJECT"
                 | "MEDIAN"
                 | "PERCENTILE"
                 | "PERCENTILE_CONT"
@@ -1410,6 +1411,7 @@ impl<'arena> ArenaParser<'arena> {
                     true
                 }
                 "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
+                "JSON_GROUP_OBJECT" => true,                      // JSON aggregate function
                 // percentile.c family - arg counts validated by the executor
                 "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
                 "MIN" | "MAX" => args.len() <= 1 && !distinct,

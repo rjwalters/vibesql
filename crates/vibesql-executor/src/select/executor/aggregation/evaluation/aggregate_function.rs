@@ -292,6 +292,15 @@ fn validate_aggregate_args(
             }
             Ok(())
         }
+        "JSON_GROUP_OBJECT" => {
+            // json_group_object(key, value) requires exactly 2 arguments
+            if has_wildcard || arg_count != 2 {
+                return Err(ExecutorError::WrongNumberOfArguments {
+                    function_name: name.display().to_string(),
+                });
+            }
+            Ok(())
+        }
         "MEDIAN" => {
             // median(Y) requires exactly 1 argument (percentile.c)
             if has_wildcard || arg_count != 1 {
@@ -700,6 +709,76 @@ pub(super) fn evaluate(
             }
             let value = evaluator.eval(&args[0], row)?;
             acc.accumulate(&value);
+        }
+
+        let result = acc.finalize()?;
+        executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+        return Ok(result);
+    }
+
+    // Handle JSON_GROUP_OBJECT(key, value) - collects key/value pairs into a
+    // JSON object. NULL-keyed pairs are dropped at finalize (SQLite semantics).
+    if name_upper == "JSON_GROUP_OBJECT" {
+        if args.len() != 2 {
+            return Err(ExecutorError::WrongNumberOfArguments {
+                function_name: name.display().to_string(),
+            });
+        }
+
+        let mut acc = AggregateAccumulator::new(name.canonical(), distinct)?;
+
+        // Optional ORDER BY within the aggregate: collect (key, value, sort_keys)
+        // then emit in sorted order.
+        if let Some(order_items) = order_by {
+            let collations = extract_collations(order_items);
+            let mut rows_with_keys: Vec<(
+                vibesql_types::SqlValue,
+                vibesql_types::SqlValue,
+                Vec<SortKey>,
+            )> = Vec::with_capacity(group_rows.len());
+
+            for row in group_rows {
+                evaluator.clear_cse_cache();
+                if !passes_filter(row, evaluator)? {
+                    continue;
+                }
+                let key = evaluator.eval(&args[0], row)?;
+                let value = evaluator.eval(&args[1], row)?;
+
+                let mut sort_keys = Vec::with_capacity(order_items.len());
+                for item in order_items {
+                    let sort_value = evaluator.eval(&item.expr, row)?;
+                    let is_desc = item.direction == vibesql_ast::OrderDirection::Desc;
+                    let nulls_first = item
+                        .nulls_order
+                        .as_ref()
+                        .map(|no| matches!(no, vibesql_ast::NullsOrder::First));
+                    sort_keys.push((sort_value, is_desc, nulls_first));
+                }
+
+                rows_with_keys.push((key, value, sort_keys));
+            }
+
+            rows_with_keys.sort_by(|a, b| compare_sort_keys(&a.2, &b.2, &collations));
+
+            for (key, value, _) in rows_with_keys {
+                acc.accumulate_json_object_pair(key, value);
+            }
+
+            let result = acc.finalize()?;
+            executor.get_aggregate_cache().borrow_mut().insert(cache_key, result.clone());
+            return Ok(result);
+        }
+
+        // No ORDER BY - accumulate in row order.
+        for row in group_rows {
+            evaluator.clear_cse_cache();
+            if !passes_filter(row, evaluator)? {
+                continue;
+            }
+            let key = evaluator.eval(&args[0], row)?;
+            let value = evaluator.eval(&args[1], row)?;
+            acc.accumulate_json_object_pair(key, value);
         }
 
         let result = acc.finalize()?;
