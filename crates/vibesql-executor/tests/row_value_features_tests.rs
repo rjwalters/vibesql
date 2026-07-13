@@ -469,3 +469,90 @@ fn scalar_subquery_lhs_of_in_with_join() {
     );
     assert_eq!(rows, vec![vec![I(1), I(1), I(1)], vec![I(1), I(2), I(1)]]);
 }
+
+// ─── SELECT-WHERE row-value / subquery arity misuse (#6079) ──────────────────
+//
+// A row-value arity misuse in a top-level SELECT WHERE clause must error at
+// prepare time (even for an empty table) instead of silently returning 0 rows.
+// SQLite 3.51 parity verified: a scalar compared against a multi-column subquery
+// in a SELECT WHERE is `row value misused`; a nested scalar-vs-subquery arity
+// misuse is `sub-select returns N columns - expected 1`.
+
+fn assert_subquery_arity(
+    db: &vibesql_storage::Database,
+    sql: &str,
+    expected: usize,
+    actual: usize,
+) {
+    let err = query_err(db, sql);
+    assert!(
+        matches!(err, ExecutorError::SubqueryColumnCountMismatch { expected: e, actual: a } if e == expected && a == actual),
+        "Query: {} -- expected SubqueryColumnCountMismatch {{ expected: {}, actual: {} }}, got {:?}",
+        sql,
+        expected,
+        actual,
+        err
+    );
+}
+
+#[test]
+fn select_where_scalar_vs_multicol_subquery_is_misused() {
+    // Issue #6079 repro and rowvalue4.test 8.2: a plain scalar compared against a
+    // multi-column subquery in a SELECT WHERE is `row value misused`, on an empty
+    // table, regardless of operator or which side the subquery is on.
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t(a, b)");
+    assert_misused(&db, "SELECT a FROM t WHERE a < (SELECT b, 2 FROM t)");
+    assert_misused(&db, "SELECT a FROM t WHERE a = (SELECT b, 2 FROM t)");
+    assert_misused(&db, "SELECT a FROM t WHERE (SELECT b, 2 FROM t) > a");
+    // rowvalue4.test 8.2 exact shape: the misuse is inside one OR/AND branch.
+    run_stmt(&mut db, "CREATE TABLE c1(x, y)");
+    run_stmt(&mut db, "CREATE TABLE c2(a, b, c)");
+    run_stmt(&mut db, "CREATE TABLE c3(d)");
+    assert_misused(
+        &db,
+        "SELECT * FROM c2 CROSS JOIN c3 WHERE \
+         ((a, b) == (SELECT x, y FROM c1) AND c3.d = c) OR \
+         (c == (SELECT x, y FROM c1) AND c3.d = c)",
+    );
+}
+
+#[test]
+fn select_where_nested_in_subquery_arity_misuse() {
+    // rowvalue9.test 8.2: the arity misuse lives inside the RHS subquery's
+    // projection (`2 IN (SELECT 2,2)`), which never executes for an empty table.
+    // It must still surface as `sub-select returns 2 columns - expected 1`.
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t1(a, b)");
+    assert_subquery_arity(
+        &db,
+        "SELECT a FROM t1 WHERE (a, b) > (SELECT 2 IN (SELECT 2, 2), 2)",
+        1,
+        2,
+    );
+}
+
+#[test]
+fn select_where_valid_row_value_comparisons_not_flagged() {
+    // No false positives: legal row-value / subquery WHERE comparisons keep
+    // working on a populated table.
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t(a, b, c)");
+    run_stmt(&mut db, "INSERT INTO t VALUES(1, 2, 3)");
+    run_stmt(&mut db, "INSERT INTO t VALUES(4, 5, 6)");
+    // row value vs matched-arity subquery / row value
+    assert_eq!(query_column(&db, "SELECT a FROM t WHERE (a, b) = (SELECT 1, 2)"), vec![I(1)]);
+    assert_eq!(query_column(&db, "SELECT a FROM t WHERE (a, b) < (2, 3)"), vec![I(1)]);
+    // scalar vs single-column subquery (arity 1) — legal
+    assert_eq!(query_column(&db, "SELECT a FROM t WHERE a = (SELECT 1)"), vec![I(1)]);
+    // multi-column subquery LHS of IN vs matched-arity IN subquery — legal
+    assert_eq!(
+        query_rows(&db, "SELECT a FROM t WHERE (SELECT a, b) IN (SELECT a, b FROM t)"),
+        vec![vec![I(1)], vec![I(4)]]
+    );
+    // row value IN subquery — legal
+    assert_eq!(
+        query_rows(&db, "SELECT a FROM t WHERE (a, b) IN (SELECT a, b FROM t)"),
+        vec![vec![I(1)], vec![I(4)]]
+    );
+}

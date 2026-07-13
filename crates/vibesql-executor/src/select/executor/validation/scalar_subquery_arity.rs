@@ -177,3 +177,150 @@ pub fn validate_predicate_expr(
         _ => Ok(()),
     }
 }
+
+/// Static arity of an `IN` left-hand side, if it can be determined: a
+/// multi-element `RowValueConstructor` has that arity, a scalar subquery has its
+/// projected column count (a multi-column subquery LHS is a legal row value —
+/// e.g. `(SELECT a, b) IN (SELECT a, b FROM t)`), and any other expression is a
+/// scalar (arity 1). Returns `None` when a subquery's column count cannot be
+/// computed statically, in which case the arity check is skipped in favor of the
+/// runtime check.
+fn in_lhs_arity(expr: &Expression, database: &vibesql_storage::Database) -> Option<usize> {
+    match expr {
+        Expression::RowValueConstructor(elems) if elems.len() > 1 => Some(elems.len()),
+        Expression::ScalarSubquery(subquery) => subquery_column_count(subquery, database),
+        _ => Some(1),
+    }
+}
+
+/// Validate a `WHERE` predicate of a top-level `SELECT`.
+///
+/// SQLite's SELECT-WHERE handling differs from the UPDATE/DELETE WHERE rule
+/// covered by [`validate_predicate_expr`]: a scalar compared against a
+/// multi-column subquery in a SELECT WHERE is reported as `row value misused`,
+/// whereas the same shape in an UPDATE/DELETE WHERE is the arity error
+/// `sub-select returns N columns - expected 1`. (Verified against sqlite3 3.51:
+/// `SELECT * FROM t WHERE a < (SELECT b, 2)` → `row value misused`, while the
+/// UPDATE/DELETE forms give the arity error — see `rowvalue4.test` 8.2 and
+/// `rowvalue.test` 15.3/15.4.)
+///
+/// The check is a prepare-time walk so the misuse surfaces even when the target
+/// table is empty and the WHERE predicate is never evaluated. In addition to
+/// the top-level scalar-vs-subquery shape, the walk descends into nested
+/// scalar-subquery bodies so a deep arity misuse such as
+/// `(a,b) > (SELECT 2 IN (SELECT 2,2), 2)` (`rowvalue9.test` 8.2, where the
+/// inner `2 IN (SELECT 2,2)` compares a scalar against a 2-column subquery) is
+/// caught regardless of row count.
+pub fn validate_select_where_expr(
+    expr: &Expression,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    match expr {
+        Expression::BinaryOp { left, op, right } if is_comparison_op(op) => {
+            // Legal row-value comparison (row value / subquery on both sides):
+            // the arities are checked elsewhere; still descend into each operand
+            // so a nested subquery misuse is not missed.
+            if is_row_value_or_subquery(left) && is_row_value_or_subquery(right) {
+                validate_select_where_descend(left, database)?;
+                validate_select_where_descend(right, database)?;
+                return Ok(());
+            }
+            // A plain scalar compared against a multi-column subquery in a
+            // SELECT WHERE is `row value misused` (not the arity error).
+            if !is_row_value_or_subquery(left) && multi_col_subquery(right, database).is_some() {
+                return Err(ExecutorError::RowValueMisused);
+            }
+            if !is_row_value_or_subquery(right) && multi_col_subquery(left, database).is_some() {
+                return Err(ExecutorError::RowValueMisused);
+            }
+            // Otherwise descend into operands for nested subquery misuse.
+            validate_select_where_descend(left, database)?;
+            validate_select_where_descend(right, database)
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            for c in children {
+                validate_select_where_expr(c, database)?;
+            }
+            Ok(())
+        }
+        Expression::BinaryOp { left, right, .. } => {
+            validate_select_where_expr(left, database)?;
+            validate_select_where_expr(right, database)
+        }
+        Expression::UnaryOp { expr: inner, .. } => validate_select_where_expr(inner, database),
+        other => validate_select_where_descend(other, database),
+    }
+}
+
+/// Descend into an expression's nested subqueries looking for a scalar
+/// `IN (multi-column subquery)` misuse (arity error). This is the shape that
+/// escapes the top-level comparison check because it lives inside a subquery's
+/// projection (e.g. `(SELECT 2 IN (SELECT 2,2), 2)`), which is never evaluated
+/// when the outer table is empty.
+fn validate_select_where_descend(
+    expr: &Expression,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    match expr {
+        // `scalar IN (SELECT c1, c2, ...)` where the subquery returns more than
+        // one column is the arity error, independent of row count.
+        //
+        // The LHS may itself be a row value: a multi-element
+        // `RowValueConstructor`, or a *subquery* that projects multiple columns
+        // (`(SELECT a, b) IN (SELECT a, b FROM t)` is a legal row-value IN — see
+        // rowvalue.test 18.1/18.2/18.4/18.5). Only flag when the LHS is a genuine
+        // scalar (arity 1) and the IN subquery returns more than one column.
+        Expression::In { expr: lhs, subquery, .. } => {
+            if in_lhs_arity(lhs, database) == Some(1) {
+                if let Some(n) = subquery_column_count(subquery, database) {
+                    if n > 1 {
+                        return Err(arity_error(n));
+                    }
+                }
+            }
+            validate_select_where_descend(lhs, database)?;
+            validate_select_stmt(subquery, database)
+        }
+        Expression::ScalarSubquery(subquery) => validate_select_stmt(subquery, database),
+        Expression::BinaryOp { left, right, .. } => {
+            validate_select_where_descend(left, database)?;
+            validate_select_where_descend(right, database)
+        }
+        Expression::UnaryOp { expr: inner, .. } => validate_select_where_descend(inner, database),
+        Expression::Conjunction(children)
+        | Expression::Disjunction(children)
+        | Expression::RowValueConstructor(children) => {
+            for c in children {
+                validate_select_where_descend(c, database)?;
+            }
+            Ok(())
+        }
+        Expression::InList { expr: lhs, values, .. } => {
+            validate_select_where_descend(lhs, database)?;
+            for v in values {
+                validate_select_where_descend(v, database)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Walk a nested `SELECT` body for scalar-subquery arity misuse: each
+/// projected item and its `WHERE` predicate are validated the same way the
+/// top-level SELECT is, so a misuse buried in a subquery's projection surfaces
+/// even when no row ever reaches it.
+fn validate_select_stmt(
+    stmt: &vibesql_ast::SelectStmt,
+    database: &vibesql_storage::Database,
+) -> Result<(), ExecutorError> {
+    for item in &stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            validate_select_where_descend(expr, database)?;
+        }
+    }
+    if let Some(where_expr) = &stmt.where_clause {
+        validate_select_where_descend(where_expr, database)?;
+    }
+    Ok(())
+}
