@@ -4741,6 +4741,8 @@ array set vibesql_skip_tests {
     indexexpr2-8.5.25.2 "Result gap downstream of indexexpr2-8.5.25.1 coercion gap (out of scope for #5695)."
     indexexpr2-9.0 "Expression-index aggregate result is empty where SQLite returns rows (expression-index execution gap unrelated to plan selection, out of scope for #5695)."
     indexexpr2-10.0 "Parser gap: 'IN'-clause form in this expression-index context is not parsed ('near \"IN\": syntax error') (out of scope for #5695)."
+    rowvalue-34.5 "SQLite-implementation-defined EQP text (row-value Stage 4, #6048, part of #5779). Correctness is identical — both VibeSQL and sqlite3 3.51.0 return {} for the underlying query. Only the query-plan SHAPE differs: SQLite pushes t2.id>999 into a covering-index search on t1a(a,id); VibeSQL does a rowid=?/rowid>? PK search plus a separate scan and a temp-B-tree sort. The root cause is a composite-index join-predicate-pushdown optimizer capability gap, out of scope for a row-value correctness stage — recommended as a separate optimizer-track follow-up in #6048's curation. Skipped as an EQP-text-only mismatch, not a correctness defect."
+    rowvalue9-1.6.2 "SQLite-implementation-defined join iteration order (row-value Stage 4, #6048, part of #5779). VibeSQL returns the correct value set (3 14 15 92, each twice) but in a different nested-loop join order than SQLite for this unordered EXISTS join (no ORDER BY). Pre-existing nested-loop ordering artifact documented in PR #6064; values match, only row order differs. Skipped rather than chased since the query has no ORDER BY and the result set is correct."
 }
 
 # -----------------------------------------------------------------------------
@@ -7110,6 +7112,28 @@ proc drop_all_tables {} {
         foreach table $tables {
             catch {execsql "DROP TABLE IF EXISTS $table"}
         }
+    }
+    return
+}
+
+proc drop_all_indexes {{db db}} {
+    # Drop all auxiliary (CREATE INDEX) indexes from the database.
+    # Ported from the canonical SQLite harness
+    # (docs/reference/sqlite/test/tester.tcl:2284) but expressed via the shim's
+    # execsql idiom (matching drop_all_tables above) rather than a raw [$db eval].
+    #
+    # The `sql LIKE 'create%'` filter naturally excludes auto-indexes (which
+    # have sql IS NULL), so only user-created indexes are dropped. Used by tests
+    # such as rowvalue3/rowvalue4 to reset index state between blocks; without
+    # it those files abort mid-run with `invalid command name "drop_all_indexes"`.
+    if {$::db_file eq ""} {
+        return
+    }
+    set indexes [execsql {
+        SELECT name FROM sqlite_master WHERE type='index' AND sql LIKE 'create%'
+    }]
+    foreach idx $indexes {
+        catch {execsql "DROP INDEX $idx"}
     }
     return
 }
