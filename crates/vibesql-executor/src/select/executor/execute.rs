@@ -65,6 +65,36 @@ impl SelectExecutor<'_> {
         // empty-table case (window9.test 3.4).
         super::validation::validate_in_subquery_column_counts(stmt, self.database)?;
 
+        // Validate a bare multi-column subquery used as a top-level SELECT-list
+        // item (#6046). `SELECT (SELECT c0,c1 FROM t0) FROM t0` is a prepare-time
+        // error in SQLite ("sub-select returns N columns - expected 1"), even
+        // when the outer table is empty so the subquery never executes
+        // (rowvalue.test 28.10 trigger body over an empty table). The runtime
+        // evaluator only catches this when a row is actually produced.
+        //
+        // Only the top-level statement is checked: a bare multi-column subquery
+        // is context-dependent (legal as a row-value comparison operand deeper
+        // in the tree), and nested SELECTs — including UPDATE `SET`-value
+        // subqueries — reach the correct check through their own execution path.
+        //
+        // Synthetic UPDATE…FROM SELECTs (see `update::from_clause`) project each
+        // tuple-assignment SET value as a `__set_N__`-aliased item; a
+        // multi-column subquery there is a legal row-value assignment, so those
+        // items are skipped.
+        if self.outer_schema.is_none() && self.subquery_depth == 0 {
+            for item in &stmt.select_list {
+                if let vibesql_ast::SelectItem::Expression { expr, alias, .. } = item {
+                    let is_synthetic_set_value =
+                        alias.as_deref().is_some_and(|a| a.starts_with("__set_"));
+                    if !is_synthetic_set_value {
+                        if let vibesql_ast::Expression::ScalarSubquery(_) = expr {
+                            super::validation::validate_value_subquery_arity(expr, self.database)?;
+                        }
+                    }
+                }
+            }
+        }
+
         // Validate SQLite index hints (issue #5235)
         // INDEXED BY must name an index that exists on that table; SQLite
         // reports "no such index: X" at prepare time. The hint is otherwise

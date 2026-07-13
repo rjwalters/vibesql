@@ -79,6 +79,11 @@ executor-parse-error = Erreur d'analyse : { $message }
 executor-subquery-returned-multiple-rows = La sous-requête scalaire a retourné { $actual } lignes, { $expected } attendue
 executor-subquery-column-count-mismatch = La sous-requête a retourné { $actual } colonnes, { $expected } attendues
 executor-column-count-mismatch = La liste de colonnes dérivées a { $provided } colonnes mais la requête produit { $expected } colonnes
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Erreurs de Contrainte

@@ -79,6 +79,11 @@ executor-parse-error = Errore di parsing: { $message }
 executor-subquery-returned-multiple-rows = La subquery scalare ha restituito { $actual } righe, prevista { $expected }
 executor-subquery-column-count-mismatch = La subquery ha restituito { $actual } colonne, previste { $expected }
 executor-column-count-mismatch = La lista colonne derivata ha { $provided } colonne ma la query produce { $expected } colonne
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

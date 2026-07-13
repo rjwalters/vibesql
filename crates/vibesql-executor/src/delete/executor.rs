@@ -202,6 +202,14 @@ impl DeleteExecutor {
             return Err(ExecutorError::TableNotFound(stmt.table_name.clone()));
         }
 
+        // Prepare-time scalar-subquery arity validation (#6046). SQLite rejects
+        // a multi-column subquery compared in a WHERE predicate at prepare time,
+        // even when the table is empty so no row is ever scanned
+        // (rowvalue.test 15.4: `DELETE FROM x1 WHERE a<(SELECT * FROM (SELECT b,2))`).
+        if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+            crate::select::validate_predicate_subquery_arity(where_expr, database)?;
+        }
+
         // Fast path: DELETE FROM table (no WHERE clause)
         // Use TRUNCATE-style optimization for 100-1000x performance improvement
         // Only use truncate if there's no ORDER BY or LIMIT (which would restrict which rows to
@@ -225,6 +233,21 @@ impl DeleteExecutor {
         // Use canonical table name from schema for all storage operations
         // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
         let table_name = &schema.name;
+
+        // Validate DELETE trigger body statements for scalar-subquery arity at
+        // prepare time (#6046, rowvalue.test 28.10). SQLite resolves a trigger's
+        // body when the firing DELETE is prepared, so a body
+        // `SELECT (SELECT c0,c1 FROM t0) FROM t0` errors even when `t0` is empty
+        // and the trigger never fires. Only at the top level (not inside another
+        // trigger's body), matching SQLite's prepare of the outermost statement.
+        if trigger_context.is_none() {
+            crate::TriggerFirer::validate_trigger_bodies_for_event(
+                database,
+                table_name,
+                vibesql_ast::TriggerEvent::Delete,
+                None,
+            )?;
+        }
 
         // Fast path: Single-row PK delete without triggers/FKs
         // This avoids ExpressionEvaluator creation and row cloning

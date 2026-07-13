@@ -109,6 +109,27 @@ pub enum ExecutorError {
         expected: usize,
         actual: usize,
     },
+    /// An IN(...) candidate row-value element has a different arity than the
+    /// left-hand tuple (SQLite-compatible error). Format:
+    /// "IN(...) element has N term(s) - expected M"
+    /// e.g. `(1,2) IN ((1,2),(3,4,5))` — the `(3,4,5)` element has 3 terms but
+    /// the LHS expects 2.
+    InElementArity {
+        /// The arity expected by the left-hand tuple.
+        expected: usize,
+        /// The arity of the offending candidate element.
+        actual: usize,
+    },
+    /// An UPDATE-SET tuple assignment `SET (a, b, ...) = (...)` has a different
+    /// number of target columns than RHS values (SQLite-compatible error).
+    /// Format: "N columns assigned M values"
+    /// e.g. `UPDATE t SET (c,d) = (SELECT x,y,z ...)` — 2 columns, 3 values.
+    ColumnsAssignedValues {
+        /// Number of target columns on the left of the assignment.
+        columns: usize,
+        /// Number of values produced by the RHS.
+        values: usize,
+    },
     /// Set operation (UNION, INTERSECT, EXCEPT) column count mismatch (SQLite-compatible)
     /// Format: "SELECTs to the left and right of {op} do not have the same number of result columns"
     SetOperationColumnMismatch {
@@ -717,6 +738,28 @@ impl std::fmt::Display for ExecutorError {
                         "executor-subquery-column-count-mismatch",
                         expected = *expected as i64,
                         actual = *actual as i64
+                    )
+                )
+            }
+            ExecutorError::InElementArity { expected, actual } => {
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "executor-in-element-arity",
+                        expected = *expected as i64,
+                        actual = *actual as i64
+                    )
+                )
+            }
+            ExecutorError::ColumnsAssignedValues { columns, values } => {
+                write!(
+                    f,
+                    "{}",
+                    vibe_msg!(
+                        "executor-columns-assigned-values",
+                        columns = *columns as i64,
+                        values = *values as i64
                     )
                 )
             }

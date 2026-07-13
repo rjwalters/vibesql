@@ -79,6 +79,11 @@ executor-parse-error = خطأ في التحليل: { $message }
 executor-subquery-returned-multiple-rows = أعاد الاستعلام الفرعي القياسي { $actual } صف/صفوف، المتوقع { $expected }
 executor-subquery-column-count-mismatch = أعاد الاستعلام الفرعي { $actual } عمود/أعمدة، المتوقع { $expected }
 executor-column-count-mismatch = قائمة الأعمدة المشتقة تحتوي على { $provided } عمود/أعمدة لكن الاستعلام ينتج { $expected } عمود/أعمدة
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

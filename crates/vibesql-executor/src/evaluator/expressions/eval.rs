@@ -516,19 +516,55 @@ impl ExpressionEvaluator<'_> {
         match expr {
             vibesql_ast::Expression::RowValueConstructor(elems) => {
                 if elems.len() != expected {
-                    return Err(ExecutorError::SubqueryColumnCountMismatch {
-                        expected,
-                        actual: elems.len(),
+                    // UPDATE-SET tuple arity mismatch: SQLite reports
+                    // "N columns assigned M values", not the sub-select arity
+                    // error (the RHS here is a literal row value, not a query).
+                    return Err(ExecutorError::ColumnsAssignedValues {
+                        columns: expected,
+                        values: elems.len(),
                     });
                 }
                 elems.iter().map(|e| self.eval(e, row)).collect()
             }
             vibesql_ast::Expression::ScalarSubquery(subquery) => {
-                self.eval_scalar_subquery_as_row(subquery, row, expected)
+                // The RHS is a `(SELECT ...)`. An arity mismatch here is still an
+                // UPDATE-SET "N columns assigned M values" error, not the generic
+                // "sub-select returns N columns - expected M" — SQLite distinguishes
+                // the assignment-target context from a scalar-subquery misuse.
+                self.eval_scalar_subquery_as_row(subquery, row, expected).map_err(|e| match e {
+                    ExecutorError::SubqueryColumnCountMismatch { expected, actual } => {
+                        ExecutorError::ColumnsAssignedValues { columns: expected, values: actual }
+                    }
+                    other => other,
+                })
             }
             // A non-row RHS for a multi-column target is a misuse per SQLite
             // (e.g. `SET (a, b) = 1`).
             _ => Err(ExecutorError::RowValueMisused),
+        }
+    }
+
+    /// Returns true when a scalar subquery's result has more than one column.
+    ///
+    /// Used to detect `(SELECT a, b) <op> scalar` comparison misuse, where SQLite
+    /// reports "row value misused". If the column count cannot be determined
+    /// statically (e.g. a wildcard over a not-yet-materialized CTE), we
+    /// conservatively return `false` and let ordinary scalar evaluation raise the
+    /// downstream "sub-select returns N columns - expected 1" error instead.
+    fn scalar_subquery_is_multi_column(
+        &self,
+        subquery: &vibesql_ast::SelectStmt,
+    ) -> Result<bool, ExecutorError> {
+        let Some(database) = self.database else {
+            return Ok(false);
+        };
+        match crate::evaluator::compute_select_list_column_count(
+            subquery,
+            database,
+            self.cte_context,
+        ) {
+            Ok(n) => Ok(n > 1),
+            Err(_) => Ok(false),
         }
     }
 
@@ -676,6 +712,19 @@ impl ExpressionEvaluator<'_> {
                                     if elems.len() > 1 =>
                                 {
                                     return Err(ExecutorError::RowValueMisused);
+                                }
+                                // A multi-column scalar subquery compared against
+                                // a plain scalar (not a row value or subquery),
+                                // e.g. `(SELECT * FROM (SELECT 1,2)) < 3`, is a
+                                // misuse per SQLite ("row value misused"), not a
+                                // scalar-subquery arity error. The other side is
+                                // known here to be neither a RowValueConstructor
+                                // nor a ScalarSubquery (those are matched above).
+                                (vibesql_ast::Expression::ScalarSubquery(subquery), _)
+                                | (_, vibesql_ast::Expression::ScalarSubquery(subquery)) => {
+                                    if self.scalar_subquery_is_multi_column(subquery)? {
+                                        return Err(ExecutorError::RowValueMisused);
+                                    }
                                 }
                                 _ => {}
                             }

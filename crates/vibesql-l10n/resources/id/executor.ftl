@@ -79,6 +79,11 @@ executor-parse-error = Kesalahan parsing: { $message }
 executor-subquery-returned-multiple-rows = Subquery skalar mengembalikan { $actual } baris, diharapkan { $expected }
 executor-subquery-column-count-mismatch = Subquery mengembalikan { $actual } kolom, diharapkan { $expected }
 executor-column-count-mismatch = Daftar kolom turunan memiliki { $provided } kolom tetapi query menghasilkan { $expected } kolom
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

@@ -79,6 +79,11 @@ executor-parse-error = Lỗi phân tích cú pháp: { $message }
 executor-subquery-returned-multiple-rows = Subquery vô hướng trả về { $actual } hàng, mong đợi { $expected }
 executor-subquery-column-count-mismatch = Subquery trả về { $actual } cột, mong đợi { $expected }
 executor-column-count-mismatch = Danh sách cột dẫn xuất có { $provided } cột nhưng truy vấn tạo ra { $expected } cột
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

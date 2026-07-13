@@ -79,6 +79,11 @@ executor-parse-error = Tolkningsfel: { $message }
 executor-subquery-returned-multiple-rows = Skalär underfråga returnerade { $actual } rader, förväntade { $expected }
 executor-subquery-column-count-mismatch = Underfråga returnerade { $actual } kolumner, förväntade { $expected }
 executor-column-count-mismatch = Härledd kolumnlista har { $provided } kolumner men frågan producerar { $expected } kolumner
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

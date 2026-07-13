@@ -79,6 +79,11 @@ executor-parse-error = ข้อผิดพลาดการแยกวิเ
 executor-subquery-returned-multiple-rows = Scalar subquery คืนค่า { $actual } แถว คาดหวัง { $expected }
 executor-subquery-column-count-mismatch = Subquery คืนค่า { $actual } คอลัมน์ คาดหวัง { $expected }
 executor-column-count-mismatch = Derived column list มี { $provided } คอลัมน์ แต่ query สร้าง { $expected } คอลัมน์
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

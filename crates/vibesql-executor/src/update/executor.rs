@@ -98,6 +98,22 @@ pub(super) fn execute_internal(
     // This ensures case-sensitive tables (quoted identifiers) are accessed correctly
     let table_name = &schema_owned.name;
 
+    // Prepare-time scalar-subquery arity validation (#6046). SQLite rejects a
+    // multi-column subquery used where a single value is required at prepare
+    // time, even when the target table is empty so the per-row path never runs
+    // (rowvalue.test 15.2 SET value, 15.3 WHERE). A tuple assignment
+    // `(a, b) = (SELECT x, y)` is a legal row-value assignment (arity is checked
+    // by the SET-tuple path), so only single-column assignment values are
+    // validated in the scalar-value context here.
+    for assignment in &stmt.assignments {
+        if assignment.columns.is_empty() {
+            crate::select::validate_value_subquery_arity(&assignment.value, database)?;
+        }
+    }
+    if let Some(vibesql_ast::WhereClause::Condition(where_expr)) = &stmt.where_clause {
+        crate::select::validate_predicate_subquery_arity(where_expr, database)?;
+    }
+
     // Check if table has UPDATE triggers (check once, use multiple times).
     //
     // ROW-level triggers fire even when this UPDATE runs inside another

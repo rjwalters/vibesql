@@ -79,6 +79,11 @@ executor-parse-error = 구문 분석 오류: { $message }
 executor-subquery-returned-multiple-rows = 스칼라 서브쿼리가 { $actual }개의 행을 반환했습니다. 예상: { $expected }개
 executor-subquery-column-count-mismatch = 서브쿼리가 { $actual }개의 컬럼을 반환했습니다. 예상: { $expected }개
 executor-column-count-mismatch = 파생 컬럼 목록에 { $provided }개의 컬럼이 있지만 쿼리는 { $expected }개의 컬럼을 생성합니다
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint Errors

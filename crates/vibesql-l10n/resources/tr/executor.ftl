@@ -79,6 +79,11 @@ executor-parse-error = Ayrıştırma hatası: { $message }
 executor-subquery-returned-multiple-rows = Skaler alt sorgu { $actual } satır döndürdü, beklenen { $expected }
 executor-subquery-column-count-mismatch = Alt sorgu { $actual } sütun döndürdü, beklenen { $expected }
 executor-column-count-mismatch = Türetilmiş sütun listesi { $provided } sütun içeriyor ancak sorgu { $expected } sütun üretiyor
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Kısıtlama Hataları

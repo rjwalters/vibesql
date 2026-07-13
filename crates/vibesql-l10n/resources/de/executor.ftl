@@ -79,6 +79,11 @@ executor-parse-error = Parserfehler: { $message }
 executor-subquery-returned-multiple-rows = Skalare Unterabfrage lieferte { $actual } Zeilen, erwartet wurden { $expected }
 executor-subquery-column-count-mismatch = Unterabfrage lieferte { $actual } Spalten, erwartet wurden { $expected }
 executor-column-count-mismatch = Abgeleitete Spaltenliste hat { $provided } Spalten, aber Abfrage erzeugt { $expected } Spalten
+executor-in-element-arity = IN(...) element has { $actual } { $actual ->
+    [one] term
+   *[other] terms
+} - expected { $expected }
+executor-columns-assigned-values = { $columns } columns assigned { $values } values
 
 # =============================================================================
 # Constraint-Fehler

@@ -18,6 +18,7 @@ mod in_subquery_columns;
 mod index_hints;
 mod join_limits;
 mod row_values;
+mod scalar_subquery_arity;
 mod schema;
 
 use std::collections::HashSet;
@@ -35,6 +36,10 @@ pub use in_subquery_columns::validate_in_subquery_column_counts;
 pub use index_hints::validate_index_hints;
 pub use join_limits::validate_join_table_limit;
 pub use row_values::validate_row_value_usage;
+pub use scalar_subquery_arity::{
+    validate_predicate_expr as validate_predicate_subquery_arity,
+    validate_value_expr as validate_value_subquery_arity,
+};
 pub use schema::validate_aggregate_subquery_outer_refs;
 use vibesql_ast::{Expression, SelectItem};
 
