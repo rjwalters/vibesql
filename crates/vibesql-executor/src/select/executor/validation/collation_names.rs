@@ -10,12 +10,21 @@
 //! returned a row instead of erroring (rowvalue4 §7.3/§7.4, rowvalue §23.100
 //! adjacent COLLATE cases).
 //!
-//! This walks the SELECT list and WHERE clause expressions and raises on the
-//! first unknown COLLATE name it finds. It intentionally recurses only through
-//! the *directly evaluated* expression subtree; nested subqueries carry their
-//! own COLLATE nodes but are validated when that subquery is itself prepared, so
-//! recursing into them here would either duplicate work or, worse, evaluate a
-//! COLLATE against a schema it does not belong to.
+//! This walks an expression subtree and raises on the first unknown COLLATE
+//! name it finds. It is invoked for every clause of a top-level `SELECT` that
+//! can carry a COLLATE node: the SELECT list and WHERE clause (from
+//! `validate_select_columns_with_context`), and — added in #6110 — the
+//! ORDER BY, GROUP BY, HAVING, and JOIN ... ON clauses (from
+//! `SelectExecutor::execute`). Before #6110 the latter four were silently
+//! accepted, so `SELECT a FROM t ORDER BY a COLLATE nose` returned rows instead
+//! of erroring; SQLite reports `no such collation sequence: nose` at prepare
+//! time in every one of these positions.
+//!
+//! It intentionally recurses only through the *directly evaluated* expression
+//! subtree; nested subqueries carry their own COLLATE nodes but are validated
+//! when that subquery is itself prepared, so recursing into them here would
+//! either duplicate work or, worse, evaluate a COLLATE against a schema it does
+//! not belong to.
 
 use vibesql_ast::Expression;
 
