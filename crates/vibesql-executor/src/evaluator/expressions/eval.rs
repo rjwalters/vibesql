@@ -182,6 +182,67 @@ impl ExpressionEvaluator<'_> {
         }
     }
 
+    /// Apply SQLite affinity rules to a column-vs-column comparison given the
+    /// resolved affinity of each side (issue #6045).
+    ///
+    /// This is the value-level core used by row-value `IN (subquery)`, where the
+    /// right-hand operands are *subquery columns* (their affinity resolved via
+    /// [`schema_utils::get_subquery_column_affinity_at`]) rather than
+    /// expressions available on the current evaluator. It mirrors the
+    /// column-vs-column cases of [`Self::apply_affinity_for_comparison`]:
+    ///
+    /// - A NUMERIC/INTEGER/REAL side coerces a TEXT *value* on the other side to
+    ///   numeric (SQLite datatype3 §4.2 — NUMERIC applied to the other operand).
+    /// - TEXT-vs-NONE (or NONE-vs-NONE, TEXT-vs-TEXT) column comparisons perform
+    ///   NO coercion: they compare by storage class, so `'1'` (TEXT) does not
+    ///   equal `1` (INTEGER stored in a BLOB/NONE column). This is what makes
+    ///   `(a, b) IN (SELECT x, y FROM blob_table)` match SQLite (rowvalue9 1.6.1).
+    ///
+    /// A `None` affinity (a non-column expression such as `+col`, matching
+    /// SQLite's rule that unary `+` strips affinity to NONE) behaves like a real
+    /// NONE-affinity column here: it never triggers TEXT coercion of a numeric on
+    /// the other side, only numeric coercion of a TEXT value against a numeric
+    /// affinity.
+    pub(crate) fn apply_affinity_for_comparison_values(
+        left_val: SqlValue,
+        left_affinity: Option<TypeAffinity>,
+        right_val: SqlValue,
+        right_affinity: Option<TypeAffinity>,
+    ) -> (SqlValue, SqlValue) {
+        let is_numeric_affinity = |a: Option<TypeAffinity>| {
+            matches!(
+                a,
+                Some(TypeAffinity::Numeric)
+                    | Some(TypeAffinity::Integer)
+                    | Some(TypeAffinity::Real)
+            )
+        };
+        let left_numeric = is_numeric_affinity(left_affinity);
+        let right_numeric = is_numeric_affinity(right_affinity);
+
+        // Left numeric affinity vs a TEXT value on the right → coerce the TEXT to
+        // numeric (mirrors apply_affinity_for_comparison Case 5).
+        if left_numeric
+            && !right_numeric
+            && matches!(right_val, SqlValue::Varchar(_) | SqlValue::Character(_))
+        {
+            return (left_val, Self::try_coerce_string_to_numeric(&right_val));
+        }
+
+        // Right numeric affinity vs a TEXT value on the left → coerce (Case 6).
+        if right_numeric
+            && !left_numeric
+            && matches!(left_val, SqlValue::Varchar(_) | SqlValue::Character(_))
+        {
+            return (Self::try_coerce_string_to_numeric(&left_val), right_val);
+        }
+
+        // TEXT vs NONE, NONE vs NONE, TEXT vs TEXT: no coercion, storage-class
+        // comparison (SQLite type ordering). A numeric value compared against a
+        // TEXT/NONE-affinity column stays as-is, so TEXT '1' != INTEGER 1.
+        (left_val, right_val)
+    }
+
     /// Apply SQLite affinity rules for comparisons.
     ///
     /// When comparing a TEXT-affinity column to an INTEGER literal, SQLite:
@@ -1710,5 +1771,106 @@ impl ExpressionEvaluator<'_> {
                 Ok(super::super::core::values_are_distinct(&left_val, &right_val))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod affinity_values_tests {
+    use super::ExpressionEvaluator;
+    use vibesql_types::{SqlValue, TypeAffinity};
+
+    // Regression tests for issue #6045: the value-level affinity core used by
+    // row-value `IN (subquery)` and `= (SELECT ...)` comparisons. It must match
+    // SQLite's row-value comparison semantics where a NONE-affinity (BLOB)
+    // subquery column suppresses TEXT coercion.
+
+    fn text(s: &str) -> SqlValue {
+        SqlValue::Varchar(arcstr::ArcStr::from(s))
+    }
+
+    #[test]
+    fn text_column_vs_none_blob_integer_does_not_coerce() {
+        // `a TEXT ('1') IN (SELECT x BLOB (1))`: '1' must NOT equal 1 (rowvalue9
+        // 1.6.1 / 2.3). NONE-affinity right side → no coercion.
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            text("1"),
+            Some(TypeAffinity::Text),
+            SqlValue::Integer(1),
+            Some(TypeAffinity::None),
+        );
+        assert_eq!(l, text("1"));
+        assert_eq!(r, SqlValue::Integer(1));
+        assert_ne!(l, r);
+    }
+
+    #[test]
+    fn numeric_column_vs_none_text_coerces_text_to_numeric() {
+        // `b INTEGER (4) = y BLOB ('4')`: NUMERIC affinity coerces the TEXT
+        // value '4' to 4, so they compare equal (rowvalue9 4.tn.1 position 1).
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            SqlValue::Integer(4),
+            Some(TypeAffinity::Integer),
+            text("4"),
+            Some(TypeAffinity::None),
+        );
+        assert_eq!(l, SqlValue::Integer(4));
+        assert_eq!(r, SqlValue::Integer(4));
+        assert_eq!(l, r);
+    }
+
+    #[test]
+    fn numeric_left_vs_none_right_numeric_stays() {
+        // NUMERIC vs NONE where the NONE value is already an integer: no change.
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            SqlValue::Integer(3),
+            Some(TypeAffinity::Numeric),
+            SqlValue::Integer(3),
+            Some(TypeAffinity::None),
+        );
+        assert_eq!(l, SqlValue::Integer(3));
+        assert_eq!(r, SqlValue::Integer(3));
+    }
+
+    #[test]
+    fn none_vs_none_text_and_int_do_not_coerce() {
+        // Two BLOB columns: '3' (text) vs 3 (int) compare by storage class.
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            text("3"),
+            Some(TypeAffinity::None),
+            SqlValue::Integer(3),
+            Some(TypeAffinity::None),
+        );
+        assert_eq!(l, text("3"));
+        assert_eq!(r, SqlValue::Integer(3));
+        assert_ne!(l, r);
+    }
+
+    #[test]
+    fn unary_plus_strips_affinity_to_none() {
+        // `+col` yields affinity None (SQLite strips affinity). A None-affinity
+        // left vs a TEXT subquery value must not numeric-coerce, and a None
+        // left vs numeric right must not TEXT-coerce — behaves like NONE.
+        // Here: `(+c) INTEGER-valued (2) IN (SELECT x TEXT '2')` — +c has None
+        // affinity, x is TEXT, neither numeric affinity → no coercion, 2 != '2'.
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            SqlValue::Integer(2),
+            None, // +c strips affinity
+            text("2"),
+            Some(TypeAffinity::Text),
+        );
+        assert_eq!(l, SqlValue::Integer(2));
+        assert_eq!(r, text("2"));
+        assert_ne!(l, r);
+    }
+
+    #[test]
+    fn text_vs_text_no_coercion() {
+        let (l, r) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+            text("4"),
+            Some(TypeAffinity::Text),
+            text("4"),
+            Some(TypeAffinity::None),
+        );
+        assert_eq!(l, r);
     }
 }

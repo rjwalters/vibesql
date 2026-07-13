@@ -662,6 +662,91 @@ mod tests {
         assert!(is_correlated(&subquery, &outer_schema, None));
     }
 
+    /// Regression test for issue #6045 (Root Cause #2): a scalar subquery whose
+    /// WHERE clause compares a 2-element row-value against outer columns must be
+    /// detected as correlated. Previously such a subquery was treated as
+    /// non-correlated and cached, so every outer row received the first row's
+    /// result.
+    ///
+    /// Models: `SELECT (SELECT rowid FROM a1 WHERE (a,b) = (x,y)) FROM a2`
+    /// where `a1(a,b)` is the inner table and the outer schema is `a2(x,y)`.
+    #[test]
+    fn test_row_value_where_clause_is_correlated() {
+        // Outer schema: table "a2" with columns x, y
+        let outer_columns = vec![
+            vibesql_catalog::ColumnSchema {
+                name: "x".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                is_exact_integer_type: false,
+                collation: None,
+            },
+            vibesql_catalog::ColumnSchema {
+                name: "y".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                is_exact_integer_type: false,
+                collation: None,
+            },
+        ];
+        let outer_schema = CombinedSchema::from_table(
+            "a2".to_string(),
+            vibesql_catalog::TableSchema::new("a2".to_string(), outer_columns),
+        );
+
+        // Inner subquery: SELECT 1 FROM a1 WHERE (a, b) = (x, y)
+        // a, b are the inner table's columns; x, y are the outer table's columns.
+        let where_clause = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::RowValueConstructor(vec![
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("a", false)),
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("b", false)),
+            ])),
+            right: Box::new(Expression::RowValueConstructor(vec![
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("x", false)),
+                Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("y", false)),
+            ])),
+        };
+
+        let subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "a1".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: Some(where_clause),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        };
+
+        // x and y are outer columns, so this subquery IS correlated.
+        assert!(
+            is_correlated(&subquery, &outer_schema, None),
+            "row-value WHERE clause referencing outer columns must be correlated"
+        );
+    }
+
     #[test]
     fn test_empty_outer_schema() {
         let outer_schema = CombinedSchema {

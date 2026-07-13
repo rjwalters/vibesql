@@ -32,6 +32,20 @@ fn unqualified_column_in_inner_tables(
     })
 }
 
+/// Whether `column` names a rowid pseudo-column (`rowid`, `_rowid_`, `oid`).
+///
+/// A correlated subquery may reference the *outer* table's rowid, e.g.
+/// `(SELECT y FROM d2 WHERE d2.rowid = d1.rowid)`. The outer `d1.rowid` is not a
+/// real column in the outer schema, so `get_column_index` returns `None` and the
+/// naive walk drops it — producing an empty correlation set, an identical cache
+/// key for every outer row, and thus the first row's result for all rows
+/// (rowvalue9 4.tn.4 / 4.tn.6, issue #6045). Rowid correlation refs are tracked
+/// separately and resolved from the outer `Row`'s `row_id` / `row_ids`.
+fn is_rowid_alias(column: &str) -> bool {
+    let c = column.to_ascii_lowercase();
+    c == "rowid" || c == "_rowid_" || c == "oid"
+}
+
 /// Extract correlation values from the current row for correlated subquery caching
 ///
 /// For correlated subqueries, we need to identify which columns from the outer query
@@ -101,7 +115,37 @@ pub(super) fn extract_correlation_values(
                     return None; // Column index out of bounds
                 }
             }
-            None => return None, // Column not found in outer schema
+            None => {
+                // A rowid correlation ref to the outer table isn't a real column,
+                // so it has no schema index — resolve it from the outer row's
+                // tracked row-id instead (issue #6045). Per-table `row_ids` win
+                // for joined outer rows; a single-table outer row uses `row_id`.
+                if is_rowid_alias(&column) {
+                    let rowid = table
+                        .as_deref()
+                        .and_then(|t| {
+                            row.row_ids.as_ref().and_then(|m| m.get(&t.to_lowercase()).copied())
+                        })
+                        .or(row.row_id);
+                    match rowid {
+                        Some(id) => {
+                            let full_name = if let Some(t) = &table {
+                                format!("{}.{}", t, column)
+                            } else {
+                                column.clone()
+                            };
+                            correlation_values
+                                .push((full_name, vibesql_types::SqlValue::Integer(id as i64)));
+                        }
+                        // Correlated on a rowid we can't resolve for this row:
+                        // return None so the caller skips caching rather than
+                        // caching under a colliding key.
+                        None => return None,
+                    }
+                } else {
+                    return None; // Column not found in outer schema
+                }
+            }
         }
     }
 
@@ -326,6 +370,13 @@ fn collect_correlation_refs_from_expr(
                     // Not in subquery's tables, check if in outer schema
                     if outer_schema.get_column_index(Some(table_name), column).is_some() {
                         refs.insert((Some(table_name.to_string()), column.to_string()));
+                    } else if is_rowid_alias(column)
+                        && outer_schema.table_schemas.keys().any(|t| t.canonical() == table_lower)
+                    {
+                        // Outer-table rowid correlation (e.g. `d2.rowid = d1.rowid`
+                        // where d1 is the outer table). Track it so its per-row
+                        // value goes into the cache key (issue #6045).
+                        refs.insert((Some(table_name.to_string()), column.to_string()));
                     }
                 }
             } else {
@@ -375,6 +426,52 @@ fn collect_correlation_refs_from_expr(
         }
         vibesql_ast::Expression::UnaryOp { expr, .. } => {
             collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+        }
+        // Row-value constructors, conjunctions, and disjunctions are flat lists of
+        // sub-expressions; without recursing into them a correlated column buried
+        // in `(a, b) = (x, y)` (or `a = x AND b = y` normalized to a Conjunction)
+        // is never collected. That produces an empty correlation set and thus an
+        // identical cache key for every outer row, so a correlated scalar subquery
+        // returns the first outer row's result to all rows (issue #6045).
+        vibesql_ast::Expression::RowValueConstructor(children)
+        | vibesql_ast::Expression::Conjunction(children)
+        | vibesql_ast::Expression::Disjunction(children) => {
+            for child in children {
+                collect_correlation_refs_from_expr(
+                    child,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
+            }
+        }
+        vibesql_ast::Expression::Collate { expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+        }
+        vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
+            collect_correlation_refs_from_expr(left, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(
+                right,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
+        }
+        vibesql_ast::Expression::IsTruthValue { expr, .. }
+        | vibesql_ast::Expression::Extract { expr, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+        }
+        vibesql_ast::Expression::Glob { expr, pattern, .. } => {
+            collect_correlation_refs_from_expr(expr, outer_schema, subquery_tables, database, refs);
+            collect_correlation_refs_from_expr(
+                pattern,
+                outer_schema,
+                subquery_tables,
+                database,
+                refs,
+            );
         }
         vibesql_ast::Expression::Function { args, .. }
         | vibesql_ast::Expression::AggregateFunction { args, .. } => {
@@ -564,5 +661,133 @@ fn collect_correlation_refs_from_expr(
         }
         // Literals and other expressions don't contribute to correlation
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::CombinedSchema;
+    use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
+
+    fn col(name: &str) -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(name, false))
+    }
+
+    fn outer_schema_xy() -> CombinedSchema {
+        let columns = vec![
+            vibesql_catalog::ColumnSchema {
+                name: "x".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                is_exact_integer_type: false,
+                collation: None,
+            },
+            vibesql_catalog::ColumnSchema {
+                name: "y".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                is_exact_integer_type: false,
+                collation: None,
+            },
+        ];
+        CombinedSchema::from_table(
+            "a2".to_string(),
+            vibesql_catalog::TableSchema::new("a2".to_string(), columns),
+        )
+    }
+
+    fn subquery_with_where(where_clause: Expression) -> SelectStmt {
+        SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "a1".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: Some(where_clause),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    /// Root Cause #2 (issue #6045): a row-value `(a, b) = (x, y)` WHERE clause
+    /// must have BOTH outer columns (x, y) collected as correlation values.
+    /// Previously `RowValueConstructor` fell through the match and neither was
+    /// collected, producing an identical cache key for every outer row.
+    #[test]
+    fn row_value_where_extracts_both_outer_columns() {
+        let outer = outer_schema_xy();
+        // (a, b) = (x, y): a,b are inner (a1); x,y are outer (a2).
+        let where_clause = Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(Expression::RowValueConstructor(vec![col("a"), col("b")])),
+            right: Box::new(Expression::RowValueConstructor(vec![col("x"), col("y")])),
+        };
+        let subquery = subquery_with_where(where_clause);
+
+        // Outer row a2: x=10, y=20.
+        let row = vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(10),
+            vibesql_types::SqlValue::Integer(20),
+        ]);
+
+        let values = extract_correlation_values(&subquery, &row, &outer, None)
+            .expect("correlation values should extract");
+        // Both x and y must be present with their per-row values.
+        assert!(
+            values.iter().any(|(n, v)| n == "x" && *v == vibesql_types::SqlValue::Integer(10)),
+            "x correlation value missing: {:?}",
+            values
+        );
+        assert!(
+            values.iter().any(|(n, v)| n == "y" && *v == vibesql_types::SqlValue::Integer(20)),
+            "y correlation value missing: {:?}",
+            values
+        );
+    }
+
+    /// A conjunction `a = x AND b = y` (the non-row-value equivalent) also
+    /// collects both outer columns — guards the Conjunction arm added alongside
+    /// the RowValueConstructor arm.
+    #[test]
+    fn conjunction_where_extracts_both_outer_columns() {
+        let outer = outer_schema_xy();
+        let eq = |l: Expression, r: Expression| Expression::BinaryOp {
+            op: BinaryOperator::Equal,
+            left: Box::new(l),
+            right: Box::new(r),
+        };
+        let where_clause =
+            Expression::Conjunction(vec![eq(col("a"), col("x")), eq(col("b"), col("y"))]);
+        let subquery = subquery_with_where(where_clause);
+        let row = vibesql_storage::Row::new(vec![
+            vibesql_types::SqlValue::Integer(7),
+            vibesql_types::SqlValue::Integer(9),
+        ]);
+        let values = extract_correlation_values(&subquery, &row, &outer, None)
+            .expect("correlation values should extract");
+        assert!(values.iter().any(|(n, _)| n == "x"));
+        assert!(values.iter().any(|(n, _)| n == "y"));
     }
 }

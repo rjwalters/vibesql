@@ -253,6 +253,33 @@ pub fn get_subquery_first_column_affinity(
     get_expression_affinity_from_from_clause(expr, &stmt.from, database)
 }
 
+/// Get the type affinity of the subquery's SELECT expression at position `idx`.
+///
+/// This is the per-position sibling of [`get_subquery_first_column_affinity`],
+/// needed by row-value `IN (subquery)` comparisons where each tuple position is
+/// compared against a different subquery column and therefore needs that
+/// column's affinity (issue #6045). Position 0 is equivalent to
+/// `get_subquery_first_column_affinity`.
+///
+/// # Returns
+/// - `Some(TypeAffinity)` if the expression at `idx` is a column reference (or a
+///   CAST/COLLATE thereof) with a determinable affinity.
+/// - `None` if the position is out of range, is a wildcard, or the expression
+///   does not carry a column affinity (e.g. a literal, function call, or an
+///   affinity-stripping expression like `+col`).
+pub fn get_subquery_column_affinity_at(
+    stmt: &vibesql_ast::SelectStmt,
+    idx: usize,
+    database: &vibesql_storage::Database,
+) -> Option<vibesql_types::TypeAffinity> {
+    let item = stmt.select_list.get(idx)?;
+    let expr = match item {
+        vibesql_ast::SelectItem::Expression { expr, .. } => expr,
+        _ => return None, // Wildcards don't have a single per-position affinity
+    };
+    get_expression_affinity_from_from_clause(expr, &stmt.from, database)
+}
+
 /// Get the type affinity of an expression given a FROM clause context
 ///
 /// This resolves column references by looking up the table schema.
