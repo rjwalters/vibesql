@@ -34,18 +34,37 @@
 //! the replicated membership). Severing a proxy kills its live connections
 //! and refuses new ones.
 //!
-//! All synchronization is bounded polling ([`TcpTestCluster::wait_until`],
-//! 10s deadline) — no bare sleeps; every wait fails loudly instead of
-//! hanging (PR 1's convention). Writes that don't specifically assert a
-//! rejection go through [`TcpTestCluster::propose_on_leader`], which
-//! retries the typed `NotLeader` rejection under the same deadline —
-//! release timing lets an election depose a just-observed leader between
-//! `wait_for_leader` and the propose (#5385).
+//! All synchronization is bounded polling ([`TcpTestCluster::wait_until`]) —
+//! no bare sleeps; every wait fails loudly instead of hanging (PR 1's
+//! convention). Writes that don't specifically assert a rejection go through
+//! [`TcpTestCluster::propose_on_leader`], which retries the typed `NotLeader`
+//! rejection under the same deadline — release timing lets an election depose
+//! a just-observed leader between `wait_for_leader` and the propose (#5385).
+//!
+//! ## Wait ceiling (CI headroom)
+//!
+//! The per-wait deadline [`WAIT_TIMEOUT`] is a *ceiling*, not a sleep: on the
+//! happy path a wait returns the moment its condition holds, so widening the
+//! ceiling costs the passing case nothing. It defaults to 10s locally but
+//! widens to 30s under CI, because CI runs `cargo test --release` with full
+//! workspace parallelism on a shared runner — scheduling contention can delay
+//! a Raft election by hundreds of milliseconds, and a ceiling sized for a
+//! quiet local machine then starves out and flakes (#6039). Resolution order,
+//! evaluated once at test-binary load:
+//!
+//! - `VIBESQL_TEST_WAIT_TIMEOUT_MS=<n>` — explicit override (any environment).
+//! - `CI` present (GitHub Actions sets `CI=true`) — 30s.
+//! - otherwise — 10s.
+//!
+//! This never weakens an assertion: the *condition* each wait requires
+//! (acknowledged leader, `NotLeader` rejection with the correct hint,
+//! converged history) is identical — only how long CI is allowed to take to
+//! reach it changes.
 
 use std::collections::BTreeMap;
 use std::net::TcpListener as StdTcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use tempfile::TempDir;
@@ -58,8 +77,47 @@ use vibesql_consensus::{
     RaftTuning, Role,
 };
 
-/// Upper bound for any single cluster-level wait (election, catch-up).
-const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default upper bound for any single cluster-level wait (election, catch-up)
+/// on a quiet local machine.
+const WAIT_TIMEOUT_LOCAL: Duration = Duration::from_secs(10);
+
+/// Upper bound for any single cluster-level wait when running under CI, where
+/// the runner shares CPU across the whole workspace's test binaries. These
+/// waits are *ceilings*, not sleeps — they cost nothing on the happy path and
+/// only matter when a genuinely slow (contention-delayed) election/catch-up
+/// needs more headroom than a quiet local machine would.
+const WAIT_TIMEOUT_CI: Duration = Duration::from_secs(30);
+
+/// Upper bound for any single cluster-level wait (election, catch-up),
+/// resolved once at test-binary load time.
+///
+/// CI runs `cargo test --release` with full workspace parallelism on a shared
+/// runner (see `.github/workflows/ci.yml`), so this suite's Raft elections can
+/// be scheduling-delayed by hundreds of milliseconds; a ceiling sized for a
+/// quiet local machine then starves out and flakes (#6039). To keep the
+/// assertions unchanged (they still require the *same* converged condition)
+/// while giving CI the headroom it needs, the ceiling is widened under CI:
+///
+/// - `VIBESQL_TEST_WAIT_TIMEOUT_MS=<n>` — explicit override (any environment),
+///   takes precedence.
+/// - `CI` set (GitHub Actions sets `CI=true`) — [`WAIT_TIMEOUT_CI`] (30s).
+/// - otherwise — [`WAIT_TIMEOUT_LOCAL`] (10s).
+///
+/// This is a per-wait ceiling, not a per-job one, so a single slow wait never
+/// eats the whole suite's budget — the same fix category as the job-level
+/// timeout headroom added for #5342, applied at the right layer.
+static WAIT_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
+    if let Some(ms) = std::env::var("VIBESQL_TEST_WAIT_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        return Duration::from_millis(ms);
+    }
+    if std::env::var_os("CI").is_some() {
+        return WAIT_TIMEOUT_CI;
+    }
+    WAIT_TIMEOUT_LOCAL
+});
 
 /// Poll interval inside bounded waits.
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -305,7 +363,7 @@ impl TcpTestCluster {
         let node = self.nodes.get_mut(&id).expect("unknown node");
         assert!(node.backend.is_none(), "node {id} is not killed");
 
-        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + *WAIT_TIMEOUT;
         let backend = loop {
             match OpenraftBackend::join_tcp_cluster_with_data_dir_tuned(
                 id,
@@ -385,7 +443,7 @@ impl TcpTestCluster {
     /// [`propose_on_leader`](Self::propose_on_leader) restricted to `ids`
     /// (e.g. the majority side of a partition).
     async fn propose_on_leader_among(&self, ids: &[u64], value: &str) -> (u64, LogIndex) {
-        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + *WAIT_TIMEOUT;
         let mut hint: Option<u64> = None;
         loop {
             let leader = match hint.take().filter(|id| ids.contains(id)) {
@@ -397,8 +455,9 @@ impl TcpTestCluster {
                 Err(ConsensusError::NotLeader { leader_hint }) => {
                     assert!(
                         tokio::time::Instant::now() < deadline,
-                        "timed out after {WAIT_TIMEOUT:?} proposing {value:?}: leadership \
-                         never settled"
+                        "timed out after {:?} proposing {value:?}: leadership \
+                         never settled",
+                        *WAIT_TIMEOUT
                     );
                     hint = leader_hint;
                     tokio::time::sleep(POLL_INTERVAL).await;
@@ -421,14 +480,15 @@ impl TcpTestCluster {
     /// [`WAIT_TIMEOUT`]. The single bounded-wait primitive every
     /// cluster-level synchronization goes through.
     async fn wait_until<T>(&self, what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
-        let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + *WAIT_TIMEOUT;
         loop {
             if let Some(value) = probe() {
                 return value;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "timed out after {WAIT_TIMEOUT:?} waiting for {what}"
+                "timed out after {:?} waiting for {what}",
+                *WAIT_TIMEOUT
             );
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -587,7 +647,7 @@ async fn minority_partition_rejects_writes_while_the_majority_continues() {
     // The deposed leader truncates its uncommitted entry when the new
     // leader's log reaches it; the pending write surfaces NotLeader with
     // the new leader as hint.
-    let result = tokio::time::timeout(WAIT_TIMEOUT, pending)
+    let result = tokio::time::timeout(*WAIT_TIMEOUT, pending)
         .await
         .expect("the minority write should resolve after the partition heals")
         .expect("the propose task must not panic");
@@ -627,7 +687,7 @@ async fn minority_partition_rejects_writes_while_the_majority_continues() {
 /// Read until the server hangs up; panics if it answers or stays open.
 async fn assert_connection_closed(mut stream: TcpStream) {
     let mut buf = [0u8; 16];
-    match tokio::time::timeout(WAIT_TIMEOUT, stream.read(&mut buf)).await {
+    match tokio::time::timeout(*WAIT_TIMEOUT, stream.read(&mut buf)).await {
         Ok(Ok(0)) | Ok(Err(_)) => {} // clean close or reset — both fine
         Ok(Ok(n)) => panic!("server answered {n} bytes instead of dropping the connection"),
         Err(_) => panic!("server kept the connection open after a malformed frame"),
@@ -773,7 +833,8 @@ async fn rejoin_lagging_follower_via_snapshot(
 #[tokio::test]
 async fn lagging_follower_rejoins_via_snapshot_and_survives_restart() {
     let (mut cluster, follower) =
-        rejoin_lagging_follower_via_snapshot(aggressive_purge_tuning(), 30, 16, WAIT_TIMEOUT).await;
+        rejoin_lagging_follower_via_snapshot(aggressive_purge_tuning(), 30, 16, *WAIT_TIMEOUT)
+            .await;
 
     cluster.kill(follower).await;
     cluster.restore(follower).await;
@@ -796,7 +857,7 @@ async fn lagging_follower_rejoins_via_snapshot_and_survives_restart() {
 #[tokio::test]
 async fn snapshot_transfer_spans_many_chunks() {
     let tuning = RaftTuning { snapshot_chunk_bytes: 4096, ..aggressive_purge_tuning() };
-    rejoin_lagging_follower_via_snapshot(tuning, 30, 2048, WAIT_TIMEOUT).await;
+    rejoin_lagging_follower_via_snapshot(tuning, 30, 2048, *WAIT_TIMEOUT).await;
 }
 
 /// Env-tunable large-snapshot variant for manual / nightly runs (curator
@@ -834,14 +895,15 @@ async fn large_snapshot_transfer_stress() {
 /// Bounded poll shared by the MVCC test below (the `TcpTestCluster`
 /// methods are bound to the echo backend).
 async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
-    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + *WAIT_TIMEOUT;
     loop {
         if let Some(value) = probe() {
             return value;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timed out after {WAIT_TIMEOUT:?} waiting for {what}"
+            "timed out after {:?} waiting for {what}",
+            *WAIT_TIMEOUT
         );
         tokio::time::sleep(POLL_INTERVAL).await;
     }
@@ -853,7 +915,7 @@ async fn execute_on_mvcc_leader(
     nodes: &BTreeMap<u64, MvccRaftNode>,
     sql: &str,
 ) -> (LogIndex, vibesql_consensus::ApplyOutcome) {
-    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + *WAIT_TIMEOUT;
     loop {
         let leader = wait_for("a leader to be elected", || {
             nodes.iter().find(|(_, n)| n.role() == Role::Leader).map(|(id, _)| *id)
@@ -892,9 +954,14 @@ async fn mvcc_three_node_cluster_replicates_over_tcp() {
         let listener = listeners.remove(&id).expect("a bound listener per node");
         nodes.insert(
             id,
-            MvccRaftNode::join_tcp_cluster_with_listener(id, &config, listener, RaftTuning::default())
-                .await
-                .expect("boot mvcc tcp node"),
+            MvccRaftNode::join_tcp_cluster_with_listener(
+                id,
+                &config,
+                listener,
+                RaftTuning::default(),
+            )
+            .await
+            .expect("boot mvcc tcp node"),
         );
     }
 
