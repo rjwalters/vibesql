@@ -146,7 +146,7 @@ pub fn sample_rows<T: Clone>(rows: &[T], config: &SamplingConfig, rng: &mut impl
 fn random_sample<T: Clone>(rows: &[T], n: usize, rng: &mut impl Rng) -> Vec<T> {
     let n = n.min(rows.len());
     let indices: Vec<usize> = (0..rows.len()).collect();
-    let sampled_indices = indices.choose_multiple(rng, n);
+    let sampled_indices = indices.sample(rng, n);
 
     sampled_indices.map(|&i| rows[i].clone()).collect()
 }
