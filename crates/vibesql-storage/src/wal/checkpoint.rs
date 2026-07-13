@@ -378,19 +378,46 @@ impl CheckpointWriter {
         Ok(checkpoints.into_iter().last())
     }
 
-    /// Remove old checkpoints, keeping only the most recent N
+    /// Remove old checkpoints, keeping only the most recent N.
+    ///
+    /// Returns the number of checkpoints actually removed. If any per-file
+    /// `fs::remove_file` fails (e.g. permissions), the failure is no longer
+    /// silently swallowed (issue #6122): every candidate is still attempted
+    /// (a single unremovable file must not block pruning the rest), but if
+    /// one or more removals fail this returns `Err` describing how many
+    /// failed and which paths, after reporting how many *did* succeed via
+    /// `log::debug!` as before. Callers that treat pruning as best-effort
+    /// (see `WalState::checkpoint` in vibesql-cli, issue #6023/#6024) already
+    /// log this `Err` as a loud warning without failing the checkpoint
+    /// itself — pruning problems are warnings, never checkpoint failures.
     pub fn cleanup_old_checkpoints(&self, keep_count: usize) -> Result<usize, StorageError> {
         let checkpoints = self.list_checkpoints()?;
         let mut removed = 0;
+        let mut failed_paths: Vec<PathBuf> = Vec::new();
 
         if checkpoints.len() > keep_count {
             let to_remove = checkpoints.len() - keep_count;
             for checkpoint in checkpoints.into_iter().take(to_remove) {
-                if fs::remove_file(&checkpoint.path).is_ok() {
-                    log::debug!("Removed old checkpoint: {:?}", checkpoint.path);
-                    removed += 1;
+                match fs::remove_file(&checkpoint.path) {
+                    Ok(()) => {
+                        log::debug!("Removed old checkpoint: {:?}", checkpoint.path);
+                        removed += 1;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to remove old checkpoint {:?}: {}", checkpoint.path, e);
+                        failed_paths.push(checkpoint.path);
+                    }
                 }
             }
+        }
+
+        if !failed_paths.is_empty() {
+            return Err(StorageError::IoError(format!(
+                "failed to remove {} of {} old checkpoint(s): {}",
+                failed_paths.len(),
+                failed_paths.len() + removed,
+                failed_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
+            )));
         }
 
         Ok(removed)
@@ -607,6 +634,125 @@ mod tests {
         let remaining = writer.list_checkpoints().unwrap();
         assert_eq!(remaining[0].lsn, 40);
         assert_eq!(remaining[1].lsn, 50);
+    }
+
+    /// Issue #6122: a per-file `fs::remove_file` failure during pruning must
+    /// no longer be silently swallowed. Simulate a real-world failure
+    /// (permission denied) by making the checkpoint directory read-only:
+    /// on Unix, deleting a file requires write permission on its *parent*
+    /// directory, not the file itself, so this reliably fails every
+    /// `fs::remove_file` call in the loop without touching individual files.
+    /// `cleanup_old_checkpoints` must:
+    ///   1. still attempt every removal (best-effort — one failure must not
+    ///      short-circuit the rest of the candidates), and
+    ///   2. return `Err` — not silently report `Ok(0)` as success — so the
+    ///      CLI's existing warn-not-fail seam (`WalState::checkpoint`,
+    ///      #6023/#6024) actually fires and the operator learns pruning
+    ///      under-deleted.
+    #[cfg(unix)]
+    #[test]
+    fn test_cleanup_surfaces_per_file_remove_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        // Create 5 checkpoints; keep_count=2 means the oldest 3 are pruning
+        // candidates.
+        for i in 1..=5 {
+            writer.create_checkpoint(i * 10, format!("data{}", i).as_bytes(), 1).unwrap();
+        }
+        assert_eq!(writer.list_checkpoints().unwrap().len(), 5);
+
+        let checkpoint_dir = writer.checkpoint_dir().to_path_buf();
+        let orig_perms = fs::metadata(&checkpoint_dir).unwrap().permissions();
+        fs::set_permissions(&checkpoint_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Skip when running as root (root bypasses permission checks, so the
+        // sabotage above would not actually block removal).
+        if fs::File::create(checkpoint_dir.join(".probe")).is_ok() {
+            let _ = fs::remove_file(checkpoint_dir.join(".probe"));
+            fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+            eprintln!("skipping: running as root, cannot inject a permission failure");
+            return;
+        }
+
+        let result = writer.cleanup_old_checkpoints(2);
+
+        // Restore permissions immediately so TempDir teardown can clean up
+        // regardless of whether the assertions below pass or fail.
+        fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+
+        // Must surface as an error — not swallowed as `Ok(0)`.
+        assert!(result.is_err(), "failed removals must surface as Err, got {result:?}");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains('3'), "error must report the failure count (3): {err}");
+
+        // Every candidate must have been attempted (all failed, since the
+        // whole directory was locked) — none silently skipped.
+        assert_eq!(
+            writer.list_checkpoints().unwrap().len(),
+            5,
+            "no checkpoint should have been removed while the directory was locked"
+        );
+    }
+
+    /// Same failure mode, but exercises the CLI-facing seam directly: when
+    /// `cleanup_old_checkpoints` returns `Err`, the shape of the error must
+    /// carry enough information for `WalState::checkpoint`'s warn arm
+    /// (`crates/vibesql-cli/src/executor/wal.rs`) to print something
+    /// actionable, while still being a `StorageError::IoError` so it doesn't
+    /// require special-casing at that call site.
+    #[cfg(unix)]
+    #[test]
+    fn test_cleanup_error_is_io_error_variant() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        for i in 1..=3 {
+            writer.create_checkpoint(i * 10, format!("data{}", i).as_bytes(), 1).unwrap();
+        }
+
+        let checkpoint_dir = writer.checkpoint_dir().to_path_buf();
+        let orig_perms = fs::metadata(&checkpoint_dir).unwrap().permissions();
+        fs::set_permissions(&checkpoint_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        if fs::File::create(checkpoint_dir.join(".probe")).is_ok() {
+            let _ = fs::remove_file(checkpoint_dir.join(".probe"));
+            fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+            eprintln!("skipping: running as root, cannot inject a permission failure");
+            return;
+        }
+
+        let result = writer.cleanup_old_checkpoints(0);
+        fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, StorageError::IoError(_)),
+            "cleanup errors must be StorageError::IoError, got {err:?}"
+        );
+    }
+
+    /// Success path is unchanged: when every removal succeeds,
+    /// `cleanup_old_checkpoints` still returns `Ok(removed_count)` with no
+    /// error, matching the pre-#6122 contract that `checkpoint_retention_test`
+    /// and `checkpoint_failure_test` (vibesql-cli) rely on for stderr-silent
+    /// clean saves.
+    #[test]
+    fn test_cleanup_success_path_returns_ok_with_no_failures() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut writer = CheckpointWriter::new(temp_dir.path()).unwrap();
+
+        for i in 1..=4 {
+            writer.create_checkpoint(i * 10, format!("data{}", i).as_bytes(), 1).unwrap();
+        }
+
+        let removed = writer.cleanup_old_checkpoints(1).unwrap();
+        assert_eq!(removed, 3);
+        assert_eq!(writer.list_checkpoints().unwrap().len(), 1);
     }
 
     #[test]
