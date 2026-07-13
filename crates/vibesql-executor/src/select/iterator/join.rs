@@ -126,6 +126,12 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             hidden_columns.insert(left_total + idx);
         }
 
+        // Merge always-hidden (TVF SQLITE_HIDDEN) columns, adjusting right indices
+        let mut always_hidden_columns = left_schema.always_hidden_columns.clone();
+        for idx in right_schema.always_hidden_columns.iter() {
+            always_hidden_columns.insert(left_total + idx);
+        }
+
         // Merge joined_columns from both sides
         // These track columns from NATURAL/USING joins that shouldn't be considered ambiguous
         let mut joined_columns = left_schema.joined_columns.clone();
@@ -160,6 +166,7 @@ impl<'schema, I: RowIterator> LazyNestedLoopJoin<'schema, I> {
             table_schemas,
             total_columns: left_total + right_total,
             hidden_columns,
+            always_hidden_columns,
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns,

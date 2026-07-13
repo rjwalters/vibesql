@@ -115,6 +115,18 @@ pub struct CombinedSchema {
     /// This allows `SELECT t1.*` to return all columns from t1, while `SELECT *`
     /// correctly deduplicates columns for NATURAL JOIN.
     pub hidden_columns: HashSet<usize>,
+    /// Columns that are ALWAYS hidden from `SELECT *` / `table.*` expansion,
+    /// with no replacement or COALESCE partner (unlike `hidden_columns`, which is
+    /// join-deduplication and always pairs the hidden column with a replacement).
+    ///
+    /// This models SQLite's `SQLITE_HIDDEN` virtual-table columns: the `json` and
+    /// `root` columns of `json_each`/`json_tree` are resolvable by explicit
+    /// reference (`jx.json`, `WHERE root = '$'`) but are excluded from wildcard
+    /// expansion and `pragma_table_info`. The three `SELECT *` expansion call
+    /// sites short-circuit these to *excluded* unconditionally, distinct from the
+    /// join-dedup `hidden_columns` fallback that treats a no-replacement hidden
+    /// column as visible (issue #6050).
+    pub always_hidden_columns: HashSet<usize>,
     /// Reference to outer scope schema for nested subquery column resolution (issue #4493)
     /// Forms a linked-list chain similar to SQLite's NameContext.pNext
     /// Enables resolution of columns from multiple nesting levels
@@ -167,6 +179,7 @@ impl CombinedSchema {
             table_schemas: HashMap::new(),
             total_columns: 0,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
@@ -190,6 +203,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
@@ -238,6 +252,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
@@ -289,6 +304,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
@@ -433,6 +449,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns: left_total + right_columns,
             hidden_columns: left.hidden_columns,
+            always_hidden_columns: left.always_hidden_columns,
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns: left.joined_columns,
@@ -492,6 +509,12 @@ impl CombinedSchema {
             hidden_columns.insert(left_total + idx);
         }
 
+        // Merge always-hidden (TVF SQLITE_HIDDEN) columns, adjusting right indices
+        let mut always_hidden_columns = left.always_hidden_columns;
+        for idx in right.always_hidden_columns {
+            always_hidden_columns.insert(left_total + idx);
+        }
+
         // Merge duplicate aliases from both sides
         duplicate_aliases.extend(right.duplicate_aliases);
 
@@ -528,6 +551,7 @@ impl CombinedSchema {
             table_schemas,
             total_columns: left_total + right.total_columns,
             hidden_columns,
+            always_hidden_columns,
             outer_schema: left.outer_schema,
             duplicate_aliases,
             joined_columns,
@@ -962,6 +986,24 @@ impl CombinedSchema {
         self.hidden_columns.insert(idx);
     }
 
+    /// Is this column ALWAYS hidden from `SELECT *` / `table.*` expansion?
+    ///
+    /// True for `SQLITE_HIDDEN`-style TVF columns (`json`/`root` of
+    /// `json_each`/`json_tree`) that must be excluded from wildcard expansion
+    /// unconditionally — no replacement or COALESCE partner exists. Distinct from
+    /// [`is_column_hidden`], which is join-deduplication and pairs the hidden
+    /// column with a replacement (issue #6050).
+    #[inline]
+    pub fn is_column_always_hidden(&self, idx: usize) -> bool {
+        self.always_hidden_columns.contains(&idx)
+    }
+
+    /// Mark a column as always-hidden from `SELECT *` expansion (see
+    /// [`is_column_always_hidden`]).
+    pub fn always_hide_column(&mut self, idx: usize) {
+        self.always_hidden_columns.insert(idx);
+    }
+
     /// Mark a column name as a "joined column" from NATURAL JOIN or USING clause.
     ///
     /// Joined columns exist in multiple tables but should NOT be considered ambiguous
@@ -1176,6 +1218,13 @@ impl CombinedSchema {
                     continue;
                 }
 
+                // Always-hidden (SQLITE_HIDDEN-style TVF) columns are excluded
+                // from wildcard expansion unconditionally — no replacement or
+                // COALESCE partner exists (issue #6050).
+                if self.is_column_always_hidden(abs_idx) {
+                    continue;
+                }
+
                 let should_include = if self.is_column_hidden(abs_idx) {
                     self.get_column_replacement(abs_idx).is_some()
                         || self.get_using_coalesce_right_for_left(abs_idx).is_some()
@@ -1277,6 +1326,7 @@ pub struct SchemaBuilder {
     table_schemas: HashMap<TableIdentifier, (usize, vibesql_catalog::TableSchema)>,
     column_offset: usize,
     hidden_columns: HashSet<usize>,
+    always_hidden_columns: HashSet<usize>,
     duplicate_aliases: HashSet<TableIdentifier>,
     joined_columns: HashSet<String>,
     using_coalesce_indices: HashMap<String, Vec<usize>>,
@@ -1292,6 +1342,7 @@ impl SchemaBuilder {
             table_schemas: HashMap::new(),
             column_offset: 0,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
             using_coalesce_indices: HashMap::new(),
@@ -1310,6 +1361,7 @@ impl SchemaBuilder {
             table_schemas: schema.table_schemas,
             column_offset,
             hidden_columns: schema.hidden_columns,
+            always_hidden_columns: schema.always_hidden_columns,
             duplicate_aliases: schema.duplicate_aliases,
             joined_columns: schema.joined_columns,
             using_coalesce_indices: schema.using_coalesce_indices,
@@ -1350,6 +1402,7 @@ impl SchemaBuilder {
             table_schemas: self.table_schemas,
             total_columns: self.column_offset,
             hidden_columns: self.hidden_columns,
+            always_hidden_columns: self.always_hidden_columns,
             outer_schema: None,
             duplicate_aliases: self.duplicate_aliases,
             joined_columns: self.joined_columns,

@@ -1111,6 +1111,7 @@ fn build_aggregate_result_schema(
         table_schemas,
         total_columns: table_schema.columns.len(),
         hidden_columns: std::collections::HashSet::new(),
+        always_hidden_columns: std::collections::HashSet::new(),
         outer_schema: None,
         duplicate_aliases: std::collections::HashSet::new(),
         joined_columns: std::collections::HashSet::new(),

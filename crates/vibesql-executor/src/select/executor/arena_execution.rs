@@ -126,6 +126,7 @@ impl SelectExecutor<'_> {
             table_schemas: HashMap::new(),
             total_columns: 0,
             hidden_columns: HashSet::new(),
+            always_hidden_columns: HashSet::new(),
             outer_schema: None,
             duplicate_aliases: HashSet::new(),
             joined_columns: HashSet::new(),
