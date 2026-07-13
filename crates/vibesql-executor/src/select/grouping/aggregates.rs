@@ -72,6 +72,9 @@ pub enum AggregateAccumulator {
         distinct: bool,
         seen: Option<HashSet<vibesql_types::SqlValue>>,
     },
+    /// JSON_GROUP_OBJECT - Collects (key, value) pairs into a JSON object
+    /// (SQLite compatible). Pairs with a NULL key are dropped at finalize time.
+    JsonGroupObject { pairs: Vec<(vibesql_types::SqlValue, vibesql_types::SqlValue)> },
     /// MD5SUM - Compute MD5 hash of concatenated values (SQLite TCL test compatible)
     Md5sum { values: Vec<String>, distinct: bool, seen: Option<HashSet<String>> },
     /// STDDEV / VARIANCE family - statistical dispersion aggregates.
@@ -172,6 +175,7 @@ impl AggregateAccumulator {
             "JSON_GROUP_ARRAY" => {
                 Ok(AggregateAccumulator::JsonGroupArray { values: Vec::new(), distinct, seen })
             }
+            "JSON_GROUP_OBJECT" => Ok(AggregateAccumulator::JsonGroupObject { pairs: Vec::new() }),
             "MD5SUM" => Ok(AggregateAccumulator::Md5sum {
                 values: Vec::new(),
                 distinct,
@@ -510,6 +514,10 @@ impl AggregateAccumulator {
                     values.push(str_value);
                 }
             }
+
+            // JSON_GROUP_OBJECT accumulates (key, value) pairs via
+            // `accumulate_json_object_pair`, not the single-value path.
+            AggregateAccumulator::JsonGroupObject { .. } => {}
         }
     }
 
@@ -554,6 +562,20 @@ impl AggregateAccumulator {
                 // Other aggregates don't support multi-argument form
                 // This should be caught earlier by validation
             }
+        }
+    }
+
+    /// Accumulate one (key, value) pair for JSON_GROUP_OBJECT.
+    ///
+    /// Pairs are stored verbatim; NULL-keyed pairs are dropped at finalize time
+    /// (matching SQLite, which silently skips them).
+    pub fn accumulate_json_object_pair(
+        &mut self,
+        key: vibesql_types::SqlValue,
+        value: vibesql_types::SqlValue,
+    ) {
+        if let AggregateAccumulator::JsonGroupObject { pairs } = self {
+            pairs.push((key, value));
         }
     }
 
@@ -712,8 +734,13 @@ impl AggregateAccumulator {
             }
             AggregateAccumulator::JsonGroupArray { values, .. } => {
                 // Convert values to JSON array string
-                let json_array = sql_values_to_json_array(values);
+                let json_array = sql_values_to_json_array(values)?;
                 Ok(vibesql_types::SqlValue::Varchar(json_array.into()))
+            }
+            AggregateAccumulator::JsonGroupObject { pairs, .. } => {
+                // Convert (key, value) pairs to a JSON object string
+                let json_object = sql_pairs_to_json_object(pairs)?;
+                Ok(vibesql_types::SqlValue::Varchar(json_object.into()))
             }
             AggregateAccumulator::Percentile {
                 values,
@@ -1464,20 +1491,34 @@ fn escape_json_string(s: &str) -> String {
     escaped
 }
 
-/// Convert a single SqlValue to a JSON value representation
-fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
+/// Convert a single SqlValue to a JSON value representation.
+///
+/// Real numbers are rendered through the canonical JSON number formatter
+/// (`render_json_number`) so that integral doubles keep their fractional
+/// spelling (`2.0`, not `2`), matching SQLite's `json_group_array` /
+/// `json()` output. BLOB values are routed through the shared JSONB decoder:
+/// a well-formed JSONB blob is embedded as its decoded JSON text, while any
+/// other blob raises the SQLite-exact "JSON cannot hold BLOB values" error
+/// (never a mangled byte-string).
+fn sql_value_to_json(
+    value: &vibesql_types::SqlValue,
+) -> Result<String, crate::errors::ExecutorError> {
+    use crate::evaluator::functions::sqlite_compat::{
+        json_funcs::{json_node_to_json_text, render_json_number},
+        jsonb,
+    };
     use vibesql_types::SqlValue;
-    match value {
+    let rendered = match value {
         SqlValue::Null => "null".to_string(),
         SqlValue::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
         SqlValue::Integer(i) => i.to_string(),
         SqlValue::Bigint(i) => i.to_string(),
         SqlValue::Smallint(i) => i.to_string(),
         SqlValue::Unsigned(u) => u.to_string(),
-        SqlValue::Numeric(n) => n.to_string(),
-        SqlValue::Real(r) => r.to_string(),
-        SqlValue::Double(d) => d.to_string(),
-        SqlValue::Float(f) => f.to_string(),
+        SqlValue::Numeric(n) => render_json_number(*n),
+        SqlValue::Real(r) => render_json_number(*r),
+        SqlValue::Double(d) => render_json_number(*d),
+        SqlValue::Float(f) => render_json_number(*f as f64),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             let trimmed = s.trim();
             // If the value is already a JSON object or array, embed it directly
@@ -1489,17 +1530,61 @@ fn sql_value_to_json(value: &vibesql_types::SqlValue) -> String {
                 format!("\"{}\"", escape_json_string(s))
             }
         }
+        SqlValue::Blob(bytes) => match jsonb::decode(bytes) {
+            // A well-formed JSONB blob decodes and re-renders as canonical JSON
+            // text (SQLite: `json_group_array(jsonb('[1]'))` -> `[[1]]`).
+            Some(node) => json_node_to_json_text(&node),
+            None => {
+                return Err(crate::errors::ExecutorError::SqliteCompatError(
+                    "JSON cannot hold BLOB values".to_string(),
+                ));
+            }
+        },
         _ => {
             // For other types, convert to string and quote
             format!("\"{}\"", escape_json_string(&value.to_string()))
         }
-    }
+    };
+    Ok(rendered)
 }
 
 /// Convert a vector of SqlValues to a JSON array string
-fn sql_values_to_json_array(values: &[vibesql_types::SqlValue]) -> String {
-    let elements: Vec<String> = values.iter().map(sql_value_to_json).collect();
-    format!("[{}]", elements.join(","))
+fn sql_values_to_json_array(
+    values: &[vibesql_types::SqlValue],
+) -> Result<String, crate::errors::ExecutorError> {
+    let mut elements: Vec<String> = Vec::with_capacity(values.len());
+    for value in values {
+        elements.push(sql_value_to_json(value)?);
+    }
+    Ok(format!("[{}]", elements.join(",")))
+}
+
+/// Convert a vector of (key, value) pairs to a JSON object string for
+/// `json_group_object`.
+///
+/// Keys are rendered as JSON strings (labels are TEXT in SQLite). Pairs whose
+/// key is NULL are dropped entirely, matching SQLite which silently skips
+/// NULL-keyed pairs. Values go through [`sql_value_to_json`], so real numbers
+/// keep their fractional spelling, JSONB blobs embed as decoded JSON, and
+/// non-JSONB blobs raise "JSON cannot hold BLOB values".
+fn sql_pairs_to_json_object(
+    pairs: &[(vibesql_types::SqlValue, vibesql_types::SqlValue)],
+) -> Result<String, crate::errors::ExecutorError> {
+    use vibesql_types::SqlValue;
+    let mut entries: Vec<String> = Vec::with_capacity(pairs.len());
+    for (key, value) in pairs {
+        // SQLite silently drops pairs with a NULL key.
+        if matches!(key, SqlValue::Null) {
+            continue;
+        }
+        let key_str = match key {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+            other => sql_value_to_string(other),
+        };
+        let value_json = sql_value_to_json(value)?;
+        entries.push(format!("\"{}\":{}", escape_json_string(&key_str), value_json));
+    }
+    Ok(format!("{{{}}}", entries.join(",")))
 }
 
 /// Divide a SqlValue by an integer count, handling all numeric types
@@ -2334,5 +2419,95 @@ mod tests {
         let distinct = acc.finalize().unwrap();
         // Population variance of {2,4}: mean 3, m2 = 2, /2 = 1.0.
         assert!(matches!(distinct, SqlValue::Double(d) if (d - 1.0).abs() < 1e-9));
+    }
+
+    // ----- JSON aggregate real formatting / BLOB handling (issue #6049) -----
+
+    fn json_array_text(acc: AggregateAccumulator) -> String {
+        match acc.finalize().unwrap() {
+            SqlValue::Varchar(s) => s.to_string(),
+            other => panic!("expected Varchar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_json_group_array_real_keeps_fractional_spelling() {
+        // Integral doubles must render as `2.0`/`5.0`, not `2`/`5` (SQLite parity).
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();
+        acc.accumulate(&SqlValue::Integer(1));
+        acc.accumulate(&SqlValue::Real(2.0));
+        acc.accumulate(&SqlValue::Null);
+        acc.accumulate(&SqlValue::Varchar("three".into()));
+        assert_eq!(json_array_text(acc), r#"[1,2.0,null,"three"]"#);
+    }
+
+    #[test]
+    fn test_json_group_array_real_various() {
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();
+        acc.accumulate(&SqlValue::Real(3.14));
+        acc.accumulate(&SqlValue::Real(5.0));
+        acc.accumulate(&SqlValue::Real(-0.0));
+        // -0.0 normalizes to 0.0, matching SQLite's json_group_array(-0.0) -> [0.0].
+        assert_eq!(json_array_text(acc), "[3.14,5.0,0.0]");
+    }
+
+    #[test]
+    fn test_json_group_array_jsonb_blob_embeds() {
+        // A well-formed JSONB blob embeds as its decoded JSON: json_group_array(jsonb('[1]')) -> [[1]].
+        use crate::evaluator::functions::sqlite_compat::jsonb;
+        let blob = jsonb::encode(&serde_json::json!([1]));
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();
+        acc.accumulate(&SqlValue::Blob(blob));
+        assert_eq!(json_array_text(acc), "[[1]]");
+    }
+
+    #[test]
+    fn test_json_group_array_non_jsonb_blob_errors() {
+        // Arbitrary bytes that do not decode as JSONB must raise the SQLite error,
+        // never a mangled string.
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();
+        acc.accumulate(&SqlValue::Blob(vec![0xab, 0xcd, 0xef, 0xff]));
+        let err = acc.finalize().unwrap_err();
+        assert!(
+            format!("{err}").contains("JSON cannot hold BLOB values"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_json_group_object_basic_and_null_key_skipped() {
+        // json_group_object(x, y): NULL key drops the pair; NULL value passes through.
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_OBJECT", false).unwrap();
+        acc.accumulate_json_object_pair(SqlValue::Varchar("a".into()), SqlValue::Integer(1));
+        acc.accumulate_json_object_pair(SqlValue::Varchar("b".into()), SqlValue::Real(2.0));
+        acc.accumulate_json_object_pair(SqlValue::Varchar("c".into()), SqlValue::Null);
+        acc.accumulate_json_object_pair(SqlValue::Null, SqlValue::Varchar("three".into()));
+        acc.accumulate_json_object_pair(
+            SqlValue::Varchar("e".into()),
+            SqlValue::Varchar("four".into()),
+        );
+        assert_eq!(json_array_text(acc), r#"{"a":1,"b":2.0,"c":null,"e":"four"}"#);
+    }
+
+    #[test]
+    fn test_json_group_object_jsonb_value_embeds_and_blob_errors() {
+        use crate::evaluator::functions::sqlite_compat::jsonb;
+        // JSONB value embeds as raw JSON.
+        let blob = jsonb::encode(&serde_json::json!([1]));
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_OBJECT", false).unwrap();
+        acc.accumulate_json_object_pair(SqlValue::Varchar("k".into()), SqlValue::Blob(blob));
+        assert_eq!(json_array_text(acc), r#"{"k":[1]}"#);
+
+        // Non-JSONB blob value errors.
+        let mut acc2 = AggregateAccumulator::new("JSON_GROUP_OBJECT", false).unwrap();
+        acc2.accumulate_json_object_pair(
+            SqlValue::Varchar("k".into()),
+            SqlValue::Blob(vec![0xab, 0xcd]),
+        );
+        let err = acc2.finalize().unwrap_err();
+        assert!(
+            format!("{err}").contains("JSON cannot hold BLOB values"),
+            "unexpected error: {err}"
+        );
     }
 }

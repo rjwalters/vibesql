@@ -1170,7 +1170,12 @@ pub(crate) fn json_quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 
 /// Render an f64 the way SQLite renders JSON reals (keeps a fractional part,
 /// e.g. `2.0`), by round-tripping through serde_json's number formatter.
-fn render_json_number(f: f64) -> String {
+///
+/// Negative zero is normalized to `0.0` to match SQLite, which renders both
+/// `0.0` and `-0.0` as `0.0` in JSON output.
+pub(crate) fn render_json_number(f: f64) -> String {
+    // Normalize -0.0 to 0.0 (SQLite: json_group_array(-0.0) -> [0.0]).
+    let f = if f == 0.0 { 0.0 } else { f };
     match serde_json::Number::from_f64(f) {
         Some(n) => n.to_string(),
         None => f.to_string(),

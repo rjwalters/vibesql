@@ -161,6 +161,7 @@ impl Parser {
                 | "STRING_AGG"
                 | "TOTAL"
                 | "JSON_GROUP_ARRAY"
+                | "JSON_GROUP_OBJECT"
                 | "MEDIAN"
                 | "PERCENTILE"
                 | "PERCENTILE_CONT"
@@ -481,6 +482,7 @@ impl Parser {
             "STDDEV" | "STDDEV_SAMP" | "STDDEV_POP" | "VARIANCE" | "VAR_SAMP" | "VAR_POP" => true,
             "GROUP_CONCAT" | "STRING_AGG" => args.len() <= 2, // 1 or 2 args
             "JSON_GROUP_ARRAY" => true,                       // JSON aggregate function
+            "JSON_GROUP_OBJECT" => true,                      // JSON aggregate function
             // percentile.c family - arg counts validated by the executor so
             // it can emit SQLite-exact "wrong number of arguments" errors
             "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
