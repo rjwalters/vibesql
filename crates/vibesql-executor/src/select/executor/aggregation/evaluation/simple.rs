@@ -295,6 +295,81 @@ pub(super) fn evaluate(
             Ok(vibesql_types::SqlValue::Boolean(result))
         }
 
+        // GLOB: expr GLOB pattern
+        //
+        // Mirrors the scalar-evaluator path (evaluator/expressions/predicates.rs
+        // eval_glob) but evaluates both operands with aggregate support so that
+        // non-literal operands (columns, subqueries, IN, IsNull, Cast, function
+        // calls, NULL/numeric literals) work in the simple/scalar evaluator
+        // instead of raising "Unexpected expression in simple evaluator". (#6070)
+        //
+        // GLOB is always case-sensitive and does not take an ESCAPE clause,
+        // which is why it uses glob_match rather than like_match.
+        vibesql_ast::Expression::Glob { expr: test_expr, pattern, negated, .. } => {
+            let test_val =
+                executor.evaluate_with_aggregates(test_expr, group_rows, group_key, evaluator)?;
+            let pattern_val =
+                executor.evaluate_with_aggregates(pattern, group_rows, group_key, evaluator)?;
+
+            // Coerce operands to text, mirroring eval_glob's rules: SQLite
+            // renders numerics as text, booleans (EXISTS/IN results) as 0/1,
+            // and blob bytes as raw text; NULL on either side yields NULL.
+            let text = match &test_val {
+                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                    s.clone()
+                }
+                vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Boolean(b) => {
+                    arcstr::ArcStr::from(if *b { "1" } else { "0" })
+                }
+                vibesql_types::SqlValue::Blob(b) => {
+                    arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
+                }
+                _ => {
+                    return Err(ExecutorError::TypeMismatch {
+                        left: test_val,
+                        op: "GLOB".to_string(),
+                        right: pattern_val,
+                    })
+                }
+            };
+
+            let pattern_str = match &pattern_val {
+                vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                    s.clone()
+                }
+                vibesql_types::SqlValue::Null => return Ok(vibesql_types::SqlValue::Null),
+                vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+                vibesql_types::SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+                vibesql_types::SqlValue::Boolean(b) => {
+                    arcstr::ArcStr::from(if *b { "1" } else { "0" })
+                }
+                vibesql_types::SqlValue::Blob(b) => {
+                    arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned())
+                }
+                _ => {
+                    return Err(ExecutorError::TypeMismatch {
+                        left: test_val,
+                        op: "GLOB".to_string(),
+                        right: pattern_val,
+                    })
+                }
+            };
+
+            let matches = pattern::glob_match(&text, &pattern_str);
+            let result = if *negated { !matches } else { matches };
+
+            Ok(vibesql_types::SqlValue::Boolean(result))
+        }
+
         // IS NULL / IS NOT NULL
         vibesql_ast::Expression::IsNull { expr: test_expr, negated } => {
             let value =

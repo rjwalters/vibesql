@@ -4750,28 +4750,33 @@ array set vibesql_skip_tests {
 #
 # The fuzz2-*/fuzz4-* entries in vibesql_skip_tests above are whole-file-differs
 # skips for the SIBLING files fuzz2.test / fuzz4.test. The DIFFERENT file
-# fuzz.test (35,031 tests, srand(0) deterministic corpus) has 33 residual
+# fuzz.test (35,031 tests, srand(0) deterministic corpus) had 33 residual
 # failures as of the #6041 classification pass, and — unlike fuzz2/fuzz4 —
-# EVERY ONE of those 33 is a REAL engine gap, not a harness artifact. Per the
+# EVERY ONE of those is a REAL engine gap, not a harness artifact. Per the
 # #5779 epic's honest-framing rule, real failures are recorded by an OPEN
 # TRACKING ISSUE, never by a skip entry: they deliberately keep running and
 # reporting "failed" until the underlying engine bugs are fixed. This block is
 # the durable, greppable record (the #6066 partial-skip documentation
 # convention, applied here to a NON-skip: honest failures tracked by issue, not
-# silenced). NO vibesql_skip_tests entry is added for any of the 33.
+# silenced). NO vibesql_skip_tests entry is added for any of these.
 #
 # Canonical fuzz.test count on a QUIET machine (fresh release build):
-#   35031 run / 34998 pass / 33 fail / 0 skip.
-# (A LOADED machine can add a spurious 34th failure — fuzz-7.2.1267 fails with
+#   35031 run / 35005 pass / 26 fail / 0 skip.
+# (Was 33 fail before #6070 fixed Bucket A's 7 GLOB simple-evaluator cases.)
+# (A LOADED machine can add a spurious extra failure — fuzz-7.2.1267 fails with
 # "Too many open files in system (os error 23)" when the trial-DB checkpoint
 # copy path exhausts the system fd table; that is a transient machine-load
-# artifact, NOT one of the 33, and does not reproduce on a quiet machine.)
+# artifact, NOT one of the residual failures, and does not reproduce on a quiet
+# machine.)
 #
-# The 33 real failures, 4 buckets (test name -> class -> tracking issue):
+# The residual real failures, by bucket (test name -> class -> tracking issue):
 #   Bucket A — GLOB in the simple (scalar) evaluator, non-literal operands (7)
 #     fuzz-3.2.1965, fuzz-3.2.2663, fuzz-3.2.2863, fuzz-4.2.586,
 #     fuzz-4.2.1633, fuzz-4.2.1896, fuzz-4.2.4455
-#     -> #6070  ("Unexpected expression in simple evaluator: Glob {...}")
+#     -> #6070  FIXED: the aggregation simple evaluator now has a Glob arm that
+#        evaluates both operands with aggregate support (mirroring the scalar
+#        eval_glob coercion) instead of raising
+#        "Unexpected expression in simple evaluator: Glob {...}".
 #   Bucket B — ORDER BY numeric-ordinal range validation, nested context (1)
 #     fuzz-1.18                                            -> #6071
 #   Bucket C — CAST(zeroblob(N) AS text) returns N NUL bytes, not "" (MEM_Zero) (1)
