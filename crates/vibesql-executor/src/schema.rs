@@ -723,6 +723,54 @@ impl CombinedSchema {
         )
     }
 
+    /// Resolve a column's *declared* collation by name (optionally qualified
+    /// with a table/alias), searching this schema level first and then
+    /// following the `outer_schema` chain to enclosing scopes.
+    ///
+    /// This mirrors [`get_column_index`](Self::get_column_index): a correlated
+    /// subquery may reference an outer column whose declared `COLLATE` must be
+    /// honored inside the subquery's comparisons. The outer column is not in
+    /// this level's `table_schemas`, so a lookup restricted to the current
+    /// level would incorrectly report the default BINARY collation and a
+    /// `COLLATE NOCASE` outer column would compare BINARY (issue #6115).
+    ///
+    /// Returns `None` when the column has no declared collation (default
+    /// BINARY) or cannot be resolved anywhere in the chain.
+    pub fn get_column_collation_in_chain(
+        &self,
+        table: Option<&str>,
+        column: &str,
+    ) -> Option<String> {
+        // Try the current level first.
+        if let Some(table_name) = table {
+            // Qualified column reference (table.column).
+            let table_id = TableIdentifier::unquoted(table_name);
+            if let Some((_start_index, schema)) = self.table_schemas.get(&table_id) {
+                if let Some(col_idx) = schema.get_column_index(column) {
+                    return schema.columns[col_idx].collation.clone();
+                }
+            }
+        } else {
+            // Unqualified column reference - search all non-alias tables.
+            for (table_id, (_start_index, schema)) in &self.table_schemas {
+                if self.alias_tables.contains(table_id) {
+                    continue;
+                }
+                if let Some(col_idx) = schema.get_column_index(column) {
+                    return schema.columns[col_idx].collation.clone();
+                }
+            }
+        }
+
+        // Not found at this level - follow the outer_schema chain so a
+        // correlated reference reaches the enclosing scope that declares it.
+        if let Some(outer) = &self.outer_schema {
+            return outer.get_column_collation_in_chain(table, column);
+        }
+
+        None
+    }
+
     /// Get the type affinity for a column by name
     ///
     /// Returns the SQLite type affinity for the column, which determines how
