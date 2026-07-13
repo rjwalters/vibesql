@@ -302,8 +302,19 @@ pub(crate) fn quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Float(f) => Ok(SqlValue::Varchar(format_float_for_quote(*f as f64).into())),
         SqlValue::Boolean(b) => Ok(SqlValue::Varchar(if *b { "1" } else { "0" }.into())),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // SQLite observes TEXT values as NUL-terminated C strings: quote()
+            // renders the observed string, stopping at the first embedded NUL
+            // (consistent with LENGTH() in length.rs). e.g.
+            // CAST(x'4142004344' AS text) is "AB\0CD" but quote() emits 'AB',
+            // not a literal containing an embedded NUL. This also keeps CLI
+            // rendering balanced (PR #6093's format_sql_value truncation no
+            // longer drops the closing quote).
+            let observed = match s.as_bytes().iter().position(|&b| b == 0) {
+                Some(nul_idx) => &s[..nul_idx],
+                None => s.as_str(),
+            };
             // Escape single quotes by doubling them
-            let escaped = s.replace('\'', "''");
+            let escaped = observed.replace('\'', "''");
             Ok(SqlValue::Varchar(format!("'{}'", escaped).into()))
         }
         SqlValue::Vector(floats) => {
@@ -438,5 +449,26 @@ mod tests {
 
         // Empty string
         assert_eq!(quote(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Varchar("''".into()));
+    }
+
+    #[test]
+    fn test_quote_observes_embedded_nul() {
+        // SQLite observes TEXT as a NUL-terminated C string. CAST(x'4142004344'
+        // AS text) is "AB\0CD" but quote() emits 'AB' (no embedded NUL), so
+        // hex(quote(...)) is 27414227 rather than 27414200434427.
+        assert_eq!(
+            quote(&[SqlValue::Varchar("AB\0CD".into())]).unwrap(),
+            SqlValue::Varchar("'AB'".into())
+        );
+        // Leading NUL -> observed empty string -> ''
+        assert_eq!(
+            quote(&[SqlValue::Varchar("\0AB".into())]).unwrap(),
+            SqlValue::Varchar("''".into())
+        );
+        // Interior single quote before a NUL is still escaped.
+        assert_eq!(
+            quote(&[SqlValue::Varchar("it's\0X".into())]).unwrap(),
+            SqlValue::Varchar("'it''s'".into())
+        );
     }
 }
