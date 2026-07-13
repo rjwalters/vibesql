@@ -280,6 +280,75 @@ pub fn get_subquery_column_affinity_at(
     get_expression_affinity_from_from_clause(expr, &stmt.from, database)
 }
 
+/// Resolve the collating-sequence contribution of a subquery's `idx`-th result
+/// column for a datatype3 §7.1 comparison.
+///
+/// Returns:
+/// - `Some(Some(coll))` — the column position is a §7.1 "column operand" with a
+///   declared collation `coll` (an explicit COLLATE, or a bare column /
+///   unary-`+` / CAST wrapping a column declared `COLLATE coll`);
+/// - `Some(None)` — a column operand with the default BINARY collation, which
+///   still *blocks* fallback to the other operand's collation;
+/// - `None` — not a column operand (literal, `||`, function, …), so it does not
+///   contribute a collation and the comparison falls through to the other side.
+///
+/// This distinction (column-with-BINARY vs not-a-column) is what makes
+/// `(SELECT +bb, 1) >= (aa, 1)` compare element 0 as BINARY: `+bb` is a BINARY
+/// column operand that blocks the tuple's NOCASE `aa` (rowvalue §23.110,
+/// issue #6089).
+pub fn get_subquery_column_collation_at(
+    stmt: &vibesql_ast::SelectStmt,
+    idx: usize,
+    database: &vibesql_storage::Database,
+) -> Option<Option<String>> {
+    let item = stmt.select_list.get(idx)?;
+    let expr = match item {
+        vibesql_ast::SelectItem::Expression { expr, .. } => expr,
+        _ => return None,
+    };
+    crate::evaluator::collation::operand_column_collation(expr, &|col_id| {
+        get_column_collation_from_from_clause(col_id, &stmt.from, database)
+    })
+}
+
+/// Resolve a column reference's declared collation within a FROM clause.
+fn get_column_collation_from_from_clause(
+    col_id: &vibesql_ast::ColumnIdentifier,
+    from: &Option<vibesql_ast::FromClause>,
+    database: &vibesql_storage::Database,
+) -> Option<String> {
+    let column_name = col_id.column_canonical();
+    if let Some(table) = col_id.table_canonical() {
+        let tbl = database.get_table(table)?;
+        let col_idx = tbl.schema.get_column_index(column_name)?;
+        return tbl.schema.columns[col_idx].collation.clone();
+    }
+    let from_clause = from.as_ref()?;
+    find_column_collation_in_from_clause(column_name, from_clause, database)
+}
+
+/// Search a FROM clause for a column and return its declared collation.
+fn find_column_collation_in_from_clause(
+    column_name: &str,
+    from: &vibesql_ast::FromClause,
+    database: &vibesql_storage::Database,
+) -> Option<String> {
+    match from {
+        vibesql_ast::FromClause::Table { name, .. } => {
+            let table = database.get_table(name)?;
+            let col_idx = table.schema.get_column_index(column_name)?;
+            table.schema.columns[col_idx].collation.clone()
+        }
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            find_column_collation_in_from_clause(column_name, left, database)
+                .or_else(|| find_column_collation_in_from_clause(column_name, right, database))
+        }
+        vibesql_ast::FromClause::Subquery { .. }
+        | vibesql_ast::FromClause::Values { .. }
+        | vibesql_ast::FromClause::TableFunction { .. } => None,
+    }
+}
+
 /// Get the type affinity of an expression given a FROM clause context
 ///
 /// This resolves column references by looking up the table schema.

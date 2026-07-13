@@ -23,12 +23,19 @@ use crate::{
 ///   function calls, subqueries, etc.)
 /// * `cte_results` - Optional CTE context so subqueries inside VALUES rows can
 ///   reference names bound by an enclosing WITH clause (issue #5353)
+/// * `outer_row` / `outer_schema` - Optional outer-query context so a VALUES row
+///   used as a correlated row-value LHS (`(VALUES(b3.a, b3.b)) IN (...)`) can
+///   resolve outer column references. Without this the VALUES expressions are
+///   evaluated against an empty schema and `b3.a` raises "no such column"
+///   (rowvalue §18.2/§18.5, issue #6089).
 pub(crate) fn execute_values(
     rows: &[Vec<vibesql_ast::Expression>],
     alias: &str,
     column_aliases: Option<&Vec<String>>,
     database: Option<&vibesql_storage::Database>,
     cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
+    outer_row: Option<&vibesql_storage::Row>,
+    outer_schema: Option<&CombinedSchema>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Handle empty VALUES - return empty result with appropriate schema
     if rows.is_empty() {
@@ -45,25 +52,51 @@ pub(crate) fn execute_values(
     // Determine expected column count from first row
     let expected_columns = rows[0].len();
 
-    // Create an empty schema and row for expression evaluation
-    // VALUES expressions should not reference columns, so this is safe
+    // Create an empty schema and row as the *primary* evaluation context. A
+    // bare VALUES row references no local columns; outer references (issue
+    // #6089) resolve through the evaluator's outer_schema/outer_row chain.
     let empty_schema = CombinedSchema::empty();
     let empty_row = vibesql_storage::Row::new(vec![]);
 
-    // Create evaluator - use database if available for function calls, subqueries, etc.
-    let mut evaluator = if let Some(db) = database {
-        CombinedExpressionEvaluator::with_database(&empty_schema, db)
-    } else {
-        CombinedExpressionEvaluator::new(&empty_schema)
-    };
+    // Non-empty CTE context so subqueries in VALUES rows can reference names
+    // bound by an enclosing WITH clause (issue #5353).
+    let cte_ctx = cte_results.filter(|ctes| !ctes.is_empty());
 
-    // Thread CTE context so subqueries in VALUES rows can reference names
-    // bound by an enclosing WITH clause (issue #5353)
-    if let Some(ctes) = cte_results {
-        if !ctes.is_empty() {
-            evaluator = evaluator.with_cte_context(ctes);
+    // Create evaluator - use database if available for function calls,
+    // subqueries, etc. When outer context is supplied (a correlated VALUES
+    // row-value LHS, issue #6089), build with it so `b3.a` resolves against
+    // the enclosing query row rather than raising "no such column".
+    let evaluator = match (database, outer_row, outer_schema) {
+        (Some(db), Some(orow), Some(oschema)) => match cte_ctx {
+            Some(ctes) => CombinedExpressionEvaluator::with_database_and_outer_context_and_cte(
+                &empty_schema,
+                db,
+                orow,
+                oschema,
+                ctes,
+            ),
+            None => CombinedExpressionEvaluator::with_database_and_outer_context(
+                &empty_schema,
+                db,
+                orow,
+                oschema,
+            ),
+        },
+        (Some(db), _, _) => {
+            let mut ev = CombinedExpressionEvaluator::with_database(&empty_schema, db);
+            if let Some(ctes) = cte_ctx {
+                ev = ev.with_cte_context(ctes);
+            }
+            ev
         }
-    }
+        (None, _, _) => {
+            let mut ev = CombinedExpressionEvaluator::new(&empty_schema);
+            if let Some(ctes) = cte_ctx {
+                ev = ev.with_cte_context(ctes);
+            }
+            ev
+        }
+    };
 
     // Evaluate all rows and collect results
     let mut result_rows = Vec::with_capacity(rows.len());

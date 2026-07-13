@@ -1102,6 +1102,8 @@ impl SelectExecutor<'_> {
                     None,
                     Some(self.database),
                     cte_ctx,
+                    self.outer_row,
+                    self.outer_schema,
                 )?;
                 from_result.into_rows()
             };

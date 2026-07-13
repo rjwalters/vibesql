@@ -895,9 +895,9 @@ impl ExpressionEvaluator<'_> {
                 elem_exprs.iter().zip(left_vals.iter()).zip(cand_exprs.iter())
             {
                 let r_val = self.eval(r_expr, row)?;
-                let collation = self
-                    .get_expression_collation(l_expr)
-                    .or_else(|| self.get_expression_collation(r_expr));
+                // datatype3 §7.1 comparison collation (issue #6089): left column
+                // collation, including default BINARY, blocks the right operand.
+                let collation = self.comparison_collation(l_expr, r_expr);
                 let (l_val, r_val) = crate::evaluator::row_value::apply_collation_to_pair(
                     l_val.clone(),
                     r_val,
