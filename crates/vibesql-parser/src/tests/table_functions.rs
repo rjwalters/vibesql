@@ -133,6 +133,69 @@ fn std_quoted_name_is_a_table_not_a_tvf() {
 }
 
 // ============================================================================
+// Parenthesized single-term FROM with a trailing `AS alias` (issue #6051)
+// ============================================================================
+//
+// `parse_table_reference`'s parenthesized-fallback branch previously reattached
+// a post-`)` `AS alias` only when the inner content was a `Join`. A single
+// parenthesized table or table-valued function silently dropped the alias, so
+// `SELECT xyz.* FROM (t1) AS xyz` / `FROM (json_each(...)) AS xyz` later failed
+// to resolve `xyz`. These assert the alias survives on both variants.
+
+#[test]
+fn std_paren_plain_table_with_alias() {
+    // FROM (t1) AS xyz  — the inner term is a plain table; the alias must land on
+    // the Table node, not be discarded.
+    let from = std_from("SELECT xyz.* FROM (t1) AS xyz");
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            assert_eq!(name, "t1");
+            assert_eq!(alias.as_deref(), Some("xyz"));
+        }
+        other => panic!("expected Table with alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn std_paren_tvf_with_alias() {
+    // FROM (json_each('{"a":1}')) AS xyz — the inner term is a TVF; the alias
+    // must land on the TableFunction node.
+    let from = std_from(r#"SELECT xyz.* FROM (json_each('{"a":1}')) AS xyz"#);
+    match from {
+        FromClause::TableFunction { name, alias, .. } => {
+            assert_eq!(name, "json_each");
+            assert_eq!(alias.as_deref(), Some("xyz"));
+        }
+        other => panic!("expected TableFunction with alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn std_paren_join_with_alias_unregressed() {
+    // The pre-existing Join case must still attach its alias.
+    let from = std_from("SELECT * FROM (t1 JOIN t2 USING(id)) AS j1");
+    match from {
+        FromClause::Join { alias, .. } => {
+            assert_eq!(alias.as_deref(), Some("j1"));
+        }
+        other => panic!("expected Join with alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn std_paren_plain_table_without_alias_unregressed() {
+    // FROM (t1) with no alias still parses to a bare Table.
+    let from = std_from("SELECT * FROM (t1)");
+    match from {
+        FromClause::Table { name, alias, .. } => {
+            assert_eq!(name, "t1");
+            assert_eq!(alias, None);
+        }
+        other => panic!("expected Table, got {other:?}"),
+    }
+}
+
+// ============================================================================
 // Arena parser
 // ============================================================================
 

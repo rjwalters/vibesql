@@ -40,9 +40,12 @@ use crate::{
         functions::sqlite_compat::{
             json_funcs::{
                 json_node_to_json_text, json_node_to_sql_value, json_node_type_name, navigate,
-                parse_json_relaxed, parse_sqlite_json_path,
+                parse_json_relaxed, parse_sqlite_json_path, PathSegment,
             },
-            jsonb::decode as decode_jsonb_blob,
+            jsonb::{
+                container_payload_len, decode as decode_jsonb_blob, encoded_len, header_len,
+                key_encoded_len,
+            },
         },
         CombinedExpressionEvaluator,
     },
@@ -180,7 +183,16 @@ pub(crate) fn execute_table_function(
     // Resolve the optional path argument. The path is applied to the root; the
     // referenced node becomes the expansion root. The `base_path` string is the
     // JSONPath prefix used to build `fullkey`/`path` for emitted rows.
-    let (start_node, base_path) = match path_value {
+    //
+    // `base_id_offset` / `base_value_offset` are the JSONB byte offsets of the
+    // navigated node within the encoding of the *whole original document* —
+    // SQLite's `id`/`parent` columns are these JSONB parse-tree offsets, not
+    // source-text positions, and they are measured against the full document even
+    // when a path navigates into a subtree (verified against sqlite3 3.51). The
+    // `id_offset` is the key offset for an object member (else the value offset);
+    // the `value_offset` is where the node's children begin. See the docs on
+    // [`jsonb_value_offset`] and [`expand_each`]/[`expand_tree_node`].
+    let (start_node, base_path, base_id_offset, base_value_offset) = match path_value {
         Some(SqlValue::Null) => {
             return Ok(super::FromResult::from_rows(schema, vec![]));
         }
@@ -192,29 +204,38 @@ pub(crate) fn execute_table_function(
             let segments =
                 parse_sqlite_json_path(&path_str).map_err(ExecutorError::SqliteCompatError)?;
             match navigate(&root, &segments) {
-                Some(node) => (node, path_str),
+                Some(node) => {
+                    let (id_off, val_off) = jsonb_value_offset(&root, &segments).unwrap_or((0, 0));
+                    (node, path_str, id_off, val_off)
+                }
                 // Path does not resolve -> zero rows.
                 None => return Ok(super::FromResult::from_rows(schema, vec![])),
             }
         }
-        None => (&root, "$".to_string()),
+        // No path: expansion root is the whole document, whose value element
+        // begins at JSONB offset 0 (id and value offsets coincide at the root).
+        None => (&root, "$".to_string(), 0usize, 0usize),
     };
 
     let mut rows: Vec<vibesql_storage::Row> = Vec::new();
-    let mut next_id: i64 = 0;
     if is_each {
-        expand_each(start_node, &base_path, &mut rows, &mut next_id);
+        // `json_each` emits the immediate children of the navigated node; their
+        // ids are computed from the node's *value* offset (where children begin).
+        expand_each(start_node, &base_path, base_value_offset, &mut rows);
     } else {
         // json_tree: emit the root node itself, then recurse.
         // The root's `key` is NULL, its `fullkey`/`path` are the base path.
+        // Its `id` is the navigated node's id offset (key offset when reached via
+        // an object-member path), while its children start at the value offset.
         expand_tree_node(
             start_node,
             SqlValue::Null,
             &base_path,
             &base_path,
             None,
+            base_id_offset,
+            base_value_offset,
             &mut rows,
-            &mut next_id,
         );
     }
 
@@ -375,51 +396,144 @@ fn make_row(
     ])
 }
 
+/// The JSONB byte offsets, within the encoding of the *whole document* `root`,
+/// of the node navigated to by `segments`. Returns `(id_offset, value_offset)`,
+/// or `None` if the path does not resolve.
+///
+/// - `id_offset` is the node's `id` as SQLite reports it: for an object member
+///   this is the *key* element's offset; for an array element or the bare root
+///   it is the *value* element's offset.
+/// - `value_offset` is the value element's offset (where the node's own children
+///   begin, after its header). For an object member this is `id_offset +
+///   key_len`; otherwise it equals `id_offset`.
+///
+/// SQLite's `json_each`/`json_tree` `id`/`parent` columns are these JSONB
+/// parse-tree offsets (`JsonParse.aNode[]` positions), measured against the full
+/// original document even when a `path` argument navigates into a subtree
+/// (verified against sqlite3 3.51: `json_tree('{"a":1,"b":[2,{"c":3}]}','$.b')`
+/// reports the root `$.b` with id 6 — the key offset — while its children live
+/// at the value offset 8). We compute the offsets by walking `segments` from the
+/// root, accumulating the JSONB strides of the containers and preceding siblings
+/// using the same size-class rules as the encoder.
+fn jsonb_value_offset(
+    root: &serde_json::Value,
+    segments: &[PathSegment],
+) -> Option<(usize, usize)> {
+    let mut node = root;
+    // The root (empty path) has id == value offset == 0.
+    let mut id_offset = 0usize;
+    let mut value_offset = 0usize;
+    for seg in segments {
+        // Descend one level: children begin after this container's header.
+        let payload = container_payload_len(node);
+        let children_start = value_offset + header_len(payload);
+        match (seg, node) {
+            (PathSegment::Key(k), serde_json::Value::Object(map)) => {
+                // Walk members in order, summing key+value strides, until we hit
+                // the requested key. The member's `id` is the key offset; its
+                // value offset is key_offset + key_len.
+                let mut cur = children_start;
+                let mut found = None;
+                for (member_key, member_val) in map.iter() {
+                    let klen = key_encoded_len(member_key);
+                    if member_key == k {
+                        found = Some((cur, cur + klen, member_val));
+                        break;
+                    }
+                    cur += klen + encoded_len(member_val);
+                }
+                let (key_off, value_off, value_node) = found?;
+                id_offset = key_off;
+                value_offset = value_off;
+                node = value_node;
+            }
+            (PathSegment::Index(n), serde_json::Value::Array(arr)) => {
+                let mut cur = children_start;
+                for child in arr.iter().take(*n) {
+                    cur += encoded_len(child);
+                }
+                node = arr.get(*n)?;
+                id_offset = cur;
+                value_offset = cur;
+            }
+            (PathSegment::IndexFromEnd(n), serde_json::Value::Array(arr)) => {
+                let len = arr.len();
+                if *n == 0 || *n > len {
+                    return None;
+                }
+                let idx = len - *n;
+                let mut cur = children_start;
+                for child in arr.iter().take(idx) {
+                    cur += encoded_len(child);
+                }
+                node = arr.get(idx)?;
+                id_offset = cur;
+                value_offset = cur;
+            }
+            _ => return None,
+        }
+    }
+    Some((id_offset, value_offset))
+}
+
 /// `json_each` expansion: one row per immediate child of `node`. A scalar (or
 /// container navigated to via a path that lands on a scalar) yields exactly one
 /// row for the node itself.
+///
+/// `base_offset` is the JSONB byte offset of `node`'s value element within the
+/// whole document. Each emitted row's `id` is the JSONB offset of that child's
+/// *key* element (object members) or its *value* element (array elements /
+/// scalars) — matching SQLite's `JsonParse.aNode[]` offsets.
 fn expand_each(
     node: &serde_json::Value,
     base_path: &str,
+    base_offset: usize,
     rows: &mut Vec<vibesql_storage::Row>,
-    next_id: &mut i64,
 ) {
     match node {
         serde_json::Value::Array(arr) => {
+            // Array elements have no key: `id` is the element value's offset.
+            let mut child_off = base_offset + header_len(container_payload_len(node));
             for (i, child) in arr.iter().enumerate() {
                 let fullkey = format!("{}[{}]", base_path, i);
-                let id = *next_id;
-                *next_id += 1;
                 rows.push(make_row(
                     SqlValue::Bigint(i as i64),
                     child,
-                    id,
+                    child_off as i64,
                     None,
                     &fullkey,
                     base_path,
                 ));
+                child_off += encoded_len(child);
             }
         }
         serde_json::Value::Object(map) => {
+            // Object members: `id` is the *key* element's offset.
+            let mut member_off = base_offset + header_len(container_payload_len(node));
             for (k, child) in map.iter() {
                 let fullkey = format!("{}{}", base_path, dot_key(k));
-                let id = *next_id;
-                *next_id += 1;
                 rows.push(make_row(
                     SqlValue::Varchar(k.as_str().into()),
                     child,
-                    id,
+                    member_off as i64,
                     None,
                     &fullkey,
                     base_path,
                 ));
+                member_off += key_encoded_len(k) + encoded_len(child);
             }
         }
         // Scalar: a single row for the node itself, key NULL, fullkey == path.
+        // Its `id` is the node's own value offset.
         scalar => {
-            let id = *next_id;
-            *next_id += 1;
-            rows.push(make_row(SqlValue::Null, scalar, id, None, base_path, base_path));
+            rows.push(make_row(
+                SqlValue::Null,
+                scalar,
+                base_offset as i64,
+                None,
+                base_path,
+                base_path,
+            ));
         }
     }
 }
@@ -427,21 +541,31 @@ fn expand_each(
 /// `json_tree` recursive expansion. Emits a row for `node` (with the given
 /// `key`, `fullkey`, `path`, and `parent`), then, if `node` is a container,
 /// recurses into each child.
+///
+/// `id_offset` is this node's `id` — the JSONB offset of its *key* element for
+/// object members, or its *value* element for array elements / the root.
+/// `value_offset` is the JSONB offset of the node's value element (where its own
+/// children begin, after the header); for object members this is
+/// `id_offset + key_len`, for array elements / the root it equals `id_offset`.
+#[allow(clippy::too_many_arguments)]
 fn expand_tree_node(
     node: &serde_json::Value,
     key: SqlValue,
     fullkey: &str,
     path: &str,
     parent: Option<i64>,
+    id_offset: usize,
+    value_offset: usize,
     rows: &mut Vec<vibesql_storage::Row>,
-    next_id: &mut i64,
 ) {
-    let id = *next_id;
-    *next_id += 1;
+    let id = id_offset as i64;
     rows.push(make_row(key, node, id, parent, fullkey, path));
 
     match node {
         serde_json::Value::Array(arr) => {
+            // Array element ids are the element value offsets; children of an
+            // element (if a container) begin after that element's own header.
+            let mut child_off = value_offset + header_len(container_payload_len(node));
             for (i, child) in arr.iter().enumerate() {
                 let child_fullkey = format!("{}[{}]", fullkey, i);
                 expand_tree_node(
@@ -450,23 +574,32 @@ fn expand_tree_node(
                     &child_fullkey,
                     fullkey,
                     Some(id),
+                    child_off,
+                    child_off,
                     rows,
-                    next_id,
                 );
+                child_off += encoded_len(child);
             }
         }
         serde_json::Value::Object(map) => {
+            // Object member ids are the *key* offsets; the member value begins at
+            // key_offset + key_len (that is the recursion's value_offset).
+            let mut member_off = value_offset + header_len(container_payload_len(node));
             for (k, child) in map.iter() {
                 let child_fullkey = format!("{}{}", fullkey, dot_key(k));
+                let klen = key_encoded_len(k);
+                let child_value_off = member_off + klen;
                 expand_tree_node(
                     child,
                     SqlValue::Varchar(k.as_str().into()),
                     &child_fullkey,
                     fullkey,
                     Some(id),
+                    member_off,
+                    child_value_off,
                     rows,
-                    next_id,
                 );
+                member_off += klen + encoded_len(child);
             }
         }
         _ => {}
@@ -503,16 +636,14 @@ mod tests {
     fn each_rows(json: &str) -> Vec<vibesql_storage::Row> {
         let root = parse_json_relaxed(json).unwrap();
         let mut rows = Vec::new();
-        let mut id = 0;
-        expand_each(&root, "$", &mut rows, &mut id);
+        expand_each(&root, "$", 0, &mut rows);
         rows
     }
 
     fn tree_rows(json: &str) -> Vec<vibesql_storage::Row> {
         let root = parse_json_relaxed(json).unwrap();
         let mut rows = Vec::new();
-        let mut id = 0;
-        expand_tree_node(&root, SqlValue::Null, "$", "$", None, &mut rows, &mut id);
+        expand_tree_node(&root, SqlValue::Null, "$", "$", None, 0, 0, &mut rows);
         rows
     }
 
@@ -664,9 +795,13 @@ mod tests {
         assert_eq!(rows[4].values[PARENT], inner_array_id, "$[1][1] parent = $[1]");
         // path of $[1][0] is the inner array's fullkey.
         assert_eq!(s(&rows[3].values[PATH]), "$[1]");
-        // ids are stable pre-order 0..n.
-        for (i, row) in rows.iter().enumerate() {
-            assert_eq!(row.values[ID], SqlValue::Bigint(i as i64), "pre-order id");
+        // ids are JSONB parse-tree byte offsets (verified against sqlite3 3.51:
+        // `SELECT id FROM json_tree('[1,[20,21],3]')` -> 0,1,3,4,7,10). JSONB:
+        //   BB 13 31 6B 23 32 30 23 32 31 13 33
+        //   ^0 root array   ^1 int 1  ^3 inner array  ^4 "20"  ^7 "21"  ^10 int 3
+        let expected_ids = [0i64, 1, 3, 4, 7, 10];
+        for (row, &eid) in rows.iter().zip(expected_ids.iter()) {
+            assert_eq!(row.values[ID], SqlValue::Bigint(eid), "jsonb-offset id");
         }
     }
 
@@ -692,10 +827,11 @@ mod tests {
         // Simulate json_each(json,'$.items'): expansion of the navigated array
         // uses the path as the base so fullkey/path carry the prefix.
         let root = parse_json_relaxed(r#"{"items":[3,5]}"#).unwrap();
-        let node = navigate(&root, &parse_sqlite_json_path("$.items").unwrap()).unwrap();
+        let segments = parse_sqlite_json_path("$.items").unwrap();
+        let node = navigate(&root, &segments).unwrap();
+        let (_id_off, value_off) = jsonb_value_offset(&root, &segments).unwrap();
         let mut rows = Vec::new();
-        let mut id = 0;
-        expand_each(node, "$.items", &mut rows, &mut id);
+        expand_each(node, "$.items", value_off, &mut rows);
         assert_eq!(rows.len(), 2);
         assert_eq!(s(&rows[0].values[FULLKEY]), "$.items[0]");
         assert_eq!(s(&rows[0].values[PATH]), "$.items");
@@ -756,6 +892,130 @@ mod tests {
             assert_eq!(s(&row.values[FULLKEY]), fk, "tree fullkey");
             assert_eq!(s(&row.values[PATH]), "$", "tree member path = parent container");
         }
+    }
+
+    #[test]
+    fn each_object_ids_are_jsonb_key_offsets() {
+        // json_each('{"a":1,"b":2}') — the exact json101-15.100..130 fixture.
+        // SQLite 3.51: id = 1, 5 (JSONB key-element offsets), parent = NULL.
+        // JSONB: 8C 17 61 13 31 17 62 13 32
+        //           ^1 key "a"     ^5 key "b"
+        let rows = each_rows(r#"{"a":1, "b":2}"#);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].values[ID], SqlValue::Bigint(1), "id of member a");
+        assert_eq!(rows[0].values[PARENT], SqlValue::Null, "each parent = NULL");
+        assert_eq!(rows[1].values[ID], SqlValue::Bigint(5), "id of member b");
+        assert_eq!(rows[1].values[PARENT], SqlValue::Null, "each parent = NULL");
+    }
+
+    #[test]
+    fn each_array_ids_are_jsonb_value_offsets() {
+        // json_each('["x","yy",1]') — string atoms of differing length shift the
+        // stride. sqlite3 3.51: ids 1, 3, 6.
+        // JSONB: 7B 17 78 27 79 79 13 31
+        //           ^1 "x"  ^3 "yy"    ^6 int 1
+        let rows = each_rows(r#"["x","yy",1]"#);
+        let ids: Vec<i64> = rows
+            .iter()
+            .map(|r| match &r.values[ID] {
+                SqlValue::Bigint(n) => *n,
+                other => panic!("id not bigint: {:?}", other),
+            })
+            .collect();
+        assert_eq!(ids, vec![1, 3, 6]);
+    }
+
+    #[test]
+    fn each_mixed_scalar_array_ids() {
+        // json_each('[1.5,true,false,null,"str"]'). sqlite3 3.51: ids 1,5,6,7,8.
+        // JSONB: BB 35 31 2E 35 01 02 00 37 73 74 72
+        //           ^1 1.5(float,3)  ^5 true ^6 false ^7 null ^8 "str"
+        let rows = each_rows(r#"[1.5,true,false,null,"str"]"#);
+        let ids: Vec<i64> = rows
+            .iter()
+            .map(|r| match &r.values[ID] {
+                SqlValue::Bigint(n) => *n,
+                other => panic!("id not bigint: {:?}", other),
+            })
+            .collect();
+        assert_eq!(ids, vec![1, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn tree_nested_object_and_array_ids_and_parents() {
+        // json_tree('{"a":1,"b":[2,{"c":3}]}'). sqlite3 3.51:
+        //   fullkey   id  parent
+        //   $          0  NULL
+        //   $.a        2  0
+        //   $.b        6  0
+        //   $.b[0]     9  6
+        //   $.b[1]    11  6
+        //   $.b[1].c  12  11
+        // JSONB: CC 0E 17 61 13 31 17 62 7B 13 32 4C 17 63 13 33
+        let rows = tree_rows(r#"{"a":1,"b":[2,{"c":3}]}"#);
+        let got: Vec<(String, i64, Option<i64>)> = rows
+            .iter()
+            .map(|r| {
+                let id = match &r.values[ID] {
+                    SqlValue::Bigint(n) => *n,
+                    o => panic!("id not bigint: {:?}", o),
+                };
+                let parent = match &r.values[PARENT] {
+                    SqlValue::Bigint(n) => Some(*n),
+                    SqlValue::Null => None,
+                    o => panic!("parent not bigint/null: {:?}", o),
+                };
+                (s(&r.values[FULLKEY]), id, parent)
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("$".to_string(), 0, None),
+                ("$.a".to_string(), 2, Some(0)),
+                ("$.b".to_string(), 6, Some(0)),
+                ("$.b[0]".to_string(), 9, Some(6)),
+                ("$.b[1]".to_string(), 11, Some(6)),
+                ("$.b[1].c".to_string(), 12, Some(11)),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_with_path_ids_are_whole_document_offsets() {
+        // json_each('{"items":[3,5]}','$.items') — ids are offsets in the WHOLE
+        // document's JSONB, not the navigated subtree. sqlite3 3.51: 8, 10.
+        // JSONB: BC 57 69 74 65 6D 73 4B 13 33 13 35
+        //           ^1 key "items"          ^7 array ^8 int 3 ^10 int 5
+        let root = parse_json_relaxed(r#"{"items":[3,5]}"#).unwrap();
+        let segments = parse_sqlite_json_path("$.items").unwrap();
+        let node = navigate(&root, &segments).unwrap();
+        let (_id_off, value_off) = jsonb_value_offset(&root, &segments).unwrap();
+        let mut rows = Vec::new();
+        expand_each(node, "$.items", value_off, &mut rows);
+        let ids: Vec<i64> = rows
+            .iter()
+            .map(|r| match &r.values[ID] {
+                SqlValue::Bigint(n) => *n,
+                o => panic!("id not bigint: {:?}", o),
+            })
+            .collect();
+        assert_eq!(ids, vec![8, 10]);
+    }
+
+    #[test]
+    fn jsonb_value_offset_matches_navigation() {
+        // Spot-check the offset helper directly against known JSONB layouts.
+        let root = parse_json_relaxed(r#"{"a":1,"b":[2,{"c":3}]}"#).unwrap();
+        // $.b -> (id offset = key "b" @6, value offset = array @8).
+        let seg_b = parse_sqlite_json_path("$.b").unwrap();
+        assert_eq!(jsonb_value_offset(&root, &seg_b), Some((6, 8)));
+        // $.b[1] -> array element, id == value @11 (no key).
+        let seg_b1 = parse_sqlite_json_path("$.b[1]").unwrap();
+        assert_eq!(jsonb_value_offset(&root, &seg_b1), Some((11, 11)));
+        // $.b[1].c -> object member, id = key "c" @12, value @14.
+        let seg_c = parse_sqlite_json_path("$.b[1].c").unwrap();
+        assert_eq!(jsonb_value_offset(&root, &seg_c), Some((12, 14)));
     }
 
     #[test]

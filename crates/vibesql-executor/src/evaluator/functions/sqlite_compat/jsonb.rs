@@ -78,6 +78,66 @@ pub(crate) fn encode(node: &Value) -> Vec<u8> {
     out
 }
 
+/// Total number of bytes `node` occupies in the JSONB binary encoding
+/// (element header + payload). This is exactly `encode(node).len()`, exposed
+/// separately so callers that only need the *stride* of a node (e.g. computing
+/// `json_each`/`json_tree` `id` offsets, which are byte offsets into the JSONB
+/// parse tree — see `table_function.rs`) do not have to materialize the bytes.
+pub(crate) fn encoded_len(node: &Value) -> usize {
+    encode(node).len()
+}
+
+/// The number of bytes an object *key* occupies in the JSONB encoding. In JSONB
+/// an object member is stored as `<key-string-element><value-element>`, and the
+/// key is encoded exactly like any JSON string value (TEXT/TEXTJ). This is the
+/// stride from the key's offset to the value's offset.
+pub(crate) fn key_encoded_len(key: &str) -> usize {
+    let mut out = Vec::new();
+    encode_string(key, &mut out);
+    out.len()
+}
+
+/// The number of *header* bytes preceding the payload for an element whose
+/// payload is `payload_len` bytes, following SQLite's size-class encoding (the
+/// inverse of [`append_header`]'s width selection). A container's children begin
+/// at `container_offset + header_len(container_payload_len)`.
+pub(crate) fn header_len(payload_len: usize) -> usize {
+    if payload_len <= 11 {
+        1
+    } else if payload_len <= 0xff {
+        2
+    } else if payload_len <= 0xffff {
+        3
+    } else if payload_len <= 0xffff_ffff {
+        5
+    } else {
+        9
+    }
+}
+
+/// The number of payload bytes a container node contributes (the concatenated
+/// encodings of its children, or key/value pairs for objects) — i.e. its total
+/// [`encoded_len`] minus its own header. Returns 0 for non-containers' payloads
+/// only in the sense that the caller should not use this for scalars.
+pub(crate) fn container_payload_len(node: &Value) -> usize {
+    let total = encoded_len(node);
+    // header_len depends on payload_len, but for containers the payload is
+    // `total - header`; solve by subtracting the header derived from the payload.
+    // Since header width is monotonic in payload length, deriving header from the
+    // full total is safe here: total = header(payload) + payload, and
+    // header(payload) == header(total - header(payload)). We recover payload by
+    // trying each header width.
+    for hdr in [1usize, 2, 3, 5, 9] {
+        if total >= hdr {
+            let payload = total - hdr;
+            if header_len(payload) == hdr {
+                return payload;
+            }
+        }
+    }
+    total.saturating_sub(1)
+}
+
 fn encode_node(node: &Value, out: &mut Vec<u8>) {
     match node {
         Value::Null => append_header(out, JSONB_NULL, 0),

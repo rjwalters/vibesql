@@ -294,32 +294,36 @@ impl Parser {
                             }
                         }
 
-                        // Parse optional alias for parenthesized join expressions
-                        // Example: FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON j1.id=t1.id
+                        // Parse optional alias for a parenthesized FROM term.
+                        // This covers not only parenthesized JOIN expressions
+                        // (`FROM t1 JOIN (t2 JOIN t3 USING(id)) AS j1 ON ...`) but
+                        // also a *single* parenthesized term reached via this
+                        // fallback branch — a plain table (`FROM (t1) AS xyz`) or a
+                        // table-valued function (`FROM (json_each(...)) AS xyz`).
+                        // The alias must be reattached to whichever variant the
+                        // inner content parsed into; previously only `Join` was
+                        // handled, so `(t1) AS xyz` / `(json_each(...)) AS xyz`
+                        // silently dropped the alias and later failed to resolve
+                        // `xyz.*` (issue #6051).
                         if self.peek_keyword(Keyword::As) {
                             self.consume_keyword(Keyword::As)?;
                             // Parse alias - must be an identifier or keyword usable as identifier
                             let alias = self.parse_alias_name()?;
-                            // Set alias on the outermost Join node
-                            if let vibesql_ast::FromClause::Join {
-                                left,
-                                right,
-                                join_type,
-                                condition,
-                                using_columns,
-                                natural,
-                                ..
-                            } = from_clause
-                            {
-                                from_clause = vibesql_ast::FromClause::Join {
-                                    left,
-                                    right,
-                                    join_type,
-                                    condition,
-                                    using_columns,
-                                    natural,
-                                    alias: Some(alias),
-                                };
+                            match &mut from_clause {
+                                vibesql_ast::FromClause::Join { alias: a, .. } => {
+                                    *a = Some(alias);
+                                }
+                                vibesql_ast::FromClause::Table { alias: a, .. } => {
+                                    *a = Some(alias);
+                                }
+                                vibesql_ast::FromClause::TableFunction { alias: a, .. } => {
+                                    *a = Some(alias);
+                                }
+                                // Subquery/Values require and parse their alias
+                                // inline in their own branches above, so they are
+                                // not reachable via this fallback path.
+                                vibesql_ast::FromClause::Subquery { .. }
+                                | vibesql_ast::FromClause::Values { .. } => {}
                             }
                         }
 
