@@ -78,6 +78,26 @@ impl CombinedExpressionEvaluator<'_> {
             }
             // For COLLATE expressions, get affinity of the inner expression
             vibesql_ast::Expression::Collate { expr, .. } => self.get_expression_affinity(expr),
+            // A CAST to a *numeric* type carries that numeric affinity (SQLite's
+            // `sqlite3ExprAffinity` TK_CAST case, issue #6089). A TEXT-affinity
+            // column compared to `CAST(0 AS REAL)` must route through the
+            // numeric-affinity coercion path rather than treating the CAST as an
+            // affinity-less literal (which would wrongly coerce the column value
+            // to text). This affects only how the OTHER operand is coerced.
+            //
+            // TEXT / BLOB casts are deliberately reported as affinity-less
+            // (`None`), matching the prior behaviour: surfacing TEXT affinity for
+            // `CAST(x AS text)` here would make an IN-list element look like a
+            // TEXT column and wrongly coerce a numeric LHS literal to text
+            // (`1 IN (CAST('1' AS text))` must stay 0 — in-17.3/17.4).
+            vibesql_ast::Expression::Cast { data_type, .. } => {
+                match data_type.sqlite_affinity() {
+                    affinity @ (vibesql_types::TypeAffinity::Numeric
+                    | vibesql_types::TypeAffinity::Integer
+                    | vibesql_types::TypeAffinity::Real) => Some(affinity),
+                    _ => None,
+                }
+            }
             // A scalar subquery carries the affinity of its (single) result
             // column, so `col = (SELECT y FROM blob_table)` compares by the
             // real column affinity of `y` (NONE for a BLOB column) rather than
@@ -1447,9 +1467,9 @@ impl CombinedExpressionEvaluator<'_> {
         for (left_expr, right_expr) in left_exprs.iter().zip(right_exprs.iter()) {
             let left_val = self.eval(left_expr, row)?;
             let right_val = self.eval(right_expr, row)?;
-            let collation = self
-                .get_expression_collation(left_expr)
-                .or_else(|| self.get_expression_collation(right_expr));
+            // datatype3 §7.1 comparison collation (issue #6089): left column
+            // collation, including default BINARY, blocks the right operand.
+            let collation = self.comparison_collation(left_expr, right_expr);
             let (left_val, right_val) = crate::evaluator::row_value::apply_collation_to_pair(
                 left_val,
                 right_val,
@@ -1492,7 +1512,7 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         let (tuple_values, subquery_values) =
-            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row)?;
+            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row, tuple_on_left)?;
 
         // Always evaluate with the tuple on the left. `subquery OP tuple` is
         // equivalent to `tuple flip(OP) subquery`, so only the operator flips.
@@ -1528,7 +1548,7 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         let (tuple_values, subquery_values) =
-            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row)?;
+            self.eval_row_value_tuple_and_subquery(tuple_exprs, subquery, row, true)?;
 
         Ok(crate::evaluator::row_value::row_values_is_distinct(
             &tuple_values,
@@ -1545,6 +1565,7 @@ impl CombinedExpressionEvaluator<'_> {
         tuple_exprs: &[vibesql_ast::Expression],
         subquery: &vibesql_ast::SelectStmt,
         row: &vibesql_storage::Row,
+        tuple_on_left: bool,
     ) -> Result<(Vec<SqlValue>, Vec<SqlValue>), ExecutorError> {
         let arity = tuple_exprs.len();
         let subquery_values = self.eval_scalar_subquery_as_row(subquery, row, arity)?;
@@ -1565,13 +1586,46 @@ impl CombinedExpressionEvaluator<'_> {
             })
             .collect();
 
+        // Per-position collating contribution of the subquery's result columns
+        // (`Some(Some(coll))` = column with declared collation, `Some(None)` =
+        // column with default BINARY that still blocks, `None` = not a column
+        // operand), so a row-value comparison against a scalar subquery applies
+        // the datatype3 §7.1 comparison collation with correct left-operand
+        // precedence (rowvalue §23.110, issue #6089). `(SELECT +bb, 1) >=
+        // (aa, 1)` compares element 0 with the *subquery* column `+bb` as the
+        // left operand, whose default BINARY blocks the tuple's NOCASE `aa`.
+        let sub_collations: Vec<Option<Option<String>>> = (0..arity)
+            .map(|i| {
+                self.database.and_then(|db| {
+                    crate::evaluator::combined::subqueries::schema_utils::get_subquery_column_collation_at(
+                        subquery, i, db,
+                    )
+                })
+            })
+            .collect();
+
         let mut tuple_values = Vec::with_capacity(arity);
         let mut other_values = Vec::with_capacity(arity);
         for (idx, (tuple_expr, sub_val)) in tuple_exprs.iter().zip(subquery_values).enumerate() {
             let tuple_val = self.eval(tuple_expr, row)?;
-            // Per-element collation from the tuple side (explicit COLLATE or
-            // column-declared collation), e.g. `(a COLLATE nocase, b) = (SELECT ...)`.
-            let collation = self.get_expression_collation(tuple_expr);
+            // datatype3 §7.1 comparison collation: the *left* operand's column
+            // collation (including its default BINARY) blocks fallback to the
+            // right; an explicit COLLATE on either side wins first (rule 1).
+            // `tuple_on_left` decides which side is the left operand.
+            let tuple_operand = crate::evaluator::collation::operand_column_collation(
+                tuple_expr,
+                &|col_id| self.column_collation_of(col_id),
+            );
+            let sub_operand = sub_collations[idx].clone();
+            let (left_operand, right_operand) = if tuple_on_left {
+                (tuple_operand, sub_operand)
+            } else {
+                (sub_operand, tuple_operand)
+            };
+            let collation = crate::evaluator::collation::comparison_collation_of_operands(
+                left_operand,
+                right_operand,
+            );
             let (tuple_val, sub_val) = crate::evaluator::row_value::apply_collation_to_pair(
                 tuple_val,
                 sub_val,
@@ -1707,9 +1761,9 @@ impl CombinedExpressionEvaluator<'_> {
             _ => {
                 let left_val = self.eval(left_expr, row)?;
                 let right_val = self.eval(right_expr, row)?;
-                let collation = self
-                    .get_expression_collation(left_expr)
-                    .or_else(|| self.get_expression_collation(right_expr));
+                // datatype3 §7.1 comparison collation (issue #6089): left column
+                // collation, including default BINARY, blocks the right operand.
+                let collation = self.comparison_collation(left_expr, right_expr);
                 let (left_val, right_val) = crate::evaluator::row_value::apply_collation_to_pair(
                     left_val,
                     right_val,

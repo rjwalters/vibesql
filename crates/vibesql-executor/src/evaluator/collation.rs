@@ -62,11 +62,13 @@ pub(crate) fn explicit_collation_of(expr: &Expression) -> Option<String> {
 /// Returns `None` when the expression is not a column operand at all
 /// (literal, `||`, function call, ...), in which case a comparison falls
 /// through to the other operand.
-fn operand_column_collation(
+pub(crate) fn operand_column_collation(
     expr: &Expression,
     column_collation: &dyn Fn(&ColumnIdentifier) -> Option<String>,
 ) -> Option<Option<String>> {
     match expr {
+        // An explicit COLLATE makes this a collating operand carrying that name.
+        Expression::Collate { collation, .. } => Some(Some(collation.clone())),
         Expression::ColumnRef(col_id) => Some(column_collation(col_id)),
         Expression::UnaryOp { op: UnaryOperator::Plus, expr } => {
             operand_column_collation(expr, column_collation)
@@ -177,6 +179,31 @@ pub(crate) fn comparison_collation(
         return coll;
     }
     None
+}
+
+/// Resolve the datatype3 §7.1 comparison collation for a single element pair from
+/// the operands' collating contributions (as returned by
+/// [`operand_column_collation`]): `Some(Some(coll))` = column operand with
+/// declared collation, `Some(None)` = column operand with default BINARY (which
+/// still blocks the other side), `None` = not a column operand.
+///
+/// Precedence: the left operand wins if it is a column operand (rule 2 — its
+/// default BINARY blocks fallback to the right); otherwise the right operand's
+/// collation; otherwise `None` (BINARY). An explicit COLLATE is surfaced as
+/// `Some(Some(coll))` by `operand_column_collation`, so rule-1 precedence falls
+/// out of the left-first ordering for the common single-explicit case.
+///
+/// This is used where one side of the comparison is an already-evaluated value
+/// (a scalar-subquery row), so its collating contribution is supplied directly
+/// rather than derived from a live `Expression`.
+pub(crate) fn comparison_collation_of_operands(
+    left_operand: Option<Option<String>>,
+    right_operand: Option<Option<String>>,
+) -> Option<String> {
+    match left_operand {
+        Some(coll) => coll,
+        None => right_operand.flatten(),
+    }
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@
 #![allow(clippy::collapsible_if)]
 
 mod aggregates;
+mod collation_names;
 mod column_refs;
 mod in_subquery_columns;
 mod index_hints;
@@ -31,6 +32,7 @@ pub use aggregates::{
     validate_order_by_aliased_window_functions, validate_subquery_context_misuse,
     validate_window_query_order_by_aggregates, SubqueryContext,
 };
+pub use collation_names::validate_collation_names;
 pub use column_refs::{extract_column_refs, validate_column_ref};
 pub use in_subquery_columns::validate_in_subquery_column_counts;
 pub use index_hints::validate_index_hints;
@@ -94,6 +96,9 @@ pub fn validate_select_columns_with_context(
     for item in select_list {
         match item {
             SelectItem::Expression { expr, .. } => {
+                // Validate COLLATE names at prepare time (issue #6089): an
+                // unknown collating sequence must error even on an empty table.
+                validate_collation_names(expr)?;
                 extract_column_refs(expr, &mut column_refs);
             }
             SelectItem::Wildcard { .. } => {
@@ -125,6 +130,9 @@ pub fn validate_select_columns_with_context(
 
     // Extract column references from WHERE clause (tracked separately for alias resolution)
     if let Some(where_expr) = where_clause {
+        // Validate COLLATE names at prepare time (issue #6089): rowvalue4 §7.4
+        // `... WHERE (?, ? COLLATE nose) > (a, b)` must error at prepare time.
+        validate_collation_names(where_expr)?;
         extract_column_refs(where_expr, &mut where_column_refs);
 
         // Check for wrong argument count FIRST (takes priority over misuse)

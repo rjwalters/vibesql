@@ -217,6 +217,11 @@ where
             column_aliases.as_ref(),
             Some(database),
             Some(cte_results),
+            // Thread outer context so a correlated VALUES row-value LHS
+            // (`(VALUES(b3.a, b3.b)) IN (...)`) can resolve outer columns
+            // (rowvalue §18.2/§18.5, issue #6089).
+            outer_row,
+            outer_schema,
         ),
         vibesql_ast::FromClause::TableFunction { name, args, alias, column_aliases } => {
             table_function::execute_table_function(

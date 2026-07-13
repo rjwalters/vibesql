@@ -350,24 +350,55 @@ pub fn optimize_expression(
         Expression::Cast { expr: inner_expr, data_type } => {
             let expr_opt = optimize_expression(inner_expr, evaluator)?;
 
-            // If the operand is a literal, we can evaluate the cast at plan time
+            // A CAST to a *numeric* type is not collapsed to a bare literal even
+            // when its operand is constant. Such a CAST node carries NUMERIC /
+            // INTEGER / REAL affinity (SQLite's `sqlite3ExprAffinity` TK_CAST
+            // case), which the comparison machinery reads to decide coercion:
+            // `t0.c0 > CAST(0 AS REAL)` on a TEXT column compares by storage
+            // class (→ 1), whereas the plain literal `t0.c0 > 0.0` applies TEXT
+            // affinity to the literal (→ 0). Folding `CAST(0 AS REAL)` down to
+            // `Literal(Real(0.0))` erased that distinction, so a WHERE-clause
+            // comparison (which runs constant folding, unlike the SELECT list)
+            // returned the wrong result (rowvalue §24.100, issue #6089).
+            //
+            // Casts to TEXT / BLOB affinity are affinity-safe to fold: a folded
+            // text/blob literal already triggers the same coercion a CAST would
+            // (a numeric-affinity operand coerces the text either way; a text
+            // operand never coerces), so those keep the folding optimization.
+            let target_affinity = data_type.sqlite_affinity();
+            let is_numeric_affinity = matches!(
+                target_affinity,
+                vibesql_types::TypeAffinity::Numeric
+                    | vibesql_types::TypeAffinity::Integer
+                    | vibesql_types::TypeAffinity::Real
+            );
+
             if let Expression::Literal(val) = &expr_opt {
-                // Get sql_mode from the evaluator's database if available
-                let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
-                match cast_value(val, data_type, &sql_mode) {
-                    Ok(result) => Ok(Expression::Literal(result)),
-                    Err(_) => {
-                        // If cast fails, keep the CAST expression to fail at runtime with proper
-                        // error
-                        Ok(Expression::Cast {
-                            expr: Box::new(expr_opt),
-                            data_type: data_type.clone(),
-                        })
+                // Folding is affinity-safe when either the target affinity is
+                // not numeric (text/blob casts coerce identically to a folded
+                // literal) or the constant is NULL (comparisons against NULL are
+                // NULL regardless of affinity). Numeric-affinity casts of a
+                // non-NULL constant must retain the CAST wrapper.
+                if !is_numeric_affinity || matches!(val, SqlValue::Null) {
+                    let sql_mode =
+                        evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
+                    match cast_value(val, data_type, &sql_mode) {
+                        Ok(result) => return Ok(Expression::Literal(result)),
+                        Err(_) => {
+                            // Keep the CAST to fail at runtime with the proper error.
+                            return Ok(Expression::Cast {
+                                expr: Box::new(expr_opt),
+                                data_type: data_type.clone(),
+                            });
+                        }
                     }
                 }
-            } else {
-                Ok(Expression::Cast { expr: Box::new(expr_opt), data_type: data_type.clone() })
             }
+
+            // Numeric-affinity cast (or non-constant operand): preserve the
+            // `Cast` wrapper so affinity is not lost. Re-running `cast_value`
+            // per row is negligible next to a correct affinity result.
+            Ok(Expression::Cast { expr: Box::new(expr_opt), data_type: data_type.clone() })
         }
 
         // String functions - cannot optimize generally
@@ -486,7 +517,10 @@ mod tests {
 
     #[test]
     fn test_cast_folding_varchar_to_integer() {
-        // CAST('123' AS INTEGER) should fold to 123
+        // CAST('123' AS INTEGER) is a numeric-affinity cast: it is NOT collapsed
+        // to a bare literal, because the CAST node's INTEGER affinity must be
+        // preserved for comparisons (issue #6089). Its constant operand is still
+        // optimized, so the result is `Cast { Literal('123'), INTEGER }`.
         let expr = Expression::Cast {
             expr: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("123")))),
             data_type: DataType::Integer,
@@ -500,15 +534,19 @@ mod tests {
         let optimized = optimize_expression(&expr, &evaluator).unwrap();
 
         match optimized {
-            Expression::Literal(SqlValue::Integer(n)) => assert_eq!(n, 123),
-            _ => panic!("Expected folded INTEGER literal, got {:?}", optimized),
+            Expression::Cast { expr: inner, data_type: DataType::Integer } => match &*inner {
+                Expression::Literal(SqlValue::Varchar(s)) => assert_eq!(s.as_str(), "123"),
+                other => panic!("Expected inner literal '123', got {other:?}"),
+            },
+            _ => panic!("Expected preserved INTEGER CAST, got {optimized:?}"),
         }
     }
 
     #[test]
     fn test_cast_folding_permissive_string_to_integer() {
-        // SQLite-compatible behavior: CAST('abc' AS INTEGER) returns 0
-        // Non-numeric strings convert to 0 (permissive conversion)
+        // A numeric-affinity cast of a non-NULL constant retains its CAST wrapper
+        // (issue #6089); the permissive 'abc' -> 0 conversion still happens at
+        // evaluation time, not at fold time.
         let expr = Expression::Cast {
             expr: Box::new(Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("abc")))),
             data_type: DataType::Integer,
@@ -521,12 +559,9 @@ mod tests {
 
         let optimized = optimize_expression(&expr, &evaluator).unwrap();
 
-        // SQLite: non-numeric string converts to 0, so CAST is folded to literal
         match optimized {
-            Expression::Literal(SqlValue::Integer(0)) => {} // Good, folded to 0
-            _ => {
-                panic!("Expected CAST('abc' AS INTEGER) to fold to Integer(0), got {:?}", optimized)
-            }
+            Expression::Cast { data_type: DataType::Integer, .. } => {} // preserved
+            _ => panic!("Expected preserved INTEGER CAST, got {optimized:?}"),
         }
     }
 
