@@ -195,10 +195,22 @@ impl CombinedExpressionEvaluator<'_> {
     fn resolve_outer_rowid(&self, table: Option<&str>) -> Option<SqlValue> {
         let table_name = table?;
 
-        // Try the immediate parent scope: outer_row + outer_schema.
-        if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
-            if let Some(value) = rowid_from_scope(outer_schema, outer_row, table_name) {
-                return Some(value);
+        // Try the immediate parent scope and every enclosing scope reachable
+        // through the `outer_schema` chain. For a doubly-nested correlated
+        // subquery the outer table lives several levels up: `self.outer_schema`
+        // is a merged schema whose own `outer_schema` field links to the real
+        // outer table (built by `build_merged_outer_schema`), and the merged
+        // `outer_row` carries every scope's rowid (see `build_merged_outer_row`).
+        // Walking only the immediate level missed the grandparent, so e.g.
+        // `d1.rowid` referenced two levels below d1 fell through to NULL and the
+        // subquery returned no rows (issue #6107).
+        if let Some(outer_row) = self.outer_row {
+            let mut current_schema = self.outer_schema;
+            while let Some(schema) = current_schema {
+                if let Some(value) = rowid_from_scope(schema, outer_row, table_name) {
+                    return Some(value);
+                }
+                current_schema = schema.outer_schema.as_deref();
             }
         }
 

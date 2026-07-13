@@ -94,17 +94,58 @@ pub(super) fn build_merged_outer_schema<'a>(
 /// A merged row with values from both rows, or just the current row if no outer row exists
 pub(super) fn build_merged_outer_row<'a>(
     current_row: &'a vibesql_storage::Row,
+    current_schema: &crate::schema::CombinedSchema,
     outer_row: Option<&'a vibesql_storage::Row>,
+    outer_schema: Option<&crate::schema::CombinedSchema>,
 ) -> std::borrow::Cow<'a, vibesql_storage::Row> {
     if let Some(outer) = outer_row {
         // Merge: current row values + outer row values (current is the prefix)
         let mut merged_values = current_row.values.clone();
         merged_values.extend(outer.values.iter().cloned());
 
-        std::borrow::Cow::Owned(vibesql_storage::Row::new(merged_values))
+        // Preserve per-table rowids across the merge (issue #6107). A correlated
+        // reference to an *outer* table's `rowid` (e.g. `d1.rowid` from two
+        // levels below) resolves via `Row::get_row_id_for_table(Some("d1"))`,
+        // which reads the row's tracked rowids. `Row::new` alone drops those, so
+        // a doubly-nested correlated `d1.rowid` bound to NULL and the subquery
+        // returned no rows. Rebuild a table-keyed rowid map from both sides so
+        // every enclosing scope's rowid survives the merge. The outer row is
+        // itself a merged row by induction, so its whole chain is carried along.
+        let mut row_ids: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        collect_row_ids(current_row, current_schema, &mut row_ids);
+        if let Some(outer_schema) = outer_schema {
+            collect_row_ids(outer, outer_schema, &mut row_ids);
+        }
+
+        if row_ids.is_empty() {
+            std::borrow::Cow::Owned(vibesql_storage::Row::new(merged_values))
+        } else {
+            std::borrow::Cow::Owned(vibesql_storage::Row::with_row_ids(merged_values, row_ids))
+        }
     } else {
         // No outer row to merge, just use current row
         std::borrow::Cow::Borrowed(current_row)
+    }
+}
+
+/// Collect each table's tracked rowid from `row` into `row_ids`, walking the
+/// full `outer_schema` chain of `schema` so a merged row carries the rowids of
+/// every scope it represents. Table names use the schema's canonical form to
+/// match `Row::get_row_id_for_table`'s case-insensitive (lowercased) lookup.
+fn collect_row_ids(
+    row: &vibesql_storage::Row,
+    schema: &crate::schema::CombinedSchema,
+    row_ids: &mut std::collections::HashMap<String, u64>,
+) {
+    let mut cur = Some(schema);
+    while let Some(s) = cur {
+        for table_id in s.table_schemas.keys() {
+            let name = table_id.canonical().to_string();
+            if let Some(id) = row.get_row_id_for_table(Some(&name)) {
+                row_ids.entry(name).or_insert(id);
+            }
+        }
+        cur = s.outer_schema.as_deref();
     }
 }
 

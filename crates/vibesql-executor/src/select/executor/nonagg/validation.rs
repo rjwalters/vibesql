@@ -499,8 +499,18 @@ fn validate_expression_column_refs(
                     let qualifier_lower = qualifier.to_lowercase();
                     let table_exists =
                         schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower);
+                    // Walk the FULL outer_schema chain, not just its immediate
+                    // level. For a doubly-nested correlated subquery the innermost
+                    // scope's `outer_schema` is a merged schema whose own
+                    // `outer_schema` field links to the real outer table several
+                    // levels up, so a single-level check spuriously reported the
+                    // table missing and raised ColumnNotFound for e.g. `d1.rowid`
+                    // referenced two levels below d1. Mirrors the qualified-column
+                    // chain-walk in `validation/column_refs.rs`. Issue #6107.
                     let table_in_outer = outer_schema.is_some_and(|outer| {
-                        outer.table_schemas.keys().any(|k| k.canonical() == qualifier_lower)
+                        outer.contains_table_in_chain(&vibesql_catalog::TableIdentifier::from(
+                            qualifier,
+                        ))
                     });
                     if table_exists || table_in_outer {
                         return Ok(());
