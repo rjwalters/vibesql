@@ -3055,7 +3055,10 @@ array set vibesql_skip_files {
     func4 "Entire file tests tointeger()/toreal() provided only by the static `totype` test extension (load_static_extension db totype). VibeSQL implements neither function, so 120+ of the 200 tests fail purely because the functions are missing. The load_static_extension shim stub now prevents the crash-abort (the file previously aborted at file scope), but a documented file skip is clearer than 120 visible function-missing failures. Tracked: tointeger()/toreal() are out-of-scope SQLite test extensions."
     trigger6 "Entire file is built around a custom counter() TCL function (db function counter ...) used to verify INSERT/UPDATE expressions are evaluated exactly once; the tables and triggers are created in 6-1.1 alongside the function registration, so once 6-1.1 is auto-skipped (custom function) every later test cascade-fails with 'no such table: log/t1' (#5470)"
     capi2 "Pure C-API file: every test asserts sqlite3_prepare/sqlite3_step/sqlite3_column_*/sqlite3_data_count statement-handle behavior. The `execsql` calls only build setup tables; the assertions themselves are all C-API and unreachable from the SQL CLI. No do_execsql_test coverage. (Audit #5788: 144 tests, 60 failed purely on C-API emulation gaps before this skip.)"
+    capi3 "Pure C-API file (header: 'tests for the callback-free C/C++ API'): asserts sqlite3_get_autocommit/sqlite3_errcode/sqlite3_errmsg/sqlite3_extended_errcode statement-handle behavior — shim commands VibeSQL does not implement. The lone do_execsql_test (capi3-20.1: CREATE TABLE t4 + INSERT) is setup only, feeding the capi3-20.2 C-API assertions; no SQL-CLI-reachable coverage. Same shape as the already-skipped capi2/capi3b/capi3e. (Audit #6042, Part of #5779.)"
     capi3b "Pure C-API file: tests sqlite3_prepare/sqlite3_step/sqlite3_finalize handle lifecycle and UTF16 column metadata via the C API. `execsql` is setup only; no do_execsql_test SQL-CLI-reachable assertions. (Audit #5788.)"
+    capi3c "Pure C-API file (header: 'copy of capi3.test... adapted to test the new sqlite3_prepare_v2 interface'): asserts sqlite3_errcode/sqlite3_errmsg/sqlite3_get_autocommit plus second-connection sqlite3_open handle behavior — none reachable from the SQL CLI. The lone do_execsql_test (CREATE TABLE t11/t12) is setup only for the column-decltype C-API assertions. Same C-API family as the already-skipped capi3b (its _v2 sibling). (Audit #6042, Part of #5779.)"
+    capi3d "Pure C-API file: tests sqlite3_next_stmt/sqlite3_stmt_readonly/sqlite3_stmt_busy statement-handle introspection via sqlite3_prepare16 — shim commands VibeSQL does not implement; the file aborts at capi3d-1.1 on 'invalid command name sqlite3_prepare16' before any test runs. The lone do_execsql_test (CREATE TABLE t4(x,y); BEGIN) is setup only. No SQL-CLI-reachable coverage. (Audit #6042, Part of #5779.)"
     capi3e "Pure C-API file: every test opens a raw connection handle via sqlite3_open/sqlite3_open16 and checks sqlite3_errcode/sqlite3_close plus `file isfile` filesystem assertions on the file that handle created — semantics of the C open API, not SQL reachable from the CLI. No do_execsql_test coverage. (The per-test sqlite3_open*/sqlite3_close detector also skips these, but a file-level entry documents intent.)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
@@ -6224,6 +6227,16 @@ proc sqlite3 {db args} {
         # Return VibeSQL version in SQLite format for compatibility
         # Tests use this to get the expected sqlite_version() result
         return "3.46.0"
+    }
+
+    # "sqlite3 -has-codec" queries whether the build has SQLite's encryption
+    # codec (SQLITE_HAS_CODEC). VibeSQL has no codec support, so return 0.
+    # Without this, "sqlite3 -has-codec" falls through to the normal-open path
+    # and aborts the file with 'expected boolean value but got "-has-codec"'
+    # (e.g. tclsqlite.test line 29, before any of its 120 do_test blocks run).
+    # Same command-form-gap class as the do_not_use_codec stub fixed in #5289.
+    if {$db eq "-has-codec"} {
+        return 0
     }
 
     # Normal case: sqlite3 db filename ?options?
