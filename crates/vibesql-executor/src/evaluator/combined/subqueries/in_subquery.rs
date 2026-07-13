@@ -16,7 +16,7 @@ use super::{
     super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator},
     schema_utils::{
         build_merged_outer_row, build_merged_outer_schema, compute_select_list_column_count,
-        get_subquery_first_column_affinity,
+        get_subquery_column_affinity_at, get_subquery_first_column_affinity,
     },
 };
 use crate::errors::ExecutorError;
@@ -522,6 +522,19 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         let sql_mode = database.sql_mode();
+
+        // Per-position affinity for IN-subquery comparison (issue #6045).
+        // Each tuple position `i` compares the left element against the
+        // subquery's i-th column, so we coerce with that column's affinity
+        // before the raw comparison. Mirrors the scalar IN-subquery path
+        // which applies `apply_in_subquery_affinity_coercion` keyed off the
+        // subquery column affinity.
+        let left_affinities: Vec<Option<TypeAffinity>> =
+            expr_elements.iter().map(|e| self.get_expression_affinity(e)).collect();
+        let right_affinities: Vec<Option<TypeAffinity>> = (0..expected_columns)
+            .map(|i| get_subquery_column_affinity_at(subquery, i, database))
+            .collect();
+
         // Whether any row compared as UNKNOWN (all non-NULL elements equal,
         // but at least one element comparison involved NULL). Rows that are
         // definitively FALSE (some element definitively unequal) do NOT make
@@ -547,10 +560,23 @@ impl CombinedExpressionEvaluator<'_> {
                     continue;
                 }
 
+                // Apply per-position affinity coercion before comparison (#6045),
+                // using the subquery column's real affinity so a TEXT column vs a
+                // BLOB/NONE subquery column compares by storage class while a
+                // NUMERIC column coerces a TEXT subquery value — matching
+                // SQLite's row-value `=` semantics (rowvalue9 1.6.1).
+                let (coerced_left, coerced_right) =
+                    ExpressionEvaluator::apply_affinity_for_comparison_values(
+                        expr_val.clone(),
+                        left_affinities[i],
+                        subquery_val.clone(),
+                        right_affinities[i],
+                    );
+
                 let eq_result = ExpressionEvaluator::eval_binary_op_static(
-                    expr_val,
+                    &coerced_left,
                     &vibesql_ast::BinaryOperator::Equal,
-                    subquery_val,
+                    &coerced_right,
                     sql_mode.clone(),
                 )?;
 

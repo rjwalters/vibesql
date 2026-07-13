@@ -78,6 +78,18 @@ impl CombinedExpressionEvaluator<'_> {
             }
             // For COLLATE expressions, get affinity of the inner expression
             vibesql_ast::Expression::Collate { expr, .. } => self.get_expression_affinity(expr),
+            // A scalar subquery carries the affinity of its (single) result
+            // column, so `col = (SELECT y FROM blob_table)` compares by the
+            // real column affinity of `y` (NONE for a BLOB column) rather than
+            // treating the produced value as an affinity-less literal. Without
+            // this, `text_col = (SELECT blob_int_col)` wrongly coerced the
+            // integer to text and matched (rowvalue9 3.5/3.6/4.tn.4/4.tn.6,
+            // issue #6045).
+            vibesql_ast::Expression::ScalarSubquery(subquery) => self.database.and_then(|db| {
+                crate::evaluator::combined::subqueries::schema_utils::get_subquery_first_column_affinity(
+                    subquery, db,
+                )
+            }),
             // Literals, functions, and other expressions don't have column affinity
             _ => None,
         }
@@ -1529,9 +1541,25 @@ impl CombinedExpressionEvaluator<'_> {
         let arity = tuple_exprs.len();
         let subquery_values = self.eval_scalar_subquery_as_row(subquery, row, arity)?;
 
+        // Per-position affinity of the subquery's result columns, so a BLOB
+        // (NONE-affinity) subquery column suppresses TEXT coercion of the tuple
+        // side — matching `(c, a) = (SELECT x, y FROM blob_table)` in SQLite
+        // (rowvalue9 3.6 / 4.tn.4, issue #6045). Falls back to treating the
+        // value as an affinity-less literal when the column affinity can't be
+        // resolved.
+        let sub_affinities: Vec<Option<vibesql_types::TypeAffinity>> = (0..arity)
+            .map(|i| {
+                self.database.and_then(|db| {
+                    crate::evaluator::combined::subqueries::schema_utils::get_subquery_column_affinity_at(
+                        subquery, i, db,
+                    )
+                })
+            })
+            .collect();
+
         let mut tuple_values = Vec::with_capacity(arity);
         let mut other_values = Vec::with_capacity(arity);
-        for (tuple_expr, sub_val) in tuple_exprs.iter().zip(subquery_values) {
+        for (idx, (tuple_expr, sub_val)) in tuple_exprs.iter().zip(subquery_values).enumerate() {
             let tuple_val = self.eval(tuple_expr, row)?;
             // Per-element collation from the tuple side (explicit COLLATE or
             // column-declared collation), e.g. `(a COLLATE nocase, b) = (SELECT ...)`.
@@ -1541,9 +1569,13 @@ impl CombinedExpressionEvaluator<'_> {
                 sub_val,
                 collation.as_deref(),
             );
-            let synthetic = vibesql_ast::Expression::Literal(sub_val.clone());
-            let (tuple_val, sub_val) =
-                self.apply_affinity_for_comparison(tuple_expr, tuple_val, &synthetic, sub_val);
+            let tuple_affinity = self.get_expression_affinity(tuple_expr);
+            let (tuple_val, sub_val) = ExpressionEvaluator::apply_affinity_for_comparison_values(
+                tuple_val,
+                tuple_affinity,
+                sub_val,
+                sub_affinities[idx],
+            );
             tuple_values.push(tuple_val);
             other_values.push(sub_val);
         }

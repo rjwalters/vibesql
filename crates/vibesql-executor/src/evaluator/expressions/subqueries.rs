@@ -693,6 +693,22 @@ impl ExpressionEvaluator<'_> {
             return Ok(SqlValue::Boolean(negated));
         }
 
+        // Per-position affinity for IN-subquery comparison (issue #6045).
+        // Each tuple position `i` compares the left element against the
+        // subquery's i-th column, so we need the affinity of *that* column
+        // (not just the first). Mirrors the scalar IN-subquery path
+        // (`eval_in_subquery`) which applies `apply_in_subquery_affinity_coercion`
+        // keyed off `get_subquery_first_column_affinity`.
+        let left_affinities: Vec<Option<vibesql_types::TypeAffinity>> =
+            expr_elements.iter().map(|e| self.get_expression_affinity(e)).collect();
+        let right_affinities: Vec<Option<vibesql_types::TypeAffinity>> = (0..expected_columns)
+            .map(|i| {
+                crate::evaluator::combined::subqueries::schema_utils::get_subquery_column_affinity_at(
+                    subquery, i, database,
+                )
+            })
+            .collect();
+
         // Whether any row compared as UNKNOWN (all non-NULL elements equal,
         // but at least one element comparison involved NULL). Rows that are
         // definitively FALSE (some element definitively unequal) do NOT make
@@ -720,11 +736,25 @@ impl ExpressionEvaluator<'_> {
                     continue;
                 }
 
+                // Apply per-position affinity coercion before comparison
+                // (issue #6045), using the subquery column's real affinity so a
+                // TEXT column vs a BLOB/NONE subquery column compares by storage
+                // class (no coercion), while a NUMERIC column vs a TEXT subquery
+                // value coerces the TEXT to numeric — matching SQLite's row-value
+                // `=` semantics (rowvalue9 1.6.1).
+                let (coerced_left, coerced_right) =
+                    ExpressionEvaluator::apply_affinity_for_comparison_values(
+                        expr_val.clone(),
+                        left_affinities[i],
+                        subquery_val.clone(),
+                        right_affinities[i],
+                    );
+
                 // Compare values
                 let eq_result = self.eval_binary_op(
-                    expr_val,
+                    &coerced_left,
                     &vibesql_ast::BinaryOperator::Equal,
-                    subquery_val,
+                    &coerced_right,
                 )?;
 
                 match eq_result {
