@@ -947,12 +947,11 @@ pub(crate) fn eval_json_arrow(
         return Ok(SqlValue::Null);
     }
 
-    let value = match left {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
-        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
-        _ => {
-            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
-        }
+    let value = match read_json_doc_arg(left)? {
+        Some(v) => v,
+        // `left` is non-NULL here (guarded above); a non-JSON, non-numeric type
+        // is malformed.
+        None => return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
     };
 
     let path = arrow_operand_to_path(right)?;
@@ -1024,16 +1023,19 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let json5_ok = accept_json5 && !canonical_ok && parse_json_relaxed(s).is_ok();
             canonical_ok || json5_ok
         }
-        // Numeric SQL values render to valid JSON scalars (accepted when either
-        // text bit is set).
+        // Integer SQL values always render to valid JSON number scalars (accepted
+        // when either text bit is set).
         SqlValue::Integer(_)
         | SqlValue::Smallint(_)
         | SqlValue::Bigint(_)
-        | SqlValue::Unsigned(_)
-        | SqlValue::Numeric(_)
-        | SqlValue::Float(_)
-        | SqlValue::Real(_)
-        | SqlValue::Double(_) => accept_canonical || accept_json5,
+        | SqlValue::Unsigned(_) => accept_canonical || accept_json5,
+        // Real SQL values are valid only when finite: SQLite renders a finite
+        // real as a valid JSON number, but ±Infinity / NaN do not form valid JSON
+        // (e.g. `json_valid(9e999)` -> 0), so those are rejected.
+        SqlValue::Numeric(f) | SqlValue::Real(f) | SqlValue::Double(f) => {
+            f.is_finite() && (accept_canonical || accept_json5)
+        }
+        SqlValue::Float(f) => f.is_finite() && (accept_canonical || accept_json5),
         // A BLOB validates only under the JSONB bits, and only when it decodes as
         // a well-formed JSONB document (a non-JSONB blob like x'abcd' is invalid).
         SqlValue::Blob(bytes) => accept_jsonb && super::jsonb::decode(bytes).is_some(),
@@ -1062,12 +1064,9 @@ pub(crate) fn json_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError>
         return Ok(SqlValue::Null);
     }
 
-    let value = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
-        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
-        _ => {
-            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
-        }
+    let value = match read_json_doc_arg(&args[0])? {
+        Some(v) => v,
+        None => return Ok(SqlValue::Null),
     };
 
     let paths = &args[1..];
@@ -1129,12 +1128,9 @@ pub(crate) fn jsonb_extract(args: &[SqlValue]) -> Result<SqlValue, ExecutorError
         return Ok(SqlValue::Null);
     }
 
-    let value = match &args[0] {
-        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
-        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
-        _ => {
-            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
-        }
+    let value = match read_json_doc_arg(&args[0])? {
+        Some(v) => v,
+        None => return Ok(SqlValue::Null),
     };
 
     let paths = &args[1..];
@@ -1184,13 +1180,9 @@ pub(crate) fn json_type(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         });
     }
 
-    let value = match &args[0] {
-        SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
-        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
-        _ => {
-            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
-        }
+    let value = match read_json_doc_arg(&args[0])? {
+        Some(v) => v,
+        None => return Ok(SqlValue::Null),
     };
 
     let node = if args.len() == 2 {
@@ -1315,6 +1307,48 @@ fn sql_value_scalar_text(v: &SqlValue) -> String {
     }
 }
 
+/// Render a numeric/boolean SQL argument as the minified JSON scalar text that
+/// SQLite's `json()` emits, or `None` for a non-numeric type.
+///
+/// SQLite's `json()` accepts a numeric (or boolean) argument and returns its
+/// JSON scalar rendering directly (`json(1)` -> `1`, `json(1.5)` -> `1.5`,
+/// `json(true)` -> `1`). This intentionally differs from the JSON *node*
+/// rendering used by the construction functions for one value: an infinite REAL
+/// renders here as the bare `9e999` / `-9e999` token (the same text SQLite emits
+/// for `json('9e999')`), whereas `json_array(9e999)` uses the `9.0e+999`
+/// sentinel. Finite reals use SQLite's `%!.15g` JSON real format (matching
+/// [`SqlValue::Real`]'s Display), and integers/booleans render as decimal
+/// integer tokens.
+fn json_numeric_scalar_text(value: &SqlValue) -> Option<String> {
+    match value {
+        SqlValue::Boolean(b) => Some(if *b { "1" } else { "0" }.to_string()),
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => Some(i.to_string()),
+        SqlValue::Smallint(i) => Some(i.to_string()),
+        SqlValue::Unsigned(u) => Some(u.to_string()),
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+            Some(json_real_scalar_text(*f))
+        }
+        SqlValue::Float(f) => Some(json_real_scalar_text(*f as f64)),
+        _ => None,
+    }
+}
+
+/// Render an f64 as SQLite's `json()` scalar text: `9e999` / `-9e999` for
+/// ±Infinity, and [`SqlValue::Real`]'s Display (SQLite's `%!.15g` form) for
+/// finite values. NaN reaches this only defensively (NaN is SQL NULL before the
+/// JSON layer); it falls back to a JSON `null`.
+fn json_real_scalar_text(f: f64) -> String {
+    if f.is_infinite() {
+        return if f > 0.0 { "9e999".to_string() } else { "-9e999".to_string() };
+    }
+    if f.is_nan() {
+        return "null".to_string();
+    }
+    // SqlValue::Real's Display is SQLite's JSON real format (keeps ".0", uses
+    // `1.0e+15`-style scientific form).
+    SqlValue::Real(f).to_string()
+}
+
 /// json(X) - Validate and minify JSON
 ///
 /// The json(X) function verifies that its argument X is a valid JSON string
@@ -1322,7 +1356,9 @@ fn sql_value_scalar_text(v: &SqlValue) -> String {
 /// whitespace removed). If X is not a well-formed JSON string, then this
 /// function throws an error.
 ///
-/// If the argument is NULL, returns NULL.
+/// A numeric (or boolean) argument is accepted and rendered as its JSON scalar
+/// form (`json(1)` -> `1`, `json(1.5)` -> `1.5`, `json(9e999)` -> `9e999`),
+/// matching SQLite. If the argument is NULL, returns NULL.
 ///
 /// Reference: https://www.sqlite.org/json1.html#the_json_function
 pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
@@ -1375,10 +1411,16 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             let value = jsonb_blob_to_node(bytes)?;
             Ok(SqlValue::Varchar(serde_json::to_string(&value).unwrap_or_default().into()))
         }
-        // For non-string types, SQLite throws an error
-        _ => Err(ExecutorError::SqliteCompatError(
-            "JSON functions require string arguments".to_string(),
-        )),
+        // A numeric/boolean argument renders as its JSON scalar text
+        // (`json(1)` -> `1`, `json(1.5)` -> `1.5`, `json(9e999)` -> `9e999`),
+        // matching SQLite.
+        other => match json_numeric_scalar_text(other) {
+            Some(text) => Ok(SqlValue::Varchar(text.into())),
+            // Remaining types (BLOB handled above; date/time/etc.) are rejected.
+            None => Err(ExecutorError::SqliteCompatError(
+                "JSON functions require string arguments".to_string(),
+            )),
+        },
     }
 }
 
@@ -1540,6 +1582,47 @@ fn json_text_or_blob_to_node(json_str: &str) -> Result<serde_json::Value, Execut
 fn jsonb_blob_to_node(bytes: &[u8]) -> Result<serde_json::Value, ExecutorError> {
     super::jsonb::decode(bytes)
         .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))
+}
+
+/// Convert a numeric or boolean SQL value into the JSON scalar *node* used by
+/// the read-only accessors (`json_extract`, `json_type`, `json_array_length`,
+/// `->`/`->>`), or `None` for a non-numeric type.
+///
+/// This mirrors the numeric handling in [`parse_json_doc_arg`]: integers/booleans
+/// become JSON integer nodes and reals become JSON number nodes via
+/// [`json_number_node`] (so an infinite REAL uses the `9.0e+999` sentinel that
+/// round-trips back to `±inf` on extraction, matching SQLite's
+/// `json_extract(9e999,'$')` -> `Inf`).
+fn numeric_doc_node(value: &SqlValue) -> Option<serde_json::Value> {
+    match value {
+        SqlValue::Boolean(b) => Some(serde_json::Value::Number(if *b { 1 } else { 0 }.into())),
+        SqlValue::Integer(i) | SqlValue::Bigint(i) => Some(serde_json::Value::Number((*i).into())),
+        SqlValue::Smallint(i) => Some(serde_json::Value::Number((*i as i64).into())),
+        SqlValue::Unsigned(u) => Some(serde_json::Value::Number((*u).into())),
+        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
+            Some(json_number_node(*f))
+        }
+        SqlValue::Float(f) => Some(json_number_node(*f as f64)),
+        _ => None,
+    }
+}
+
+/// Parse a read-only JSON document argument that may be JSON text, a JSONB blob,
+/// or a numeric/boolean scalar (which SQLite accepts as its JSON scalar value).
+/// Returns `Ok(None)` for SQL NULL (accessors propagate NULL). A non-JSON,
+/// non-numeric type yields the SQLite-compatible `malformed JSON` error.
+fn read_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, ExecutorError> {
+    match value {
+        SqlValue::Null => Ok(None),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            json_text_or_blob_to_node(s.as_str()).map(Some)
+        }
+        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes).map(Some),
+        other => match numeric_doc_node(other) {
+            Some(node) => Ok(Some(node)),
+            None => Err(ExecutorError::SqliteCompatError("malformed JSON".to_string())),
+        },
+    }
 }
 
 /// Parse the JSON document argument shared by the mutation functions. Returns
@@ -1706,13 +1789,9 @@ pub(crate) fn json_array_length(args: &[SqlValue]) -> Result<SqlValue, ExecutorE
         });
     }
 
-    let value = match &args[0] {
-        SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => json_text_or_blob_to_node(s.as_str())?,
-        SqlValue::Blob(bytes) => jsonb_blob_to_node(bytes)?,
-        _ => {
-            return Err(ExecutorError::SqliteCompatError("malformed JSON".to_string()));
-        }
+    let value = match read_json_doc_arg(&args[0])? {
+        Some(v) => v,
+        None => return Ok(SqlValue::Null),
     };
 
     let node = if args.len() == 2 {
@@ -2851,10 +2930,87 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// A non-JSONB BLOB argument to json() is malformed (a valid JSONB blob is
+    /// decoded elsewhere; an arbitrary byte string is not JSON).
     #[test]
-    fn test_json_non_string_input() {
-        let result = json(&[SqlValue::Integer(42)]);
+    fn test_json_non_jsonb_blob_input() {
+        let result = json(&[SqlValue::Blob(b"abc".to_vec())]);
         assert!(result.is_err());
+    }
+
+    /// SQLite's json() accepts numeric and boolean arguments, rendering them as
+    /// their JSON scalar text. Pinned byte-for-byte to sqlite3 3.51.0 (issue
+    /// #6118). Note json(9e999) -> "9e999" (the bare token), which differs from
+    /// json_array(9e999) -> "[9.0e+999]" (the sentinel).
+    #[test]
+    fn test_json_numeric_and_boolean_input() {
+        for (arg, want) in [
+            (SqlValue::Integer(1), "1"),
+            (SqlValue::Integer(-2), "-2"),
+            (SqlValue::Integer(0), "0"),
+            (SqlValue::Bigint(9223372036854775807), "9223372036854775807"),
+            (SqlValue::Smallint(7), "7"),
+            (SqlValue::Real(1.5), "1.5"),
+            (SqlValue::Real(1.0), "1.0"),
+            (SqlValue::Real(100.0), "100.0"),
+            (SqlValue::Real(0.1), "0.1"),
+            (SqlValue::Real(1e15), "1.0e+15"),
+            (SqlValue::Real(1e300), "1.0e+300"),
+            (SqlValue::Real(-0.0), "0.0"),
+            (SqlValue::Double(f64::INFINITY), "9e999"),
+            (SqlValue::Double(f64::NEG_INFINITY), "-9e999"),
+            (SqlValue::Boolean(true), "1"),
+            (SqlValue::Boolean(false), "0"),
+        ] {
+            let got = json(std::slice::from_ref(&arg)).unwrap();
+            assert_eq!(got, SqlValue::Varchar(want.into()), "json({arg:?})");
+        }
+    }
+
+    /// The read-only accessors accept a numeric document argument (SQLite
+    /// semantics, issue #6118): the value is treated as its JSON scalar. Note the
+    /// asymmetry vs json(): extracting the root of an infinite REAL round-trips
+    /// back to ±inf (rendered "Inf"), because the accessor path uses the
+    /// 9.0e+999 sentinel node.
+    #[test]
+    fn test_readers_accept_numeric_document() {
+        // json_extract(N, '$') -> the SQL scalar value.
+        assert_eq!(
+            json_extract(&[SqlValue::Integer(1), SqlValue::Varchar("$".into())]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            json_extract(&[SqlValue::Real(1.5), SqlValue::Varchar("$".into())]).unwrap(),
+            SqlValue::Real(1.5)
+        );
+        assert_eq!(
+            json_extract(&[SqlValue::Double(f64::INFINITY), SqlValue::Varchar("$".into())])
+                .unwrap(),
+            SqlValue::Real(f64::INFINITY)
+        );
+        // json_type(N) -> the JSON type name.
+        assert_eq!(
+            json_type(&[SqlValue::Integer(1)]).unwrap(),
+            SqlValue::Varchar("integer".into())
+        );
+        assert_eq!(json_type(&[SqlValue::Real(1.5)]).unwrap(), SqlValue::Varchar("real".into()));
+        // json_array_length(N) -> 0 (a scalar is not an array).
+        assert_eq!(json_array_length(&[SqlValue::Integer(1)]).unwrap(), SqlValue::Integer(0));
+        // ->/->> over a numeric document.
+        assert_eq!(
+            eval_json_arrow(&SqlValue::Integer(1), &SqlValue::Varchar("$".into()), true).unwrap(),
+            SqlValue::Integer(1)
+        );
+    }
+
+    /// json_valid() accepts finite numerics but rejects ±Infinity / NaN reals,
+    /// matching SQLite (`json_valid(9e999)` -> 0, issue #6118).
+    #[test]
+    fn test_json_valid_numeric_finiteness() {
+        assert_eq!(json_valid(&[SqlValue::Integer(1)]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(json_valid(&[SqlValue::Real(1.5)]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(json_valid(&[SqlValue::Double(f64::INFINITY)]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(json_valid(&[SqlValue::Double(f64::NAN)]).unwrap(), SqlValue::Integer(0));
     }
 
     // SQLite's json() accepts a relaxed JSON5-like syntax. These regression
