@@ -1,19 +1,22 @@
-//! Tests for `pragma_compile_options` synthetic-table shadowing precedence (#6030)
+//! Tests for `pragma_compile_options` synthetic-table shadowing precedence
+//! (#6030 real tables, #6061 real views)
 //!
 //! `pragma_compile_options` is an eponymous system table VibeSQL synthesizes
 //! (single `compile_options TEXT` column, zero rows). Because `pragma_*` names
-//! are not reserved at `CREATE TABLE` time, a user may create a real table of
-//! the same name. In that case the real table must take precedence for
-//! `SELECT` (matching SQLite, where an eponymous virtual table is shadowed by a
-//! same-named real table). Once the real table is dropped, the synthetic table
-//! re-engages.
+//! are not reserved at `CREATE TABLE`/`CREATE VIEW` time, a user may create a
+//! real table or a real view of the same name. In that case the real object
+//! must take precedence for `SELECT` (matching SQLite, where an eponymous
+//! virtual table is shadowed by a same-named real table or view). Once the
+//! real object is dropped, the synthetic table re-engages.
 
 #[cfg(test)]
 mod tests {
     use vibesql_parser::Parser;
     use vibesql_storage::Database;
 
-    use crate::{CreateTableExecutor, DropTableExecutor, InsertExecutor, SelectExecutor};
+    use crate::{
+        CreateTableExecutor, DropTableExecutor, InsertExecutor, SelectExecutor, ViewExecutor,
+    };
 
     fn create_real_pragma_table(db: &mut Database) {
         let sql = "CREATE TABLE pragma_compile_options (x INTEGER)";
@@ -22,6 +25,24 @@ mod tests {
             CreateTableExecutor::execute(&create_stmt, db).expect("Failed to create table");
         } else {
             panic!("Expected CreateTable statement");
+        }
+    }
+
+    fn create_view(db: &mut Database, sql: &str) {
+        let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
+        if let vibesql_ast::Statement::CreateView(create_stmt) = stmt {
+            ViewExecutor::execute_create_view(&create_stmt, db).expect("Failed to create view");
+        } else {
+            panic!("Expected CreateView statement");
+        }
+    }
+
+    fn drop_view(db: &mut Database, sql: &str) {
+        let stmt = Parser::parse_sql(sql).expect("Failed to parse DROP VIEW");
+        if let vibesql_ast::Statement::DropView(drop_stmt) = stmt {
+            ViewExecutor::execute_drop_view(&drop_stmt, db).expect("Failed to drop view");
+        } else {
+            panic!("Expected DropView statement");
         }
     }
 
@@ -120,5 +141,73 @@ mod tests {
         // Synthetic fallback re-engages: zero rows again.
         let rows = run_select(&db, "SELECT * FROM pragma_compile_options");
         assert_eq!(rows.len(), 0, "after DROP, the synthetic zero-row table must return");
+    }
+
+    /// A real view named `pragma_compile_options` wins over the synthetic
+    /// eponymous table. This is the core repro from #6061: SQLite allows
+    /// `CREATE VIEW pragma_compile_options` and resolves the view for `SELECT`.
+    #[test]
+    fn test_real_view_shadows_synthetic() {
+        let mut db = Database::new();
+        create_view(&mut db, "CREATE VIEW pragma_compile_options AS SELECT 42 AS x");
+
+        let rows = run_select(&db, "SELECT * FROM pragma_compile_options");
+
+        // View wins: one row with value 42, not the synthetic zero-row table.
+        assert_eq!(rows.len(), 1, "expected the view's row, got the synthetic table");
+        assert_eq!(rows[0].values.len(), 1);
+        assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(42));
+    }
+
+    /// Case-insensitive naming: the real view wins even when referenced with
+    /// different casing than it was created with. `get_view` folds identifiers
+    /// the same way `is_pragma_compile_options_table` does.
+    #[test]
+    fn test_real_view_shadows_synthetic_case_insensitive() {
+        let mut db = Database::new();
+        create_view(&mut db, "CREATE VIEW pragma_compile_options AS SELECT 7 AS x");
+
+        let rows = run_select(&db, "SELECT * FROM PRAGMA_COMPILE_OPTIONS");
+        assert_eq!(rows.len(), 1, "case-insensitive reference should still hit the real view");
+        assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(7));
+    }
+
+    /// Dropping the real view re-engages the synthetic fallback.
+    #[test]
+    fn test_drop_real_view_reverts_to_synthetic() {
+        let mut db = Database::new();
+        create_view(&mut db, "CREATE VIEW pragma_compile_options AS SELECT 99 AS x");
+
+        // View wins while it exists.
+        let rows = run_select(&db, "SELECT * FROM pragma_compile_options");
+        assert_eq!(rows.len(), 1);
+
+        // Drop it.
+        drop_view(&mut db, "DROP VIEW pragma_compile_options");
+
+        // Synthetic fallback re-engages: zero rows again.
+        let rows = run_select(&db, "SELECT * FROM pragma_compile_options");
+        assert_eq!(rows.len(), 0, "after DROP VIEW, the synthetic zero-row table must return");
+    }
+
+    /// A multi-column view exercises the `validation.rs` `SELECT *` column-count
+    /// path (the second callsite fixed in #6061): the wildcard must expand to
+    /// the view's column count, not the synthetic single-column shape, so the
+    /// returned rows carry the view's full column set with no count mismatch.
+    #[test]
+    fn test_multi_column_view_shadows_synthetic_wildcard() {
+        let mut db = Database::new();
+        create_view(&mut db, "CREATE VIEW pragma_compile_options AS SELECT 1 AS a, 2 AS b, 3 AS c");
+
+        let rows = run_select(&db, "SELECT * FROM pragma_compile_options");
+        assert_eq!(rows.len(), 1, "expected the view's single row");
+        assert_eq!(
+            rows[0].values.len(),
+            3,
+            "wildcard must expand to the view's 3 columns, not the synthetic 1-column shape"
+        );
+        assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(1));
+        assert_eq!(rows[0].values[1], vibesql_types::SqlValue::Integer(2));
+        assert_eq!(rows[0].values[2], vibesql_types::SqlValue::Integer(3));
     }
 }
