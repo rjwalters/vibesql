@@ -6182,6 +6182,22 @@ proc sqlite3_connection_pointer {db} {
     return "0x12345678"
 }
 
+proc sqlite3_libversion_number {args} {
+    # SQLite's C-API SQLITE_VERSION_NUMBER: the library version encoded as
+    # (major*1000000 + minor*1000 + patch). tclsqlite.test group 12 (tcl-12.1)
+    # scans `[db version]` back into that integer and asserts it equals
+    # [sqlite3_libversion_number]. Without this proc the file aborts mid-evaluation
+    # on the result-expression, before the SQL-reachable tail (17.x quote(),
+    # 18.120 typeof) ever runs.
+    #
+    # Return value MUST match the shim's reported version string ("3.46.0" from
+    # both `sqlite3 -version` and the `db version` method) so tcl-12.1 passes:
+    #   3*1000000 + 46*1000 + 0 = 3046000
+    # Same command-form-gap class as the -has-codec / do_not_use_codec stubs
+    # (#5289, PR #6080).
+    return 3046000
+}
+
 proc load_static_extension {db args} {
     # SQLite's test harness statically links a handful of test extensions
     # (totype, wholenumber, etc.) and loads them into a connection via
@@ -6605,6 +6621,39 @@ proc db {cmd args} {
         progress {
             # Set progress callback - not supported
             return
+        }
+        profile {
+            # Register an SQL profiler callback (db profile ?SCRIPT?). VibeSQL has
+            # no profiler; registering one is a pure side effect that the callee's
+            # own tests don't observe. Silently accept it so files that register a
+            # profiler and then keep testing (tclsqlite.test tcl-15.x) continue
+            # past the registration instead of aborting mid-file on an unknown
+            # db command. Same no-op class as authorizer/progress/trace.
+            return
+        }
+        bind_fallback {
+            # db bind_fallback ?CALLBACK?  (SQLite 3.28+): register a Tcl script
+            # invoked for otherwise-unbound SQL parameters, or (no args) query the
+            # currently-registered callback. VibeSQL's shim does not route unbound
+            # $params through a fallback during `db eval`, so we cannot honor the
+            # substitution semantics (tclsqlite.test 18.100/18.110/18.300 depend on
+            # that and fail as shim-gaps). But we can honor the *registration*
+            # surface so the file no longer aborts mid-evaluation and the
+            # SQL-reachable tail (18.120 `SELECT typeof($mno)`) runs:
+            #   - no args         -> return the stored callback (test 18.140)
+            #   - one arg         -> store it, return "" (18.200/18.910 register)
+            #   - two or more args-> the documented arg-count error (test 18.900)
+            if {[llength $args] == 0} {
+                if {[info exists ::db_bind_fallback]} {
+                    return $::db_bind_fallback
+                }
+                return ""
+            }
+            if {[llength $args] > 1} {
+                error "wrong # args: should be \"db bind_fallback ?CALLBACK?\""
+            }
+            set ::db_bind_fallback [lindex $args 0]
+            return ""
         }
         busy {
             # Set busy callback - not supported

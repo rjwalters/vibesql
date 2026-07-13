@@ -82,6 +82,70 @@ def parse_partial_skip_files(shim_content: str) -> dict:
     return partial
 
 
+def parse_whole_file_skips(shim_content: str) -> dict:
+    """Extract whole-file skip entries from the shim file.
+
+    These are the vibesql_skip_files array entries: test FILES (keyed by
+    basename, e.g. ``intreal``, ``capi3``) that are skipped in their entirety
+    because every test in them exercises a SQLite-internal / C-API surface with
+    no SQL-CLI-reachable coverage. This is the largest skip category and, until
+    now, was invisible to the audit (only vibesql_skip_tests and, since #6066,
+    vibesql_partial_skip_files were parsed).
+
+    Like parse_partial_skip_files, this is a DISCOVERABILITY report: the actual
+    skipping is enforced elsewhere in the shim, so we only surface the entries
+    rather than unskip-and-rerun them.
+
+    Resilient parsing (matching the #6066 partial-skip style):
+      * The array literal closes with a bare ``}`` at the start of a line, so we
+        capture up to ``\\n}`` rather than the first ``}`` (reasons contain
+        braces, e.g. ``{ run_test_suite fts3 }``).
+      * A reason may embed an escaped double-quote (``\\"sqlite3_shutdown\\"`` in
+        the sort2 entry), so the value pattern accepts escaped characters
+        instead of stopping at the first quote.
+    """
+    files = {}
+
+    match = re.search(
+        r'array set vibesql_skip_files \{(.*?)\n\}',
+        shim_content,
+        re.DOTALL,
+    )
+    if not match:
+        # Not an error: the array is optional (mirrors parse_partial_skip_files).
+        return files
+
+    section = match.group(1)
+
+    # Each entry: file_basename "reason". The reason is a TCL double-quoted
+    # string whose only escaped metacharacter of concern is an embedded \" —
+    # (?:[^"\\]|\\.)* consumes any escaped char (\", \\, ...) without terminating
+    # the value early. Anchored per-line so a stray brace inside a reason (e.g.
+    # "{ run_test_suite fts3 }") does not split an entry.
+    pattern = r'^\s*([a-zA-Z0-9_.-]+)\s+"((?:[^"\\]|\\.)*)"'
+    for line in section.split('\n'):
+        m = re.match(pattern, line.strip())
+        if m:
+            # Unescape \" so the reported reason reads naturally.
+            files[m.group(1)] = m.group(2).replace('\\"', '"')
+
+    return files
+
+
+def find_stale_whole_file_skips(file_skips: dict) -> list:
+    """Return skip-file basenames whose <basename>.test no longer exists.
+
+    A whole-file skip names a test FILE by basename; if the referenced
+    ``<basename>.test`` is gone from the test tree, the entry is stale and can be
+    removed. Cheap check: one filesystem stat per entry, no test execution.
+    """
+    stale = []
+    for basename in sorted(file_skips):
+        if not (TCL_TEST_DIR / f"{basename}.test").exists():
+            stale.append(basename)
+    return stale
+
+
 def get_test_file(test_name: str) -> str:
     """Determine which test file contains a test based on naming convention."""
     # Test names follow pattern: filename-N.N or filename-N.N.N
@@ -258,6 +322,18 @@ def main():
     if partial_files:
         print(f"Found {len(partial_files)} partial-file documented skip(s)")
 
+    # Parse whole-file skips (vibesql_skip_files) — the largest skip category.
+    # Discoverability record; enforced elsewhere in the shim, so not rerun-verified.
+    whole_files = parse_whole_file_skips(shim_content)
+    if whole_files:
+        print(f"Found {len(whole_files)} whole-file documented skip(s)")
+    stale_whole_files = find_stale_whole_file_skips(whole_files)
+    if stale_whole_files:
+        print(
+            f"WARNING: {len(stale_whole_files)} whole-file skip(s) reference a "
+            f".test file that no longer exists: {', '.join(stale_whole_files)}"
+        )
+
     # Categorize skips
     categories = categorize_skips(skips)
 
@@ -271,6 +347,13 @@ def main():
                 # Show a truncated reason so the record is auditable at a glance.
                 summary = reason if len(reason) <= 100 else reason[:97] + "..."
                 print(f"    - {fname}: {summary}")
+        if whole_files:
+            print(f"  WHOLE_FILE: {len(whole_files)} files (documented whole-file skips)")
+            for fname, reason in sorted(whole_files.items()):
+                # Show a truncated reason so the record is auditable at a glance.
+                summary = reason if len(reason) <= 100 else reason[:97] + "..."
+                flag = " [STALE: .test file missing]" if fname in stale_whole_files else ""
+                print(f"    - {fname}: {summary}{flag}")
         return 0
 
     # Determine which tests to check
