@@ -3088,6 +3088,25 @@ array set vibesql_skip_files {
     strict2 "Tests writable_schema + rootpage aliasing to plant an inconsistent schema that strict-mode validation must catch. Requires the writable_schema B-tree manipulation path that is out-of-scope for VibeSQL. (#5844.)"
 }
 
+# Test FILES that are only PARTIALLY skipped — a documented subset of the file's
+# tests is auto-skipped (see the regex detectors in vibesql_skip_test below),
+# but the rest of the file runs normally and its results (pass OR fail) are kept
+# visible. Unlike vibesql_skip_files (whole-file skips), these files CANNOT be
+# skipped wholesale without discarding legitimate SQL coverage.
+#
+# This array is a DISCOVERABILITY record, not an enforcement mechanism: the
+# actual skipping is performed by the regex detectors in vibesql_skip_test.
+# It exists so a skip audit (or a `grep -n <file> tester_vibesql.tcl`) can find
+# an intentional, reasoned partial-skip by FILE NAME — mirroring how the
+# vibesql_skip_files array makes whole-file skips (e.g. intreal) discoverable —
+# rather than only by grepping the regex-detector source. scripts/verify_skips.py
+# parses this array and reports it under the PARTIAL_FILE category.
+# Format: file_basename -> reason (which subset is skipped, why, and where enforced)
+variable vibesql_partial_skip_files
+array set vibesql_partial_skip_files {
+    atof1 "PARTIAL: the ~39,998 dynamically-named atof1-1.\$i.1/.2 loop tests are auto-skipped because they call real2hex()/hex2real() — SQLite C-test-harness functions (test_func.c) that expose raw IEEE-754 bit patterns and are unreachable from the SQL CLI. Same harness-artifact class as the intreal whole-file skip, but atof1 CANNOT be a whole-file skip: the ~7 non-loop atof1-2.x/atof-3.x tests are legitimate do_execsql_test coverage that must keep running. Enforced by the real2hex()/hex2real() regex detectors in vibesql_skip_test (search 'real2hex' below), NOT by a whole-file skip. Current non-loop status: atof1-2.40/atof-3.2/atof-3.3 pass; atof1-2.10/2.20/2.30 (UTF16be substr) and atof-3.1 (large-literal REAL precision) are REAL open engine bugs, tracked in #6065 — they must keep running and reporting 'failed', never reclassified as skipped."
+}
+
 # Tests to skip because they test SQLite-specific behavior that VibeSQL
 # intentionally does not implement or implements differently.
 # Format: test_name -> reason
@@ -5146,6 +5165,13 @@ proc uses_sqlite_internals {script} {
     # VibeSQL's user-facing float formatting is correct (SELECT 1.0e300, 0.1,
     # 2.0/3.0 => 1.0e+300, 0.1, 0.666666666666667 — matching SQLite), so these
     # are harness artifacts, the same class as the skipped intreal() tests.
+    #
+    # This is a PARTIAL-file skip, not a whole-file skip: only the atof1-1.$i.1/.2
+    # loop tests match here; the ~7 non-loop atof1-2.x/atof-3.x tests keep running.
+    # The intent is recorded discoverably by FILE NAME in the vibesql_partial_skip_files
+    # array above (search 'atof1'). The atof1-2.10/2.20/2.30 and atof-3.1 non-loop
+    # tests that currently FAIL are REAL engine bugs tracked in #6065 — they are
+    # deliberately left visible here and must NOT be reclassified as skipped.
     if {[regexp {real2hex[[:space:]]*\(} $script]} {
         return [list 1 "uses real2hex() (SQLite test function, test_func.c)"]
     }

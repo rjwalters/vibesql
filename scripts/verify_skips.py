@@ -49,6 +49,39 @@ def parse_skip_list(shim_content: str) -> dict:
     return skips
 
 
+def parse_partial_skip_files(shim_content: str) -> dict:
+    """Extract partial-file documented-skip entries from the shim file.
+
+    These are files (keyed by basename) where a documented subset of tests is
+    auto-skipped by a regex detector while the rest of the file keeps running.
+    They are recorded in the vibesql_partial_skip_files array purely for
+    discoverability (audit-by-file-name); the actual skipping is done elsewhere,
+    so we only report them here rather than attempting to unskip-and-rerun.
+    """
+    partial = {}
+
+    match = re.search(
+        r'array set vibesql_partial_skip_files \{(.*?)\n\}',
+        shim_content,
+        re.DOTALL,
+    )
+    if not match:
+        # Not an error: the array is optional.
+        return partial
+
+    section = match.group(1)
+
+    # Each entry: file_basename "reason" — reason may contain escaped chars but
+    # no unescaped double-quote, matching the TCL array literal convention.
+    pattern = r'^\s*([a-zA-Z0-9_.-]+)\s+"([^"]+)"'
+    for line in section.split('\n'):
+        m = re.match(pattern, line.strip())
+        if m:
+            partial[m.group(1)] = m.group(2)
+
+    return partial
+
+
 def get_test_file(test_name: str) -> str:
     """Determine which test file contains a test based on naming convention."""
     # Test names follow pattern: filename-N.N or filename-N.N.N
@@ -220,6 +253,11 @@ def main():
     skips = parse_skip_list(shim_content)
     print(f"Found {len(skips)} skip entries")
 
+    # Parse partial-file documented skips (discoverability records; not rerun-verified)
+    partial_files = parse_partial_skip_files(shim_content)
+    if partial_files:
+        print(f"Found {len(partial_files)} partial-file documented skip(s)")
+
     # Categorize skips
     categories = categorize_skips(skips)
 
@@ -227,6 +265,12 @@ def main():
         print("\nSkip categories:")
         for cat, tests in sorted(categories.items(), key=lambda x: -len(x[1])):
             print(f"  {cat}: {len(tests)} tests")
+        if partial_files:
+            print(f"  PARTIAL_FILE: {len(partial_files)} files (documented per-test/regex subset skips)")
+            for fname, reason in sorted(partial_files.items()):
+                # Show a truncated reason so the record is auditable at a glance.
+                summary = reason if len(reason) <= 100 else reason[:97] + "..."
+                print(f"    - {fname}: {summary}")
         return 0
 
     # Determine which tests to check
