@@ -20,6 +20,18 @@
 //! `else` branch, which is the expected behavior since VibeSQL does not define
 //! the legacy JSON compile options). See issue #6019.
 //!
+//! ## Precedence: a real user table shadows the synthetic table (#6030)
+//!
+//! `pragma_*` identifiers are **not** reserved at `CREATE TABLE` time (only
+//! `sqlite_*` names are), so a user may legally create a real table named
+//! `pragma_compile_options`. When such a table exists, it takes precedence over
+//! the synthetic eponymous table — matching SQLite's semantics, where an
+//! eponymous virtual table is shadowed by a same-named real table. The dispatch
+//! in [`crate::select::scan::table::execute_table_scan`] therefore probes the
+//! catalog (`database.get_table`) first and only falls through to the synthetic
+//! zero-row table when no real table exists. The synthetic table re-engages
+//! automatically once the real table is dropped.
+//!
 //! Reference: <https://www.sqlite.org/pragma.html#pragma_compile_options>
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
