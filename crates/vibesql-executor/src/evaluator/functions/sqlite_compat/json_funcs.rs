@@ -1267,12 +1267,30 @@ pub(crate) fn json_quote(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Varchar(rendered.into()))
 }
 
+/// Render `±Infinity` as SQLite's JSON infinity sentinel, or `None` for finite
+/// (or NaN) inputs. SQLite serializes an infinite JSON real as the literal token
+/// `9.0e+999` / `-9.0e+999` (see `quote()` in `blob_funcs.rs`), which round-trips
+/// back to `±inf` on extraction. NaN never reaches the JSON layer as a value
+/// (it is SQL NULL first), so it is intentionally not given a sentinel here.
+fn json_infinity_sentinel(f: f64) -> Option<&'static str> {
+    if f.is_infinite() {
+        Some(if f > 0.0 { "9.0e+999" } else { "-9.0e+999" })
+    } else {
+        None
+    }
+}
+
 /// Render an f64 the way SQLite renders JSON reals (keeps a fractional part,
 /// e.g. `2.0`), by round-tripping through serde_json's number formatter.
 ///
 /// Negative zero is normalized to `0.0` to match SQLite, which renders both
-/// `0.0` and `-0.0` as `0.0` in JSON output.
+/// `0.0` and `-0.0` as `0.0` in JSON output. `±Infinity` renders as SQLite's
+/// `9.0e+999` / `-9.0e+999` sentinel (serde_json's `Number::from_f64` returns
+/// `None` for non-finite values, so this must be handled explicitly).
 pub(crate) fn render_json_number(f: f64) -> String {
+    if let Some(sentinel) = json_infinity_sentinel(f) {
+        return sentinel.to_string();
+    }
     // Normalize -0.0 to 0.0 (SQLite: json_group_array(-0.0) -> [0.0]).
     let f = if f == 0.0 { 0.0 } else { f };
     match serde_json::Number::from_f64(f) {
@@ -1483,15 +1501,21 @@ fn sql_value_to_json_node(
 /// SQLite renders JSON reals (keeps ".0", uses `1.0e+99`-style scientific form).
 ///
 /// We rely on `arbitrary_precision`: the node stores the exact SQLite-formatted
-/// token, so `serde_json::to_string` reproduces it verbatim. Non-finite values
-/// (which SQLite rejects, and which the covered surface never produces here)
-/// fall back to a JSON null.
+/// token, so `serde_json::to_string` reproduces it verbatim. `±Infinity` is
+/// emitted as SQLite's `9.0e+999` / `-9.0e+999` sentinel token, which
+/// `json_node_to_sql_value` round-trips back to `±inf` on extraction. NaN
+/// (which reaches this helper only defensively, since NaN is SQL NULL before
+/// the JSON layer) falls back to a JSON null.
 fn json_number_node(f: f64) -> serde_json::Value {
-    if !f.is_finite() {
-        return serde_json::Value::Null;
-    }
-    // SqlValue::Real's Display is SQLite's JSON real format.
-    let token = SqlValue::Real(f).to_string();
+    // SQLite serializes ±Infinity as the `9.0e+999` sentinel; store it as a raw
+    // number token (arbitrary_precision) so `serde_json::to_string` reproduces
+    // it verbatim and `->>` decodes it back to ±inf.
+    let token = match json_infinity_sentinel(f) {
+        Some(sentinel) => sentinel.to_string(),
+        None if f.is_nan() => return serde_json::Value::Null,
+        // SqlValue::Real's Display is SQLite's JSON real format.
+        None => SqlValue::Real(f).to_string(),
+    };
     match serde_json::from_str::<serde_json::Value>(&token) {
         Ok(v @ serde_json::Value::Number(_)) => v,
         _ => serde_json::Value::Null,
@@ -3416,6 +3440,80 @@ mod tests {
         assert_eq!(
             txt(json_array(&[SqlValue::Boolean(true), SqlValue::Boolean(false)], &[]).unwrap()),
             "[1,0]"
+        );
+    }
+
+    #[test]
+    fn test_json_infinity_sentinel_across_surface() {
+        // json_array / json_object emit SQLite's 9.0e+999 sentinel for ±Inf
+        // (json101-20.1). Previously these collapsed to `null`.
+        assert_eq!(txt(json_array(&[SqlValue::Real(f64::INFINITY)], &[]).unwrap()), "[9.0e+999]");
+        assert_eq!(
+            txt(json_array(&[SqlValue::Real(f64::NEG_INFINITY)], &[]).unwrap()),
+            "[-9.0e+999]"
+        );
+        assert_eq!(
+            txt(json_object(&[v("a"), SqlValue::Real(f64::INFINITY)], &[]).unwrap()),
+            r#"{"a":9.0e+999}"#
+        );
+        assert_eq!(
+            txt(json_object(
+                &[v("a"), SqlValue::Real(f64::INFINITY), v("b"), SqlValue::Real(f64::NEG_INFINITY)],
+                &[]
+            )
+            .unwrap()),
+            r#"{"a":9.0e+999,"b":-9.0e+999}"#
+        );
+
+        // json_quote renders the sentinel too (previously rendered bare "inf").
+        assert_eq!(
+            json_quote(&[SqlValue::Real(f64::INFINITY)]).unwrap(),
+            SqlValue::Varchar("9.0e+999".into())
+        );
+        assert_eq!(
+            json_quote(&[SqlValue::Real(f64::NEG_INFINITY)]).unwrap(),
+            SqlValue::Varchar("-9.0e+999".into())
+        );
+
+        // render_json_number (shared with json_group_array/object) helper check.
+        assert_eq!(render_json_number(f64::INFINITY), "9.0e+999");
+        assert_eq!(render_json_number(f64::NEG_INFINITY), "-9.0e+999");
+
+        // NaN stays NULL at the node level (SQLite never emits a NaN sentinel).
+        assert_eq!(json_number_node(f64::NAN), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_json_infinity_extract_round_trips_to_inf() {
+        // The 9.0e+999 sentinel decodes back to ±inf via json_node_to_sql_value,
+        // driving json101-20.2/20.3 (->> of an infinite field yields Inf/-Inf).
+        let obj = txt(json_object(
+            &[v("a"), SqlValue::Real(f64::INFINITY), v("b"), SqlValue::Real(f64::NEG_INFINITY)],
+            &[],
+        )
+        .unwrap());
+        assert_eq!(
+            json_extract(&[SqlValue::Varchar(obj.clone().into()), v("$.a")]).unwrap(),
+            SqlValue::Real(f64::INFINITY)
+        );
+        assert_eq!(
+            json_extract(&[SqlValue::Varchar(obj.into()), v("$.b")]).unwrap(),
+            SqlValue::Real(f64::NEG_INFINITY)
+        );
+    }
+
+    #[test]
+    fn test_json_insert_infinity_sentinel() {
+        // The mutation helpers (json_insert/json_set/...) share json_number_node,
+        // so an infinite value argument stores the sentinel too.
+        assert_eq!(
+            txt(json_insert(&[v("{}"), v("$.a"), SqlValue::Real(f64::INFINITY)], &[]).unwrap()),
+            r#"{"a":9.0e+999}"#
+        );
+        assert_eq!(
+            txt(json_set(&[v(r#"{"a":1}"#), v("$.a"), SqlValue::Real(f64::NEG_INFINITY)], &[])
+                .unwrap()),
+            r#"{"a":-9.0e+999}"#
         );
     }
 

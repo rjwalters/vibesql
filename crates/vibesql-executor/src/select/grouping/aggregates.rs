@@ -2452,6 +2452,29 @@ mod tests {
     }
 
     #[test]
+    fn test_json_group_array_infinity_sentinel() {
+        // ±Inf must render as SQLite's 9.0e+999 sentinel, not Rust's bare "inf".
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();
+        acc.accumulate(&SqlValue::Real(f64::INFINITY));
+        acc.accumulate(&SqlValue::Real(f64::NEG_INFINITY));
+        assert_eq!(json_array_text(acc), "[9.0e+999,-9.0e+999]");
+    }
+
+    #[test]
+    fn test_json_group_object_infinity_sentinel() {
+        let mut acc = AggregateAccumulator::new("JSON_GROUP_OBJECT", false).unwrap();
+        acc.accumulate_json_object_pair(
+            SqlValue::Varchar("a".into()),
+            SqlValue::Real(f64::INFINITY),
+        );
+        let text = match acc.finalize().unwrap() {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str().to_string(),
+            other => panic!("expected text, got {other:?}"),
+        };
+        assert_eq!(text, r#"{"a":9.0e+999}"#);
+    }
+
+    #[test]
     fn test_json_group_array_jsonb_blob_embeds() {
         // A well-formed JSONB blob embeds as its decoded JSON: json_group_array(jsonb('[1]')) -> [[1]].
         use crate::evaluator::functions::sqlite_compat::jsonb;
