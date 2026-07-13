@@ -33,13 +33,33 @@ arcstr = "1.2"
 # (literal-run search between wildcards). Already resolved transitively at 2.8.x;
 # promoted to a direct dependency here (issue #6011).
 memchr = "2.8"
-# The SQLite JSON1 functions (json_object/json_set/json_patch/...) need two
+# The SQLite JSON1 functions (json_object/json_set/json_patch/...) need three
 # serde_json behaviors to match sqlite3 byte-for-byte:
 #   * preserve_order    - keep object keys in insertion order
 #   * arbitrary_precision - preserve the exact source number tokens (e.g.
 #                           `34.5e+6`) through parse+serialize, so mutation
 #                           functions round-trip untouched numbers verbatim.
-serde_json = { version = "1.0", features = ["preserve_order", "arbitrary_precision"] }
+#   * unbounded_depth   - lets `Deserializer::disable_recursion_limit()` lift
+#                           serde_json's hard-coded 128-level recursion cap. We
+#                           only reach that call AFTER an iterative depth precheck
+#                           has already bounded nesting to <= SQLITE_MAX_JSON_DEPTH
+#                           (1000), so serde never recurses on unbounded untrusted
+#                           input (issue #6052). Without this feature json_valid /
+#                           json() reject canonical documents deeper than ~127.
+# `serde` provides the `Deserialize` trait used to drive a manually-constructed
+# `serde_json::Deserializer` with `disable_recursion_limit()` (issue #6052).
+serde = "1.0"
+serde_json = { version = "1.0", features = [
+    "preserve_order",
+    "arbitrary_precision",
+    "unbounded_depth",
+] }
+# serde_json's `Value` deserializer recurses once per nesting level on the native
+# call stack; even at SQLITE_MAX_JSON_DEPTH (1000) that overflows an ordinary
+# stack. serde_stacker moves that recursion onto a heap-backed growable stack so
+# depth-bounded (<= 1000) but deep documents parse without overflow — the pairing
+# serde_json's own docs recommend for `disable_recursion_limit()` (issue #6052).
+serde_stacker = "0.1"
 tokio = { version = "1.0", features = ["sync"] }
 rand = "0.10"
 md-5 = "0.11"

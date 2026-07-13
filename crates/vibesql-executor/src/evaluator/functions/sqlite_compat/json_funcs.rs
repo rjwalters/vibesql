@@ -201,11 +201,18 @@ pub(crate) fn navigate<'a>(
 /// rejects (e.g. leading-zero integers like `-01`, which must be malformed so
 /// `json_error_position`/`json_valid` match SQLite).
 pub(crate) fn parse_json_relaxed(s: &str) -> Result<serde_json::Value, ()> {
-    if let Ok(v) = serde_json::from_str(s) {
+    // Both parses go through [`parse_strict_json_bounded`] rather than
+    // `serde_json::from_str` so that documents nested deeper than serde_json's
+    // hard-coded 128-level cap (but within SQLITE_MAX_JSON_DEPTH = 1000) parse
+    // successfully instead of being spuriously rejected (issue #6052). The
+    // rewritten text has already been depth-bounded to <= 1000 by the
+    // `Json5Rewriter`, and the raw attempt is independently depth-gated inside
+    // `parse_strict_json_bounded`, so neither path lets serde recurse unbounded.
+    if let Ok(v) = parse_strict_json_bounded(s) {
         return Ok(v);
     }
     if let Some(rewritten) = json5_to_json(s) {
-        if let Ok(v) = serde_json::from_str(&rewritten) {
+        if let Ok(v) = parse_strict_json_bounded(&rewritten) {
             return Ok(v);
         }
     }
@@ -248,6 +255,95 @@ fn json5_to_json(s: &str) -> Option<String> {
 /// cap the rewriter returns `None` (rewrite failure), so callers observe the same
 /// "malformed JSON" outcome (`json_valid` → 0) rather than a crash.
 const MAX_JSON5_DEPTH: usize = 1000;
+
+/// Return the maximum object/array nesting depth of a strict-JSON text, or
+/// `None` if that depth would exceed [`MAX_JSON5_DEPTH`].
+///
+/// This is a **non-recursive** (iterative) scan: it walks the bytes tracking a
+/// single depth counter, so it cannot itself overflow the stack no matter how
+/// deeply nested the input is. Brackets inside string literals are ignored by
+/// skipping over `"..."` runs (honoring backslash escapes).
+///
+/// Callers use it as a stack-safety gate *before* handing text to
+/// `serde_json` with its recursion limit disabled (see
+/// [`parse_strict_json_bounded`] / [`strict_json_is_valid_bounded`]): serde_json
+/// deserializes by recursing once per nesting level on the native call stack, so
+/// we must independently bound depth to <= [`MAX_JSON5_DEPTH`] before disabling
+/// its built-in 128-level guard. Because this check runs on the raw input, serde
+/// never recurses on unbounded untrusted nesting (issue #6052).
+fn json_nesting_within_cap(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut depth: usize = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                // Skip the string body, respecting backslash escapes, so that
+                // brackets inside strings do not affect the depth counter.
+                i += 1;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'\\' => i += 2, // skip the escaped byte
+                        b'"' => {
+                            i += 1;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+            }
+            b'{' | b'[' => {
+                depth += 1;
+                if depth > MAX_JSON5_DEPTH {
+                    return false;
+                }
+                i += 1;
+            }
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    true
+}
+
+/// Parse strict JSON text allowing nesting up to [`MAX_JSON5_DEPTH`] (1000),
+/// rather than serde_json's hard-coded 128-level cap.
+///
+/// serde_json's `Deserializer` caps recursion at 128 and that limit is only
+/// liftable via `disable_recursion_limit()` (gated behind the `unbounded_depth`
+/// feature). Disabling it removes *all* depth checking, so we take two
+/// precautions:
+///   1. Run the non-recursive [`json_nesting_within_cap`] gate first: nesting
+///      beyond 1000 is rejected here (mirroring SQLite's `SQLITE_MAX_JSON_DEPTH`)
+///      *before* serde ever recurses, so serde sees at most 1000 levels on
+///      already-bounded input — never unbounded on untrusted input.
+///   2. Even 1000-deep recursion overflows an ordinary native stack (serde
+///      builds a map/vec per level), so we route serde's recursion through
+///      [`serde_stacker`], which grows the stack on the heap. This is the
+///      pairing serde_json's own docs recommend for `disable_recursion_limit()`.
+/// (issue #6052)
+fn parse_strict_json_bounded(s: &str) -> Result<serde_json::Value, ()> {
+    if !json_nesting_within_cap(s) {
+        return Err(());
+    }
+    let mut de = serde_json::Deserializer::from_str(s);
+    de.disable_recursion_limit();
+    let stacker = serde_stacker::Deserializer::new(&mut de);
+    let value = <serde_json::Value as serde::Deserialize>::deserialize(stacker).map_err(|_| ())?;
+    // Ensure the whole input was consumed (no trailing junk), matching
+    // `serde_json::from_str`'s end-of-input check.
+    de.end().map_err(|_| ())?;
+    Ok(value)
+}
+
+/// Validity-only variant of [`parse_strict_json_bounded`]: `true` iff `s` is
+/// well-formed canonical JSON with nesting <= [`MAX_JSON5_DEPTH`].
+fn strict_json_is_valid_bounded(s: &str) -> bool {
+    parse_strict_json_bounded(s).is_ok()
+}
 
 struct Json5Rewriter<'a> {
     chars: &'a [char],
@@ -917,8 +1013,11 @@ pub(crate) fn json_valid(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Null => return Ok(SqlValue::Null),
         SqlValue::Varchar(s) | SqlValue::Character(s) => {
             let s = s.as_str();
-            let canonical_ok =
-                accept_canonical && serde_json::from_str::<serde_json::Value>(s).is_ok();
+            // Depth-bounded strict check (accepts nesting up to
+            // SQLITE_MAX_JSON_DEPTH = 1000) rather than `serde_json::from_str`,
+            // which caps at 128 and would reject deep-but-valid canonical
+            // documents (issue #6052).
+            let canonical_ok = accept_canonical && strict_json_is_valid_bounded(s);
             // JSON5 acceptance: the relaxed parser accepts a superset that
             // includes canonical JSON, so only consult it when the JSON5 bit is
             // set and the strict check did not already succeed.
@@ -1229,7 +1328,11 @@ pub(crate) fn json(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
                 // (e.g. leading-zero integers like `00`). Validate by re-parsing
                 // the strict output — but return the rewriter's *text*, not a
                 // serde round-trip, so exponent/infinity tokens stay verbatim.
-                if serde_json::from_str::<serde_json::Value>(&minified).is_ok() {
+                // Use the depth-bounded strict check (accepts up to
+                // SQLITE_MAX_JSON_DEPTH = 1000) rather than `serde_json::from_str`
+                // so deep-but-valid documents are not rejected at 128 (issue
+                // #6052); the rewriter has already bounded nesting to <= 1000.
+                if strict_json_is_valid_bounded(&minified) {
                     return Ok(SqlValue::Varchar(minified.into()));
                 }
             }
@@ -2429,6 +2532,128 @@ mod tests {
             json5_to_json(&build(MAX_JSON5_DEPTH + 1)).is_none(),
             "nesting past MAX_JSON5_DEPTH should fail the rewrite"
         );
+    }
+
+    /// Build a canonical (strict, no JSON5 syntax) array nested `depth` levels
+    /// deep with a scalar at the center: `[[[...0...]]]`.
+    fn build_canonical_array(depth: usize) -> String {
+        let mut s = String::with_capacity(depth * 2 + 1);
+        for _ in 0..depth {
+            s.push('[');
+        }
+        s.push('0');
+        for _ in 0..depth {
+            s.push(']');
+        }
+        s
+    }
+
+    /// Build a canonical object nested `depth` levels deep:
+    /// `{"a":{"a":...0...}}` (mirrors json101-11.2/11.3).
+    fn build_canonical_object(depth: usize) -> String {
+        let mut s = String::with_capacity(depth * 6 + 1);
+        for _ in 0..depth {
+            s.push_str(r#"{"a":"#);
+        }
+        s.push('0');
+        for _ in 0..depth {
+            s.push('}');
+        }
+        s
+    }
+
+    /// The effective nesting cap for canonical `json_valid` / `json()` is exactly
+    /// SQLITE_MAX_JSON_DEPTH (1000), not serde_json's built-in 128 — a document
+    /// nested 128..=1000 deep must validate, and 1001 must not (issue #6052,
+    /// mirrors the vendored SQLite json101-11.0..11.3 expectations).
+    #[test]
+    fn test_json_depth_cap_is_1000_not_128() {
+        // Regression guard: the old serde_json 128 boundary must be gone.
+        let d200 = build_canonical_array(200);
+        assert_eq!(
+            json_valid(&[SqlValue::Varchar(d200.clone().into())]).unwrap(),
+            SqlValue::Integer(1),
+            "canonical array nested 200 deep must validate (was rejected at 128)"
+        );
+
+        for build in [build_canonical_array as fn(usize) -> String, build_canonical_object] {
+            // Exactly at the cap: valid under default flags (1), JSON5 (2), and
+            // canonical+JSON5 (3).
+            let at_cap = build(MAX_JSON5_DEPTH);
+            for flags in [1i64, 2, 3] {
+                assert_eq!(
+                    json_valid(&[
+                        SqlValue::Varchar(at_cap.clone().into()),
+                        SqlValue::Integer(flags),
+                    ])
+                    .unwrap(),
+                    SqlValue::Integer(1),
+                    "json_valid at depth {MAX_JSON5_DEPTH} with flags {flags} must be 1"
+                );
+            }
+            // json() minifies (and thus validates) a 1000-deep document.
+            assert!(
+                json(&[SqlValue::Varchar(at_cap.clone().into())]).is_ok(),
+                "json() at depth {MAX_JSON5_DEPTH} must succeed"
+            );
+
+            // One past the cap: rejected under all text flags, and json() errors.
+            let past_cap = build(MAX_JSON5_DEPTH + 1);
+            for flags in [1i64, 2, 3] {
+                assert_eq!(
+                    json_valid(&[
+                        SqlValue::Varchar(past_cap.clone().into()),
+                        SqlValue::Integer(flags),
+                    ])
+                    .unwrap(),
+                    SqlValue::Integer(0),
+                    "json_valid at depth {} with flags {flags} must be 0",
+                    MAX_JSON5_DEPTH + 1
+                );
+            }
+            assert!(
+                json(&[SqlValue::Varchar(past_cap.into())]).is_err(),
+                "json() at depth {} must error (malformed JSON)",
+                MAX_JSON5_DEPTH + 1
+            );
+        }
+    }
+
+    /// The fixed canonical call sites (`json_valid` flags=1 and `json()`) must not
+    /// overflow the stack on adversarially deep *canonical* input — the depth
+    /// gate ([`json_nesting_within_cap`]) is iterative and rejects before serde
+    /// ever recurses. Runs on a small (512 KiB) stack so an unbounded parse would
+    /// reliably crash (issue #6052).
+    #[test]
+    fn test_deep_canonical_does_not_overflow_stack() {
+        let handle = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let s = build_canonical_array(20_000);
+
+                // The iterative depth gate bails without recursing.
+                assert!(
+                    !json_nesting_within_cap(&s),
+                    "20k-deep canonical nesting must exceed the cap"
+                );
+
+                let deep = SqlValue::Varchar(s.into());
+                // Default flags (canonical) — the newly-fixed path.
+                assert_eq!(
+                    json_valid(&[deep.clone()]).unwrap(),
+                    SqlValue::Integer(0),
+                    "json_valid(<deep canonical>) must be 0, not crash"
+                );
+                // Canonical+JSON5 flags.
+                assert_eq!(
+                    json_valid(&[deep.clone(), SqlValue::Integer(3)]).unwrap(),
+                    SqlValue::Integer(0),
+                    "json_valid(<deep canonical>, 3) must be 0, not crash"
+                );
+                assert!(json(&[deep]).is_err(), "json(<deep canonical>) must error, not crash");
+            })
+            .expect("spawn small-stack test thread");
+        handle.join().expect("deep-canonical test thread must not abort/panic");
     }
 
     /// Leading-zero numbers are malformed under both JSON and SQLite's JSON5
