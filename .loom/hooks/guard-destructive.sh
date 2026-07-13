@@ -75,6 +75,7 @@ deny() {
     local reason="$1"
     if jq -n --arg reason "$reason" '{
         hookSpecificOutput: {
+            hookEventName: "PreToolUse",
             permissionDecision: "deny",
             permissionDecisionReason: $reason
         }
@@ -84,7 +85,7 @@ deny() {
     # jq failed — emit raw JSON as fallback
     local escaped_reason
     escaped_reason=$(echo "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\n/\\n/g')
-    echo "{\"hookSpecificOutput\":{\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"${escaped_reason}\"}}"
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"${escaped_reason}\"}}"
     exit 0
 }
 
@@ -93,6 +94,7 @@ ask() {
     local reason="$1"
     if jq -n --arg reason "$reason" '{
         hookSpecificOutput: {
+            hookEventName: "PreToolUse",
             permissionDecision: "ask",
             permissionDecisionReason: $reason
         }
@@ -102,7 +104,7 @@ ask() {
     # jq failed — emit raw JSON as fallback
     local escaped_reason
     escaped_reason=$(echo "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\n/\\n/g')
-    echo "{\"hookSpecificOutput\":{\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"${escaped_reason}\"}}"
+    echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"${escaped_reason}\"}}"
     exit 0
 }
 
