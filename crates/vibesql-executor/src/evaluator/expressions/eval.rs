@@ -966,38 +966,17 @@ impl ExpressionEvaluator<'_> {
                 // - IS UNKNOWN: TRUE if expr is UNKNOWN (NULL), FALSE if expr is TRUE or FALSE
                 // - IS NOT X: negates the result
                 //
-                // SQLite compatibility: integers are treated as booleans
-                // - 0 is FALSE
-                // - Non-zero integers are TRUE
-                // - NULL is UNKNOWN
+                // SQLite compatibility: any value is coerced to a boolean via the
+                // shared truthiness rule (numeric prefix != 0), which also covers
+                // TEXT and BLOB operands: `'3' IS TRUE` -> 1, `'3.5' IS TRUE` -> 1,
+                // `'abc' IS TRUE` -> 0, `x'00' IS TRUE` -> 0. NULL is UNKNOWN.
+                // See crate::evaluator::operators::is_truthy.
+                use crate::evaluator::operators::is_truthy;
+                let is_null = matches!(val, SqlValue::Null);
                 let result = match truth_value {
-                    vibesql_ast::TruthValue::True => match &val {
-                        SqlValue::Boolean(true) => true,
-                        SqlValue::Integer(n) => *n != 0,
-                        SqlValue::Bigint(n) => *n != 0,
-                        SqlValue::Smallint(n) => *n != 0,
-                        // REAL/floating values are truthy when non-zero (and not
-                        // NaN), matching SQLite: `0.5 IS TRUE` -> 1, `0.0 IS
-                        // TRUE` -> 0.
-                        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
-                            *f != 0.0 && !f.is_nan()
-                        }
-                        SqlValue::Float(f) => *f != 0.0 && !f.is_nan(),
-                        _ => false,
-                    },
-                    vibesql_ast::TruthValue::False => match &val {
-                        SqlValue::Boolean(false)
-                        | SqlValue::Integer(0)
-                        | SqlValue::Bigint(0)
-                        | SqlValue::Smallint(0) => true,
-                        // A floating value equal to zero is FALSE.
-                        SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f) => {
-                            *f == 0.0
-                        }
-                        SqlValue::Float(f) => *f == 0.0,
-                        _ => false,
-                    },
-                    vibesql_ast::TruthValue::Unknown => matches!(val, SqlValue::Null),
+                    vibesql_ast::TruthValue::True => !is_null && is_truthy(&val),
+                    vibesql_ast::TruthValue::False => !is_null && !is_truthy(&val),
+                    vibesql_ast::TruthValue::Unknown => is_null,
                 };
                 let final_result = if *negated { !result } else { result };
                 Ok(SqlValue::Boolean(final_result))
