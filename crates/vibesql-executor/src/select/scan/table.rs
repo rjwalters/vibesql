@@ -396,11 +396,18 @@ pub(crate) fn execute_table_scan(
     //
     // A real user table of the same name takes precedence (#6030): SQLite's
     // eponymous virtual tables are shadowed by a same-named real table, and
-    // `pragma_*` names are not reserved at CREATE TABLE time. Probe the catalog
-    // first (case-insensitive, matching `is_pragma_compile_options_table`'s
-    // folding) and only fall through to the synthetic zero-row table when no
-    // real table exists.
-    if is_pragma_compile_options_table(table_name) && database.get_table(table_name).is_none() {
+    // `pragma_*` names are not reserved at CREATE TABLE time. A real view of
+    // the same name likewise wins (#6061): `CREATE VIEW pragma_compile_options`
+    // is allowed and SQLite resolves the view over the eponymous virtual table.
+    // Probe the catalog first (case-insensitive, matching
+    // `is_pragma_compile_options_table`'s folding, which `get_table`/`get_view`
+    // share) and only fall through to the synthetic zero-row table when neither
+    // a real table nor a real view exists. The view-resolution branch below
+    // then handles the view; keeping this guard in sync avoids shadowing it.
+    if is_pragma_compile_options_table(table_name)
+        && database.get_table(table_name).is_none()
+        && database.catalog.get_view(table_name).is_none()
+    {
         let result = execute_pragma_compile_options_query()?;
         let table_schema = get_pragma_compile_options_table_schema();
 

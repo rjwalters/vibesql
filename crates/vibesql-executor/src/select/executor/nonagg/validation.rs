@@ -234,7 +234,14 @@ fn compute_single_select_column_count(
                     continue;
                 }
                 // #6019: pragma_compile_options eponymous system table.
-                if is_pragma_compile_options_table(qualifier) {
+                // #6030/#6061: a real table or a real view of the same name
+                // takes precedence over the synthetic table, so only report the
+                // synthetic single-column shape when neither exists. This keeps
+                // the wildcard column count consistent with `execute_table_scan`.
+                if is_pragma_compile_options_table(qualifier)
+                    && database.get_table(qualifier).is_none()
+                    && database.catalog.get_view(qualifier).is_none()
+                {
                     count += get_pragma_compile_options_table_schema().columns.len();
                     continue;
                 }
@@ -282,7 +289,14 @@ fn count_columns_in_from_clause(
                 return Ok(get_sqlite_schema_table_schema().columns.len());
             }
             // #6019: pragma_compile_options eponymous system table.
-            if is_pragma_compile_options_table(name) {
+            // #6030/#6061: a real table or a real view of the same name takes
+            // precedence over the synthetic table, so only report the synthetic
+            // single-column shape when neither exists. This keeps the wildcard
+            // column count consistent with `execute_table_scan`.
+            if is_pragma_compile_options_table(name)
+                && database.get_table(name).is_none()
+                && database.catalog.get_view(name).is_none()
+            {
                 return Ok(get_pragma_compile_options_table_schema().columns.len());
             }
             // Check for views before regular tables
