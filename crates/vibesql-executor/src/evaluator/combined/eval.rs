@@ -158,7 +158,7 @@ impl CombinedExpressionEvaluator<'_> {
         let table = col_id.table_canonical();
         let column = col_id.column_canonical();
 
-        // Look up the column in the combined schema
+        // Look up the column in the combined schema (the subquery's own tables).
         for (_start_idx, table_schema) in self.schema.table_schemas.values() {
             // If table qualifier is specified, check if this is the right table
             if let Some(t) = table {
@@ -173,6 +173,41 @@ impl CombinedExpressionEvaluator<'_> {
                 return table_schema.columns[col_offset].collation.clone();
             }
         }
+
+        // Not found in this evaluator's own schema. A correlated reference to
+        // an outer column (e.g. a no-FROM `UPDATE t1 SET a = (SELECT (x='abc'))`
+        // where `x` is the outer `t1.x COLLATE NOCASE`) must still honor the
+        // outer column's *declared* collation; otherwise the comparison inside
+        // the subquery silently reverts to BINARY (issue #6115). Mirror the
+        // outer-scope value resolution walk: the immediate parent
+        // (`outer_schema`, including its own chain) first, then the
+        // `outer_context` chain for grandparent scopes and beyond.
+        if let Some(outer_schema) = self.outer_schema {
+            if let Some(collation) = outer_schema.get_column_collation_in_chain(table, column) {
+                return Some(collation);
+            }
+            // `get_column_collation_in_chain` returns `None` for a resolved
+            // column with default BINARY collation as well as for an unresolved
+            // column, so continuing to the context chain below is safe: an
+            // ancestor scope that *declares* a non-BINARY collation on the same
+            // name is only consulted when the nearer scopes have none.
+        }
+
+        let mut current_context = self.outer_context;
+        while let Some(ctx) = current_context {
+            if let Some(collation) = ctx.schema.get_column_collation_in_chain(table, column) {
+                return Some(collation);
+            }
+            if let Some(ctx_outer_schema) = ctx.outer_schema {
+                if let Some(collation) =
+                    ctx_outer_schema.get_column_collation_in_chain(table, column)
+                {
+                    return Some(collation);
+                }
+            }
+            current_context = ctx.outer_context;
+        }
+
         None
     }
 

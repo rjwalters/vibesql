@@ -420,3 +420,121 @@ fn collation_nocase_col_vs_nocase_outer() {
     assert_eq!(r[1], SqlValue::Integer(300));
     assert_eq!(r[2], SqlValue::Integer(2));
 }
+
+// ---------------------------------------------------------------------------
+// No-FROM correlated subquery: outer column collation (issue #6115).
+//
+// `UPDATE t1 SET a = (SELECT (x='abc'))` and its tuple form execute a
+// *correlated* subquery per outer row WITHOUT literal substitution (the #6114
+// CollatedLiteral path only covers UPDATE…FROM). The subquery evaluator
+// resolves the outer column `x` through the outer-schema chain, but previously
+// resolved its *value* while dropping its *declared collation*, so a
+// `COLLATE NOCASE` outer column compared BINARY. `column_collation_of` now
+// walks the outer-schema / outer-context chain to recover the declared
+// collation. All expected values confirmed against sqlite3 3.51.
+// ---------------------------------------------------------------------------
+
+/// Target `t1(x TEXT COLLATE NOCASE, y TEXT, a, b)` with a single row
+/// `('ABC','ABC',0,0)`. Runs `stmt` then returns `(a, b)`.
+fn nofrom_ab(stmt: &str) -> (SqlValue, SqlValue) {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(x TEXT COLLATE NOCASE, y TEXT, a, b)");
+    exec(&mut db, "INSERT INTO t1 VALUES('ABC','ABC',0,0)");
+    run_update(&mut db, stmt).expect("update");
+    let table = db.get_table("t1").expect("t1");
+    let r = table.scan().iter().next().map(|r| r.values.to_vec()).expect("row");
+    (r[2].clone(), r[3].clone())
+}
+
+/// The issue's scalar repro: outer NOCASE column left operand → NOCASE → true.
+/// (The `=` comparison yields a Boolean at the value layer; the CLI renders it
+/// as `1`, which is what the issue quotes.)
+#[test]
+fn nofrom_scalar_nocase_outer_lhs() {
+    let (a, _) = nofrom_ab("UPDATE t1 SET a = (SELECT (x = 'abc'))");
+    assert_eq!(a, SqlValue::Boolean(true));
+}
+
+/// Outer NOCASE column right operand (literal left) → NOCASE → true.
+#[test]
+fn nofrom_scalar_nocase_outer_rhs() {
+    let (a, _) = nofrom_ab("UPDATE t1 SET a = (SELECT ('abc' = x))");
+    assert_eq!(a, SqlValue::Boolean(true));
+}
+
+/// Outer BINARY column must stay BINARY → false (no over-application of NOCASE).
+#[test]
+fn nofrom_scalar_binary_outer_stays_binary() {
+    let (a, _) = nofrom_ab("UPDATE t1 SET a = (SELECT (y = 'abc'))");
+    assert_eq!(a, SqlValue::Boolean(false));
+}
+
+/// Explicit `COLLATE BINARY` on the outer NOCASE column overrides → false.
+#[test]
+fn nofrom_scalar_explicit_binary_override() {
+    let (a, _) = nofrom_ab("UPDATE t1 SET a = (SELECT (x COLLATE BINARY = 'abc'))");
+    assert_eq!(a, SqlValue::Boolean(false));
+}
+
+/// Explicit `COLLATE NOCASE` on the outer BINARY column overrides → true.
+#[test]
+fn nofrom_scalar_explicit_nocase_override() {
+    let (a, _) = nofrom_ab("UPDATE t1 SET a = (SELECT (y COLLATE NOCASE = 'abc'))");
+    assert_eq!(a, SqlValue::Boolean(true));
+}
+
+/// The issue's tuple repro: `(a,b) = (SELECT (x='abc'), (y='abc'))` →
+/// NOCASE `x` compares true, BINARY `y` compares false.
+#[test]
+fn nofrom_tuple_mixed_collations() {
+    let (a, b) = nofrom_ab("UPDATE t1 SET (a,b) = (SELECT (x='abc'), (y='abc'))");
+    assert_eq!(a, SqlValue::Boolean(true));
+    assert_eq!(b, SqlValue::Boolean(false));
+}
+
+/// Correlated subquery WHERE clause: outer NOCASE column as the *right* operand
+/// (inner BINARY column left) → left BINARY blocks → 0 matches.
+#[test]
+fn nofrom_where_inner_bin_lhs_blocks_outer_nocase() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(x TEXT COLLATE NOCASE, a)");
+    exec(&mut db, "INSERT INTO t1 VALUES('ABC', 0)");
+    exec(&mut db, "CREATE TABLE inner_t(v TEXT)");
+    exec(&mut db, "INSERT INTO inner_t VALUES('abc')");
+    exec(&mut db, "INSERT INTO inner_t VALUES('XYZ')");
+    run_update(&mut db, "UPDATE t1 SET a = (SELECT count(*) FROM inner_t WHERE v = x)")
+        .expect("update");
+    let table = db.get_table("t1").expect("t1");
+    let r = table.scan().iter().next().map(|r| r.values.to_vec()).expect("row");
+    assert_eq!(r[1], SqlValue::Integer(0));
+}
+
+/// Correlated subquery WHERE clause: outer NOCASE column as the *left* operand
+/// → NOCASE compare → matches 'abc' case-insensitively → 1 match.
+#[test]
+fn nofrom_where_outer_nocase_lhs_matches() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(x TEXT COLLATE NOCASE, a)");
+    exec(&mut db, "INSERT INTO t1 VALUES('ABC', 0)");
+    exec(&mut db, "CREATE TABLE inner_t(v TEXT)");
+    exec(&mut db, "INSERT INTO inner_t VALUES('abc')");
+    exec(&mut db, "INSERT INTO inner_t VALUES('XYZ')");
+    run_update(&mut db, "UPDATE t1 SET a = (SELECT count(*) FROM inner_t WHERE x = v)")
+        .expect("update");
+    let table = db.get_table("t1").expect("t1");
+    let r = table.scan().iter().next().map(|r| r.values.to_vec()).expect("row");
+    assert_eq!(r[1], SqlValue::Integer(1));
+}
+
+/// Nested two-level correlated subquery: the outer NOCASE column is referenced
+/// two scopes deep and its declared collation must still be recovered → 1.
+#[test]
+fn nofrom_nested_two_level_correlated() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t2(z TEXT COLLATE NOCASE, m)");
+    exec(&mut db, "INSERT INTO t2 VALUES('ABC', 0)");
+    run_update(&mut db, "UPDATE t2 SET m = (SELECT (SELECT (z = 'abc')))").expect("update");
+    let table = db.get_table("t2").expect("t2");
+    let r = table.scan().iter().next().map(|r| r.values.to_vec()).expect("row");
+    assert_eq!(r[1], SqlValue::Boolean(true));
+}
