@@ -1755,6 +1755,20 @@ enum EditMode {
     Set,
 }
 
+/// Choose the container type to vivify when a new intermediate node must be
+/// created from nothing. SQLite decides purely from the *next* path segment:
+/// a `Key` implies an object, an array index (`Index` / `IndexFromEnd`) implies
+/// an array. `next` is the segment that will be walked into the freshly-created
+/// container (`rest[0]` at the call site), which is always non-empty here.
+fn vivified_container(next: &PathSegment) -> serde_json::Value {
+    match next {
+        PathSegment::Key(_) => serde_json::Value::Object(serde_json::Map::new()),
+        PathSegment::Index(_) | PathSegment::IndexFromEnd(_) => {
+            serde_json::Value::Array(Vec::new())
+        }
+    }
+}
+
 /// Apply a single edit of the given `mode` at `segments` within `root`,
 /// installing `new_value`. Missing intermediate containers are created (for the
 /// Insert/Set modes) exactly as SQLite does.
@@ -1793,7 +1807,10 @@ fn apply_edit(
                 if mode == EditMode::Replace {
                     return;
                 }
-                obj.insert(k.clone(), serde_json::Value::Object(serde_json::Map::new()));
+                // Vivify the container implied by the *next* segment: a following
+                // array index means SQLite creates an array here, not an object
+                // (e.g. json_set('{}','$.a[0]',1) => {"a":[1]}).
+                obj.insert(k.clone(), vivified_container(&rest[0]));
             }
             if let Some(child) = obj.get_mut(k) {
                 apply_edit(child, rest, new_value, mode);
@@ -1803,6 +1820,13 @@ fn apply_edit(
             if let Some(arr) = root.as_array_mut() {
                 if let Some(child) = arr.get_mut(*n) {
                     apply_edit(child, rest, new_value, mode);
+                } else if *n == arr.len() && mode != EditMode::Replace {
+                    // Exact-len append slot: SQLite appends a freshly-vivified
+                    // container (type chosen by the next segment) and descends
+                    // into it. n > len is a silent no-op (never null-padded).
+                    arr.push(vivified_container(&rest[0]));
+                    let idx = arr.len() - 1;
+                    apply_edit(&mut arr[idx], rest, new_value, mode);
                 }
             }
         }
@@ -1843,7 +1867,14 @@ fn apply_leaf_edit(
             if let Some(arr) = parent.as_array_mut() {
                 let exists = *n < arr.len();
                 match mode {
-                    EditMode::Insert => {} // existing index: no-op; SQLite does not extend here
+                    // Existing index: no-op (SQLite does not overwrite on insert).
+                    // Exact-len append slot (n == len): SQLite appends the value;
+                    // n > len is a silent no-op (never null-padded).
+                    EditMode::Insert => {
+                        if !exists && *n == arr.len() {
+                            arr.push(new_value);
+                        }
+                    }
                     EditMode::Replace => {
                         if exists {
                             arr[*n] = new_value;
@@ -1852,6 +1883,8 @@ fn apply_leaf_edit(
                     EditMode::Set => {
                         if exists {
                             arr[*n] = new_value;
+                        } else if *n == arr.len() {
+                            arr.push(new_value);
                         }
                     }
                 }
@@ -3709,6 +3742,139 @@ mod tests {
         assert_eq!(
             txt(json_set(&[v(r#"{"a":{}}"#), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()),
             r#"{"a":{"b":1}}"#
+        );
+    }
+
+    // --- Nested-path auto-vivify rule matrix (issue #6054) -------------------
+    //
+    // Curator-verified rule (differential-tested vs sqlite3 3.51): a plain
+    // array-index segment vivifies/appends iff `n == arr.len()` EXACTLY, at any
+    // position (terminal or intermediate). `n > len` is a silent no-op (never
+    // null-padded). json_insert and json_set are symmetric for these vivify
+    // decisions. When a container is vivified from nothing, its type is chosen
+    // from the *next* segment: key => object, index => array.
+
+    #[test]
+    fn test_vivify_terminal_index_exact_len_appends() {
+        // n == len at the terminal (leaf) position => append, for both set/insert.
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[3]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2,9]"
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[0,1,2]"), v("$[3]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2,9]"
+        );
+    }
+
+    #[test]
+    fn test_vivify_terminal_index_past_len_is_noop() {
+        // n > len (one past the append slot) => silent no-op, never null-padded.
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[4]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[0,1,2]"), v("$[4]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+        // Empty array: index 3 is far past the append slot => no-op.
+        assert_eq!(txt(json_set(&[v("[]"), v("$[3]"), SqlValue::Integer(1)], &[]).unwrap()), "[]");
+    }
+
+    #[test]
+    fn test_vivify_intermediate_index_exact_len_appends() {
+        // n == len at an intermediate position => append a vivified container and
+        // descend. json101-24.4: $[3].a[0].b on [0,1,2].
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[3].a[0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,1,2,{"a":[{"b":9}]}]"#
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[0,1,2]"), v("$[3].a[0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,1,2,{"a":[{"b":9}]}]"#
+        );
+    }
+
+    #[test]
+    fn test_vivify_intermediate_index_past_len_is_noop() {
+        // Out-of-range intermediate segment => no vivify at all.
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[4].a"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+    }
+
+    #[test]
+    fn test_vivify_key_then_index_creates_array() {
+        // A newly-vivified key whose next segment is an index becomes an ARRAY.
+        // json_set('{}','$.a[0]',1) => {"a":[1]}
+        assert_eq!(
+            txt(json_set(&[v("{}"), v("$.a[0]"), SqlValue::Integer(1)], &[]).unwrap()),
+            r#"{"a":[1]}"#
+        );
+        // json101-24.6: $[1].a[0].b on [0,{},2] => key "a" (absent) vivifies array.
+        assert_eq!(
+            txt(json_set(&[v("[0,{},2]"), v("$[1].a[0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,{"a":[{"b":9}]},2]"#
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[0,{},2]"), v("$[1].a[0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,{"a":[{"b":9}]},2]"#
+        );
+    }
+
+    #[test]
+    fn test_vivify_key_then_key_creates_object() {
+        // A newly-vivified key whose next segment is a key becomes an OBJECT.
+        assert_eq!(
+            txt(json_set(&[v("{}"), v("$.a.b"), SqlValue::Integer(1)], &[]).unwrap()),
+            r#"{"a":{"b":1}}"#
+        );
+    }
+
+    #[test]
+    fn test_vivify_appended_element_then_index_creates_array() {
+        // json101-24.7: $[3][0].b on [0,1,2] => append slot vivifies an ARRAY
+        // (next segment is an index), then object {"b":9} inside it.
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[3][0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,1,2,[{"b":9}]]"#
+        );
+        assert_eq!(
+            txt(json_insert(&[v("[0,1,2]"), v("$[3][0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            r#"[0,1,2,[{"b":9}]]"#
+        );
+    }
+
+    #[test]
+    fn test_vivify_in_range_noncontainer_does_not_vivify() {
+        // json101-24.5/24.8 analogue: $[1] on [0,1,2] is in-range but holds a
+        // non-container scalar; the walk aborts, no vivify/append.
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[1].a"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+        assert_eq!(
+            txt(json_set(&[v("[0,1,2]"), v("$[1][0]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+    }
+
+    #[test]
+    fn test_vivify_replace_never_vivifies() {
+        // replace must never create/append: all vivify cases are no-ops.
+        assert_eq!(
+            txt(json_replace(&[v("[0,1,2]"), v("$[3]"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+        assert_eq!(
+            txt(json_replace(&[v("[0,1,2]"), v("$[3].a[0].b"), SqlValue::Integer(9)], &[]).unwrap()),
+            "[0,1,2]"
+        );
+        assert_eq!(
+            txt(json_replace(&[v("{}"), v("$.a[0]"), SqlValue::Integer(1)], &[]).unwrap()),
+            "{}"
         );
     }
 
