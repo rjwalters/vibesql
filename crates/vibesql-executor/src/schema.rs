@@ -853,6 +853,29 @@ impl CombinedSchema {
         self.table_schemas.contains_key(&TableIdentifier::unquoted(table_name))
     }
 
+    /// Check if a table exists at this schema level or anywhere in the
+    /// `outer_schema` chain (case-insensitive lookup).
+    ///
+    /// Unlike [`contains_table`], this walks the full chain of enclosing
+    /// scopes exactly like [`get_column_index`] does (see lines around #4493),
+    /// so a qualified column reference in a doubly-nested correlated subquery
+    /// can find its outer table even when that table lives several levels up
+    /// the chain. The single-level check missed this: for an N-level-nested
+    /// subquery the innermost evaluator's immediate `outer_schema` is an empty
+    /// merged schema whose own `outer_schema` field links to the real outer
+    /// table (built by `build_merged_outer_schema`). Issue #6047 (follow-up to
+    /// the unqualified-column fix in #4618).
+    pub fn contains_table_in_chain(&self, table_id: &TableIdentifier) -> bool {
+        let mut cur = Some(self);
+        while let Some(schema) = cur {
+            if schema.table_schemas.contains_key(table_id) {
+                return true;
+            }
+            cur = schema.outer_schema.as_deref();
+        }
+        false
+    }
+
     /// Get all table names as strings (using display form)
     pub fn table_names(&self) -> Vec<String> {
         self.table_schemas.keys().map(|table_id| table_id.display().to_string()).collect()

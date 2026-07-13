@@ -551,9 +551,17 @@ impl CombinedExpressionEvaluator<'_> {
                     // Create TableIdentifier for lookup (handles case-insensitive comparison)
                     let table_id = vibesql_catalog::TableIdentifier::from(table_name);
                     let inner_has_table = self.schema.table_schemas.contains_key(&table_id);
+                    // Walk the FULL outer_schema chain, not just its immediate level.
+                    // For a doubly-nested correlated subquery the innermost
+                    // evaluator's `outer_schema` is an empty merged schema whose own
+                    // `outer_schema` field links to the real outer table, so a
+                    // single-level check spuriously reported the table missing and
+                    // raised NoSuchColumn even though `get_column_index` (which walks
+                    // the chain) would have resolved it. Issue #6047 (follow-up to the
+                    // unqualified-column fix in #4618).
                     let outer_has_table = self
                         .outer_schema
-                        .is_some_and(|outer| outer.table_schemas.contains_key(&table_id));
+                        .is_some_and(|outer| outer.contains_table_in_chain(&table_id));
                     if !inner_has_table && !outer_has_table {
                         // Table qualifier doesn't exist in query - return "no such column" error
                         return Err(ExecutorError::NoSuchColumn {
