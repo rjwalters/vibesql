@@ -116,6 +116,23 @@ fn assert_misused(db: &vibesql_storage::Database, sql: &str) {
     );
 }
 
+fn assert_in_element_arity(
+    db: &vibesql_storage::Database,
+    sql: &str,
+    expected: usize,
+    actual: usize,
+) {
+    let err = query_err(db, sql);
+    assert!(
+        matches!(err, ExecutorError::InElementArity { expected: e, actual: a } if e == expected && a == actual),
+        "Query: {} -- expected InElementArity {{ expected: {}, actual: {} }}, got {:?}",
+        sql,
+        expected,
+        actual,
+        err
+    );
+}
+
 const I: fn(i64) -> SqlValue = SqlValue::Integer;
 
 /// Build a text `SqlValue` matching how the executor materializes a string
@@ -166,10 +183,13 @@ fn tuple_in_list_column_affinity() {
 }
 
 #[test]
-fn tuple_in_list_arity_mismatch_is_misused() {
+fn tuple_in_list_arity_mismatch_reports_element_arity() {
     let db = vibesql_storage::Database::new();
-    assert_misused(&db, "SELECT (1,2) IN ((1,2,3))");
-    assert_misused(&db, "SELECT (1,2) IN ((1,2), 3)");
+    // SQLite reports the element-arity error for a mismatched IN candidate
+    // ("IN(...) element has N term(s) - expected M"), not a generic misuse.
+    assert_in_element_arity(&db, "SELECT (1,2) IN ((1,2,3))", 2, 3);
+    // A bare-scalar candidate has arity 1.
+    assert_in_element_arity(&db, "SELECT (1,2) IN ((1,2), 3)", 2, 1);
 }
 
 #[test]
