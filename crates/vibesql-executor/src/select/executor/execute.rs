@@ -155,6 +155,17 @@ impl SelectExecutor<'_> {
         }
         if let Some(where_expr) = &stmt.where_clause {
             super::validation::validate_row_value_usage(where_expr)?;
+            // Scalar-subquery arity / row-value misuse in the SELECT WHERE
+            // clause. SQLite reports a scalar compared against a multi-column
+            // subquery here as `row value misused` (distinct from the arity
+            // error UPDATE/DELETE raise), and rejects nested scalar-vs-subquery
+            // arity misuse at prepare time even for empty tables (#6079,
+            // rowvalue4.test 8.2 / rowvalue9.test 8.2). Only inspect the
+            // top-level statement — nested subqueries reach their own checks
+            // through their execution path.
+            if self.outer_schema.is_none() && self.subquery_depth == 0 {
+                super::validation::validate_select_where_subquery_arity(where_expr, self.database)?;
+            }
         }
         if let Some(having_expr) = &stmt.having {
             super::validation::validate_row_value_usage(having_expr)?;

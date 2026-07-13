@@ -38,6 +38,7 @@ pub use join_limits::validate_join_table_limit;
 pub use row_values::validate_row_value_usage;
 pub use scalar_subquery_arity::{
     validate_predicate_expr as validate_predicate_subquery_arity,
+    validate_select_where_expr as validate_select_where_subquery_arity,
     validate_value_expr as validate_value_subquery_arity,
 };
 pub use schema::validate_aggregate_subquery_outer_refs;
