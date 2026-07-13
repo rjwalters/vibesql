@@ -58,6 +58,16 @@ pub(in crate::evaluator::functions) fn substring(
         None => return Ok(vibesql_types::SqlValue::Null),
     };
 
+    // SQLite observes TEXT values as NUL-terminated C strings: substr() operates
+    // on the observed string, stopping at the first embedded NUL byte (consistent
+    // with LENGTH() in length.rs). e.g. CAST(x'4142004344' AS text) is "AB\0CD"
+    // but substr sees only "AB", so substr(x,3,2) is empty and substr(x,1,5) is
+    // "AB". Numeric coercions never contain NULs, so this is a no-op for them.
+    let s = match s.as_bytes().iter().position(|&b| b == 0) {
+        Some(nul_idx) => &s[..nul_idx],
+        None => s.as_str(),
+    };
+
     // Work with characters (not bytes) for proper UTF-8 handling
     let chars: Vec<char> = s.chars().collect();
     let char_count = chars.len() as i64;
@@ -382,5 +392,62 @@ pub(in crate::evaluator::functions) fn right(
             "RIGHT requires string and integer arguments, got {:?} and {:?}",
             a, b
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibesql_types::SqlValue;
+
+    fn text(s: &str) -> SqlValue {
+        SqlValue::Varchar(arcstr::ArcStr::from(s))
+    }
+
+    fn substr_text(v: SqlValue, start: i64, len: Option<i64>) -> String {
+        let mut args = vec![v, SqlValue::Integer(start)];
+        if let Some(l) = len {
+            args.push(SqlValue::Integer(l));
+        }
+        match substring(&args).unwrap() {
+            SqlValue::Varchar(s) => s.to_string(),
+            other => panic!("expected Varchar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_substr_plain_text() {
+        assert_eq!(substr_text(text("hello"), 2, Some(3)), "ell");
+        assert_eq!(substr_text(text("hello"), 1, None), "hello");
+        assert_eq!(substr_text(text("hello"), -2, Some(2)), "lo");
+    }
+
+    #[test]
+    fn test_substr_observes_embedded_nul() {
+        // SQLite observes TEXT as a NUL-terminated C string. CAST(x'4142004344'
+        // AS text) is "AB\0CD" but substr() sees only the observed "AB".
+        let v = text("AB\0CD");
+        // hex(substr(x,1,5)) -> "4142" (only "AB"); we assert the observed chars.
+        assert_eq!(substr_text(v.clone(), 1, Some(5)), "AB");
+        assert_eq!(substr_text(v.clone(), 1, Some(2)), "AB");
+        assert_eq!(substr_text(v.clone(), 1, Some(10)), "AB");
+        // position 3 is past the observed 2-char string -> empty.
+        assert_eq!(substr_text(v.clone(), 3, Some(2)), "");
+        assert_eq!(substr_text(v.clone(), 2, None), "B");
+        // negative start counts from the end of the observed string.
+        assert_eq!(substr_text(v.clone(), -2, Some(2)), "AB");
+    }
+
+    #[test]
+    fn test_substr_leading_nul_is_empty() {
+        // "\0AB" observed as "" -> any substr is empty.
+        assert_eq!(substr_text(text("\0AB"), 1, Some(5)), "");
+        assert_eq!(substr_text(text("\0AB"), 1, None), "");
+    }
+
+    #[test]
+    fn test_substr_numeric_coercion_unaffected() {
+        // Numeric coercions never contain NULs; behavior is unchanged.
+        assert_eq!(substr_text(SqlValue::Integer(12345), 2, Some(3)), "234");
     }
 }
