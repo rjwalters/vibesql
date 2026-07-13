@@ -530,10 +530,18 @@ pub(crate) fn cast_value(
                 SqlValue::Smallint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Bigint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Unsigned(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Float(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Real(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Double(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Numeric(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                // Floating-point values must render through the SqlValue Display
+                // impl, not the raw f64/f32 `to_string()`. Rust's `f64::to_string`
+                // emits shortest-round-trip *fixed-point* text
+                // (e.g. "18446744073709550000"), whereas SQLite's CAST(REAL AS TEXT)
+                // uses %!.15g-style scientific notation for large/small magnitudes
+                // ("1.84467440737095e+19"). Display (format_f64/format_f32) already
+                // matches SQLite 3.51 here, so route floats through it for parity
+                // (fixes atof-3.1 GLOB comparison against the scientific rendering).
+                SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_) => arcstr::ArcStr::from(value.to_string().as_str()),
                 SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "TRUE" } else { "FALSE" }),
                 SqlValue::Date(s) => arcstr::ArcStr::from(s.to_string().as_str()),
                 SqlValue::Time(s) => arcstr::ArcStr::from(s.to_string().as_str()),
@@ -649,10 +657,13 @@ pub(crate) fn cast_value(
                 SqlValue::Smallint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Bigint(n) => arcstr::ArcStr::from(n.to_string().as_str()),
                 SqlValue::Unsigned(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Float(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Real(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Double(n) => arcstr::ArcStr::from(n.to_string().as_str()),
-                SqlValue::Numeric(n) => arcstr::ArcStr::from(n.to_string().as_str()),
+                // See the CAST-to-VARCHAR branch above: floats must render through
+                // the SqlValue Display impl (SQLite %!.15g scientific), not raw
+                // f64/f32 `to_string()` (fixed-point).
+                SqlValue::Float(_)
+                | SqlValue::Real(_)
+                | SqlValue::Double(_)
+                | SqlValue::Numeric(_) => arcstr::ArcStr::from(value.to_string().as_str()),
                 SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "TRUE" } else { "FALSE" }),
                 SqlValue::Blob(bytes) => {
                     // SQLite: CAST BLOB to TEXT interprets bytes as UTF-8

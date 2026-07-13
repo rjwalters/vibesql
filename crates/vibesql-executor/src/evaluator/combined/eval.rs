@@ -1098,28 +1098,16 @@ impl CombinedExpressionEvaluator<'_> {
                 // - IS UNKNOWN: TRUE if expr is UNKNOWN (NULL), FALSE if expr is TRUE or FALSE
                 // - IS NOT X: negates the result
                 //
-                // SQLite compatibility: integers are treated as booleans
-                // - 0 is FALSE
-                // - Non-zero integers are TRUE
-                // - NULL is UNKNOWN
+                // SQLite compatibility: any value is coerced to a boolean via the
+                // shared truthiness rule (numeric prefix != 0), covering TEXT/BLOB
+                // operands too (`'3' IS TRUE` -> 1, `'abc' IS TRUE` -> 0). NULL is
+                // UNKNOWN. See crate::evaluator::operators::is_truthy.
+                use crate::evaluator::operators::is_truthy;
+                let is_null = matches!(val, vibesql_types::SqlValue::Null);
                 let result = match truth_value {
-                    vibesql_ast::TruthValue::True => match &val {
-                        vibesql_types::SqlValue::Boolean(true) => true,
-                        vibesql_types::SqlValue::Integer(n) => *n != 0,
-                        vibesql_types::SqlValue::Bigint(n) => *n != 0,
-                        vibesql_types::SqlValue::Smallint(n) => *n != 0,
-                        _ => false,
-                    },
-                    vibesql_ast::TruthValue::False => matches!(
-                        val,
-                        vibesql_types::SqlValue::Boolean(false)
-                            | vibesql_types::SqlValue::Integer(0)
-                            | vibesql_types::SqlValue::Bigint(0)
-                            | vibesql_types::SqlValue::Smallint(0)
-                    ),
-                    vibesql_ast::TruthValue::Unknown => {
-                        matches!(val, vibesql_types::SqlValue::Null)
-                    }
+                    vibesql_ast::TruthValue::True => !is_null && is_truthy(&val),
+                    vibesql_ast::TruthValue::False => !is_null && !is_truthy(&val),
+                    vibesql_ast::TruthValue::Unknown => is_null,
                 };
                 let final_result = if *negated { !result } else { result };
                 Ok(vibesql_types::SqlValue::Boolean(final_result))

@@ -465,13 +465,14 @@ impl NativeColumnarPipeline {
         let mut filtered = Vec::with_capacity(rows.len());
         for row in rows {
             let value = evaluator.eval(predicate, &row)?;
-            let include = match value {
-                vibesql_types::SqlValue::Boolean(true) => true,
-                vibesql_types::SqlValue::Boolean(false) | vibesql_types::SqlValue::Null => false,
-                vibesql_types::SqlValue::Integer(0) => false,
-                vibesql_types::SqlValue::Integer(_) => true,
-                _ => false,
-            };
+            // Coerce the predicate result via the shared SQLite truthiness rule
+            // (numeric prefix != 0), which covers TEXT/BLOB/REAL operands too
+            // (`WHERE '3'` keeps the row, `WHERE '0'`/`WHERE 'abc'` drop it) and
+            // treats NULL as false. The previous `_ => false` arm silently dropped
+            // every text/real predicate result in this count/group-by fast path,
+            // diverging from the general filter paths and from SQLite (fixes
+            // atof1-2.30's `count(*) ... WHERE substr(a,',')`).
+            let include = crate::evaluator::operators::is_truthy(&value);
             if include {
                 filtered.push(row);
             }

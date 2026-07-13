@@ -555,22 +555,19 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             // SQLite compatibility: integers are treated as booleans (0=FALSE, non-zero=TRUE)
             ArenaExpression::IsTruthValue { expr, truth_value, negated } => {
                 let val = self.eval_with_depth(expr, row)?;
+                // SQLite compatibility: coerce any value to a boolean via the
+                // shared truthiness rule (numeric prefix != 0), covering TEXT/BLOB
+                // (`'3' IS TRUE` -> 1, `'abc' IS TRUE` -> 0). NULL is UNKNOWN.
+                // See crate::evaluator::operators::is_truthy.
+                let is_null = matches!(val, SqlValue::Null);
                 let result = match truth_value {
-                    vibesql_ast::arena::TruthValue::True => match &val {
-                        SqlValue::Boolean(true) => true,
-                        SqlValue::Integer(n) => *n != 0,
-                        SqlValue::Bigint(n) => *n != 0,
-                        SqlValue::Smallint(n) => *n != 0,
-                        _ => false,
-                    },
-                    vibesql_ast::arena::TruthValue::False => matches!(
-                        val,
-                        SqlValue::Boolean(false)
-                            | SqlValue::Integer(0)
-                            | SqlValue::Bigint(0)
-                            | SqlValue::Smallint(0)
-                    ),
-                    vibesql_ast::arena::TruthValue::Unknown => matches!(val, SqlValue::Null),
+                    vibesql_ast::arena::TruthValue::True => {
+                        !is_null && crate::evaluator::operators::is_truthy(&val)
+                    }
+                    vibesql_ast::arena::TruthValue::False => {
+                        !is_null && !crate::evaluator::operators::is_truthy(&val)
+                    }
+                    vibesql_ast::arena::TruthValue::Unknown => is_null,
                 };
                 Ok(SqlValue::Boolean(if *negated { !result } else { result }))
             }
@@ -1059,9 +1056,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Render floats through the SqlValue Display impl (SQLite %!.15g
+            // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
+            // Display already matches SQLite 3.51; this keeps stored/CTE REAL
+            // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
+            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
+                arcstr::ArcStr::from(f.to_string())
+            }
             SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
@@ -1076,9 +1077,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Render floats through the SqlValue Display impl (SQLite %!.15g
+            // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
+            // Display already matches SQLite 3.51; this keeps stored/CTE REAL
+            // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
+            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
+                arcstr::ArcStr::from(f.to_string())
+            }
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "LIKE requires string operands, got {:?} and {:?}",
@@ -1104,9 +1109,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Render floats through the SqlValue Display impl (SQLite %!.15g
+            // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
+            // Display already matches SQLite 3.51; this keeps stored/CTE REAL
+            // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
+            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
+                arcstr::ArcStr::from(f.to_string())
+            }
             SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
@@ -1121,9 +1130,13 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
-            SqlValue::Float(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Double(f) => arcstr::ArcStr::from(f.to_string()),
-            SqlValue::Real(f) => arcstr::ArcStr::from(f.to_string()),
+            // Render floats through the SqlValue Display impl (SQLite %!.15g
+            // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
+            // Display already matches SQLite 3.51; this keeps stored/CTE REAL
+            // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
+            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
+                arcstr::ArcStr::from(f.to_string())
+            }
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "GLOB requires string operands, got {:?} and {:?}",
