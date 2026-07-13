@@ -71,7 +71,14 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 def get_machine_info() -> Dict[str, str]:
-    """Get information about the current machine."""
+    """Get information about the current machine.
+
+    ``machine_tag`` mirrors the results-DB column of the same name: the
+    VIBESQL_MACHINE_TAG env var when set (e.g. a remote-run.sh benchmark host),
+    else None ("unknown/local"). This is distinct from the descriptive
+    system/cpu fields — it is the stable key used to attribute a run to a host.
+    """
+    machine_tag = os.environ.get("VIBESQL_MACHINE_TAG") or None
     system = platform.system()
     machine = platform.machine()
     if os.environ.get("GITHUB_ACTIONS"):
@@ -79,13 +86,15 @@ def get_machine_info() -> Dict[str, str]:
             "system": f"GitHub Actions {platform.platform()}",
             "cpu": os.environ.get("RUNNER_ARCH", machine),
             "memory": "Standard GH Actions runner",
-            "notes": "CI environment"
+            "notes": "CI environment",
+            "machine_tag": machine_tag,
         }
     return {
         "system": f"{system} {platform.release()}",
         "cpu": machine,
         "memory": "Unknown",
-        "notes": "Local development"
+        "notes": "Local development",
+        "machine_tag": machine_tag,
     }
 
 
@@ -760,7 +769,8 @@ def load_tcl_data() -> Dict[str, Any]:
                     "passed": passed,
                     "failed": run["failed"],
                     "skipped": skipped,
-                    "pass_rate": pass_rate
+                    "pass_rate": pass_rate,
+                    "machine_tag": run.get("machine_tag"),
                 }
         except Exception:
             pass
@@ -991,7 +1001,8 @@ def export_dashboard(data: BenchmarkData, previous_url: Optional[str] = None) ->
                 "passed": tcl_data.get("passed"),
                 "failed": tcl_data.get("failed"),
                 "skipped": tcl_data.get("skipped"),
-                "total_tests": tcl_data.get("total_tests")
+                "total_tests": tcl_data.get("total_tests"),
+                "machine_tag": tcl_data.get("machine_tag")
             } if tcl_data else None
         },
         "benchmarks": {

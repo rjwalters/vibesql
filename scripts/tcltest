@@ -85,7 +85,8 @@ init_results_db() {
                 skipped INTEGER DEFAULT 0,
                 skipped_setup_failed INTEGER DEFAULT 0,
                 parse_errors INTEGER DEFAULT 0,
-                setup_failures INTEGER DEFAULT 0
+                setup_failures INTEGER DEFAULT 0,
+                machine_tag TEXT
             );
 
             CREATE TABLE IF NOT EXISTS tcl_test_results (
@@ -117,6 +118,19 @@ init_results_db() {
             "$VIBESQL_BIN" "$RESULTS_DB" -c "
                 ALTER TABLE tcl_test_runs ADD COLUMN skipped_setup_failed INTEGER DEFAULT 0;
                 ALTER TABLE tcl_test_runs ADD COLUMN setup_failures INTEGER DEFAULT 0;
+            " 2>/dev/null || true
+        }
+
+        # Migrate: add machine_tag column so runs are attributable to the host
+        # that produced them (nullable; historical rows read back as NULL,
+        # understood to mean "unknown/local"). Probe-then-ALTER, matching the
+        # additive-migration pattern used above.
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            SELECT machine_tag FROM tcl_test_runs LIMIT 1
+        " 2>/dev/null || {
+            print_info "Migrating database schema (machine_tag)..."
+            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+                ALTER TABLE tcl_test_runs ADD COLUMN machine_tag TEXT;
             " 2>/dev/null || true
         }
 

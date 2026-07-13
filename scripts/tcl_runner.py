@@ -78,6 +78,10 @@ class RunSummary:
     skipped_setup_failed: int = 0  # Tests skipped due to setup failure
     parse_errors: int = 0
     setup_failures: int = 0  # Number of files with setup failures
+    # machine_tag: identifies the host that produced this run (None -> NULL,
+    # understood as "unknown/local"). Populated from VIBESQL_MACHINE_TAG so a
+    # remote run (scripts/remote-run.sh) tags its results automatically.
+    machine_tag: Optional[str] = None
     results: list[TestResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -85,6 +89,7 @@ class RunSummary:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "git_commit": self.git_commit,
+            "machine_tag": self.machine_tag,
             "total_files": self.total_files,
             "total_tests": self.total_tests,
             "passed": self.passed,
@@ -608,6 +613,7 @@ class TclTestRunner:
         summary = RunSummary(
             started_at=datetime.now().isoformat(),
             total_files=len(file_paths),
+            machine_tag=os.environ.get("VIBESQL_MACHINE_TAG"),
         )
 
         # Get git commit
@@ -701,15 +707,26 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     except (ValueError, IndexError):
         run_id = 1
 
+    # Machine tag SQL literal: NULL when unset, single-quote-escaped otherwise.
+    # Sourced (in priority order) from an explicit summary.machine_tag, else the
+    # VIBESQL_MACHINE_TAG environment variable, else NULL ("unknown/local").
+    machine_tag_value = summary.machine_tag or os.environ.get("VIBESQL_MACHINE_TAG")
+    if machine_tag_value:
+        machine_tag_literal = "'" + machine_tag_value.replace("'", "''") + "'"
+    else:
+        machine_tag_literal = "NULL"
+
     # Create run record
     run_sql = f"""
         INSERT INTO tcl_test_runs (
             run_id, started_at, completed_at, git_commit,
-            total_files, total_tests, passed, failed, skipped, skipped_setup_failed, parse_errors, setup_failures
+            total_files, total_tests, passed, failed, skipped, skipped_setup_failed, parse_errors, setup_failures,
+            machine_tag
         ) VALUES (
             {run_id}, '{summary.started_at}', '{summary.completed_at}', '{summary.git_commit}',
             {summary.total_files}, {summary.total_tests},
-            {summary.passed}, {summary.failed}, {summary.skipped}, {summary.skipped_setup_failed}, {summary.parse_errors}, {summary.setup_failures}
+            {summary.passed}, {summary.failed}, {summary.skipped}, {summary.skipped_setup_failed}, {summary.parse_errors}, {summary.setup_failures},
+            {machine_tag_literal}
         );
     """
 
@@ -1233,6 +1250,7 @@ def main():
                 skipped_setup_failed=0,
                 parse_errors=0,
                 setup_failures=0,
+                machine_tag=os.environ.get("VIBESQL_MACHINE_TAG"),
                 results=all_results,  # Per-test detail parsed from the shim's --emit-detail output
             )
             save_to_database(summary, args.results_db, args.vibesql)

@@ -22,6 +22,7 @@ import argparse
 import csv
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -71,8 +72,22 @@ def get_git_info() -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
 
+def get_machine_tag() -> Optional[str]:
+    """Return the machine tag for this run, or None ("unknown/local").
+
+    Sourced from the VIBESQL_MACHINE_TAG environment variable so a remote run
+    (see scripts/remote-run.sh) can attribute its results to the dedicated host
+    while local/CI runs leave it unset (NULL) and stay backward compatible.
+    """
+    tag = os.environ.get("VIBESQL_MACHINE_TAG")
+    return tag if tag else None
+
+
 def init_benchmark_schema(cursor) -> None:
-    """Initialize benchmark tables in the database if they don't exist."""
+    """Initialize benchmark tables in the database if they don't exist.
+
+    Also applies additive migrations for older databases (e.g. adding the
+    nullable ``machine_tag`` column to ``benchmark_runs``)."""
     schema_path = get_repo_root() / "scripts" / "benchmark_results_schema_vibesql.sql"
 
     if not schema_path.exists():
@@ -83,6 +98,17 @@ def init_benchmark_schema(cursor) -> None:
         schema_sql = f.read()
 
     init_schema(cursor, schema_sql)
+
+    # Additive migration: a pre-existing benchmark_runs table is left untouched
+    # by the CREATE TABLE above ("already exists"), so add the machine_tag
+    # column explicitly for older databases. Nullable and idempotent — a second
+    # run (column already present) is a no-op.
+    try:
+        cursor.execute("ALTER TABLE benchmark_runs ADD COLUMN machine_tag TEXT")
+    except Exception:
+        # Column already exists (or ALTER unsupported on this build) — safe to
+        # ignore; the CREATE TABLE path already produced the column for new DBs.
+        pass
 
 
 def convert_time_to_ms(value: float, unit: str) -> float:
@@ -374,7 +400,7 @@ class TPCHParser(BenchmarkParser):
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
             "scale_factor", "timeout_secs", "total_queries", "passed_queries",
-            "failed_queries", "timeout_queries", "notes"
+            "failed_queries", "timeout_queries", "notes", "machine_tag"
         ], [
             datetime.now().isoformat(),
             git_commit,
@@ -386,7 +412,8 @@ class TPCHParser(BenchmarkParser):
             summary['passed_queries'],
             summary['failed_queries'],
             summary['timeout_queries'],
-            notes
+            notes,
+            get_machine_tag()
         ])
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
@@ -536,7 +563,7 @@ class TPCCParser(BenchmarkParser):
 
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
-            "scale_factor", "timeout_secs", "total_queries", "notes"
+            "scale_factor", "timeout_secs", "total_queries", "notes", "machine_tag"
         ], [
             datetime.now().isoformat(),
             git_commit,
@@ -545,7 +572,8 @@ class TPCCParser(BenchmarkParser):
             str(scale_factor),
             duration_secs,
             sum(r.get('transaction_count', 0) for r in results),
-            notes
+            notes,
+            get_machine_tag()
         ])
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
@@ -891,7 +919,7 @@ class TPCDSParser(BenchmarkParser):
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
             "scale_factor", "total_queries", "passed_queries", "failed_queries",
-            "timeout_queries", "notes"
+            "timeout_queries", "notes", "machine_tag"
         ], [
             datetime.now().isoformat(),
             git_commit,
@@ -902,7 +930,8 @@ class TPCDSParser(BenchmarkParser):
             len([r for r in vibesql_results if r.get('status') == 'passed']),
             len([r for r in vibesql_results if r.get('status') == 'failed']),
             len([r for r in vibesql_results if r.get('status') == 'timeout']),
-            notes
+            notes,
+            get_machine_tag()
         ])
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
@@ -1276,7 +1305,7 @@ class SysbenchParser(BenchmarkParser):
 
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
-            "scale_factor", "total_queries", "notes"
+            "scale_factor", "total_queries", "notes", "machine_tag"
         ], [
             datetime.now().isoformat(),
             git_commit,
@@ -1284,7 +1313,8 @@ class SysbenchParser(BenchmarkParser):
             'sysbench',
             str(table_size),
             len(results),
-            notes
+            notes,
+            get_machine_tag()
         ])
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
@@ -1412,7 +1442,7 @@ class HnswRecallParser(BenchmarkParser):
 
         execute_insert(cursor, "benchmark_runs", [
             "run_timestamp", "git_commit", "git_branch", "benchmark_suite",
-            "scale_factor", "total_queries", "notes"
+            "scale_factor", "total_queries", "notes", "machine_tag"
         ], [
             datetime.now().isoformat(),
             git_commit,
@@ -1420,7 +1450,8 @@ class HnswRecallParser(BenchmarkParser):
             'hnsw',
             str(summary.get('dataset_size') or ''),
             len(results),
-            notes
+            notes,
+            get_machine_tag()
         ])
 
         run_id = get_last_insert_id(cursor, "benchmark_runs", "run_id")
