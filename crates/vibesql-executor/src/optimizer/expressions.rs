@@ -129,8 +129,10 @@ pub fn optimize_expression(
     evaluator: &CombinedExpressionEvaluator,
 ) -> Result<Expression, ExecutorError> {
     match expr {
-        // Literals are already optimized
-        Expression::Literal(_) => Ok(expr.clone()),
+        // Literals are already optimized. A CollatedLiteral (issue #6105)
+        // carries a semantically significant implicit collation, so leave it
+        // intact rather than folding it into a bare literal.
+        Expression::Literal(_) | Expression::CollatedLiteral { .. } => Ok(expr.clone()),
 
         // Column references, pseudo-variables, and session variables cannot be optimized
         Expression::ColumnRef(_)

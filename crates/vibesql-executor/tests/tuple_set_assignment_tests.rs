@@ -301,3 +301,122 @@ fn update_from_tuple_set_subquery_correlated_empty_yields_nulls() {
     assert_eq!(r[0], SqlValue::Null);
     assert_eq!(r[1], SqlValue::Null);
 }
+
+// ---------------------------------------------------------------------------
+// Collation preservation across literal substitution (issue #6105).
+//
+// #6099's single-evaluation path substitutes an outer column reference into the
+// (now uncorrelated) tuple subquery as a literal. That substituted value must
+// carry the outer column's *implicit* declared collation so collation-sensitive
+// comparisons inside the subquery match SQLite 3.51 rather than reverting to
+// BINARY. The collation is IMPLICIT (like a column ref, datatype3 §7.1 rule 2 —
+// left-operand precedence), NOT explicit COLLATE (rule 1 — wins anywhere).
+//
+// All expected values were confirmed against sqlite3 3.51.0.
+// ---------------------------------------------------------------------------
+
+/// Sets up a target `dst(id, s, n)` driven by UPDATE…FROM `o` (outer) with a
+/// declared-NOCASE column `o.nc` and a plain-BINARY column `o.bc`, plus an
+/// `inner_t` whose rows exercise case sensitivity. Each test issues its own
+/// UPDATE and reads `dst.s` (sum) / `dst.n` (count).
+fn setup_collation() -> Database {
+    let mut db = Database::new();
+    for sql in [
+        "CREATE TABLE o(id INTEGER PRIMARY KEY, nc TEXT COLLATE NOCASE, bc TEXT)",
+        "INSERT INTO o VALUES(1, 'Foo', 'Foo')",
+        "CREATE TABLE inner_t(bin_col TEXT, nocase_col TEXT COLLATE NOCASE, v INTEGER)",
+        "INSERT INTO inner_t VALUES('foo', 'foo', 100)",
+        "INSERT INTO inner_t VALUES('FOO', 'FOO', 200)",
+        "INSERT INTO inner_t VALUES('bar', 'bar', 300)",
+        "CREATE TABLE dst(id INTEGER, s INTEGER, n INTEGER)",
+        "INSERT INTO dst VALUES(1, -1, -1)",
+    ] {
+        exec(&mut db, sql);
+    }
+    db
+}
+
+fn dst_row(db: &Database) -> Vec<SqlValue> {
+    let table = db.get_table("dst").expect("dst");
+    table.scan().iter().next().map(|r| r.values.to_vec()).unwrap_or_default()
+}
+
+fn run_collation_update(where_clause: &str) -> Vec<SqlValue> {
+    let mut db = setup_collation();
+    let sql = format!(
+        "UPDATE dst SET (s, n) = (SELECT sum(v), count(*) FROM inner_t WHERE {where_clause}) \
+         FROM o WHERE dst.id = o.id"
+    );
+    run_update(&mut db, &sql).expect("update");
+    dst_row(&db)
+}
+
+/// Left = inner BINARY column, right = substituted NOCASE outer column.
+/// Rule 2: the left operand's declared BINARY collation wins → BINARY compare,
+/// so 'Foo' matches neither 'foo' nor 'FOO' → no rows → sum NULL, count 0.
+#[test]
+fn collation_bin_lhs_vs_nocase_outer_rhs_binary() {
+    let r = run_collation_update("inner_t.bin_col = o.nc");
+    assert_eq!(r[1], SqlValue::Null);
+    assert_eq!(r[2], SqlValue::Integer(0));
+}
+
+/// Left = substituted NOCASE outer column, right = inner BINARY column.
+/// The left operand carries the outer column's implicit NOCASE → NOCASE compare,
+/// so 'Foo' matches 'foo' and 'FOO' → sum 300, count 2.
+#[test]
+fn collation_nocase_outer_lhs_vs_bin_rhs_nocase() {
+    let r = run_collation_update("o.nc = inner_t.bin_col");
+    assert_eq!(r[1], SqlValue::Integer(300));
+    assert_eq!(r[2], SqlValue::Integer(2));
+}
+
+/// The critical BINARY caveat: left = inner NOCASE column, right = substituted
+/// BINARY outer column. The substituted BINARY outer column is still a
+/// *collating operand* (a real column would be), but here the left operand's
+/// NOCASE wins → NOCASE compare → sum 300, count 2.
+#[test]
+fn collation_nocase_col_lhs_vs_bin_outer_rhs_nocase() {
+    let r = run_collation_update("inner_t.nocase_col = o.bc");
+    assert_eq!(r[1], SqlValue::Integer(300));
+    assert_eq!(r[2], SqlValue::Integer(2));
+}
+
+/// The critical BINARY caveat, reversed operands: left = substituted BINARY
+/// outer column, right = inner NOCASE column. Because the substituted BINARY
+/// column is a collating operand (NOT a bare literal), its left-operand default
+/// BINARY BLOCKS fallthrough to the right's NOCASE → BINARY compare → no rows.
+/// A naive plain-literal substitution would wrongly compare NOCASE here.
+#[test]
+fn collation_bin_outer_lhs_blocks_nocase_rhs_binary() {
+    let r = run_collation_update("o.bc = inner_t.nocase_col");
+    assert_eq!(r[1], SqlValue::Null);
+    assert_eq!(r[2], SqlValue::Integer(0));
+}
+
+/// Explicit `COLLATE BINARY` on the substituted NOCASE outer column overrides
+/// its implicit collation (rule 1) → BINARY compare → no rows.
+#[test]
+fn collation_explicit_binary_override() {
+    let r = run_collation_update("inner_t.bin_col = o.nc COLLATE BINARY");
+    assert_eq!(r[1], SqlValue::Null);
+    assert_eq!(r[2], SqlValue::Integer(0));
+}
+
+/// Explicit `COLLATE NOCASE` on the substituted BINARY outer column overrides
+/// its implicit BINARY (rule 1) → NOCASE compare → sum 300, count 2.
+#[test]
+fn collation_explicit_nocase_override() {
+    let r = run_collation_update("inner_t.bin_col = o.bc COLLATE NOCASE");
+    assert_eq!(r[1], SqlValue::Integer(300));
+    assert_eq!(r[2], SqlValue::Integer(2));
+}
+
+/// Two implicit NOCASE operands: left inner NOCASE column, right substituted
+/// NOCASE outer column → NOCASE compare → sum 300, count 2.
+#[test]
+fn collation_nocase_col_vs_nocase_outer() {
+    let r = run_collation_update("inner_t.nocase_col = o.nc");
+    assert_eq!(r[1], SqlValue::Integer(300));
+    assert_eq!(r[2], SqlValue::Integer(2));
+}

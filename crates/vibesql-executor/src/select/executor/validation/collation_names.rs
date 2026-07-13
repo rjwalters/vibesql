@@ -150,6 +150,7 @@ pub fn validate_collation_names(expr: &Expression) -> Result<(), ExecutorError> 
         // no directly-evaluated COLLATE to check here.
         Expression::ColumnRef(_)
         | Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
         | Expression::Exists { .. }
         | Expression::ScalarSubquery(_)

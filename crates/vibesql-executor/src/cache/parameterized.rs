@@ -350,6 +350,12 @@ impl LiteralExtractor {
                 literals.push(LiteralValue::from_sql_value(value));
             }
 
+            // Internal collation-carrying literal (issue #6105): treat its value
+            // like a plain literal for extraction purposes.
+            Expression::CollatedLiteral { value, .. } => {
+                literals.push(LiteralValue::from_sql_value(value));
+            }
+
             Expression::BinaryOp { left, right, .. } => {
                 Self::extract_from_expression(left, literals);
                 Self::extract_from_expression(right, literals);

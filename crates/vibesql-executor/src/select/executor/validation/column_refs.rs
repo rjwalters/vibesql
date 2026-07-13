@@ -170,6 +170,7 @@ pub fn extract_column_refs(expr: &Expression, refs: &mut Vec<ColumnReference>) {
 
         // Terminals with no column references
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

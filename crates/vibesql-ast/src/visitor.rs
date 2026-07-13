@@ -218,6 +218,9 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
     let result = match expr {
         Expression::Literal(value) => visitor.visit_literal(value),
 
+        // Internal-only node carrying an implicit collation; visit its value.
+        Expression::CollatedLiteral { value, .. } => visitor.visit_literal(value),
+
         Expression::Placeholder(index) => visitor.visit_placeholder(*index),
 
         Expression::NumberedPlaceholder(number) => visitor.visit_numbered_placeholder(*number),
@@ -576,6 +579,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
     let transformed = match expr {
         // Leaf nodes - no children to transform
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)

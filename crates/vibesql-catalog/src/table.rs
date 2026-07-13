@@ -857,6 +857,7 @@ impl TableSchema {
                 Self::expression_references_column(value, column_name)
             }
             vibesql_ast::Expression::Literal(_)
+            | vibesql_ast::Expression::CollatedLiteral { .. }
             | vibesql_ast::Expression::Placeholder(_)
             | vibesql_ast::Expression::NumberedPlaceholder(_)
             | vibesql_ast::Expression::NamedPlaceholder(_)

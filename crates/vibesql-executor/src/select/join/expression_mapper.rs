@@ -274,6 +274,7 @@ impl ExpressionMapper {
             }
             // Literals and other terminal expressions don't reference columns
             Expression::Literal(_)
+            | Expression::CollatedLiteral { .. }
             | Expression::Wildcard
             | Expression::CurrentDate
             | Expression::CurrentTime { .. }

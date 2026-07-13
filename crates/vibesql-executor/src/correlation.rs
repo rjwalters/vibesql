@@ -270,6 +270,7 @@ fn is_expression_correlated(
 ) -> bool {
     match expr {
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)

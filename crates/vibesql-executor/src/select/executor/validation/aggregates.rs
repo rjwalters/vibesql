@@ -165,6 +165,7 @@ fn walk_first<T>(expr: &Expression, f: &impl Fn(&Expression) -> WalkAction<T>) -
         Expression::ScalarSubquery(_)
         | Expression::Exists { .. }
         | Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Placeholder(_)
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_)

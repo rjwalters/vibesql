@@ -1528,6 +1528,7 @@ fn resolve_where_expression_with_schema(
 
         // Expressions that don't need alias resolution (pass through)
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }
@@ -1778,6 +1779,7 @@ fn collect_aggregates_from_expr(
 
         // Leaf expressions - nothing to extract
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::ColumnRef(_)
         | Expression::Wildcard
         | Expression::CurrentDate

@@ -595,6 +595,10 @@ impl ExpressionEvaluator<'_> {
             // Literals - just return the value
             vibesql_ast::Expression::Literal(val) => Ok(val.clone()),
 
+            // A collation-carrying literal (issue #6105) evaluates to its value;
+            // its implicit collation only affects comparison resolution.
+            vibesql_ast::Expression::CollatedLiteral { value, .. } => Ok(value.clone()),
+
             // DEFAULT keyword - not allowed in SELECT/WHERE expressions
             vibesql_ast::Expression::Default => Err(ExecutorError::UnsupportedExpression(
                 "DEFAULT keyword is only valid in INSERT VALUES and UPDATE SET clauses".to_string(),

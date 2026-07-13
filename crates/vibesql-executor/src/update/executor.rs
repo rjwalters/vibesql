@@ -1465,6 +1465,7 @@ fn validate_expression(
 
         // Expressions that don't need validation (literals, special keywords, etc.)
         Expression::Literal(_)
+        | Expression::CollatedLiteral { .. }
         | Expression::Default
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }

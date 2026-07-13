@@ -89,6 +89,7 @@ impl SelectExecutor<'_> {
 
             // Truly simple expressions: Literal, ColumnRef (cannot contain aggregates)
             vibesql_ast::Expression::Literal(_)
+            | vibesql_ast::Expression::CollatedLiteral { .. }
             | vibesql_ast::Expression::ColumnRef(_)
             | vibesql_ast::Expression::Wildcard
             | vibesql_ast::Expression::CurrentDate

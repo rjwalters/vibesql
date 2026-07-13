@@ -145,6 +145,14 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             write_tag!(writer, ExprTag::Literal);
             write_sql_value(writer, value)?;
         }
+        // `CollatedLiteral` is an internal-only transient node produced during
+        // UPDATE tuple-subquery substitution (issue #6105); it is never part of
+        // a persisted schema/expression. Serialize it as a plain literal so the
+        // exhaustive match compiles without introducing a new on-disk tag.
+        Expression::CollatedLiteral { value, .. } => {
+            write_tag!(writer, ExprTag::Literal);
+            write_sql_value(writer, value)?;
+        }
         Expression::ColumnRef(col_id) => {
             write_tag!(writer, ExprTag::ColumnRef);
             // Write schema (optional)

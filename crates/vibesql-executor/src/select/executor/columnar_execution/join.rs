@@ -860,6 +860,7 @@ fn expression_has_rowid(expr: &vibesql_ast::Expression) -> bool {
         }
         // These variants don't contain column references that could be ROWID
         vibesql_ast::Expression::Literal(_)
+        | vibesql_ast::Expression::CollatedLiteral { .. }
         | vibesql_ast::Expression::Placeholder(_)
         | vibesql_ast::Expression::NumberedPlaceholder(_)
         | vibesql_ast::Expression::NamedPlaceholder(_)
@@ -968,7 +969,9 @@ fn is_columnar_join_disabled() -> bool {
 /// resolved shape turns out to be unsupported.
 fn group_by_key_shape_maybe_columnar(expr: &vibesql_ast::Expression) -> bool {
     match expr {
-        vibesql_ast::Expression::ColumnRef(_) | vibesql_ast::Expression::Literal(_) => true,
+        vibesql_ast::Expression::ColumnRef(_)
+        | vibesql_ast::Expression::Literal(_)
+        | vibesql_ast::Expression::CollatedLiteral { .. } => true,
         vibesql_ast::Expression::BinaryOp { left, op, right } => {
             matches!(
                 op,

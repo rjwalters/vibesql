@@ -328,6 +328,14 @@ impl QuerySignature {
             | Expression::NumberedPlaceholder(_)
             | Expression::NamedPlaceholder(_) => "LITERAL_PLACEHOLDER".hash(hasher),
 
+            // Internal collation-carrying literal (issue #6105): the collation
+            // is semantically significant, so it hashes distinctly rather than
+            // collapsing into the parameterizable literal bucket.
+            Expression::CollatedLiteral { collation, .. } => {
+                "COLLATED_LITERAL".hash(hasher);
+                collation.hash(hasher);
+            }
+
             Expression::ColumnRef(col_id) => {
                 "COLUMN".hash(hasher);
                 col_id.table_canonical().hash(hasher);
