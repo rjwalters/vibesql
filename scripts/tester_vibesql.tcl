@@ -4738,6 +4738,46 @@ array set vibesql_skip_tests {
     indexexpr2-10.0 "Parser gap: 'IN'-clause form in this expression-index context is not parsed ('near \"IN\": syntax error') (out of scope for #5695)."
 }
 
+# -----------------------------------------------------------------------------
+# fuzz.test residual classification (#6041) — DO NOT SKIP-LIST THESE.
+#
+# The fuzz2-*/fuzz4-* entries in vibesql_skip_tests above are whole-file-differs
+# skips for the SIBLING files fuzz2.test / fuzz4.test. The DIFFERENT file
+# fuzz.test (35,031 tests, srand(0) deterministic corpus) has 33 residual
+# failures as of the #6041 classification pass, and — unlike fuzz2/fuzz4 —
+# EVERY ONE of those 33 is a REAL engine gap, not a harness artifact. Per the
+# #5779 epic's honest-framing rule, real failures are recorded by an OPEN
+# TRACKING ISSUE, never by a skip entry: they deliberately keep running and
+# reporting "failed" until the underlying engine bugs are fixed. This block is
+# the durable, greppable record (the #6066 partial-skip documentation
+# convention, applied here to a NON-skip: honest failures tracked by issue, not
+# silenced). NO vibesql_skip_tests entry is added for any of the 33.
+#
+# Canonical fuzz.test count on a QUIET machine (fresh release build):
+#   35031 run / 34998 pass / 33 fail / 0 skip.
+# (A LOADED machine can add a spurious 34th failure — fuzz-7.2.1267 fails with
+# "Too many open files in system (os error 23)" when the trial-DB checkpoint
+# copy path exhausts the system fd table; that is a transient machine-load
+# artifact, NOT one of the 33, and does not reproduce on a quiet machine.)
+#
+# The 33 real failures, 4 buckets (test name -> class -> tracking issue):
+#   Bucket A — GLOB in the simple (scalar) evaluator, non-literal operands (7)
+#     fuzz-3.2.1965, fuzz-3.2.2663, fuzz-3.2.2863, fuzz-4.2.586,
+#     fuzz-4.2.1633, fuzz-4.2.1896, fuzz-4.2.4455
+#     -> #6070  ("Unexpected expression in simple evaluator: Glob {...}")
+#   Bucket B — ORDER BY numeric-ordinal range validation, nested context (1)
+#     fuzz-1.18                                            -> #6071
+#   Bucket C — CAST(zeroblob(N) AS text) returns N NUL bytes, not "" (MEM_Zero) (1)
+#     fuzz-1.8                                             -> #6072
+#   Bucket D — fuzz-5.2/7.2 batched trial-check surfaces the generic CLI
+#     "N statements failed" (cli.ftl script-failed-error) instead of SQLite's
+#     specific allowlisted error text; error-allowlist mismatch
+#     (22 stmts + 2 downstream COMMIT sentinels fuzz-5.3 / fuzz-7.4):
+#       fuzz-5.2.2, fuzz-5.2.10,
+#       fuzz-7.2.{2,4,5,13,14,18,19,20,22,31,33,34,36,38,40,41,42,45,46,48}
+#     -> #6073
+# -----------------------------------------------------------------------------
+
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
     {select9-2.*.3 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). These compound-SELECT ORDER BY ... COLLATE reverse cases depend on the 'reverse' collation registered via 'db collate reverse reverse', which the TCL shim cannot bridge to the VibeSQL CLI subprocess (same class as the sqlite3_create_aggregate stub in #5712). Covers select9-2.x.3 and its .flipped and limit/offset variants for all index loops."}
