@@ -660,6 +660,65 @@ cmd_status() {
                 print_warning "File universe SHRANK: run $run_id covers $with_results file(s) vs $prev_files in previous run $prev_run. Cross-run pass-rate comparison is invalid (different universes)."
             fi
         fi
+
+        # File-weighted metrics (issue #6137): the raw pass rate above is a
+        # per-test-row ratio, so a few "monster" files (fuzz.test ~25k rows,
+        # func.test ~14.7k rows) that VibeSQL fails wholesale can drag the raw
+        # headline far below the rate normal SQL files actually achieve. These
+        # SUPPLEMENTARY metrics are pure read-side SQL over the same
+        # tcl_test_results rows (no execution/schema change) and are reported
+        # ALONGSIDE — never replacing — the raw headline, which stays
+        # inclusion-rule-compatible with epic #5779's 72.3% raw-row baseline.
+        #
+        # - mean per-file pass rate: average of each file's own pass rate, so
+        #   every file counts equally regardless of how many rows it emits.
+        # - clean vs dirty file counts: files with 0 failures vs files with >=1
+        #   failure (matches the epic's "315 clean / 413 with failures" framing).
+        # Marker statuses (timeout/incomplete/error) count as failures here, the
+        # same way they do in the raw headline.
+        echo ""
+        echo "=== File-weighted metrics (supplementary — raw headline above stays epic-comparable) ==="
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            WITH per_file AS (
+                SELECT
+                    file_path,
+                    SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as f_passed,
+                    SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END) as f_scored,
+                    SUM(CASE WHEN status IN ('failed','timeout','incomplete','error') THEN 1 ELSE 0 END) as f_failed
+                FROM tcl_test_results
+                WHERE run_id = $run_id
+                GROUP BY file_path
+            )
+            SELECT
+                COUNT(*) as files,
+                ROUND(AVG(CASE WHEN f_scored > 0 THEN 100.0 * f_passed / f_scored END), 1) as mean_per_file_pass_rate,
+                SUM(CASE WHEN f_failed = 0 THEN 1 ELSE 0 END) as clean_files,
+                SUM(CASE WHEN f_failed > 0 THEN 1 ELSE 0 END) as files_with_failures
+            FROM per_file
+        " 2>/dev/null || true
+
+        # Top-N files by test-count (issue #6137): surface the high-volume files
+        # that dominate the raw per-row aggregate, so a low raw headline can be
+        # attributed at a glance to a handful of monster files rather than to
+        # broad SQL failure.
+        echo ""
+        echo "=== Top 10 files by test count (monster-file visibility) ==="
+        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            SELECT
+                file_path,
+                COUNT(*) as tests,
+                SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END) as passed,
+                ROUND(
+                    100.0 * SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END)
+                        / NULLIF(SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END), 0),
+                    1
+                ) as pass_rate
+            FROM tcl_test_results
+            WHERE run_id = $run_id
+            GROUP BY file_path
+            ORDER BY tests DESC
+            LIMIT 10
+        " 2>/dev/null || true
     fi
 }
 
