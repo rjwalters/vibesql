@@ -161,11 +161,13 @@ ALWAYS_BLOCK_PATTERNS=(
     'init 0'
     'init 6'
 
-    # Database destruction
-    'DROP DATABASE'
-    'DROP TABLE'
-    'DROP SCHEMA'
-    'TRUNCATE TABLE'
+    # NOTE: SQL DDL/DML patterns (DROP DATABASE/TABLE/SCHEMA, TRUNCATE TABLE) are
+    # intentionally NOT blocked in this repo. VibeSQL *is* a SQL database engine, so
+    # these statements are its own test/dev vocabulary (they appear in the TCL suite,
+    # docs, and inline `vibesql -c "..."` commands). A generic prod-DB guard here is a
+    # category error — there is no external production database for an agent to nuke,
+    # and the case-insensitive substring match blocked even comments/labels mentioning
+    # the words. Catastrophic filesystem/git/cloud blocks above remain in force.
 )
 
 for pattern in "${ALWAYS_BLOCK_PATTERNS[@]}"; do
@@ -238,13 +240,10 @@ if echo "$COMMAND" | grep -qE 'rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+' || \
 fi
 
 # =============================================================================
-# DELETE without WHERE - Database safety
+# DELETE without WHERE - intentionally NOT guarded in this repo.
+# `DELETE FROM t` (no WHERE) is a valid, routinely-tested statement in a SQL
+# engine's own suite. See the SQL note in ALWAYS_BLOCK_PATTERNS above.
 # =============================================================================
-
-if echo "$COMMAND" | grep -qiE 'DELETE\s+FROM\s+' && \
-   ! echo "$COMMAND" | grep -qiE 'WHERE\s+'; then
-    deny "BLOCKED: DELETE FROM without WHERE clause"
-fi
 
 # =============================================================================
 # REQUIRE CONFIRMATION - Potentially dangerous but sometimes legitimate
@@ -256,8 +255,11 @@ ASK_PATTERNS=(
     'git push -f '
     'git reset --hard'
     'git clean -fd'
-    'git checkout \.'
-    'git restore \.'
+    # Anchored to whole-tree discard only: `git checkout .` / `git restore .`
+    # (optionally followed by whitespace/EOL). A single-file path like
+    # `git checkout ./src/main.rs` is NOT a discard-all and must not prompt.
+    'git checkout \.($|[[:space:]])'
+    'git restore \.($|[[:space:]])'
 
     # GitHub operations that modify shared state
     'gh pr close'
@@ -266,9 +268,11 @@ ASK_PATTERNS=(
     'gh label delete'
 
     # Cloud CLI operations
-    'aws s3'
-    'aws ec2'
-    'aws lambda'
+    # NOTE: broad `aws s3` / `aws ec2` / `aws lambda` ASK entries removed — they
+    # prompted on read-only (describe/ls) and on the start/stop calls that
+    # scripts/remote-run.sh legitimately makes. The genuinely destructive AWS ops
+    # (aws ec2 terminate, aws s3 rb, aws s3 rm --recursive, aws iam delete,
+    # aws cloudformation delete-stack) are already hard-blocked in ALWAYS_BLOCK.
 
     # Docker operations
     'docker rm'
