@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -971,16 +972,34 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
 
     Returns: (passed, failed, skipped, failed_test_names, per_test_results)
     """
-    cmd = ["tclsh", shim_path, test_file, "--emit-detail"]
+    # Isolate each file's worker in its own throwaway working directory. The
+    # shim's sqlite3 command only pid-isolates the filenames ":memory:" and
+    # "test.db"; every other DB filename the suite uses (test2.db, corrupt.db,
+    # bak.db, ...) resolves via `file normalize` against the worker's cwd. If
+    # all files shared the caller's cwd, one file's leftover DB/WAL/lock/
+    # checkpoint siblings could contaminate a later file's fresh open and cause
+    # spurious worker deaths (issue #6132). A fresh per-file tmpdir gives those
+    # non-isolated filenames a private namespace.
+    #
+    # test_file arrives repo-root-RELATIVE (TCL_TEST_DIR is a relative path), so
+    # it must be absolutized before we hand it to a worker running in a
+    # different cwd — otherwise `source $testdir/...` and the file open in the
+    # shim (which derives testdir from this argument) would fail to resolve. The
+    # VibeSQL binary path is already cwd-independent (derived from the shim's own
+    # [info script]), so it is unaffected.
+    abs_test_file = os.path.abspath(test_file)
+    cmd = ["tclsh", shim_path, abs_test_file, "--emit-detail"]
     if verbose:
         cmd.append("--verbose")
 
+    workdir = tempfile.mkdtemp(prefix="vibesql_tcl_")
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=workdir,
         )
         output = result.stdout + result.stderr
 
@@ -1080,6 +1099,12 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
             error_message=str(e)[:500],
         )
         return 0, 1, 0, [f"RUNNER ERROR: {e}"], [error_result]
+
+    finally:
+        # Always remove the per-file working directory, on every exit path
+        # (success, timeout, incomplete, exception). ignore_errors keeps a
+        # stubborn leftover file from masking the real result.
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def main():
