@@ -7436,7 +7436,7 @@ proc run_test_file {filename} {
         # tallied (real pass/fail) and the summary is emitted. This does not
         # fake any passes: the aborting statement is reported below.
         puts "Setup error (file evaluation aborted mid-file): $err"
-        puts "Error info: $::errorInfo"
+        puts "Error info: [expr {[info exists ::errorInfo] ? $::errorInfo : {(none)}}]"
         # Emit an 'incomplete' marker so the runner sees the file was truncated
         # (#5845). Without this the partial run looks clean to tcl_runner.py:
         # finish_test still prints the "Tests run:" trailer and exits 0, so the
