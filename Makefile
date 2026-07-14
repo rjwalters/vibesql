@@ -285,9 +285,14 @@ test-tcl:
 
 # Run all SQLite TCL tests (all priorities)
 # Uses errors-only mode by default. Add --verbose for full output.
+# Results are persisted incrementally every TCL_BATCH_SIZE files under ONE
+# shared run_id (#6136), so a killed full run is durable at batch granularity
+# and the canonical `WHERE run_id = MAX(run_id)` status query still covers the
+# whole suite. Override the batch size with TCL_BATCH_SIZE=<n> (0 disables).
+TCL_BATCH_SIZE ?= 50
 test-tcl-all:
 	@echo "Running full SQLite TCL test suite (all 1174 files)..."
-	./scripts/tcltest run --timeout $(TCL_TIMEOUT)
+	./scripts/tcltest run --timeout $(TCL_TIMEOUT) --batch-size $(TCL_BATCH_SIZE)
 
 # Run specific TCL test file
 test-tcl-file:

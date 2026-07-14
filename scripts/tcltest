@@ -414,8 +414,10 @@ cmd_run() {
     local verbose=false
     local native_tcl=true  # Default to native TCL mode
     local timeout=""
-
-    # Parse arguments
+    # Native-TCL batch size: persist results to the DB every N files under one
+    # shared run_id, making a killed run durable at batch granularity (#6136).
+    # Empty -> use tcl_runner.py's own default (50); a value is passed through.
+    local batch_size=""
     while [[ $# -gt 0 ]]; do
         case $1 in
             --help)
@@ -434,6 +436,9 @@ Options:
   --native-tcl             Use native tclsh (default, handles TCL loops)
   --no-native-tcl          Use static parsing instead of native tclsh
   --timeout SECONDS        Per-file timeout (default: 1200 native, 5 static)
+  --batch-size N           Native mode: persist results every N files under one
+                           shared run_id, so a killed run is durable at batch
+                           granularity (default: 50; 0 disables batching)
 
 Examples:
   # Run Priority 1 tests (core SQL)
@@ -480,6 +485,10 @@ EOF
                 ;;
             --timeout)
                 timeout="$2"
+                shift 2
+                ;;
+            --batch-size)
+                batch_size="$2"
                 shift 2
                 ;;
             *)
@@ -562,6 +571,10 @@ EOF
 
     if [ -n "$timeout" ]; then
         py_args+=("--timeout" "$timeout")
+    fi
+
+    if [ -n "$batch_size" ]; then
+        py_args+=("--batch-size" "$batch_size")
     fi
 
     # Add files
