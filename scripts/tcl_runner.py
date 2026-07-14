@@ -693,9 +693,13 @@ class TclTestRunner:
         return summary
 
 
-def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
-    """Save run results to the database."""
-    # First, get the next run_id
+def allocate_run_id(db_path: str, vibesql_path: str) -> int:
+    """Reserve the next run_id (MAX(run_id)+1) from tcl_test_runs.
+
+    Used both by the single-shot save path and by the batched/incremental
+    path, which allocates one run_id up front so every batch appends under the
+    same logical run.
+    """
     result = subprocess.run(
         [vibesql_path, db_path, "-c", "SELECT COALESCE(MAX(run_id), 0) + 1 FROM tcl_test_runs", "--format", "raw"],
         capture_output=True,
@@ -704,10 +708,19 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     try:
         # Parse output - look for the number in the result
         lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-        run_id = int(lines[-1])
+        return int(lines[-1])
     except (ValueError, IndexError):
-        run_id = 1
+        return 1
 
+
+def upsert_run_summary(summary: RunSummary, run_id: int, db_path: str, vibesql_path: str) -> bool:
+    """Write (or overwrite) the tcl_test_runs summary row for `run_id`.
+
+    Uses INSERT OR REPLACE so it is idempotent: the batched path calls this
+    once per completed batch with rolled-up totals, and a plain re-INSERT would
+    otherwise hit the `run_id INTEGER PRIMARY KEY` constraint on the 2nd batch.
+    Returns True on success.
+    """
     # Machine tag SQL literal: NULL when unset, single-quote-escaped otherwise.
     # Sourced (in priority order) from an explicit summary.machine_tag, else the
     # VIBESQL_MACHINE_TAG environment variable, else NULL ("unknown/local").
@@ -717,9 +730,11 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     else:
         machine_tag_literal = "NULL"
 
-    # Create run record
+    # INSERT OR REPLACE keyed on run_id (PRIMARY KEY) makes the summary write
+    # idempotent so it can be refreshed after every batch with the latest
+    # rolled-up totals.
     run_sql = f"""
-        INSERT INTO tcl_test_runs (
+        INSERT OR REPLACE INTO tcl_test_runs (
             run_id, started_at, completed_at, git_commit,
             total_files, total_tests, passed, failed, skipped, skipped_setup_failed, parse_errors, setup_failures,
             machine_tag
@@ -737,10 +752,21 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
             capture_output=True,
             check=True,
         )
+        return True
     except subprocess.CalledProcessError as e:
         print(f"Warning: Failed to save run summary: {e.stderr}")
-        return
+        return False
 
+
+def insert_detail_rows(
+    results: list[TestResult], run_id: int, db_path: str, vibesql_path: str
+) -> None:
+    """Append per-test detail rows under `run_id` to tcl_test_results.
+
+    Detail rows carry the AUTOINCREMENT `id` PK, so many rows may share one
+    `run_id` via plain INSERTs — this is what makes incremental per-batch
+    appends work without a PK conflict.
+    """
     # Helper to escape SQL string literals. Returns the full SQL literal
     # including surrounding quotes (or NULL for empty values).
     def sql_literal(s: Optional[str], max_len: int = 1000) -> str:
@@ -798,7 +824,7 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
         except subprocess.CalledProcessError:
             return False
 
-    total_rows = len(summary.results)
+    total_rows = len(results)
     inserted = 0
     failed_inserts = 0
     failure_samples: list[str] = []
@@ -809,7 +835,7 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
     # entire batch.
     BATCH_SIZE = 200
     for start in range(0, total_rows, BATCH_SIZE):
-        batch = summary.results[start:start + BATCH_SIZE]
+        batch = results[start:start + BATCH_SIZE]
         if insert_batch(batch):
             inserted += len(batch)
             continue
@@ -848,6 +874,20 @@ def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
                     f"run_id={run_id} (within 5% tolerance).",
                     file=sys.stderr,
                 )
+
+
+def save_to_database(summary: RunSummary, db_path: str, vibesql_path: str):
+    """Save a complete run (summary + all detail rows) under a fresh run_id.
+
+    Single-shot convenience wrapper used by the static-parsing path. The
+    native-TCL path instead allocates a run_id up front and calls the batched
+    primitives (allocate_run_id / upsert_run_summary / insert_detail_rows)
+    directly so results are durable per batch.
+    """
+    run_id = allocate_run_id(db_path, vibesql_path)
+    if not upsert_run_summary(summary, run_id, db_path, vibesql_path):
+        return
+    insert_detail_rows(summary.results, run_id, db_path, vibesql_path)
 
 
 # Sentinel prefix the TCL shim uses for machine-readable per-test detail lines.
@@ -1121,6 +1161,11 @@ def main():
                         help="Run tests using native tclsh instead of parsing (for files with TCL loops)")
     parser.add_argument("--tcl-shim", default=None,
                         help="Path to TCL shim (default: scripts/tester_vibesql.tcl)")
+    parser.add_argument("--batch-size", type=int, default=50,
+                        help="Native-TCL mode: persist results to the DB every "
+                             "N files under one shared run_id, making a killed "
+                             "run durable at batch granularity (default: 50; "
+                             "<=0 disables batching and saves once at the end)")
 
     args = parser.parse_args()
 
@@ -1176,6 +1221,63 @@ def main():
         # skips — NOT compromised runs — so they are reported separately and do
         # not trigger the "did not run to completion" warning (#5887).
         files_self_skipped = 0
+        files_processed = 0
+
+        # Durable, resumable batching (issue #6136): instead of buffering every
+        # file's results in memory and saving once at the very end (a multi-hour
+        # process whose results were all lost if it was killed early), we persist
+        # incrementally. A single run_id is allocated up front so every batch
+        # appends detail rows and refreshes the summary row under ONE logical
+        # run; the canonical `WHERE run_id = MAX(run_id)` status query therefore
+        # covers the whole suite, and a kill mid-run leaves already-completed
+        # batches durably queryable.
+        batch_size = args.batch_size
+        run_id: Optional[int] = None
+        results_pending_persist: list[TestResult] = []
+        git_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True
+        ).stdout.strip()[:8]
+        run_started_at = datetime.now().isoformat()
+
+        if args.results_db:
+            run_id = allocate_run_id(args.results_db, args.vibesql)
+
+        def build_running_summary() -> RunSummary:
+            """Snapshot of rolled-up totals across all files processed so far."""
+            return RunSummary(
+                started_at=run_started_at,
+                completed_at=datetime.now().isoformat(),
+                git_commit=git_commit,
+                total_files=files_processed,
+                total_tests=total_passed + total_failed + total_skipped,
+                passed=total_passed,
+                failed=total_failed,
+                skipped=total_skipped,
+                skipped_setup_failed=0,
+                parse_errors=0,
+                setup_failures=0,
+                machine_tag=os.environ.get("VIBESQL_MACHINE_TAG"),
+            )
+
+        def persist_batch() -> None:
+            """Flush pending detail rows + refresh the summary row for run_id.
+
+            Idempotent on the summary (INSERT OR REPLACE) and append-only on the
+            detail rows, so after this returns the DB durably reflects every file
+            processed so far under the shared run_id.
+            """
+            if run_id is None:
+                return
+            # Refresh the rolled-up summary FIRST so the FK target row exists
+            # before its detail rows, then append the new detail rows.
+            upsert_run_summary(
+                build_running_summary(), run_id, args.results_db, args.vibesql
+            )
+            if results_pending_persist:
+                insert_detail_rows(
+                    results_pending_persist, run_id, args.results_db, args.vibesql
+                )
+                results_pending_persist.clear()
 
         for file_path in file_paths:
             if args.verbose:
@@ -1189,6 +1291,8 @@ def main():
             total_skipped += skipped
             all_failed_tests.extend(failed_tests)
             all_results.extend(results)
+            results_pending_persist.extend(results)
+            files_processed += 1
 
             statuses = {r.status for r in results}
             if results:
@@ -1204,6 +1308,28 @@ def main():
             # whole-file skip); count it separately from compromised files.
             if results and statuses == {"skipped"}:
                 files_self_skipped += 1
+
+            # Checkpoint after every `batch_size` files. Batching disabled
+            # (batch_size <= 0) falls through to the single end-of-run save.
+            if run_id is not None and batch_size > 0 and files_processed % batch_size == 0:
+                persist_batch()
+                print(
+                    f"[checkpoint] Persisted {files_processed}/{files_attempted} "
+                    f"files under run_id={run_id} (durable)."
+                )
+                # Test-only crash seam (unset in normal operation): abort hard
+                # right after a checkpoint to deterministically simulate a
+                # SIGKILL mid-run. The final end-of-run save is never reached,
+                # so a passing durability test proves already-persisted batches
+                # survive a kill. os._exit skips atexit/cleanup like a real kill.
+                _abort_after = os.environ.get("VIBESQL_TCL_TEST_ABORT_AFTER_FILES")
+                if _abort_after and files_processed >= int(_abort_after):
+                    print(
+                        f"[test-abort] Simulating kill after {files_processed} "
+                        f"files (VIBESQL_TCL_TEST_ABORT_AFTER_FILES).",
+                        file=sys.stderr,
+                    )
+                    os._exit(137)
 
         # Print summary
         total_tests = total_passed + total_failed + total_skipped
@@ -1259,27 +1385,15 @@ def main():
             if len(all_failed_tests) > 20:
                 print(f"  ... and {len(all_failed_tests) - 20} more")
 
-        # Save to database if specified (native TCL mode)
-        if args.results_db:
-            # Create a RunSummary for native TCL mode
-            from datetime import datetime
-            summary = RunSummary(
-                started_at=datetime.now().isoformat(),
-                completed_at=datetime.now().isoformat(),
-                git_commit=subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()[:8],
-                total_files=len(file_paths),
-                total_tests=total_tests,
-                passed=total_passed,
-                failed=total_failed,
-                skipped=total_skipped,
-                skipped_setup_failed=0,
-                parse_errors=0,
-                setup_failures=0,
-                machine_tag=os.environ.get("VIBESQL_MACHINE_TAG"),
-                results=all_results,  # Per-test detail parsed from the shim's --emit-detail output
-            )
-            save_to_database(summary, args.results_db, args.vibesql)
-            print(f"\nResults saved to: {args.results_db}")
+        # Final durable save under the pre-allocated run_id. Any files left over
+        # since the last batch checkpoint (the trailing partial batch, or every
+        # file when batching is disabled) are flushed here, and the summary row
+        # is refreshed with the final rolled-up totals. Because we reuse the
+        # up-front run_id — never allocating a new one — all batches share ONE
+        # logical run and `WHERE run_id = MAX(run_id)` covers the whole suite.
+        if args.results_db and run_id is not None:
+            persist_batch()
+            print(f"\nResults saved to: {args.results_db} (run_id={run_id})")
 
         if _SAVE_HAD_FATAL_INSERT_FAILURES:
             sys.exit(2)
