@@ -99,6 +99,54 @@ ORDER BY failed DESC
 LIMIT 10;
 ```
 
+### Raw headline vs. file-weighted metrics (which number is epic-comparable?)
+
+The headline "current pass rate" above is a **raw per-test-row ratio**: passed rows over scored rows (passed + failed + marker rows), summed across every file in the run. This is *the* epic-comparable number. Epic #5779's baseline ("Raw pass rate: 72.3% — 116,719 passed / 44,624 failed" across 728 files) is itself a raw-row ratio with the same inclusion rules: files that produced detail rows in the latest run, with timeout/incomplete/error marker rows counted as failures and `skipped` rows excluded from the denominator. **Compare only raw-to-raw** — the raw headline is the one to hold against 72.3%. Its inclusion rules must never change, or the comparison silently breaks.
+
+The raw ratio has one interpretive hazard: it is dominated by whichever files emit the most rows. A handful of "monster" files (`fuzz.test` ~25k tests, `func.test` ~14.7k) that VibeSQL fails wholesale can drag the raw headline down to single digits even while normal SQL files pass 90-99%. To make that visible — *without* changing the raw headline — `make test-tcl-status` additionally reports two **supplementary** file-weighted metrics. These are reported *alongside* the raw number, never in place of it, and are **not** comparable to the epic's 72.3% (different weighting):
+
+**File-weighted metric — mean per-file pass rate + clean/dirty file counts.** Every file counts equally regardless of row count. `mean_per_file_pass_rate` is the average of each file's own pass rate; `clean_files` vs `files_with_failures` matches the epic's "315 clean / 413 with failures" framing (marker rows count as a failure, same as the raw headline):
+
+```sql
+WITH per_file AS (
+  SELECT
+    file_path,
+    SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) AS f_passed,
+    SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END) AS f_scored,
+    SUM(CASE WHEN status IN ('failed','timeout','incomplete','error') THEN 1 ELSE 0 END) AS f_failed
+  FROM tcl_test_results
+  WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results)
+  GROUP BY file_path
+)
+SELECT
+  COUNT(*) AS files,
+  ROUND(AVG(CASE WHEN f_scored > 0 THEN 100.0 * f_passed / f_scored END), 1) AS mean_per_file_pass_rate,
+  SUM(CASE WHEN f_failed = 0 THEN 1 ELSE 0 END) AS clean_files,
+  SUM(CASE WHEN f_failed > 0 THEN 1 ELSE 0 END) AS files_with_failures
+FROM per_file;
+```
+
+**Top-N files by test count — monster-file visibility.** Surfaces the high-volume files that dominate the raw aggregate, so a low raw headline can be attributed to a few monster files at a glance:
+
+```sql
+SELECT
+  file_path,
+  COUNT(*) AS tests,
+  SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) AS passed,
+  ROUND(
+    100.0 * SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END)
+      / NULLIF(SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END), 0),
+    1
+  ) AS pass_rate
+FROM tcl_test_results
+WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results)
+GROUP BY file_path
+ORDER BY tests DESC
+LIMIT 10;
+```
+
+> **Which number do I quote?** For "how does VibeSQL compare to the epic baseline / to a previous run" use the **raw** headline (unchanged inclusion rules). For "how broad is our SQL coverage, ignoring monster-file domination" use the **file-weighted** mean and the clean/dirty file counts. Never quote the file-weighted number against 72.3% — they are different denominators.
+
 > **Source-of-truth note:** `make test-tcl-status` reads the `tcl_test_runs` summary table for the headline numbers. Any per-file or per-test analysis must query the `tcl_test_results` detail table using the queries above. The two reconcile because every run (native-TCL and static) now writes both. If a detail-row insert fails, `tcl_runner.py` logs it to stderr, counts it, and exits non-zero when more than 5% of inserts fail — so silent divergence between the tables cannot recur unnoticed.
 
 ### Exporting Results
