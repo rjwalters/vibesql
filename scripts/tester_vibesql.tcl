@@ -7425,8 +7425,21 @@ proc run_test_file {filename} {
     # with $::varname (explicit global namespace). Using 'eval' inside this proc
     # would make those variables local to run_test_file, not global.
     # 'uplevel #0' ensures the test file runs in the global scope.
-    if {[catch {uplevel #0 $content} err]} {
-        # A top-level (non-do_test) statement threw and aborted file
+    # Distinguish a genuine mid-file abort (a real TCL_ERROR) from a clean
+    # file-scope `return` (#6151). `catch` reports the propagated return code:
+    #   1 == TCL_ERROR  -> a top-level statement threw and truncated the file.
+    #   2 == TCL_RETURN -> the file executed a bare `return` at file scope,
+    #                      a standard SQLite-test idiom to self-disable a file
+    #                      (e.g. alias.test's `return` after a comment) or to
+    #                      bail after a guard. This is a CLEAN early-exit, not a
+    #                      crash: err is empty and no errorInfo stack exists.
+    #   0 == TCL_OK      -> normal completion (does not enter the block).
+    # Previously EVERY non-zero code (including a clean TCL_RETURN) fell into
+    # the "aborted mid-file" path and wrote a false 'incomplete' marker, so
+    # ~128 self-disabling files were mis-counted as failed worker deaths.
+    set eval_code [catch {uplevel #0 $content} err eval_opts]
+    if {$eval_code == 1} {
+        # TCL_ERROR: a top-level (non-do_test) statement threw and aborted file
         # evaluation — typically a bare `execsql`/`db eval` setup statement
         # that hit a genuine VibeSQL gap, or cross-connection state the shim's
         # per-statement process model cannot preserve (e.g. TEMP objects from
@@ -7446,6 +7459,25 @@ proc run_test_file {filename} {
         # as the file's complete result. The row keeps the tests that DID run
         # (they are already emitted) and marks the file compromised in the DB.
         emit_test_detail incomplete "ABORTED_MID_FILE: $err"
+        set ::file_marker_emitted 1
+    } elseif {$eval_code == 2} {
+        # TCL_RETURN: clean file-scope early-return. Do NOT emit an 'incomplete'
+        # marker. Any tests that DID run before the return are already tallied
+        # (their detail rows were emitted incrementally); if none ran, finish_test
+        # synthesizes a clean 'skipped' row (the capability-self-skip path) so the
+        # file is recorded as a completed 0-test file rather than a worker death.
+        if {$::nTest > 0} {
+            puts "File-scope early return after $::nTest test(s) — file completed cleanly."
+        } else {
+            puts "File-scope early return (self-disabled) — 0 tests, clean early-exit."
+        }
+    } elseif {$eval_code != 0} {
+        # Any other non-zero, non-OK code (TCL_BREAK/TCL_CONTINUE at file scope,
+        # or a custom return code) is not a legitimate completion path. Treat it
+        # conservatively as a genuine abort so real problems are never masked.
+        puts "Setup error (file evaluation aborted mid-file, code $eval_code): $err"
+        puts "Error info: [expr {[info exists ::errorInfo] ? $::errorInfo : {(none)}}]"
+        emit_test_detail incomplete "ABORTED_MID_FILE (code $eval_code): $err"
         set ::file_marker_emitted 1
     }
 
