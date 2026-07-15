@@ -766,6 +766,15 @@ def insert_detail_rows(
     Detail rows carry the AUTOINCREMENT `id` PK, so many rows may share one
     `run_id` via plain INSERTs — this is what makes incremental per-batch
     appends work without a PK conflict.
+
+    Persist strategy (issue #6149): all rows for this call are inserted by a
+    SINGLE `vibesql` process inside ONE transaction, so the CLI's expensive
+    full-DB checkpoint happens exactly ONCE (at COMMIT / process exit) rather
+    than once per 200-row batch. The previous implementation spawned a fresh
+    `vibesql <db> -c ...` process per batch, which re-checkpointed the entire
+    growing results DB every batch — O(rows^2) checkpoint work that ran for
+    hours and torned every rebaseline. A malformed value falls back to a
+    granular per-batch/per-row retry that still counts failures exactly.
     """
     # Helper to escape SQL string literals. Returns the full SQL literal
     # including surrounding quotes (or NULL for empty values).
@@ -808,15 +817,23 @@ def insert_detail_rows(
         "execution_time_ms, line_number"
     )
 
-    def insert_batch(rows: list[TestResult]) -> bool:
-        """Insert a batch of rows in one statement. Returns True on success."""
-        if not rows:
-            return True
+    # Rows-per-INSERT: bound each statement's size to keep the multi-row VALUES
+    # list manageable while still amortizing per-statement overhead.
+    BATCH_SIZE = 200
+
+    def batch_insert_sql(rows: list[TestResult]) -> str:
+        """Build one multi-row INSERT statement for `rows`."""
         values = ",\n".join(row_values(r) for r in rows)
-        insert_sql = f"INSERT INTO tcl_test_results ({columns}) VALUES\n{values};"
+        return f"INSERT INTO tcl_test_results ({columns}) VALUES\n{values};"
+
+    def run_command(sql: str) -> bool:
+        """Run a single statement in its own process. Returns True on success.
+
+        Used only by the rare per-row failure-isolation fallback below.
+        """
         try:
             subprocess.run(
-                [vibesql_path, db_path, "-c", insert_sql],
+                [vibesql_path, db_path, "-c", sql],
                 capture_output=True,
                 check=True,
             )
@@ -824,29 +841,90 @@ def insert_detail_rows(
         except subprocess.CalledProcessError:
             return False
 
+    def run_txn_script(insert_statements: list[str]) -> bool:
+        """Execute many INSERTs in ONE vibesql process wrapped in a single
+        transaction. Returns True on a clean exit (every insert succeeded).
+
+        This is the O(n^2) -> O(n) fix (issue #6149). Spawning a fresh
+        `vibesql <db> -c ...` process per 200-row batch made the CLI reload and
+        re-checkpoint the ENTIRE growing results DB on every batch's clean exit,
+        so a full run's persist did checkpoint work proportional to rows^2 and
+        ran for hours at 100% CPU (torning every rebaseline). The CLI's script
+        executor suppresses its per-modification-statement auto-save while a
+        transaction is open and checkpoints exactly ONCE at COMMIT, so feeding
+        all batches to a single process inside one BEGIN/COMMIT collapses the
+        whole persist to a single full-DB checkpoint at process exit.
+        """
+        if not insert_statements:
+            return True
+        script = "BEGIN;\n" + "\n".join(insert_statements) + "\nCOMMIT;\n"
+        try:
+            proc = subprocess.run(
+                [vibesql_path, db_path, "--stdin"],
+                input=script,
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        except OSError:
+            return False
+
+    def delete_this_calls_rows() -> None:
+        """Remove any rows THIS call may have already landed, scoped to this
+        call's files under `run_id`.
+
+        A batched transaction that hits a malformed value is NOT atomic in the
+        VibeSQL CLI: the script executor continues past the failed statement
+        while the transaction is open and still COMMITs the survivors. Before
+        the granular retry re-inserts everything we must therefore clear the
+        partial writes, or good rows would be double-inserted. The delete is
+        scoped to `file_path IN (this call's files)` so it never touches earlier
+        file-batches persisted under the same shared `run_id` (the #6136
+        incremental durability model persists each file exactly once).
+        """
+        distinct_files = sorted({r.file_path for r in results if r.file_path})
+        if not distinct_files:
+            return
+        in_list = ", ".join(sql_literal(f, 500) for f in distinct_files)
+        run_command(
+            f"DELETE FROM tcl_test_results "
+            f"WHERE run_id = {run_id} AND file_path IN ({in_list});"
+        )
+
     total_rows = len(results)
     inserted = 0
     failed_inserts = 0
     failure_samples: list[str] = []
 
-    # Insert in batches for speed. If a batch fails (e.g. one malformed value),
-    # fall back to per-row inserts so we lose at most the genuinely-bad rows and
-    # can count/report exactly how many failed instead of silently dropping the
-    # entire batch.
-    BATCH_SIZE = 200
-    for start in range(0, total_rows, BATCH_SIZE):
-        batch = results[start:start + BATCH_SIZE]
-        if insert_batch(batch):
-            inserted += len(batch)
-            continue
-        # Batch failed: retry each row individually.
-        for r in batch:
-            if insert_batch([r]):
-                inserted += 1
-            else:
-                failed_inserts += 1
-                if len(failure_samples) < 5:
-                    failure_samples.append(f"{r.file_path}::{r.test_name}")
+    # Partition into bounded multi-row INSERT statements once; both the fast
+    # single-transaction path and the granular fallback reuse the same batches.
+    batches = [
+        results[start:start + BATCH_SIZE]
+        for start in range(0, total_rows, BATCH_SIZE)
+    ]
+
+    # Fast path: ALL batches in ONE process inside ONE transaction -> ONE
+    # checkpoint at COMMIT. This is the common case (rows are well-formed).
+    if batches and run_txn_script([batch_insert_sql(b) for b in batches]):
+        inserted = total_rows
+    elif batches:
+        # Slow path (rare): a malformed value aborted the batched transaction,
+        # possibly leaving partial writes. Clean this call's rows, then retry
+        # per batch and finally per row so we lose at most the genuinely-bad
+        # rows and can count/report exactly how many failed.
+        delete_this_calls_rows()
+        for batch in batches:
+            if run_txn_script([batch_insert_sql(batch)]):
+                inserted += len(batch)
+                continue
+            # Batch failed: retry each row individually.
+            for r in batch:
+                if run_command(batch_insert_sql([r])):
+                    inserted += 1
+                else:
+                    failed_inserts += 1
+                    if len(failure_samples) < 5:
+                        failure_samples.append(f"{r.file_path}::{r.test_name}")
 
     if total_rows > 0:
         fail_pct = 100.0 * failed_inserts / total_rows
