@@ -289,10 +289,19 @@ test-tcl:
 # shared run_id (#6136), so a killed full run is durable at batch granularity
 # and the canonical `WHERE run_id = MAX(run_id)` status query still covers the
 # whole suite. Override the batch size with TCL_BATCH_SIZE=<n> (0 disables).
+#
+# TCL_JOBS controls native-TCL file concurrency (#6141): up to N test files run
+# at once, one isolated tclsh worker per job, cutting full-suite wall-clock
+# ~linearly with cores. Defaults to 1 (sequential, today's behavior) — set
+# TCL_JOBS=$(nproc) (or a specific core count) to parallelize. Full canonical
+# runs still require a quiet machine (see CLAUDE.md): parallelism only speeds up
+# an otherwise-idle box; on a loaded machine it produces timeout/incomplete
+# markers instead.
 TCL_BATCH_SIZE ?= 50
+TCL_JOBS ?= 1
 test-tcl-all:
 	@echo "Running full SQLite TCL test suite (all 1174 files)..."
-	./scripts/tcltest run --timeout $(TCL_TIMEOUT) --batch-size $(TCL_BATCH_SIZE)
+	./scripts/tcltest run --timeout $(TCL_TIMEOUT) --batch-size $(TCL_BATCH_SIZE) --jobs $(TCL_JOBS)
 
 # Run specific TCL test file
 test-tcl-file:
