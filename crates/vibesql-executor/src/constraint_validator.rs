@@ -18,8 +18,15 @@ use crate::errors::ExecutorError;
 pub struct ConstraintResult {
     /// Primary key column names (if any)
     pub primary_key: Option<Vec<String>>,
+    /// Explicit per-key-part `COLLATE` for the PRIMARY KEY, parallel to
+    /// `primary_key`. `None` for a key part with no explicit collation (falls
+    /// back to the column's declared collation, then BINARY). Issue #5881.
+    pub primary_key_collations: Option<Vec<Option<String>>>,
     /// UNIQUE constraints (each Vec<String> is a set of columns)
     pub unique_constraints: Vec<Vec<String>>,
+    /// Explicit per-key-part `COLLATE` for each UNIQUE constraint, parallel to
+    /// `unique_constraints`. Issue #5881.
+    pub unique_constraint_collations: Vec<Vec<Option<String>>>,
     /// CHECK constraints (name, expression pairs)
     pub check_constraints: Vec<(String, Expression)>,
     /// Columns that should be marked as NOT NULL
@@ -31,11 +38,27 @@ impl ConstraintResult {
     pub fn new() -> Self {
         Self {
             primary_key: None,
+            primary_key_collations: None,
             unique_constraints: Vec::new(),
+            unique_constraint_collations: Vec::new(),
             check_constraints: Vec::new(),
             not_null_columns: Vec::new(),
         }
     }
+}
+
+/// Extract the explicit key-part `COLLATE` names from a table-level
+/// PRIMARY KEY / UNIQUE column list, positionally aligned with the columns.
+/// Expression key parts (which cannot appear in these constraints today)
+/// contribute `None`. Issue #5881.
+fn key_part_collations(columns: &[vibesql_ast::IndexColumn]) -> Vec<Option<String>> {
+    columns
+        .iter()
+        .map(|c| match c {
+            vibesql_ast::IndexColumn::Column { collation, .. } => collation.clone(),
+            vibesql_ast::IndexColumn::Expression { .. } => None,
+        })
+        .collect()
 }
 
 /// Constraint validator for table creation and alteration
@@ -83,6 +106,10 @@ impl ConstraintValidator {
                             });
                         }
                         result.primary_key = Some(vec![col_def.name.clone()]);
+                        // Column-level PK carries no key-part COLLATE (any COLLATE
+                        // is a separate column constraint that sets the column's
+                        // declared collation); enforcement falls back to that.
+                        result.primary_key_collations = Some(vec![None]);
                         // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
                         // Other types (TEXT, REAL, BLOB, etc.) can have NULL in PRIMARY KEY
                         if col_def.data_type == DataType::Integer {
@@ -92,6 +119,9 @@ impl ConstraintValidator {
                     }
                     ColumnConstraintKind::Unique { .. } => {
                         result.unique_constraints.push(vec![col_def.name.clone()]);
+                        // Column-level UNIQUE carries no key-part COLLATE; fall
+                        // back to the column's declared collation at enforcement.
+                        result.unique_constraint_collations.push(vec![None]);
                     }
                     ColumnConstraintKind::Check { expr, source_text } => {
                         // Use explicit name if provided; otherwise use the
@@ -147,6 +177,9 @@ impl ConstraintValidator {
                     let column_names: Vec<String> =
                         pk_cols.iter().map(|c| c.expect_column_name().to_string()).collect();
                     result.primary_key = Some(column_names.clone());
+                    // Carry the explicit per-key-part COLLATE so INSERT uniqueness
+                    // enforcement can honor `PRIMARY KEY(a COLLATE nocase)` (#5881).
+                    result.primary_key_collations = Some(key_part_collations(pk_cols));
                     // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
                     // For table-level constraints, check each column's type
                     for col_name in &column_names {
@@ -164,6 +197,9 @@ impl ConstraintValidator {
                     let column_names: Vec<String> =
                         columns.iter().map(|c| c.expect_column_name().to_string()).collect();
                     result.unique_constraints.push(column_names);
+                    // Carry the explicit per-key-part COLLATE so INSERT uniqueness
+                    // enforcement can honor `UNIQUE(a COLLATE nocase)` (#5881).
+                    result.unique_constraint_collations.push(key_part_collations(columns));
                 }
                 TableConstraintKind::Check { expr, source_text } => {
                     // Use explicit name if provided; otherwise the verbatim
@@ -220,10 +256,14 @@ impl ConstraintValidator {
         // Set primary key
         if let Some(pk) = &constraint_result.primary_key {
             table_schema.primary_key = Some(pk.clone());
+            // Key-part collations are aligned with the PK column list (#5881).
+            table_schema.primary_key_collations = constraint_result.primary_key_collations.clone();
         }
 
         // Set unique constraints
         table_schema.unique_constraints = constraint_result.unique_constraints.clone();
+        table_schema.unique_constraint_collations =
+            constraint_result.unique_constraint_collations.clone();
 
         // Set check constraints
         table_schema.check_constraints = constraint_result.check_constraints.clone();
@@ -567,5 +607,125 @@ mod tests {
         assert_eq!(result.primary_key, Some(vec!["big_id".to_string()]));
         // SQLite only treats INTEGER (not INT, BIGINT, etc.) specially
         assert!(!result.not_null_columns.contains(&"big_id".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-key-part COLLATE collection + effective resolution (issue #5881)
+    // -----------------------------------------------------------------------
+
+    fn index_col_with_collation(name: &str, collation: Option<&str>) -> vibesql_ast::IndexColumn {
+        vibesql_ast::IndexColumn::Column {
+            column_name: name.to_string(),
+            direction: vibesql_ast::OrderDirection::Asc,
+            prefix_length: None,
+            collation: collation.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_table_level_pk_collects_key_part_collation() {
+        let columns =
+            vec![make_column_def_with_type("a", DataType::Varchar { max_length: None }, vec![])];
+        let constraints = vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: vec![index_col_with_collation("a", Some("nocase"))],
+                on_conflict: None,
+            },
+        }];
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        assert_eq!(result.primary_key_collations, Some(vec![Some("nocase".to_string())]));
+    }
+
+    #[test]
+    fn test_table_level_unique_collects_key_part_collation() {
+        let columns = vec![
+            make_column_def_with_type("a", DataType::Varchar { max_length: None }, vec![]),
+            make_column_def_with_type("b", DataType::Varchar { max_length: None }, vec![]),
+        ];
+        let constraints = vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::Unique {
+                columns: vec![
+                    index_col_with_collation("a", Some("rtrim")),
+                    index_col_with_collation("b", None),
+                ],
+                on_conflict: None,
+            },
+        }];
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        assert_eq!(
+            result.unique_constraint_collations,
+            vec![vec![Some("rtrim".to_string()), None]]
+        );
+    }
+
+    #[test]
+    fn test_column_level_pk_has_no_key_part_collation() {
+        // A column-level PRIMARY KEY carries no key-part COLLATE; any collation
+        // is a separate column constraint that lives on the column itself.
+        let columns = vec![make_column_def_with_type(
+            "id",
+            DataType::Varchar { max_length: None },
+            vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
+        )];
+        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        assert_eq!(result.primary_key_collations, Some(vec![None]));
+    }
+
+    #[test]
+    fn test_apply_to_schema_effective_collation_prefers_key_part() {
+        // Key-part COLLATE nocase on column `a` (which itself has no declared
+        // collation) → effective PK collation is nocase.
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        let columns =
+            vec![make_column_def_with_type("a", DataType::Varchar { max_length: None }, vec![])];
+        let constraints = vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: vec![index_col_with_collation("a", Some("NOCASE"))],
+                on_conflict: None,
+            },
+        }];
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+
+        let mut schema = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true)],
+        );
+        ConstraintValidator::apply_to_schema(&mut schema, &result);
+
+        assert_eq!(
+            schema.primary_key_effective_collations(),
+            Some(vec![Some("NOCASE".to_string())])
+        );
+    }
+
+    #[test]
+    fn test_effective_collation_falls_back_to_column_collation() {
+        // No key-part COLLATE, but the column is declared NOCASE → effective PK
+        // collation falls back to the column's declared collation.
+        use vibesql_catalog::{ColumnSchema, TableSchema};
+        let columns =
+            vec![make_column_def_with_type("a", DataType::Varchar { max_length: None }, vec![])];
+        let constraints = vec![TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: vec![index_col_with_collation("a", None)],
+                on_conflict: None,
+            },
+        }];
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+
+        let mut col =
+            ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true);
+        col.collation = Some("nocase".to_string());
+        let mut schema = TableSchema::new("t".to_string(), vec![col]);
+        ConstraintValidator::apply_to_schema(&mut schema, &result);
+
+        assert_eq!(
+            schema.primary_key_effective_collations(),
+            Some(vec![Some("nocase".to_string())])
+        );
     }
 }

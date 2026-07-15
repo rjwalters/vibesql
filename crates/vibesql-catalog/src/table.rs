@@ -79,6 +79,17 @@ pub struct TableSchema {
     /// Unique constraints - each inner vec represents a unique constraint (can be single or
     /// composite)
     pub unique_constraints: Vec<Vec<String>>,
+    /// Explicit per-key-part collation for each PRIMARY KEY column, parallel to
+    /// `primary_key`. `Some(vec)` mirrors the PK column list; each element is the
+    /// key-part `COLLATE` name (`PRIMARY KEY(a COLLATE nocase)`), or `None` to
+    /// fall back to the column's declared collation, then BINARY. Not serialized
+    /// in the binary catalog — rederived from `sql_source` on load (like
+    /// `strict_types`), so no format bump is needed. Issue #5881.
+    pub primary_key_collations: Option<Vec<Option<String>>>,
+    /// Explicit per-key-part collation for each UNIQUE constraint, parallel to
+    /// `unique_constraints` (outer + inner index alignment). Same fallback and
+    /// persistence semantics as `primary_key_collations`. Issue #5881.
+    pub unique_constraint_collations: Vec<Vec<Option<String>>>,
     /// Check constraints - each tuple is (constraint_name, check_expression)
     pub check_constraints: Vec<(String, vibesql_ast::Expression)>,
     /// Foreign key constraints
@@ -160,6 +171,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -196,6 +209,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -222,6 +237,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -248,6 +265,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -275,6 +294,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -304,6 +325,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -330,6 +353,8 @@ impl TableSchema {
             sql_source: None,
             strict: false,
             strict_types: Vec::new(),
+            primary_key_collations: None,
+            unique_constraint_collations: Vec::new(),
         }
     }
 
@@ -429,6 +454,71 @@ impl TableSchema {
             .collect()
     }
 
+    /// Effective per-key-part collation for the PRIMARY KEY, aligned with
+    /// [`get_primary_key_indices`](Self::get_primary_key_indices).
+    ///
+    /// Resolution per key part follows SQLite semantics (issue #5881):
+    /// explicit key-part `COLLATE` (`PRIMARY KEY(a COLLATE nocase)`), else the
+    /// column's declared collation, else `None` (BINARY, case-sensitive). The
+    /// key-part vector is looked up by position with a safe fallback so a stale
+    /// or short `primary_key_collations` (e.g. after DROP COLUMN) degrades to
+    /// the column's declared collation rather than panicking.
+    ///
+    /// Returns `None` when the table has no primary key.
+    pub fn primary_key_effective_collations(&self) -> Option<Vec<Option<String>>> {
+        let pk_cols = self.primary_key.as_ref()?;
+        Some(
+            pk_cols
+                .iter()
+                .enumerate()
+                .map(|(i, col_name)| {
+                    let key_part = self
+                        .primary_key_collations
+                        .as_ref()
+                        .and_then(|v| v.get(i).cloned().flatten());
+                    self.resolve_key_part_collation(key_part, col_name)
+                })
+                .collect(),
+        )
+    }
+
+    /// Effective per-key-part collation for the UNIQUE constraint at
+    /// `constraint_idx`, aligned with its entry in
+    /// [`get_unique_constraint_indices`](Self::get_unique_constraint_indices).
+    /// Same key-part → column → BINARY resolution as
+    /// [`primary_key_effective_collations`](Self::primary_key_effective_collations).
+    pub fn unique_constraint_effective_collations(
+        &self,
+        constraint_idx: usize,
+    ) -> Vec<Option<String>> {
+        let Some(cols) = self.unique_constraints.get(constraint_idx) else {
+            return Vec::new();
+        };
+        cols.iter()
+            .enumerate()
+            .map(|(i, col_name)| {
+                let key_part = self
+                    .unique_constraint_collations
+                    .get(constraint_idx)
+                    .and_then(|v| v.get(i).cloned().flatten());
+                self.resolve_key_part_collation(key_part, col_name)
+            })
+            .collect()
+    }
+
+    /// Resolve a single key part's effective collation: the explicit key-part
+    /// `COLLATE` if present, otherwise the named column's declared collation,
+    /// otherwise `None` (BINARY).
+    fn resolve_key_part_collation(
+        &self,
+        key_part: Option<String>,
+        col_name: &str,
+    ) -> Option<String> {
+        key_part.or_else(|| {
+            self.get_column_index(col_name).and_then(|idx| self.columns[idx].collation.clone())
+        })
+    }
+
     /// Add a column to the table schema
     pub fn add_column(&mut self, column: ColumnSchema) -> Result<(), crate::CatalogError> {
         if self.get_column(&column.name).is_some() {
@@ -463,6 +553,14 @@ impl TableSchema {
                 self.primary_key = None;
             }
         }
+
+        // The per-key-part collation vectors (issue #5881) are positionally
+        // aligned with `primary_key` / `unique_constraints`; a column removal
+        // shifts those lists, so drop the explicit key-part collations rather
+        // than risk stale misalignment. Enforcement then falls back to each
+        // column's declared collation, which remains correct.
+        self.primary_key_collations = None;
+        self.unique_constraint_collations = Vec::new();
 
         // Remove from unique constraints
         self.unique_constraints = self

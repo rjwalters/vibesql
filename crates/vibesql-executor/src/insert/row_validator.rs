@@ -211,39 +211,64 @@ impl<'a> RowValidator<'a> {
         pk_values: &Option<Vec<vibesql_types::SqlValue>>,
     ) -> Result<(), ExecutorError> {
         if let Some(ref new_pk_values) = pk_values {
+            // Effective per-key-part collation (key-part COLLATE → column
+            // collation → BINARY). A non-BINARY collation forces a
+            // collation-aware comparison because the primary-key hash index is
+            // keyed on exact `SqlValue` bytes and would miss collated
+            // duplicates — e.g. NOCASE 'a' vs 'A' (issue #5881).
+            let collations = self.schema.primary_key_effective_collations().unwrap_or_default();
+            let collated = super::constraints::has_non_binary_collation(&collations);
+
             // Check for duplicates within the batch
-            if self.batch_pk_values.contains(new_pk_values) {
-                let pk_col_names: Vec<String> = self.schema.primary_key.as_ref().unwrap().clone();
-                // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                let qualified_cols: Vec<String> =
-                    pk_col_names.iter().map(|col| format!("{}.{}", self.table_name, col)).collect();
-                // SQLite-compatible: output the message as-is without prefix
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "UNIQUE constraint failed: {}",
-                    qualified_cols.join(", ")
-                )));
+            let dup_in_batch = if collated {
+                self.batch_pk_values.iter().any(|b| {
+                    super::constraints::key_eq_with_collations(new_pk_values, b, &collations)
+                })
+            } else {
+                self.batch_pk_values.contains(new_pk_values)
+            };
+            if dup_in_batch {
+                return Err(super::constraints::primary_key_violation(
+                    self.schema,
+                    self.table_name,
+                ));
             }
 
-            // Check for duplicates in existing table data using index
+            // Check for duplicates in existing table data.
             let table = self
                 .db
                 .get_table(self.table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(self.table_name.to_string()))?;
 
-            if let Some(pk_index) = table.primary_key_index() {
-                if pk_index.contains_key(new_pk_values) {
-                    let pk_col_names: Vec<String> =
-                        self.schema.primary_key.as_ref().unwrap().clone();
-                    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                    let qualified_cols: Vec<String> = pk_col_names
+            if collated {
+                // Collation-aware scan: the hash index cannot surface collated
+                // duplicates, so compare every row with the key-part collation.
+                let pk_indices = self.schema.get_primary_key_indices().unwrap_or_default();
+                for existing_row in table.scan() {
+                    let existing_pk_values: Vec<vibesql_types::SqlValue> = pk_indices
                         .iter()
-                        .map(|col| format!("{}.{}", self.table_name, col))
+                        .filter_map(|&idx| existing_row.get(idx).cloned())
                         .collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    if existing_pk_values.contains(&vibesql_types::SqlValue::Null) {
+                        continue;
+                    }
+                    if super::constraints::key_eq_with_collations(
+                        new_pk_values,
+                        &existing_pk_values,
+                        &collations,
+                    ) {
+                        return Err(super::constraints::primary_key_violation(
+                            self.schema,
+                            self.table_name,
+                        ));
+                    }
+                }
+            } else if let Some(pk_index) = table.primary_key_index() {
+                if pk_index.contains_key(new_pk_values) {
+                    return Err(super::constraints::primary_key_violation(
+                        self.schema,
+                        self.table_name,
+                    ));
                 }
             }
         }
@@ -265,46 +290,48 @@ impl<'a> RowValidator<'a> {
                 continue;
             };
 
+            // Effective per-key-part collation (key-part COLLATE → column
+            // collation → BINARY). A non-BINARY collation forces a
+            // collation-aware comparison because the unique hash index is keyed
+            // on exact `SqlValue` bytes (issue #5881).
+            let collations = self.schema.unique_constraint_effective_collations(constraint_idx);
+            let collated = super::constraints::has_non_binary_collation(&collations);
+
             // Check for duplicates within the batch
-            if self.batch_unique_values[constraint_idx].contains(new_unique_values) {
-                let unique_col_names: Vec<String> =
-                    self.schema.unique_constraints[constraint_idx].clone();
-                // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-                let qualified_cols: Vec<String> = unique_col_names
-                    .iter()
-                    .map(|col| format!("{}.{}", self.table_name, col))
-                    .collect();
-                // SQLite-compatible: output the message as-is without prefix
-                return Err(ExecutorError::SqliteCompatError(format!(
-                    "UNIQUE constraint failed: {}",
-                    qualified_cols.join(", ")
-                )));
+            let dup_in_batch = if collated {
+                self.batch_unique_values[constraint_idx].iter().any(|b| {
+                    super::constraints::key_eq_with_collations(new_unique_values, b, &collations)
+                })
+            } else {
+                self.batch_unique_values[constraint_idx].contains(new_unique_values)
+            };
+            if dup_in_batch {
+                return Err(super::constraints::unique_constraint_violation(
+                    self.schema,
+                    self.table_name,
+                    constraint_idx,
+                ));
             }
 
-            // Check for duplicates in existing table data using index
+            // Check for duplicates in existing table data.
             let table = self
                 .db
                 .get_table(self.table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(self.table_name.to_string()))?;
 
-            if constraint_idx < table.unique_indexes().len() {
+            // BINARY fast path uses the hash index; a non-BINARY collation (or a
+            // missing index) falls through to a collation-aware scan.
+            if !collated && constraint_idx < table.unique_indexes().len() {
                 let unique_index = &table.unique_indexes()[constraint_idx];
                 if unique_index.contains_key(new_unique_values) {
-                    let unique_col_names: Vec<String> =
-                        self.schema.unique_constraints[constraint_idx].clone();
-                    // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-                    let qualified_cols: Vec<String> = unique_col_names
-                        .iter()
-                        .map(|col| format!("{}.{}", self.table_name, col))
-                        .collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    return Err(super::constraints::unique_constraint_violation(
+                        self.schema,
+                        self.table_name,
+                        constraint_idx,
+                    ));
                 }
             } else {
-                // Fallback to table scan if index not available
+                // Scan (collation-aware when `collated`, exact otherwise).
                 let unique_indices = &unique_constraint_indices[constraint_idx];
                 for existing_row in table.scan() {
                     let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
@@ -317,19 +344,21 @@ impl<'a> RowValidator<'a> {
                         continue;
                     }
 
-                    if new_unique_values == &existing_unique_values {
-                        let unique_col_names: Vec<String> =
-                            self.schema.unique_constraints[constraint_idx].clone();
-                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-                        let qualified_cols: Vec<String> = unique_col_names
-                            .iter()
-                            .map(|col| format!("{}.{}", self.table_name, col))
-                            .collect();
-                        // SQLite-compatible: output the message as-is without prefix
-                        return Err(ExecutorError::SqliteCompatError(format!(
-                            "UNIQUE constraint failed: {}",
-                            qualified_cols.join(", ")
-                        )));
+                    let is_dup = if collated {
+                        super::constraints::key_eq_with_collations(
+                            new_unique_values,
+                            &existing_unique_values,
+                            &collations,
+                        )
+                    } else {
+                        *new_unique_values == existing_unique_values
+                    };
+                    if is_dup {
+                        return Err(super::constraints::unique_constraint_violation(
+                            self.schema,
+                            self.table_name,
+                            constraint_idx,
+                        ));
                     }
                 }
             }

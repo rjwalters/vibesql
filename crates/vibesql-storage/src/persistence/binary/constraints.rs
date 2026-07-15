@@ -213,13 +213,40 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
         }
     }
 
+    // ---- PRIMARY KEY key-part collations (issue #5881) ----
+    // The explicit per-key-part COLLATE (`PRIMARY KEY(a COLLATE nocase)`) is not
+    // a serialized binary field, so before this rehydration a reloaded WITHOUT
+    // ROWID / composite PK forgot its collation and INSERT uniqueness silently
+    // reverted to BINARY (a case-variant duplicate would wrongly be accepted).
+    // Rederive it from the re-parsed source, aligned with `primary_key`. A
+    // column-level PK (no table-level key-part COLLATE) leaves every entry
+    // `None`, which falls back to the column's declared collation at enforcement.
+    if let Some(pk_cols) = schema.primary_key.clone() {
+        let table_level_key_parts = create.table_constraints.iter().find_map(|tc| {
+            if let vibesql_ast::TableConstraintKind::PrimaryKey { columns, .. } = &tc.kind {
+                Some(
+                    columns
+                        .iter()
+                        .map(|c| match c {
+                            vibesql_ast::IndexColumn::Column { collation, .. } => collation.clone(),
+                            vibesql_ast::IndexColumn::Expression { .. } => None,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            }
+        });
+        schema.primary_key_collations =
+            Some(table_level_key_parts.unwrap_or_else(|| vec![None; pk_cols.len()]));
+    }
+
     // ---- CHECK constraints (column-level first, then table-level) ----
     // Matches ConstraintValidator::process_constraints ordering and naming.
     let mut check_constraints: Vec<(String, vibesql_ast::Expression)> = Vec::new();
     for col_def in &create.columns {
         for constraint in &col_def.constraints {
-            if let vibesql_ast::ColumnConstraintKind::Check { expr, source_text } =
-                &constraint.kind
+            if let vibesql_ast::ColumnConstraintKind::Check { expr, source_text } = &constraint.kind
             {
                 use vibesql_ast::pretty_print::ToSql;
                 // Prefer the explicit name, then the verbatim CHECK source
@@ -410,11 +437,8 @@ mod tests {
     fn rehydrated_check_name_preserves_source_spacing() {
         // Both spaced and unspaced CHECK forms round-trip verbatim through
         // rehydration, matching SQLite's violation-message text byte-for-byte.
-        let mut spaced = schema_with_source(
-            "t",
-            vec![col("d")],
-            "CREATE TABLE t(d INTEGER, CHECK (d > 0))",
-        );
+        let mut spaced =
+            schema_with_source("t", vec![col("d")], "CREATE TABLE t(d INTEGER, CHECK (d > 0))");
         rehydrate_constraints_from_sql_source(&mut spaced, &HashMap::new()).unwrap();
         assert_eq!(spaced.check_constraints[0].0, "d > 0");
 
@@ -584,11 +608,36 @@ mod tests {
 
     #[test]
     fn non_strict_table_stays_non_strict_on_rehydrate() {
-        let mut schema =
-            schema_with_source("t", vec![col("a")], "CREATE TABLE t(a INTEGER)");
+        let mut schema = schema_with_source("t", vec![col("a")], "CREATE TABLE t(a INTEGER)");
         rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
         assert!(!schema.strict);
         assert!(schema.strict_types.is_empty());
+    }
+
+    #[test]
+    fn rehydrates_primary_key_key_part_collation() {
+        // The explicit `PRIMARY KEY(a COLLATE nocase)` key-part collation is not
+        // a serialized binary field; it must be rederived from `sql_source` so
+        // INSERT uniqueness keeps honoring it after a reload (issue #5881).
+        let mut schema = schema_with_source(
+            "t",
+            vec![col("a"), col("b")],
+            "CREATE TABLE t(a, b, PRIMARY KEY(a COLLATE nocase)) WITHOUT ROWID",
+        );
+        schema.primary_key = Some(vec!["a".to_string()]);
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+        assert_eq!(schema.primary_key_collations, Some(vec![Some("nocase".to_string())]));
+    }
+
+    #[test]
+    fn rehydrates_column_level_pk_with_no_key_part_collation() {
+        // A column-level PK carries no key-part COLLATE, so every entry is None
+        // (enforcement falls back to the column's declared collation).
+        let mut schema =
+            schema_with_source("t", vec![col("id")], "CREATE TABLE t(id INTEGER PRIMARY KEY)");
+        schema.primary_key = Some(vec!["id".to_string()]);
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+        assert_eq!(schema.primary_key_collations, Some(vec![None]));
     }
 
     #[test]
