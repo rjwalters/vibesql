@@ -185,7 +185,7 @@ fn expression_index_timestamp_one_sided_ranges_full_strings() {
 
 #[test]
 fn expression_index_timestamp_no_over_return_on_lower_bound() {
-    let mut db = timestamp_expression_db();
+    let db = timestamp_expression_db();
     // Over-return guard: rows strictly below the bound must NOT be returned.
     // Before the fix, lower-bounded probes returned every temporal key.
     let rows = select_ints(&db, "SELECT x FROM t1 WHERE datetime(b) >= '2017-07-10'").unwrap();

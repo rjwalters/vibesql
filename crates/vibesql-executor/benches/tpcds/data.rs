@@ -11,7 +11,7 @@
 //!   customer_demographics, household_demographics, income_band, store, catalog_page, web_page,
 //!   web_site, warehouse, ship_mode, reason, promotion, call_center
 
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 // Gender options

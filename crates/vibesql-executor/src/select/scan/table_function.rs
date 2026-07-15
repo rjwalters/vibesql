@@ -156,16 +156,15 @@ pub(crate) fn execute_table_function(
     // `json_each(t.j).json == t.j` byte-for-byte (json101-5.5/5.6 compare with
     // `<>`). For a JSONB blob the text form of the decoded document is used; for
     // a non-text scalar its JSON scalar token is used.
-    let mut json_column_text: Option<String> = None;
-    let root = match &json_value {
+    let (root, json_column_text): (_, Option<String>) = match &json_value {
         SqlValue::Null => return Ok(super::FromResult::from_rows(schema, vec![])),
         SqlValue::Blob(bytes) => {
             let node = decode_jsonb_blob(bytes)
                 .ok_or_else(|| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
             // JSONB blob: echo the decoded document as normalized JSON text
             // (the raw blob is not valid text to echo).
-            json_column_text = Some(json_node_to_json_text(&node));
-            node
+            let text = json_node_to_json_text(&node);
+            (node, Some(text))
         }
         other => {
             let json_str = match sqlvalue_as_json_text(other) {
@@ -175,8 +174,7 @@ pub(crate) fn execute_table_function(
             let node = parse_json_relaxed(&json_str)
                 .map_err(|_| ExecutorError::SqliteCompatError("malformed JSON".to_string()))?;
             // Echo the input text verbatim (preserves original whitespace).
-            json_column_text = Some(json_str);
-            node
+            (node, Some(json_str))
         }
     };
 

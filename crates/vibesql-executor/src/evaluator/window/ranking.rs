@@ -8,10 +8,7 @@ use vibesql_ast::{Expression, OrderByItem};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use super::{
-    partitioning::Partition,
-    sorting::{compare_values, compare_values_with_collation},
-};
+use super::{partitioning::Partition, sorting::compare_values_with_collation};
 
 /// Check if ORDER BY values differ between two rows, respecting collation
 fn order_values_differ<F>(

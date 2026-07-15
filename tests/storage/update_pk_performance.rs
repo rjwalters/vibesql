@@ -56,6 +56,7 @@ fn test_update_with_pk_index_performance() {
             alias: None,
             assignments: vec![Assignment {
                 column: "value".to_string(),
+                columns: Vec::new(),
                 value: Expression::BinaryOp {
                     left: Box::new(Expression::ColumnRef(ColumnIdentifier::simple("value", false))),
                     op: BinaryOperator::Plus,
