@@ -1,5 +1,84 @@
 use crate::errors::ExecutorError;
 
+/// The text behind a `SqlValue`, for collation-aware comparison. Only the
+/// string variants carry a collating sequence; everything else compares by
+/// exact `SqlValue` equality regardless of the declared collation.
+pub(crate) fn sql_value_text(v: &vibesql_types::SqlValue) -> Option<&str> {
+    match v {
+        vibesql_types::SqlValue::Character(s) | vibesql_types::SqlValue::Varchar(s) => {
+            Some(s.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// Collation-aware equality for a single key value pair, layered on top of the
+/// strict `SqlValue` equality used for BINARY key comparisons (issue #5881).
+///
+/// Only text operands under NOCASE / RTRIM diverge from raw equality; BINARY, an
+/// unrecognized collation name, or a non-text operand all fall back to `a == b`
+/// (preserving the pre-existing exact-match semantics). This intentionally does
+/// NOT apply the numeric coercion that FK comparison uses — PK/UNIQUE keys are
+/// compared by strict typed equality, exactly as before.
+pub(crate) fn value_eq_with_collation(
+    a: &vibesql_types::SqlValue,
+    b: &vibesql_types::SqlValue,
+    collation: Option<&str>,
+) -> bool {
+    if a == b {
+        return true;
+    }
+    let Some(name) = collation else {
+        return false;
+    };
+    let (Some(sa), Some(sb)) = (sql_value_text(a), sql_value_text(b)) else {
+        return false;
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "nocase" => sa.eq_ignore_ascii_case(sb),
+        "rtrim" => sa.trim_end_matches(' ') == sb.trim_end_matches(' '),
+        _ => false,
+    }
+}
+
+/// Collation-aware equality for a whole key tuple, applying each key part's
+/// effective collation (aligned positionally with the key columns).
+pub(crate) fn key_eq_with_collations(
+    a: &[vibesql_types::SqlValue],
+    b: &[vibesql_types::SqlValue],
+    collations: &[Option<String>],
+) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b.iter()).enumerate().all(|(i, (x, y))| {
+            value_eq_with_collation(x, y, collations.get(i).and_then(|c| c.as_deref()))
+        })
+}
+
+/// True when any key part resolves to a non-BINARY collation. In that case the
+/// raw hash indexes (keyed on exact `SqlValue`) would miss collated duplicates
+/// — e.g. `'a'` and `'A'` hash to different buckets under NOCASE — so the caller
+/// must fall back to a collation-aware scan instead of the O(1) hash lookup.
+pub(crate) fn has_non_binary_collation(collations: &[Option<String>]) -> bool {
+    collations
+        .iter()
+        .any(|c| matches!(c.as_deref(), Some(name) if !name.eq_ignore_ascii_case("binary")))
+}
+
+/// Build the SQLite-compatible "UNIQUE constraint failed: t.a, t.b" error for a
+/// PRIMARY KEY violation.
+pub(crate) fn primary_key_violation(
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+) -> ExecutorError {
+    let pk_col_names: Vec<String> = schema.primary_key.clone().unwrap_or_default();
+    let qualified_cols: Vec<String> =
+        pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
+    ExecutorError::SqliteCompatError(format!(
+        "UNIQUE constraint failed: {}",
+        qualified_cols.join(", ")
+    ))
+}
+
 /// Enforce PRIMARY KEY constraint (uniqueness)
 /// Returns Ok if constraint is satisfied
 pub fn enforce_primary_key_constraint(
@@ -20,17 +99,20 @@ pub fn enforce_primary_key_constraint(
             return Ok(());
         }
 
+        // Effective per-key-part collation (key-part COLLATE → column collation →
+        // BINARY). Under any non-BINARY collation we must compare with the
+        // collation, and the raw hash index cannot be used (issue #5881).
+        let collations = schema.primary_key_effective_collations().unwrap_or_default();
+        let collated = has_non_binary_collation(&collations);
+
         // Check for duplicates within the batch of rows being inserted
-        if batch_pk_values.contains(&new_pk_values) {
-            let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
-            // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-            let qualified_cols: Vec<String> =
-                pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-            // SQLite-compatible: output the message as-is without prefix
-            return Err(ExecutorError::SqliteCompatError(format!(
-                "UNIQUE constraint failed: {}",
-                qualified_cols.join(", ")
-            )));
+        let dup_in_batch = if collated {
+            batch_pk_values.iter().any(|b| key_eq_with_collations(&new_pk_values, b, &collations))
+        } else {
+            batch_pk_values.contains(&new_pk_values)
+        };
+        if dup_in_batch {
+            return Err(primary_key_violation(schema, table_name));
         }
 
         // Check if any existing row has the same primary key using the hash index
@@ -52,19 +134,27 @@ pub fn enforce_primary_key_constraint(
         // reduces to the existing not-bitmap-deleted check.
         let snapshot = crate::mvcc::read_snapshot(db);
 
-        // Use the primary key index for O(1) lookup instead of O(n) scan
-        if let Some(pk_index) = table.primary_key_index() {
+        if collated {
+            // Collation-aware existing-row scan. The primary-key hash index is
+            // keyed on exact `SqlValue` bytes, so it would never surface a
+            // case-variant duplicate under NOCASE (or a trailing-space variant
+            // under RTRIM); we must compare every visible row with the key-part
+            // collation instead (issue #5881).
+            for (_idx, existing_row) in table.scan_visible(&snapshot) {
+                let existing_pk_values: Vec<vibesql_types::SqlValue> =
+                    pk_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
+                if existing_pk_values.contains(&vibesql_types::SqlValue::Null) {
+                    continue;
+                }
+                if key_eq_with_collations(&new_pk_values, &existing_pk_values, &collations) {
+                    return Err(primary_key_violation(schema, table_name));
+                }
+            }
+        } else if let Some(pk_index) = table.primary_key_index() {
+            // BINARY fast path: O(1) hash lookup on exact key bytes.
             if let Some(&row_idx) = pk_index.get(&new_pk_values) {
                 if table.is_row_visible(row_idx, &snapshot) {
-                    let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
-                    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                    let qualified_cols: Vec<String> =
-                        pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    return Err(primary_key_violation(schema, table_name));
                 }
             }
         } else {
@@ -75,21 +165,30 @@ pub fn enforce_primary_key_constraint(
                     pk_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
 
                 if new_pk_values == existing_pk_values {
-                    let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
-                    // SQLite uses "UNIQUE constraint failed" for PRIMARY KEY violations
-                    let qualified_cols: Vec<String> =
-                        pk_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    return Err(primary_key_violation(schema, table_name));
                 }
             }
         }
     }
 
     Ok(())
+}
+
+/// Build the SQLite-compatible "UNIQUE constraint failed: t.a, t.b" error for
+/// the UNIQUE constraint at `constraint_idx`.
+pub(crate) fn unique_constraint_violation(
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    constraint_idx: usize,
+) -> ExecutorError {
+    let unique_col_names: Vec<String> =
+        schema.unique_constraints.get(constraint_idx).cloned().unwrap_or_default();
+    let qualified_cols: Vec<String> =
+        unique_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
+    ExecutorError::SqliteCompatError(format!(
+        "UNIQUE constraint failed: {}",
+        qualified_cols.join(", ")
+    ))
 }
 
 /// Enforce UNIQUE constraints on a row
@@ -114,20 +213,25 @@ pub fn enforce_unique_constraints(
             continue;
         }
 
+        // Effective per-key-part collation (key-part COLLATE → column collation →
+        // BINARY). A non-BINARY collation forces a collation-aware scan because
+        // the unique hash index is keyed on exact `SqlValue` bytes (issue #5881).
+        let collations = schema.unique_constraint_effective_collations(constraint_idx);
+        let collated = has_non_binary_collation(&collations);
+
         // Check for duplicates within the batch of rows being inserted
         // (skip if batch_unique_values is empty or doesn't have this constraint)
-        if constraint_idx < batch_unique_values.len()
-            && batch_unique_values[constraint_idx].contains(&new_unique_values)
-        {
-            let unique_col_names: Vec<String> = schema.unique_constraints[constraint_idx].clone();
-            // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-            let qualified_cols: Vec<String> =
-                unique_col_names.iter().map(|col| format!("{}.{}", table_name, col)).collect();
-            // SQLite-compatible: output the message as-is without prefix
-            return Err(ExecutorError::SqliteCompatError(format!(
-                "UNIQUE constraint failed: {}",
-                qualified_cols.join(", ")
-            )));
+        if constraint_idx < batch_unique_values.len() {
+            let dup_in_batch = if collated {
+                batch_unique_values[constraint_idx]
+                    .iter()
+                    .any(|b| key_eq_with_collations(&new_unique_values, b, &collations))
+            } else {
+                batch_unique_values[constraint_idx].contains(&new_unique_values)
+            };
+            if dup_in_batch {
+                return Err(unique_constraint_violation(schema, table_name, constraint_idx));
+            }
         }
 
         // Check if any existing row has the same unique constraint values using hash index
@@ -140,23 +244,28 @@ pub fn enforce_unique_constraints(
         // `is_row_visible` is the existing not-bitmap-deleted check.
         let snapshot = crate::mvcc::read_snapshot(db);
 
-        // Use the unique constraint index for O(1) lookup instead of O(n) scan
-        if constraint_idx < table.unique_indexes().len() {
+        if collated {
+            // Collation-aware existing-row scan (the unique hash index cannot
+            // surface collated duplicates — see the PK path above, #5881).
+            for (_idx, existing_row) in table.scan_visible(&snapshot) {
+                let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
+                    .iter()
+                    .filter_map(|&idx| existing_row.get(idx).cloned())
+                    .collect();
+                if existing_unique_values.contains(&vibesql_types::SqlValue::Null) {
+                    continue;
+                }
+                if key_eq_with_collations(&new_unique_values, &existing_unique_values, &collations)
+                {
+                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
+                }
+            }
+        } else if constraint_idx < table.unique_indexes().len() {
+            // BINARY fast path: O(1) hash lookup on exact key bytes.
             let unique_index = &table.unique_indexes()[constraint_idx];
             if let Some(&row_idx) = unique_index.get(&new_unique_values) {
                 if table.is_row_visible(row_idx, &snapshot) {
-                    let unique_col_names: Vec<String> =
-                        schema.unique_constraints[constraint_idx].clone();
-                    // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
-                    let qualified_cols: Vec<String> = unique_col_names
-                        .iter()
-                        .map(|col| format!("{}.{}", table_name, col))
-                        .collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
                 }
             }
         } else {
@@ -174,19 +283,7 @@ pub fn enforce_unique_constraints(
                 }
 
                 if new_unique_values == existing_unique_values {
-                    let unique_col_names: Vec<String> =
-                        schema.unique_constraints[constraint_idx].clone();
-                    // Format: "UNIQUE constraint failed: table.col1, table.col2"
-                    // (SQLite-compatible)
-                    let qualified_cols: Vec<String> = unique_col_names
-                        .iter()
-                        .map(|col| format!("{}.{}", table_name, col))
-                        .collect();
-                    // SQLite-compatible: output the message as-is without prefix
-                    return Err(ExecutorError::SqliteCompatError(format!(
-                        "UNIQUE constraint failed: {}",
-                        qualified_cols.join(", ")
-                    )));
+                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
                 }
             }
         }
