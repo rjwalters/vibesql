@@ -1578,7 +1578,7 @@ mod tests {
             let file = std::fs::File::create(&wal_path).unwrap();
             let mut writer = WalWriter::create(file).unwrap();
             let mut lsn = 1u64;
-            let mut append = |writer: &mut WalWriter<std::fs::File>, op: WalOp, lsn: &mut u64| {
+            let append = |writer: &mut WalWriter<std::fs::File>, op: WalOp, lsn: &mut u64| {
                 writer.append(&WalEntry::new(*lsn, 0, op)).unwrap();
                 *lsn += 1;
             };

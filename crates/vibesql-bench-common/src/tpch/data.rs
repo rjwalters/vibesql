@@ -4,7 +4,7 @@
 //! It includes constants for reference data (nations, regions) and a data
 //! generator that produces deterministic pseudo-random data based on scale factor.
 
-use rand::{Rng, RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 pub const NATIONS: &[(&str, usize)] = &[

@@ -7,7 +7,7 @@
 //! - RANDOMBLOB(n) - Create blob of n random bytes
 //! - QUOTE(x) - Return SQL literal representation
 
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;

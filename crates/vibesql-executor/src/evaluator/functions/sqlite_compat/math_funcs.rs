@@ -6,7 +6,7 @@
 //! - UNLIKELY(x) - Query planner hint (no-op)
 //! - LIKELIHOOD(x, p) - Query planner hint with probability (no-op)
 
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
