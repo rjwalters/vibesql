@@ -418,6 +418,10 @@ cmd_run() {
     # shared run_id, making a killed run durable at batch granularity (#6136).
     # Empty -> use tcl_runner.py's own default (50); a value is passed through.
     local batch_size=""
+    # Native-TCL concurrency: run up to N test files at once (one tclsh worker
+    # per job). Empty -> use tcl_runner.py's own default (1, sequential); a
+    # value is passed through. Distinct from --parallel (static-path boolean).
+    local jobs=""
     while [[ $# -gt 0 ]]; do
         case $1 in
             --help)
@@ -439,6 +443,9 @@ Options:
   --batch-size N           Native mode: persist results every N files under one
                            shared run_id, so a killed run is durable at batch
                            granularity (default: 50; 0 disables batching)
+  --jobs, -j N             Native mode: run up to N test files concurrently
+                           (one tclsh worker per job; default: 1 = sequential).
+                           Use -j "$(nproc)" to parallelize across cores.
 
 Examples:
   # Run Priority 1 tests (core SQL)
@@ -489,6 +496,10 @@ EOF
                 ;;
             --batch-size)
                 batch_size="$2"
+                shift 2
+                ;;
+            --jobs|-j)
+                jobs="$2"
                 shift 2
                 ;;
             *)
@@ -575,6 +586,10 @@ EOF
 
     if [ -n "$batch_size" ]; then
         py_args+=("--batch-size" "$batch_size")
+    fi
+
+    if [ -n "$jobs" ]; then
+        py_args+=("--jobs" "$jobs")
     fi
 
     # Add files

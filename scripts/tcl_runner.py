@@ -1166,6 +1166,14 @@ def main():
                              "N files under one shared run_id, making a killed "
                              "run durable at batch granularity (default: 50; "
                              "<=0 disables batching and saves once at the end)")
+    parser.add_argument("--jobs", "-j", type=int, default=1,
+                        help="Native-TCL mode: run up to N test files "
+                             "concurrently (one tclsh worker per job). Each file "
+                             "already runs in its own isolated temp cwd (#6132), "
+                             "so files are independent units of work. Defaults to "
+                             "1 (sequential — no behavior change). Use "
+                             "--jobs $(nproc) to parallelize across cores. Values "
+                             "<1 are clamped to 1.")
 
     args = parser.parse_args()
 
@@ -1279,13 +1287,29 @@ def main():
                 )
                 results_pending_persist.clear()
 
-        for file_path in file_paths:
-            if args.verbose:
-                print(f"\nRunning: {file_path}")
+        # Number of files to run concurrently. Each file's tclsh worker runs in
+        # its own isolated temp cwd (#6132), so files are independent units of
+        # work and safe to run in parallel. jobs<=1 preserves the original
+        # strictly-sequential control flow (default, no behavior change).
+        jobs = max(1, args.jobs)
 
-            passed, failed, skipped, failed_tests, results = run_native_tcl(
-                file_path, shim_path, verbose=args.verbose, timeout=args.timeout
-            )
+        def process_completed_file(file_path: str, result_tuple) -> None:
+            """Fold one file's completed results into the shared run accounting.
+
+            Runs on ONE thread (the driver): in sequential mode it is called
+            inline, and in parallel mode it is called from the single
+            `as_completed` drain loop — never concurrently. All shared-state
+            mutation (counters, pending-persist buffer, checkpointing) therefore
+            stays single-threaded and lock-free, exactly as in the original
+            sequential loop. Result rows carry `file_path`, so folding files in
+            completion order (which differs from input order under --jobs>1)
+            yields the same totals and the same set of detail rows.
+            """
+            nonlocal total_passed, total_failed, total_skipped
+            nonlocal files_with_results, files_timeout, files_incomplete
+            nonlocal files_error, files_self_skipped, files_processed
+
+            passed, failed, skipped, failed_tests, results = result_tuple
             total_passed += passed
             total_failed += failed
             total_skipped += skipped
@@ -1309,8 +1333,11 @@ def main():
             if results and statuses == {"skipped"}:
                 files_self_skipped += 1
 
-            # Checkpoint after every `batch_size` files. Batching disabled
-            # (batch_size <= 0) falls through to the single end-of-run save.
+            # Checkpoint after every `batch_size` COMPLETED files (completion
+            # order, not dispatch order — under --jobs>1 files finish out of
+            # order but each checkpoint still reflects exactly files_processed
+            # completed files). Batching disabled (batch_size <= 0) falls
+            # through to the single end-of-run save.
             if run_id is not None and batch_size > 0 and files_processed % batch_size == 0:
                 persist_batch()
                 print(
@@ -1330,6 +1357,57 @@ def main():
                         file=sys.stderr,
                     )
                     os._exit(137)
+
+        if jobs <= 1:
+            # Sequential execution (default): identical control flow to the
+            # pre-parallel implementation.
+            for file_path in file_paths:
+                if args.verbose:
+                    print(f"\nRunning: {file_path}")
+
+                result_tuple = run_native_tcl(
+                    file_path, shim_path, verbose=args.verbose, timeout=args.timeout
+                )
+                process_completed_file(file_path, result_tuple)
+        else:
+            # Parallel execution: dispatch up to `jobs` tclsh workers at once.
+            # run_native_tcl is 100% subprocess-bound (subprocess.run releases
+            # the GIL during the blocking wait), so threads give real wall-clock
+            # concurrency. The as_completed drain runs on this (driver) thread,
+            # so process_completed_file — and thus every checkpoint under the
+            # single shared run_id — stays single-threaded and order-independent.
+            if args.verbose:
+                print(f"\nRunning {files_attempted} file(s) with up to {jobs} concurrent worker(s)")
+            with ThreadPoolExecutor(max_workers=jobs) as executor:
+                futures = {
+                    executor.submit(
+                        run_native_tcl,
+                        file_path,
+                        shim_path,
+                        verbose=args.verbose,
+                        timeout=args.timeout,
+                    ): file_path
+                    for file_path in file_paths
+                }
+                for future in as_completed(futures):
+                    file_path = futures[future]
+                    try:
+                        result_tuple = future.result()
+                    except Exception as e:
+                        # Runner-level failure that escaped run_native_tcl's own
+                        # guard: keep the file in the universe with an error
+                        # marker row so it never silently vanishes (#5821).
+                        print(f"Error running {file_path}: {e}")
+                        error_result = TestResult(
+                            test_name="RUNNER ERROR",
+                            file_path=file_path,
+                            test_type="native-tcl",
+                            status="error",
+                            sql="",
+                            error_message=str(e)[:500],
+                        )
+                        result_tuple = (0, 1, 0, [f"RUNNER ERROR: {e}"], [error_result])
+                    process_completed_file(file_path, result_tuple)
 
         # Print summary
         total_tests = total_passed + total_failed + total_skipped
