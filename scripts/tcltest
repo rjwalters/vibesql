@@ -200,6 +200,12 @@ Commands:
   analyze                  Analyze failure patterns
   status                   Show quick pass rate summary
 
+Related tooling:
+  scripts/tcl_triage.py    Triage failures into root-cause families and emit a
+                           Markdown report (per-file + per-error breakdown,
+                           normalized families, certified/non-certified stamp).
+                           Run: python3 scripts/tcl_triage.py --help
+
 Options for 'run':
   --pattern GLOB           Run only files matching pattern (e.g., "select*.test")
   --priority N             Run priority level N tests (1=core, 2=advanced, 3=sqlite-specific)
