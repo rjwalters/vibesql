@@ -248,5 +248,3 @@ here so the definitions stay in sync.
   raw-vs-file-weighted guidance, and results-table schema.
 - `scripts/tcltest` `cmd_status()` — the wiring that prints this metric.
 - `scripts/verify_skips.py --list-categories` — the live Bucket-A category counts.
-</content>
-</invoke>
