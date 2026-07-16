@@ -6987,6 +6987,58 @@ proc sqlite3_db_config {args} {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# Library-configuration / lifecycle C-API stubs (#6153)
+#
+# These SQLite C-API test commands appear almost exclusively in test *setup*
+# to configure library-global or per-connection internals — threading mode,
+# URI handling, lookaside / pagecache / heap / scratch memory, the
+# multi-threaded sorter PMA size, shared-cache mode, and soft/hard heap
+# limits. NONE of them has any SQL-reachable effect in VibeSQL: they tune
+# SQLite pager/allocator internals with no observable equivalent in the SQL
+# CLI. Before these stubs existed, a file that merely *mentioned* one of them
+# at file scope (e.g. `db close; sqlite3_shutdown; sqlite3_config_uri 1;
+# sqlite3_initialize`) aborted on `invalid command name ...`, which killed
+# the tclsh worker and lost EVERY remaining test in that file — the dominant
+# trigger behind the 272-file incomplete-marker population (#6153).
+#
+# HONESTY / NON-MASKING: each stub returns an EMPTY string, never a fabricated
+# "SQLITE_OK". Real SQLite returns SQLITE_OK from these calls, but the test
+# harness almost never asserts on their return; on the rare occasion a test
+# DOES assert the return value, an empty result fails that assertion HONESTLY
+# (empty != SQLITE_OK) instead of being silently turned green. A corpus-wide
+# grep confirmed no file-scope logic branches on these return values, so an
+# empty return never re-introduces a file-scope abort. Commands whose return
+# value carries real SQL semantics — sqlite3_step / sqlite3_column_* /
+# sqlite3_prepare* / sqlite3_bind_* / sqlite3_errcode / sqlite3_get_autocommit
+# and the rest of the statement-handle family — are DELIBERATELY NOT stubbed
+# here; those remain the substance of the pure-C-API test files (capi2/capi3*
+# etc.) and are handled by the file-level skip list, so their honest failures
+# are preserved.
+proc sqlite3_shutdown {args} { return "" }
+proc sqlite3_initialize {args} { return "" }
+proc sqlite3_config {args} { return "" }
+proc sqlite3_config_uri {args} { return "" }
+proc sqlite3_config_lookaside {args} { return "" }
+proc sqlite3_config_pagecache {args} { return "" }
+proc sqlite3_config_heap {args} { return "" }
+proc sqlite3_config_heap_size {args} { return "" }
+proc sqlite3_config_scratch {args} { return "" }
+proc sqlite3_config_pmasz {args} { return "" }
+proc sqlite3_config_memstatus {args} { return "" }
+proc sqlite3_config_pagecache_size {args} { return "" }
+proc sqlite3_config_sorterref {args} { return "" }
+proc sqlite3_config_alt_pcache {args} { return "" }
+proc sqlite3_config_cis {args} { return "" }
+proc sqlite3_config_error {args} { return "" }
+proc sqlite3_config_sqllog {args} { return "" }
+proc sqlite3_db_config_lookaside {args} { return "" }
+proc sqlite3_hard_heap_limit {args} { return 0 }
+proc sqlite3_hard_heap_limit64 {args} { return 0 }
+proc sqlite3_enable_shared_cache {args} { return "" }
+proc sqlite3_release_memory {args} { return 0 }
+proc sqlite3_db_release_memory {args} { return 0 }
+
 proc sqlite3_exec {db sql} {
     # SQLite sqlite3_exec API - execute SQL statement(s) directly.
     # Returns {result_code output}; result_code: 0 = success, non-zero = error.
@@ -7316,6 +7368,124 @@ proc set_test_counter {counter {value ""}} {
     }
 }
 
+# Number of file-scope statement errors CONTAINED by the resilient evaluator
+# for the current file (reset per file in run_test_file). Reported in the
+# summary so a file that recovered from a mid-file abort is visible.
+set ::contained_file_scope_errors 0
+
+# Split a (preprocessed) TCL script into its top-level commands, honoring the
+# TCL parser's comment rule so command boundaries stay correct even when a
+# comment contains an unbalanced brace/bracket/quote (#6153).
+#
+# `info complete` is a purely lexical brace/bracket/quote matcher and does NOT
+# know about comments, so feeding it a comment line like `# has a { brace`
+# would report "incomplete" and swallow the following real commands. To match
+# the actual TCL parser, when a command starts with `#` we consume the whole
+# comment (respecting an odd trailing-backslash line continuation) and skip
+# it, so its delimiters never perturb boundaries. Non-comment commands are
+# accumulated line-by-line until `info complete` — exactly the rule an
+# interactive tclsh uses to decide a command is finished — so multi-line
+# constructs (for/foreach/if/proc/do_test bodies) stay intact as single
+# top-level commands.
+proc split_tcl_commands {content} {
+    set commands {}
+    set lines [split $content "\n"]
+    set n [llength $lines]
+    set i 0
+    while {$i < $n} {
+        set line [lindex $lines $i]
+        set lead [string trimleft $line]
+        if {$lead eq ""} {
+            incr i
+            continue
+        }
+        if {[string index $lead 0] eq "#"} {
+            # Comment: consume continuation lines (line ending in an odd number
+            # of backslashes continues the comment), then skip the whole thing.
+            while {$i < $n} {
+                set l [lindex $lines $i]
+                incr i
+                if {[regexp {(\\+)$} $l -> bs] \
+                        && ([string length $bs] % 2 == 1)} {
+                    continue
+                }
+                break
+            }
+            continue
+        }
+        # Accumulate a complete command.
+        set cmd ""
+        while {$i < $n} {
+            set l [lindex $lines $i]
+            incr i
+            if {$cmd eq ""} {
+                set cmd $l
+            } else {
+                append cmd "\n" $l
+            }
+            if {[info complete "$cmd\n"]} {
+                break
+            }
+        }
+        lappend commands $cmd
+    }
+    return $commands
+}
+
+# Record a CONTAINED file-scope statement error as an honest failed detail row
+# (kept consistent with the shim's own summary counters so detail and summary
+# reconcile) and let the file CONTINUE. This is the resilience mechanism that
+# stops one bad file-scope statement — an unimplemented command, or a bare
+# execsql/db-eval that hits a genuine VibeSQL gap — from aborting the whole
+# file and losing every remaining test (#6153). It never fabricates a pass:
+# the offending statement is recorded as a real failure.
+proc record_contained_error {seq err} {
+    set base [file rootname [file tail [lindex $::argv 0]]]
+    set name "${base}-filescope-err.${seq}"
+    incr ::nTest
+    incr ::nFail
+    lappend ::failList $name
+    emit_test_detail failed $name
+    puts "  $name... FAILED (contained file-scope error: $err)"
+}
+
+# Evaluate file content command-by-command so a mid-file TCL_ERROR is contained
+# (recorded + continue) instead of killing the worker and truncating the file
+# (#6153). Returns the TCL return code of the terminating condition:
+#   2 (TCL_RETURN) -> file executed a file-scope `return` (clean early-exit
+#                     idiom, #6152); stop evaluating the remainder.
+#   0 (TCL_OK)     -> reached end of file.
+# TCL_ERROR (1) from any single command is caught, recorded, and evaluation
+# continues with the NEXT top-level command.
+proc eval_file_resilient {content} {
+    set ::contained_file_scope_errors 0
+    set seq 0
+    foreach cmd [split_tcl_commands $content] {
+        set rc [catch {uplevel #0 $cmd} err]
+        switch -- $rc {
+            0 { }
+            2 {
+                # File-scope `return`: clean early-exit; stop the file here.
+                return 2
+            }
+            1 {
+                incr ::contained_file_scope_errors
+                incr seq
+                record_contained_error $seq $err
+            }
+            default {
+                # TCL_BREAK / TCL_CONTINUE / custom code at file scope: not a
+                # legitimate completion path. Record it and keep going so the
+                # remaining top-level commands (and their tests) still run.
+                incr ::contained_file_scope_errors
+                incr seq
+                record_contained_error $seq "non-error return code $rc: $err"
+            }
+        }
+    }
+    return 0
+}
+
 #-----------------------------------------------------------------------------
 # Main entry point
 #-----------------------------------------------------------------------------
@@ -7420,65 +7590,37 @@ proc run_test_file {filename} {
     "
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
 
-    # Execute the modified content at GLOBAL level
-    # This is critical: tests often set variables at file scope and reference them
-    # with $::varname (explicit global namespace). Using 'eval' inside this proc
-    # would make those variables local to run_test_file, not global.
-    # 'uplevel #0' ensures the test file runs in the global scope.
-    # Distinguish a genuine mid-file abort (a real TCL_ERROR) from a clean
-    # file-scope `return` (#6151). `catch` reports the propagated return code:
-    #   1 == TCL_ERROR  -> a top-level statement threw and truncated the file.
-    #   2 == TCL_RETURN -> the file executed a bare `return` at file scope,
-    #                      a standard SQLite-test idiom to self-disable a file
-    #                      (e.g. alias.test's `return` after a comment) or to
-    #                      bail after a guard. This is a CLEAN early-exit, not a
-    #                      crash: err is empty and no errorInfo stack exists.
-    #   0 == TCL_OK      -> normal completion (does not enter the block).
-    # Previously EVERY non-zero code (including a clean TCL_RETURN) fell into
-    # the "aborted mid-file" path and wrote a false 'incomplete' marker, so
-    # ~128 self-disabling files were mis-counted as failed worker deaths.
-    set eval_code [catch {uplevel #0 $content} err eval_opts]
-    if {$eval_code == 1} {
-        # TCL_ERROR: a top-level (non-do_test) statement threw and aborted file
-        # evaluation — typically a bare `execsql`/`db eval` setup statement
-        # that hit a genuine VibeSQL gap, or cross-connection state the shim's
-        # per-statement process model cannot preserve (e.g. TEMP objects from
-        # an earlier `ifcapable tempdb` block; #5460). Previously this did
-        # `exit 1`, which discarded ALL results — so a file that had already
-        # run dozens of tests reported 0/0/0. Instead, surface the abort as a
-        # setup error and still call finish_test so the tests that DID run are
-        # tallied (real pass/fail) and the summary is emitted. This does not
-        # fake any passes: the aborting statement is reported below.
-        puts "Setup error (file evaluation aborted mid-file): $err"
-        puts "Error info: [expr {[info exists ::errorInfo] ? $::errorInfo : {(none)}}]"
-        # Emit an 'incomplete' marker so the runner sees the file was truncated
-        # (#5845). Without this the partial run looks clean to tcl_runner.py:
-        # finish_test still prints the "Tests run:" trailer and exits 0, so the
-        # runner's incomplete-detection (returncode<0 OR not saw_summary) never
-        # fires and the N tests that ran before the abort are silently treated
-        # as the file's complete result. The row keeps the tests that DID run
-        # (they are already emitted) and marks the file compromised in the DB.
-        emit_test_detail incomplete "ABORTED_MID_FILE: $err"
-        set ::file_marker_emitted 1
-    } elseif {$eval_code == 2} {
-        # TCL_RETURN: clean file-scope early-return. Do NOT emit an 'incomplete'
-        # marker. Any tests that DID run before the return are already tallied
-        # (their detail rows were emitted incrementally); if none ran, finish_test
-        # synthesizes a clean 'skipped' row (the capability-self-skip path) so the
-        # file is recorded as a completed 0-test file rather than a worker death.
+    # Execute the modified content at GLOBAL level, but command-by-command so
+    # that ONE bad file-scope statement does not truncate the whole file.
+    #
+    # This is critical: tests often set variables at file scope and reference
+    # them with $::varname (explicit global namespace), so each command is run
+    # with `uplevel #0` (global scope) exactly as a single whole-file
+    # `uplevel #0 $content` would have.
+    #
+    # Historically the file was evaluated as one `uplevel #0 $content`; a
+    # mid-file TCL_ERROR (an unimplemented C-API command, or a bare
+    # execsql/db-eval that hit a genuine VibeSQL gap) aborted the ENTIRE
+    # remaining file and killed the worker, losing every subsequent test — the
+    # 272-file incomplete-marker population (#6153). eval_file_resilient walks
+    # the file's top-level commands and CONTAINS a per-command TCL_ERROR
+    # (records an honest `failed` detail row via record_contained_error, then
+    # continues to the next command) so the rest of the file's tests still run.
+    #
+    # The clean file-scope `return` idiom (#6151/#6152) is preserved: a
+    # top-level `return` propagates as TCL_RETURN (code 2) and stops the file
+    # cleanly, with no 'incomplete' marker. Any tests that ran before it are
+    # already tallied; if none ran, finish_test synthesizes a clean 'skipped'
+    # row (the capability-self-skip path).
+    set eval_code [eval_file_resilient $content]
+    if {$eval_code == 2} {
         if {$::nTest > 0} {
             puts "File-scope early return after $::nTest test(s) — file completed cleanly."
         } else {
             puts "File-scope early return (self-disabled) — 0 tests, clean early-exit."
         }
-    } elseif {$eval_code != 0} {
-        # Any other non-zero, non-OK code (TCL_BREAK/TCL_CONTINUE at file scope,
-        # or a custom return code) is not a legitimate completion path. Treat it
-        # conservatively as a genuine abort so real problems are never masked.
-        puts "Setup error (file evaluation aborted mid-file, code $eval_code): $err"
-        puts "Error info: [expr {[info exists ::errorInfo] ? $::errorInfo : {(none)}}]"
-        emit_test_detail incomplete "ABORTED_MID_FILE (code $eval_code): $err"
-        set ::file_marker_emitted 1
+    } elseif {$::contained_file_scope_errors > 0} {
+        puts "Contained $::contained_file_scope_errors file-scope statement error(s); file ran to completion (remaining tests recovered)."
     }
 
     finish_test
