@@ -167,6 +167,36 @@ def default_vibesql_bin() -> str:
     return os.path.join(repo_root, "target", "release", "vibesql")
 
 
+def results_db_reachable(db_path: str) -> bool:
+    """Return True if ``db_path`` is an openable VibeSQL results database.
+
+    A plain ``os.path.exists`` check is wrong for the common case: in WAL mode
+    (the CLI default) there is *no* ``<name>.vbsql`` snapshot file at all — the
+    database is recovered from the extension-stripped siblings
+    ``<name>-checkpoints/`` (``*.vchk``) plus ``<name>.wal``. Both the certified
+    bench-runner DB and every local results DB are stored this way, so the file
+    check alone rejects databases the ``vibesql`` binary opens fine.
+
+    Consider the DB reachable if any of these hold:
+      - the ``db_path`` file itself exists (snapshot / legacy SQL-dump mode), or
+      - a ``<stem>-checkpoints/`` directory exists with at least one ``*.vchk``
+        (WAL mode, where ``<stem>`` is ``db_path`` minus a trailing ``.vbsql``), or
+      - a ``<stem>.wal`` write-ahead log exists.
+
+    The genuinely-absent case (no file, no checkpoints, no WAL) returns False so
+    the caller still fails loudly and never fabricates data.
+    """
+    if os.path.exists(db_path):
+        return True
+    stem = db_path[: -len(".vbsql")] if db_path.endswith(".vbsql") else db_path
+    checkpoints_dir = stem + "-checkpoints"
+    if os.path.isdir(checkpoints_dir) and any(
+        name.endswith(".vchk") for name in os.listdir(checkpoints_dir)
+    ):
+        return True
+    return os.path.exists(stem + ".wal")
+
+
 def _extract_json_array(raw: str) -> str | None:
     """Extract the JSON array from vibesql output.
 
@@ -629,12 +659,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not os.path.exists(args.db):
+    if not results_db_reachable(args.db):
         sys.stderr.write(
             "ERROR: results DB not found:\n"
             f"  {args.db}\n\n"
             "This tool does NOT fabricate data. To triage TCL failures you need a\n"
-            "populated results DB. Options:\n"
+            "populated results DB (a `.vbsql` snapshot, or its WAL-mode siblings:\n"
+            "a `-checkpoints/` directory with a `*.vchk`, or a `.wal` file).\n"
+            "Options:\n"
             "  - Local, NON-CERTIFIED: run `make test-tcl` (or `make test-tcl-all`)\n"
             "    then re-run this tool.\n"
             "  - CERTIFIED: obtain the AWS bench-runner DB (tag\n"
