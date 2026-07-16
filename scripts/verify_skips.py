@@ -24,6 +24,59 @@ REPO_ROOT = Path(__file__).parent.parent
 SHIM_FILE = REPO_ROOT / "scripts" / "tester_vibesql.tcl"
 TCL_TEST_DIR = REPO_ROOT / "docs" / "reference" / "sqlite" / "test"
 
+# ---------------------------------------------------------------------------
+# Skip-honesty audit (issue #6154 / epic #5779)
+#
+# See docs/reference/tcl-skip-policy.md for the two-bucket taxonomy. The audit
+# below is the structural enforcement of the standing rule "no new skip may be
+# added without declaring its bucket": it scans every whole-file / pattern skip
+# rationale for Bucket-B smell phrases (in-scope-SQL "differs"/"not implemented"
+# language) and fails if it finds one that is neither on the acknowledged
+# Bucket-B worklist nor declared as a Bucket-A category override.
+# ---------------------------------------------------------------------------
+
+# Rationale substrings that mark a skip as hiding an in-scope SQL gap.
+BUCKET_B_SMELL_PHRASES = (
+    "behavior differs",
+    "handling differs",
+    "features differ",
+    "feature differs",
+    "not fully supported",
+    "not implemented",
+    "optimization differs",
+    "options differ",
+)
+
+# Pattern/file keys already adjudicated Bucket B in the #6154 static pass. They
+# are expected to carry smell phrases; the policy doc records the Phase-2
+# fix-or-unskip worklist for each. Keyed by the exact array key in the shim.
+ACK_BUCKET_B = {
+    # curator-flagged
+    "collate1-", "collate2-", "collate3-", "collate4-", "collate5-",
+    "collate7-", "collate8-", "collate9-", "collateA-",
+    "types-", "types2-", "subquery-",
+    "without_rowid1-", "without_rowid2-", "without_rowid5-", "without_rowid6-",
+    "autoindex3-", "autoindex4-", "autoindex5-",
+    "unique2-", "rowid-", "resolver01-", "misc3-", "misc4-", "aggnested-",
+    # additional entries flagged by this audit
+    "printf2-", "e_totalchanges-",
+    "altertab2-", "altertab3-", "alterlegacy-",
+    "window1-66.", "window2-66.", "window1-69.",
+    "orderby8-1.", "orderbyA-",
+    "boundary1-", "boundary2-", "boundary3-", "boundary4-",
+    "like2-", "tableopts-", "randexpr-", "sidedelete-",
+}
+
+# Pattern/file keys whose rationale contains a smell phrase but which are
+# defensibly Bucket A (the phrase describes an out-of-scope subsystem, not an
+# in-scope SQL gap). Keep this list short and principled — each maps to a
+# category in docs/reference/tcl-skip-policy.md.
+ACK_BUCKET_A_OVERRIDE = {
+    "e_wal-",        # A2: VibeSQL ships its own WAL; SQLite WAL-pragma pager semantics N/A
+    "indexexpr3-",   # A7: asserts EXPLAIN COVERING INDEX output, not results
+    "utf16align-",   # A9: UTF-16 encoding internals; VibeSQL is UTF-8 by construction
+}
+
 
 def parse_skip_list(shim_content: str) -> dict:
     """Extract skip entries from the shim file."""
@@ -130,6 +183,91 @@ def parse_whole_file_skips(shim_content: str) -> dict:
             files[m.group(1)] = m.group(2).replace('\\"', '"')
 
     return files
+
+
+def parse_skip_patterns(shim_content: str) -> dict:
+    """Extract glob-pattern skip entries from the shim file.
+
+    These are the ``vibesql_skip_patterns`` list entries, each a TCL brace-quoted
+    ``{pattern "reason"}``. The pattern is a glob prefix (e.g. ``collate1-``) and
+    the reason is a double-quoted rationale string. Returns ``{pattern: reason}``.
+    """
+    patterns = {}
+
+    match = re.search(
+        r'variable vibesql_skip_patterns \{(.*?)\n\}',
+        shim_content,
+        re.DOTALL,
+    )
+    if not match:
+        return patterns
+
+    # Each entry is {<pattern> "<reason>"} on its own line. The pattern token has
+    # no whitespace; the reason is a double-quoted string.
+    for m in re.finditer(r'\{(\S+)\s+"((?:[^"\\]|\\.)*)"\}', match.group(1)):
+        patterns[m.group(1)] = m.group(2).replace('\\"', '"')
+
+    return patterns
+
+
+def audit_buckets(shim_content: str) -> int:
+    """Enforce the skip-honesty standing rule (issue #6154).
+
+    Scans every whole-file and pattern skip rationale for Bucket-B smell phrases.
+    Any smell-bearing entry that is neither on the acknowledged Bucket-B worklist
+    nor a declared Bucket-A override is an *undeclared* skip and fails the check.
+
+    Returns 0 when clean, 1 when an undeclared Bucket-B smell is found. See
+    docs/reference/tcl-skip-policy.md for the taxonomy this enforces.
+    """
+    patterns = parse_skip_patterns(shim_content)
+    files = parse_whole_file_skips(shim_content)
+
+    def smells(reason: str):
+        rl = reason.lower()
+        return [p for p in BUCKET_B_SMELL_PHRASES if p in rl]
+
+    acknowledged_b = []
+    undeclared = []
+
+    for kind, entries in (("pattern", patterns), ("whole-file", files)):
+        for key, reason in sorted(entries.items()):
+            hits = smells(reason)
+            if not hits:
+                continue
+            if key in ACK_BUCKET_A_OVERRIDE:
+                continue  # declared Bucket A despite the phrase
+            if key in ACK_BUCKET_B:
+                acknowledged_b.append((kind, key, hits))
+            else:
+                undeclared.append((kind, key, hits, reason))
+
+    print("=" * 60)
+    print("SKIP-HONESTY BUCKET AUDIT (issue #6154)")
+    print("=" * 60)
+    print(f"Patterns scanned:    {len(patterns)}")
+    print(f"Whole-file scanned:  {len(files)}")
+    print(f"Bucket-A overrides:  {len(ACK_BUCKET_A_OVERRIDE)}")
+    print(f"Acknowledged Bucket-B (worklist): {len(acknowledged_b)}")
+
+    if acknowledged_b:
+        print("\nAcknowledged Bucket-B skips (Phase-2 fix-or-unskip worklist):")
+        for kind, key, hits in acknowledged_b:
+            print(f"  [{kind}] {key}  ({', '.join(hits)})")
+
+    if undeclared:
+        print("\nERROR: undeclared Bucket-B smell — must declare a bucket")
+        print("(add a Bucket-A category rationale in tcl-skip-policy.md, or add")
+        print(" the key to the Bucket-B worklist in verify_skips.py):")
+        for kind, key, hits, reason in undeclared:
+            print(f"  [{kind}] {key}  ({', '.join(hits)})")
+            print(f"      reason: {reason[:100]}")
+        print(f"\nFAIL: {len(undeclared)} undeclared skip(s).")
+        return 1
+
+    print("\nOK: every smell-bearing skip is declared (Bucket A override or "
+          "Bucket-B worklist).")
+    return 0
 
 
 def find_stale_whole_file_skips(file_skips: dict) -> list:
@@ -307,11 +445,17 @@ def main():
     parser.add_argument("--test", help="Check only this specific test")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--list-categories", action="store_true", help="List skip categories and counts")
+    parser.add_argument("--audit-buckets", action="store_true",
+                        help="Enforce the skip-honesty standing rule (issue #6154): "
+                             "fail if any skip carries an undeclared Bucket-B smell")
     args = parser.parse_args()
 
     # Read the shim file
     with open(SHIM_FILE, 'r') as f:
         shim_content = f.read()
+
+    if args.audit_buckets:
+        return audit_buckets(shim_content)
 
     # Parse skip list
     skips = parse_skip_list(shim_content)
