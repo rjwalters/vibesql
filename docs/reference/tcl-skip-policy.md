@@ -1,7 +1,10 @@
 # TCL Skip-Honesty Policy
 
 **Status:** canonical. Part of epic #5779. Delivers the static (source-only)
-half of issue #6154.
+half of issue #6154: the full Bucket-A/Bucket-B classification of every in-tree
+skip declaration, enforced-completeness auditing (`--audit-buckets`), and the
+local by-category excluded-skip report in `make test-tcl-status`. The certified
+excluded-row denominator remains operator-gated (see "Deferred work").
 
 An honest claim of "N% SQLite compatibility" is meaningless without a
 **defensible skip policy**: a documented taxonomy in which every whole-file and
@@ -60,6 +63,16 @@ decision actually depends on:
 | `vibesql_partial_skip_files` | 1 | documented partial-skip record (`atof1`) |
 | `vibesql_skip_tests` | 1,528 | individually-named test skips |
 | `vibesql_skip_patterns` | 56 | glob-pattern skip rules |
+
+**Every whole-file and pattern declaration now has an enforced bucket.** All 60
+whole-file skips and all 56 pattern skips are classified below (73 Bucket A + 43
+Bucket B = 116), and `scripts/verify_skips.py --audit-buckets` fails if any
+whole-file/pattern entry is left without a bucket. The machine-readable source of
+truth for the Bucket-A category of each entry is `BUCKET_A_CLASSIFICATION` in
+`scripts/verify_skips.py`; this prose taxonomy and that map must stay in sync
+(the audit is what keeps them honest). The 1,528 named `vibesql_skip_tests`
+entries are not individually category-mapped in this static pass (see the
+named-test note below and "Deferred work").
 
 **Deferred to operator data (deliverable 5 of #6154):** the reconciled
 excluded-row denominator "by category" and any `ifcapable`-guarded self-skip that
@@ -284,12 +297,27 @@ silently.
   issue and the intent to un-skip.
 
 This is enforced (not merely documented) by
-`scripts/verify_skips.py --audit-buckets`, which scans every pattern/whole-file
-rationale for Bucket-B smell phrases and fails if it finds one that is not on the
-acknowledged Bucket-B worklist above (and is not on a declared Bucket-A
-override). A future contributor adding a "behavior differs" skip must therefore
-either declare it Bucket A with a category or add it to the worklist — the check
-will not let it pass silently. Run it locally and in review:
+`scripts/verify_skips.py --audit-buckets`, which runs three gates over every
+whole-file and pattern skip:
+
+1. **Completeness** — every skip must be declared in exactly one bucket: present
+   in `BUCKET_A_CLASSIFICATION` (with an A1–A10 category) or in `ACK_BUCKET_B`
+   (the worklist above). A skip in **neither** map is an *undeclared* skip and
+   fails the check. This is the structural enforcement of the standing rule: a
+   newly-added shim skip that no one classified — even one with a perfectly bland,
+   smell-free rationale — cannot pass silently.
+2. **Consistency** — no skip may appear in both maps, and every Bucket-A category
+   code must be a real A1–A10 category.
+3. **Anti-hiding** — a Bucket-B smell phrase ("behavior differs", "not
+   implemented", …) attached to a skip classified Bucket A is rejected unless the
+   key is on the explicit `ACK_BUCKET_A_OVERRIDE` list (a certified
+   false-positive, e.g. `e_wal-`). This stops an in-scope-SQL gap from being
+   buried in Bucket A to silence it.
+
+A future contributor adding a skip must therefore either add it to
+`BUCKET_A_CLASSIFICATION` with a category (and update this doc) or add it to
+`ACK_BUCKET_B` with a worklist entry — the check will not let it pass silently.
+Run it locally and in review:
 
 ```bash
 scripts/verify_skips.py --audit-buckets
@@ -297,21 +325,43 @@ scripts/verify_skips.py --audit-buckets
 
 ---
 
-## Deferred work (operator data required — deliverable 5)
+## Local by-category excluded-skip report (deliverable 5, LOCAL half — done)
+
+`make test-tcl-status` now itemises the excluded (`skipped`) rows of the **latest
+local run** by skip-honesty bucket. The runner's `skipped` detail rows are read
+with the CLI `--format raw` framing (ASCII 30/31 record/field separators, so file
+paths with pipes or newlines parse unambiguously) and attributed to a bucket by
+`scripts/verify_skips.py --categorize-skips`, which reuses the **same**
+`BUCKET_A_CLASSIFICATION` map the audit enforces (single source of truth). The
+report prints a per-A-category count, a Bucket-B subtotal (honest: currently
+non-zero — that is the Phase-2 worklist), a named/runtime-self-skip subtotal
+(per-entry adjudication deferred), and a TOTAL that reconciles to the run's
+`skipped` count. `atof1` skipped rows attribute to A5 — by construction only the
+`real2hex()`/`hex2real()` loop tests are skipped, so no non-loop landmine row can
+leak in.
+
+This is the **automatable, in-tree** half of the reconciled-denominator
+deliverable. It runs against whatever local results DB exists; it does **not**
+require the certified bench-runner DB. The certified denominator remains an
+operator step below.
+
+## Deferred work (operator data required)
 
 These parts of #6154 depend on the certified bench-runner DB and are **not**
 delivered by the static classification:
 
-1. **Reconciled excluded-row denominator by category.** Attribute the certified
-   run's 174,982 skipped rows to the categories above and publish the count, so
-   the "100% of in-scope tests" claim has a defensible base. Requires the
-   `~/.vibesql/test_results/tcl_test_results.vbsql` DB on the AWS bench runner.
+1. **Reconciled excluded-row denominator by category, CERTIFIED.** Run
+   `make test-tcl-status` against the certified
+   `~/.vibesql/test_results/tcl_test_results.vbsql` on the quiet AWS bench runner
+   and publish the per-category breakdown of the certified run's 174,982 skipped
+   rows. The tooling is already wired (see the local report above); this is a
+   pure operator/data step — point it at the certified DB and record the numbers.
 2. **`ifcapable`-guarded runtime self-skips.** Enumerate skips that only appear at
    runtime (including the `fuzz-oss1`/`fuzzer1`/`dbfuzz001` smoke-skips) and
-   classify them.
+   classify them. The categorizer already lands these in the "named / runtime
+   self-skips" line; certifying each one's bucket needs the certified run.
 3. **Drive Bucket B to zero.** Un-skip each Bucket-B pattern (and the named-test
    residual), fix the gap or leave it visibly `failed`, and confirm on a quiet
    full-suite run that no previously-passing test in the same file regresses.
-4. **Wire the by-category excluded count into `make test-tcl-status`.**
 
-Tracked under #6154 (this PR is `Part of #6154`, not `Closes`).
+Tracked under #6154.

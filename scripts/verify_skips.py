@@ -12,11 +12,13 @@ Usage:
 """
 
 import argparse
+import fnmatch
 import os
 import re
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 # Repository root
@@ -75,6 +77,81 @@ ACK_BUCKET_A_OVERRIDE = {
     "e_wal-",        # A2: VibeSQL ships its own WAL; SQLite WAL-pragma pager semantics N/A
     "indexexpr3-",   # A7: asserts EXPLAIN COVERING INDEX output, not results
     "utf16align-",   # A9: UTF-16 encoding internals; VibeSQL is UTF-8 by construction
+}
+
+# Human-readable names for the Bucket-A categories defined in
+# docs/reference/tcl-skip-policy.md. Used by the completeness audit (to validate
+# category codes) and by the by-category skip report (--categorize-skips).
+BUCKET_A_CATEGORIES = {
+    "A1": "C-API / statement-handle surface",
+    "A2": "VFS / pager internals",
+    "A3": "Unshipped extensions / virtual tables",
+    "A4": "Incremental blob I/O",
+    "A5": "Harness-only functions & TCL helpers",
+    "A6": "Permutation / suite dispatchers",
+    "A7": "Internal optimizer / VDBE counters",
+    "A8": "Built-in-test fuzzers",
+    "A9": "Documented intentional engine divergence",
+    "A10": "Error-message-format divergence",
+}
+
+# Canonical Bucket-A classification of every whole-file (vibesql_skip_files) and
+# every Bucket-A pattern (vibesql_skip_patterns) declaration, keyed by the exact
+# array key in the shim, mapping to a category code in BUCKET_A_CATEGORIES. This
+# is the single machine-readable source of truth behind the prose taxonomy in
+# docs/reference/tcl-skip-policy.md.
+#
+# The audit (--audit-buckets) requires EVERY whole-file/pattern skip to be either
+# in this map (declared Bucket A) or in ACK_BUCKET_B (declared Bucket B). An entry
+# in neither is an *undeclared* skip and fails the check — this is the structural
+# enforcement of "no skip may be added without declaring its bucket" (issue #6154
+# deliverable 4). When a new skip is added to the shim, it MUST be added here (with
+# a category) or to ACK_BUCKET_B (with a policy-doc worklist entry).
+BUCKET_A_CLASSIFICATION = {
+    # --- whole-file skips (vibesql_skip_files), all 60 ---
+    # A1: C-API / statement-handle surface
+    "capi2": "A1", "capi3": "A1", "capi3b": "A1", "capi3c": "A1",
+    "capi3d": "A1", "capi3e": "A1", "tkt2409": "A1", "colmeta": "A1",
+    "tableapi": "A1", "bind": "A1", "ptrchng": "A1", "delete_db": "A1",
+    "intarray": "A1", "snapshot": "A1", "shared6": "A1", "symlink": "A1",
+    "quota-glob": "A1", "varint": "A1",
+    # A2: VFS / pager internals
+    "jrnlmode": "A2", "jrnlmode3": "A2", "pagesize": "A2", "filefmt": "A2",
+    "corruptL": "A2", "lock": "A2", "lock5": "A2", "sort2": "A2",
+    "strict2": "A2",
+    # A3: Unshipped extensions / virtual tables
+    "fts3": "A3", "rtree": "A3", "index6": "A3", "index7": "A3",
+    "orderby7": "A3", "ieee754": "A3", "trustschema1": "A3",
+    # A4: Incremental blob I/O
+    "incrblob": "A4", "incrblob2": "A4", "incrblob3": "A4", "incrblob4": "A4",
+    "incrblob_err": "A4", "incrblobfault": "A4",
+    # A5: Harness-only functions & TCL helpers
+    "intreal": "A5", "func4": "A5", "trigger6": "A5", "update2": "A5",
+    # A6: Permutation / suite dispatchers
+    "all": "A6", "full": "A6", "quick": "A6", "veryquick": "A6",
+    "extraquick": "A6", "rbu": "A6", "session": "A6",
+    # A7: Internal optimizer / VDBE counters
+    "insert4": "A7", "insert5": "A7", "whereJ": "A7", "where8": "A7",
+    "malloc4": "A7", "manydb": "A7",
+    # A8: Built-in-test fuzzers
+    "bitvec": "A8",
+    # A9: Documented intentional engine divergence
+    "badutf": "A9", "badutf2": "A9",
+
+    # --- Bucket-A pattern skips (vibesql_skip_patterns), all 13 ---
+    # A2
+    "e_wal-": "A2",
+    # A5 (harness-only collation / temp-session / libc-time helpers)
+    "select9-2.*.3": "A5", "select9-2.*.6": "A5",
+    "temptable-": "A5", "temptable2-": "A5",
+    "date-6.": "A5", "date4-": "A5",
+    # A7 (EXPLAIN / VDBE-flag / fault-injection assertions)
+    "indexexpr3-": "A7", "fordelete-": "A7",
+    "fkey_malloc-": "A7", "windowfault-": "A7",
+    # A9
+    "utf16align-": "A9",
+    # A10 (error-message-format divergence)
+    "subselect-1.2": "A10",
 }
 
 
@@ -213,12 +290,28 @@ def parse_skip_patterns(shim_content: str) -> dict:
 def audit_buckets(shim_content: str) -> int:
     """Enforce the skip-honesty standing rule (issue #6154).
 
-    Scans every whole-file and pattern skip rationale for Bucket-B smell phrases.
-    Any smell-bearing entry that is neither on the acknowledged Bucket-B worklist
-    nor a declared Bucket-A override is an *undeclared* skip and fails the check.
+    Runs three gates over every whole-file (vibesql_skip_files) and pattern
+    (vibesql_skip_patterns) skip declaration:
 
-    Returns 0 when clean, 1 when an undeclared Bucket-B smell is found. See
-    docs/reference/tcl-skip-policy.md for the taxonomy this enforces.
+      1. COMPLETENESS (deliverable 4): every skip must be declared in exactly one
+         bucket — present in BUCKET_A_CLASSIFICATION (a category code) or in
+         ACK_BUCKET_B (the Phase-2 worklist). A skip in NEITHER is *undeclared*
+         and fails. This turns "no skip may be added without declaring its bucket"
+         into an enforced check rather than a review convention: a newly-added
+         shim skip that no one classified will fail CI here.
+
+      2. CONSISTENCY: no skip may be in both maps, and every Bucket-A category
+         code must be a known A1–A10 category.
+
+      3. ANTI-HIDING (the original smell gate): a Bucket-B smell phrase
+         ("behavior differs", "not implemented", …) attached to a skip that is
+         classified Bucket A is only allowed when the key is on the explicit
+         ACK_BUCKET_A_OVERRIDE list (a certified false-positive, e.g. e_wal-).
+         This stops an in-scope-SQL gap from being buried in Bucket A to silence
+         it.
+
+    Returns 0 when clean, 1 on any violation. See docs/reference/tcl-skip-policy.md
+    for the taxonomy this enforces.
     """
     patterns = parse_skip_patterns(shim_content)
     files = parse_whole_file_skips(shim_content)
@@ -227,46 +320,93 @@ def audit_buckets(shim_content: str) -> int:
         rl = reason.lower()
         return [p for p in BUCKET_B_SMELL_PHRASES if p in rl]
 
-    acknowledged_b = []
-    undeclared = []
+    acknowledged_b = []       # smell-bearing, on the Bucket-B worklist (expected)
+    undeclared = []           # in neither bucket map (deliverable-4 failure)
+    both_buckets = []         # in both maps (contradiction)
+    bad_category = []         # Bucket-A category code not in A1–A10
+    hidden_b = []             # smell-bearing but classified A without an override
 
+    all_entries = []
     for kind, entries in (("pattern", patterns), ("whole-file", files)):
         for key, reason in sorted(entries.items()):
-            hits = smells(reason)
-            if not hits:
-                continue
-            if key in ACK_BUCKET_A_OVERRIDE:
-                continue  # declared Bucket A despite the phrase
-            if key in ACK_BUCKET_B:
-                acknowledged_b.append((kind, key, hits))
-            else:
-                undeclared.append((kind, key, hits, reason))
+            all_entries.append((kind, key, reason))
+
+    for kind, key, reason in all_entries:
+        in_a = key in BUCKET_A_CLASSIFICATION
+        in_b = key in ACK_BUCKET_B
+        hits = smells(reason)
+
+        if in_a and in_b:
+            both_buckets.append((kind, key))
+        if not in_a and not in_b:
+            undeclared.append((kind, key, hits, reason))
+            continue
+        if in_a:
+            cat = BUCKET_A_CLASSIFICATION[key]
+            if cat not in BUCKET_A_CATEGORIES:
+                bad_category.append((kind, key, cat))
+            if hits and key not in ACK_BUCKET_A_OVERRIDE:
+                hidden_b.append((kind, key, hits, reason))
+        if in_b and hits:
+            acknowledged_b.append((kind, key, hits))
 
     print("=" * 60)
     print("SKIP-HONESTY BUCKET AUDIT (issue #6154)")
     print("=" * 60)
-    print(f"Patterns scanned:    {len(patterns)}")
-    print(f"Whole-file scanned:  {len(files)}")
-    print(f"Bucket-A overrides:  {len(ACK_BUCKET_A_OVERRIDE)}")
-    print(f"Acknowledged Bucket-B (worklist): {len(acknowledged_b)}")
+    print(f"Patterns scanned:      {len(patterns)}")
+    print(f"Whole-file scanned:    {len(files)}")
+    print(f"Bucket-A classified:   "
+          f"{sum(1 for _, k, _ in all_entries if k in BUCKET_A_CLASSIFICATION)}")
+    print(f"Bucket-B worklist:     "
+          f"{sum(1 for _, k, _ in all_entries if k in ACK_BUCKET_B)}")
+    print(f"Bucket-A overrides:    {len(ACK_BUCKET_A_OVERRIDE)}")
 
     if acknowledged_b:
         print("\nAcknowledged Bucket-B skips (Phase-2 fix-or-unskip worklist):")
         for kind, key, hits in acknowledged_b:
             print(f"  [{kind}] {key}  ({', '.join(hits)})")
 
+    failed = False
+
     if undeclared:
-        print("\nERROR: undeclared Bucket-B smell — must declare a bucket")
-        print("(add a Bucket-A category rationale in tcl-skip-policy.md, or add")
-        print(" the key to the Bucket-B worklist in verify_skips.py):")
+        failed = True
+        print("\nERROR: undeclared skip(s) — every skip must declare a bucket")
+        print("(add the key to BUCKET_A_CLASSIFICATION with an A1–A10 category, or")
+        print(" to ACK_BUCKET_B with a policy-doc worklist entry):")
         for kind, key, hits, reason in undeclared:
+            extra = f" (smell: {', '.join(hits)})" if hits else ""
+            print(f"  [{kind}] {key}{extra}")
+            print(f"      reason: {reason[:100]}")
+
+    if both_buckets:
+        failed = True
+        print("\nERROR: skip(s) declared in BOTH Bucket A and Bucket B:")
+        for kind, key in both_buckets:
+            print(f"  [{kind}] {key}")
+
+    if bad_category:
+        failed = True
+        print("\nERROR: Bucket-A skip(s) with an unknown category code:")
+        for kind, key, cat in bad_category:
+            print(f"  [{kind}] {key} -> {cat} (not in A1–A10)")
+
+    if hidden_b:
+        failed = True
+        print("\nERROR: Bucket-B smell on a Bucket-A skip without an override")
+        print("(a 'differs'/'not implemented' in-scope-SQL gap may not be buried")
+        print(" in Bucket A; add to ACK_BUCKET_B or justify via ACK_BUCKET_A_OVERRIDE):")
+        for kind, key, hits, reason in hidden_b:
             print(f"  [{kind}] {key}  ({', '.join(hits)})")
             print(f"      reason: {reason[:100]}")
-        print(f"\nFAIL: {len(undeclared)} undeclared skip(s).")
+
+    if failed:
+        n = len(undeclared) + len(both_buckets) + len(bad_category) + len(hidden_b)
+        print(f"\nFAIL: {n} bucket-declaration violation(s).")
         return 1
 
-    print("\nOK: every smell-bearing skip is declared (Bucket A override or "
-          "Bucket-B worklist).")
+    print("\nOK: every whole-file/pattern skip declares exactly one bucket "
+          "(Bucket A category or Bucket-B worklist), and no in-scope-SQL gap is "
+          "hidden in Bucket A.")
     return 0
 
 
@@ -439,6 +579,155 @@ def verify_tests(tests_to_check: list, shim_content: str, verbose: bool = False)
     return results
 
 
+# ---------------------------------------------------------------------------
+# By-category excluded-skip report (issue #6154 deliverable 5, LOCAL run)
+#
+# Attributes the `skipped` detail rows of the LOCAL results DB to the Bucket-A
+# categories (and the Bucket-B worklist) using the same classification that the
+# audit enforces — so `make test-tcl-status` can state "the excluded-test count
+# by category" for the run it just produced. This is the automatable, in-tree
+# half of the reconciled-denominator deliverable; the CERTIFIED bench-runner run
+# remains an operator step (see docs/reference/tcl-skip-policy.md "Deferred
+# work"). Input is the CLI `--format raw` framing (fields joined by ASCII 31,
+# rows terminated by ASCII 30), which is unambiguous even for file paths that
+# contain pipes or newlines.
+# ---------------------------------------------------------------------------
+
+_RAW_FIELD_SEP = "\x1f"  # ASCII 31, between values within a row
+_RAW_ROW_SEP = "\x1e"    # ASCII 30, terminates each row
+
+
+def _basename_of(file_path: str) -> str:
+    """'.../sqlite/test/collate1.test' -> 'collate1'."""
+    base = file_path.rsplit("/", 1)[-1]
+    if base.endswith(".test"):
+        base = base[:-len(".test")]
+    return base
+
+
+def build_skip_lookups(shim_content: str):
+    """Return (file_cat, pattern_cat) mapping each shim skip key to (bucket, cat).
+
+    bucket is 'A' or 'B'; cat is an A-code (for Bucket A) or None (for Bucket B).
+    Whole-file keys are matched by test-file basename; pattern keys by glob over
+    the test name. Only keys that are actually declared (in BUCKET_A_CLASSIFICATION
+    or ACK_BUCKET_B) are included — the audit guarantees that is every key.
+    """
+    def bucket_of(key):
+        if key in BUCKET_A_CLASSIFICATION:
+            return ("A", BUCKET_A_CLASSIFICATION[key])
+        if key in ACK_BUCKET_B:
+            return ("B", None)
+        return None
+
+    file_cat = {}
+    for key in parse_whole_file_skips(shim_content):
+        b = bucket_of(key)
+        if b:
+            file_cat[key] = b
+
+    pattern_cat = {}
+    for key in parse_skip_patterns(shim_content):
+        b = bucket_of(key)
+        if b:
+            pattern_cat[key] = b
+
+    return file_cat, pattern_cat
+
+
+def classify_skip_row(file_path: str, test_name: str, file_cat: dict, pattern_cat: dict):
+    """Classify one `skipped` detail row.
+
+    Returns (bucket, category, key):
+      * bucket   — 'A', 'B', or 'named' (a vibesql_skip_tests entry or a runtime
+                   ifcapable self-skip that is not individually bucketed in the
+                   static pass — Phase-2 / operator-deferred).
+      * category — an A-code for Bucket A, else None.
+      * key      — the matching shim skip key, or None for 'named'.
+    """
+    base = _basename_of(file_path)
+
+    # 1. Whole-file skip (every row in the file shares the file's bucket).
+    if base in file_cat:
+        bucket, cat = file_cat[base]
+        return (bucket, cat, base)
+
+    # 2. atof1 partial skip: only the real2hex()/hex2real() loop tests are
+    #    skipped (harness-only functions, A5); the non-loop atof1-2.x/atof-3.x
+    #    tests keep RUNNING and are never 'skipped', so any atof1 skipped row is a
+    #    loop test. (Landmine #6065 — see the shim detector.)
+    if base == "atof1":
+        return ("A", "A5", "atof1 (partial: real2hex/hex2real)")
+
+    # 3. Pattern skip: match the test name against '<pattern>*'. Prefer the most
+    #    specific (longest) pattern so overlapping prefixes are deterministic.
+    for key in sorted(pattern_cat, key=len, reverse=True):
+        if fnmatch.fnmatch(test_name, key + "*") or fnmatch.fnmatch(test_name, key):
+            bucket, cat = pattern_cat[key]
+            return (bucket, cat, key)
+
+    # 4. Named skip / runtime self-skip — not individually bucketed here.
+    return ("named", None, None)
+
+
+def categorize_skip_stream(shim_content: str, stream_text: str) -> int:
+    """Print a by-category breakdown of `skipped` rows read from stdin.
+
+    stream_text is the CLI `--format raw` payload of a
+    `SELECT file_path, test_name ... WHERE status='skipped'` query. Reconciles:
+    the printed per-category counts sum to the total skipped rows.
+    """
+    file_cat, pattern_cat = build_skip_lookups(shim_content)
+
+    rows = [r for r in stream_text.split(_RAW_ROW_SEP) if r != ""]
+    if not rows:
+        print("No 'skipped' rows in the latest local run "
+              "(nothing to attribute by category).")
+        return 0
+
+    a_counts = Counter()   # A-code -> n
+    b_count = 0
+    named_count = 0
+    for r in rows:
+        fields = r.split(_RAW_FIELD_SEP)
+        file_path = fields[0] if fields else ""
+        test_name = fields[1] if len(fields) > 1 else ""
+        bucket, cat, _key = classify_skip_row(file_path, test_name, file_cat, pattern_cat)
+        if bucket == "A":
+            a_counts[cat] += 1
+        elif bucket == "B":
+            b_count += 1
+        else:
+            named_count += 1
+
+    total = sum(a_counts.values()) + b_count + named_count
+    a_total = sum(a_counts.values())
+
+    print(f"Excluded (skipped) rows in latest local run: {total}")
+    print("(Attributed via the same classification the bucket audit enforces.)")
+    print()
+    print("Bucket A — out-of-scope by design (honest to exclude):")
+    for code in sorted(BUCKET_A_CATEGORIES, key=lambda c: int(c[1:])):
+        n = a_counts.get(code, 0)
+        if n:
+            print(f"  {code:<3} {BUCKET_A_CATEGORIES[code]:<42} {n:>8}")
+    print(f"  {'':<3} {'Bucket A subtotal':<42} {a_total:>8}")
+    print()
+    print("Bucket B — skipped-because-failing (must reach zero; honest to count):")
+    print(f"  {'':<3} {'Bucket B subtotal':<42} {b_count:>8}")
+    print()
+    print("Named / runtime self-skips (per-entry adjudication deferred — Phase 2):")
+    print(f"  {'':<3} {'vibesql_skip_tests + ifcapable self-skips':<42} {named_count:>8}")
+    print(f"  {'':<3} {'':<42} {'-' * 8:>8}")
+    print(f"  {'':<3} {'TOTAL excluded (reconciles to run skipped)':<42} {total:>8}")
+    print()
+    print("Note: this is the LOCAL run's excluded count. The CERTIFIED "
+          "bench-runner denominator")
+    print("remains an operator step — see docs/reference/tcl-skip-policy.md "
+          "\"Deferred work\".")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verify TCL test skip entries")
     parser.add_argument("--category", help="Check only skips in this category")
@@ -447,7 +736,11 @@ def main():
     parser.add_argument("--list-categories", action="store_true", help="List skip categories and counts")
     parser.add_argument("--audit-buckets", action="store_true",
                         help="Enforce the skip-honesty standing rule (issue #6154): "
-                             "fail if any skip carries an undeclared Bucket-B smell")
+                             "fail if any whole-file/pattern skip lacks a declared bucket")
+    parser.add_argument("--categorize-skips", action="store_true",
+                        help="Read a `--format raw` (file_path, test_name) skip stream "
+                             "on stdin and print the excluded-test count by Bucket-A "
+                             "category (issue #6154 deliverable 5, local run)")
     args = parser.parse_args()
 
     # Read the shim file
@@ -456,6 +749,9 @@ def main():
 
     if args.audit_buckets:
         return audit_buckets(shim_content)
+
+    if args.categorize_skips:
+        return categorize_skip_stream(shim_content, sys.stdin.read())
 
     # Parse skip list
     skips = parse_skip_list(shim_content)
