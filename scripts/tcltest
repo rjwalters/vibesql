@@ -845,6 +845,30 @@ cmd_status() {
             ORDER BY tests DESC
             LIMIT 10
         " 2>/dev/null || true
+
+        # Excluded (skipped) tests by skip-honesty bucket (issue #6154 deliverable
+        # 5, LOCAL run). This is the per-run ROW attribution that complements the
+        # STATIC declaration taxonomy printed by print_compatibility_metric() above
+        # (which counts skip *declarations* in the shim via --list-categories). The
+        # #6165 comment there explicitly defers "the reconciled by-category
+        # excluded-row count" to this deliverable: here we take the actual
+        # 'skipped' detail ROWS of the latest run — exactly the rows the canonical
+        # pass rate EXCLUDES from its denominator — and attribute each to its
+        # Bucket-A category (A1–A10), a Bucket-B subtotal, or a named/runtime
+        # residual, reconciling to the run's total skipped count. Classification is
+        # single-sourced in verify_skips.py (BUCKET_A_CLASSIFICATION — the same map
+        # the bucket audit enforces). `--format raw` frames rows on ASCII 30/31 so
+        # file paths with pipes/newlines parse unambiguously. LOCAL run only; the
+        # CERTIFIED bench-runner denominator stays an operator step (policy doc's
+        # "Deferred work").
+        echo ""
+        echo "=== Excluded (skipped) rows by skip-honesty bucket — this run (issue #6154) ==="
+        "$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT file_path, test_name
+            FROM tcl_test_results
+            WHERE run_id = $run_id AND status = 'skipped'
+        " 2>/dev/null | python3 scripts/verify_skips.py --categorize-skips 2>/dev/null \
+            || print_warning "Skip-by-category report unavailable (needs verify_skips.py + a run with skipped rows)."
     fi
 }
 
