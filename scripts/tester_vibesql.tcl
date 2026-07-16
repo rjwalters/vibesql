@@ -47,6 +47,29 @@ set ::failList {}
 # One test file is evaluated per tclsh process, so a top-level init suffices.
 set ::file_marker_emitted 0
 
+# Circuit-breaker state (#6158). The #6157 resilient evaluation contains a
+# per-command TCL_ERROR (records an honest failure, then continues) so one bad
+# command no longer truncates the file. That is the right default, but it turns
+# a degenerate case pathological: a generative loop whose EVERY iteration fails
+# identically on the SAME unimplemented shim command (e.g. tkt2409's
+# `for {...} {$::rc} {...} { ... do_test ... read_lock_db -> sqlite3_prepare }`,
+# which never updates its loop-termination variable) will run to millions of
+# iterations, each a `failed` row, dominating wall-clock and bloating the
+# results DB. The circuit-breaker tracks CONSECUTIVE IDENTICAL
+# "invalid command name <cmd>" failures; once the streak reaches the threshold
+# it bails the file with an honest marker instead of grinding out the whole
+# doomed loop. Any success (see emit_test_detail) or any DIFFERENT error resets
+# the streak, so a normal file with scattered failures never trips it.
+set ::cb_streak 0            ;# consecutive identical unimplemented-command failures
+set ::cb_last_cmd ""         ;# the command name of the last such failure
+set ::cb_tripped 0           ;# set when the breaker fires (drives the eval_file_resilient bail)
+set ::cb_threshold 50
+if {[info exists ::env(TCLTEST_CIRCUIT_BREAKER)] &&
+    [string is integer -strict $::env(TCLTEST_CIRCUIT_BREAKER)] &&
+    $::env(TCLTEST_CIRCUIT_BREAKER) > 0} {
+    set ::cb_threshold $::env(TCLTEST_CIRCUIT_BREAKER)
+}
+
 # Emit a structured per-test detail line consumed by tcl_runner.py.
 #
 # Format: "##TCLTEST## <status>\t<name>"
@@ -56,6 +79,15 @@ set ::file_marker_emitted 0
 # The sentinel prefix lets the Python runner distinguish these lines from the
 # human-readable output, so the same stream serves both humans and the parser.
 proc emit_test_detail {status name} {
+    # Any passing test breaks a consecutive-identical-unsupported-command
+    # failure streak (circuit-breaker, #6158). Done here — the single chokepoint
+    # every passed row flows through (do_test and its do_execsql_test/
+    # do_catchsql_test wrappers) — and OUTSIDE the emit_detail guard so the
+    # reset happens even when detail emission is disabled.
+    if {$status eq "passed"} {
+        set ::cb_streak 0
+        set ::cb_last_cmd ""
+    }
     if {$::emit_detail} {
         puts "##TCLTEST## $status\t$name"
     }
@@ -3168,6 +3200,7 @@ array set vibesql_skip_files {
     capi3c "Pure C-API file (header: 'copy of capi3.test... adapted to test the new sqlite3_prepare_v2 interface'): asserts sqlite3_errcode/sqlite3_errmsg/sqlite3_get_autocommit plus second-connection sqlite3_open handle behavior — none reachable from the SQL CLI. The lone do_execsql_test (CREATE TABLE t11/t12) is setup only for the column-decltype C-API assertions. Same C-API family as the already-skipped capi3b (its _v2 sibling). (Audit #6042, Part of #5779.)"
     capi3d "Pure C-API file: tests sqlite3_next_stmt/sqlite3_stmt_readonly/sqlite3_stmt_busy statement-handle introspection via sqlite3_prepare16 — shim commands VibeSQL does not implement; the file aborts at capi3d-1.1 on 'invalid command name sqlite3_prepare16' before any test runs. The lone do_execsql_test (CREATE TABLE t4(x,y); BEGIN) is setup only. No SQL-CLI-reachable coverage. (Audit #6042, Part of #5779.)"
     capi3e "Pure C-API file: every test opens a raw connection handle via sqlite3_open/sqlite3_open16 and checks sqlite3_errcode/sqlite3_close plus `file isfile` filesystem assertions on the file that handle created — semantics of the C open API, not SQL reachable from the CLI. No do_execsql_test coverage. (The per-test sqlite3_open*/sqlite3_close detector also skips these, but a file-level entry documents intent.)"
+    tkt2409 "Pure C-API statement-handle test: read_lock_db acquires a read lock via sqlite3_prepare db2 {...} / sqlite3_step / sqlite3_finalize — shim commands VibeSQL does not implement. The tkt2409-2.1.* case sits inside a generative `for {set iCache 10} {\$::rc} {incr iCache}` loop whose termination variable \$::rc is only updated AFTER read_lock_db succeeds; because sqlite3_prepare raises 'invalid command name', \$::rc never changes and the loop ran ~4.5 MILLION iterations post-#6157 (the resilient per-command catch no longer lets the first failure abort the file), every iteration failing identically on sqlite3_prepare and bloating the results DB. Same Bucket-A C-API class as the capi*/bind/colmeta skips: no SQL-CLI-reachable coverage. (Audit #6158, follow-on to #6157/#6153, Part of #5779.)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
     incrblob "Uses incrblob - SQLite incremental blob I/O API"
@@ -5554,6 +5587,16 @@ proc do_test {name script expected} {
         lappend ::failList $name
         emit_test_detail failed $name
         puts "  $name... FAILED (error: $result)"
+        # Circuit-breaker (#6158): feed this failure in. If it is the Nth
+        # consecutive IDENTICAL unimplemented-command failure (a degenerate
+        # generative loop like tkt2409's, which would otherwise grind out
+        # millions of doomed iterations), raise the breaker so it propagates out
+        # of the enclosing loop and eval_file_resilient bails the file. The
+        # failure above is already recorded as a real `failed` row, so nothing is
+        # masked. Any success or different error resets the streak first.
+        if {[cb_note_failure $result]} {
+            cb_trip $name
+        }
         return
     }
 
@@ -7432,6 +7475,68 @@ proc split_tcl_commands {content} {
     return $commands
 }
 
+# --- Circuit-breaker (#6158) -------------------------------------------------
+#
+# Return the command name from an "invalid command name <cmd>" error (the shim
+# surface for an unimplemented SQLite C-API command), or "" if $err is any other
+# kind of error. TCL formats the message as: invalid command name "sqlite3_prepare"
+proc cb_unsupported_cmd {err} {
+    if {[regexp {invalid command name "([^"]+)"} $err -> name]} {
+        return $name
+    }
+    return ""
+}
+
+# Feed one FAILURE into the circuit-breaker. Returns 1 if the breaker has just
+# tripped (the consecutive-identical-unimplemented-command streak reached the
+# threshold), 0 otherwise. A different error — or an error that is not an
+# unimplemented-command failure at all — resets the streak, so only a run of
+# consecutive IDENTICAL unsupported-command failures can trip it. (Successes
+# reset the streak in emit_test_detail.)
+proc cb_note_failure {err} {
+    set cmd [cb_unsupported_cmd $err]
+    if {$cmd eq ""} {
+        # A genuine different error (SQL mismatch, unrelated TCL error, ...):
+        # this is exactly the scattered-failure case that must NOT trip.
+        set ::cb_streak 0
+        set ::cb_last_cmd ""
+        return 0
+    }
+    if {$cmd eq $::cb_last_cmd} {
+        incr ::cb_streak
+    } else {
+        set ::cb_streak 1
+        set ::cb_last_cmd $cmd
+    }
+    return [expr {$::cb_streak >= $::cb_threshold}]
+}
+
+# Raise the circuit-breaker as a TCL error so it propagates OUT of whatever
+# generative loop / top-level command the failing do_test sits inside, up to
+# eval_file_resilient's per-command catch, which recognizes ::cb_tripped and
+# bails the file (records an honest marker, stops evaluating the remainder).
+proc cb_trip {ctx} {
+    set ::cb_tripped 1
+    return -code error -errorcode {VIBESQL_CIRCUIT_BREAKER} \
+        "circuit-breaker: $::cb_threshold consecutive identical unimplemented-command failures (invalid command name \"$::cb_last_cmd\") near $ctx — file bailed"
+}
+
+# Record an HONEST bail marker for a file the circuit-breaker stopped. Emits an
+# `incomplete` detail row (a marker status the runner counts as a failure, per
+# CLAUDE.md) — never `passed`, never `skipped` — and bumps the shim's own fail
+# counter so the "Tests failed" trailer and the detail rows reconcile. The file
+# is NOT masked: the offending do_test failures already recorded before the trip
+# stay as real `failed` rows, and this marker documents why the rest was cut.
+proc cb_emit_marker {reason} {
+    set base [file rootname [file tail [lindex $::argv 0]]]
+    emit_test_detail incomplete "$base (circuit-breaker bail)"
+    incr ::nTest
+    incr ::nFail
+    lappend ::failList "$base (circuit-breaker bail: $reason)"
+    set ::file_marker_emitted 1
+    puts "CIRCUIT-BREAKER: $reason"
+}
+
 # Record a CONTAINED file-scope statement error as an honest failed detail row
 # (kept consistent with the shim's own summary counters so detail and summary
 # reconcile) and let the file CONTINUE. This is the resilience mechanism that
@@ -7469,9 +7574,28 @@ proc eval_file_resilient {content} {
                 return 2
             }
             1 {
+                # Circuit-breaker (#6158) fired inside this command — e.g. a
+                # generative loop (tkt2409) whose every iteration failed
+                # identically on an unimplemented shim command. The breaker
+                # error propagated out here; bail the file with an honest marker
+                # instead of continuing. The doomed do_test failures up to the
+                # trip are already recorded as real `failed` rows.
+                if {$::cb_tripped} {
+                    cb_emit_marker $err
+                    return 3
+                }
                 incr ::contained_file_scope_errors
                 incr seq
                 record_contained_error $seq $err
+                # Feed contained top-level failures into the breaker too, so a
+                # run of consecutive IDENTICAL unimplemented-command failures at
+                # FILE SCOPE (many separate top-level commands, not one loop)
+                # also bails rather than grinding through every one.
+                if {[cb_note_failure $err]} {
+                    set ::cb_tripped 1
+                    cb_emit_marker "circuit-breaker: $::cb_threshold consecutive identical unimplemented-command failures (invalid command name \"$::cb_last_cmd\") at file scope — file bailed"
+                    return 3
+                }
             }
             default {
                 # TCL_BREAK / TCL_CONTINUE / custom code at file scope: not a
@@ -7516,6 +7640,13 @@ proc run_test_file {filename} {
     set ::attach_skipped 0
     set ::trigger_skipped 0
     set ::window_skipped 0
+
+    # Reset circuit-breaker state for the new file (#6158). One file per process
+    # so a top-level init already suffices, but reset defensively alongside the
+    # other per-file trackers.
+    set ::cb_streak 0
+    set ::cb_last_cmd ""
+    set ::cb_tripped 0
 
     # Clean any existing temp db (use catch to handle race conditions)
     if {$::db_file ne ""} {
@@ -7619,6 +7750,11 @@ proc run_test_file {filename} {
         } else {
             puts "File-scope early return (self-disabled) — 0 tests, clean early-exit."
         }
+    } elseif {$eval_code == 3} {
+        # Circuit-breaker bailed the file (#6158): an honest `incomplete` marker
+        # row was already emitted by cb_emit_marker. Any tests that ran before
+        # the trip are tallied normally.
+        puts "File bailed by circuit-breaker after $::nTest recorded test result(s)."
     } elseif {$::contained_file_scope_errors > 0} {
         puts "Contained $::contained_file_scope_errors file-scope statement error(s); file ran to completion (remaining tests recovered)."
     }
