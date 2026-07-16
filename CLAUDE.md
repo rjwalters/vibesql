@@ -147,6 +147,8 @@ LIMIT 10;
 
 > **Which number do I quote?** For "how does VibeSQL compare to the epic baseline / to a previous run" use the **raw** headline (unchanged inclusion rules). For "how broad is our SQL coverage, ignoring monster-file domination" use the **file-weighted** mean and the clean/dirty file counts. Never quote the file-weighted number against 72.3% — they are different denominators.
 
+> **Canonical "SQLite compatibility %" claim.** The raw headline above **is** the canonical "SQLite compatibility %" metric — its exact denominator (in-scope tests = all tests minus the out-of-scope Bucket-A skips), the honest claim sentence with its scope/exclusions clause, its relationship to epic #5779's 72.3% baseline, and its frozen inclusion rules are defined in **[docs/reference/tcl-compatibility-metric.md](docs/reference/tcl-compatibility-metric.md)**. The out-of-scope exclusion taxonomy lives in **[docs/reference/tcl-skip-policy.md](docs/reference/tcl-skip-policy.md)**. `make test-tcl-status` prints this metric (raw headline + honest claim sentence + Bucket-A category breakdown) via `cmd_status()` in `scripts/tcltest`. The raw-row inclusion rules here, in that doc, and in `cmd_status()` are the same frozen rules and must never drift apart.
+
 > **Source-of-truth note:** `make test-tcl-status` reads the `tcl_test_runs` summary table for the headline numbers. Any per-file or per-test analysis must query the `tcl_test_results` detail table using the queries above. The two reconcile because every run (native-TCL and static) now writes both. If a detail-row insert fails, `tcl_runner.py` logs it to stderr, counts it, and exits non-zero when more than 5% of inserts fail — so silent divergence between the tables cannot recur unnoticed.
 
 ### Exporting Results
