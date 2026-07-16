@@ -607,6 +607,89 @@ EOF
     echo "Results database: $RESULTS_DB"
 }
 
+# Print the canonical "SQLite compatibility %" headline + honest claim sentence
+# (issue #6156).
+#
+# This is the HEADLINE compatibility metric: the raw per-test-row pass rate over
+# the in-scope universe (skipped rows excluded, marker rows counted as failures),
+# reframed as an honest claim that names its denominator and its out-of-scope
+# exclusions. It reuses the same canonical pass-rate inclusion rules frozen in
+# CLAUDE.md and defined in docs/reference/tcl-compatibility-metric.md — it does
+# NOT invent a new query. The excluded out-of-scope categories are the static
+# Bucket-A skip declarations enumerated in docs/reference/tcl-skip-policy.md and
+# surfaced live by scripts/verify_skips.py --list-categories.
+#
+# Degrades gracefully with no results DB / no detail rows: the definition and the
+# static category breakdown still print; the live numbers are simply absent.
+#
+# Arg: $1 = run_id (may be empty or "0" when no detail rows exist yet).
+print_compatibility_metric() {
+    local run_id="$1"
+
+    echo ""
+    echo "=== SQLite compatibility % (canonical headline — see docs/reference/tcl-compatibility-metric.md) ==="
+
+    if [ -n "$run_id" ] && [ "$run_id" != "0" ]; then
+        # Raw per-row numbers over the in-scope universe. Denominator excludes
+        # 'skipped' (the Bucket-A out-of-scope exclusions) and counts marker rows
+        # (timeout/incomplete/error) as failures — identical inclusion rules to
+        # CLAUDE.md's canonical pass-rate query.
+        local passed scored excluded files rate
+        passed="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COALESCE(SUM(CASE WHEN status = 'passed' THEN 1 ELSE 0 END), 0)
+            FROM tcl_test_results WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || passed=""
+        scored="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COALESCE(SUM(CASE WHEN status IN ('passed','failed','timeout','incomplete','error') THEN 1 ELSE 0 END), 0)
+            FROM tcl_test_results WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || scored=""
+        excluded="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0)
+            FROM tcl_test_results WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || excluded=""
+        files="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+            SELECT COUNT(DISTINCT file_path) FROM tcl_test_results WHERE run_id = $run_id
+        " 2>/dev/null | tr -cd '0-9')" || files=""
+
+        if [ -n "$scored" ] && [ "$scored" -gt 0 ] 2>/dev/null; then
+            # 1-dp rate via integer math (avoid depending on awk/bc availability).
+            # tenths = 10 × percentage; split into integer + fractional digit.
+            # Pad to >=2 digits so sub-1% rates render as "0.x", not ".x".
+            local tenths
+            tenths=$(( (passed * 1000 + scored / 2) / scored ))
+            [ "${#tenths}" -lt 2 ] && tenths="0$tenths"
+            rate="${tenths%?}.${tenths: -1}"
+            echo ""
+            echo "  VibeSQL passes ${passed}/${scored} (${rate}%) of the ${scored} in-scope SQLite TCL"
+            echo "  tests (${files} files); it deliberately does not implement SQLite's C API,"
+            echo "  VFS/pager internals, or unshipped extensions, so ${excluded} out-of-scope tests"
+            echo "  are excluded (enumerated by category in docs/reference/tcl-skip-policy.md)."
+        else
+            print_warning "No scored in-scope rows in run $run_id — compatibility % unavailable (run: ./scripts/tcltest run)."
+        fi
+    else
+        print_warning "No test runs with detail rows yet — compatibility % unavailable (run: ./scripts/tcltest run)."
+    fi
+
+    # Excluded out-of-scope categories (static Bucket-A skip declarations). This
+    # backs the exclusions clause with a visible breakdown rather than a bare
+    # link. It is the STATIC declaration taxonomy from tester_vibesql.tcl, not a
+    # certified per-run row count — the reconciled by-category excluded-row count
+    # against the certified 174,982-skip run is deferred to #6154 deliverable 5.
+    if [ -f "$REPO_ROOT/scripts/verify_skips.py" ]; then
+        echo ""
+        echo "  Out-of-scope exclusions (static Bucket-A skip declarations; full taxonomy"
+        echo "  in docs/reference/tcl-skip-policy.md):"
+        # Show only the category summary counts, not the full per-file
+        # enumeration (that lives in tcl-skip-policy.md) — keeps `status` concise.
+        python3 "$REPO_ROOT/scripts/verify_skips.py" --list-categories 2>/dev/null \
+            | sed -n '/^Skip categories:/,$p' \
+            | grep -v '^[[:space:]]*- ' \
+            | sed 's/^/    /' \
+            || print_warning "  (could not read skip categories from verify_skips.py)"
+    fi
+}
+
 # Status command: quick summary
 cmd_status() {
     check_vibesql
@@ -648,6 +731,15 @@ cmd_status() {
     run_id="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
         SELECT COALESCE((SELECT MAX(run_id) FROM tcl_test_results), 0)
     " 2>/dev/null | tr -cd '0-9')" || run_id=""
+
+    # Canonical "SQLite compatibility %" headline (issue #6156). This reframes
+    # the existing raw per-row pass rate as THE compatibility claim, backed by an
+    # honest scope/exclusions clause. Definition + frozen inclusion rules live in
+    # docs/reference/tcl-compatibility-metric.md; the exclusion taxonomy lives in
+    # docs/reference/tcl-skip-policy.md. No new headline SQL is invented here — the
+    # denominator is the same canonical query frozen in CLAUDE.md (skipped rows
+    # excluded, marker rows count as failures).
+    print_compatibility_metric "$run_id"
 
     if [ -n "$run_id" ] && [ "$run_id" != "0" ]; then
         echo ""
