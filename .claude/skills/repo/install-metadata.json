@@ -1,7 +1,7 @@
 {
-  "version": "0.4.0",
-  "commit": "0ed10f4",
-  "installed_at": "2026-07-16T13:41:44Z",
+  "version": "0.4.1",
+  "commit": "2218737",
+  "installed_at": "2026-07-16T15:23:57Z",
   "dev": false,
   "source": "/Users/rwalters/GitHub/repo",
   "commands": ["all","audit","branches","docs","gitignore","help","links","orphans","readme","release","remote","reset","tidy","update-tools"]

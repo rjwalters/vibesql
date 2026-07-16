@@ -37,6 +37,9 @@ test*.wal
 test*.lock
 test*-checkpoints/
 out.db
+out.wal
+out.lock
+out-checkpoints/
 *.db.tmp*
 .*.tmp*
 
