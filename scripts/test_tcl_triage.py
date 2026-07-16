@@ -24,6 +24,7 @@ from tcl_triage import (  # noqa: E402
     CERTIFIED_TAG_PATTERN,
     cluster_errors,
     normalize_error_message,
+    results_db_reachable,
     _extract_json_array,
 )
 
@@ -159,6 +160,57 @@ class TestJsonExtraction(unittest.TestCase):
         extracted = _extract_json_array(raw)
         self.assertIsNotNone(extracted)
         self.assertTrue(extracted.endswith("]"))
+
+
+class TestResultsDbReachable(unittest.TestCase):
+    """A WAL-mode results DB (checkpoints + wal, no .vbsql snapshot file) must
+    be recognized as reachable; a genuinely-absent DB must not."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        self.db = os.path.join(self.dir, "tcl_test_results.vbsql")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_absent_db_is_unreachable(self):
+        # No file, no checkpoints, no wal.
+        self.assertFalse(results_db_reachable(self.db))
+
+    def test_snapshot_file_is_reachable(self):
+        with open(self.db, "w", encoding="utf-8") as fh:
+            fh.write("-- VibeSQL Database dump\n")
+        self.assertTrue(results_db_reachable(self.db))
+
+    def test_wal_mode_checkpoints_is_reachable(self):
+        # Extension-stripped sibling dir with a .vchk, no .vbsql file.
+        ckpt = os.path.join(self.dir, "tcl_test_results-checkpoints")
+        os.mkdir(ckpt)
+        with open(os.path.join(ckpt, "checkpoint_53.vchk"), "wb") as fh:
+            fh.write(b"VCHK\x02\x00\x00\x00")
+        self.assertFalse(os.path.exists(self.db))  # precondition: no snapshot
+        self.assertTrue(results_db_reachable(self.db))
+
+    def test_empty_checkpoints_dir_without_vchk_is_unreachable(self):
+        os.mkdir(os.path.join(self.dir, "tcl_test_results-checkpoints"))
+        self.assertFalse(results_db_reachable(self.db))
+
+    def test_wal_sibling_is_reachable(self):
+        with open(os.path.join(self.dir, "tcl_test_results.wal"), "wb") as fh:
+            fh.write(b"\x00" * 32)
+        self.assertTrue(results_db_reachable(self.db))
+
+    def test_non_vbsql_path_uses_path_as_stem(self):
+        # A bare basename (no .vbsql extension) recovers from <path>-checkpoints/.
+        bare = os.path.join(self.dir, "tcl_test_results")
+        ckpt = os.path.join(self.dir, "tcl_test_results-checkpoints")
+        os.mkdir(ckpt)
+        with open(os.path.join(ckpt, "checkpoint_1.vchk"), "wb") as fh:
+            fh.write(b"VCHK")
+        self.assertTrue(results_db_reachable(bare))
 
 
 if __name__ == "__main__":
