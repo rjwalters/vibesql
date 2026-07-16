@@ -1,6 +1,9 @@
 {
   "version": "2",
   "offlineMode": false,
+  "guards": {
+    "sqlDdl": false
+  },
   "forge": {
     "type": "auto",
     "gitea": {
