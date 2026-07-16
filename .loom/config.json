@@ -1,9 +1,6 @@
 {
   "version": "2",
   "offlineMode": false,
-  "worktree": {
-    "root": "/Volumes/Stripe"
-  },
   "forge": {
     "type": "auto",
     "gitea": {

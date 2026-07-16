@@ -125,12 +125,14 @@ profile-*.json.gz
 .loom/claude-config/
 .loom/logs/
 .loom/spawn-loop-state.json
-.loom/worktrees/
-.loom/state.json
-.loom/*.log
-.loom/*.sock
 
 # Secrets — never commit
 .env
 .env.*
 !.env.example
+.loom/worktrees/
+.loom/state.json
+.loom/*.log
+.loom/*.sock
+
+tcl-baseline-2026-07-16/
