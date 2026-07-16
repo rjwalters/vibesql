@@ -47,27 +47,72 @@ set ::failList {}
 # One test file is evaluated per tclsh process, so a top-level init suffices.
 set ::file_marker_emitted 0
 
-# Circuit-breaker state (#6158). The #6157 resilient evaluation contains a
-# per-command TCL_ERROR (records an honest failure, then continues) so one bad
-# command no longer truncates the file. That is the right default, but it turns
-# a degenerate case pathological: a generative loop whose EVERY iteration fails
-# identically on the SAME unimplemented shim command (e.g. tkt2409's
-# `for {...} {$::rc} {...} { ... do_test ... read_lock_db -> sqlite3_prepare }`,
-# which never updates its loop-termination variable) will run to millions of
-# iterations, each a `failed` row, dominating wall-clock and bloating the
-# results DB. The circuit-breaker tracks CONSECUTIVE IDENTICAL
-# "invalid command name <cmd>" failures; once the streak reaches the threshold
-# it bails the file with an honest marker instead of grinding out the whole
-# doomed loop. Any success (see emit_test_detail) or any DIFFERENT error resets
-# the streak, so a normal file with scattered failures never trips it.
-set ::cb_streak 0            ;# consecutive identical unimplemented-command failures
-set ::cb_last_cmd ""         ;# the command name of the last such failure
+# Circuit-breaker state (#6158, generalized #6160). The #6157 resilient
+# evaluation contains a per-command TCL_ERROR (records an honest failure, then
+# continues) so one bad command no longer truncates the file. That is the right
+# default, but it turns a degenerate case pathological: a generative loop whose
+# EVERY iteration fails identically will run to millions of iterations, each a
+# `failed` row, dominating wall-clock and bloating the results DB. Two observed
+# classes:
+#   - tkt2409's `for {...} {$::rc} {...} { ... read_lock_db -> sqlite3_prepare }`
+#     loop, whose termination variable is only set AFTER the (unimplemented)
+#     sqlite3_prepare succeeds — ~4.5M iterations, each identically failing on
+#     `invalid command name "sqlite3_prepare"`.
+#   - malloc4's malloc-fault-injection loop referencing `$::name8`, a variable
+#     its (un-runnable-under-the-shim) setup never sets — ~1.44M iterations,
+#     each identically failing on `can't read "::name8": no such variable`,
+#     which is NOT an unimplemented-command error and so slipped past the
+#     original #6159 breaker that only counted "invalid command name" failures.
+#
+# The breaker now tracks CONSECUTIVE IDENTICAL failures of ANY error class,
+# keyed on the full error message (the streak signature). Any success (see
+# emit_test_detail) or any DIFFERENT error message resets the streak, so a
+# normal file with scattered/different failures never trips it.
+#
+# Two thresholds, because 50 identical failures means different things:
+#   - Unimplemented-command loops (`invalid command name "X"`): keep #6159's
+#     small, fast N=50 bail — 50 identical missing-command failures is already
+#     an unambiguous degenerate loop, and no legitimate file re-runs one missing
+#     shim command 50 times in a row.
+#   - ANY OTHER error class: use a much HIGHER threshold (default 1000). 50
+#     consecutive identical failures is plausible in a LEGITIMATE all-failing
+#     feature file (e.g. 100 tests all failing on one genuinely-missing SQL
+#     function), so bailing those at 50 would truncate real failure signal. The
+#     degenerate loops are orders of magnitude bigger (1.44M, 4.5M); the largest
+#     LEGITIMATE file is atof1 at ~40k (passing) tests — so a threshold in the
+#     thousands cleanly separates "runaway loop" from "real failing file".
+# Plus an absolute per-file row-count ceiling backstop (default 200k) that bails
+# any single file past a row count no legitimate file approaches, even when its
+# errors are NOT identical (a varying-message runaway loop the streak can't see).
+set ::cb_streak 0            ;# consecutive identical failures (any error class)
+set ::cb_last_sig ""         ;# full error message of the last failure (streak signature)
+set ::cb_last_cmd ""         ;# unimplemented-command name if last error was one, else ""
 set ::cb_tripped 0           ;# set when the breaker fires (drives the eval_file_resilient bail)
+
+# Narrow threshold: consecutive identical UNIMPLEMENTED-COMMAND failures.
 set ::cb_threshold 50
 if {[info exists ::env(TCLTEST_CIRCUIT_BREAKER)] &&
     [string is integer -strict $::env(TCLTEST_CIRCUIT_BREAKER)] &&
     $::env(TCLTEST_CIRCUIT_BREAKER) > 0} {
     set ::cb_threshold $::env(TCLTEST_CIRCUIT_BREAKER)
+}
+
+# Generalized threshold: consecutive identical failures of ANY OTHER error class
+# (malloc4's variable-read loop, etc.). Set far above any legitimate file.
+set ::cb_threshold_any 1000
+if {[info exists ::env(TCLTEST_CIRCUIT_BREAKER_ANY)] &&
+    [string is integer -strict $::env(TCLTEST_CIRCUIT_BREAKER_ANY)] &&
+    $::env(TCLTEST_CIRCUIT_BREAKER_ANY) > 0} {
+    set ::cb_threshold_any $::env(TCLTEST_CIRCUIT_BREAKER_ANY)
+}
+
+# Absolute per-file emitted-row ceiling backstop; 0 disables. No legitimate file
+# approaches this (largest is atof1 at ~40k rows).
+set ::cb_row_ceiling 200000
+if {[info exists ::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS)] &&
+    [string is integer -strict $::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS)] &&
+    $::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS) >= 0} {
+    set ::cb_row_ceiling $::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS)
 }
 
 # Emit a structured per-test detail line consumed by tcl_runner.py.
@@ -86,6 +131,7 @@ proc emit_test_detail {status name} {
     # reset happens even when detail emission is disabled.
     if {$status eq "passed"} {
         set ::cb_streak 0
+        set ::cb_last_sig ""
         set ::cb_last_cmd ""
     }
     if {$::emit_detail} {
@@ -3201,6 +3247,7 @@ array set vibesql_skip_files {
     capi3d "Pure C-API file: tests sqlite3_next_stmt/sqlite3_stmt_readonly/sqlite3_stmt_busy statement-handle introspection via sqlite3_prepare16 — shim commands VibeSQL does not implement; the file aborts at capi3d-1.1 on 'invalid command name sqlite3_prepare16' before any test runs. The lone do_execsql_test (CREATE TABLE t4(x,y); BEGIN) is setup only. No SQL-CLI-reachable coverage. (Audit #6042, Part of #5779.)"
     capi3e "Pure C-API file: every test opens a raw connection handle via sqlite3_open/sqlite3_open16 and checks sqlite3_errcode/sqlite3_close plus `file isfile` filesystem assertions on the file that handle created — semantics of the C open API, not SQL reachable from the CLI. No do_execsql_test coverage. (The per-test sqlite3_open*/sqlite3_close detector also skips these, but a file-level entry documents intent.)"
     tkt2409 "Pure C-API statement-handle test: read_lock_db acquires a read lock via sqlite3_prepare db2 {...} / sqlite3_step / sqlite3_finalize — shim commands VibeSQL does not implement. The tkt2409-2.1.* case sits inside a generative `for {set iCache 10} {\$::rc} {incr iCache}` loop whose termination variable \$::rc is only updated AFTER read_lock_db succeeds; because sqlite3_prepare raises 'invalid command name', \$::rc never changes and the loop ran ~4.5 MILLION iterations post-#6157 (the resilient per-command catch no longer lets the first failure abort the file), every iteration failing identically on sqlite3_prepare and bloating the results DB. Same Bucket-A C-API class as the capi*/bind/colmeta skips: no SQL-CLI-reachable coverage. (Audit #6158, follow-on to #6157/#6153, Part of #5779.)"
+    malloc4 "Malloc-fault-injection test: drives SQLite's simulated out-of-memory paths (sqlite3_memdebug_fail / OOM retry loops) that VibeSQL has no equivalent for. Its fault-injection setup cannot run under the shim, so `$::name8` (a variable that setup would populate) is never set, and a large generative loop that references it ran ~1.44 MILLION iterations post-#6157, every one failing identically on `can't read \"::name8\": no such variable` and flooding the results DB (the exact degenerate-loop pathology of tkt2409, but a variable-read error rather than an unimplemented-command error — which is why the generalized #6160 breaker now also catches it). Same Bucket-A resource/VFS-internal class as the other malloc/OOM and pager-internals skips: no SQL-CLI-reachable coverage. This whole-file skip is immediate insurance; the generalized circuit-breaker is the durable backstop. (Audit #6160, follow-on to #6159/#6158/#6157, Part of #5779.)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
     incrblob "Uses incrblob - SQLite incremental blob I/O API"
@@ -7488,27 +7535,51 @@ proc cb_unsupported_cmd {err} {
 }
 
 # Feed one FAILURE into the circuit-breaker. Returns 1 if the breaker has just
-# tripped (the consecutive-identical-unimplemented-command streak reached the
-# threshold), 0 otherwise. A different error — or an error that is not an
-# unimplemented-command failure at all — resets the streak, so only a run of
-# consecutive IDENTICAL unsupported-command failures can trip it. (Successes
-# reset the streak in emit_test_detail.)
+# tripped, 0 otherwise. The streak counts CONSECUTIVE IDENTICAL failures keyed
+# on the full error message (any error class — unimplemented-command loops like
+# tkt2409 AND variable-read / value-mismatch loops like malloc4). Any DIFFERENT
+# error message resets the streak, so a normal file with scattered/different
+# failures never trips (successes also reset it in emit_test_detail).
+#
+# Trip conditions (any one):
+#   - streak >= narrow threshold (50) when the identical error is an
+#     unimplemented-command failure (`invalid command name "X"`); or
+#   - streak >= generalized threshold (1000) for any other identical error; or
+#   - the file has already emitted >= the absolute row ceiling (200k),
+#     regardless of streak — the backstop for varying-message runaway loops.
 proc cb_note_failure {err} {
     set cmd [cb_unsupported_cmd $err]
-    if {$cmd eq ""} {
-        # A genuine different error (SQL mismatch, unrelated TCL error, ...):
-        # this is exactly the scattered-failure case that must NOT trip.
-        set ::cb_streak 0
-        set ::cb_last_cmd ""
-        return 0
-    }
-    if {$cmd eq $::cb_last_cmd} {
+    if {$err eq $::cb_last_sig} {
         incr ::cb_streak
     } else {
         set ::cb_streak 1
+        set ::cb_last_sig $err
         set ::cb_last_cmd $cmd
     }
-    return [expr {$::cb_streak >= $::cb_threshold}]
+    # Absolute row-count backstop first: catches a runaway loop even when its
+    # per-iteration error text VARIES (streak keeps resetting, but rows pile up).
+    if {$::cb_row_ceiling > 0 && $::nTest >= $::cb_row_ceiling} {
+        return 1
+    }
+    # Unimplemented-command loops keep #6159's fast N=50 bail; any other error
+    # class needs the much higher generalized threshold so legitimate
+    # all-failing feature files (tens/hundreds of identical failures) survive.
+    set threshold [expr {$cmd ne "" ? $::cb_threshold : $::cb_threshold_any}]
+    return [expr {$::cb_streak >= $threshold}]
+}
+
+# Build an honest, human-readable reason for a circuit-breaker bail from the
+# current state (which trip condition fired, the streak size, the offending
+# error signature). Used by both the loop-body trip and the file-scope trip.
+proc cb_reason {ctx} {
+    if {$::cb_row_ceiling > 0 && $::nTest >= $::cb_row_ceiling} {
+        return "circuit-breaker: file emitted $::nTest test rows (>= row ceiling $::cb_row_ceiling) near $ctx — degenerate loop, file bailed"
+    }
+    set sig $::cb_last_sig
+    if {[string length $sig] > 120} {
+        set sig "[string range $sig 0 119]..."
+    }
+    return "circuit-breaker: $::cb_streak consecutive identical failures (\"$sig\") near $ctx — degenerate loop, file bailed"
 }
 
 # Raise the circuit-breaker as a TCL error so it propagates OUT of whatever
@@ -7517,8 +7588,7 @@ proc cb_note_failure {err} {
 # bails the file (records an honest marker, stops evaluating the remainder).
 proc cb_trip {ctx} {
     set ::cb_tripped 1
-    return -code error -errorcode {VIBESQL_CIRCUIT_BREAKER} \
-        "circuit-breaker: $::cb_threshold consecutive identical unimplemented-command failures (invalid command name \"$::cb_last_cmd\") near $ctx — file bailed"
+    return -code error -errorcode {VIBESQL_CIRCUIT_BREAKER} [cb_reason $ctx]
 }
 
 # Record an HONEST bail marker for a file the circuit-breaker stopped. Emits an
@@ -7588,12 +7658,12 @@ proc eval_file_resilient {content} {
                 incr seq
                 record_contained_error $seq $err
                 # Feed contained top-level failures into the breaker too, so a
-                # run of consecutive IDENTICAL unimplemented-command failures at
-                # FILE SCOPE (many separate top-level commands, not one loop)
-                # also bails rather than grinding through every one.
+                # run of consecutive IDENTICAL failures at FILE SCOPE (many
+                # separate top-level commands, not one loop) also bails rather
+                # than grinding through every one.
                 if {[cb_note_failure $err]} {
                     set ::cb_tripped 1
-                    cb_emit_marker "circuit-breaker: $::cb_threshold consecutive identical unimplemented-command failures (invalid command name \"$::cb_last_cmd\") at file scope — file bailed"
+                    cb_emit_marker [cb_reason "file scope"]
                     return 3
                 }
             }
@@ -7645,6 +7715,7 @@ proc run_test_file {filename} {
     # so a top-level init already suffices, but reset defensively alongside the
     # other per-file trackers.
     set ::cb_streak 0
+    set ::cb_last_sig ""
     set ::cb_last_cmd ""
     set ::cb_tripped 0
 
