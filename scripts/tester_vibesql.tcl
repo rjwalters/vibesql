@@ -115,15 +115,38 @@ if {[info exists ::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS)] &&
     set ::cb_row_ceiling $::env(TCLTEST_CIRCUIT_BREAKER_MAX_ROWS)
 }
 
+# Collapse a detail string (expected/actual result text) to a single tab-free,
+# newline-free, length-bounded field so it can ride on one "##TCLTEST##" line
+# without breaking the tab-delimited / line-oriented parsing in tcl_runner.py.
+proc detail_sanitize {s} {
+    # Tabs are the field separator and newlines are the record separator on the
+    # detail stream, so both must be squashed to spaces before the value is
+    # embedded. Collapse any run of whitespace to a single space and trim.
+    regsub -all {[\t\r\n]+} $s { } s
+    regsub -all { +} $s { } s
+    set s [string trim $s]
+    # Bound the length so a pathological multi-KB result/error doesn't bloat the
+    # stream; the Python side truncates again to the column width (#6179).
+    if {[string length $s] > 800} {
+        set s "[string range $s 0 799]…"
+    }
+    return $s
+}
+
 # Emit a structured per-test detail line consumed by tcl_runner.py.
 #
-# Format: "##TCLTEST## <status>\t<name>"
+# Format: "##TCLTEST## <status>\t<name>"                      (pass/skip)
+#     or: "##TCLTEST## <status>\t<name>\t<expected>\t<actual>" (failure detail)
 #   - status is one of: passed, failed, skipped
 #   - name is the test name (test names never contain tabs or newlines)
+#   - expected/actual carry the do_test comparison text for failed tests so the
+#     runner can populate error_message/actual_output/expected_output instead of
+#     recording every failure with empty diagnostics (#6179). Both are
+#     sanitized to stay on a single tab-delimited line.
 #
 # The sentinel prefix lets the Python runner distinguish these lines from the
 # human-readable output, so the same stream serves both humans and the parser.
-proc emit_test_detail {status name} {
+proc emit_test_detail {status name {expected ""} {actual ""}} {
     # Any passing test breaks a consecutive-identical-unsupported-command
     # failure streak (circuit-breaker, #6158). Done here — the single chokepoint
     # every passed row flows through (do_test and its do_execsql_test/
@@ -135,7 +158,11 @@ proc emit_test_detail {status name} {
         set ::cb_last_cmd ""
     }
     if {$::emit_detail} {
-        puts "##TCLTEST## $status\t$name"
+        if {$expected eq "" && $actual eq ""} {
+            puts "##TCLTEST## $status\t$name"
+        } else {
+            puts "##TCLTEST## $status\t$name\t[detail_sanitize $expected]\t[detail_sanitize $actual]"
+        }
     }
 }
 
@@ -5629,10 +5656,12 @@ proc do_test {name script expected} {
             omit_test $name "cascading from skipped WINDOW test"
             return
         }
-        # Script error - always print failures
+        # Script error - always print failures. The caught error text is the
+        # actual diagnostic; there is no expected value to compare against
+        # (#6179).
         incr ::nFail
         lappend ::failList $name
-        emit_test_detail failed $name
+        emit_test_detail failed $name "" "error: $result"
         puts "  $name... FAILED (error: $result)"
         # Circuit-breaker (#6158): feed this failure in. If it is the Nth
         # consecutive IDENTICAL unimplemented-command failure (a degenerate
@@ -5660,7 +5689,7 @@ proc do_test {name script expected} {
         } else {
             incr ::nFail
             lappend ::failList $name
-            emit_test_detail failed $name
+            emit_test_detail failed $name "pattern: $expected" $result
             puts "  $name... FAILED"
             puts "    Expected pattern: $expected"
             puts "    Got:              $result"
@@ -5697,7 +5726,7 @@ proc do_test {name script expected} {
         } else {
             incr ::nFail
             lappend ::failList $name
-            emit_test_detail failed $name
+            emit_test_detail failed $name $expected $result
             puts "  $name... FAILED"
             puts "    Expected: $expected"
             puts "    Got:      $result"
@@ -6352,7 +6381,7 @@ proc integrity_check {name} {
     }
     incr ::nFail
     lappend ::failList $name
-    emit_test_detail failed $name
+    emit_test_detail failed $name "ok" "integrity check: $result"
     # Always print failures
     puts "  $name... FAILED (integrity check: $result)"
 }
@@ -7620,7 +7649,7 @@ proc record_contained_error {seq err} {
     incr ::nTest
     incr ::nFail
     lappend ::failList $name
-    emit_test_detail failed $name
+    emit_test_detail failed $name "" "contained file-scope error: $err"
     puts "  $name... FAILED (contained file-scope error: $err)"
 }
 
