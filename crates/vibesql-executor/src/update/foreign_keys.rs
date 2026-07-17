@@ -220,6 +220,23 @@ impl ForeignKeyValidator {
         let new_parent_key_values: Vec<vibesql_types::SqlValue> =
             pk_indices.iter().map(|&idx| new_parent_row.values[idx].clone()).collect();
 
+        // SQLite fires no referential action and raises no violation when an
+        // UPDATE does not actually change the parent key. Re-assigning a
+        // parent-key column to the value it already holds (e.g.
+        // `UPDATE t1 SET a = 1` when `a` is already 1, or `UPDATE t1 SET a = a`)
+        // leaves every existing child reference valid, so there is nothing to
+        // cascade, set-null/default, or restrict. Without this early-out the
+        // NO ACTION / RESTRICT paths below see child rows still matching the
+        // (unchanged) old key and raise a spurious "cannot update a parent
+        // row" violation (fkey2-1.*.13: `UPDATE t1 SET a = 1` /
+        // `UPDATE t7 SET b = 1` expect success). Plain equality is a
+        // conservative test: when the stored representations differ (e.g.
+        // 1 vs 1.0) we fall through to the full affinity-aware check below,
+        // preserving prior behaviour.
+        if old_parent_key_values == new_parent_key_values {
+            return Ok(());
+        }
+
         // Optimization: Check if any table in the database has foreign keys at all
         // If not, skip the expensive scan of all tables
         let has_any_fks = db.catalog.list_tables().iter().any(|table_name| {
