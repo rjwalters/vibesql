@@ -1003,21 +1003,36 @@ def _parse_shim_output(output: str, test_file: str) -> tuple[int, int, int, list
     saw_summary = False
 
     for line in output.split('\n'):
-        # Machine-readable per-test detail line
+        # Machine-readable per-test detail line. Two shapes are emitted by the
+        # shim (tester_vibesql.tcl):
+        #   "##TCLTEST## <status>\t<name>"                       pass/skip
+        #   "##TCLTEST## <status>\t<name>\t<expected>\t<actual>" failure detail
+        # The 4-field form carries the do_test comparison text for failed tests
+        # so native-TCL runs record non-empty error_message/actual_output/
+        # expected_output instead of empty diagnostics (#6179). The 2-field form
+        # is still accepted for pass/skip rows (and for backward compatibility).
         if line.startswith(TCL_DETAIL_PREFIX):
             payload = line[len(TCL_DETAIL_PREFIX):]
-            if '\t' in payload:
-                status, test_name = payload.split('\t', 1)
-            else:
-                status, test_name = payload, ""
-            status = status.strip()
-            test_name = test_name.strip()
+            fields = payload.split('\t')
+            status = fields[0].strip()
+            test_name = fields[1].strip() if len(fields) > 1 else ""
+            expected = fields[2].strip() if len(fields) > 2 else ""
+            actual = fields[3].strip() if len(fields) > 3 else ""
+            # Route the failure diagnostic into error_message for triage
+            # clustering: prefer the actual/divergent text (VibeSQL engine
+            # errors surface there), falling back to the expected text.
+            error_message = None
+            if status == "failed":
+                error_message = actual or expected or None
             per_test_results.append(TestResult(
                 test_name=test_name,
                 file_path=test_file,
                 test_type="native-tcl",
                 status=status,
                 sql="",
+                expected_output=expected or None,
+                actual_output=actual or None,
+                error_message=error_message,
             ))
             continue
 
