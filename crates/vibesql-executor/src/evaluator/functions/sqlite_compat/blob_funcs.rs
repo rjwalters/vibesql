@@ -71,46 +71,87 @@ pub(crate) fn hex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Varchar(hex_string.into()))
 }
 
-/// UNHEX(x) - Convert hexadecimal string to blob
+/// Coerce a value to its TEXT representation for UNHEX, matching SQLite's
+/// `sqlite3_value_text()`. Returns `None` for NULL (so the caller can return
+/// NULL per SQLite's "NULL in, NULL out" contract).
+fn unhex_text(value: &SqlValue) -> Option<String> {
+    match value {
+        SqlValue::Null => None,
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Some(s.to_string()),
+        // SQLite coerces a blob to text by reading its bytes directly.
+        SqlValue::Blob(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        // All other types (integer, real, boolean, ...) coerce to their text form.
+        other => Some(other.to_string()),
+    }
+}
+
+/// UNHEX(X) / UNHEX(X, Y) - Convert a hexadecimal string to a blob.
 ///
-/// Returns a blob containing the binary data represented by the hexadecimal string.
-/// Returns NULL if the input is not a valid hexadecimal string.
+/// Returns a blob containing the binary data decoded from the hexadecimal
+/// digit pairs in `X`. Returns NULL if `X` is not a valid hexadecimal string.
+///
+/// The two-argument form treats every character that appears in `Y` as an
+/// ignorable separator: such characters may appear before, between, or after
+/// complete hexadecimal digit pairs and are skipped. An ignore character may
+/// NOT split a digit pair (this mirrors SQLite's `unhexFunc`): once the high
+/// nibble of a byte has been read, the very next character must be a hex digit.
+/// If either argument is NULL the result is NULL.
 pub(crate) fn unhex(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
-    if args.len() != 1 {
+    if args.is_empty() || args.len() > 2 {
         return Err(ExecutorError::UnsupportedFeature(format!(
-            "UNHEX requires exactly 1 argument, got {}",
+            "UNHEX requires 1 or 2 arguments, got {}",
             args.len()
         )));
     }
 
-    let hex_str = match &args[0] {
-        SqlValue::Null => return Ok(SqlValue::Null),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
-        _ => {
-            return Err(ExecutorError::UnsupportedFeature(
-                "UNHEX argument must be a string".to_string(),
-            ));
-        }
+    // First argument: NULL propagates to a NULL result.
+    let hex_str = match unhex_text(&args[0]) {
+        Some(s) => s,
+        None => return Ok(SqlValue::Null),
     };
 
-    // SQLite returns NULL for odd-length hex strings
-    if hex_str.len() % 2 != 0 {
-        return Ok(SqlValue::Null);
-    }
+    // Second argument (optional): the set of ignorable separator characters.
+    // A NULL separator argument makes the whole result NULL.
+    let ignore: std::collections::HashSet<char> = if args.len() == 2 {
+        match unhex_text(&args[1]) {
+            Some(s) => s.chars().collect(),
+            None => return Ok(SqlValue::Null),
+        }
+    } else {
+        std::collections::HashSet::new()
+    };
 
-    // Parse hex string to bytes
-    let mut bytes = Vec::with_capacity(hex_str.len() / 2);
     let chars: Vec<char> = hex_str.chars().collect();
+    let mut bytes = Vec::with_capacity(chars.len() / 2 + 1);
+    let mut i = 0;
 
-    for chunk in chars.chunks(2) {
-        let high = match chunk[0].to_digit(16) {
+    while i < chars.len() {
+        // Skip ignorable separator characters before the high nibble.
+        while i < chars.len() && ignore.contains(&chars[i]) {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+
+        // High nibble.
+        let high = match chars[i].to_digit(16) {
             Some(d) => d as u8,
             None => return Ok(SqlValue::Null), // Invalid hex character
         };
-        let low = match chunk[1].to_digit(16) {
+        i += 1;
+
+        // Low nibble: the immediately following character. Separator characters
+        // are NOT skipped here, so a separator cannot split a digit pair.
+        if i >= chars.len() {
+            return Ok(SqlValue::Null); // Dangling high nibble (odd number of digits)
+        }
+        let low = match chars[i].to_digit(16) {
             Some(d) => d as u8,
             None => return Ok(SqlValue::Null), // Invalid hex character
         };
+        i += 1;
+
         bytes.push((high << 4) | low);
     }
 
@@ -376,6 +417,62 @@ mod tests {
         assert_eq!(unhex(&[SqlValue::Varchar("abc".into())]).unwrap(), SqlValue::Null);
         // Invalid hex returns NULL
         assert_eq!(unhex(&[SqlValue::Varchar("zz".into())]).unwrap(), SqlValue::Null);
+        // Empty string returns an empty blob (not NULL)
+        assert_eq!(unhex(&[SqlValue::Varchar("".into())]).unwrap(), SqlValue::Blob(vec![]));
+        // NULL propagates
+        assert_eq!(unhex(&[SqlValue::Null]).unwrap(), SqlValue::Null);
+    }
+
+    #[test]
+    fn test_unhex_two_arg() {
+        // Separators may appear before, between, and after complete digit pairs.
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("FFFF  ABCD".into()), SqlValue::Varchar(" -".into())])
+                .unwrap(),
+            SqlValue::Blob(vec![0xFF, 0xFF, 0xAB, 0xCD])
+        );
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("--FFFF AB- -CD- ".into()), SqlValue::Varchar(" -".into())])
+                .unwrap(),
+            SqlValue::Blob(vec![0xFF, 0xFF, 0xAB, 0xCD])
+        );
+        // A string of only separators decodes to an empty blob.
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("--".into()), SqlValue::Varchar(" -".into())]).unwrap(),
+            SqlValue::Blob(vec![])
+        );
+        // A separator may not split a digit pair: "F F" -> read 'F' then ' ' as
+        // the low nibble, which is not a hex digit -> NULL.
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("F F".into()), SqlValue::Varchar(" ".into())]).unwrap(),
+            SqlValue::Null
+        );
+        // A non-separator, non-hex character -> NULL.
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("GG".into()), SqlValue::Varchar(" -".into())]).unwrap(),
+            SqlValue::Null
+        );
+        // Either argument NULL -> NULL.
+        assert_eq!(
+            unhex(&[SqlValue::Null, SqlValue::Varchar(" ".into())]).unwrap(),
+            SqlValue::Null
+        );
+        assert_eq!(
+            unhex(&[SqlValue::Varchar("1234".into()), SqlValue::Null]).unwrap(),
+            SqlValue::Null
+        );
+    }
+
+    #[test]
+    fn test_unhex_arity() {
+        // Zero or more-than-two arguments is an error.
+        assert!(unhex(&[]).is_err());
+        assert!(unhex(&[
+            SqlValue::Varchar("AB".into()),
+            SqlValue::Varchar("".into()),
+            SqlValue::Varchar("".into())
+        ])
+        .is_err());
     }
 
     #[test]
