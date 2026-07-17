@@ -4,7 +4,8 @@
 half of issue #6154: the full Bucket-A/Bucket-B classification of every in-tree
 skip declaration, enforced-completeness auditing (`--audit-buckets`), and the
 local by-category excluded-skip report in `make test-tcl-status`. The certified
-excluded-row denominator remains operator-gated (see "Deferred work").
+by-category failure denominator (the operator-gated half) is delivered by #6180;
+see the "#6180 additions" subsection and "Deferred work" item 1.
 
 An honest claim of "N% SQLite compatibility" is meaningless without a
 **defensible skip policy**: a documented taxonomy in which every whole-file and
@@ -59,14 +60,14 @@ decision actually depends on:
 
 | Array | Count | What it declares |
 |-------|-------|------------------|
-| `vibesql_skip_files` | 60 | whole-file skips (basename → reason) |
+| `vibesql_skip_files` | 224 | whole-file skips (basename → reason) |
 | `vibesql_partial_skip_files` | 1 | documented partial-skip record (`atof1`) |
 | `vibesql_skip_tests` | 1,528 | individually-named test skips |
 | `vibesql_skip_patterns` | 56 | glob-pattern skip rules |
 
-**Every whole-file and pattern declaration now has an enforced bucket.** All 60
-whole-file skips and all 56 pattern skips are classified below (73 Bucket A + 43
-Bucket B = 116), and `scripts/verify_skips.py --audit-buckets` fails if any
+**Every whole-file and pattern declaration now has an enforced bucket.** All 224
+whole-file skips and all 56 pattern skips are classified below (237 Bucket A + 43
+Bucket B = 280), and `scripts/verify_skips.py --audit-buckets` fails if any
 whole-file/pattern entry is left without a bucket. The machine-readable source of
 truth for the Bucket-A category of each entry is `BUCKET_A_CLASSIFICATION` in
 `scripts/verify_skips.py`; this prose taxonomy and that map must stay in sync
@@ -88,8 +89,11 @@ the deferred half.
 
 ## Bucket A categories (defensible out-of-scope)
 
-Every whole-file skip (all 60) and 13 of the 56 pattern skips are Bucket A. They
-group into the following categories. The rationale is stated **per category** so
+Every whole-file skip (all 224) and 13 of the 56 pattern skips are Bucket A. They
+group into the following categories. The 164 whole-file skips added by issue
+#6180 (reclassifying certified out-of-scope failures) are listed in the
+dedicated #6180 subsection at the end of this section; categories A11 and A12
+were introduced by that work. The rationale is stated **per category** so
 the audit is a short list of principles, not 116 ad-hoc notes.
 
 ### A1. C-API / statement-handle surface
@@ -205,6 +209,62 @@ equivalent error.
 - Pattern: `subselect-1.2` ("row value misused" vs "sub-select returns N
   columns").
 - (Many named `vibesql_skip_tests` entries also fall here — see below.)
+
+---
+
+### A11. CLI shell / command-line tooling surface
+
+Tests drive the `sqlite3` CLI shell's dot-commands (`.stats`, `.import`, `.dump`,
+…) or a standalone command-line tool (`sqldiff`). They exercise the reference
+tooling, not the SQL engine, and are unreachable from VibeSQL's own CLI.
+
+- Whole-file (#6180): `shell1`, `shell2`, `shell3`, `shell4`, `shell5`, `shell7`, `shell9`, `shellA`, `sqldiff1`.
+
+### A12. Concurrency / threading / multi-process model
+
+Tests spawn multiple OS threads or concurrent named connections that share
+in-process state (shared-cache, WAL, pcache) to provoke races, deadlocks, or
+mutex-ordering assertions. The process-per-batch shim runs each file in its own
+worker and cannot host the threaded/multi-connection model these files require.
+
+- Whole-file (#6180): `mutex1`, `mutex2`, `thread001`, `thread002`, `thread003`, `thread004`, `thread005`, `thread1`, `thread2`, `thread3`, `walthread`, `pendingrace`.
+
+### #6180 additions — certified out-of-scope failures reclassified as Bucket A
+
+Issue #6180 (the operator-gated half of #6154) verified 164 whole files against
+the certified run (`aws-c7i.8xlarge-32c-clean2`, run_id=1) and reclassified their
+certified out-of-scope failures from visible `failed` into documented Bucket-A
+whole-file skips. Each is declared in `BUCKET_A_CLASSIFICATION`
+(`scripts/verify_skips.py`) with the category shown, and carries a prose
+rationale in `scripts/tester_vibesql.tcl`:
+
+- **A1** (C-API): `notify1`, `notify2`, `notify3`, `hook`, `hook2`, `trace`, `trace2`, `trace3`, `backup`, `backup2`, `backup4`, `backup5`, `backup_ioerr`, `scanstatus`, `scanstatus2`, `dbstatus`, `dbstatus2`, `stmt`, `bindxfer`, `bind2`, `snapshot2`, `snapshot3`, `snapshot4`, `snapshot_up`, `snapshot_fault`, `cacheflush`, `dataversion1`, `busy`, `busy2`, `interrupt`, `interrupt2`, `openv2`, `shrink`.
+- **A2** (VFS/pager): `memjournal`, `memjournal2`, `mjournal`, `subjournal`, `journal1`, `journal2`, `journal3`, `trans2`, `avtrans`, `pager1`, `pager2`, `pager3`, `pager4`, `walmode`, `jrnlmode2`, `cache`, `cachespill`, `pcache`, `pcache2`, `lookaside`, `quota`, `quota2`, `shared`, `shared2`, `shared3`, `shared4`, `shared7`, `shared8`, `shared9`, `sharedA`, `shared_err`, `sharedlock`, `multiplex2`, `multiplex3`, `multiplex4`, `securedel`, `securedel2`, `cksumvfs`, `reservebytes`, `chunksize`, `fallocate`, `superlock`, `nolock`, `tempdb`, `tempdb2`, `corrupt`, `corrupt2`, `corrupt4`, `corrupt6`, `corruptB`, `corruptC`, `corruptF`, `ioerr`, `ioerr2`, `io`, `wal9`, `walseh1`, `e_walckpt`, `e_walhook`, `e_walauto`, `exclusive`, `exclusive2`, `lock2`, `lock3`, `lock4`, `lock6`, `lock7`, `rowallock`, `rdonly`, `readonly`, `uri`, `uri2`, `e_uri`, `8_3_names`, `shortread1`, `diskfull`.
+- **A3** (extensions/vtab): `icu`, `normalize`, `extension01`, `stmtvtab1`.
+- **A4** (incremental blob I/O): `e_blobopen`, `e_blobwrite`, `e_blobclose`, `e_blobbytes`.
+- **A7** (internal/fault-injection): `malloc`, `malloc3`, `malloc5`, `memsubsys1`, `memsubsys2`, `mem5`, `mmap1`, `pagerfault`, `pagerfault2`, `indexfault`, `btreefault`, `rollbackfault`, `sortfault`, `tempfault`, `savepointfault`, `existsfault`, `altermalloc2`, `altermalloc3`, `mallocAll`, `softheap1`, `memleak`, `fuzz_malloc`, `imposter1`.
+- **A9** (UTF-8-by-construction divergence): `enc`, `enc2`, `enc3`.
+- **A11** (CLI tooling): `shell1`, `shell2`, `shell3`, `shell4`, `shell5`, `shell7`, `shell9`, `shellA`, `sqldiff1`.
+- **A12** (concurrency/threading): `mutex1`, `mutex2`, `thread001`, `thread002`, `thread003`, `thread004`, `thread005`, `thread1`, `thread2`, `thread3`, `walthread`, `pendingrace`.
+
+**Deliberately NOT reclassified (straddlers — stay visibly `failed`).** Per the
+never-hide-an-in-scope-gap rule and the `atof1`/#6065 precedent, files that mix
+out-of-scope subsystems with in-scope SQL were left failing rather than
+bulk-skipped: SAVEPOINT (`savepoint*`), VACUUM/ATTACH (`vacuum*`, `attach*`,
+`e_vacuum`), behavioral PRAGMAs (`pragma*`, `queryonly`), the SQL-reachable
+`changes()`/`total_changes()`/`last_insert_rowid()`/`zeroblob()` function files
+(`changes*`, `laststmtchanges`, `lastinsert`, `zeroblob`, `e_changes`), in-memory
+databases (`memdb*`), transaction/ROLLBACK semantics (`trans`, `trans3`,
+`rollback`, `rollback2`), the parser tokenizer (`tokenize`), and the TCL-interface
+file (`tclsqlite`). These remain in-scope failures tracked by #6170–#6177.
+
+**Certified by-category denominator (run_id=1, `tcl_test_results`).** After
+reclassification the certified 7,123 detail-table failures (incl. markers)
+partition exactly as: Bucket A **3,206** (A1 769, A2 1,790, A3 39, A4 149, A5 2,
+A7 158, A9 63, A11 157, A12 79) — of which **3,197** are caught by the new #6180
+whole-file skips — plus Bucket B **14** (worklist patterns) plus **3,903**
+remaining in-scope failures that stay visible. 3,206 + 14 + 3,903 = 7,123, the
+honest in-scope-failure denominator.
 
 ---
 
@@ -350,12 +410,15 @@ operator step below.
 These parts of #6154 depend on the certified bench-runner DB and are **not**
 delivered by the static classification:
 
-1. **Reconciled excluded-row denominator by category, CERTIFIED.** Run
-   `make test-tcl-status` against the certified
-   `~/.vibesql/test_results/tcl_test_results.vbsql` on the quiet AWS bench runner
-   and publish the per-category breakdown of the certified run's 174,982 skipped
-   rows. The tooling is already wired (see the local report above); this is a
-   pure operator/data step — point it at the certified DB and record the numbers.
+1. **Reconciled excluded-row denominator by category, CERTIFIED.** *(Delivered by
+   #6180.)* The certified run (`aws-c7i.8xlarge-32c-clean2`, run_id=1) is now
+   locally reachable at `~/.vibesql/test_results/tcl_test_results.vbsql`; its
+   7,123 detail-table failures (incl. markers) partition by Bucket-A category as
+   recorded in the "#6180 additions" subsection above (Bucket A 3,206 + Bucket B
+   14 + remaining in-scope 3,903 = 7,123). The 1-row detail-vs-summary gap
+   (summary failed 7,124 vs detail 7,123) is fixed at the source in
+   `scripts/tcl_runner.py` (`_reconcile_details_to_counts`) so future runs
+   reconcile exactly.
 2. **`ifcapable`-guarded runtime self-skips.** Enumerate skips that only appear at
    runtime (including the `fuzz-oss1`/`fuzzer1`/`dbfuzz001` smoke-skips) and
    classify them. The categorizer already lands these in the "named / runtime

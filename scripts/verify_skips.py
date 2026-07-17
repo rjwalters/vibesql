@@ -93,6 +93,8 @@ BUCKET_A_CATEGORIES = {
     "A8": "Built-in-test fuzzers",
     "A9": "Documented intentional engine divergence",
     "A10": "Error-message-format divergence",
+    "A11": "CLI shell / command-line tooling surface",
+    "A12": "Concurrency / threading / multi-process model",
 }
 
 # Canonical Bucket-A classification of every whole-file (vibesql_skip_files) and
@@ -152,6 +154,57 @@ BUCKET_A_CLASSIFICATION = {
     "utf16align-": "A9",
     # A10 (error-message-format divergence)
     "subselect-1.2": "A10",
+
+    # --- issue #6180: certified out-of-scope failures reclassified as
+    # Bucket-A whole-file skips (the operator-gated half of #6154). Rationale is
+    # per-category in docs/reference/tcl-skip-policy.md; the matching skip-file
+    # entries with prose rationales live in scripts/tester_vibesql.tcl.
+    # A1 (33)
+    "notify1": "A1", "notify2": "A1", "notify3": "A1", "hook": "A1", "hook2": "A1",
+    "trace": "A1", "trace2": "A1", "trace3": "A1", "backup": "A1", "backup2": "A1",
+    "backup4": "A1", "backup5": "A1", "backup_ioerr": "A1", "scanstatus": "A1",
+    "scanstatus2": "A1", "dbstatus": "A1", "dbstatus2": "A1", "stmt": "A1", "bindxfer": "A1",
+    "bind2": "A1", "snapshot2": "A1", "snapshot3": "A1", "snapshot4": "A1",
+    "snapshot_up": "A1", "snapshot_fault": "A1", "cacheflush": "A1", "dataversion1": "A1",
+    "busy": "A1", "busy2": "A1", "interrupt": "A1", "interrupt2": "A1", "openv2": "A1",
+    "shrink": "A1",
+    # A2 (76)
+    "memjournal": "A2", "memjournal2": "A2", "mjournal": "A2", "subjournal": "A2",
+    "journal1": "A2", "journal2": "A2", "journal3": "A2", "trans2": "A2", "avtrans": "A2",
+    "pager1": "A2", "pager2": "A2", "pager3": "A2", "pager4": "A2", "walmode": "A2",
+    "jrnlmode2": "A2", "cache": "A2", "cachespill": "A2", "pcache": "A2", "pcache2": "A2",
+    "lookaside": "A2", "quota": "A2", "quota2": "A2", "shared": "A2", "shared2": "A2",
+    "shared3": "A2", "shared4": "A2", "shared7": "A2", "shared8": "A2", "shared9": "A2",
+    "sharedA": "A2", "shared_err": "A2", "sharedlock": "A2", "multiplex2": "A2",
+    "multiplex3": "A2", "multiplex4": "A2", "securedel": "A2", "securedel2": "A2",
+    "cksumvfs": "A2", "reservebytes": "A2", "chunksize": "A2", "fallocate": "A2",
+    "superlock": "A2", "nolock": "A2", "tempdb": "A2", "tempdb2": "A2", "corrupt": "A2",
+    "corrupt2": "A2", "corrupt4": "A2", "corrupt6": "A2", "corruptB": "A2", "corruptC": "A2",
+    "corruptF": "A2", "ioerr": "A2", "ioerr2": "A2", "io": "A2", "wal9": "A2", "walseh1": "A2",
+    "e_walckpt": "A2", "e_walhook": "A2", "e_walauto": "A2", "exclusive": "A2",
+    "exclusive2": "A2", "lock2": "A2", "lock3": "A2", "lock4": "A2", "lock6": "A2",
+    "lock7": "A2", "rowallock": "A2", "rdonly": "A2", "readonly": "A2", "uri": "A2",
+    "uri2": "A2", "e_uri": "A2", "8_3_names": "A2", "shortread1": "A2", "diskfull": "A2",
+    # A3 (4)
+    "icu": "A3", "normalize": "A3", "extension01": "A3", "stmtvtab1": "A3",
+    # A4 (4)
+    "e_blobopen": "A4", "e_blobwrite": "A4", "e_blobclose": "A4", "e_blobbytes": "A4",
+    # A7 (23)
+    "malloc": "A7", "malloc3": "A7", "malloc5": "A7", "memsubsys1": "A7", "memsubsys2": "A7",
+    "mem5": "A7", "mmap1": "A7", "pagerfault": "A7", "pagerfault2": "A7", "indexfault": "A7",
+    "btreefault": "A7", "rollbackfault": "A7", "sortfault": "A7", "tempfault": "A7",
+    "savepointfault": "A7", "existsfault": "A7", "altermalloc2": "A7", "altermalloc3": "A7",
+    "mallocAll": "A7", "softheap1": "A7", "memleak": "A7", "fuzz_malloc": "A7",
+    "imposter1": "A7",
+    # A9 (3)
+    "enc": "A9", "enc2": "A9", "enc3": "A9",
+    # A11 (9)
+    "shell1": "A11", "shell2": "A11", "shell3": "A11", "shell4": "A11", "shell5": "A11",
+    "shell7": "A11", "shell9": "A11", "shellA": "A11", "sqldiff1": "A11",
+    # A12 (12)
+    "mutex1": "A12", "mutex2": "A12", "thread001": "A12", "thread002": "A12",
+    "thread003": "A12", "thread004": "A12", "thread005": "A12", "thread1": "A12",
+    "thread2": "A12", "thread3": "A12", "walthread": "A12", "pendingrace": "A12",
 }
 
 
