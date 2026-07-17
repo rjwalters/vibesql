@@ -2425,7 +2425,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|table_info)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|table_info|data_version|collation_list|index_list|index_xinfo|index_info)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -3175,7 +3175,7 @@ proc execsql2 {sql {db ""}} {
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
         # Allow supported PRAGMAs through
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys)} $sql]} {
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|data_version|collation_list|index_list|index_xinfo|index_info)} [string trim $sql]]} {
             # Pass through to VibeSQL - these are supported
         } else {
             return {}  ;# Skip unsupported PRAGMA statements
