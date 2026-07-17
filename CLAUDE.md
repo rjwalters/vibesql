@@ -176,6 +176,8 @@ The replicated state machine applies committed transactions from the Raft log. H
 
 The `vibesql` CLI keeps a Write-Ahead Log for file-backed databases so committed changes survive an unclean shutdown (crash, SIGKILL, power loss). WAL is **on by default**; set `[database] wal = false` in `~/.vibesqlrc` to opt out and use the snapshot-only path.
 
+The `~/.vibesqlrc` `[database]` section also exposes `columnar_cache_budget` (default `"256MB"`; accepts `"512MB"`, `"1GB"`, a bare byte count, or `"0"` to disable the columnar representation cache) to trade RAM for analytical-query speed.
+
 For a database file `mydata.vbsql`, WAL-active mode maintains two sibling files next to it:
 
 ```text

@@ -273,6 +273,11 @@ fn main() -> anyhow::Result<()> {
         // `<stem>-checkpoints/` directory does not grow unboundedly. Clamped to
         // a minimum of 1 downstream so the newest checkpoint always survives.
         keep_checkpoints: config.database.keep_checkpoints,
+        // Columnar representation cache budget (issue #6200): parsed from the
+        // human-readable `[database] columnar_cache_budget` (default 256MB;
+        // `0` disables the cache). A malformed value is a clean error here, not
+        // a panic.
+        columnar_cache_budget: config.get_columnar_cache_budget()?,
     };
 
     if let Some(cmd) = args.command {

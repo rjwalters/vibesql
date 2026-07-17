@@ -1,4 +1,35 @@
-use super::{validation, SqlExecutor};
+use super::{validation, DbOpenOptions, SqlExecutor};
+
+#[test]
+fn test_columnar_cache_budget_applied_on_open() {
+    // A configured budget is applied to the Database on open (#6200).
+    let budget = 8 * 1024 * 1024; // 8MB
+    let executor = SqlExecutor::new_with_options(
+        None,
+        DbOpenOptions { columnar_cache_budget: budget, ..DbOpenOptions::default() },
+    )
+    .unwrap();
+    assert_eq!(executor.db.columnar_cache_budget(), budget);
+}
+
+#[test]
+fn test_columnar_cache_budget_zero_disables_cache() {
+    // `columnar_cache_budget = 0` disables the cache: the Database reports a
+    // 0-byte budget after open (#6200).
+    let executor = SqlExecutor::new_with_options(
+        None,
+        DbOpenOptions { columnar_cache_budget: 0, ..DbOpenOptions::default() },
+    )
+    .unwrap();
+    assert_eq!(executor.db.columnar_cache_budget(), 0);
+}
+
+#[test]
+fn test_columnar_cache_budget_default_is_256mb() {
+    // The default open options carry the 256MB budget through to the Database.
+    let executor = SqlExecutor::new(None).unwrap();
+    assert_eq!(executor.db.columnar_cache_budget(), 256 * 1024 * 1024);
+}
 
 #[test]
 fn test_list_schemas() {

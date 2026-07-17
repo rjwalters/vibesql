@@ -53,6 +53,15 @@ auto_save = true
 # Default: 2
 # keep_checkpoints = 2
 
+# Memory budget for the columnar representation cache. The cache trades RAM for
+# analytical-query speed (row tables get a cached columnar copy so scans hit the
+# SIMD fast path). Accepts a human-readable size ("256MB", "512MB", "1GB", a bare
+# byte count) or "0" to disable the cache entirely (analytical queries take the
+# row path). Raise it to spend more RAM for speed; set "0" on a memory-constrained
+# machine.
+# Default: 256MB
+# columnar_cache_budget = "256MB"
+
 # ============================================================================
 # History Settings
 # ============================================================================

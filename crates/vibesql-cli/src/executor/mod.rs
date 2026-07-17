@@ -214,6 +214,12 @@ pub struct DbOpenOptions {
     /// `<stem>-checkpoints/` directory does not grow unboundedly (issue #6023).
     /// Clamped to a minimum of 1 so the newest checkpoint always survives.
     pub keep_checkpoints: usize,
+    /// Memory budget (bytes) for the columnar representation cache
+    /// (`[database] columnar_cache_budget`, default 256MB). `0` disables the
+    /// cache so analytical queries take the row path. Applied to the `Database`
+    /// right after open, before any query runs — the cache populates lazily, so
+    /// setting the budget post-load discards nothing (issue #6200).
+    pub columnar_cache_budget: usize,
 }
 
 impl Default for DbOpenOptions {
@@ -223,6 +229,8 @@ impl Default for DbOpenOptions {
             recover_fallback: false,
             lock_timeout_ms: 5000,
             keep_checkpoints: 2,
+            // Matches vibesql_storage::database::DEFAULT_COLUMNAR_CACHE_BUDGET.
+            columnar_cache_budget: 256 * 1024 * 1024,
         }
     }
 }
@@ -342,6 +350,11 @@ impl SqlExecutor {
                         e
                     )
                 })?;
+                // Apply the configured columnar cache budget (issue #6200).
+                // Safe post-load: the cache populates lazily on the first
+                // analytical query, so no cached data is discarded here. `0`
+                // disables the cache entirely.
+                db.set_columnar_cache_budget(options.columnar_cache_budget);
                 return Ok(SqlExecutor {
                     db,
                     timing_enabled: false,
@@ -376,6 +389,11 @@ impl SqlExecutor {
         // (binary/JSON reload path). Harmless no-op when there are none. #5784.
         vibesql_executor::rebuild_pending_expression_indexes(&mut db)
             .map_err(|e| anyhow::anyhow!("Failed to rebuild expression indexes: {}", e))?;
+
+        // Apply the configured columnar cache budget (issue #6200). Applied
+        // before any query runs; the cache populates lazily so this discards
+        // nothing. `0` disables the cache (analytical queries take the row path).
+        db.set_columnar_cache_budget(options.columnar_cache_budget);
 
         Ok(SqlExecutor {
             db,
