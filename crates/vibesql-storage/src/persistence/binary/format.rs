@@ -91,7 +91,17 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        stopped matching after a checkpoint (upsert4 2.x.2.1). v14 and earlier
 ///        files remain readable: the read path is gated on `version >= 15` and
 ///        treats absence as `collation = None` (prior behavior). Issue #5921.
-pub const VERSION: u8 = 15;
+/// - v16: Added `TriggerDefinition::sql_definition` persistence per trigger (one
+///        present-flag bool + optional string, appended after the trigger's
+///        schema field). Without it, every reloaded trigger lost its verbatim
+///        `CREATE TRIGGER` text and `sqlite_master.sql` fell back to an
+///        AST-reconstructed form (injected `BEFORE`/`FOR EACH ROW`, normalized
+///        spacing), so a trigger's `sql` column changed after a checkpoint
+///        (altercol.test 9.x). Mirrors the view `sql_definition` field. v15 and
+///        earlier files remain readable: the read path is gated on
+///        `version >= 16` and treats absence as `sql_definition = None` (prior
+///        AST-reconstruction behavior). Issue #6174.
+pub const VERSION: u8 = 16;
 
 /// Type tags for binary serialization
 #[repr(u8)]

@@ -400,6 +400,23 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     write_bool(writer, false)?;
                 }
             }
+
+            // Write the trigger's verbatim `CREATE TRIGGER` text (v16+, issue
+            // #6174). Written last in the per-trigger record so v15-and-earlier
+            // readers, which stop after the schema field, are unaffected; the
+            // read path gates on `version >= 16`. Encoded as a present-flag bool
+            // + optional string, mirroring the view `sql_definition` field.
+            // Without it, a reloaded trigger loses its verbatim text and
+            // `sqlite_master.sql` renders an AST-reconstructed form.
+            match &trigger.sql_definition {
+                Some(def) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, def)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
         }
     }
 
@@ -976,6 +993,21 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             None
         };
 
+        // Read the trigger's verbatim `CREATE TRIGGER` text (v16+, issue #6174).
+        // v15-and-earlier files do not include this field; absence is treated as
+        // `None`, so the renderer falls back to AST reconstruction (prior
+        // behavior). Written as present-flag bool + optional string.
+        let sql_definition = if version >= 16 {
+            let has_sql_def = read_bool(reader)?;
+            if has_sql_def {
+                Some(read_string(reader)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Create trigger definition
         let trigger = vibesql_catalog::TriggerDefinition::new(
             name,
@@ -986,7 +1018,8 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             when_condition,
             triggered_action,
         )
-        .with_schema(schema);
+        .with_schema(schema)
+        .with_sql_definition(sql_definition);
 
         // Add to catalog
         db.catalog.create_trigger(trigger).map_err(|e| {
@@ -2003,6 +2036,91 @@ mod tests {
             reloaded.catalog.get_trigger("tr_temp").is_none(),
             "temp trigger must NOT survive a checkpoint round-trip"
         );
+    }
+
+    /// Issue #6174: a trigger's verbatim `CREATE TRIGGER` text
+    /// (`sql_definition`) must round-trip through the binary catalog (v16). Before
+    /// the fix, `write_catalog` never wrote the field, so every reloaded trigger
+    /// had `sql_definition = None` and `sqlite_master.sql` rendered an
+    /// AST-reconstructed form (injected `BEFORE`/`FOR EACH ROW`, normalized
+    /// spacing) after a checkpoint (altercol.test 9.x).
+    #[test]
+    fn test_binary_catalog_trigger_sql_definition_round_trips() {
+        let mut db = Database::new();
+
+        // A trigger whose verbatim text differs from any AST reconstruction
+        // (multi-line body, an odd unnamed-looking header, no `FOR EACH ROW`).
+        let verbatim =
+            "CREATE TRIGGER AFTER INSERT ON t1 BEGIN\n        SELECT _x_ FROM t1;\n      END";
+        let with_sql = vibesql_catalog::TriggerDefinition::new(
+            "AFTER".to_string(),
+            vibesql_ast::TriggerTiming::Before,
+            vibesql_ast::TriggerEvent::Insert,
+            "t1".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("BEGIN SELECT _x_ FROM t1; END".to_string()),
+        )
+        .with_sql_definition(Some(verbatim.to_string()));
+        db.catalog.create_trigger(with_sql).unwrap();
+
+        // A trigger with no preserved text: must round-trip as `None`.
+        let no_sql = vibesql_catalog::TriggerDefinition::new(
+            "tr_plain".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t1".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+        );
+        db.catalog.create_trigger(no_sql).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let tr = reloaded.catalog.get_trigger("AFTER").expect("trigger must survive");
+        assert_eq!(
+            tr.sql_definition.as_deref(),
+            Some(verbatim),
+            "verbatim CREATE TRIGGER text must round-trip byte-for-byte (v16)"
+        );
+
+        let tr = reloaded.catalog.get_trigger("tr_plain").expect("trigger must survive");
+        assert_eq!(
+            tr.sql_definition, None,
+            "a trigger with no preserved text must round-trip as None"
+        );
+    }
+
+    /// Issue #6174: a v15 file has no per-trigger `sql_definition` field, so the
+    /// v16 reader must default it to `None` rather than mis-parsing the following
+    /// bytes. A v15 record ends right after the schema field, so reading it back
+    /// at version 15 must succeed and leave `sql_definition = None`.
+    #[test]
+    fn test_v15_trigger_loads_sql_definition_as_none() {
+        let mut db = Database::new();
+        let tr = vibesql_catalog::TriggerDefinition::new(
+            "tr".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+        )
+        .with_sql_definition(Some("CREATE TRIGGER tr AFTER INSERT ON t ...".to_string()));
+        db.catalog.create_trigger(tr).unwrap();
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+
+        // Reading the same bytes at version 15 must stop before the trailing
+        // sql_definition present-flag and default the field to None.
+        let reloaded = read_catalog_v(&mut &buf[..], 15).unwrap();
+        let tr = reloaded.catalog.get_trigger("tr").expect("trigger must survive");
+        assert_eq!(tr.sql_definition, None, "a v15 reader must default sql_definition to None");
     }
 
     /// Issue #5940, Cluster A: a v13 file has no per-trigger schema field, so the
