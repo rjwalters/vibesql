@@ -5994,6 +5994,74 @@ proc do_catchsql_test {name sql expected} {
     do_test $name [list catchsql $sql] $expected
 }
 
+# Table-driven test helper ported faithfully from SQLite's canonical
+# tester.tcl (proc do_select_tests). Many evidence-suite files
+# (e_createtable.test, e_select.test, e_expr.test, ...) define thin wrappers
+# such as `do_createtable_tests` that forward to `do_select_tests`. Without
+# this proc every such wrapper aborts at file scope on
+# `invalid command name "do_select_tests"`, which the resilient file evaluator
+# records as a long run of `filescope-err` failures and skips the rest of the
+# file (#6173: 66 of e_createtable's 137 failures were this single missing
+# helper cascading). It dispatches each {name sql result} triple to the shim's
+# existing do_execsql_test / do_catchsql_test / do_test, so behavior matches
+# the upstream helper exactly, including 2-char switch abbreviations
+# (`-error` == `-errorformat`, `-query`, `-tclquery`, `-repair`, `-count`).
+proc do_select_tests {prefix args} {
+
+    set testlist [lindex $args end]
+    set switches [lrange $args 0 end-1]
+
+    set errfmt ""
+    set countonly 0
+    set tclquery ""
+    set repair ""
+
+    for {set i 0} {$i < [llength $switches]} {incr i} {
+        set s [lindex $switches $i]
+        set n [string length $s]
+        if {$n>=2 && [string equal -length $n $s "-query"]} {
+            set tclquery [list execsql [lindex $switches [incr i]]]
+        } elseif {$n>=2 && [string equal -length $n $s "-tclquery"]} {
+            set tclquery [lindex $switches [incr i]]
+        } elseif {$n>=2 && [string equal -length $n $s "-errorformat"]} {
+            set errfmt [lindex $switches [incr i]]
+        } elseif {$n>=2 && [string equal -length $n $s "-repair"]} {
+            set repair [lindex $switches [incr i]]
+        } elseif {$n>=2 && [string equal -length $n $s "-count"]} {
+            set countonly 1
+        } else {
+            error "unknown switch: $s"
+        }
+    }
+
+    if {$countonly && $errfmt!=""} {
+        error "Cannot use -count and -errorformat together"
+    }
+    set nTestlist [llength $testlist]
+    if {$nTestlist%3 || $nTestlist==0 } {
+        error "SELECT test list contains [llength $testlist] elements"
+    }
+
+    eval $repair
+    foreach {tn sql res} $testlist {
+        if {$tclquery != ""} {
+            execsql $sql
+            uplevel do_test ${prefix}.$tn [list $tclquery] [list [list {*}$res]]
+        } elseif {$countonly} {
+            set nRow 0
+            db eval $sql {incr nRow}
+            uplevel do_test ${prefix}.$tn [list [list set {} $nRow]] [list $res]
+        } elseif {$errfmt==""} {
+            uplevel do_execsql_test ${prefix}.${tn} [list $sql] [list [list {*}$res]]
+        } else {
+            set res [list 1 [string trim [format $errfmt {*}$res]]]
+            uplevel do_catchsql_test ${prefix}.${tn} [list $sql] [list $res]
+        }
+        eval $repair
+    }
+
+}
+
 proc do_eqp_test {name sql expected} {
     # EXPLAIN QUERY PLAN test
     # Runs the query with EXPLAIN QUERY PLAN and matches against expected pattern

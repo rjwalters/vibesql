@@ -365,14 +365,20 @@ impl Parser {
     /// with column constraints in any order (e.g., `idx UNIQUE DEFAULT NULL`), so
     /// callers should treat the returned default as additional output and merge it
     /// with any DEFAULT clause parsed before the constraint list.
+    #[allow(clippy::type_complexity)]
     pub(in crate::parser) fn parse_column_constraints(
         &mut self,
     ) -> Result<
-        (Vec<vibesql_ast::ColumnConstraint>, Option<Box<vibesql_ast::Expression>>),
+        (
+            Vec<vibesql_ast::ColumnConstraint>,
+            Option<Box<vibesql_ast::Expression>>,
+            Option<Box<vibesql_ast::Expression>>,
+        ),
         ParseError,
     > {
         let mut constraints = Vec::new();
         let mut default_value: Option<Box<vibesql_ast::Expression>> = None;
+        let mut generated_expr: Option<Box<vibesql_ast::Expression>> = None;
 
         loop {
             // Check for optional CONSTRAINT keyword
@@ -568,19 +574,93 @@ impl Parser {
                         kind: vibesql_ast::ColumnConstraintKind::Collate(collation_name),
                     });
                 }
-                _ => {
-                    // If we parsed a CONSTRAINT name but no constraint type, error
-                    if name.is_some() {
+                Token::Keyword { keyword: Keyword::Generated, .. } => {
+                    // Generated column constraint (full form):
+                    //   [CONSTRAINT name] GENERATED ALWAYS AS (expr) [STORED|VIRTUAL]
+                    // In SQLite the generated-column clause is itself a
+                    // column-constraint alternative, so it may appear interleaved
+                    // with UNIQUE / NOT NULL / etc. in any order (e.g.
+                    // `b UNIQUE AS(a)`, `b INT NOT NULL AS(a==0)`). Parsing it here
+                    // — rather than only at the fixed post-type position — lets
+                    // those orderings parse (#6173: gencol1 `near "AS"` failures).
+                    self.advance(); // consume GENERATED
+                    self.expect_keyword(Keyword::Always)?;
+                    self.expect_keyword(Keyword::As)?;
+                    self.expect_token(Token::LParen)?;
+                    let expr = self.parse_expression()?;
+                    self.expect_token(Token::RParen)?;
+                    if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                        self.advance();
+                    }
+                    if generated_expr.is_some() {
                         return Err(ParseError {
-                            message: "Expected constraint type after CONSTRAINT name".to_string(),
+                            message: "duplicate generated column clause".to_string(),
                         });
+                    }
+                    generated_expr = Some(Box::new(expr));
+                }
+                Token::Keyword { keyword: Keyword::As, .. } => {
+                    // Generated column constraint (short form):
+                    //   [CONSTRAINT name] AS (expr) [STORED|VIRTUAL]
+                    self.advance(); // consume AS
+                    self.expect_token(Token::LParen)?;
+                    let expr = self.parse_expression()?;
+                    self.expect_token(Token::RParen)?;
+                    if self.peek_keyword(Keyword::Stored) || self.peek_keyword(Keyword::Virtual) {
+                        self.advance();
+                    }
+                    if generated_expr.is_some() {
+                        return Err(ParseError {
+                            message: "duplicate generated column clause".to_string(),
+                        });
+                    }
+                    generated_expr = Some(Box::new(expr));
+                }
+                _ => {
+                    // A `CONSTRAINT name` clause with no constraint body following
+                    // it is accepted and ignored by SQLite for backwards
+                    // compatibility ("The CONSTRAINT name clause can follow a
+                    // constraint. Such a clause is ignored." — check.test 2.10).
+                    // This also covers back-to-back names such as
+                    // `CONSTRAINT x_one CONSTRAINT x_two CHECK(...)`, where only the
+                    // final name binds to the constraint body. We consumed the
+                    // CONSTRAINT + name tokens above, so continue the loop to pick
+                    // up whatever follows (another name, a real constraint, or the
+                    // column terminator) rather than erroring (#6173).
+                    if name.is_some() {
+                        continue;
                     }
                     break;
                 }
             }
         }
 
-        Ok((constraints, default_value))
+        Ok((constraints, default_value, generated_expr))
+    }
+
+    /// Absorb trailing, body-less `CONSTRAINT <name>` clauses that SQLite accepts
+    /// and ignores after a table-level constraint (e.g.
+    /// `CONSTRAINT u_one UNIQUE(x,y,z) CONSTRAINT u_two` — check.test 2.12). Only
+    /// a `CONSTRAINT <name>` immediately followed by a `,` or `)` terminator is
+    /// treated as such a trailing name; a `CONSTRAINT <name> <TYPE>` sequence is
+    /// left untouched so a genuine next constraint still parses.
+    pub(in crate::parser) fn skip_trailing_constraint_names(&mut self) {
+        while self.peek_keyword(Keyword::Constraint) {
+            let name_is_ident = matches!(
+                self.tokens.get(self.position + 1),
+                Some(Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_))
+            );
+            let terminated = matches!(
+                self.tokens.get(self.position + 2),
+                Some(Token::Comma) | Some(Token::RParen)
+            );
+            if name_is_ident && terminated {
+                self.advance(); // consume CONSTRAINT
+                self.advance(); // consume the ignored name
+            } else {
+                break;
+            }
+        }
     }
 
     /// Parse table-level constraints (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK)
