@@ -21,10 +21,38 @@ impl ForeignKeyValidator {
     /// immediate `Err`. The caller must push the returned violations
     /// onto the transaction queue once any immutable borrow of
     /// `database` is released.
-    pub fn collect_constraints(
+    ///
+    /// The `old_row_values` parameter carries the pre-update (`OLD`) row so
+    /// that self-referential foreign keys are checked against the row's
+    /// *post-update* state.
+    ///
+    /// SQLite evaluates a self-referential FK against the table as it will
+    /// look after the UPDATE is applied: the row being updated contributes
+    /// its NEW parent-key (not its OLD one). Two corrections follow from
+    /// this, both of which the plain (`old_row_values = None`) path gets
+    /// wrong for a self-referential constraint:
+    ///
+    /// 1. **Self-rescue** — an UPDATE that sets a row's own parent-key equal
+    ///    to its FK value (e.g. `UPDATE self SET a=14, b=14` on a
+    ///    `b REFERENCES self(a)` table) satisfies the constraint via the
+    ///    row itself. Without the OLD row we still scan for the new parent
+    ///    key, which does not yet exist in the stored (pre-update) table,
+    ///    and raise a spurious violation (fkey2-16.1.*.6 false positive).
+    ///
+    /// 2. **Old-row exclusion** — an UPDATE that moves a row's parent-key
+    ///    away (e.g. `UPDATE self SET a=15` where the row was `(14, 14)`)
+    ///    must *not* be rescued by its own stale OLD parent-key still sitting
+    ///    in the table during the scan; that OLD row is about to be
+    ///    overwritten. Excluding it exposes the real violation
+    ///    (fkey2-16.1.*.4 false negative).
+    ///
+    /// Non-self-referential FKs are unaffected: the parent table is a
+    /// different table, so neither the self-rescue nor the exclusion applies.
+    pub fn collect_constraints_with_old(
         db: &Database,
         table_name: &str,
         row_values: &[vibesql_types::SqlValue],
+        old_row_values: Option<&[vibesql_types::SqlValue]>,
     ) -> Result<Vec<DeferredFkViolation>, ExecutorError> {
         let mut deferred: Vec<DeferredFkViolation> = Vec::new();
 
@@ -68,6 +96,52 @@ impl ForeignKeyValidator {
             let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
             let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
 
+            // Self-referential FKs are evaluated against the post-update row
+            // (see the doc comment). Only relevant when the parent table is
+            // this very table.
+            let self_ref = fk.parent_table.eq_ignore_ascii_case(table_name);
+
+            // Correction 1 (self-rescue): if the NEW row's own parent-key
+            // equals its FK value, the row satisfies its own constraint.
+            if self_ref
+                && parent_indices.iter().zip(&fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match row_values.get(parent_idx) {
+                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    },
+                )
+            {
+                continue;
+            }
+
+            // Correction 2 (old-row exclusion): for a self-referential FK,
+            // skip the pre-update version of the row being changed — it is
+            // about to be overwritten and must not satisfy the new FK value.
+            let excluded_old: Option<&[vibesql_types::SqlValue]> =
+                if self_ref { old_row_values } else { None };
+            let is_excluded = |parent_row: &[vibesql_types::SqlValue]| -> bool {
+                excluded_old.map(|old| parent_row == old).unwrap_or(false)
+            };
+            let row_satisfies = |parent_row: &vibesql_storage::Row| -> bool {
+                if is_excluded(&parent_row.values) {
+                    return false;
+                }
+                parent_indices.iter().zip(&fk_values).enumerate().all(
+                    |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
+                        Some(parent_val) => crate::foreign_key_check::fk_values_equal(
+                            fk_val,
+                            parent_val,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        ),
+                        None => false,
+                    },
+                )
+            };
+
             // Phase 1d follow-up (#5205): the parent-existence check on
             // the UPDATE path must honor MVCC visibility for the same
             // reason as INSERT — an uncommitted concurrent INSERT on the
@@ -78,34 +152,12 @@ impl ForeignKeyValidator {
             let key_exists = {
                 #[cfg(feature = "mvcc_enabled")]
                 {
-                    parent_table.scan_visible(&snapshot).any(|(_, parent_row)| {
-                        parent_indices.iter().zip(&fk_values).enumerate().all(
-                            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                                Some(parent_val) => crate::foreign_key_check::fk_values_equal(
-                                    fk_val,
-                                    parent_val,
-                                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                                ),
-                                None => false,
-                            },
-                        )
-                    })
+                    parent_table.scan_visible(&snapshot).any(|(_, parent_row)| row_satisfies(parent_row))
                 }
                 #[cfg(not(feature = "mvcc_enabled"))]
                 {
                     let _ = &snapshot;
-                    parent_table.scan().iter().any(|parent_row| {
-                        parent_indices.iter().zip(&fk_values).enumerate().all(
-                            |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
-                                Some(parent_val) => crate::foreign_key_check::fk_values_equal(
-                                    fk_val,
-                                    parent_val,
-                                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                                ),
-                                None => false,
-                            },
-                        )
-                    })
+                    parent_table.scan().iter().any(row_satisfies)
                 }
             };
 
@@ -242,7 +294,24 @@ impl ForeignKeyValidator {
                 // walking every physical row via `scan().iter()`.
                 let snapshot = crate::mvcc::read_snapshot(db);
                 let child_table = db.get_table(&table_name).unwrap();
+
+                // Self-referential exclusion: when the child table *is* the
+                // parent table, the row being updated is its own child. That
+                // row is updated in place by this same statement, and its
+                // post-update FK value is validated separately by
+                // `collect_constraints_with_old` (the child-side check). It
+                // must therefore not count as an orphaned child of its own
+                // parent-key change — otherwise `UPDATE self SET a=14, b=14`
+                // (which moves both the parent key and the self-reference in
+                // lock-step) would wrongly trip "cannot update a parent row"
+                // (fkey2-16.1.*). Identify that row by full equality to the
+                // OLD row still present in the pre-update scan.
+                let self_ref_table = table_name.eq_ignore_ascii_case(parent_table_name);
+                let excluded_self_row: &[vibesql_types::SqlValue] = &parent_row.values;
                 let matches_fk = |child_row: &vibesql_storage::Row| -> bool {
+                    if self_ref_table && child_row.values.as_slice() == excluded_self_row {
+                        return false;
+                    }
                     let child_fk_values: Vec<vibesql_types::SqlValue> = fk
                         .column_indices
                         .iter()

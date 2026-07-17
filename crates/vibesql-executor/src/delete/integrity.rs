@@ -122,8 +122,19 @@ pub fn check_no_child_references(
             // `scan_visible(&snapshot)` so the MVCC visibility filter
             // applies. With MVCC OFF, this reduces to `scan_live` and
             // behavior is unchanged.
+            // Self-referential exclusion: when the child table *is* the
+            // parent table, the row being deleted is its own child. Deleting
+            // a row that references itself (e.g. `DELETE FROM self` where the
+            // sole row is `(17, 17)` with `b REFERENCES self(a)`) is legal in
+            // SQLite — the self-reference disappears together with the row, so
+            // it must not count as a blocking child reference (fkey2-16.1.*).
+            // Identify that row by full equality to the row being deleted.
+            let self_ref_table = table_name.eq_ignore_ascii_case(parent_table_name);
             let child_table = db.get_table(&table_name).unwrap();
             let has_references = child_table.scan_visible(&snapshot).any(|(_, child_row)| {
+                if self_ref_table && child_row.values.as_slice() == parent_row.values.as_slice() {
+                    return false;
+                }
                 let child_fk_values: Vec<SqlValue> =
                     fk.column_indices.iter().map(|&idx| child_row.values[idx].clone()).collect();
 

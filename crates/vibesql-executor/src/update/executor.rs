@@ -475,10 +475,11 @@ pub(super) fn execute_internal(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                match ForeignKeyValidator::collect_constraints(
+                match ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &new_row.values,
+                    Some(&row.values),
                 ) {
                     Ok(deferred) => pending_deferred_violations.extend(deferred),
                     Err(_) => continue, // Skip this row
@@ -503,10 +504,11 @@ pub(super) fn execute_internal(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                let deferred = ForeignKeyValidator::collect_constraints(
+                let deferred = ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &new_row.values,
+                    Some(&row.values),
                 )?;
                 pending_deferred_violations.extend(deferred);
             }
@@ -531,10 +533,11 @@ pub(super) fn execute_internal(
 
             // Enforce FOREIGN KEY constraints (child table)
             if !schema.foreign_keys.is_empty() {
-                let deferred = ForeignKeyValidator::collect_constraints(
+                let deferred = ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &new_row.values,
+                    Some(&row.values),
                 )?;
                 pending_deferred_violations.extend(deferred);
             }
@@ -1895,10 +1898,11 @@ fn execute_update_from(
             // Validate foreign key constraints (only retain deferred violations
             // for kept rows — FK collection is per-row, so an Err means we skip).
             if !schema.foreign_keys.is_empty() {
-                match ForeignKeyValidator::collect_constraints(
+                match ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &u.new_row.values,
+                    Some(&u.old_row.values),
                 ) {
                     Ok(deferred) => pending_deferred_violations.extend(deferred),
                     Err(_) => continue,
@@ -1951,10 +1955,11 @@ fn execute_update_from(
 
                 // Foreign key constraints still apply.
                 if !schema.foreign_keys.is_empty() {
-                    let deferred = ForeignKeyValidator::collect_constraints(
+                    let deferred = ForeignKeyValidator::collect_constraints_with_old(
                         database,
                         table_name,
                         &u.new_row.values,
+                        Some(&u.old_row.values),
                     )?;
                     pending_deferred_violations.extend(deferred);
                 }
@@ -2139,10 +2144,11 @@ fn execute_update_from(
 
             // Validate foreign key constraints
             if !schema.foreign_keys.is_empty() {
-                let deferred = ForeignKeyValidator::collect_constraints(
+                let deferred = ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &u.new_row.values,
+                    Some(&u.old_row.values),
                 )?;
                 pending_deferred_violations.extend(deferred);
             }
