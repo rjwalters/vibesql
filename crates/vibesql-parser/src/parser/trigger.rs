@@ -9,6 +9,33 @@ use crate::{keywords::Keyword, lexer::Lexer, token::Token};
 /// rejects any variable reference at create time (see triggerE.test).
 const TRIGGER_CANNOT_USE_VARIABLES: &str = "trigger cannot use variables";
 
+/// SQLite's verbatim error when a trigger-body INSERT/UPDATE/DELETE targets a
+/// schema-qualified table name (e.g. `INSERT INTO main.t VALUES(...)` inside a
+/// trigger body). The trigger grammar never allowed a qualifier on the DML
+/// target; SQLite rejects it at create time with this message rather than a
+/// bare "syntax error" (ticket #3947, trigger1-16.1..16.3).
+const TRIGGER_QUALIFIED_TABLE: &str =
+    "qualified table names are not allowed on INSERT, UPDATE, and DELETE statements within triggers";
+
+/// SQLite's verbatim error when a trigger-body UPDATE/DELETE carries a
+/// `NOT INDEXED` clause (trigger1-16.4/16.6).
+const TRIGGER_NOT_INDEXED: &str =
+    "the NOT INDEXED clause is not allowed on UPDATE or DELETE statements within triggers";
+
+/// SQLite's verbatim error when a trigger-body UPDATE/DELETE carries an
+/// `INDEXED BY <index>` clause (trigger1-16.5/16.7).
+const TRIGGER_INDEXED_BY: &str =
+    "the INDEXED BY clause is not allowed on UPDATE or DELETE statements within triggers";
+
+/// Pick the verbatim SQLite rejection message for an index hint on a
+/// trigger-body UPDATE/DELETE (`NOT INDEXED` vs `INDEXED BY <index>`).
+fn index_hint_rejection_message(hint: &vibesql_ast::IndexHint) -> String {
+    match hint {
+        vibesql_ast::IndexHint::NotIndexed => TRIGGER_NOT_INDEXED.to_string(),
+        vibesql_ast::IndexHint::IndexedBy(_) => TRIGGER_INDEXED_BY.to_string(),
+    }
+}
+
 impl Parser {
     /// Parse CREATE TRIGGER statement
     ///
@@ -373,20 +400,77 @@ impl Parser {
             // `RAISE()` is admitted (SQLite only permits RAISE() within a
             // trigger-program; `parse_sql` rejects it at parse time, but a
             // trigger body legitimately contains it).
-            if let Err(e) = Self::parse_sql_in_trigger_body(&stmt_with_terminator) {
-                if Self::is_create_time_rejection(&e) {
-                    // Propagate verbatim so the message (e.g.
-                    // `unsupported use of NULLS FIRST`) matches the
-                    // direct-statement form and SQLite.
-                    return Err(e);
+            match Self::parse_sql_in_trigger_body(&stmt_with_terminator) {
+                Ok(stmt) => Self::validate_trigger_body_statement(&stmt)?,
+                Err(e) => {
+                    if Self::is_create_time_rejection(&e) {
+                        // Propagate verbatim so the message (e.g.
+                        // `unsupported use of NULLS FIRST`) matches the
+                        // direct-statement form and SQLite.
+                        return Err(e);
+                    }
+                    // Otherwise tolerate: a construct VibeSQL does not yet
+                    // parse. Preserve the prior behavior (stored raw, re-parsed
+                    // at fire time) so we don't reject bodies SQLite accepts.
                 }
-                // Otherwise tolerate: a construct VibeSQL does not yet
-                // parse. Preserve the prior behavior (stored raw, re-parsed
-                // at fire time) so we don't reject bodies SQLite accepts.
             }
         }
 
         Ok(())
+    }
+
+    /// Reject the create-time-invalid constructs SQLite disallows on a
+    /// trigger-body INSERT/UPDATE/DELETE statement (ticket #3947, trigger1-16.x):
+    ///
+    /// 1. A schema-qualified DML target (`INSERT INTO main.t ...`,
+    ///    `UPDATE main.t ...`, `DELETE FROM main.t ...`). The trigger grammar
+    ///    never permitted a schema qualifier on the DML target — the whole
+    ///    trigger program runs in the schema of the trigger's own table — so
+    ///    SQLite rejects it with a full message rather than a bare syntax error.
+    /// 2. An `INDEXED BY <index>` / `NOT INDEXED` clause on a body UPDATE/DELETE,
+    ///    which SQLite likewise forbids inside a trigger program.
+    ///
+    /// Only runs on statements VibeSQL parsed successfully, so bodies using
+    /// constructs VibeSQL cannot yet parse are still tolerated as before.
+    fn validate_trigger_body_statement(stmt: &vibesql_ast::Statement) -> Result<(), ParseError> {
+        use vibesql_ast::Statement;
+        match stmt {
+            Statement::Insert(insert) => {
+                // INSERT keeps the schema qualifier in a dedicated field.
+                if insert.schema_name.is_some() {
+                    return Err(ParseError { message: TRIGGER_QUALIFIED_TABLE.to_string() });
+                }
+            }
+            Statement::Update(update) => {
+                if Self::dml_target_is_schema_qualified(&update.table_name, update.quoted) {
+                    return Err(ParseError { message: TRIGGER_QUALIFIED_TABLE.to_string() });
+                }
+                if let Some(hint) = &update.index_hint {
+                    return Err(ParseError { message: index_hint_rejection_message(hint) });
+                }
+            }
+            Statement::Delete(delete) => {
+                if Self::dml_target_is_schema_qualified(&delete.table_name, delete.quoted) {
+                    return Err(ParseError { message: TRIGGER_QUALIFIED_TABLE.to_string() });
+                }
+                if let Some(hint) = &delete.index_hint {
+                    return Err(ParseError { message: index_hint_rejection_message(hint) });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Is an UPDATE/DELETE target name schema-qualified (`schema.table`)?
+    ///
+    /// UPDATE/DELETE flatten the qualifier into `table_name` as `schema.table`
+    /// (see [`vibesql_ast::TableRef::full_name`]). A dot only signals a schema
+    /// qualifier for an *unquoted* name — a quoted identifier may legitimately
+    /// contain a dot (`"weird.name"`) and is not a schema reference — so the
+    /// quoted form is deliberately left alone to avoid false positives.
+    fn dml_target_is_schema_qualified(table_name: &str, quoted: bool) -> bool {
+        !quoted && table_name.contains('.')
     }
 
     /// Is this body-statement parse error one that SQLite also rejects at
