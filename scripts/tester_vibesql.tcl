@@ -730,6 +730,20 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (trigger cannot use variables)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # RAISE() used outside a trigger program (trigger1-11.1, triggerC-16.2) —
+    # SQLite returns this semantic message verbatim, not wrapped as a syntax error.
+    if {[regexp -nocase {^Parse error: (RAISE\(\) may only be used within a trigger-program)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    # Trigger-body DML restrictions (ticket #3947, trigger1-16.1..16.7) — a
+    # schema-qualified DML target, or an INDEXED BY / NOT INDEXED clause on a
+    # body UPDATE/DELETE. SQLite returns each of these verbatim, not wrapped.
+    if {[regexp -nocase {^Parse error: (qualified table names are not allowed on INSERT, UPDATE, and DELETE statements within triggers)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    if {[regexp -nocase {^Parse error: (the (?:NOT INDEXED|INDEXED BY) clause is not allowed on UPDATE or DELETE statements within triggers)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"

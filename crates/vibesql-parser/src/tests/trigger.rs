@@ -1074,6 +1074,95 @@ fn test_create_trigger_accepts_raise() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Trigger-body DML restrictions (ticket #3947, trigger1-16.1..16.7). A
+// trigger-body INSERT/UPDATE/DELETE may not target a schema-qualified table
+// name, and a body UPDATE/DELETE may not carry an INDEXED BY / NOT INDEXED
+// clause. SQLite rejects each at CREATE TRIGGER time with a full message.
+// ---------------------------------------------------------------------------
+
+const TRIGGER_QUALIFIED_TABLE_ERR: &str =
+    "qualified table names are not allowed on INSERT, UPDATE, and DELETE statements within triggers";
+const TRIGGER_NOT_INDEXED_ERR: &str =
+    "the NOT INDEXED clause is not allowed on UPDATE or DELETE statements within triggers";
+const TRIGGER_INDEXED_BY_ERR: &str =
+    "the INDEXED BY clause is not allowed on UPDATE or DELETE statements within triggers";
+
+fn assert_trigger_rejected_with(sql: &str, expected: &str) {
+    let err = Parser::parse_sql(sql).expect_err(&format!("expected rejection for: {sql}"));
+    assert_eq!(err.message, expected, "wrong message for: {sql}\n  got: {}", err.message);
+}
+
+#[test]
+fn test_create_trigger_rejects_qualified_insert_target() {
+    // trigger1-16.1
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err1 AFTER INSERT ON tA BEGIN \
+         INSERT INTO main.t16 VALUES(1,2,3); END;",
+        TRIGGER_QUALIFIED_TABLE_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_qualified_update_target() {
+    // trigger1-16.2
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err2 AFTER INSERT ON tA BEGIN \
+         UPDATE main.t16 SET a=a+1; END;",
+        TRIGGER_QUALIFIED_TABLE_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_qualified_delete_target() {
+    // trigger1-16.3
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err3 AFTER INSERT ON tA BEGIN \
+         DELETE FROM main.t16; END;",
+        TRIGGER_QUALIFIED_TABLE_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_not_indexed_in_body() {
+    // trigger1-16.4
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err4 AFTER INSERT ON tA BEGIN \
+         UPDATE t16 NOT INDEXED SET b=b+1; END;",
+        TRIGGER_NOT_INDEXED_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_indexed_by_in_body() {
+    // trigger1-16.5
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err5 AFTER INSERT ON tA BEGIN \
+         UPDATE t16 INDEXED BY t16a SET b=b+1 WHERE a=1; END;",
+        TRIGGER_INDEXED_BY_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_not_indexed_in_delete_body() {
+    // trigger1-16.6
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER t16err6 AFTER INSERT ON tA BEGIN \
+         DELETE FROM t16 NOT INDEXED WHERE a=1; END;",
+        TRIGGER_NOT_INDEXED_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_accepts_unqualified_body_dml() {
+    // Negative control: an ordinary unqualified body DML with no index hint is
+    // still accepted.
+    assert_trigger_accepted(
+        "CREATE TRIGGER tr1 AFTER INSERT ON tA BEGIN \
+         INSERT INTO t16 VALUES(1,2,3); UPDATE t16 SET b=b+1; DELETE FROM t16 WHERE a=1; END;",
+    );
+}
+
 // --- name_source: preserve the verbatim trigger-name spelling (issue #5527) ---
 //
 // SQLite echoes the trigger name *exactly as written* (including its quoting
