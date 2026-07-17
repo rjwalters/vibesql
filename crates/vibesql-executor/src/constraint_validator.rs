@@ -61,6 +61,61 @@ fn key_part_collations(columns: &[vibesql_ast::IndexColumn]) -> Vec<Option<Strin
         .collect()
 }
 
+/// Deduplicate repeated key parts within a table-level PRIMARY KEY, matching
+/// SQLite's index-key semantics: a later key part is dropped when an earlier
+/// kept part references the same column *and* has the same effective collation.
+///
+/// `PRIMARY KEY(a, a, b)` collapses to `(a, b)` (both `a` parts share the
+/// column's default collation), but `PRIMARY KEY(a COLLATE nocase, a)` keeps
+/// both parts because their collations differ. Without this, a duplicated PK
+/// column produced a malformed internal PK index whose uniqueness check never
+/// fired — e.g. `INSERT`ing two rows equal under the effective collation
+/// silently succeeded. Issue #6171 (WITHOUT ROWID support), matching SQLite's
+/// `without_rowid7-1.1`.
+fn dedup_pk_key_parts(
+    pk_columns: &[String],
+    pk_collations: &[Option<String>],
+    columns: &[ColumnDef],
+) -> (Vec<String>, Vec<Option<String>>) {
+    // Effective collation for a key part: the explicit key-part COLLATE if
+    // present, else the column's declared COLLATE, else BINARY.
+    let effective = |name: &str, part_coll: &Option<String>| -> String {
+        if let Some(c) = part_coll {
+            return c.to_ascii_lowercase();
+        }
+        columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .and_then(|c| {
+                c.constraints.iter().find_map(|cn| {
+                    if let ColumnConstraintKind::Collate(coll) = &cn.kind {
+                        Some(coll.to_ascii_lowercase())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| "binary".to_string())
+    };
+
+    let mut out_cols: Vec<String> = Vec::with_capacity(pk_columns.len());
+    let mut out_colls: Vec<Option<String>> = Vec::with_capacity(pk_columns.len());
+    let mut seen: Vec<(String, String)> = Vec::new();
+
+    for (i, name) in pk_columns.iter().enumerate() {
+        let part_coll = pk_collations.get(i).cloned().flatten();
+        let key = (name.to_ascii_lowercase(), effective(name, &part_coll));
+        if seen.contains(&key) {
+            continue; // exact duplicate key part — drop it
+        }
+        seen.push(key);
+        out_cols.push(name.clone());
+        out_colls.push(part_coll);
+    }
+
+    (out_cols, out_colls)
+}
+
 /// Constraint validator for table creation and alteration
 pub struct ConstraintValidator;
 
@@ -174,12 +229,19 @@ impl ConstraintValidator {
                         });
                     }
                     // Extract column names from IndexColumn structs
-                    let column_names: Vec<String> =
+                    let raw_column_names: Vec<String> =
                         pk_cols.iter().map(|c| c.expect_column_name().to_string()).collect();
-                    result.primary_key = Some(column_names.clone());
                     // Carry the explicit per-key-part COLLATE so INSERT uniqueness
                     // enforcement can honor `PRIMARY KEY(a COLLATE nocase)` (#5881).
-                    result.primary_key_collations = Some(key_part_collations(pk_cols));
+                    let raw_collations = key_part_collations(pk_cols);
+                    // Collapse exact-duplicate key parts (same column + same
+                    // effective collation) the way SQLite does, so a PK like
+                    // `(a, a, b)` becomes `(a, b)` and its internal unique index
+                    // is well-formed (#6171).
+                    let (column_names, collations) =
+                        dedup_pk_key_parts(&raw_column_names, &raw_collations, columns);
+                    result.primary_key = Some(column_names.clone());
+                    result.primary_key_collations = Some(collations);
                     // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
                     // For table-level constraints, check each column's type
                     for col_name in &column_names {
@@ -344,6 +406,74 @@ mod tests {
         assert_eq!(result.primary_key, Some(vec!["id".to_string(), "tenant_id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
         assert!(result.not_null_columns.contains(&"tenant_id".to_string()));
+    }
+
+    /// Build a table-level PRIMARY KEY constraint from `(column, collation)`
+    /// key-part specs.
+    fn pk_constraint(parts: &[(&str, Option<&str>)]) -> TableConstraint {
+        TableConstraint {
+            name: None,
+            kind: TableConstraintKind::PrimaryKey {
+                columns: parts
+                    .iter()
+                    .map(|(name, coll)| vibesql_ast::IndexColumn::Column {
+                        column_name: name.to_string(),
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        prefix_length: None,
+                        collation: coll.map(|c| c.to_string()),
+                    })
+                    .collect(),
+                on_conflict: None,
+            },
+        }
+    }
+
+    /// `PRIMARY KEY(a, a, b)` collapses to `(a, b)` — the two `a` key parts
+    /// share the column's default collation, so SQLite drops the duplicate.
+    /// Matches SQLite `without_rowid7-1.1`. Issue #6171.
+    #[test]
+    fn test_primary_key_dedups_repeated_columns() {
+        let columns = vec![make_column_def("a", vec![]), make_column_def("b", vec![])];
+        let constraints = vec![pk_constraint(&[("a", None), ("a", None), ("b", None)])];
+
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["a".to_string(), "b".to_string()]));
+        // Collations stay positionally aligned with the deduped column list.
+        assert_eq!(result.primary_key_collations, Some(vec![None, None]));
+    }
+
+    /// `PRIMARY KEY(a COLLATE nocase, a)` keeps BOTH key parts: the first is
+    /// nocase, the second falls back to the column's default (BINARY), so their
+    /// effective collations differ and neither is a duplicate of the other.
+    /// Matches SQLite `without_rowid7-2.x`. Issue #6171.
+    #[test]
+    fn test_primary_key_keeps_columns_with_distinct_collations() {
+        let columns = vec![make_column_def("a", vec![]), make_column_def("b", vec![])];
+        let constraints = vec![pk_constraint(&[("a", Some("nocase")), ("a", None)])];
+
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["a".to_string(), "a".to_string()]));
+        assert_eq!(result.primary_key_collations, Some(vec![Some("nocase".to_string()), None]));
+    }
+
+    /// A repeated key part whose explicit COLLATE matches the column's declared
+    /// COLLATE is still a duplicate (both resolve to the same effective
+    /// collation) and is dropped. Issue #6171.
+    #[test]
+    fn test_primary_key_dedups_when_explicit_collation_matches_declared() {
+        let columns = vec![
+            make_column_def("a", vec![ColumnConstraintKind::Collate("nocase".to_string())]),
+            make_column_def("b", vec![]),
+        ];
+        // (a, a COLLATE nocase) — column a is declared COLLATE nocase, so the
+        // first (default) part also resolves to nocase → the two are duplicates.
+        let constraints = vec![pk_constraint(&[("a", None), ("a", Some("nocase")), ("b", None)])];
+
+        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+
+        assert_eq!(result.primary_key, Some(vec!["a".to_string(), "b".to_string()]));
     }
 
     #[test]
