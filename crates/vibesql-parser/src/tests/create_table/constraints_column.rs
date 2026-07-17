@@ -613,3 +613,62 @@ fn test_parse_column_standalone_deferrable() {
         assert!(result.is_ok(), "{sql} should parse: {:?}", result);
     }
 }
+
+// ========================================================================
+// Generated-column clause interleaved with other constraints (#6173)
+//
+// In SQLite the `[GENERATED ALWAYS] AS (expr) [STORED|VIRTUAL]` clause is a
+// column-constraint alternative, so it may appear in any order relative to
+// UNIQUE / NOT NULL / PRIMARY KEY. VibeSQL previously only accepted it at the
+// fixed post-type position, so `b UNIQUE AS(a)` failed with `near "AS"`.
+// ========================================================================
+
+#[test]
+fn test_parse_generated_column_after_constraint() {
+    for sql in [
+        "CREATE TABLE t(a INT, b UNIQUE AS (a))",
+        "CREATE TABLE t(a INT, b NOT NULL AS (a==0))",
+        "CREATE TABLE t(a INT, b INT UNIQUE AS (a))",
+        "CREATE TABLE t(a INT, b UNIQUE GENERATED ALWAYS AS (a))",
+        "CREATE TABLE t(a INT, b AS (a) STORED NOT NULL)",
+        "CREATE TABLE t(a INT, b UNIQUE AS (a) STORED)",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} should parse: {:?}", result);
+        if let Ok(vibesql_ast::Statement::CreateTable(create)) = result {
+            assert!(
+                create.columns[1].generated_expr.is_some(),
+                "{sql}: column b should be recorded as a generated column"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_parse_duplicate_generated_clause_rejected() {
+    // Two generated clauses on the same column are a parse error.
+    let result = Parser::parse_sql("CREATE TABLE t(a INT, b AS (a) UNIQUE AS (a))");
+    assert!(result.is_err(), "Two generated clauses should be rejected");
+}
+
+// ========================================================================
+// Trailing / standalone `CONSTRAINT name` clauses are accepted and ignored
+// (#6173, check.test 2.10 / 2.12). SQLite documents: "The CONSTRAINT name
+// clause can follow a constraint. Such a clause is ignored. But the parser
+// must accept it for backwards compatibility."
+// ========================================================================
+
+#[test]
+fn test_parse_trailing_constraint_name_ignored() {
+    for sql in [
+        // Column-level trailing name
+        "CREATE TABLE t(x INTEGER CHECK(x<5) CONSTRAINT one, y TEXT PRIMARY KEY CONSTRAINT two)",
+        // Back-to-back names; only the last binds to the CHECK body
+        "CREATE TABLE t(x INTEGER CONSTRAINT a CONSTRAINT b CHECK(x>0) CONSTRAINT c CONSTRAINT d, y)",
+        // Table-level trailing name
+        "CREATE TABLE t(x, y, z, CONSTRAINT u_one UNIQUE(x,z) CONSTRAINT u_two)",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} should parse: {:?}", result);
+    }
+}

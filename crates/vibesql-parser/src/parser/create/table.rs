@@ -90,6 +90,9 @@ impl Parser {
                 || self.peek_keyword(Keyword::Fulltext)
             {
                 table_constraints.push(self.parse_table_constraint()?);
+                // Absorb any trailing, body-less `CONSTRAINT <name>` clauses that
+                // SQLite accepts and ignores after a table constraint (#6173).
+                self.skip_trailing_constraint_names();
                 if matches!(self.peek(), Token::Comma) {
                     self.advance();
                     continue;
@@ -219,8 +222,10 @@ impl Parser {
                 None
             };
 
-            // Parse column constraints (which may include NOT NULL and an interleaved DEFAULT)
-            let (constraints, mid_default) = self.parse_column_constraints()?;
+            // Parse column constraints (which may include NOT NULL, an
+            // interleaved DEFAULT, and — in any order — a generated-column
+            // `[GENERATED ALWAYS] AS (expr)` clause).
+            let (constraints, mid_default, mid_generated) = self.parse_column_constraints()?;
             if let Some(d) = mid_default {
                 if default_value.is_some() {
                     return Err(ParseError {
@@ -228,6 +233,14 @@ impl Parser {
                     });
                 }
                 default_value = Some(d);
+            }
+            if let Some(g) = mid_generated {
+                if generated_expr.is_some() {
+                    return Err(ParseError {
+                        message: "duplicate generated column clause".to_string(),
+                    });
+                }
+                generated_expr = Some(g);
             }
 
             // SQLite rejects a generated column that also declares DEFAULT with
