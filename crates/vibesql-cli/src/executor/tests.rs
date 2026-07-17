@@ -688,3 +688,140 @@ fn test_pragma_database_list_persistent_objects_no_temp_row() {
     assert_eq!(result.row_count, 1, "persistent objects only -> just main");
     assert_eq!(result.rows[0][1].as_deref(), Some("main"));
 }
+
+#[test]
+fn test_pragma_data_version_returns_one() {
+    // PRAGMA data_version reports 1 for a connection that has observed no
+    // external commit (SQLite's initial value). The read-only-write form
+    // `= N` is a no-op that still reports the current value.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("PRAGMA data_version").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.columns, vec!["data_version".to_string()]);
+    assert_eq!(result.rows[0][0].as_deref(), Some("1"));
+
+    // Read-only-write form still reports 1.
+    let result = executor.execute("PRAGMA data_version = 1234").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.rows[0][0].as_deref(), Some("1"));
+
+    // Schema-qualified form is accepted and ignored.
+    let result = executor.execute("PRAGMA main.data_version").unwrap();
+    assert_eq!(result.rows[0][0].as_deref(), Some("1"));
+}
+
+#[test]
+fn test_pragma_collation_list_builtins() {
+    // PRAGMA collation_list reports the three built-in collating sequences,
+    // most-recently-registered first: RTRIM, NOCASE, BINARY.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    let result = executor.execute("PRAGMA collation_list").unwrap();
+    assert_eq!(result.columns, vec!["seq".to_string(), "name".to_string()]);
+    assert_eq!(result.row_count, 3);
+    assert_eq!(result.rows[0][0].as_deref(), Some("0"));
+    assert_eq!(result.rows[0][1].as_deref(), Some("RTRIM"));
+    assert_eq!(result.rows[1][1].as_deref(), Some("NOCASE"));
+    assert_eq!(result.rows[2][1].as_deref(), Some("BINARY"));
+}
+
+#[test]
+fn test_pragma_index_info_reports_key_columns() {
+    // PRAGMA index_info(idx) returns one row per key column: seqno, cid (table
+    // column rank), name. The `= idx` form is accepted the same as `(idx)`.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t3(a, b, c)").unwrap();
+    executor.execute("CREATE INDEX t3i2 ON t3(b, a)").unwrap();
+
+    let result = executor.execute("PRAGMA index_info(t3i2)").unwrap();
+    assert_eq!(result.columns, vec!["seqno".to_string(), "cid".to_string(), "name".to_string()]);
+    assert_eq!(result.row_count, 2);
+    // b is table column 1, a is table column 0.
+    assert_eq!(result.rows[0], vec![Some("0".into()), Some("1".into()), Some("b".into())]);
+    assert_eq!(result.rows[1], vec![Some("1".into()), Some("0".into()), Some("a".into())]);
+
+    // `= idx` form.
+    let result = executor.execute("PRAGMA index_info = t3i2").unwrap();
+    assert_eq!(result.row_count, 2);
+
+    // Unknown index -> empty result (no error).
+    let result = executor.execute("PRAGMA index_info(nope)").unwrap();
+    assert_eq!(result.row_count, 0);
+}
+
+#[test]
+fn test_pragma_index_xinfo_appends_rowid_aux_column() {
+    // PRAGMA index_xinfo(idx) adds desc/coll/key columns and appends the
+    // auxiliary rowid entry (cid -1, name NULL, key 0) that index_info omits.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t3(a, b)").unwrap();
+    executor.execute("CREATE INDEX t3i1 ON t3(a, b)").unwrap();
+
+    let result = executor.execute("PRAGMA index_xinfo(t3i1)").unwrap();
+    assert_eq!(
+        result.columns,
+        vec![
+            "seqno".to_string(),
+            "cid".to_string(),
+            "name".to_string(),
+            "desc".to_string(),
+            "coll".to_string(),
+            "key".to_string()
+        ]
+    );
+    assert_eq!(result.row_count, 3);
+    // Two key columns, then the auxiliary rowid column.
+    assert_eq!(result.rows[0][5].as_deref(), Some("1"), "a is a key column");
+    assert_eq!(result.rows[1][5].as_deref(), Some("1"), "b is a key column");
+    assert_eq!(result.rows[2][1].as_deref(), Some("-1"), "aux rowid cid = -1");
+    assert_eq!(result.rows[2][2], None, "aux rowid name is NULL");
+    assert_eq!(result.rows[2][5].as_deref(), Some("0"), "aux column key = 0");
+}
+
+#[test]
+fn test_pragma_index_list_origins() {
+    // PRAGMA index_list(table) reports seq, name, unique, origin, partial. An
+    // explicit CREATE INDEX has origin 'c'; a UNIQUE-constraint autoindex has
+    // origin 'u'; a PRIMARY KEY autoindex has origin 'pk'.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t3(a, b UNIQUE)").unwrap();
+    executor.execute("CREATE INDEX t3i1 ON t3(a, b)").unwrap();
+
+    let result = executor.execute("PRAGMA index_list(t3)").unwrap();
+    assert_eq!(
+        result.columns,
+        vec![
+            "seq".to_string(),
+            "name".to_string(),
+            "unique".to_string(),
+            "origin".to_string(),
+            "partial".to_string()
+        ]
+    );
+    // Newest-first ordering: the explicit index appears before the autoindex.
+    let names: Vec<Option<&str>> = result.rows.iter().map(|r| r[1].as_deref()).collect();
+    assert!(names.contains(&Some("t3i1")));
+    assert!(names.contains(&Some("sqlite_autoindex_t3_1")));
+    for row in &result.rows {
+        match row[1].as_deref() {
+            Some("t3i1") => {
+                assert_eq!(row[2].as_deref(), Some("0"), "explicit index not unique");
+                assert_eq!(row[3].as_deref(), Some("c"), "explicit -> origin c");
+            }
+            Some("sqlite_autoindex_t3_1") => {
+                assert_eq!(row[2].as_deref(), Some("1"), "UNIQUE autoindex is unique");
+                assert_eq!(row[3].as_deref(), Some("u"), "UNIQUE -> origin u");
+            }
+            other => panic!("unexpected index {other:?}"),
+        }
+    }
+
+    // PRIMARY KEY autoindex -> origin pk.
+    executor.execute("CREATE TABLE tp(a, b, PRIMARY KEY(a, b))").unwrap();
+    let result = executor.execute("PRAGMA index_list(tp)").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.rows[0][3].as_deref(), Some("pk"));
+
+    // Unknown table -> empty result (no error).
+    let result = executor.execute("PRAGMA index_list(nope)").unwrap();
+    assert_eq!(result.row_count, 0);
+}

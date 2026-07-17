@@ -1226,6 +1226,44 @@ impl SqlExecutor {
             "DATABASE_LIST" => {
                 return self.execute_pragma_database_list();
             }
+            "INDEX_LIST" => {
+                return self.execute_pragma_index_list(stmt);
+            }
+            "INDEX_INFO" => {
+                return self.execute_pragma_index_info(stmt, false);
+            }
+            "INDEX_XINFO" => {
+                return self.execute_pragma_index_info(stmt, true);
+            }
+            "COLLATION_LIST" => {
+                return self.execute_pragma_collation_list();
+            }
+            "DATA_VERSION" => {
+                // SQLite `PRAGMA data_version` returns an integer that a given
+                // connection observes changing only when *another* connection
+                // commits to the database file; commits made on the same
+                // connection never change it (R-47505-58569), and writing to
+                // the pragma is a no-op that still reports the current value.
+                //
+                // The VibeSQL TCL conformance shim runs each SQL batch as a
+                // fresh connection to the file, so every read legitimately sees
+                // the initial value 1 — which is exactly SQLite's behaviour for
+                // a connection that has observed no external commit. The
+                // multi-connection cases in pragma3 (a persistent `db2` seeing
+                // the counter advance to 2, 3, ...) cannot be emulated across
+                // the shim's ephemeral processes; those are a shim limitation,
+                // not an engine gap, and are left failing rather than forced.
+                //
+                // Handled here (before the set/query split) so both the query
+                // form and the read-only-write form `= N` report 1.
+                return Ok(QueryResult {
+                    columns: vec!["data_version".to_string()],
+                    rows: vec![vec![Some("1".to_string())]],
+                    row_count: 1,
+                    execution_time_ms: None,
+                    message: None,
+                });
+            }
             "INTEGRITY_CHECK" | "QUICK_CHECK" => {
                 // SQLite compatibility: `PRAGMA integrity_check` and the
                 // table-scoped form `PRAGMA integrity_check('t1')` both report
@@ -1973,6 +2011,237 @@ impl SqlExecutor {
                 Some(notnull.to_string()),
                 dflt_value,
                 Some(pk.to_string()),
+            ]);
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
+    }
+
+    /// PRAGMA collation_list - SQLite-compatible
+    ///
+    /// Returns one row (`seq`, `name`) per registered collating sequence. VibeSQL
+    /// ships the three built-in collations SQLite always registers — BINARY,
+    /// NOCASE and RTRIM — listed most-recently-registered first (BINARY is
+    /// registered first internally, so it sorts last), matching SQLite's
+    /// `pragma-11.1` fixture `{seq 0 name RTRIM seq 1 name NOCASE seq 2 name
+    /// BINARY}`. User-defined collations registered through the C API
+    /// (`db collate ...`) cannot be added through the CLI, so they are not
+    /// reported.
+    fn execute_pragma_collation_list(&self) -> anyhow::Result<QueryResult> {
+        let columns = vec!["seq".to_string(), "name".to_string()];
+        let names = ["RTRIM", "NOCASE", "BINARY"];
+        let rows: Vec<Vec<Option<String>>> = names
+            .iter()
+            .enumerate()
+            .map(|(seq, name)| vec![Some(seq.to_string()), Some((*name).to_string())])
+            .collect();
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
+    }
+
+    /// PRAGMA index_list(table-name) - SQLite-compatible
+    ///
+    /// Returns one row per index on the named table with:
+    ///   seq (index number), name, unique (0/1), origin, partial (0/1).
+    ///
+    /// `origin` is `c` for an index created by CREATE INDEX, `u` for the implicit
+    /// index backing a UNIQUE constraint, and `pk` for the implicit index backing
+    /// a (non-rowid) PRIMARY KEY. Implicit indexes are named `sqlite_autoindex_*`
+    /// and are materialized in the catalog, so they are reported here. Indexes are
+    /// listed newest-first (matching SQLite, which walks its per-table index list
+    /// in reverse creation order).
+    fn execute_pragma_index_list(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
+        let columns = vec![
+            "seq".to_string(),
+            "name".to_string(),
+            "unique".to_string(),
+            "origin".to_string(),
+            "partial".to_string(),
+        ];
+
+        let empty = QueryResult {
+            columns: columns.clone(),
+            rows: Vec::new(),
+            row_count: 0,
+            execution_time_ms: None,
+            message: None,
+        };
+
+        let table_name = match &stmt.value {
+            Some(vibesql_ast::PragmaValue::Identifier(name)) => name.clone(),
+            Some(vibesql_ast::PragmaValue::String(name)) => name.clone(),
+            // No table argument supplied - SQLite returns no rows.
+            _ => return Ok(empty),
+        };
+
+        // Schema-qualified handling: VibeSQL carries a single schema, so a
+        // qualifier other than the current schema / `main` yields no rows.
+        let current_schema = self.db.catalog.get_current_schema().to_string();
+        if let Some(ref schema) = stmt.database {
+            let is_current =
+                schema.eq_ignore_ascii_case(&current_schema) || schema.eq_ignore_ascii_case("main");
+            if !is_current {
+                return Ok(empty);
+            }
+        }
+
+        // Unknown table -> no rows (SQLite is silent for index_list on a missing
+        // table).
+        let table = match self.db.catalog.get_table(&table_name) {
+            Some(t) => t,
+            None => return Ok(empty),
+        };
+
+        // Primary-key column set, used to distinguish a `pk`-origin autoindex
+        // from a `u`-origin (UNIQUE) autoindex.
+        let pk_cols: Option<Vec<String>> =
+            table.primary_key.as_ref().map(|cols| cols.iter().map(|c| c.to_lowercase()).collect());
+
+        // SQLite lists indexes in reverse creation order (newest first); the
+        // catalog stores them oldest-first, so reverse for parity.
+        let mut indexes = self.db.catalog.get_table_indexes(&table_name);
+        indexes.reverse();
+
+        let mut rows: Vec<Vec<Option<String>>> = Vec::with_capacity(indexes.len());
+        for (seq, index) in indexes.iter().enumerate() {
+            let unique = if index.is_unique { 1 } else { 0 };
+            let partial = if index.where_clause.is_some() { 1 } else { 0 };
+
+            let origin = if index.name.to_lowercase().starts_with("sqlite_autoindex_") {
+                // Implicit index: classify as pk vs u by comparing its key
+                // columns to the table's declared PRIMARY KEY.
+                let index_cols: Vec<String> = index
+                    .columns
+                    .iter()
+                    .filter_map(|c| c.column_name().map(|n| n.to_lowercase()))
+                    .collect();
+                match &pk_cols {
+                    Some(pk) if !pk.is_empty() && *pk == index_cols => "pk",
+                    _ => "u",
+                }
+            } else {
+                "c"
+            };
+
+            rows.push(vec![
+                Some(seq.to_string()),
+                Some(index.name.clone()),
+                Some(unique.to_string()),
+                Some(origin.to_string()),
+                Some(partial.to_string()),
+            ]);
+        }
+
+        let row_count = rows.len();
+        Ok(QueryResult { columns, rows, row_count, execution_time_ms: None, message: None })
+    }
+
+    /// PRAGMA index_info(index-name) / index_xinfo(index-name) - SQLite-compatible
+    ///
+    /// `index_info` returns one row per key column of the named index:
+    ///   seqno (rank within the index, 0-based), cid (rank of the column within
+    ///   the table, or -1 for a rowid/expression), name (column name, NULL for a
+    ///   rowid or expression column).
+    ///
+    /// `index_xinfo` (when `extended` is true) adds three columns —
+    ///   desc (1 if DESC), coll (collation name), key (1 for a key column, 0 for
+    ///   an auxiliary column) — and additionally lists the auxiliary columns that
+    ///   SQLite appends to every index on a rowid table: a trailing rowid entry
+    ///   (cid -1, name NULL, key 0).
+    fn execute_pragma_index_info(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+        extended: bool,
+    ) -> anyhow::Result<QueryResult> {
+        let columns = if extended {
+            vec![
+                "seqno".to_string(),
+                "cid".to_string(),
+                "name".to_string(),
+                "desc".to_string(),
+                "coll".to_string(),
+                "key".to_string(),
+            ]
+        } else {
+            vec!["seqno".to_string(), "cid".to_string(), "name".to_string()]
+        };
+
+        let empty = QueryResult {
+            columns: columns.clone(),
+            rows: Vec::new(),
+            row_count: 0,
+            execution_time_ms: None,
+            message: None,
+        };
+
+        let index_name = match &stmt.value {
+            Some(vibesql_ast::PragmaValue::Identifier(name)) => name.clone(),
+            Some(vibesql_ast::PragmaValue::String(name)) => name.clone(),
+            // No index argument supplied - SQLite returns no rows.
+            _ => return Ok(empty),
+        };
+
+        // Unknown index -> no rows (SQLite is silent for index_info on a missing
+        // index).
+        let index = match self.db.catalog.find_index_by_name(&index_name) {
+            Some(i) => i,
+            None => return Ok(empty),
+        };
+
+        // Resolve the backing table so key columns can be mapped to their table
+        // column position (cid).
+        let table = self.db.catalog.get_table(&index.table_name);
+
+        let mut rows: Vec<Vec<Option<String>>> = Vec::new();
+        for (seqno, column) in index.columns.iter().enumerate() {
+            let (cid, name): (i64, Option<String>) = match column.column_name() {
+                Some(col_name) => {
+                    let cid = table
+                        .and_then(|t| t.get_column_index(col_name))
+                        .map(|i| i as i64)
+                        .unwrap_or(-1);
+                    (cid, Some(col_name.to_string()))
+                }
+                // Expression column: SQLite reports cid -1 and a NULL name.
+                None => (-1, None),
+            };
+
+            if extended {
+                let desc = if matches!(column.order(), vibesql_catalog::SortOrder::Descending) {
+                    1
+                } else {
+                    0
+                };
+                rows.push(vec![
+                    Some(seqno.to_string()),
+                    Some(cid.to_string()),
+                    name,
+                    Some(desc.to_string()),
+                    Some("BINARY".to_string()),
+                    Some("1".to_string()),
+                ]);
+            } else {
+                rows.push(vec![Some(seqno.to_string()), Some(cid.to_string()), name]);
+            }
+        }
+
+        // index_xinfo lists the auxiliary columns appended to make the index a
+        // covering key. For an ordinary rowid table this is the trailing rowid
+        // (cid -1, name NULL, key 0). index_info omits auxiliary columns
+        // (R-23114-21695).
+        if extended {
+            let seqno = index.columns.len();
+            rows.push(vec![
+                Some(seqno.to_string()),
+                Some("-1".to_string()),
+                None,
+                Some("0".to_string()),
+                Some("BINARY".to_string()),
+                Some("0".to_string()),
             ]);
         }
 
