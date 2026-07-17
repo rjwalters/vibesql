@@ -99,6 +99,17 @@ impl TriggerDefinition {
         self
     }
 
+    /// Set the verbatim `CREATE TRIGGER` text (builder-style).
+    ///
+    /// This is the original statement text preserved so `sqlite_master.sql`
+    /// renders SQLite's exact form (original spacing/quoting, no injected
+    /// `BEFORE`/`FOR EACH ROW`). `None` leaves it unset, in which case the
+    /// renderer reconstructs the statement from the parsed fields.
+    pub fn with_sql_definition(mut self, sql_definition: Option<String>) -> Self {
+        self.sql_definition = sql_definition;
+        self
+    }
+
     /// Returns true if this trigger lives in the temp schema.
     pub fn is_temp(&self) -> bool {
         self.schema
