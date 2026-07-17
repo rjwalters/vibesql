@@ -1080,6 +1080,57 @@ def _counts_from_details(per_test_results: list["TestResult"]) -> tuple[int, int
     return passed, failed, skipped
 
 
+def _reconcile_details_to_counts(
+    per_test_results: list["TestResult"],
+    test_file: str,
+    passed: int,
+    failed: int,
+    skipped: int,
+) -> None:
+    """Materialise synthetic detail rows so the per-test rows reconcile EXACTLY
+    with the shim's summary-trailer counts.
+
+    On the complete-run path the trailer counts (``Tests passed/failed/skipped:``)
+    are folded into the run summary (``tcl_test_runs``), while the detail table
+    (``tcl_test_results``) is built from the ``##TCLTEST##`` per-test lines. These
+    normally match 1:1, but the shim can increment a trailer counter without
+    emitting a matching per-test line -- e.g. a failure raised at file scope or
+    during ``finish_test`` finalization, outside any numbered test. When that
+    happens the summary counts one more than the detail table, leaving a
+    reconciliation gap (observed on the certified run, run_id=1: summary failed
+    7124 vs detail failed+markers 7123; total_tests 804435 vs detail rows 804434).
+
+    Rather than lower the summary -- which would hide a real failure, violating the
+    never-silently-smaller policy -- we materialise the missing rows as visible
+    synthetic detail rows so BOTH tables carry the same count. Only a positive
+    trailer-minus-detail difference is materialised; the reverse cannot happen
+    because every emitted per-test line is also counted by the trailer. This
+    guarantees ``tcl_test_runs`` and ``tcl_test_results`` reconcile exactly for
+    every future run.
+    """
+    have = {"passed": 0, "failed": 0, "skipped": 0}
+    for r in per_test_results:
+        if r.status in have:
+            have[r.status] += 1
+    for status, target in (("passed", passed), ("failed", failed), ("skipped", skipped)):
+        deficit = target - have[status]
+        for i in range(deficit):
+            per_test_results.append(TestResult(
+                test_name=f"RECONCILE ({status} #{i + 1})",
+                file_path=test_file,
+                test_type="native-tcl",
+                status=status,
+                sql="",
+                error_message=(
+                    f"Synthetic reconciliation row: the shim summary trailer "
+                    f"reported {target} {status} test(s) but emitted only "
+                    f"{have[status]} matching per-test detail line(s); this row "
+                    f"materialises the difference so tcl_test_results reconciles "
+                    f"exactly with tcl_test_runs (never silently smaller)."
+                ),
+            ))
+
+
 def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeout: float = 1200.0) -> tuple[int, int, int, list[str], list[TestResult]]:
     """
     Run a TCL test file using the native tclsh interpreter with our VibeSQL shim.
@@ -1173,6 +1224,11 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
             failed_tests.append(f"INCOMPLETE: {reason}")
             return passed, failed + 1, skipped, failed_tests, per_test_results
 
+        # Complete run: the summary folds the trailer counts while the detail
+        # table is built from the ##TCLTEST## rows. Reconcile any trailer-minus-
+        # detail shortfall into visible synthetic rows so tcl_test_runs and
+        # tcl_test_results always agree (fixes the certified 1-row gap, #6180).
+        _reconcile_details_to_counts(per_test_results, test_file, passed, failed, skipped)
         return passed, failed, skipped, failed_tests, per_test_results
 
     except subprocess.TimeoutExpired as e:
