@@ -45,6 +45,9 @@ impl Database {
         table_name: &str,
         pk_value: &vibesql_types::SqlValue,
     ) -> Result<Option<&Row>, StorageError> {
+        // Phase 1 of #6199: record the point lookup (measurement only).
+        self.record_point_lookup(table_name);
+
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
@@ -85,6 +88,9 @@ impl Database {
         pk_value: &vibesql_types::SqlValue,
         column_index: usize,
     ) -> Result<Option<&vibesql_types::SqlValue>, StorageError> {
+        // Phase 1 of #6199: record the point lookup (measurement only).
+        self.record_point_lookup(table_name);
+
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
@@ -130,6 +136,9 @@ impl Database {
         table_name: &str,
         pk_values: &[vibesql_types::SqlValue],
     ) -> Result<Option<&Row>, StorageError> {
+        // Phase 1 of #6199: record the point lookup (measurement only).
+        self.record_point_lookup(table_name);
+
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;

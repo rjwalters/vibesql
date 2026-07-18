@@ -2,6 +2,7 @@
 // Database Module
 // ============================================================================
 
+mod access_signal;
 mod cache;
 mod change_events_api;
 mod config;
@@ -25,6 +26,7 @@ pub mod transactions;
 #[cfg(test)]
 mod tests;
 
+pub use access_signal::AccessSignalSnapshot;
 pub use core::{Database, ExportedSpatialIndexMetadata as SpatialIndexMetadata};
 // The WAL recovery path (`wal::recovery`) shares the CreateTable schema-blob
 // layout with the emit path here; its tests round-trip through the real

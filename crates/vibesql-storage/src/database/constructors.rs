@@ -10,6 +10,11 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use parking_lot::RwLock;
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
+
 use super::{
     config::{DatabaseConfig, DEFAULT_COLUMNAR_CACHE_BUDGET},
     core::Database,
@@ -42,6 +47,8 @@ impl Clone for Database {
             total_changes_count: 0,
             // Clone resets search_count - each database instance tracks independently
             search_count: AtomicU64::new(0),
+            // Clone resets access signals - each database instance tracks independently
+            table_access_signals: RwLock::new(HashMap::new()),
             // Clone does not inherit persistence engine - cloned databases are independent
             persistence_engine: None,
             // Preserve table ID counter for consistency
@@ -72,6 +79,7 @@ impl Database {
             last_changes_count: 0,
             total_changes_count: 0,
             search_count: AtomicU64::new(0),
+            table_access_signals: RwLock::new(HashMap::new()),
             persistence_engine: None,
             next_table_id: 1,
             reserved_rowids: HashMap::new(),

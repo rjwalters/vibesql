@@ -72,6 +72,12 @@ impl Database {
     /// For native columnar tables, this is a no-op since the columnar data
     /// is maintained incrementally by the Table itself during DML operations.
     pub fn invalidate_columnar_cache(&self, table_name: &str) {
+        // Phase 1 of #6199: this is the universal DML funnel (every
+        // INSERT/UPDATE/DELETE/TRUNCATE/ALTER routes through it), so record the
+        // write here — BEFORE the native-columnar early return below — so
+        // native-columnar tables are counted too.
+        self.record_write(table_name);
+
         // For native columnar tables, skip invalidation -- they maintain
         // their own columnar data incrementally during INSERT/UPDATE/DELETE
         if let Some(table) = self.get_table(table_name) {
