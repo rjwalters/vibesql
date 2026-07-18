@@ -44,10 +44,10 @@ pub use change_events::{
 pub use columnar::{ColumnData, ColumnarTable};
 pub use columnar_cache::{CacheStats, ColumnarCache};
 pub use database::{
-    print_delete_profile_summary, reset_delete_profile_stats, Database, DatabaseConfig,
-    DeferredFkViolation, DeferredFkViolationKind, DeleteProfileStats, IndexData, IndexManager,
-    IndexMetadata, OwnedStreamingRangeScan, SpatialIndexMetadata, SpillPolicy, TransactionState,
-    DELETE_PROFILE_STATS,
+    print_delete_profile_summary, reset_delete_profile_stats, AccessSignalSnapshot, Database,
+    DatabaseConfig, DeferredFkViolation, DeferredFkViolationKind, DeleteProfileStats, IndexData,
+    IndexManager, IndexMetadata, OwnedStreamingRangeScan, SpatialIndexMetadata, SpillPolicy,
+    TransactionState, DELETE_PROFILE_STATS,
 };
 pub use error::{StorageError, StorageResult};
 pub use index::{extract_mbr_from_sql_value, SpatialIndex, SpatialIndexEntry};

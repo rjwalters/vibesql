@@ -19,8 +19,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[allow(unused_imports)]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use parking_lot::RwLock;
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
+
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
-use super::{lifecycle::Lifecycle, metadata::Metadata, operations::Operations};
+use super::{
+    access_signal::TableAccessSignal, lifecycle::Lifecycle, metadata::Metadata,
+    operations::Operations,
+};
 use crate::{
     change_events::ChangeEventSender, columnar_cache::ColumnarCache, wal::PersistenceEngine,
     QueryBufferPool, Table,
@@ -77,6 +85,13 @@ pub struct Database {
     /// Tracks the number of rows examined during query execution
     /// Used by SQLite TCL tests to verify query optimization behavior
     pub(super) search_count: AtomicU64,
+    /// Per-table access-pattern signal (Phase 1 of #6199 — measurement only).
+    ///
+    /// Interior-mutable, keyed by uppercased table name, mutated through `&self`
+    /// like `search_count`. In-memory only: reset on open, never persisted.
+    /// Phase 2 will consume this to make the columnar cache adaptive; nothing
+    /// reads it yet besides accessors/tests.
+    pub(super) table_access_signals: RwLock<HashMap<String, TableAccessSignal>>,
     /// Optional persistence engine for WAL-based async persistence
     /// Enables durable storage when enabled
     pub(super) persistence_engine: Option<PersistenceEngine>,

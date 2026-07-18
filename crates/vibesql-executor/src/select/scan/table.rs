@@ -840,6 +840,11 @@ pub(crate) fn execute_table_scan(
                 let all_rows = table.scan();
                 // sqlite_search_count: Track rows examined during table scan
                 database.increment_search_count(all_rows.len() as u64);
+                // Phase 1 of #6199: record this analytical (columnar-eligible)
+                // scan and its projected column width (measurement only — no
+                // behavior change). `schema.total_columns` is the scan's output
+                // column count.
+                database.record_scan(table_name, schema.total_columns as u64);
 
                 if crate::profiling::is_scan_debug_enabled() {
                     eprintln!(
