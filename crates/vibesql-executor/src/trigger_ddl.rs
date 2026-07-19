@@ -138,10 +138,34 @@ impl TriggerExecutor {
             }
         }
 
+        // SQLite auto-assigns a trigger to the temp schema whenever its target
+        // table lives in the temp schema, even when the statement carries no
+        // `TEMP` keyword and no `temp.` qualifier (trigger1-1.8). Such a trigger
+        // must surface via `sqlite_temp_master` (and stay out of the main
+        // `sqlite_master`), mirroring `CREATE TEMP TRIGGER`. When the user gave
+        // an explicit schema we honor it verbatim; otherwise resolve the target
+        // table's schema and promote the trigger to `temp` if the table is temp.
+        let effective_schema = match &stmt.schema {
+            Some(schema) => Some(schema.clone()),
+            None => {
+                let target_in_temp_schema = db
+                    .catalog
+                    .resolve_table_schema_name(&stmt.table_name)
+                    .as_deref()
+                    .is_some_and(vibesql_catalog::Catalog::is_temp_schema);
+                if target_in_temp_schema {
+                    Some("temp".to_string())
+                } else {
+                    None
+                }
+            }
+        };
+
         // Create trigger definition from statement, preserving original SQL when available.
-        // The trigger's schema (from `CREATE TEMP TRIGGER` or an explicit
-        // `schema.` prefix) is threaded through so it binds to the correct
-        // table when a temp table shadows a main table of the same name.
+        // The trigger's schema (from `CREATE TEMP TRIGGER`, an explicit
+        // `schema.` prefix, or auto-promotion for a temp-table target above) is
+        // threaded through so it binds to the correct table when a temp table
+        // shadows a main table of the same name.
         let trigger = match original_sql {
             Some(sql) => TriggerDefinition::new_with_sql(
                 stmt.trigger_name.clone(),
@@ -163,7 +187,7 @@ impl TriggerExecutor {
                 stmt.triggered_action.clone(),
             ),
         }
-        .with_schema(stmt.schema.clone());
+        .with_schema(effective_schema);
 
         // Store in catalog
         db.catalog.create_trigger(trigger)?;
