@@ -77,8 +77,17 @@ impl ExpressionEvaluator<'_> {
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
 
-        // Get effective collation: explicit COLLATE or column-level collation
-        let collation = self.get_expression_collation(expr);
+        // Get effective collation for the BETWEEN comparisons (datatype3 §7.1).
+        // `x BETWEEN y AND z` is `x >= y AND x <= z`, so an explicit `COLLATE`
+        // operator on the tested expression OR on either bound propagates to the
+        // comparison. Prefer the tested expression's collation (explicit or its
+        // column's declared collation); otherwise fall back to an explicit
+        // COLLATE on a bound, so `'bbb' BETWEEN 'AAA' AND 'CCC' COLLATE nocase`
+        // compares under NOCASE (e_expr-9.22).
+        let collation = self.get_expression_collation(expr).or_else(|| {
+            crate::evaluator::collation::explicit_collation_of(low)
+                .or_else(|| crate::evaluator::collation::explicit_collation_of(high))
+        });
 
         let expr_val = self.eval(expr, row)?;
         let low_val = self.eval(low, row)?;
