@@ -973,6 +973,20 @@ impl ExpressionEvaluator<'_> {
 
                 let left_val = self.eval(left, row)?;
                 let right_val = self.eval(right, row)?;
+                // `IS` / `IS NOT` compare like `=` / `<>` but NULL-safe, so they
+                // must honour the datatype3 §7.1 comparison collation and SQLite
+                // affinity, mirroring the `=` and row-value-element paths. In
+                // particular an explicit `COLLATE` operator on either operand
+                // propagates to the comparison, so `'abcd' IS 'ABCD' COLLATE
+                // nocase` compares under NOCASE (e_expr-9.14 / e_expr-9.20).
+                let collation = self.comparison_collation(left, right);
+                let (left_val, right_val) = crate::evaluator::row_value::apply_collation_to_pair(
+                    left_val,
+                    right_val,
+                    collation.as_deref(),
+                );
+                let (left_val, right_val) =
+                    self.apply_affinity_for_comparison(left, left_val, right, right_val);
                 let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
                 let result = if *negated { !is_distinct } else { is_distinct };
                 Ok(SqlValue::Boolean(result))

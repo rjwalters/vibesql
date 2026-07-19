@@ -117,6 +117,12 @@ pub(crate) fn values_are_equal(
         (Character(a), Varchar(b)) | (Varchar(a), Character(b)) => a == b,
         (Boolean(a), Boolean(b)) => a == b,
 
+        // BLOB values compare byte-for-byte. Without this arm two identical
+        // blobs fell through to the `_ => false` catch-all, so `X'ABCDEF' IS
+        // X'ABCDEF'` wrongly reported "distinct" (e_expr-8.2.10.10.1 /
+        // 8.2.11.11.1 / 8.2.12.12.1) even though `X'ABCDEF' = X'ABCDEF'` is 1.
+        (Blob(a), Blob(b)) => a == b,
+
         // SQLite compatibility: Boolean/Integer comparisons.
         //
         // SQLite has no separate boolean storage class — TRUE is stored as the
@@ -237,5 +243,37 @@ pub(crate) fn values_are_distinct(
         // Both non-NULL - compare for inequality
         // Reuse the values_are_equal logic but invert it
         _ => !values_are_equal(left, right),
+    }
+}
+
+#[cfg(test)]
+mod blob_equality_tests {
+    use super::{values_are_distinct, values_are_equal};
+    use vibesql_types::SqlValue;
+
+    // Regression for e_expr-8.2.10.10.1 / 8.2.11.11.1 / 8.2.12.12.1: identical
+    // BLOB values must compare equal (and NOT distinct), matching `=`.
+    #[test]
+    fn identical_blobs_are_equal_and_not_distinct() {
+        let a = SqlValue::Blob(vec![0xAB, 0xCD, 0xEF]);
+        let b = SqlValue::Blob(vec![0xAB, 0xCD, 0xEF]);
+        assert!(values_are_equal(&a, &b));
+        assert!(!values_are_distinct(&a, &b));
+    }
+
+    #[test]
+    fn empty_blobs_are_equal_and_not_distinct() {
+        let a = SqlValue::Blob(vec![]);
+        let b = SqlValue::Blob(vec![]);
+        assert!(values_are_equal(&a, &b));
+        assert!(!values_are_distinct(&a, &b));
+    }
+
+    #[test]
+    fn differing_blobs_are_distinct() {
+        let a = SqlValue::Blob(vec![0xAB]);
+        let b = SqlValue::Blob(vec![0xCD]);
+        assert!(!values_are_equal(&a, &b));
+        assert!(values_are_distinct(&a, &b));
     }
 }
