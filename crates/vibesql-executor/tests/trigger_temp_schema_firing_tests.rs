@@ -47,6 +47,21 @@ fn exec(db: &mut Database, sql: &str) {
     }
 }
 
+/// Returns the first-column text values of an arbitrary introspection query
+/// (used to read trigger names from `sqlite_master` / `sqlite_temp_master`).
+fn names(db: &Database, sql: &str) -> Vec<String> {
+    use vibesql_ast::Statement;
+    let stmt = Parser::parse_sql(sql).expect("parse failed");
+    let Statement::Select(select) = stmt else { panic!("expected SELECT") };
+    let rows = SelectExecutor::new(db).execute(&select).expect("SELECT failed");
+    rows.iter()
+        .map(|r| match &r.values[0] {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+            other => panic!("expected text, got {other:?}"),
+        })
+        .collect()
+}
+
 /// Returns the ordered `y` column of `t301` as i64s (insertion order).
 fn log_values(db: &Database) -> Vec<i64> {
     use vibesql_ast::Statement;
@@ -135,6 +150,68 @@ fn temp_trigger_on_main_only_table_fires() {
         log_values(&db),
         vec![7],
         "a temp trigger on a main-only table must bind to and fire for the main table"
+    );
+}
+
+/// A plain `CREATE TRIGGER` (no `TEMP` keyword, no `temp.` qualifier) whose
+/// target table lives in the temp schema is auto-promoted to the temp schema,
+/// exactly as SQLite does (trigger1-1.8). It must surface via
+/// `sqlite_temp_master`, stay out of the main `sqlite_master`, and still fire.
+#[test]
+fn plain_trigger_on_temp_table_is_promoted_to_temp_schema() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TEMP TABLE tt(x);");
+    exec(&mut db, "CREATE TABLE t301(y);");
+    // Note: no TEMP keyword and no schema qualifier on the trigger.
+    exec(
+        &mut db,
+        "CREATE TRIGGER trg AFTER INSERT ON tt \
+         BEGIN INSERT INTO t301 VALUES(new.x); END;",
+    );
+
+    // The trigger must NOT appear in the main schema introspection view...
+    assert!(
+        names(&db, "SELECT name FROM sqlite_master WHERE type='trigger';").is_empty(),
+        "a trigger on a temp table must not leak into main sqlite_master (trigger1-1.8)"
+    );
+    // ...and MUST appear in the temp-schema introspection view.
+    assert_eq!(
+        names(&db, "SELECT name FROM sqlite_temp_master WHERE type='trigger';"),
+        vec!["trg".to_string()],
+        "a trigger on a temp table must surface via sqlite_temp_master"
+    );
+
+    // It still fires for inserts into the temp table.
+    exec(&mut db, "INSERT INTO tt VALUES(5);");
+    assert_eq!(
+        log_values(&db),
+        vec![5],
+        "the auto-promoted temp trigger must still fire on its temp table"
+    );
+}
+
+/// An explicit schema qualifier is always honored verbatim: a `main.`-qualified
+/// trigger on a main-only table stays in the main schema and appears in
+/// `sqlite_master` (guards the promotion above from over-reaching).
+#[test]
+fn qualified_main_trigger_stays_in_main_schema() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE base(x);");
+    exec(&mut db, "CREATE TABLE t301(y);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER main.r AFTER INSERT ON base \
+         BEGIN INSERT INTO t301 VALUES(new.x); END;",
+    );
+
+    assert_eq!(
+        names(&db, "SELECT name FROM sqlite_master WHERE type='trigger';"),
+        vec!["r".to_string()],
+        "a main-schema trigger on a main table must appear in sqlite_master"
+    );
+    assert!(
+        names(&db, "SELECT name FROM sqlite_temp_master WHERE type='trigger';").is_empty(),
+        "a main-schema trigger must not appear in sqlite_temp_master"
     );
 }
 
