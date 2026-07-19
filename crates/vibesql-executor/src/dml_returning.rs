@@ -195,7 +195,7 @@ pub(crate) fn returning_has_subquery(items: &[SelectItem]) -> bool {
 
 /// Recursively test whether an expression contains any subquery form
 /// (scalar subquery, IN (SELECT), EXISTS, or a quantified comparison).
-fn expression_has_subquery(expr: &Expression) -> bool {
+pub(crate) fn expression_has_subquery(expr: &Expression) -> bool {
     use Expression::*;
     match expr {
         ScalarSubquery(_) | Exists { .. } => true,
