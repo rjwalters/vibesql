@@ -157,8 +157,20 @@ impl CreateTableExecutor {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them
             // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
-            let id = TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
-            (schema_part.to_string(), table_part.to_string(), id)
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                // SQLite compatibility: the "temp" schema qualifier maps to this
+                // session's temp schema, so `CREATE TABLE temp.t(...)` creates a
+                // temporary table exactly like `CREATE TEMP TABLE t(...)`. Without
+                // this mapping the raw "temp" schema name is looked up verbatim and
+                // fails with SchemaNotFound("temp").
+                let temp_schema = database.catalog.temp_schema_name();
+                let id = TableIdentifier::qualified(temp_schema, false, table_part, stmt.quoted);
+                (temp_schema.to_string(), table_part.to_string(), id)
+            } else {
+                let id =
+                    TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
+                (schema_part.to_string(), table_part.to_string(), id)
+            }
         } else {
             // Simple table name - use current schema
             let id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
