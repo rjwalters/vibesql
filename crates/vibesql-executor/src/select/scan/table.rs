@@ -240,6 +240,72 @@ fn sort_rows_by_integer_primary_key(rows: &mut Vec<vibesql_storage::Row>, ipk_co
     });
 }
 
+/// Sort rows by a WITHOUT ROWID table's PRIMARY KEY tuple (Issue #6171).
+///
+/// For a `WITHOUT ROWID` table the PRIMARY KEY *is* the table's clustering
+/// btree, so a full table scan with no explicit `ORDER BY` returns rows in
+/// ascending PRIMARY KEY order — not insertion order (which is what an ordinary
+/// rowid table would yield). Each key part is compared with its effective
+/// collating sequence (explicit key-part `COLLATE`, else the column's declared
+/// collation, else BINARY), matching SQLite's btree ordering.
+///
+/// `pk_indices` are the PK column positions in key order (from
+/// [`get_primary_key_indices`](vibesql_catalog::TableSchema::get_primary_key_indices));
+/// `pk_collations` is the parallel effective-collation vector (from
+/// [`primary_key_effective_collations`](vibesql_catalog::TableSchema::primary_key_effective_collations)).
+/// PK columns are `NOT NULL`, so NULL handling here is only a defensive fallback.
+fn sort_rows_by_without_rowid_pk(
+    rows: &mut [vibesql_storage::Row],
+    pk_indices: &[usize],
+    pk_collations: &[Option<String>],
+) {
+    use std::cmp::Ordering;
+
+    use crate::select::grouping::compare_sql_values_with_collation;
+
+    rows.sort_by(|a, b| {
+        for (part, &col_idx) in pk_indices.iter().enumerate() {
+            let ord = match (a.get(col_idx), b.get(col_idx)) {
+                (Some(av), Some(bv)) => {
+                    let collation = pk_collations.get(part).and_then(|c| c.as_deref());
+                    compare_sql_values_with_collation(av, bv, collation)
+                }
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+            };
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+/// Apply SQLite's implicit full-scan row ordering when the query has no
+/// `ORDER BY` (Issues #4926, #6171).
+///
+/// SQLite returns table-scan rows in physical btree order:
+/// - INTEGER PRIMARY KEY (rowid-alias) tables → ascending rowid order (#4926).
+/// - `WITHOUT ROWID` tables → ascending PRIMARY KEY order, since the PK is the
+///   table btree (#6171).
+///
+/// Ordinary rowid tables keep physical/insertion order and are left untouched.
+/// The caller is responsible for only invoking this when `order_by.is_none()`.
+fn apply_implicit_scan_order(
+    rows: &mut Vec<vibesql_storage::Row>,
+    schema: &vibesql_catalog::TableSchema,
+) {
+    if let Some(ipk_col_idx) = schema.rowid_alias_column {
+        sort_rows_by_integer_primary_key(rows, ipk_col_idx);
+    } else if schema.without_rowid {
+        if let Some(pk_indices) = schema.get_primary_key_indices() {
+            let collations = schema.primary_key_effective_collations().unwrap_or_default();
+            sort_rows_by_without_rowid_pk(rows, &pk_indices, &collations);
+        }
+    }
+}
+
 /// Execute a table scan with SQL:1999 identifier semantics
 ///
 /// This is the new entry point that properly handles case-sensitivity based on
@@ -748,11 +814,9 @@ pub(crate) fn execute_table_scan(
             let mut live_rows = table.scan_visible_vec(&snapshot);
             // sqlite_search_count: Track rows examined during table scan
             database.increment_search_count(live_rows.len() as u64);
-            // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+            // Issue #4926 / #6171: implicit rowid- or PK-order scan
             if order_by.is_none() {
-                if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-                    sort_rows_by_integer_primary_key(&mut live_rows, ipk_col_idx);
-                }
+                apply_implicit_scan_order(&mut live_rows, &table.schema);
             }
             use crate::select::from_iterator::FromIterator;
             return Ok(super::FromResult::from_iterator(
@@ -893,11 +957,9 @@ pub(crate) fn execute_table_scan(
                     if let Ok(mut filtered_rows) =
                         filter_with_simd_columnar(table, &column_predicates)
                     {
-                        // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                        // Issue #4926 / #6171: implicit rowid- or PK-order scan
                         if order_by.is_none() {
-                            if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-                                sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
-                            }
+                            apply_implicit_scan_order(&mut filtered_rows, &table.schema);
                         }
                         // Mark WHERE as already filtered to avoid double-evaluation
                         return Ok(super::FromResult::from_rows_where_filtered(
@@ -927,11 +989,9 @@ pub(crate) fn execute_table_scan(
                         &column_predicates,
                         &snapshot,
                     ) {
-                        // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                        // Issue #4926 / #6171: implicit rowid- or PK-order scan
                         if order_by.is_none() {
-                            if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-                                sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
-                            }
+                            apply_implicit_scan_order(&mut filtered_rows, &table.schema);
                         }
                         // Mark WHERE as already filtered to avoid double-evaluation
                         return Ok(super::FromResult::from_rows_where_filtered(
@@ -968,11 +1028,9 @@ pub(crate) fn execute_table_scan(
                         })
                     })
                     .collect();
-                // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+                // Issue #4926 / #6171: implicit rowid- or PK-order scan
                 if order_by.is_none() {
-                    if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-                        sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
-                    }
+                    apply_implicit_scan_order(&mut filtered_rows, &table.schema);
                 }
                 // Mark WHERE as already filtered to avoid double-evaluation
                 return Ok(super::FromResult::from_rows_where_filtered(
@@ -1009,11 +1067,9 @@ pub(crate) fn execute_table_scan(
                 None,
                 Some(cte_results), // CTE context for IN subqueries referencing CTEs
             )?;
-            // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
+            // Issue #4926 / #6171: implicit rowid- or PK-order scan
             if order_by.is_none() {
-                if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-                    sort_rows_by_integer_primary_key(&mut filtered_rows, ipk_col_idx);
-                }
+                apply_implicit_scan_order(&mut filtered_rows, &table.schema);
             }
             // Mark WHERE as already filtered to avoid double-evaluation
             return Ok(super::FromResult::from_rows_where_filtered(schema, filtered_rows, None));
@@ -1028,12 +1084,12 @@ pub(crate) fn execute_table_scan(
     // sqlite_search_count: Track rows examined during table scan
     database.increment_search_count(live_rows.len() as u64);
 
-    // Issue #4926: SQLite returns INTEGER PRIMARY KEY tables in rowid order
-    // when no explicit ORDER BY is specified. Apply implicit sorting here.
+    // Issue #4926 / #6171: SQLite returns table-scan rows in physical btree
+    // order when no explicit ORDER BY is specified — ascending rowid order for
+    // INTEGER PRIMARY KEY tables, ascending PRIMARY KEY order for WITHOUT ROWID
+    // tables. Apply that implicit ordering here.
     if order_by.is_none() {
-        if let Some(ipk_col_idx) = table.schema.rowid_alias_column {
-            sort_rows_by_integer_primary_key(&mut live_rows, ipk_col_idx);
-        }
+        apply_implicit_scan_order(&mut live_rows, &table.schema);
     }
 
     #[cfg(feature = "parallel")]
