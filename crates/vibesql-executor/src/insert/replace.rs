@@ -158,6 +158,29 @@ pub fn handle_replace_conflicts(
         return Ok(());
     }
 
+    // SQLite performs foreign-key processing when a row is REPLACEd: the
+    // implicit DELETE of each conflicting row must not orphan the child rows
+    // that referenced it (fkey2-13.*, without_rowid3). Previously the
+    // conflict-clearing delete removed the parent row silently, so a REPLACE
+    // that broke a NO ACTION foreign key succeeded where SQLite raises
+    // "FOREIGN KEY constraint failed".
+    //
+    // For a NO ACTION foreign key, SQLite performs this check at statement end
+    // — AFTER the REPLACE re-inserts its new row. Because a foreign key's
+    // parent columns are always a key (PRIMARY KEY / UNIQUE), at most one
+    // parent row can carry a given key value, so a child orphaned by the
+    // conflict-delete is repaired precisely when the re-inserted row restores
+    // that same parent-key value (fkey2-13.1.3/4). We evaluate that repair
+    // here using `row_values` (the row about to be inserted) rather than
+    // erroring eagerly on the delete.
+    //
+    // CASCADE / SET NULL / SET DEFAULT / RESTRICT actions on a REPLACE-delete
+    // are a separate, pre-existing gap and are intentionally left unchanged
+    // here; this focused fix enforces only the default NO ACTION behaviour.
+    if db.foreign_keys_enabled() {
+        enforce_replace_no_action_fks(db, table_name, &rows_to_delete, row_values)?;
+    }
+
     // Check if any DELETE triggers exist for this table.
     //
     // SQLite rule (lang_conflict.html): "When the REPLACE conflict resolution
@@ -388,6 +411,126 @@ pub fn handle_replace_conflicts(
     // reached when `fire_delete_triggers` is false (no DELETE triggers, or
     // `recursive_triggers` is OFF). The trigger-firing case is fully handled by
     // the interleaved per-row path above, which returns before reaching here.
+
+    Ok(())
+}
+
+/// Enforce NO ACTION foreign keys against a REPLACE's conflict-clearing delete.
+///
+/// When a REPLACE deletes a conflicting parent row, any child row that
+/// referenced that parent's key would be orphaned. For a NO ACTION foreign key
+/// SQLite checks this at *statement end*, after the REPLACE re-inserts its new
+/// row: the orphan is repaired if the new row restores the same parent-key
+/// value (fkey2-13.1.3/4). Because a foreign key's parent columns are always a
+/// key (PRIMARY KEY / UNIQUE), at most one parent row can carry a given key
+/// value, so "some surviving parent still provides the key" reduces to "the
+/// re-inserted row provides the key".
+///
+/// Returns `Err(ConstraintViolation)` when a conflict row's key is dropped by
+/// the REPLACE (not restored by `new_row_values`) while a child still
+/// references it. Only the default NO ACTION on-delete behaviour is enforced;
+/// CASCADE / SET NULL / SET DEFAULT / RESTRICT on a REPLACE-delete are a
+/// separate pre-existing gap.
+fn enforce_replace_no_action_fks(
+    db: &vibesql_storage::Database,
+    parent_table: &str,
+    rows_to_delete: &[(usize, vibesql_storage::Row)],
+    new_row_values: &[vibesql_types::SqlValue],
+) -> Result<(), ExecutorError> {
+    use vibesql_types::SqlValue;
+
+    for child_table_name in db.catalog.list_tables() {
+        let child_schema = match db.catalog.get_table(&child_table_name) {
+            Some(s) => s,
+            None => continue,
+        };
+        if child_schema.foreign_keys.is_empty() {
+            continue;
+        }
+
+        for fk in child_schema.foreign_keys.iter() {
+            // Only foreign keys that reference the table being REPLACEd, and
+            // only the default NO ACTION on-delete action.
+            if !fk.parent_table.eq_ignore_ascii_case(parent_table) {
+                continue;
+            }
+            if !matches!(fk.on_delete, vibesql_catalog::ReferentialAction::NoAction) {
+                continue;
+            }
+
+            let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
+            if parent_indices.is_empty()
+                || parent_indices.iter().any(|&idx| idx >= new_row_values.len())
+            {
+                continue;
+            }
+            let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
+            // Parent-key values the re-inserted row will provide.
+            let new_key: Vec<SqlValue> =
+                parent_indices.iter().map(|&idx| new_row_values[idx].clone()).collect();
+
+            for (_, del_row) in rows_to_delete {
+                if parent_indices.iter().any(|&idx| idx >= del_row.values.len()) {
+                    continue;
+                }
+                let deleted_key: Vec<SqlValue> =
+                    parent_indices.iter().map(|&idx| del_row.values[idx].clone()).collect();
+
+                // NULL parent-key values never match a child reference.
+                if deleted_key.iter().any(|v| matches!(v, SqlValue::Null)) {
+                    continue;
+                }
+
+                // If the re-inserted row restores this exact key, no child that
+                // referenced the deleted row can be orphaned.
+                let restored = deleted_key.iter().zip(&new_key).enumerate().all(|(i, (dk, nk))| {
+                    crate::foreign_key_check::fk_values_equal(
+                        dk,
+                        nk,
+                        parent_collations.get(i).and_then(|c| c.as_deref()),
+                    )
+                });
+                if restored {
+                    continue;
+                }
+
+                // The key is being dropped: any child row that references it is
+                // now orphaned. Scan the child table (visibility-aware) for such
+                // a reference.
+                let snapshot = crate::mvcc::read_snapshot(db);
+                let child_table = match db.get_table(&child_table_name) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let orphaned = child_table.scan_visible(&snapshot).any(|(_, child_row)| {
+                    let child_fk_values: Vec<SqlValue> = fk
+                        .column_indices
+                        .iter()
+                        .map(|&idx| child_row.values[idx].clone())
+                        .collect();
+                    if child_fk_values.iter().any(|v| matches!(v, SqlValue::Null)) {
+                        return false;
+                    }
+                    child_fk_values.iter().zip(&deleted_key).enumerate().all(|(i, (cv, pv))| {
+                        crate::foreign_key_check::fk_values_equal(
+                            cv,
+                            pv,
+                            parent_collations.get(i).and_then(|c| c.as_deref()),
+                        )
+                    })
+                });
+
+                if orphaned {
+                    return Err(ExecutorError::ConstraintViolation(format!(
+                        "FOREIGN KEY constraint violation: cannot delete or update a parent row when a foreign key constraint exists. The conflict occurred in table '{}', constraint '{}'.",
+                        child_table_name,
+                        fk.name.as_deref().unwrap_or(""),
+                    )));
+                }
+            }
+        }
+    }
 
     Ok(())
 }
