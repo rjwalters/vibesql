@@ -120,6 +120,26 @@ fn test_arena_alter_table_drop_column() {
 }
 
 #[test]
+fn test_arena_alter_table_drop_column_without_column_keyword() {
+    // SQLite allows `ALTER TABLE t DROP <col>` as a synonym for
+    // `ALTER TABLE t DROP COLUMN <col>` (issue #6174).
+    let arena = Bump::new();
+    let result =
+        ArenaParser::parse_alter_table_sql_with_interner("ALTER TABLE users DROP email;", &arena);
+    assert!(result.is_ok(), "bare DROP <col> should parse: {:?}", result.err());
+    let (stmt, interner) = result.unwrap();
+
+    match stmt {
+        AlterTableStmt::DropColumn(DropColumnStmt { table_name, column_name, if_exists }) => {
+            assert_eq!(interner.resolve(*table_name), "users");
+            assert_eq!(interner.resolve(*column_name), "email");
+            assert!(!if_exists);
+        }
+        _ => panic!("Expected DROP COLUMN"),
+    }
+}
+
+#[test]
 fn test_arena_alter_table_drop_column_if_exists() {
     let arena = Bump::new();
     let result = ArenaParser::parse_alter_table_sql_with_interner(
