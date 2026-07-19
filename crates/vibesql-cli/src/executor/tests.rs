@@ -756,6 +756,39 @@ fn test_pragma_collation_list_builtins() {
 }
 
 #[test]
+fn test_pragma_table_info_typeless_column_reports_empty_type() {
+    // A column declared without a datatype (`CREATE TABLE t(a)`) has BLOB
+    // affinity internally, but SQLite's table_info reports an *empty* declared
+    // type for it, not "BLOB". Regression guard for #6175 (pragma-6.2.2/6.2.3).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a, b TEXT, c)").unwrap();
+
+    let result = executor.execute("PRAGMA table_info(t)").unwrap();
+    assert_eq!(result.row_count, 3);
+    // type column is index 2.
+    assert_eq!(result.rows[0][2].as_deref(), Some(""), "typeless column a -> empty type");
+    assert_eq!(result.rows[1][2].as_deref(), Some("TEXT"), "typed column b keeps its type");
+    assert_eq!(result.rows[2][2].as_deref(), Some(""), "typeless column c -> empty type");
+}
+
+#[test]
+fn test_pragma_table_info_integer_primary_key_notnull_is_zero() {
+    // An INTEGER PRIMARY KEY rowid alias is internally non-nullable, but
+    // SQLite's table_info reports notnull=0 for it because there is no
+    // *explicit* NOT NULL clause. An explicit NOT NULL still reports 1.
+    // Regression guard for #6175 (pragma-6.2.3).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t(a, b INTEGER PRIMARY KEY, c TEXT NOT NULL)").unwrap();
+
+    let result = executor.execute("PRAGMA table_info(t)").unwrap();
+    assert_eq!(result.row_count, 3);
+    // Columns are cid, name, type, notnull, dflt_value, pk (notnull is index 3).
+    assert_eq!(result.rows[1][3].as_deref(), Some("0"), "INTEGER PRIMARY KEY notnull=0");
+    assert_eq!(result.rows[1][5].as_deref(), Some("1"), "INTEGER PRIMARY KEY pk=1");
+    assert_eq!(result.rows[2][3].as_deref(), Some("1"), "explicit NOT NULL notnull=1");
+}
+
+#[test]
 fn test_pragma_index_info_reports_key_columns() {
     // PRAGMA index_info(idx) returns one row per key column: seqno, cid (table
     // column rank), name. The `= idx` form is accepted the same as `(idx)`.
