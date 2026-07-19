@@ -187,9 +187,20 @@ impl ColumnarCache {
     /// # Returns
     /// The Arc-wrapped columnar table (for immediate use)
     pub fn insert(&self, table_name: &str, columnar: ColumnarTable) -> Arc<ColumnarTable> {
-        let key = normalize_cache_key(table_name);
-        let size_bytes = columnar.size_in_bytes();
         let data = Arc::new(columnar);
+
+        // #6199 Phase 0: a zero budget disables the representation cache. Never
+        // hold a resident copy — return the Arc for immediate use without
+        // caching (no `put`, no eviction, no conversion accounting). Combined
+        // with the `get_columnar` short-circuit in `database/cache.rs`, this
+        // keeps a disabled cache truly inert: `CacheStats` stays all-zero and
+        // `memory_usage()` stays 0.
+        if self.max_memory == 0 {
+            return data;
+        }
+
+        let key = normalize_cache_key(table_name);
+        let size_bytes = data.size_in_bytes();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
