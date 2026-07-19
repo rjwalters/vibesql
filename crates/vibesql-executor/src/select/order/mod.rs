@@ -58,6 +58,21 @@ pub(super) fn apply_order_by(
     // Get schema for proper wildcard expansion when counting columns (#4413)
     let schema = evaluator.schema();
 
+    // Resolve (and thereby validate) every ORDER BY term ONCE, up front and
+    // independent of the row count. Resolution is row-independent, so doing it
+    // here is behaviourally identical to resolving per-row — but it guarantees
+    // that positional out-of-range errors (e.g. `ORDER BY 0` / `ORDER BY 26`)
+    // are raised even when the result set is empty. Previously resolution lived
+    // inside the per-row loop, so an empty result set skipped validation
+    // entirely and silently accepted an invalid positional term (tkt2822).
+    let resolved_terms: Vec<std::borrow::Cow<'_, vibesql_ast::Expression>> = order_by
+        .iter()
+        .enumerate()
+        .map(|(term_index, order_item)| {
+            resolve_order_by_alias(&order_item.expr, select_list, term_index, Some(schema))
+        })
+        .collect::<Result<_, _>>()?;
+
     // Evaluate ORDER BY expressions for each row
     for (row, sort_keys) in &mut rows {
         // Clear CSE cache before evaluating this row's ORDER BY expressions
@@ -65,12 +80,8 @@ pub(super) fn apply_order_by(
         evaluator.clear_cse_cache();
 
         let mut keys = Vec::new();
-        for (term_index, order_item) in order_by.iter().enumerate() {
-            // Check if ORDER BY expression is a SELECT list alias or matches an aliased column
+        for (order_item, expr_to_eval) in order_by.iter().zip(resolved_terms.iter()) {
             // Evaluator handles window functions via window_mapping if present
-            // Pass schema for proper wildcard expansion in column count validation
-            let expr_to_eval =
-                resolve_order_by_alias(&order_item.expr, select_list, term_index, Some(schema))?;
             let key_value = evaluator.eval(expr_to_eval.as_ref(), row)?;
             // Get collation for this ORDER BY expression (explicit or inherited from column)
             let collation = evaluator.get_expression_collation(expr_to_eval.as_ref());

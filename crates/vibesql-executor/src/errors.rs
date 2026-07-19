@@ -501,6 +501,25 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     prev_row[len2]
 }
 
+/// Format a 1-based position as an English ordinal ("1st", "2nd", "3rd",
+/// "4th", ..., "11th", "21st", "22nd", "23rd", ...).
+///
+/// This matches SQLite's `%r` ordinal formatting used in ORDER BY / GROUP BY
+/// range error messages. The prior implementation special-cased only 1/2/3 and
+/// suffixed everything else with "th", which produced wrong forms like "21th"
+/// and "22nd" → "22th" for positions >= 21 (tkt2822-7.21 / 7.22).
+fn format_ordinal(n: usize) -> String {
+    let suffix = match (n % 100, n % 10) {
+        // 11th, 12th, 13th are irregular regardless of the last digit.
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!("{}{}", n, suffix)
+}
+
 impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use vibesql_l10n::vibe_msg;
@@ -1309,12 +1328,7 @@ impl std::fmt::Display for ExecutorError {
                 select_list_len,
             } => {
                 // SQLite-compatible error format: "1st ORDER BY term out of range - should be between 1 and N"
-                let ordinal = match term_position {
-                    1 => "1st".to_string(),
-                    2 => "2nd".to_string(),
-                    3 => "3rd".to_string(),
-                    n => format!("{}th", n),
-                };
+                let ordinal = format_ordinal(*term_position);
                 if *select_list_len == 0 {
                     write!(f, "{} ORDER BY term out of range - should be between 1 and 1", ordinal)
                 } else {
@@ -1331,12 +1345,7 @@ impl std::fmt::Display for ExecutorError {
                 select_list_len,
             } => {
                 // SQLite-compatible error format: "1st GROUP BY term out of range - should be between 1 and N"
-                let ordinal = match term_position {
-                    1 => "1st".to_string(),
-                    2 => "2nd".to_string(),
-                    3 => "3rd".to_string(),
-                    n => format!("{}th", n),
-                };
+                let ordinal = format_ordinal(*term_position);
                 if *select_list_len == 0 {
                     write!(f, "{} GROUP BY term out of range - should be between 1 and 1", ordinal)
                 } else {
@@ -1349,12 +1358,7 @@ impl std::fmt::Display for ExecutorError {
             }
             ExecutorError::OrderByTermNotInResultSet { term_position } => {
                 // SQLite-compatible error format: "1st ORDER BY term does not match any column in the result set"
-                let ordinal = match term_position {
-                    1 => "1st".to_string(),
-                    2 => "2nd".to_string(),
-                    3 => "3rd".to_string(),
-                    n => format!("{}th", n),
-                };
+                let ordinal = format_ordinal(*term_position);
                 write!(f, "{} ORDER BY term does not match any column in the result set", ordinal)
             }
             ExecutorError::InvalidLimitOffset { clause, value, reason } => {
@@ -1694,7 +1698,49 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
 
 #[cfg(test)]
 mod tests {
-    use super::ExecutorError;
+    use super::{format_ordinal, ExecutorError};
+
+    #[test]
+    fn format_ordinal_matches_sqlite_percent_r() {
+        // Regular last-digit cases.
+        assert_eq!(format_ordinal(1), "1st");
+        assert_eq!(format_ordinal(2), "2nd");
+        assert_eq!(format_ordinal(3), "3rd");
+        assert_eq!(format_ordinal(4), "4th");
+        assert_eq!(format_ordinal(9), "9th");
+        assert_eq!(format_ordinal(10), "10th");
+        // The irregular teens always take "th".
+        assert_eq!(format_ordinal(11), "11th");
+        assert_eq!(format_ordinal(12), "12th");
+        assert_eq!(format_ordinal(13), "13th");
+        // Twenties: last digit governs again (regression for tkt2822-7.21/7.22,
+        // which previously rendered as "21th" / "22th").
+        assert_eq!(format_ordinal(20), "20th");
+        assert_eq!(format_ordinal(21), "21st");
+        assert_eq!(format_ordinal(22), "22nd");
+        assert_eq!(format_ordinal(23), "23rd");
+        assert_eq!(format_ordinal(24), "24th");
+        // Higher irregular teens (111..=113) still take "th".
+        assert_eq!(format_ordinal(111), "111th");
+        assert_eq!(format_ordinal(112), "112th");
+        assert_eq!(format_ordinal(121), "121st");
+    }
+
+    #[test]
+    fn order_by_out_of_range_uses_correct_ordinal() {
+        let err = ExecutorError::OrderByOutOfRange {
+            term_position: 21,
+            column_number: 0,
+            select_list_len: 25,
+        };
+        assert_eq!(err.to_string(), "21st ORDER BY term out of range - should be between 1 and 25");
+        let err = ExecutorError::OrderByOutOfRange {
+            term_position: 22,
+            column_number: 0,
+            select_list_len: 25,
+        };
+        assert_eq!(err.to_string(), "22nd ORDER BY term out of range - should be between 1 and 25");
+    }
 
     #[test]
     fn with_main_schema_qualifier_prefixes_bare_table_name() {
