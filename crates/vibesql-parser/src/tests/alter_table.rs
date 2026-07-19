@@ -53,6 +53,27 @@ fn test_parse_alter_table_drop_column() {
 }
 
 #[test]
+fn test_parse_alter_table_drop_column_without_column_keyword() {
+    // SQLite allows `ALTER TABLE t DROP <col>` as a synonym for
+    // `ALTER TABLE t DROP COLUMN <col>` (issue #6174).
+    let result = Parser::parse_sql("ALTER TABLE users DROP email;");
+    assert!(result.is_ok(), "bare DROP <col> should parse: {result:?}");
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::AlterTable(alter) => match alter {
+            vibesql_ast::AlterTableStmt::DropColumn(drop) => {
+                assert_eq!(drop.table_name, "users");
+                assert_eq!(drop.column_name, "email");
+                assert!(!drop.if_exists);
+            }
+            _ => panic!("Expected DROP COLUMN"),
+        },
+        _ => panic!("Expected ALTER TABLE statement"),
+    }
+}
+
+#[test]
 fn test_parse_alter_table_drop_column_if_exists() {
     let result = Parser::parse_sql("ALTER TABLE users DROP COLUMN IF EXISTS email;");
     assert!(result.is_ok());
