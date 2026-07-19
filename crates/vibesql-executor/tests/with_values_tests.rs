@@ -205,3 +205,81 @@ fn test_from_values_subquery_sees_cte() {
         query(&db, "WITH c AS (SELECT 11) SELECT * FROM (VALUES((SELECT * FROM c))) AS v(x)");
     assert_eq!(rows, vec![vec![SqlValue::Integer(11)]]);
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests for issue #6190 (values.test VALUES-clause semantics).
+// Expected values verified against SQLite's values.test.
+// ---------------------------------------------------------------------------
+
+/// A `WITH v AS (VALUES ...)` CTE with no explicit column list auto-names its
+/// columns `column1`, `column2`, ... (values.test 8.1.*). Previously the CTE
+/// materialized zero named columns, so `column1` did not resolve.
+#[test]
+fn test_with_values_cte_auto_column_names() {
+    let db = vibesql_storage::Database::new();
+    let rows = query(&db, "WITH v AS (VALUES('a','b'),('c','d')) SELECT column1 FROM v");
+    assert_eq!(
+        rows,
+        vec![
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("a"))],
+            vec![SqlValue::Varchar(arcstr::ArcStr::from("c"))],
+        ]
+    );
+}
+
+/// `SELECT *` over such a CTE expands to the auto-named `column1`, `column2`.
+#[test]
+fn test_with_values_cte_star_expansion() {
+    let db = vibesql_storage::Database::new();
+    let rows = query(&db, "WITH v AS (VALUES('a','b'),('c','d')) SELECT * FROM v");
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("a")),
+                SqlValue::Varchar(arcstr::ArcStr::from("b"))
+            ],
+            vec![
+                SqlValue::Varchar(arcstr::ArcStr::from("c")),
+                SqlValue::Varchar(arcstr::ArcStr::from("d"))
+            ],
+        ]
+    );
+}
+
+/// A VALUES clause as the left arm of a compound with a trailing `ORDER BY <n>`
+/// must resolve the ordinal against the VALUES column count (values.test 9.1).
+/// Previously the VALUES branch reported zero columns, so `ORDER BY 1` was
+/// rejected as "1st ORDER BY term out of range".
+#[test]
+fn test_values_left_arm_compound_order_by() {
+    let db = vibesql_storage::Database::new();
+    let rows = query(&db, "VALUES(456),(123),(NULL) UNION ALL SELECT 122 ORDER BY 1");
+    assert_eq!(
+        rows,
+        vec![
+            vec![SqlValue::Null],
+            vec![SqlValue::Integer(122)],
+            vec![SqlValue::Integer(123)],
+            vec![SqlValue::Integer(456)],
+        ]
+    );
+}
+
+/// `CREATE TABLE ... AS SELECT * FROM (VALUES ...)` names the derived columns
+/// `column1`, `column2`, ... rather than erroring (values.test 17.1 / 17.2).
+#[test]
+fn test_ctas_from_values_star() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t1 AS SELECT * FROM (VALUES(1,2),(3,4 IN (1,2,3)))");
+    let rows = query(&db, "SELECT column1, column2 FROM t1");
+    // `4 IN (1,2,3)` is a boolean predicate, stored internally as Boolean(false)
+    // (rendered as 0 by the CLI, matching SQLite's values.test 17.2 output).
+    assert_eq!(
+        rows,
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+            vec![SqlValue::Integer(3), SqlValue::Boolean(false)],
+        ]
+    );
+}
