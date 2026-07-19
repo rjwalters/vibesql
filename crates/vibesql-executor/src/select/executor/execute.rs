@@ -1301,6 +1301,12 @@ impl SelectExecutor<'_> {
         let has_set_ops = stmt.set_operation.is_some();
         let has_window_funcs = self.has_window_functions(&stmt.select_list);
         let has_distinct_aggregates = self.has_distinct_aggregates(&stmt.select_list);
+        // Aggregates carrying a FILTER (WHERE ...) or ORDER BY clause are not
+        // handled by the columnar aggregate specs (they drop those clauses), so
+        // route them to the row-oriented path which applies FILTER/ORDER BY
+        // correctly. Without this, `sum(a) FILTER (WHERE a<5)` silently
+        // aggregates over every row (issue #6191).
+        let has_filtered_aggregates = self.has_filtered_aggregates(&stmt.select_list);
 
         // Issue #5104: implicit-outer-aggregate-collapse requires the
         // aggregation pipeline. The columnar pipelines do not support this
@@ -1339,15 +1345,17 @@ impl SelectExecutor<'_> {
             || has_window_funcs
             || has_set_ops
             || has_distinct_aggregates
+            || has_filtered_aggregates
         {
             log::debug!(
-                "{} pipeline doesn't support complex features (order_by={}, distinct={}, window={}, set_ops={}, distinct_agg={})",
+                "{} pipeline doesn't support complex features (order_by={}, distinct={}, window={}, set_ops={}, distinct_agg={}, filtered_agg={})",
                 strategy_name,
                 has_order_by,
                 has_distinct,
                 has_window_funcs,
                 has_set_ops,
-                has_distinct_aggregates
+                has_distinct_aggregates,
+                has_filtered_aggregates
             );
             return Ok(None);
         }
@@ -1556,6 +1564,54 @@ impl SelectExecutor<'_> {
                             || self.expr_has_distinct_aggregate(&case_when.result)
                     })
                     || else_result.as_ref().is_some_and(|e| self.expr_has_distinct_aggregate(e))
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if the select list contains any aggregate carrying a FILTER
+    /// (WHERE ...) clause (e.g. `SUM(a) FILTER (WHERE a<5)`).
+    ///
+    /// The columnar aggregate paths lower each aggregate to an `AggregateSpec`
+    /// that captures only the operation and its source column/expression — a
+    /// FILTER clause is dropped. Such aggregates must therefore run through the
+    /// row-oriented aggregation path, which honors the filter. (#6191)
+    ///
+    /// An aggregate ORDER BY is intentionally NOT treated as complex here: it is
+    /// order-independent for the columnar-supported ops (SUM/COUNT/AVG/MIN/MAX/…)
+    /// and order-sensitive aggregates (group_concat) already bypass the columnar
+    /// path, so routing `count(ORDER BY a)` to the row path would only regress it.
+    fn has_filtered_aggregates(&self, select_list: &[vibesql_ast::SelectItem]) -> bool {
+        select_list.iter().any(|item| {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                self.expr_has_filtered_aggregate(expr)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Recursively check if an expression contains an aggregate with a FILTER
+    /// clause.
+    #[allow(clippy::only_used_in_recursion)]
+    fn expr_has_filtered_aggregate(&self, expr: &vibesql_ast::Expression) -> bool {
+        match expr {
+            vibesql_ast::Expression::AggregateFunction { filter, .. } => filter.is_some(),
+            vibesql_ast::Expression::BinaryOp { left, right, .. } => {
+                self.expr_has_filtered_aggregate(left) || self.expr_has_filtered_aggregate(right)
+            }
+            vibesql_ast::Expression::UnaryOp { expr, .. } => self.expr_has_filtered_aggregate(expr),
+            vibesql_ast::Expression::Cast { expr, .. } => self.expr_has_filtered_aggregate(expr),
+            vibesql_ast::Expression::Function { args, .. } => {
+                args.iter().any(|arg| self.expr_has_filtered_aggregate(arg))
+            }
+            vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+                operand.as_ref().is_some_and(|e| self.expr_has_filtered_aggregate(e))
+                    || when_clauses.iter().any(|case_when| {
+                        case_when.conditions.iter().any(|c| self.expr_has_filtered_aggregate(c))
+                            || self.expr_has_filtered_aggregate(&case_when.result)
+                    })
+                    || else_result.as_ref().is_some_and(|e| self.expr_has_filtered_aggregate(e))
             }
             _ => false,
         }

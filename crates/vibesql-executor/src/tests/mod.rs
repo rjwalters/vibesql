@@ -59,6 +59,7 @@ mod aggregate_caching;
 mod aggregate_count_sum_avg_tests;
 mod aggregate_distinct;
 mod aggregate_edge_case_tests;
+mod aggregate_filter_clause_tests;
 mod aggregate_group_by_tests;
 mod aggregate_having_tests;
 mod aggregate_min_max_tests;

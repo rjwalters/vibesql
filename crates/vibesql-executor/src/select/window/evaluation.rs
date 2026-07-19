@@ -28,6 +28,57 @@ use crate::{
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
 
+/// Coerce a value to a positive integer using SQLite's numeric-affinity rules
+/// for `nth_value(expr, N)`.
+///
+/// SQLite applies numeric affinity to the second argument and accepts it only
+/// when the coerced value is an integer >= 1. Integral floats and numeric
+/// strings coerce (`2.0`, `'2'`, `'2.0'` -> 2); non-integral values, non-numeric
+/// or partially-numeric strings, NULL, and values < 1 are rejected
+/// (`8.5`, `'4ab'`, NULL, `0`, `-1`). Returns `None` for any rejected value.
+fn nth_value_positive_index(value: &SqlValue) -> Option<i64> {
+    // Convert an integral f64 to a positive i64, rejecting non-integral or
+    // out-of-range values.
+    fn integral_positive(f: f64) -> Option<i64> {
+        if f.is_finite() && f.fract() == 0.0 && f >= 1.0 && f <= i64::MAX as f64 {
+            Some(f as i64)
+        } else {
+            None
+        }
+    }
+
+    let n = match value {
+        SqlValue::Integer(n) => *n,
+        SqlValue::Smallint(n) => *n as i64,
+        SqlValue::Bigint(n) => *n,
+        SqlValue::Unsigned(n) => *n as i64,
+        SqlValue::Real(f) => return integral_positive(*f),
+        SqlValue::Float(f) => return integral_positive(*f as f64),
+        SqlValue::Double(f) => return integral_positive(*f),
+        SqlValue::Numeric(f) => return integral_positive(*f),
+        SqlValue::Varchar(s) | SqlValue::Character(s) => {
+            // Numeric affinity requires the *entire* trimmed string to parse as
+            // a number (unlike CAST's leading-prefix parse): '2' and '2.0' pass,
+            // '4ab' does not.
+            let t = s.trim();
+            if let Ok(i) = t.parse::<i64>() {
+                i
+            } else if let Ok(f) = t.parse::<f64>() {
+                return integral_positive(f);
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+
+    if n >= 1 {
+        Some(n)
+    } else {
+        None
+    }
+}
+
 /// Result from evaluating a window function, including optional row reordering
 pub(super) struct WindowEvaluationResult {
     /// Window function values in partition order
@@ -633,21 +684,19 @@ fn evaluate_window_function_for_partition(
                 let n_value = evaluator
                     .eval(&args[1], &partition.rows[row_idx])
                     .map_err(|e| ExecutorError::UnsupportedExpression(format!("{:?}", e)))?;
-                let n = match n_value {
-                    SqlValue::Integer(n) => n,
-                    _ => {
-                        return Err(ExecutorError::UnsupportedExpression(
-                            "NTH_VALUE second argument must be an integer".to_string(),
+                // SQLite applies numeric affinity to nth_value's second argument
+                // and requires the result to be a positive integer: '2', 2.0 and
+                // '2.0' coerce to 2, but 8.5, '4ab', NULL, 0 and -1 all raise
+                // "second argument to nth_value must be a positive integer"
+                // (window6.test 10.1.x / 10.2.x).
+                let n = match nth_value_positive_index(&n_value) {
+                    Some(n) => n,
+                    None => {
+                        return Err(ExecutorError::SqliteCompatError(
+                            "second argument to nth_value must be a positive integer".to_string(),
                         ))
                     }
                 };
-
-                if n < 1 {
-                    return Err(ExecutorError::UnsupportedExpression(format!(
-                        "NTH_VALUE n must be a positive integer, got {}",
-                        n
-                    )));
-                }
 
                 let nth_zero_based = (n - 1) as usize;
                 let frame_result = calculate_frame_with_exclusion(

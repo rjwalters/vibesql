@@ -1106,9 +1106,22 @@ impl SelectExecutor<'_> {
         let is_count_star = match &stmt.select_list[0] {
             vibesql_ast::SelectItem::Expression { expr, .. } => {
                 match expr {
-                    vibesql_ast::Expression::AggregateFunction { name, distinct, args, .. } => {
-                        // Must be COUNT, not DISTINCT, with single wildcard argument
-                        if name.to_uppercase() != "COUNT" || *distinct || args.len() != 1 {
+                    vibesql_ast::Expression::AggregateFunction {
+                        name,
+                        distinct,
+                        args,
+                        filter,
+                        ..
+                    } => {
+                        // Must be COUNT, not DISTINCT, with single wildcard argument.
+                        // A FILTER (WHERE ...) clause disqualifies the fast path: the
+                        // count must only include rows passing the filter, not the
+                        // whole table (issue #6191).
+                        if name.to_uppercase() != "COUNT"
+                            || *distinct
+                            || args.len() != 1
+                            || filter.is_some()
+                        {
                             return None;
                         }
                         matches!(args[0], vibesql_ast::Expression::Wildcard)
