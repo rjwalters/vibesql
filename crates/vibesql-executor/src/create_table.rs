@@ -904,6 +904,29 @@ impl CreateTableExecutor {
         for item in select_list {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. } => {
+                    // A `SELECT * FROM (VALUES ...)` source has no catalog table
+                    // to look up. SQLite names the resulting columns `column1`,
+                    // `column2`, ... (or the explicit `AS t(a,b)` aliases) and
+                    // gives them no declared type (BLOB/None affinity). Handle
+                    // this before the table-name path, which cannot resolve a
+                    // VALUES clause (values.test 17.1).
+                    if let Some(vibesql_ast::FromClause::Values { rows, column_aliases, .. }) = from
+                    {
+                        let aliases = column_aliases.as_deref().unwrap_or(&[]);
+                        let width = if !aliases.is_empty() {
+                            aliases.len()
+                        } else {
+                            rows.first().map(|r| r.len()).unwrap_or(0)
+                        };
+                        for i in 0..width {
+                            let name = aliases
+                                .get(i)
+                                .cloned()
+                                .unwrap_or_else(|| format!("column{}", i + 1));
+                            columns.push((name, TypeAffinity::None));
+                        }
+                        continue;
+                    }
                     // Expand wildcard using the FROM clause tables
                     let table_names = Self::get_table_names_from_from(from)?;
                     for table_name in table_names {

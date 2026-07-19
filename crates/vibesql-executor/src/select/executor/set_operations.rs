@@ -522,6 +522,20 @@ pub(super) fn collect_select_aliases(
 ) -> Vec<Option<String>> {
     let mut aliases = Vec::new();
 
+    // A VALUES clause (e.g. `VALUES(1,2),(3,4)`) carries no select_list; its
+    // columns are auto-named `column1`, `column2`, ... by SQLite. When such a
+    // clause is the left arm of a compound (`VALUES(...) UNION ALL SELECT ...`),
+    // ORDER BY resolution needs the correct column count/names from this branch
+    // (otherwise the branch reports zero columns and every ORDER BY term is
+    // rejected as out of range — see values.test 2.3 / 9.1).
+    if let Some(rows) = &stmt.values {
+        let width = rows.first().map(|r| r.len()).unwrap_or(0);
+        for i in 0..width {
+            aliases.push(Some(format!("column{}", i + 1)));
+        }
+        return aliases;
+    }
+
     // Pre-compute column names from FROM clause for wildcard expansion
     let from_columns = extract_column_names_from_from(database, stmt.from.as_ref());
     let mut from_col_idx = 0;
