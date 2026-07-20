@@ -1153,6 +1153,63 @@ fn test_create_trigger_rejects_not_indexed_in_delete_body() {
     );
 }
 
+// A trigger-body UPDATE/DELETE may not carry an ORDER BY / LIMIT clause. SQLite
+// rejects it as a plain grammar syntax error (`near "LIMIT"` / `near "ORDER"`),
+// "regardless of the compilation options used to build SQLite" (e_update-2.5 /
+// e_delete-2.5). Top-level UPDATE/DELETE ... LIMIT keeps working.
+const TRIGGER_LIMIT_SYNTAX_ERR: &str = "near \"LIMIT\": syntax error";
+const TRIGGER_ORDER_SYNTAX_ERR: &str = "near \"ORDER\": syntax error";
+
+#[test]
+fn test_create_trigger_rejects_limit_in_update_body() {
+    // e_update-2.5.1
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr1 AFTER INSERT ON tA BEGIN \
+         UPDATE t16 SET a=a+1 LIMIT 10; END;",
+        TRIGGER_LIMIT_SYNTAX_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_order_by_in_update_body() {
+    // e_update-2.5.2 — ORDER BY is the offending token even when a LIMIT follows.
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr1 AFTER INSERT ON tA BEGIN \
+         UPDATE t16 SET a=a+1 ORDER BY a LIMIT 10; END;",
+        TRIGGER_ORDER_SYNTAX_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_limit_offset_in_update_body() {
+    // e_update-2.5.4
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr1 AFTER INSERT ON tA BEGIN \
+         UPDATE t16 SET a=a+1 LIMIT 10 OFFSET 2; END;",
+        TRIGGER_LIMIT_SYNTAX_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_limit_in_delete_body() {
+    // e_delete-2.5.1
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr3 AFTER INSERT ON t8 BEGIN \
+         DELETE FROM t8 LIMIT 10; END;",
+        TRIGGER_LIMIT_SYNTAX_ERR,
+    );
+}
+
+#[test]
+fn test_create_trigger_rejects_order_by_in_delete_body() {
+    // e_delete-2.5.2
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr3 AFTER INSERT ON t8 BEGIN \
+         DELETE FROM t8 ORDER BY a LIMIT 5; END;",
+        TRIGGER_ORDER_SYNTAX_ERR,
+    );
+}
+
 #[test]
 fn test_create_trigger_accepts_unqualified_body_dml() {
     // Negative control: an ordinary unqualified body DML with no index hint is

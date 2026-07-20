@@ -145,3 +145,53 @@ fn delete_without_limit_deletes_all_matching() {
     assert_eq!(delete(&mut db, "DELETE FROM t WHERE b = 10"), 5);
     assert_eq!(row_count(&mut db), 0);
 }
+
+/// A LIMIT expression that evaluates to an *integral* REAL (e.g. `16/4` -> 4.0,
+/// since `/` on integers yields a REAL) is accepted with SQLite integer
+/// affinity: it caps the delete at 4 rows. Guards the comma-form LIMIT in
+/// e_delete-3.1 / e_update-3.0 that previously errored "LIMIT value must be a
+/// non-negative integer".
+#[test]
+fn delete_limit_integral_real_expression_is_accepted() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    // `16/4` -> REAL 4.0 -> LIMIT 4 (of 5 rows), leaving exactly 1.
+    assert_eq!(delete(&mut db, "DELETE FROM t LIMIT 16/4"), 4);
+    assert_eq!(row_count(&mut db), 1);
+}
+
+/// The comma form `LIMIT offset, count` with integral-REAL operands
+/// (`LIMIT 2+2, 16/4` = OFFSET 4, LIMIT 4) skips the first 4 ordered rows and
+/// then deletes up to 4 more — here only 1 remains after the offset.
+#[test]
+fn delete_limit_comma_form_integral_real_operands() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    // 5 rows ordered a=1..5; OFFSET 4 skips a=1..4, LIMIT 4 deletes a=5 only.
+    assert_eq!(delete(&mut db, "DELETE FROM t ORDER BY a LIMIT 2+2, 16/4"), 1);
+    let remaining: Vec<i64> =
+        select(&mut db, "SELECT a FROM t ORDER BY a").iter().map(|r| int(&r.values[0])).collect();
+    assert_eq!(remaining, vec![1, 2, 3, 4]);
+}
+
+/// A non-integral REAL LIMIT (e.g. `9/4` -> 2.25) cannot be converted
+/// losslessly to an integer, so it remains an error (SQLite raises a datatype
+/// mismatch here). We assert it does NOT silently truncate to 2.
+#[test]
+fn delete_limit_non_integral_real_is_rejected() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    let stmt = match Parser::parse_sql("DELETE FROM t LIMIT 9/4").expect("parse") {
+        Statement::Delete(s) => s,
+        other => panic!("expected DELETE, got {:?}", other),
+    };
+    assert!(
+        DeleteExecutor::execute(&stmt, &mut db).is_err(),
+        "non-integral REAL LIMIT must be rejected, not truncated"
+    );
+    // No rows were removed by the failed statement.
+    assert_eq!(row_count(&mut db), 5);
+}

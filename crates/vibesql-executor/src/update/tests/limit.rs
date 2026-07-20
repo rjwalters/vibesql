@@ -181,3 +181,53 @@ fn update_without_limit_updates_all() {
     assert_eq!(update(&mut db, "UPDATE t SET b = 99 WHERE b = 10"), 5);
     assert_eq!(count_b(&mut db, 99), 5);
 }
+
+/// A LIMIT expression that evaluates to an *integral* REAL (`16/4` -> 4.0, since
+/// integer `/` yields a REAL) is accepted with SQLite integer affinity: it caps
+/// the update at 4 rows. Guards the comma-form LIMIT in e_update-3.0 /
+/// e_delete-3.1 that previously errored "LIMIT value must be a non-negative
+/// integer".
+#[test]
+fn update_limit_integral_real_expression_is_accepted() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    // `16/4` -> REAL 4.0 -> LIMIT 4 of 5 rows.
+    assert_eq!(update(&mut db, "UPDATE t SET b = 99 LIMIT 16/4"), 4);
+    assert_eq!(count_b(&mut db, 99), 4);
+    assert_eq!(count_b(&mut db, 10), 1);
+}
+
+/// The comma form `LIMIT offset, count` with integral-REAL operands
+/// (`LIMIT 2+2, 16/4` = OFFSET 4, LIMIT 4) skips the first 4 ordered rows and
+/// then updates up to 4 more — here only row a=5 remains after the offset.
+#[test]
+fn update_limit_comma_form_integral_real_operands() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    assert_eq!(update(&mut db, "UPDATE t SET b = 99 ORDER BY a LIMIT 2+2, 16/4"), 1);
+    let rows = select(&mut db, "SELECT a, b FROM t ORDER BY a");
+    let got: Vec<(i64, i64)> =
+        rows.iter().map(|r| (int(&r.values[0]), int(&r.values[1]))).collect();
+    assert_eq!(got, vec![(1, 10), (2, 10), (3, 10), (4, 10), (5, 99)]);
+}
+
+/// A non-integral REAL LIMIT (`9/4` -> 2.25) cannot be converted losslessly to
+/// an integer, so it remains an error rather than silently truncating to 2.
+#[test]
+fn update_limit_non_integral_real_is_rejected() {
+    let mut db = vibesql_storage::Database::new();
+    seed(&mut db);
+
+    let stmt = match Parser::parse_sql("UPDATE t SET b = 99 LIMIT 9/4").expect("parse") {
+        Statement::Update(s) => s,
+        other => panic!("expected UPDATE, got {:?}", other),
+    };
+    assert!(
+        UpdateExecutor::execute(&stmt, &mut db).is_err(),
+        "non-integral REAL LIMIT must be rejected, not truncated"
+    );
+    // The failed statement updated nothing.
+    assert_eq!(count_b(&mut db, 10), 5);
+}
