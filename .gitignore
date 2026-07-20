@@ -22,7 +22,41 @@ Cargo.lock
 # Testing
 *.profdata
 *.profraw
+# >>> loom-managed (do not edit) >>>
+# Loom runtime state (don't commit these)
+.loom-in-use
+.loom-checkpoint
+.loom/.daemon.pid
+.loom/.daemon.log
+.loom/daemon.sock
+.loom/daemon-loop.pid
+.loom/daemon-metrics.json
+.loom/loom-source-path
+.loom/spawn-loop-state.json
+.loom/issue-failures.json
+.loom/interventions/
+.loom/worktrees/
+.loom/state.json
+.loom/mcp-command.json
+.loom/activity.db
+.loom/claims/
+.loom/locks/
+.loom/signals/
+.loom/status/
+.loom/retry-state/
 .loom/sweep-checkpoint/
+.loom/diagnostics/
+.loom/guide-docs-state.json
+.loom/metrics_state.json
+.loom/manifest.json
+.loom/stuck-config.json
+.loom/metrics/
+.loom/usage-cache.json
+.loom/claude-config/
+.loom/*.log
+.loom/*.sock
+.loom/logs/
+# <<< loom-managed <<<
 lcov.info
 conformance_test_output.log
 validation_run.log
@@ -96,46 +130,19 @@ profile.json.gz
 profile-*.json.gz
 *-profile.json.gz
 *.profile.json.gz
-.loom-in-use
-.loom-checkpoint
-.loom/.daemon.pid
-.loom/.daemon.log
-.loom/daemon.sock
 .loom/daemon-state.json
-.loom/daemon-loop.pid
-.loom/daemon-metrics.json
-.loom/loom-source-path
 .loom/[0-9][0-9]-daemon-state.json
 .loom/stuck-history.json
 .loom/alerts.json
-.loom/issue-failures.json
 .loom/health-metrics.json
-.loom/interventions/
-.loom/mcp-command.json
-.loom/activity.db
-.loom/claims/
-.loom/signals/
-.loom/status/
 .loom/progress/
-.loom/retry-state/
-.loom/diagnostics/
-.loom/guide-docs-state.json
-.loom/metrics_state.json
-.loom/manifest.json
-.loom/stuck-config.json
-.loom/metrics/
-.loom/usage-cache.json
-.loom/claude-config/
-.loom/logs/
-.loom/spawn-loop-state.json
 
 # Secrets — never commit
 .env
 .env.*
 !.env.example
-.loom/worktrees/
-.loom/state.json
-.loom/*.log
-.loom/*.sock
 
 tcl-baseline-*/
+
+# Repo Skills machine-local install metadata (absolute source path + timestamp)
+.claude/skills/repo/.install-local.json

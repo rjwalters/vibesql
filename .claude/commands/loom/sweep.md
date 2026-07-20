@@ -899,6 +899,17 @@ For each wave `W` (partition of the issue list into chunks of up to `--builders-
 
 See `.claude/commands/loom/shepherd-lifecycle.md` for the canonical phase-by-phase reference, label state machine, and recovery procedures. The summary below tells you which skill to invoke at each phase; the lifecycle reference tells you what each phase does in detail.
 
+### 0. Snapshot the main-worktree baseline (once, before wave 1) (#3648)
+
+**Before dispatching the first wave's builders**, snapshot main's current working-tree state so the per-wave contamination backstop (step 4's `check-main-clean.sh`) can distinguish builder contamination from dirt that predated the sweep:
+
+```bash
+MAIN_CLEAN_BASELINE=".loom/sweep-checkpoint/main-clean-baseline.txt"
+./.loom/scripts/check-main-clean.sh --snapshot "$MAIN_CLEAN_BASELINE"
+```
+
+Capture this **once, before wave 1 — never per-wave**. The baseline must reflect the pre-sweep state so that if an early wave contaminates main and the dirt is not reverted, every later wave's backstop still flags it (a per-wave re-snapshot would silently absorb that contamination into the "pre-existing" set). The baseline path is a gitignored per-sweep-run transient (`.loom/sweep-checkpoint/` is already gitignored); its lifetime is this sweep invocation. If the snapshot step fails for any reason, proceed anyway — step 4's backstop falls back to the whole-status hard-fail when the baseline file is missing (fail-safe, never a silent pass).
+
 ### Checkpoint-driven resume (#3373)
 
 Sweep persists a per-issue phase checkpoint after each successful lifecycle phase so that a killed-and-relaunched sweep can pick up where it left off. The checkpoint is the **only** state required to resume — worktree preservation is handled by `worktree.sh`'s idempotency (re-running for an existing worktree is a no-op).
@@ -1026,10 +1037,12 @@ Each builder is responsible for:
 **Backstop: verify the main worktree is clean after the builders return (#3513).** A builder subagent runs without `LOOM_WORKTREE_PATH` injected, so the `guard-worktree-paths.sh` hook does not fire on this path. If a builder used repo-relative paths after a cwd reset, it may have written to the **main** worktree instead of its issue worktree. After the wave's builders return and before advancing any PR to Judge, run:
 
 ```bash
-./.loom/scripts/check-main-clean.sh   # exit 3 ⇒ main is dirty (builder contamination)
+./.loom/scripts/check-main-clean.sh --baseline "$MAIN_CLEAN_BASELINE"   # exit 3 ⇒ NEW main dirt (builder contamination)
 ```
 
-If it exits `3`, the main worktree carries uncommitted changes a builder left behind. Surface this loudly in the wave summary and do not advance the wave to Judge until the contamination is investigated and the stray changes reverted. This is a backstop only — the builder guidance (capture the absolute worktree path once, use absolute paths everywhere) is the primary defense.
+The `--baseline` argument points at the snapshot taken once at step 0 (before wave 1). With it, the check subtracts any dirt that predated the sweep and exits `3` **only** on changes that appeared after the snapshot — so pre-existing working-tree dirt (a regenerated lockfile, an operator scratch edit) no longer false-positives as contamination on every wave (#3648). If the baseline file is missing or unreadable, the check warns and falls back to the whole-status hard-fail (fail-safe).
+
+If it exits `3`, the main worktree carries **new** uncommitted changes a builder left behind. Surface this loudly in the wave summary and do not advance the wave to Judge until the contamination is investigated and the stray changes reverted. This is a backstop only — the builder guidance (capture the absolute worktree path once, use absolute paths everywhere) is the primary defense.
 
 **On successful PR creation**, write the `builder-done` checkpoint for that issue (record the PR number):
 ```bash
@@ -1048,13 +1061,19 @@ If the builder failed (no PR opened), do NOT write a checkpoint — leave the ch
 For each PR in the wave (including PRs whose Builder just ran *and* PRs routed in via a `builder-done` checkpoint), in the order the builders completed (or any deterministic order — wave-internal ordering is not load-bearing), run the Judge phase sequentially:
 
 ```
+WAVE_MERGED_FILES = {}                          # union of changed paths merged so far this wave (#3647)
 for pr in wave_prs:
-    judge(pr)               # may approve or request changes
+    judge(pr)                                   # may approve or request changes — against the PR's own pre-wave base
     if changes_requested:
-        doctor(pr)          # one Doctor->Judge cycle (see step 6)
+        doctor(pr)                              # one Doctor->Judge cycle (see step 6)
     if still_approved:
-        merge(pr)           # step 7
+        revalidate_if_overlaps(pr, WAVE_MERGED_FILES)   # step 7 gate — re-judge / Doctor if pr shares a file with an already-merged sibling
+        merge(pr)                               # step 7
+        WAVE_MERGED_FILES |= changed_files(pr)  # feed the next PR's overlap probe
+post_wave_integration_gate()                    # step 8 — buildGate-against-main backstop for cross-file coupling
 ```
+
+`WAVE_MERGED_FILES` is the load-bearing state for the intra-wave collision guard (#3647): it accumulates the changed-file paths of every PR already merged **in this wave**, so the step 7 gate can tell whether the next PR overlaps a sibling that has already landed. Seed it empty at the start of each wave (it does **not** carry across waves — each wave rebases onto a settled `main`). The `post_wave_integration_gate()` call (step 8) is the backstop for the cross-file case the file-path probe cannot see.
 
 **Checkpoint skip.** For each PR:
 - If `CHECKPOINT_PHASE == "judge-done"` for the corresponding issue, the Judge already approved the PR in a prior sweep run. Skip the Judge invocation and route the PR straight to Merge (step 7). The PR should already carry `loom:pr` (judge writes that label as part of the approve path); if it doesn't, the checkpoint and forge state have diverged — log a warning and re-run Judge.
@@ -1092,6 +1111,27 @@ The Doctor cycle for `#X` does **not** block other PRs in the wave — but becau
 
 ### 7. Merge (per PR)
 
+**Intra-wave overlap revalidation — run this BEFORE the merge below (#3647).** Every builder in this wave branched off the *same pre-wave `main`* (step 0's snapshot), and Judge (step 5) validated each PR against that shared base — never against the `main` that a *sibling* PR in the same wave just produced. So two PRs that both touch the same file can each pass independently and then break `main` once both land — a *semantic* merge conflict git reports as clean. The repo's branch ruleset gives **no** server-side protection here: it has no `required_status_checks` and no "require branches up to date" rule, so `merge-pr.sh --auto` merges a clean-but-stale PR immediately without re-running checks against the new base. This gate closes that hole for overlapping PRs; the step 8 integration gate closes the cross-file case this probe cannot see.
+
+Before calling `merge-pr.sh` for PR `#X`:
+
+1. **Cheap read-only overlap probe.** Fetch `#X`'s changed-file set and compare it against `WAVE_MERGED_FILES` (the union of paths already merged in this wave — see the step 5 loop):
+   ```bash
+   gh pr view X --json files -q '.files[].path'
+   ```
+   - **Disjoint** (no path shared with `WAVE_MERGED_FILES`) → **keep the fast path**: fall straight through to the merge below. Two PRs touching disjoint files are safe (the issue confirms this), so no revalidation latency is added. This is the common case. *(Caveat: file-path granularity cannot see cross-file semantic coupling — e.g. a `to_dict()` in a source file vs. an exact-dict assertion in a test file, which are disjoint paths. That class is the step 8 integration gate's job, not this probe's.)*
+   - **Any shared path** → enter the revalidation path (step 2) before merging.
+2. **Revalidate `#X` against the freshly-merged `main`.** Update `#X`'s branch onto the current `main` so it actually contains the already-merged sibling's changes:
+   ```bash
+   gh pr update-branch X    # or the forge equivalent (forge_update_branch)
+   ```
+   Re-check `mergeStateStatus` (`gh pr view X --json mergeStateStatus`) and route:
+   - **`DIRTY`** (the merge introduced a textual conflict) → run a **single inline Doctor→Judge cycle** for `#X` (step 6 — Doctor rebases onto the updated `main` and fixes, then re-Judge), then merge. Reuse — do **not** extend — the step 6 single-cycle cap.
+   - **Clean, but the branch was updated** → the update pulled the sibling's changes into `#X`'s branch, so **re-run the Judge phase (step 5) against the integrated branch** before merging. Judge checks out the PR and runs its build/tests, which is what catches a *same-file* semantic break the pre-wave Judge could not. If the integrated build/tests fail → route to Doctor (or, if the single Doctor cycle for `#X` is already spent, mark `#X` `loom:blocked`, surface it, and do **not** merge a known-red change).
+   - **A real break Doctor cannot clear in one cycle** → mark `#X` `loom:blocked`, log the reason, skip its merge, and continue with the rest of the wave (do not block the whole wave on it). Consistent with the step 6 cap.
+
+Overlapping PRs in a wave are thus **serialized-with-revalidation**; disjoint PRs keep the parallel fast path. Under `--dry-run` nothing here runs — the plan may simply note that overlapping PRs in a wave will be serialized-with-revalidation.
+
 Use the dedicated merge script (CLAUDE.md "Merging PRs" mandate — never `gh pr merge`):
 
 ```bash
@@ -1100,7 +1140,7 @@ Use the dedicated merge script (CLAUDE.md "Merging PRs" mandate — never `gh pr
 
 The script merges via the forge API and cleans up the worktree. `--auto` enables GitHub's server-side auto-merge queue (queues the merge until required checks pass); on PRs that are already in `CLEAN` state (fast CI), the script transparently falls back to an immediate merge — see #3371.
 
-**On successful merge** (script returns 0), delete the issue's sweep checkpoint:
+**On successful merge** (script returns 0), add `#X`'s changed-file paths to `WAVE_MERGED_FILES` (so the next PR's overlap probe sees them), then delete the issue's sweep checkpoint:
 ```bash
 ./.loom/scripts/sweep-checkpoint.sh delete N
 ```
@@ -1109,9 +1149,18 @@ This is the terminal state. The checkpoint must be removed so a future `/loom:sw
 
 If `merge-pr.sh` fails (e.g., the merge queue rejects the PR, or required checks haven't passed and `--auto` is rejected), do **not** delete the checkpoint — leave it at `judge-done` so the next sweep retries the merge from a clean state.
 
-### 8. Wave settled → advance to next wave
+### 8. Wave settled → post-wave integration gate → advance to next wave
 
-Once every PR in the wave has reached a terminal state (merged, blocked, or builder-failed), advance to the next wave. Do not start the next wave's builders until the current wave's PRs are all settled.
+Once every PR in the wave has reached a terminal state (merged, blocked, or builder-failed), run the integration gate below **before** starting the next wave's builders.
+
+**Post-wave integration gate (#3647).** The step 7 overlap probe is file-path-granular: it catches two PRs that edit the **same** file, but it **cannot** see cross-file semantic coupling. That is exactly the shape of the #3647 incident — PR A changed a `to_dict()` in a *source* file and PR B added an exact-dict assertion in a *test* file. Their changed-file sets are **disjoint**, so step 7 took the fast path for both, yet `main` went red once both landed. File-path overlap alone therefore cannot protect the original incident; this gate is the load-bearing backstop for it:
+
+- **If a build/test command is configured** (`buildGate.command`, honoring `buildGate.enabled`, in `.loom/config.json`), run it once against the post-wave `main` — pull/refresh `main` to its just-merged state and run the command there. On failure, **halt the sweep**: do not start the next wave, log the failing command and its output, and surface the red `main` (e.g. leave a clear error in the summary and/or open a recovery issue). A red `main` must stop the run rather than compound across subsequent waves.
+- **If no such command is configured**, the step 7 overlap revalidation is the only intra-wave protection — same-file collisions are caught, but cross-file semantic coupling (source-vs-test) is **not**. Log a one-line advisory recommending a `buildGate.command` for waves that cluster on one subsystem, and — per the issue's mitigation #3 — prefer placing issues likely to touch a shared serialization/schema surface in **separate size-1 waves** rather than parallelizing them.
+
+Under `--dry-run` the gate does not run (no checkout, no command execution); the plan may note that a post-wave integration check would run if `buildGate.command` is configured.
+
+Once the gate has passed (or is not configured), advance to the next wave. Do not start the next wave's builders until the current wave's PRs are all settled and the integration gate (if configured) is green.
 
 ## Summary Output
 
@@ -1223,6 +1272,7 @@ The full `/sweep` design in #3298 includes many features that are intentionally 
 | Multi-closing-issue PRs (PR with `Closes #N` + `Closes #M`) | Partial — runs without checkpoint | Mode C logs all closing issues and proceeds with Judge/Doctor/Merge but skips checkpointing for the PR. Multi-key checkpoint variant is a follow-up. |
 | PRs without `Closes #N` references | Partial — runs without checkpoint | Mode C logs a warning and processes the PR without checkpointing. Judge/Doctor/Merge are idempotent at the GitHub-state level so re-running on the next sweep is safe. |
 | Cross-wave backfill on pre-flight skips | Won't fix | Intentionally clean wave boundaries — see step 1 of the Wave Lifecycle. |
+| Intra-wave collision guard (overlapping PRs off a shared base) | **Implemented (#3647)** | Step 7 runs a read-only file-path overlap probe before each in-wave merge; overlapping PRs are updated onto the just-merged `main` and re-Judged (or Doctor→re-Judge on `DIRTY`) before merging, disjoint PRs keep the fast path. Step 8 adds a post-wave `buildGate.command`-against-`main` integration gate — the load-bearing backstop for cross-file semantic coupling (source-vs-test) that path-overlap cannot see; halts the sweep on a red `main`. Symbol/AST-level overlap detection is out of scope. |
 | Spinoff-issue filing for out-of-scope discoveries | Deferred | Build it once we have richer summary output to surface them cleanly. |
 | Daemon `pipeline_state` situational awareness reads | Deferred | Skill only warns when the daemon is running. |
 | Top-level vs namespaced naming (`/sweep` vs `/loom:sweep`) | Open question | Ships as `/sweep` per the original task brief; rename later if convention favors `/loom:sweep`. See #3298 open question #1. |

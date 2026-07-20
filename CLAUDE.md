@@ -194,7 +194,7 @@ The engine lives in `crates/vibesql-storage/src/wal/` (writer, reader, checkpoin
 
 ## Release Flow
 
-Run `/loom:release` from this repo to drive a v0.X.Y cut interactively:
+Run `/repo:release` from this repo to drive a v0.X.Y cut interactively. (This replaced `/loom:release`, which Loom 0.11.0 removed; `/repo:release` discovers and runs this repo's executable `scripts/version.sh` as its bump tool, so the version-bump mechanics below are unchanged.)
 
 - Pre-flight checks (CI status, open PRs, version-file alignment)
 - Gather changes since last tag, classify by conventional-commit scope
@@ -260,13 +260,15 @@ make analyze
 make analyze-tests        # SQLLogicTest conformance
 make analyze-benchmarks   # TPC-H, TPC-DS, TPC-C, Sysbench results
 
-<!-- BEGIN LOOM ORCHESTRATION -->
-This repository uses [Loom](https://github.com/rjwalters/loom) for AI-powered development orchestration. See `.loom/CLAUDE.md` for the full guide (roles, labels, worktrees, configuration).
-<!-- END LOOM ORCHESTRATION -->
 <!-- BEGIN REPO-SKILLS -->
-This repository has [Repo Skills](https://github.com/rjwalters/repo) v0.4.1 installed —
+This repository has [Repo Skills](https://github.com/rjwalters/repo) v0.4.3 installed —
 general repository hygiene and environment commands invoked as `/repo:<command>`. Run
 `/repo:help` for the command list, or see `.claude/skills/repo/SKILL.md` for the full
-guide. Hygiene commands are report-first: they present findings and wait before changing
-anything. Managed by `install.sh` — edit outside the markers only.
+guide. Hygiene commands apply safe, reversible fixes by default and report each
+change; run with `--ask` to review first, and `--prune` to allow irreversible
+removals. Managed by `install.sh` — edit outside the markers only.
 <!-- END REPO-SKILLS -->
+
+<!-- BEGIN LOOM ORCHESTRATION -->
+This repository uses [Loom](https://github.com/rjwalters/loom) for AI-powered development orchestration — see the Loom repository for the full guide (roles, labels, worktrees, configuration). When installed, Loom also writes a locally-substituted copy of that guide to `.loom/CLAUDE.md`.
+<!-- END LOOM ORCHESTRATION -->
