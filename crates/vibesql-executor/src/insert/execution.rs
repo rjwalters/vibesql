@@ -245,6 +245,22 @@ fn execute_insert_internal(
     // which case firing falls back to the legacy schema-unaware match.
     let dml_schema: Option<String> = db.catalog.resolve_table_schema_name(&full_table_name);
 
+    // Validate INSERT trigger body statements at prepare time (mirrors the
+    // DELETE path). SQLite resolves a trigger's body when the firing INSERT is
+    // prepared, so a body with an unresolvable column reference (triggerB-2.1's
+    // `SELECT wen.x`) or a mis-arity scalar subquery (#6046) errors *before* the
+    // INSERT's own constraint checks run. Only at the top level (not inside
+    // another trigger's body), matching SQLite's prepare of the outermost
+    // statement.
+    if trigger_context.is_none() {
+        crate::TriggerFirer::validate_trigger_bodies_for_event(
+            db,
+            table_name,
+            vibesql_ast::TriggerEvent::Insert,
+            dml_schema.as_deref(),
+        )?;
+    }
+
     // Validate every explicit ON CONFLICT (cols) target up front. SQLite
     // does this at prepare time, even when no row actually conflicts:
     // unknown columns raise "no such column" and known columns without a
