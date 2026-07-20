@@ -223,6 +223,26 @@ fn collect_correlation_refs(
         }
     }
 
+    // Check a top-level VALUES form (`(VALUES(x),(x))` as a scalar subquery).
+    // These rows are stored in `subquery.values`, not in a FROM clause, so
+    // without this check a correlated VALUES scalar subquery is treated as
+    // uncorrelated, cached once, and returns the same value for every outer
+    // row (e.g. `SELECT (VALUES(x),(x)) FROM t1` yielding 1,1 instead of 1,2).
+    // (values.test §6.1)
+    if let Some(rows) = &subquery.values {
+        for row in rows {
+            for expr in row {
+                collect_correlation_refs_from_expr(
+                    expr,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
+            }
+        }
+    }
+
     // FIX for issue #4994: Check FROM clause for derived tables that reference outer columns
     // This is critical for queries like:
     //   SELECT x+1 FROM (SELECT f/d AS x FROM t2 JOIN t3 ON d*a=f)

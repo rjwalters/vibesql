@@ -110,7 +110,14 @@ where
         //
         // 2-table joins benefit from choosing optimal build/probe sides when one
         // table has highly selective predicates.
-        if reorder::should_apply_join_reordering(table_count) && reorder::all_joins_are_cross(from)
+        if reorder::should_apply_join_reordering(table_count)
+            && reorder::all_joins_are_cross(from)
+            // A comma/CROSS-join whose leaf is an inline `(VALUES ...)` cannot be
+            // materialized by the reorder path (TableRef has no row-list variant),
+            // which would raise a spurious "Table '_values_' not found". Fall
+            // through to the standard left-deep path, which handles VALUES leaves
+            // correctly. (values.test §6, §8)
+            && !reorder::from_contains_values(from)
         {
             // Apply join reordering optimization
             return reorder::execute_with_join_reordering(
