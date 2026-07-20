@@ -48,6 +48,79 @@ fn expression_has_parameter(expr: &Expression) -> bool {
     finder.found
 }
 
+/// Visitor that flags the first column reference in a CHECK constraint that
+/// cannot be resolved against the table being created. SQLite resolves CHECK
+/// constraint column names against the new table only: an unqualified name
+/// must be a column of the table (or a rowid alias), and a `table.column`
+/// qualifier must name the table being created. A three-part `schema.table.col`
+/// reference has its database qualifier silently ignored (check-8.1), so only
+/// the table and column parts are validated.
+struct CheckColumnResolver<'a> {
+    /// Canonical (lower-cased) name of the table being created.
+    table_canonical: &'a str,
+    /// Canonical (lower-cased) column names of the table being created.
+    columns: &'a std::collections::HashSet<String>,
+    /// Display form of the first unresolved reference, if any.
+    unresolved: Option<String>,
+}
+
+impl ExpressionVisitor for CheckColumnResolver<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if let Expression::ColumnRef(col_id) = expr {
+            // A table qualifier must name the table being created; the schema
+            // (database) qualifier, if present, is ignored per SQLite.
+            if let Some(table) = col_id.table_canonical() {
+                if !table.eq_ignore_ascii_case(self.table_canonical) {
+                    self.unresolved = Some(col_id.display().to_string());
+                    return VisitResult::Stop;
+                }
+            }
+
+            let col = col_id.column_canonical();
+            // rowid and its aliases are always valid inside a CHECK constraint
+            // (e.g. `CHECK(c > rowid*2)`, check-9.1).
+            let is_rowid_alias = col.eq_ignore_ascii_case("rowid")
+                || col == "_rowid_"
+                || col.eq_ignore_ascii_case("oid");
+            if !is_rowid_alias && !self.columns.contains(col) {
+                self.unresolved = Some(col_id.display().to_string());
+                return VisitResult::Stop;
+            }
+        }
+        VisitResult::Continue
+    }
+}
+
+/// Validate that every column referenced by a table's CHECK constraints exists
+/// on the table being created. SQLite performs this resolution at CREATE TABLE
+/// time and rejects the statement — leaving no table behind — when a CHECK
+/// names an unknown column (check-3.3) or a foreign table (check-3.5). This
+/// mirrors that behavior so an invalid definition never creates a table.
+pub fn validate_check_constraint_columns(
+    table_name: &str,
+    columns: &[ColumnSchema],
+    check_constraints: &[(String, Expression)],
+) -> Result<(), ExecutorError> {
+    if check_constraints.is_empty() {
+        return Ok(());
+    }
+    let column_set: std::collections::HashSet<String> =
+        columns.iter().map(|c| c.name.to_ascii_lowercase()).collect();
+    let table_canonical = table_name.to_ascii_lowercase();
+    for (_name, expr) in check_constraints {
+        let mut resolver = CheckColumnResolver {
+            table_canonical: &table_canonical,
+            columns: &column_set,
+            unresolved: None,
+        };
+        walk_expression(&mut resolver, expr);
+        if let Some(column_ref) = resolver.unresolved {
+            return Err(ExecutorError::NoSuchColumn { column_ref });
+        }
+    }
+    Ok(())
+}
+
 /// Validate that a CHECK constraint expression uses only forms SQLite permits.
 /// Subqueries and bind parameters are rejected at CREATE TABLE time with the
 /// exact SQLite messages so an invalid definition never creates a half-formed
@@ -423,6 +496,92 @@ mod tests {
             is_exact_integer_type: false,
             type_source: None,
         }
+    }
+
+    fn col(name: &str) -> ColumnSchema {
+        ColumnSchema::new(name.to_string(), DataType::Integer, true)
+    }
+
+    fn col_ref(name: &str) -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(name, false))
+    }
+
+    fn qualified_col_ref(table: &str, column: &str) -> Expression {
+        Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(table, false, column, false))
+    }
+
+    fn lt(left: Expression, right: Expression) -> Expression {
+        Expression::BinaryOp {
+            left: Box::new(left),
+            op: vibesql_ast::BinaryOperator::LessThan,
+            right: Box::new(right),
+        }
+    }
+
+    #[test]
+    fn test_check_columns_unknown_column_rejected() {
+        // check-3.3: CHECK(q < x) where `q` is not a column -> "no such column: q".
+        let cols = vec![col("x"), col("y"), col("z")];
+        let checks = vec![(String::new(), lt(col_ref("q"), col_ref("x")))];
+        let err = validate_check_constraint_columns("t3", &cols, &checks).unwrap_err();
+        match err {
+            ExecutorError::NoSuchColumn { column_ref } => assert_eq!(column_ref, "q"),
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_check_columns_foreign_table_qualifier_rejected() {
+        // check-3.5: CHECK(t2.x < x) references a different table -> "no such column: t2.x".
+        let cols = vec![col("x"), col("y"), col("z")];
+        let checks = vec![(String::new(), lt(qualified_col_ref("t2", "x"), col_ref("x")))];
+        let err = validate_check_constraint_columns("t3", &cols, &checks).unwrap_err();
+        match err {
+            ExecutorError::NoSuchColumn { column_ref } => assert_eq!(column_ref, "t2.x"),
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_check_columns_self_table_qualifier_accepted() {
+        // check-3.7: CHECK(t3.x < 25) qualifies with the table being created -> ok.
+        let cols = vec![col("x"), col("y"), col("z")];
+        let checks = vec![(
+            String::new(),
+            lt(
+                qualified_col_ref("t3", "x"),
+                Expression::Literal(vibesql_types::SqlValue::Integer(25)),
+            ),
+        )];
+        assert!(validate_check_constraint_columns("t3", &cols, &checks).is_ok());
+    }
+
+    #[test]
+    fn test_check_columns_rowid_alias_accepted() {
+        // check-9.1: CHECK(c > rowid*2) — rowid is a valid pseudo-column.
+        let cols = vec![col("a"), col("c")];
+        let checks = vec![(
+            String::new(),
+            Expression::BinaryOp {
+                left: Box::new(col_ref("c")),
+                op: vibesql_ast::BinaryOperator::GreaterThan,
+                right: Box::new(col_ref("rowid")),
+            },
+        )];
+        assert!(validate_check_constraint_columns("t1", &cols, &checks).is_ok());
+    }
+
+    #[test]
+    fn test_check_columns_database_qualifier_ignored() {
+        // check-8.1: three-part `schema.table.column` — the (possibly bogus)
+        // database qualifier is ignored; only table+column are validated.
+        let cols = vec![col("b")];
+        let ref_bogus_schema =
+            Expression::ColumnRef(vibesql_ast::ColumnIdentifier::fully_qualified(
+                "xyzzy", false, "t811", false, "b", false,
+            ));
+        let checks = vec![(String::new(), lt(ref_bogus_schema, col_ref("b")))];
+        assert!(validate_check_constraint_columns("t811", &cols, &checks).is_ok());
     }
 
     #[test]

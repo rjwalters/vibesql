@@ -82,6 +82,35 @@ pub fn create_products_table_with_check_price(db: &mut Database) {
     db.create_table(schema).unwrap();
 }
 
+/// Helper to create a products table with a PRIMARY KEY *and* a `price >= 0`
+/// CHECK constraint. A primary key routes single-row `WHERE id = ?` UPDATEs
+/// through the fast path, which historically validated NOT NULL only and
+/// silently bypassed CHECK (regression guarded by
+/// `test_update_check_constraint_violation_via_pk_fast_path`).
+pub fn create_products_table_with_pk_and_check_price(db: &mut Database) {
+    let schema = TableSchema::with_all_constraint_types(
+        "products".to_string(),
+        vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("price".to_string(), DataType::Integer, false),
+        ],
+        Some(vec!["id".to_string()]),
+        Vec::new(),
+        vec![(
+            "price_positive".to_string(),
+            Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))),
+                op: BinaryOperator::GreaterThanOrEqual,
+                right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+            },
+        )],
+        Vec::new(),
+    );
+    db.create_table(schema).unwrap();
+}
+
 /// Helper to create a products table with nullable price and check constraint
 pub fn create_products_table_with_nullable_price(db: &mut Database) {
     let schema = TableSchema::with_all_constraint_types(
