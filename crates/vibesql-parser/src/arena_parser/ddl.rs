@@ -400,6 +400,11 @@ impl<'arena> ArenaParser<'arena> {
                         self.advance();
                         self.parse_drop_constraint(table_name)?
                     }
+                    // SQLite allows DROP COLUMN without the COLUMN keyword:
+                    // `ALTER TABLE t DROP <col>` is a synonym for
+                    // `ALTER TABLE t DROP COLUMN <col>`. If we see a bare column
+                    // name, treat it as a column drop (mirrors the ADD case).
+                    Token::Identifier(_) => self.parse_drop_column(table_name)?,
                     _ => {
                         return Err(ParseError {
                             message: "Expected COLUMN or CONSTRAINT after DROP".to_string(),

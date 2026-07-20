@@ -232,7 +232,37 @@ where
     let mut states = vec![CteState::Pending; ctes.len()];
     let mut local = HashMap::new();
 
-    for idx in 0..ctes.len() {
+    // Process order: CTEs the root statement references directly come first
+    // (in declaration order among them), then the rest. SQLite resolves CTEs
+    // lazily from the query that reads them, so a circular reference is named
+    // by the member closest to that query — starting resolution from the
+    // root's direct references makes the reported name match (with1.test 3.1,
+    // with2.test 3.4). When no root is provided (DML paths), this reduces to
+    // plain declaration order.
+    let process_order: Vec<usize> = {
+        let mut root_refs = HashSet::new();
+        if let Some(stmt) = root {
+            collect_stmt_table_refs(stmt, &HashSet::new(), true, false, &mut root_refs);
+        }
+        let (mut first, mut rest): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+        for (idx, cte) in ctes.iter().enumerate() {
+            if root_refs.contains(&cte.name.to_ascii_lowercase()) {
+                first.push(idx);
+            } else {
+                rest.push(idx);
+            }
+        }
+        first.into_iter().chain(rest).collect()
+    };
+
+    // When a root statement is provided, `needed[]` has pruned this list to only
+    // the CTEs the statement (transitively) references, so any CTE that reaches
+    // execute_cte_at is genuinely referenced. DML paths pass no root and execute
+    // every CTE eagerly, where an unreferenced CTE must NOT be validated
+    // (SQLite never evaluates it — with1.test 1.2/1.4).
+    let stmt_scoped = root.is_some();
+
+    for idx in process_order {
         if needed[idx] && states[idx] == CteState::Pending {
             let hint =
                 if hinted_cte.as_deref().is_some_and(|h| ctes[idx].name.eq_ignore_ascii_case(h)) {
@@ -248,6 +278,7 @@ where
                 outer_ctes,
                 in_progress,
                 nested,
+                stmt_scoped,
                 hint,
                 database,
                 executor,
@@ -270,6 +301,7 @@ fn execute_cte_at<F, M>(
     outer_ctes: &HashMap<String, CteResult>,
     in_progress: &mut Vec<String>,
     nested: bool,
+    stmt_scoped: bool,
     outer_row_hint: Option<usize>,
     database: &vibesql_storage::Database,
     executor: &F,
@@ -307,29 +339,43 @@ where
     // A WITH clause brings all its member names into scope at once (SQLite), so
     // a body may reference a sibling declared later in the list — at the top
     // level (with1.test 2.5) as well as in nested lists (with2.test 1.11).
-    // Materialize referenced siblings first; a chain that loops back to a CTE
-    // still InFlight is reported as a circular reference by execute_cte_at.
+    // Materialize referenced siblings first; a chain that loops back to a
+    // sibling still InFlight is a mutual circular reference (with2.test
+    // 3.2/3.3/3.4). SQLite names such a cycle by the referenced InFlight member,
+    // which — because the list is processed starting from the CTEs the root
+    // query reads directly (see execute_cte_list) — is the entry CTE closest to
+    // the triggering query (with1.test 3.1, with2.test 3.4).
     for sib_idx in 0..ctes.len() {
-        if sib_idx != idx
-            && states[sib_idx] == CteState::Pending
-            && body_refs.contains(&ctes[sib_idx].name.to_ascii_lowercase())
-        {
-            execute_cte_at(
-                sib_idx,
-                ctes,
-                states,
-                local,
-                outer_ctes,
-                in_progress,
-                nested,
-                // A sibling materialized on demand is not the CTE the outer
-                // statement reads directly, so the outer LIMIT hint never
-                // applies to it.
-                None,
-                database,
-                executor,
-                memory_check,
-            )?;
+        if sib_idx == idx || !body_refs.contains(&ctes[sib_idx].name.to_ascii_lowercase()) {
+            continue;
+        }
+        match states[sib_idx] {
+            CteState::Pending => {
+                execute_cte_at(
+                    sib_idx,
+                    ctes,
+                    states,
+                    local,
+                    outer_ctes,
+                    in_progress,
+                    nested,
+                    stmt_scoped,
+                    // A sibling materialized on demand is not the CTE the outer
+                    // statement reads directly, so the outer LIMIT hint never
+                    // applies to it.
+                    None,
+                    database,
+                    executor,
+                    memory_check,
+                )?;
+            }
+            CteState::InFlight => {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "circular reference: {}",
+                    ctes[sib_idx].name
+                )));
+            }
+            CteState::Done => {}
         }
     }
 
@@ -386,6 +432,15 @@ where
                 cte.name
             )));
         }
+    } else if !shadowed_by_inner && body_refs.contains(&name_lower) {
+        // A non-recursive CTE whose body references its own name is circular:
+        // the name is in scope within the body (shadowing any real table), but a
+        // non-UNION self-reference cannot be materialized. SQLite reports
+        // "circular reference: <name>" (with2.test 3.1, e.g.
+        // `WITH i(x,y) AS (VALUES(1,(SELECT x FROM i)))`). Names redefined by
+        // the body's own nested WITH (shadowed_by_inner) are excluded — those
+        // resolve to the inner definition, not a self-reference.
+        return Err(ExecutorError::SqliteCompatError(format!("circular reference: {}", cte.name)));
     }
 
     // Build the visible CTE context for this body: enclosing scopes first,
@@ -393,6 +448,36 @@ where
     let mut visible = outer_ctes.clone();
     for (name, result) in local.iter() {
         visible.insert(name.clone(), result.clone());
+    }
+
+    // When a CTE declares an explicit column list, SQLite validates its arity
+    // against the CTE body's (leftmost/base term) output columns up front —
+    // before evaluating the body or checking UNION-term consistency. A mismatch
+    // is reported as `table <name> has <n> values for <m> columns`
+    // (with1.test 5.6.1-5.6.4/5.6.7, with3.test 6.0/6.1). This static check
+    // fires even when the body would produce no rows (with1.test 5.6.3) and
+    // takes precedence over the "same number of result columns" UNION check
+    // (with1.test 5.6.4/5.6.7). Wildcards are resolved against the visible CTE
+    // context and catalog; if the base arity cannot be determined statically we
+    // defer to the row-based check in derive_cte_schema.
+    //
+    // Only stmt-scoped lists (where `needed[]` proved this CTE is referenced)
+    // are validated: SQLite never evaluates an unreferenced CTE, so a
+    // `WITH x(a) AS (SELECT * FROM two_col_table) INSERT ...` where `x` is
+    // unused must not raise an arity error (with1.test 1.2/1.4).
+    if stmt_scoped {
+        if let Some(declared) = &cte.columns {
+            if let Some(base_cols) = collect_select_list_columns(&cte.query, database, &visible) {
+                if base_cols.len() != declared.len() {
+                    return Err(ExecutorError::SqliteCompatError(format!(
+                        "table {} has {} values for {} columns",
+                        cte.name,
+                        base_cols.len(),
+                        declared.len()
+                    )));
+                }
+            }
+        }
     }
 
     // Execute the body with this CTE's name marked in-progress so nested WITH
@@ -709,10 +794,15 @@ pub(super) fn derive_cte_schema(
         // Get data types from first row (if available)
         if let Some(first_row) = rows.first() {
             if first_row.values.len() != column_names.len() {
-                return Err(ExecutorError::UnsupportedFeature(format!(
-                    "CTE column count mismatch: specified {} columns but query returned {}",
-                    column_names.len(),
-                    first_row.values.len()
+                // SQLite's wording: `table <name> has <values> values for
+                // <columns> columns` (with1.test 5.6.x, with3.test 6.0/6.1).
+                // Reached only when the static pre-check in execute_cte_at could
+                // not resolve the base arity (e.g. an exotic FROM source).
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "table {} has {} values for {} columns",
+                    cte.name,
+                    first_row.values.len(),
+                    column_names.len()
                 )));
             }
 
@@ -743,6 +833,29 @@ pub(super) fn derive_cte_schema(
 
             Ok(cte_pseudo_schema(cte.name.clone(), columns))
         }
+    } else if cte.query.values.is_some() {
+        // A CTE whose body is a bare `VALUES (...)` clause has no select_list to
+        // infer names from. SQLite auto-names such columns `column1`, `column2`,
+        // ... so `WITH v AS (VALUES('a','b')) SELECT column1 FROM v` and
+        // `SELECT * FROM v` resolve (values.test 8.1.*). Derive the width from
+        // the materialized rows (falling back to the VALUES AST row width when
+        // the result set is empty).
+        let width = rows
+            .first()
+            .map(|r| r.values.len())
+            .or_else(|| cte.query.values.as_ref().and_then(|vr| vr.first()).map(|r| r.len()))
+            .unwrap_or(0);
+        let columns = (0..width)
+            .map(|i| {
+                let data_type = rows
+                    .first()
+                    .and_then(|first_row| first_row.values.get(i))
+                    .map(infer_type_from_value)
+                    .unwrap_or(vibesql_types::DataType::Varchar { max_length: Some(255) });
+                vibesql_catalog::ColumnSchema::new(format!("column{}", i + 1), data_type, true)
+            })
+            .collect();
+        Ok(cte_pseudo_schema(cte.name.clone(), columns))
     } else {
         // No explicit column names - infer from query SELECT list.
         // Wildcard items are statically expanded into the column names of the
@@ -1260,7 +1373,10 @@ where
         (count_stmt_columns(&base_query), count_stmt_columns(recursive_query))
     {
         if base_count != recursive_count {
-            return Err(ExecutorError::UnsupportedFeature(
+            // SQLite reports this verbatim (no "Unsupported feature:" prefix)
+            // for a recursive CTE whose terms disagree in arity
+            // (with1.test 5.6.6).
+            return Err(ExecutorError::SqliteCompatError(
                 "SELECTs to the left and right of UNION ALL do not have the same number of result columns".to_string()
             ));
         }

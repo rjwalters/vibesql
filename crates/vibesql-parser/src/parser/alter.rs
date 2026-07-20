@@ -51,6 +51,11 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
                     parser.advance();
                     parse_drop_constraint(parser, table_name)
                 }
+                // SQLite allows DROP COLUMN without the COLUMN keyword:
+                // `ALTER TABLE t DROP <col>` is a synonym for
+                // `ALTER TABLE t DROP COLUMN <col>`. If we see a bare column
+                // name, treat it as a column drop (mirrors the ADD case above).
+                Token::Identifier(_) => parse_drop_column(parser, table_name),
                 _ => Err(ParseError {
                     message: "Expected COLUMN or CONSTRAINT after DROP".to_string(),
                 }),

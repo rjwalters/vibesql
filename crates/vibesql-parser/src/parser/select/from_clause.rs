@@ -28,12 +28,24 @@ impl Parser {
                     self.advance(); // Consume comma
                     let right = self.parse_table_reference()?;
 
-                    // Check for legacy ON clause after comma-join
-                    // SQLite allows: FROM t1, t2 ON t1.a=t2.b (treated as INNER JOIN)
+                    // Check for a legacy ON or USING clause after a comma-join.
+                    // SQLite treats "," exactly like CROSS/INNER JOIN, so the
+                    // ON/USING filtering clauses are legal after it and turn the
+                    // cartesian product into an inner join:
+                    //   FROM t1, t2 ON t1.a=t2.b
+                    //   FROM t1, t2 USING (a)
+                    // (e_select-0.1.2 / 1.4 / 1.5 / 1.6 / 1.7 comma variants).
                     if self.peek_keyword(Keyword::On) {
                         self.consume_keyword(Keyword::On)?;
                         let condition = self.parse_expression()?;
                         (vibesql_ast::JoinType::Inner, right, Some(condition), None, false)
+                    } else if self.peek_keyword(Keyword::Using) {
+                        self.consume_keyword(Keyword::Using)?;
+                        self.expect_token(Token::LParen)?;
+                        let columns =
+                            self.parse_comma_separated_list(|p| p.parse_column_name())?;
+                        self.expect_token(Token::RParen)?;
+                        (vibesql_ast::JoinType::Inner, right, None, Some(columns), false)
                     } else {
                         (vibesql_ast::JoinType::Cross, right, None, None, false)
                     }

@@ -6,13 +6,65 @@
 #![allow(clippy::new_without_default)]
 
 use vibesql_ast::{
-    pretty_print::ToSql, ColumnConstraintKind, ColumnDef, Expression, TableConstraint,
-    TableConstraintKind,
+    pretty_print::ToSql,
+    visitor::{walk_expression, ExpressionVisitor, VisitResult},
+    ColumnConstraintKind, ColumnDef, Expression, TableConstraint, TableConstraintKind,
 };
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::DataType;
 
 use crate::errors::ExecutorError;
+
+/// Visitor that flags any bind parameter (`?`, `?NNN`, or `:name`) reached
+/// while walking an expression. SQLite prohibits parameters inside CHECK
+/// constraints because the constraint is evaluated at every INSERT/UPDATE with
+/// no bind context (see check-5.1 / check-5.2).
+struct ParameterFinder {
+    found: bool,
+}
+
+impl ExpressionVisitor for ParameterFinder {
+    fn visit_placeholder(&mut self, _index: usize) -> VisitResult {
+        self.found = true;
+        VisitResult::Stop
+    }
+
+    fn visit_numbered_placeholder(&mut self, _number: usize) -> VisitResult {
+        self.found = true;
+        VisitResult::Stop
+    }
+
+    fn visit_named_placeholder(&mut self, _name: &str) -> VisitResult {
+        self.found = true;
+        VisitResult::Stop
+    }
+}
+
+/// True if `expr` contains any bind parameter. Used to reject
+/// `CHECK( x < :abc )` / `CHECK( x < ? )` at CREATE TABLE time.
+fn expression_has_parameter(expr: &Expression) -> bool {
+    let mut finder = ParameterFinder { found: false };
+    walk_expression(&mut finder, expr);
+    finder.found
+}
+
+/// Validate that a CHECK constraint expression uses only forms SQLite permits.
+/// Subqueries and bind parameters are rejected at CREATE TABLE time with the
+/// exact SQLite messages so an invalid definition never creates a half-formed
+/// table (check-3.1, check-5.1, check-5.2).
+fn validate_check_expression(expr: &Expression) -> Result<(), ExecutorError> {
+    if crate::dml_returning::expression_has_subquery(expr) {
+        return Err(ExecutorError::SqliteCompatError(
+            "subqueries prohibited in CHECK constraints".to_string(),
+        ));
+    }
+    if expression_has_parameter(expr) {
+        return Err(ExecutorError::SqliteCompatError(
+            "parameters prohibited in CHECK constraints".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Result of processing constraints
 pub struct ConstraintResult {
@@ -179,6 +231,11 @@ impl ConstraintValidator {
                         result.unique_constraint_collations.push(vec![None]);
                     }
                     ColumnConstraintKind::Check { expr, source_text } => {
+                        // SQLite rejects subqueries and bind parameters inside
+                        // CHECK constraints at CREATE TABLE time (check-3.1,
+                        // check-5.1). Enforce the same prohibition so an invalid
+                        // definition never leaves a half-formed table behind.
+                        validate_check_expression(expr)?;
                         // Use explicit name if provided; otherwise use the
                         // verbatim CHECK source text (SQLite echoes the
                         // original operator spacing in the violation message),
@@ -264,6 +321,10 @@ impl ConstraintValidator {
                     result.unique_constraint_collations.push(key_part_collations(columns));
                 }
                 TableConstraintKind::Check { expr, source_text } => {
+                    // SQLite rejects subqueries and bind parameters inside CHECK
+                    // constraints at CREATE TABLE time (check-3.1, check-5.1).
+                    // Enforce the same prohibition for table-level CHECKs too.
+                    validate_check_expression(expr)?;
                     // Use explicit name if provided; otherwise the verbatim
                     // CHECK source text, falling back to the re-rendered
                     // expression only when no source span was captured.
@@ -557,6 +618,49 @@ mod tests {
         // Programmatic AST carries no source span, so the name falls back to
         // the re-rendered expression text.
         assert_eq!(result.check_constraints[0].0, check_expr.to_sql());
+    }
+
+    /// Assert that a parsed `CREATE TABLE` is rejected by constraint processing
+    /// with `expected` as the exact error message.
+    fn assert_create_table_rejected(sql: &str, expected: &str) {
+        let stmt = vibesql_parser::Parser::parse_sql(sql).expect("parse");
+        let create = match stmt {
+            vibesql_ast::Statement::CreateTable(c) => c,
+            other => panic!("expected CREATE TABLE, got {:?}", other),
+        };
+        let res = ConstraintValidator::process_constraints(
+            &create.table_name,
+            &create.columns,
+            &create.table_constraints,
+        );
+        match res {
+            Ok(_) => panic!("expected rejection of `{}`", sql),
+            Err(e) => assert_eq!(e.to_string(), expected),
+        }
+    }
+
+    #[test]
+    fn test_check_constraint_rejects_parameter() {
+        // A bind parameter inside a CHECK is rejected at CREATE TABLE time with
+        // SQLite's exact message (check-5.1 / check-5.2).
+        assert_create_table_rejected(
+            "CREATE TABLE t5(x, y, CHECK( x*y < :abc ))",
+            "parameters prohibited in CHECK constraints",
+        );
+        assert_create_table_rejected(
+            "CREATE TABLE t5(x, y, CHECK( x*y < ? ))",
+            "parameters prohibited in CHECK constraints",
+        );
+    }
+
+    #[test]
+    fn test_check_constraint_rejects_subquery() {
+        // A subquery inside a CHECK is rejected at CREATE TABLE time with
+        // SQLite's exact message (check-3.1).
+        assert_create_table_rejected(
+            "CREATE TABLE t3(x, y, z, CHECK( x < (SELECT min(x) FROM t1) ))",
+            "subqueries prohibited in CHECK constraints",
+        );
     }
 
     #[test]

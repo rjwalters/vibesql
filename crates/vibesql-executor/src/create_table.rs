@@ -157,8 +157,20 @@ impl CreateTableExecutor {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them
             // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
-            let id = TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
-            (schema_part.to_string(), table_part.to_string(), id)
+            if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                // SQLite compatibility: the "temp" schema qualifier maps to this
+                // session's temp schema, so `CREATE TABLE temp.t(...)` creates a
+                // temporary table exactly like `CREATE TEMP TABLE t(...)`. Without
+                // this mapping the raw "temp" schema name is looked up verbatim and
+                // fails with SchemaNotFound("temp").
+                let temp_schema = database.catalog.temp_schema_name();
+                let id = TableIdentifier::qualified(temp_schema, false, table_part, stmt.quoted);
+                (temp_schema.to_string(), table_part.to_string(), id)
+            } else {
+                let id =
+                    TableIdentifier::qualified(schema_part, stmt.quoted, table_part, stmt.quoted);
+                (schema_part.to_string(), table_part.to_string(), id)
+            }
         } else {
             // Simple table name - use current schema
             let id = TableIdentifier::new(&stmt.table_name, stmt.quoted);
@@ -892,6 +904,29 @@ impl CreateTableExecutor {
         for item in select_list {
             match item {
                 vibesql_ast::SelectItem::Wildcard { .. } => {
+                    // A `SELECT * FROM (VALUES ...)` source has no catalog table
+                    // to look up. SQLite names the resulting columns `column1`,
+                    // `column2`, ... (or the explicit `AS t(a,b)` aliases) and
+                    // gives them no declared type (BLOB/None affinity). Handle
+                    // this before the table-name path, which cannot resolve a
+                    // VALUES clause (values.test 17.1).
+                    if let Some(vibesql_ast::FromClause::Values { rows, column_aliases, .. }) = from
+                    {
+                        let aliases = column_aliases.as_deref().unwrap_or(&[]);
+                        let width = if !aliases.is_empty() {
+                            aliases.len()
+                        } else {
+                            rows.first().map(|r| r.len()).unwrap_or(0)
+                        };
+                        for i in 0..width {
+                            let name = aliases
+                                .get(i)
+                                .cloned()
+                                .unwrap_or_else(|| format!("column{}", i + 1));
+                            columns.push((name, TypeAffinity::None));
+                        }
+                        continue;
+                    }
                     // Expand wildcard using the FROM clause tables
                     let table_names = Self::get_table_names_from_from(from)?;
                     for table_name in table_names {

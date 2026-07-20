@@ -11,161 +11,172 @@ impl<'a> Lexer<'a> {
         let mut has_dot = false;
         let mut has_underscore = false;
 
-        // Handle leading decimal point (e.g., .5)
+        // Handle leading decimal point (e.g., .5). When present, the digit run
+        // consumed below is the fractional part.
         if !self.is_eof() && self.current_char() == '.' {
             has_dot = true;
             self.advance();
         }
 
-        // Check for hex literal (0x... or 0X...)
-        if !has_dot && !self.is_eof() && self.current_char() == '0' {
+        // Check for hex literal (0x... or 0X...).
+        if !has_dot
+            && !self.is_eof()
+            && self.current_char() == '0'
+            && matches!(self.peek_byte(1), Some(b'x') | Some(b'X'))
+        {
+            self.advance(); // '0'
+            self.advance(); // 'x' / 'X'
+            return self.tokenize_hex_literal(start);
+        }
+
+        // Integer part (or fractional part, when a leading dot was consumed).
+        // Digits and underscores are consumed greedily and underscore placement
+        // is validated *after* the whole token is scanned — this mirrors
+        // SQLite's tokenizer, which absorbs the entire numeric-looking run and
+        // only then flags a misplaced separator, reporting the full run as one
+        // unrecognized token (e.g. `1_.4` -> `unrecognized token: "1_.4"`).
+        self.consume_digits_and_underscores(&mut has_underscore);
+
+        // Fractional part.
+        if !has_dot && !self.is_eof() && self.current_char() == '.' {
             self.advance();
-            if !self.is_eof() && (self.current_char() == 'x' || self.current_char() == 'X') {
-                return self.tokenize_hex_literal();
-            }
-            // Not a hex literal, continue with normal number parsing
-            // The '0' is already consumed, so we continue from here
+            self.consume_digits_and_underscores(&mut has_underscore);
         }
 
-        while !self.is_eof() {
-            let ch = self.current_char();
-            if ch.is_ascii_digit() {
-                self.advance();
-            } else if ch == '_' {
-                // SQLite 3.46+ supports underscores as digit separators in
-                // numeric literals (e.g. 1_000_000, 1.1_1). An underscore is
-                // only valid when surrounded on both sides by digits — this
-                // holds in both the integer and fractional parts. When it is
-                // not between two digits (e.g. `1_.5`) we stop here and let the
-                // trailing-character check below reject the malformed token.
-                if self.underscore_between_digits(start) {
-                    has_underscore = true;
-                    self.advance();
-                } else {
-                    break;
-                }
-            } else if ch == '.' && !has_dot {
-                has_dot = true;
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
-        // Check for scientific notation (E-notation)
+        // Scientific notation (E-notation). SQLite only treats `e`/`E` as an
+        // exponent introducer when it is directly followed by a digit, or by a
+        // sign and then a digit. Otherwise the `e` is just a trailing identifier
+        // character, which makes the whole token unrecognized (`1e_4`, `2E+`).
         if !self.is_eof() {
             let ch = self.current_char();
-            if ch == 'E' || ch == 'e' {
-                self.advance();
-
-                // Optional sign (+/-)
-                if !self.is_eof() {
-                    let sign = self.current_char();
-                    if sign == '+' || sign == '-' {
+            if ch == 'e' || ch == 'E' {
+                let exp_ok = match self.peek_byte(1) {
+                    Some(b) if b.is_ascii_digit() => true,
+                    Some(b'+') | Some(b'-') => {
+                        self.peek_byte(2).map(|b| b.is_ascii_digit()).unwrap_or(false)
+                    }
+                    _ => false,
+                };
+                if exp_ok {
+                    self.advance(); // 'e' / 'E'
+                    if matches!(self.current_char(), '+' | '-') {
                         self.advance();
                     }
-                }
-
-                // Exponent digits (required). Underscore separators are also
-                // permitted here as long as they sit between two digits
-                // (e.g. `1e1_0`).
-                let exp_start = self.position();
-                while !self.is_eof() {
-                    let ch = self.current_char();
-                    if ch.is_ascii_digit() {
-                        self.advance();
-                    } else if ch == '_' && self.underscore_between_digits(start) {
-                        has_underscore = true;
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
-
-                // Verify we got at least one exponent digit
-                if self.position() == exp_start {
-                    let partial = self.slice_from(start);
-                    return Err(LexerError {
-                        message: "Invalid scientific notation: expected digits after 'E'"
-                            .to_string(),
-                        position: self.position(),
-                        near_token: Some(partial.to_string()),
-                    });
+                    self.consume_digits_and_underscores(&mut has_underscore);
                 }
             }
         }
 
         // A numeric literal that runs directly into an identifier character
-        // (letter or underscore) is a malformed token, not a value followed by
-        // an alias. SQLite rejects these: `123a456`, `1FROM`, `1.5x` all raise
-        // "unrecognized token". Previously the lexer split them into a number
-        // plus an identifier, silently changing the meaning.
-        self.reject_trailing_identifier_char(start)?;
+        // (letter, digit, or underscore) is a single malformed token, not a
+        // value followed by an alias. SQLite absorbs the whole trailing run and
+        // reports it as one unrecognized token (`123a456`, `1FROM`, `1.5x`),
+        // rather than splitting it into a number plus an identifier.
+        let mut illegal_trailing = false;
+        while !self.is_eof() && Self::is_identifier_char(self.current_char()) {
+            illegal_trailing = true;
+            self.advance();
+        }
 
-        let number = self.slice_from(start).to_string();
-        // Strip underscores from the token value so downstream sees a plain number
+        let token = self.slice_from(start);
+
+        // Validate underscore placement across the fully scanned token: every
+        // `_` must sit directly between two digits. A misplaced separator makes
+        // the entire token unrecognized, exactly as SQLite reports it.
+        let bad_underscore = has_underscore && !Self::underscores_all_between(token, false);
+
+        if illegal_trailing || bad_underscore {
+            return Err(LexerError::unrecognized_token(token, self.position()));
+        }
+
+        // Strip underscores from the token value so downstream sees a plain number.
         if has_underscore {
-            let stripped = number.replace('_', "");
-            Ok(Token::Number(stripped))
+            Ok(Token::Number(token.replace('_', "")))
         } else {
-            Ok(Token::Number(number))
+            Ok(Token::Number(token.to_string()))
         }
     }
 
-    /// Whether the underscore at the current position sits directly between two
-    /// digits. `start` is the byte offset where the number literal began, used
-    /// to guard against reading before the token.
+    /// Consume a run of ASCII digits and underscore separators from the current
+    /// position, advancing the lexer. Underscores are consumed unconditionally
+    /// (their placement is validated once the whole token is known). Sets
+    /// `has_underscore` if any underscore was consumed.
     #[inline]
-    fn underscore_between_digits(&self, start: usize) -> bool {
-        let prev_is_digit =
-            self.position() > start && self.input.as_bytes()[self.position() - 1].is_ascii_digit();
-        let next_is_digit = self.peek_byte(1).map(|b| b.is_ascii_digit()).unwrap_or(false);
-        prev_is_digit && next_is_digit
+    fn consume_digits_and_underscores(&mut self, has_underscore: &mut bool) {
+        while !self.is_eof() {
+            let ch = self.current_char();
+            if ch.is_ascii_digit() {
+                self.advance();
+            } else if ch == '_' {
+                *has_underscore = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
     }
 
-    /// Reject a numeric literal that is immediately followed by an identifier
-    /// character (an ASCII/Unicode letter or an underscore). SQLite treats
-    /// `123a456` and friends as a single unrecognized token rather than a
-    /// number adjacent to an identifier.
-    fn reject_trailing_identifier_char(&self, start: usize) -> Result<(), LexerError> {
-        if self.is_eof() {
-            return Ok(());
+    /// Whether every `_` in `token` sits directly between two digits. A digit
+    /// separator adjacent to a non-digit (`1_`, `1_.4`, `12__34`, `1_e4`) is
+    /// invalid and makes the whole numeric token unrecognized. When `hex` is
+    /// true the neighbours are validated as hex digits (SQLite 3.46 allows
+    /// separators between hex digits, e.g. `0xFF_FF`).
+    fn underscores_all_between(token: &str, hex: bool) -> bool {
+        let is_digit = |b: u8| if hex { b.is_ascii_hexdigit() } else { b.is_ascii_digit() };
+        let bytes = token.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'_' {
+                let prev_digit = i > 0 && is_digit(bytes[i - 1]);
+                let next_digit = i + 1 < bytes.len() && is_digit(bytes[i + 1]);
+                if !(prev_digit && next_digit) {
+                    return false;
+                }
+            }
         }
-        let ch = self.current_char();
-        if ch.is_alphabetic() || ch == '_' {
-            // Capture the full offending run for a helpful error message.
-            let bad = self.slice_from(start);
-            return Err(LexerError {
-                message: format!("unrecognized token: \"{}\"", bad),
-                position: self.position(),
-                near_token: Some(bad.to_string()),
-            });
-        }
-        Ok(())
+        true
+    }
+
+    /// Whether `ch` is an identifier continuation character. Matches SQLite's
+    /// notion of IdChar closely enough for tokenizing numbers: a numeric literal
+    /// abutting one of these is a single unrecognized token.
+    #[inline]
+    fn is_identifier_char(ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_'
     }
 
     /// Tokenize a hexadecimal literal (0x... or 0X...).
     /// The '0x' or '0X' prefix has already been consumed when this is called.
-    /// Returns the decimal representation of the hex value.
-    fn tokenize_hex_literal(&mut self) -> Result<Token, LexerError> {
-        // Consume the 'x' or 'X'
-        self.advance();
-
+    /// `start` is the byte offset of the leading '0' so a malformed token can be
+    /// reported in full. Returns the decimal representation of the hex value.
+    fn tokenize_hex_literal(&mut self, start: usize) -> Result<Token, LexerError> {
         let hex_start = self.position();
 
-        // Collect hex digits
+        // Collect hex digits (and underscore separators, SQLite 3.46+).
+        let mut has_underscore = false;
         while !self.is_eof() {
             let ch = self.current_char();
             if ch.is_ascii_hexdigit() {
+                self.advance();
+            } else if ch == '_' {
+                has_underscore = true;
                 self.advance();
             } else {
                 break;
             }
         }
 
-        let hex_str = self.slice_from(hex_start);
+        // Any trailing identifier character makes the whole `0x...` run a single
+        // unrecognized token (e.g. `0x1Ag`), not a value plus alias.
+        let mut illegal_trailing = false;
+        while !self.is_eof() && Self::is_identifier_char(self.current_char()) {
+            illegal_trailing = true;
+            self.advance();
+        }
 
-        if hex_str.is_empty() {
+        let full = self.slice_from(start);
+        let hex_body = self.slice_from(hex_start);
+
+        if hex_body.is_empty() {
             return Err(LexerError {
                 message: "Invalid hexadecimal literal: expected hex digits after '0x'".to_string(),
                 position: self.position(),
@@ -173,26 +184,30 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        // A hex literal running directly into an identifier character (e.g.
-        // `0x1Ag`) is a malformed token in SQLite, not a value plus alias.
-        self.reject_trailing_identifier_char(hex_start)?;
+        if illegal_trailing || (has_underscore && !Self::underscores_all_between(hex_body, true)) {
+            return Err(LexerError::unrecognized_token(full, self.position()));
+        }
 
-        // Parse the hex string to a number and convert to decimal string
-        // SQLite treats hex literals as 64-bit signed integers
-        match i64::from_str_radix(hex_str, 16) {
+        let hex_str = if has_underscore { hex_body.replace('_', "") } else { hex_body.to_string() };
+
+        // Parse the hex string to a number and convert to decimal string.
+        // SQLite treats hex literals as 64-bit signed integers.
+        match i64::from_str_radix(&hex_str, 16) {
             Ok(value) => Ok(Token::Number(value.to_string())),
             Err(_) => {
-                // For very large hex values, try parsing as u64 first
-                match u64::from_str_radix(hex_str, 16) {
+                // For very large hex values, try parsing as u64 first.
+                match u64::from_str_radix(&hex_str, 16) {
                     Ok(value) => {
-                        // SQLite interprets large hex values as signed (two's complement)
+                        // SQLite interprets large hex values as signed (two's complement).
                         Ok(Token::Number((value as i64).to_string()))
                     }
-                    Err(_) => Err(LexerError {
-                        message: format!("Hexadecimal literal '0x{}' is too large", hex_str),
-                        position: self.position(),
-                        near_token: Some(format!("0x{}", hex_str)),
-                    }),
+                    // A hex literal that needs more than 64 bits is rejected.
+                    // SQLite reports the original literal text: `hex literal
+                    // too big: 0x10000000000000000`.
+                    Err(_) => Err(LexerError::preformatted(
+                        format!("hex literal too big: {}", full),
+                        self.position(),
+                    )),
                 }
             }
         }
@@ -375,6 +390,66 @@ mod tests {
         for input in ["123a456", "1FROM", "1.5x", "0x1Ag", "42abc"] {
             let mut lexer = Lexer::new(input);
             assert!(lexer.tokenize().is_err(), "Expected error for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_unrecognized_token_reports_full_run() {
+        // SQLite's tokenizer absorbs the entire malformed numeric run and
+        // reports it as one `unrecognized token: "X"`. These pairs mirror the
+        // SQLite `literal.test` section-4 expectations exactly.
+        let cases = vec![
+            ("123a456", "123a456"),
+            ("1_", "1_"),
+            ("1_.4", "1_.4"),
+            ("1e_4", "1e_4"),
+            ("1_e4", "1_e4"),
+            ("1.4_e4", "1.4_e4"),
+            ("1.4e+_4", "1.4e"),
+            ("1.4e-_4", "1.4e"),
+            ("1.4e4_", "1.4e4_"),
+            ("1.4e_4", "1.4e_4"),
+            ("12__34", "12__34"),
+            ("1234_", "1234_"),
+            ("12._34", "12._34"),
+            ("12_.34", "12_.34"),
+            ("12.34_", "12.34_"),
+            ("1.0e1_______2", "1.0e1_______2"),
+        ];
+        for (input, expected_token) in cases {
+            let mut lexer = Lexer::new(input);
+            let err = lexer.tokenize().expect_err(&format!("expected error for {input}"));
+            assert_eq!(
+                err.to_string(),
+                format!("unrecognized token: \"{expected_token}\""),
+                "input: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hex_unrecognized_token_reports_full_run() {
+        let mut lexer = Lexer::new("0x1Ag");
+        let err = lexer.tokenize().expect_err("expected error");
+        assert_eq!(err.to_string(), "unrecognized token: \"0x1Ag\"");
+    }
+
+    #[test]
+    fn test_hex_underscore_separators() {
+        // SQLite 3.46+ allows underscores between hex digits in hex literals.
+        let cases = vec![("0xFF_FF", "65535"), ("0XFF_EF", "65519"), ("0x1_0", "16")];
+        for (input, expected) in cases {
+            let mut lexer = Lexer::new(input);
+            let tokens = lexer.tokenize().unwrap_or_else(|e| panic!("failed {input}: {e:?}"));
+            match &tokens[0] {
+                Token::Number(n) => assert_eq!(n, expected, "input: {input}"),
+                other => panic!("expected Number for {input}, got {other:?}"),
+            }
+        }
+        // Misplaced separators in hex are unrecognized tokens, matching SQLite.
+        for input in ["0xFF__EF", "0xFFEF_", "0x_FF"] {
+            let mut lexer = Lexer::new(input);
+            assert!(lexer.tokenize().is_err(), "expected error for {input}");
         }
     }
 

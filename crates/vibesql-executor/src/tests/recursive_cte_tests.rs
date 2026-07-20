@@ -740,3 +740,110 @@ fn test_recursive_cte_order_by_matches_select_alias() {
     .unwrap();
     assert_eq!(ints(&by_recursive), vec![1, 2, 3, 4, 5]);
 }
+
+/// Circular-reference detection and SQLite-compatible error messages.
+///
+/// Mirrors with2.test 3.1-3.4 and with1.test 3.1: mutual and self circular
+/// references between CTEs must report `circular reference: <name>`, naming the
+/// CTE closest to the query that reads the cycle (issue #6189).
+#[test]
+fn test_cte_circular_reference_errors() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Self-reference in a non-recursive body (with2.test 3.1).
+    let err =
+        execute_sql(&mut db, "WITH i(x, y) AS ( VALUES(1, (SELECT x FROM i)) ) SELECT * FROM i")
+            .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: i", "self-ref non-recursive CTE");
+
+    // Mutual cycle i -> j -> k -> i, queried via i (with2.test 3.2).
+    let err = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( SELECT * FROM j ), \
+              j(x) AS ( SELECT * FROM k ), \
+              k(x) AS ( SELECT * FROM i ) \
+         SELECT * FROM i",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: i", "3-CTE cycle named by entry i");
+
+    // Same two-CTE cycle read from j must be named by j (with2.test 3.4): the
+    // reported name follows the query's entry point, not declaration order.
+    let err = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( SELECT * FROM (SELECT * FROM j) ), \
+              j(x) AS ( SELECT * FROM (SELECT * FROM i) ) \
+         SELECT * FROM j",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: j", "cycle named by query entry j");
+
+    // Cycle whose members are declared in the reverse of reference order is
+    // still named by the entry the root reads (with1.test 3.1).
+    let err = execute_sql(
+        &mut db,
+        "WITH tmp2(x) AS ( SELECT * FROM tmp1 ), \
+              tmp1(a) AS ( SELECT * FROM tmp2 ) \
+         SELECT * FROM tmp1",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: tmp1", "cycle named by root entry tmp1");
+}
+
+/// CTE arity validation uses SQLite's `table X has N values for M columns`
+/// wording and fires before the UNION-consistency check (issue #6189,
+/// with1.test 5.6.x, with3.test 6.0/6.1).
+#[test]
+fn test_cte_column_count_mismatch_messages() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Declared columns exceed base-term values (with1.test 5.6.1).
+    let err = execute_sql(&mut db, "WITH i(x, y) AS ( VALUES(1) ) SELECT * FROM i").unwrap_err();
+    assert_eq!(err.to_string(), "table i has 1 values for 2 columns");
+
+    // Base term produces more values than declared (with1.test 5.6.2).
+    let err = execute_sql(&mut db, "WITH i(x) AS ( VALUES(1,2) ) SELECT * FROM i").unwrap_err();
+    assert_eq!(err.to_string(), "table i has 2 values for 1 columns");
+
+    // Arity check precedes the UNION-term consistency check (with1.test 5.6.4).
+    let err =
+        execute_sql(&mut db, "WITH i(x) AS ( SELECT 1, 2 UNION ALL SELECT 1 ) SELECT * FROM i")
+            .unwrap_err();
+    assert_eq!(err.to_string(), "table i has 2 values for 1 columns");
+
+    // Empty-body case is still validated statically (with1.test 5.6.3).
+    execute_sql(&mut db, "CREATE TABLE t5(a, b)").unwrap();
+    let err =
+        execute_sql(&mut db, "WITH i(x) AS ( SELECT * FROM t5 ) SELECT * FROM i").unwrap_err();
+    assert_eq!(err.to_string(), "table i has 2 values for 1 columns");
+
+    // Recursive term arity mismatch keeps SQLite's verbatim wording with no
+    // "Unsupported feature:" prefix (with1.test 5.6.6).
+    let err = execute_sql(
+        &mut db,
+        "WITH i(x) AS ( SELECT 1 UNION ALL SELECT x+1, x*2 FROM i ) SELECT * FROM i",
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "SELECTs to the left and right of UNION ALL do not have the same number of result columns"
+    );
+}
+
+/// An unreferenced CTE with a column-count mismatch is never evaluated, so it
+/// raises no error even in DML statements (issue #6189, with1.test 1.2/1.4).
+#[test]
+fn test_unreferenced_cte_not_validated() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t1(x INTEGER, y INTEGER)").unwrap();
+
+    // `x(a)` declares one column over a two-column table but is never read by
+    // the INSERT: no arity error.
+    execute_sql(&mut db, "WITH x(a) AS ( SELECT * FROM t1 ) INSERT INTO t1 VALUES(1, 2)")
+        .expect("unreferenced CTE must not be validated");
+
+    // Likewise as a no-op SELECT that does not reference the CTE.
+    let rows = execute_sql(&mut db, "WITH x(a) AS ( SELECT * FROM t1 ) SELECT 10").unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(10));
+}

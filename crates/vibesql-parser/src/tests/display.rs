@@ -254,10 +254,10 @@ fn test_token_display_eof() {
 
 #[test]
 fn test_lexer_error_display() {
-    // Test error without near_token (legacy format)
+    // Test error without near_token (SQLite-style: message emitted verbatim)
     let error =
         LexerError { message: "Unexpected character".to_string(), position: 42, near_token: None };
-    assert_eq!(format!("{}", error), "Lexer error at position 42: Unexpected character");
+    assert_eq!(format!("{}", error), "Unexpected character");
 
     // Test error with near_token (SQLite-compatible format)
     let error_with_token = LexerError {
