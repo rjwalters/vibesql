@@ -140,13 +140,15 @@ BUCKET_A_CLASSIFICATION = {
     # A9: Documented intentional engine divergence
     "badutf": "A9", "badutf2": "A9",
 
-    # --- Bucket-A pattern skips (vibesql_skip_patterns), all 13 ---
+    # --- Bucket-A pattern skips (vibesql_skip_patterns) ---
     # A2
     "e_wal-": "A2",
+    "e_reindex-1.": "A2",  # writable_schema/B-tree-corruption REINDEX harness (#6195; precedent fkey1-8.3)
     # A5 (harness-only collation / temp-session / libc-time helpers)
     "select9-2.*.3": "A5", "select9-2.*.6": "A5",
     "temptable-": "A5", "temptable2-": "A5",
     "date-6.": "A5", "date4-": "A5",
+    "e_reindex-2.": "A5", "reindex-2.": "A5", "reindex-3.": "A5",  # custom db-collate REINDEX (#6195, #5720)
     # A7 (EXPLAIN / VDBE-flag / fault-injection assertions)
     "indexexpr3-": "A7", "fordelete-": "A7",
     "fkey_malloc-": "A7", "windowfault-": "A7",
