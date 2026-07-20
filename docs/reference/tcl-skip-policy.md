@@ -119,7 +119,13 @@ VibeSQL, which uses its own WAL and has no B-tree page layer.
   `lock`, `lock5`, `sort2` (multi-threaded-sorter PMA config via
   `sqlite3_config`), `strict2` (writable_schema rootpage aliasing).
 - Pattern: `e_wal-` ("WAL mode not implemented" — VibeSQL ships its own WAL;
-  SQLite's WAL-pragma pager semantics are not applicable).
+  SQLite's WAL-pragma pager semantics are not applicable), `e_reindex-1.`
+  (the `e_reindex-1.*` block sets `PRAGMA writable_schema=1` + `sqlite3_db_config
+  DEFENSIVE 0` to delete/reinsert `sqlite_master` index rows, corrupt the on-disk
+  B-tree, then observe `REINDEX` + `PRAGMA integrity_check` repair it — the
+  SQLite-internal writable_schema/B-tree-corruption harness, same precedent as
+  the named `fkey1-8.3` skip; `e_reindex-1.4`'s bare `REINDEX` depends on the
+  corrupted state from `1.1`–`1.3`, so the whole section is out of scope. #6195).
 
 ### A3. Unshipped extensions / virtual tables
 
@@ -152,7 +158,14 @@ extension, with no SQL-CLI-reachable equivalent.
   `temptable2-` (require cross-test session state the process-per-batch shim
   cannot hold), `date-6.` (localtime DST needs the `SQLITE_TESTCTRL_LOCALTIME_FAULT`
   harness override), `date4-` (compares against libc `strftime`; shim stubs it via
-  `clock format`).
+  `clock format`), `e_reindex-2.`, `reindex-2.`, `reindex-3.` (custom Tcl
+  collations registered via `db collate collA/collB` / `db collate c1/c2`, used to
+  verify `REINDEX` rebuilds indexes when a collation function changes; the shim
+  cannot bridge these C-API collations to the CLI subprocess — same class as
+  `select9-2.*.3`. These are the collation-gated half of the `e_reindex`/`reindex`
+  **straddlers**: the bare-`REINDEX` + built-in-collation cases `e_reindex-0.*`,
+  `reindex-1.*`, and `reindex-4.*` stay visible; `reindex-4.*` uses no custom
+  collation and remains in-scope. #6195, #5720).
 
 ### A6. Permutation / suite dispatchers
 
@@ -257,6 +270,16 @@ bulk-skipped: SAVEPOINT (`savepoint*`), VACUUM/ATTACH (`vacuum*`, `attach*`,
 databases (`memdb*`), transaction/ROLLBACK semantics (`trans`, `trans3`,
 `rollback`, `rollback2`), the parser tokenizer (`tokenize`), and the TCL-interface
 file (`tclsqlite`). These remain in-scope failures tracked by #6170–#6177.
+
+The `REINDEX` files `e_reindex` and `reindex` are handled the same straddler way
+(#6195, #5720): the collation-gated and writable_schema-corruption sub-sections
+are narrow **pattern** skips (`e_reindex-2.`/`reindex-2.`/`reindex-3.` → A5;
+`e_reindex-1.` → A2), while the in-scope bare-`REINDEX` + built-in-collation cases
+(`e_reindex-0.*`, `reindex-1.*`, `reindex-4.*`) stay visible — including the
+genuinely-failing `reindex-1.9` (`REINDEX bogus` should raise "unable to identify
+the object to be reindexed" but the shim strips `REINDEX` to a no-op), which is
+kept visible as an in-scope failure and tracked in its own linked engine issue
+(#6232) rather than hidden.
 
 **Certified by-category denominator (run_id=1, `tcl_test_results`).** After
 reclassification the certified 7,123 detail-table failures (incl. markers)
