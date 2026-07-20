@@ -789,6 +789,37 @@ fn test_pragma_table_info_integer_primary_key_notnull_is_zero() {
 }
 
 #[test]
+fn test_pragma_table_info_composite_pk_positions() {
+    // A normal composite PRIMARY KEY reports 1-based positions in declared order.
+    // Regression guard for #6175 (pragma-6.8, no-duplicate case).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE tk(a, b, c, PRIMARY KEY(a, b, c))").unwrap();
+    let result = executor.execute("PRAGMA table_info(tk)").unwrap();
+    assert_eq!(result.row_count, 3);
+    // pk column is index 5.
+    assert_eq!(result.rows[0][5].as_deref(), Some("1"), "a is pk position 1");
+    assert_eq!(result.rows[1][5].as_deref(), Some("2"), "b is pk position 2");
+    assert_eq!(result.rows[2][5].as_deref(), Some("3"), "c is pk position 3");
+}
+
+#[test]
+fn test_pragma_table_info_composite_pk_duplicate_column_gap() {
+    // SQLite keys pk position off each column's *first* occurrence in the
+    // declared PRIMARY KEY list, but a repeated column still consumes an
+    // ordinal. `PRIMARY KEY(a,b,a,c)` therefore yields a=1, b=2, c=4 (the
+    // duplicate `a` consumes position 3). Regression guard for #6175
+    // (pragma-6.8).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t68(a, b, c, PRIMARY KEY(a, b, a, c))").unwrap();
+    let result = executor.execute("PRAGMA table_info(t68)").unwrap();
+    assert_eq!(result.row_count, 3);
+    // pk column is index 5.
+    assert_eq!(result.rows[0][5].as_deref(), Some("1"), "a is pk position 1");
+    assert_eq!(result.rows[1][5].as_deref(), Some("2"), "b is pk position 2");
+    assert_eq!(result.rows[2][5].as_deref(), Some("4"), "c is pk position 4 (dup a consumed 3)");
+}
+
+#[test]
 fn test_pragma_index_info_reports_key_columns() {
     // PRAGMA index_info(idx) returns one row per key column: seqno, cid (table
     // column rank), name. The `= idx` form is accepted the same as `(idx)`.

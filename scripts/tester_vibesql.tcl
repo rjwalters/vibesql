@@ -1203,6 +1203,60 @@ proc substitute_tcl_vars {sql} {
             $sql_value]
     }
 
+    # Handle TCL array-element references: $arr(elem)
+    #
+    # SQLite's TCL binding treats `$arr(elem)` as a single bound parameter whose
+    # value is the array element arr(elem) in the caller's scope. This is the
+    # idiom used by capture_pragma (pragma.test / index7.test), which iterates a
+    # PRAGMA with `db eval $sql x { ... }` (populating x(colname)) and then
+    # builds `INSERT INTO out VALUES($x(seq),$x(name),...)`. Without resolving the
+    # array element here we would forward the literal `$x(seq)` to VibeSQL, whose
+    # parser rejects it ("near \"(\": syntax error").
+    #
+    # This pass runs BEFORE the plain $var pass: otherwise the plain pattern would
+    # match the `$x` prefix, fail to read the array as a scalar, and leave the
+    # dangling `(seq)` behind. The element name is a bare identifier (optionally
+    # `*`, the column-name list key that db-eval sets).
+    set array_var_pattern {\$([a-zA-Z_][a-zA-Z0-9_]*)\(([a-zA-Z_*][a-zA-Z0-9_]*)\)}
+
+    set prev_result ""
+    while {$result ne $prev_result} {
+        set prev_result $result
+
+        # Find the first array-element reference
+        if {![regexp $array_var_pattern $result match arrname elemname]} {
+            break
+        }
+
+        # Resolve the array element, searching innermost scope outward, then
+        # global (mirroring the plain $var resolution order below).
+        set found 0
+        set value ""
+        for {set level 1} {$level <= $max_level} {incr level} {
+            if {[catch {set value [uplevel $level [list set "${arrname}($elemname)"]]}] == 0} {
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            if {[catch {set value [uplevel #0 [list set "${arrname}($elemname)"]]}] == 0} {
+                set found 1
+            }
+        }
+
+        if {!$found} {
+            # Not found - leave as-is (will surface as a SQL error) and stop to
+            # avoid an infinite loop on this match.
+            break
+        }
+
+        set sql_value [format_sql_value $value]
+        set result [string replace $result \
+            [string first $match $result] \
+            [expr {[string first $match $result] + [string length $match] - 1}] \
+            $sql_value]
+    }
+
     # Now handle regular $var patterns
     # Pattern to match TCL variable references in SQL
     # Matches: $varname or ${varname}
