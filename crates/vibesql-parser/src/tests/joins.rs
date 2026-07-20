@@ -557,6 +557,61 @@ fn test_parse_comma_without_on_still_cross_join() {
 }
 
 #[test]
+fn test_parse_legacy_comma_join_using(/* issue #6192 */) {
+    // SQLite treats "," exactly like CROSS/INNER JOIN, so a USING clause is
+    // legal after a comma-join and turns the cartesian product into an inner
+    // join. Previously the parser accepted `FROM t1, t2 ON ...` but rejected
+    // `FROM t1, t2 USING (...)` with a spurious `near "USING": syntax error`
+    // (e_select-0.1.2 / 1.4 / 1.5 / 1.6 / 1.7 comma variants).
+    let result = Parser::parse_sql("SELECT * FROM t1, t2 USING (a);");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join {
+                join_type,
+                condition,
+                using_columns,
+                natural,
+                ..
+            } => {
+                // Comma-join with USING behaves like INNER JOIN ... USING.
+                assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                assert!(!*natural);
+                assert!(condition.is_none(), "USING join carries no ON condition");
+                let cols = using_columns.as_ref().expect("Expected USING columns");
+                assert_eq!(cols.len(), 1);
+                assert_eq!(cols[0], "a");
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
+fn test_parse_legacy_comma_join_using_multiple_columns(/* issue #6192 */) {
+    let result = Parser::parse_sql("SELECT * FROM t3, t4 USING (a, c);");
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+    let stmt = result.unwrap();
+
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
+            vibesql_ast::FromClause::Join { join_type, using_columns, .. } => {
+                assert_eq!(*join_type, vibesql_ast::JoinType::Inner);
+                let cols = using_columns.as_ref().expect("Expected USING columns");
+                assert_eq!(cols.len(), 2);
+                assert_eq!(cols[0], "a");
+                assert_eq!(cols[1], "c");
+            }
+            _ => panic!("Expected JOIN"),
+        },
+        _ => panic!("Expected SELECT"),
+    }
+}
+
+#[test]
 fn test_parse_join_using_contextual_keyword_column(/* issue #5945 */) {
     // Contextual keywords (`m`, `key`, `level`) must be accepted as unquoted
     // column names in a JOIN ... USING (...) list, matching SQLite.

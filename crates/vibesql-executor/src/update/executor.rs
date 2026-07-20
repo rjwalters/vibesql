@@ -473,17 +473,23 @@ pub(super) fn execute_internal(
                 continue; // Skip this row
             }
 
-            // Validate foreign key constraints
+            // Validate foreign key constraints.
+            //
+            // Unlike NOT NULL / UNIQUE / PK / CHECK conflicts above, a FOREIGN
+            // KEY violation is NOT subject to the OR IGNORE conflict-resolution
+            // algorithm: SQLite always raises "FOREIGN KEY constraint failed"
+            // for an immediate violation and defers a DEFERRABLE one to COMMIT,
+            // regardless of OR IGNORE (fkey2-20.3). So propagate the immediate
+            // error instead of skipping the row; only genuinely deferred
+            // violations are queued.
             if !schema.foreign_keys.is_empty() {
-                match ForeignKeyValidator::collect_constraints_with_old(
+                let deferred = ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &new_row.values,
                     Some(&row.values),
-                ) {
-                    Ok(deferred) => pending_deferred_violations.extend(deferred),
-                    Err(_) => continue, // Skip this row
-                }
+                )?;
+                pending_deferred_violations.extend(deferred);
             }
         } else if use_replace {
             // For REPLACE: validate NOT NULL and CHECK constraints, but skip PK/UNIQUE
@@ -1732,8 +1738,13 @@ fn apply_generated_columns_for_update(
         if let Some(generated_expr) = &col.generated_expr {
             // Evaluate the generated expression against the current row
             let generated_value = evaluator.eval(generated_expr, row)?;
-            let coerced_value =
-                crate::insert::validation::coerce_value(generated_value, &col.data_type)?;
+            // STRICT tables (issue #6173) enforce the rigid strict-datatype
+            // rules on the recomputed generated value, matching the INSERT path.
+            let coerced_value = if let Some(st) = schema.strict_type_of(col_idx) {
+                crate::strict::enforce_strict_type(generated_value, st, &schema.name, &col.name)?
+            } else {
+                crate::insert::validation::coerce_value(generated_value, &col.data_type)?
+            };
 
             // Check if the value actually changed
             let old_value = row.get(col_idx);

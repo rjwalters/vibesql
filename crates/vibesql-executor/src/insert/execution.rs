@@ -245,6 +245,22 @@ fn execute_insert_internal(
     // which case firing falls back to the legacy schema-unaware match.
     let dml_schema: Option<String> = db.catalog.resolve_table_schema_name(&full_table_name);
 
+    // Validate INSERT trigger body statements at prepare time (mirrors the
+    // DELETE path). SQLite resolves a trigger's body when the firing INSERT is
+    // prepared, so a body with an unresolvable column reference (triggerB-2.1's
+    // `SELECT wen.x`) or a mis-arity scalar subquery (#6046) errors *before* the
+    // INSERT's own constraint checks run. Only at the top level (not inside
+    // another trigger's body), matching SQLite's prepare of the outermost
+    // statement.
+    if trigger_context.is_none() {
+        crate::TriggerFirer::validate_trigger_bodies_for_event(
+            db,
+            table_name,
+            vibesql_ast::TriggerEvent::Insert,
+            dml_schema.as_deref(),
+        )?;
+    }
+
     // Validate every explicit ON CONFLICT (cols) target up front. SQLite
     // does this at prepare time, even when no row actually conflicts:
     // unknown columns raise "no such column" and known columns without a
@@ -1791,30 +1807,19 @@ fn check_would_violate_constraints(
         }
     }
 
-    // Check FOREIGN KEY constraints
-    for fk in &schema.foreign_keys {
-        let fk_values: Vec<vibesql_types::SqlValue> =
-            fk.column_indices.iter().map(|&idx| row_values[idx].clone()).collect();
-
-        // Skip if any FK value is NULL
-        if fk_values.iter().any(|v| v.is_null()) {
-            continue;
-        }
-
-        // Check if referenced key exists in parent table
-        if let Some(parent_table) = db.get_table(&fk.parent_table) {
-            let key_exists = parent_table.scan().iter().any(|parent_row| {
-                fk.parent_column_indices
-                    .iter()
-                    .zip(&fk_values)
-                    .all(|(&parent_idx, fk_val)| parent_row.get(parent_idx) == Some(fk_val))
-            });
-
-            if !key_exists {
-                return true;
-            }
-        }
-    }
+    // NOTE: FOREIGN KEY constraints are intentionally NOT checked here.
+    //
+    // This helper decides whether an OR IGNORE / untargeted DO NOTHING row
+    // should be silently skipped. Per SQLite, the ON CONFLICT algorithm applies
+    // only to NOT NULL, UNIQUE, PRIMARY KEY, and CHECK constraints — it does
+    // *not* apply to FOREIGN KEY constraints. An immediate FK violation must
+    // always raise "FOREIGN KEY constraint failed" (never be swallowed by
+    // OR IGNORE), and a deferred FK violation must be queued for COMMIT-time
+    // re-validation rather than dropping the row. Both are handled downstream
+    // by `RowValidator::validate_foreign_keys` (which also honors
+    // `PRAGMA foreign_keys` gating), so treating a missing parent key as an
+    // "ignorable conflict" here would both suppress real errors and misbehave
+    // when foreign keys are disabled (fkey2-20.2/20.3).
 
     false
 }

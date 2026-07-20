@@ -850,6 +850,29 @@ pub(super) fn derive_cte_schema(
 
             Ok(cte_pseudo_schema(cte.name.clone(), columns))
         }
+    } else if cte.query.values.is_some() {
+        // A CTE whose body is a bare `VALUES (...)` clause has no select_list to
+        // infer names from. SQLite auto-names such columns `column1`, `column2`,
+        // ... so `WITH v AS (VALUES('a','b')) SELECT column1 FROM v` and
+        // `SELECT * FROM v` resolve (values.test 8.1.*). Derive the width from
+        // the materialized rows (falling back to the VALUES AST row width when
+        // the result set is empty).
+        let width = rows
+            .first()
+            .map(|r| r.values.len())
+            .or_else(|| cte.query.values.as_ref().and_then(|vr| vr.first()).map(|r| r.len()))
+            .unwrap_or(0);
+        let columns = (0..width)
+            .map(|i| {
+                let data_type = rows
+                    .first()
+                    .and_then(|first_row| first_row.values.get(i))
+                    .map(infer_type_from_value)
+                    .unwrap_or(vibesql_types::DataType::Varchar { max_length: Some(255) });
+                vibesql_catalog::ColumnSchema::new(format!("column{}", i + 1), data_type, true)
+            })
+            .collect();
+        Ok(cte_pseudo_schema(cte.name.clone(), columns))
     } else {
         // No explicit column names - infer from query SELECT list.
         // Wildcard items are statically expanded into the column names of the

@@ -1991,20 +1991,9 @@ impl SqlExecutor {
             }
         };
 
-        // Build a name->pk-position map (1-based) for primary key lookups.
-        // For composite keys, the position is the column's position within
-        // the declared primary-key column list.
-        let pk_positions: std::collections::HashMap<String, usize> =
-            match schema.primary_key.as_ref() {
-                Some(pk_cols) => {
-                    pk_cols.iter().enumerate().map(|(i, name)| (name.clone(), i + 1)).collect()
-                }
-                None => std::collections::HashMap::new(),
-            };
-
         // Recover per-column *declaration* facts that the catalog's affinity-only
         // `data_type` / `nullable` fields cannot express, by re-parsing the
-        // verbatim CREATE TABLE text (`sql_source`). Two SQLite `table_info`
+        // verbatim CREATE TABLE text (`sql_source`). Several SQLite `table_info`
         // quirks depend on the original declaration rather than the internal
         // affinity/rowid state:
         //
@@ -2017,35 +2006,82 @@ impl SqlExecutor {
         //     (VibeSQL sets `nullable = false`) yet SQLite reports `notnull = 0`
         //     for it. Deriving notnull from the explicit NOT NULL constraint in
         //     the source matches SQLite exactly.
+        //   * The `pk` column reports the 1-based position of a column within the
+        //     declared PRIMARY KEY. SQLite keys this off the *first* occurrence
+        //     of each column in the declared key list but still advances the
+        //     ordinal for repeated columns, so `PRIMARY KEY(a,b,a,c)` yields
+        //     a=1, b=2, c=4 (the duplicate `a` consumes position 3). VibeSQL's
+        //     catalog `primary_key` list is de-duplicated and loses that gap, so
+        //     we recover the raw ordinals from the re-parsed table-level PK
+        //     constraint.
         //
-        // Keyed by lowercase column name. Absent (no sql_source, a CREATE ... AS
-        // SELECT with no explicit column list, or a re-parse failure) means we
-        // fall back to the catalog-derived behavior below, unchanged.
-        let decl_facts: std::collections::HashMap<String, (bool, bool)> = {
-            let mut map = std::collections::HashMap::new();
-            if let Some(src) = schema.sql_source.as_deref() {
-                if let Ok(vibesql_ast::Statement::CreateTable(create)) =
-                    vibesql_parser::Parser::parse_sql(src)
-                {
-                    if create.as_query.is_none() {
-                        for col in &create.columns {
-                            let is_typeless = col.type_source.is_none();
-                            let explicit_not_null = col.constraints.iter().any(|c| {
-                                matches!(
-                                    c.kind,
-                                    vibesql_ast::ColumnConstraintKind::NotNull
-                                        | vibesql_ast::ColumnConstraintKind::NotNullWithConflict { .. }
-                                )
-                            });
-                            map.insert(
-                                col.name.to_lowercase(),
-                                (is_typeless, explicit_not_null),
-                            );
+        // `decl_facts` is keyed by lowercase column name. Absent (no sql_source,
+        // a CREATE ... AS SELECT with no explicit column list, or a re-parse
+        // failure) means we fall back to the catalog-derived behavior below,
+        // unchanged. `pk_source_positions` is likewise a best-effort override.
+        let mut decl_facts: std::collections::HashMap<String, (bool, bool)> =
+            std::collections::HashMap::new();
+        let mut pk_source_positions: Option<std::collections::HashMap<String, usize>> = None;
+        if let Some(src) = schema.sql_source.as_deref() {
+            if let Ok(vibesql_ast::Statement::CreateTable(create)) =
+                vibesql_parser::Parser::parse_sql(src)
+            {
+                if create.as_query.is_none() {
+                    for col in &create.columns {
+                        let is_typeless = col.type_source.is_none();
+                        let explicit_not_null = col.constraints.iter().any(|c| {
+                            matches!(
+                                c.kind,
+                                vibesql_ast::ColumnConstraintKind::NotNull
+                                    | vibesql_ast::ColumnConstraintKind::NotNullWithConflict { .. }
+                            )
+                        });
+                        decl_facts
+                            .insert(col.name.to_lowercase(), (is_typeless, explicit_not_null));
+                    }
+
+                    // Derive raw pk ordinals from a table-level PRIMARY KEY
+                    // constraint, preserving the duplicate-consumes-a-position
+                    // rule. Column-level PKs (single column) are left to the
+                    // catalog fallback, which already reports position 1.
+                    for tc in &create.table_constraints {
+                        if let vibesql_ast::TableConstraintKind::PrimaryKey { columns, .. } =
+                            &tc.kind
+                        {
+                            let mut map = std::collections::HashMap::new();
+                            for (idx, ic) in columns.iter().enumerate() {
+                                if let Some(name) = ic.column_name() {
+                                    // First occurrence wins; later duplicates
+                                    // still advanced `idx`, leaving the gap.
+                                    // Keyed by lowercase for case-insensitive
+                                    // column matching (SQLite semantics).
+                                    map.entry(name.to_lowercase()).or_insert(idx + 1);
+                                }
+                            }
+                            if !map.is_empty() {
+                                pk_source_positions = Some(map);
+                            }
+                            break;
                         }
                     }
                 }
             }
-            map
+        }
+
+        // Build a name->pk-position map (1-based) for primary key lookups.
+        // Prefer the source-derived ordinals (which honor SQLite's
+        // duplicate-column gap); otherwise fall back to the catalog's
+        // de-duplicated primary-key list.
+        let pk_positions: std::collections::HashMap<String, usize> = match pk_source_positions {
+            Some(map) => map,
+            None => match schema.primary_key.as_ref() {
+                Some(pk_cols) => pk_cols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| (name.to_lowercase(), i + 1))
+                    .collect(),
+                None => std::collections::HashMap::new(),
+            },
         };
 
         let mut rows: Vec<Vec<Option<String>>> = Vec::with_capacity(schema.columns.len());
@@ -2090,7 +2126,7 @@ impl SqlExecutor {
             });
 
             // pk: 1-based position within the primary key, or 0 if not PK.
-            let pk = pk_positions.get(&column.name).copied().unwrap_or(0);
+            let pk = pk_positions.get(&column.name.to_lowercase()).copied().unwrap_or(0);
 
             rows.push(vec![
                 Some(cid.to_string()),

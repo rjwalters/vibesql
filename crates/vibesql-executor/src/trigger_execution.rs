@@ -306,8 +306,19 @@ impl<'a> TriggerContext<'a> {
         }
 
         // Not a real column and not a resolvable rowid pseudo-column.
+        //
+        // SQLite reports an unresolved OLD/NEW column reference with the
+        // pseudo-table qualifier intact — e.g. `no such column: old.c`, not
+        // `no such column: c` (triggerB-2.4). Build the qualified name so the
+        // rendered message matches sqlite3. The error *type* stays
+        // `ColumnNotFound` so the prepare-time WHEN/body validation passes
+        // (which match on `ColumnNotFound`) still propagate it.
+        let pseudo_prefix = match pseudo_table {
+            PseudoTable::Old => "old",
+            PseudoTable::New => "new",
+        };
         Err(ExecutorError::ColumnNotFound {
-            column_name: column.to_string(),
+            column_name: format!("{}.{}", pseudo_prefix, column),
             table_name: self.table_schema.name.clone(),
             searched_tables: vec![self.table_schema.name.clone()],
             available_columns: self.table_schema.columns.iter().map(|c| c.name.clone()).collect(),
@@ -485,6 +496,11 @@ impl TriggerFirer {
             .cloned()
             .collect::<Vec<_>>();
 
+        // Resolve the firing table's schema once for OLD/NEW column resolution
+        // in the body-column check below. Failure here is not fatal to the arity
+        // check, so it is only computed lazily when a body SELECT needs it.
+        let mut null_ctx_schema: Option<TableSchema> = None;
+
         for trigger in &triggers {
             let sql = match &trigger.triggered_action {
                 vibesql_ast::TriggerAction::RawSql(sql) => sql,
@@ -493,6 +509,83 @@ impl TriggerFirer {
             for statement in &statements {
                 if let vibesql_ast::Statement::Select(select) = statement {
                     validate_select_scalar_subquery_arity(select, db)?;
+
+                    // SQLite resolves the names in a trigger body at
+                    // statement-prepare time, so a body `SELECT wen.x` (an
+                    // unresolvable qualified reference) errors *before* the
+                    // firing DML runs — even when the DML itself would fail a
+                    // constraint (triggerB-2.1). VibeSQL resolves body
+                    // statements lazily at fire time, so without this pass the
+                    // constraint error wins. Reproduce the prepare-time check
+                    // for the safe subset: a bare `SELECT <col-ref>, ...` with
+                    // no FROM clause, evaluating only pure column-reference
+                    // projection items against a synthetic NULL OLD/NEW row.
+                    // Restricting to column references keeps this side-effect
+                    // free (no RAISE()/function/subquery is ever evaluated).
+                    if null_ctx_schema.is_none() {
+                        null_ctx_schema = Self::resolve_trigger_schema(db, table_name).ok();
+                    }
+                    if let Some(schema) = &null_ctx_schema {
+                        Self::validate_body_select_column_refs(db, schema, select)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Resolve pure column references in a trigger-body `SELECT` at DML-prepare
+    /// time, propagating only name-resolution failures.
+    ///
+    /// Restricted to the side-effect-free subset — a `SELECT <expr>, ...` with no
+    /// FROM clause, and within it only projection items whose expression is a
+    /// bare column reference (`ColumnRef` or an OLD/NEW `PseudoVariable`). This
+    /// catches `SELECT wen.x` / `SELECT old.nosuchcol` without ever evaluating a
+    /// `RAISE()`, function call, or subquery (which could have side effects or
+    /// depend on real row data). Only column/table resolution errors surface;
+    /// every other evaluation outcome is left to the per-row fire-time path.
+    fn validate_body_select_column_refs(
+        db: &Database,
+        schema: &TableSchema,
+        select: &vibesql_ast::SelectStmt,
+    ) -> Result<(), ExecutorError> {
+        // Only a bare projection list is safe to probe. A FROM clause introduces
+        // other tables whose columns are legitimately unresolvable against the
+        // firing-table schema alone.
+        if select.from.is_some() {
+            return Ok(());
+        }
+
+        let is_view = db.catalog.get_table(&schema.name).is_none();
+        let null_row = Row::new(vec![SqlValue::Null; schema.columns.len()]);
+        let trigger_context = TriggerContext {
+            old_row: Some(&null_row),
+            new_row: Some(&null_row),
+            table_schema: schema,
+            is_view,
+        };
+        let evaluator =
+            crate::ExpressionEvaluator::with_trigger_context(schema, db, &trigger_context);
+
+        for item in &select.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                let is_pure_column_ref = matches!(
+                    expr,
+                    vibesql_ast::Expression::ColumnRef(_)
+                        | vibesql_ast::Expression::PseudoVariable { .. }
+                );
+                if !is_pure_column_ref {
+                    continue;
+                }
+                match evaluator.eval(expr, &null_row) {
+                    // Name-resolution failures must surface at prepare time.
+                    Err(e @ ExecutorError::ColumnNotFound { .. })
+                    | Err(e @ ExecutorError::InvalidTableQualifier { .. })
+                    | Err(e @ ExecutorError::TableNotFound(_))
+                    | Err(e @ ExecutorError::SqliteCompatError(_)) => return Err(e),
+                    // A resolved value or any other outcome is fine here.
+                    _ => {}
                 }
             }
         }

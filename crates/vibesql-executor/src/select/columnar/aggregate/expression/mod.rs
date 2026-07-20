@@ -79,9 +79,23 @@ pub fn extract_aggregates(
 
     for expr in exprs.iter() {
         match expr {
-            Expression::AggregateFunction { name, distinct, args, .. } => {
+            Expression::AggregateFunction { name, distinct, args, filter, .. } => {
                 // DISTINCT not supported for columnar optimization
                 if *distinct {
+                    return None;
+                }
+
+                // FILTER (WHERE ...) on an aggregate is not represented by
+                // AggregateSpec, so lowering here would silently drop it (e.g.
+                // `sum(a) FILTER (WHERE a<5)` would aggregate over every row).
+                // Bail out to the row-oriented path. (#6191)
+                //
+                // An aggregate ORDER BY (e.g. `count(ORDER BY a)`) is
+                // order-independent for every columnar-supported op
+                // (SUM/COUNT/AVG/MIN/MAX/VARIANCE/STDDEV), so it is safely
+                // ignored here — order-sensitive aggregates like group_concat
+                // are not in the supported-op set and already bail below.
+                if filter.is_some() {
                     return None;
                 }
 

@@ -45,6 +45,18 @@ impl Database {
             }
         }
 
+        // #6199 Phase 0: a configured `columnar_cache_budget` of 0 disables the
+        // representation cache entirely. For row-oriented tables there is then
+        // no cached columnar form, so every consumer of `get_columnar` (the
+        // SIMD scan filter, analytical columnar execution, and columnar joins)
+        // receives `None` and falls back to the row path — matching
+        // `VIBESQL_DISABLE_COLUMNAR=1` parity. Native columnar tables are
+        // handled above and are unaffected (their data is table-resident, not
+        // cache-managed).
+        if self.columnar_cache.max_memory() == 0 {
+            return Ok(None);
+        }
+
         // Check cache first (for row-oriented tables)
         if let Some(cached) = self.columnar_cache.get(table_name) {
             return Ok(Some(cached));
@@ -369,5 +381,90 @@ mod tests {
         assert_eq!(stats1.conversions, 1);
         assert_eq!(stats2.conversions, 1, "Second pre-warm should not cause additional conversion");
         assert_eq!(stats2.hits, stats1.hits + 1, "Second pre-warm should result in cache hit");
+    }
+
+    // ========================================================================
+    // #6199 Phase 0 — user-configurable columnar cache budget behavior
+    // ========================================================================
+
+    /// A `columnar_cache_budget` of 0 disables the representation cache: for a
+    /// row-oriented table, `get_columnar` returns `None` so every consumer
+    /// falls back to the row path, and the cache never becomes resident
+    /// (`CacheStats` stays all-zero, `memory_usage()` stays 0). The row data is
+    /// still fully available via the row path — parity with the enabled cache.
+    #[test]
+    fn test_columnar_cache_budget_zero_disables_and_forces_row_path() {
+        let mut config = crate::DatabaseConfig::server_default();
+        config.columnar_cache_budget = 0;
+        let mut db = Database::with_config(config);
+
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(100) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // The representation cache is disabled: a row-oriented table yields no
+        // columnar form, so consumers take the row path.
+        assert_eq!(db.columnar_cache_budget(), 0, "budget should be reported as 0 (disabled)");
+        assert!(
+            db.get_columnar("t").unwrap().is_none(),
+            "disabled cache must return None for a row-oriented table (row path)"
+        );
+
+        // Repeated access must never make the cache resident or accrue stats.
+        let _ = db.get_columnar("t").unwrap();
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 0, "disabled cache must perform no conversions");
+        assert_eq!(stats.hits, 0, "disabled cache must record no hits");
+        assert_eq!(stats.evictions, 0, "disabled cache must record no evictions");
+        assert_eq!(db.columnar_cache_memory_usage(), 0, "disabled cache must stay at 0 bytes");
+
+        // Parity: the same rows are still fully available via the row path.
+        let rows = db.get_table("t").expect("table exists").scan_live_vec();
+        assert_eq!(rows.len(), 100, "row path must expose all rows when cache is disabled");
+
+        // Contrast: an enabled cache DOES produce a columnar form for the same
+        // data, proving the knob (not some unrelated condition) gates behavior.
+        let mut enabled = Database::with_config(crate::DatabaseConfig::server_default());
+        enabled.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(100) {
+            enabled.insert_row("t", row).unwrap();
+        }
+        assert!(
+            enabled.get_columnar("t").unwrap().is_some(),
+            "an enabled cache must produce a columnar representation"
+        );
+        assert!(
+            enabled.columnar_cache_stats().conversions > 0,
+            "an enabled cache must record at least one conversion"
+        );
+    }
+
+    /// A small non-zero budget forces LRU eviction once cached tables exceed the
+    /// budget: `CacheStats.evictions` must be > 0 after populating several
+    /// tables through `get_columnar`.
+    #[test]
+    fn test_small_columnar_cache_budget_forces_eviction() {
+        // Tiny budget so a second resident table evicts the first.
+        let mut config = crate::DatabaseConfig::server_default();
+        config.columnar_cache_budget = 512; // bytes
+        let mut db = Database::with_config(config);
+
+        for name in ["t1", "t2", "t3"] {
+            db.create_table(create_test_table_schema(name)).unwrap();
+            for row in create_test_rows(100) {
+                db.insert_row(name, row).unwrap();
+            }
+            // Populate the cache for this table (convert + insert).
+            let cached = db.get_columnar(name).unwrap();
+            assert!(cached.is_some(), "enabled (non-zero) cache should produce columnar data");
+        }
+
+        let stats = db.columnar_cache_stats();
+        assert!(
+            stats.evictions > 0,
+            "a small budget must force at least one eviction (got {})",
+            stats.evictions
+        );
     }
 }
