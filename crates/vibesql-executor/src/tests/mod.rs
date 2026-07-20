@@ -139,6 +139,7 @@ mod sql_mode_tests;
 mod subquery_mysql_compat;
 mod timeout_enforcement;
 mod transaction_tests;
+mod trigger_body_name_resolution_tests;
 mod trigger_case_body_tests;
 mod triggers;
 mod truncate_cascade_tests;
