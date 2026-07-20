@@ -612,6 +612,34 @@ fn test_parse_legacy_comma_join_using_multiple_columns(/* issue #6192 */) {
 }
 
 #[test]
+fn test_bare_on_or_using_without_join_reports_descriptive_error(/* tkt3935 / issue #6194 */) {
+    // A join constraint (ON / USING) that directly follows the first FROM
+    // table term with no preceding join operator is a specific SQLite error,
+    // not a bare token syntax error.
+    //
+    // - `FROM t ON <expr>`            -> "a JOIN clause is required before ON"
+    // - `FROM t USING (...)`          -> "a JOIN clause is required before USING"
+    // - `FROM t ON <expr> USING (...)`-> token syntax error at the trailing USING
+    let cases = [
+        ("SELECT a FROM t1 AS t ON b;", "a JOIN clause is required before ON"),
+        ("SELECT a FROM (t1) AS t ON b;", "a JOIN clause is required before ON"),
+        ("SELECT a FROM (SELECT * FROM t1) AS t ON b;", "a JOIN clause is required before ON"),
+        ("SELECT a FROM t1 AS t USING(a);", "a JOIN clause is required before USING"),
+    ];
+    for (sql, expected) in cases {
+        let err = Parser::parse_sql(sql).expect_err(sql).message;
+        assert_eq!(err, expected, "for {sql}");
+    }
+
+    // `ON <expr> USING(...)`: the trailing USING is a token-level syntax error
+    // (SQLite: near "USING": syntax error), reported before the missing-JOIN
+    // diagnostic.
+    let err =
+        Parser::parse_sql("SELECT a FROM t1 AS t ON b USING(a);").expect_err("on+using").message;
+    assert_eq!(err, "near \"USING\": syntax error");
+}
+
+#[test]
 fn test_parse_join_using_contextual_keyword_column(/* issue #5945 */) {
     // Contextual keywords (`m`, `key`, `level`) must be accepted as unquoted
     // column names in a JOIN ... USING (...) list, matching SQLite.
