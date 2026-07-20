@@ -118,42 +118,17 @@ pub fn evaluate_default_expression(
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match expr {
         vibesql_ast::Expression::Literal(lit) => Ok(lit.clone()),
-        // Support unary plus/minus for DEFAULT expressions like "default +4.32" or "default -5"
+        // Unary operators over a materialized constant are all valid in DEFAULT
+        // expressions: unary +/- (`DEFAULT +4.32`, `DEFAULT -5`), logical NOT
+        // (istrue.test istrue-510: `DEFAULT(not true)` → 0), and bitwise NOT.
+        // The inner value is already a constant, so reuse the shared,
+        // SQLite-accurate unary evaluator rather than duplicating its
+        // truthiness / string-to-number / integer-coercion rules here. This is
+        // what makes `DEFAULT +0x7FFFFFFFFFFFFFFF` and `DEFAULT -'0xFF'` (→ 0)
+        // materialize with the same semantics as `SELECT` (literal.test 1.9/1.13).
         vibesql_ast::Expression::UnaryOp { op, expr } => {
             let inner = evaluate_default_expression(expr)?;
-            match op {
-                vibesql_ast::UnaryOperator::Plus => Ok(inner), // +x = x
-                vibesql_ast::UnaryOperator::Minus => {
-                    // Negate the value
-                    match inner {
-                        vibesql_types::SqlValue::Integer(i) => {
-                            Ok(vibesql_types::SqlValue::Integer(-i))
-                        }
-                        vibesql_types::SqlValue::Bigint(i) => {
-                            Ok(vibesql_types::SqlValue::Bigint(-i))
-                        }
-                        vibesql_types::SqlValue::Smallint(i) => {
-                            Ok(vibesql_types::SqlValue::Smallint(-i))
-                        }
-                        vibesql_types::SqlValue::Float(f) => Ok(vibesql_types::SqlValue::Float(-f)),
-                        vibesql_types::SqlValue::Real(f) => Ok(vibesql_types::SqlValue::Real(-f)),
-                        vibesql_types::SqlValue::Double(f) => {
-                            Ok(vibesql_types::SqlValue::Double(-f))
-                        }
-                        vibesql_types::SqlValue::Numeric(f) => {
-                            Ok(vibesql_types::SqlValue::Numeric(-f))
-                        }
-                        _ => Err(ExecutorError::UnsupportedExpression(format!(
-                            "Cannot apply unary minus to {:?}",
-                            inner
-                        ))),
-                    }
-                }
-                _ => Err(ExecutorError::UnsupportedExpression(format!(
-                    "Unary operator {:?} not supported in DEFAULT expressions",
-                    op
-                ))),
-            }
+            crate::evaluator::eval_unary_op(op, &inner)
         }
         vibesql_ast::Expression::NextValue { sequence_name } => {
             // NEXT VALUE FOR sequence - this should have been handled at a higher level
@@ -526,6 +501,52 @@ mod tests {
         };
         let err = evaluate_default_expression(&expr).expect_err("unknown function should error");
         assert_eq!(err.to_string(), "unknown function: definitely_not_a_function()");
+    }
+
+    fn unary(op: vibesql_ast::UnaryOperator, inner: Expression) -> Expression {
+        Expression::UnaryOp { op, expr: Box::new(inner) }
+    }
+
+    #[test]
+    fn logical_not_evaluates_in_default() {
+        // istrue.test istrue-510: BOOLEAN DEFAULT(not true) -> 0,
+        // DEFAULT(not false) -> 1.
+        let not_true =
+            unary(vibesql_ast::UnaryOperator::Not, Expression::Literal(SqlValue::Boolean(true)));
+        assert_eq!(
+            evaluate_default_expression(&not_true).expect("not true should evaluate"),
+            SqlValue::Boolean(false)
+        );
+        let not_false =
+            unary(vibesql_ast::UnaryOperator::Not, Expression::Literal(SqlValue::Boolean(false)));
+        assert_eq!(
+            evaluate_default_expression(&not_false).expect("not false should evaluate"),
+            SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn unary_minus_on_text_coerces_to_number_in_default() {
+        // literal.test 1.13: DEFAULT -'0xFF' materializes integer 0 (SQLite
+        // coerces the leading-numeric prefix of '0xFF' -> 0, then negates).
+        let expr = unary(
+            vibesql_ast::UnaryOperator::Minus,
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("0xFF"))),
+        );
+        assert_eq!(
+            evaluate_default_expression(&expr).expect("-'0xFF' should evaluate"),
+            SqlValue::Integer(0)
+        );
+    }
+
+    #[test]
+    fn unary_plus_is_identity_on_integer_in_default() {
+        // literal.test 1.9: DEFAULT +<int> keeps the integer value.
+        let expr = unary(vibesql_ast::UnaryOperator::Plus, int_lit(i64::MAX));
+        assert_eq!(
+            evaluate_default_expression(&expr).expect("+MAX should evaluate"),
+            SqlValue::Integer(i64::MAX)
+        );
     }
 }
 

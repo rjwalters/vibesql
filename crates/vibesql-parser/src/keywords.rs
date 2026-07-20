@@ -554,6 +554,12 @@ impl Keyword {
                     | Keyword::CurrentDate
                     | Keyword::CurrentTime
                     | Keyword::CurrentTimestamp
+                    // TRUE/FALSE are boolean literals only in expression
+                    // position; in table-name position no literal can occur, so
+                    // SQLite accepts them as plain table names
+                    // (istrue.test istrue-850/851: `SELECT ... FROM false`).
+                    | Keyword::True
+                    | Keyword::False
             )
     }
 
