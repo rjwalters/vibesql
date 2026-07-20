@@ -104,6 +104,29 @@ pub(crate) fn count_tables_in_from(from: &FromClause) -> usize {
     }
 }
 
+/// Check whether a FROM tree contains a `VALUES` table constructor leaf.
+///
+/// The join-reordering path materializes each leaf via `TableRef`, which only
+/// carries a name/subquery — it has no representation for an inline `VALUES`
+/// row list. A comma/CROSS-join whose right side is `(VALUES ...)` therefore
+/// resolves the synthetic `_values_` alias as a missing table and errors out
+/// ("Table '_values_' not found"). Reordering a tiny inline `VALUES` clause has
+/// no meaningful benefit anyway, so we suppress reordering when one is present
+/// and let the standard left-deep join path (which materializes `VALUES`
+/// correctly via `execute_from_clause`) handle it. Mirrors the lateral-TVF
+/// suppression in `execute_from_clause`. (values.test §6, §8)
+pub(crate) fn from_contains_values(from: &FromClause) -> bool {
+    match from {
+        FromClause::Values { .. } => true,
+        FromClause::Table { .. }
+        | FromClause::Subquery { .. }
+        | FromClause::TableFunction { .. } => false,
+        FromClause::Join { left, right, .. } => {
+            from_contains_values(left) || from_contains_values(right)
+        }
+    }
+}
+
 /// Check if all joins in the tree are CROSS joins (comma-list syntax)
 ///
 /// Join reordering changes column ordering, so we only apply it to implicit CROSS joins

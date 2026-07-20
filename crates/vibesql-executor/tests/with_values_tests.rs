@@ -266,6 +266,43 @@ fn test_values_left_arm_compound_order_by() {
     );
 }
 
+/// A comma/CROSS-join whose right leaf is an inline `(VALUES ...)` table must
+/// materialize the VALUES rows rather than resolving the synthetic `_values_`
+/// alias as a missing table (values.test 6.1: `SELECT * FROM t1, (VALUES...)`).
+/// Comma-list joins go through the join-reordering path, which had no
+/// representation for an inline VALUES leaf and raised "Table '_values_' not
+/// found"; reordering is now suppressed when a VALUES leaf is present.
+#[test]
+fn test_comma_join_with_values_table() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t1(x)");
+    run_stmt(&mut db, "INSERT INTO t1 VALUES('x'),('y')");
+    let expected = vec![
+        vec![SqlValue::Varchar(arcstr::ArcStr::from("x")), SqlValue::Integer(1)],
+        vec![SqlValue::Varchar(arcstr::ArcStr::from("x")), SqlValue::Integer(2)],
+        vec![SqlValue::Varchar(arcstr::ArcStr::from("y")), SqlValue::Integer(1)],
+        vec![SqlValue::Varchar(arcstr::ArcStr::from("y")), SqlValue::Integer(2)],
+    ];
+    // Bare comma-list syntax.
+    assert_eq!(query(&db, "SELECT * FROM t1, (VALUES(1),(2))"), expected);
+    // Explicit CROSS JOIN with an alias goes down the same reorder path.
+    assert_eq!(query(&db, "SELECT * FROM t1 CROSS JOIN (VALUES(1),(2)) AS v"), expected);
+}
+
+/// A correlated scalar subquery whose body is a top-level `VALUES` form
+/// (`SELECT (VALUES(x),(x)) FROM t1`) must be re-evaluated per outer row.
+/// Correlation detection previously ignored `SelectStmt.values`, so the
+/// subquery was treated as uncorrelated and cached — yielding 1,1 instead of
+/// 1,2 (values.test 6.1).
+#[test]
+fn test_correlated_scalar_values_subquery() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t1(x)");
+    run_stmt(&mut db, "INSERT INTO t1 VALUES(1),(2)");
+    let rows = query(&db, "SELECT ( VALUES( x ), ( x ) ) FROM t1");
+    assert_eq!(rows, vec![vec![SqlValue::Integer(1)], vec![SqlValue::Integer(2)]]);
+}
+
 /// `CREATE TABLE ... AS SELECT * FROM (VALUES ...)` names the derived columns
 /// `column1`, `column2`, ... rather than erroring (values.test 17.1 / 17.2).
 #[test]
