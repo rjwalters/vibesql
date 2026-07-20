@@ -1732,8 +1732,13 @@ fn apply_generated_columns_for_update(
         if let Some(generated_expr) = &col.generated_expr {
             // Evaluate the generated expression against the current row
             let generated_value = evaluator.eval(generated_expr, row)?;
-            let coerced_value =
-                crate::insert::validation::coerce_value(generated_value, &col.data_type)?;
+            // STRICT tables (issue #6173) enforce the rigid strict-datatype
+            // rules on the recomputed generated value, matching the INSERT path.
+            let coerced_value = if let Some(st) = schema.strict_type_of(col_idx) {
+                crate::strict::enforce_strict_type(generated_value, st, &schema.name, &col.name)?
+            } else {
+                crate::insert::validation::coerce_value(generated_value, &col.data_type)?
+            };
 
             // Check if the value actually changed
             let old_value = row.get(col_idx);

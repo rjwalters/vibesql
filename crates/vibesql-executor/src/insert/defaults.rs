@@ -547,7 +547,16 @@ pub fn apply_generated_columns(
         // If column has a generated expression, compute and apply it
         if let Some(generated_expr) = &col.generated_expr {
             let generated_value = evaluator.eval(generated_expr, &temp_row)?;
-            let coerced_value = super::validation::coerce_value(generated_value, &col.data_type)?;
+            // STRICT tables (issue #6173) apply SQLite's rigid strict-datatype
+            // rules to the *computed* value of a generated column, exactly as
+            // they do for directly-supplied column values — erroring with
+            // `cannot store <T> value in <T> column ...` when the generated
+            // result does not match the column's strict type (strict1-9.x).
+            let coerced_value = if let Some(st) = schema.strict_type_of(col_idx) {
+                crate::strict::enforce_strict_type(generated_value, st, &schema.name, &col.name)?
+            } else {
+                super::validation::coerce_value(generated_value, &col.data_type)?
+            };
             row_values[col_idx] = coerced_value;
         }
     }
