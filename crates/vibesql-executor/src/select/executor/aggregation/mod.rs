@@ -229,6 +229,19 @@ impl SelectExecutor<'_> {
                         function_name: window_name,
                     });
                 }
+
+                // Aggregate functions are not allowed directly in a GROUP BY
+                // expression. SQLite rejects these at compile time with a fixed
+                // message rather than evaluating them (e_select-4.12, #6192),
+                // e.g. `SELECT max(a) FROM t GROUP BY max(b)` or
+                // `GROUP BY count(*)`. Check the expression as written; a bare
+                // positional/alias reference to an aggregate SELECT item is a
+                // legal grouping key, so only the direct form is rejected here.
+                if crate::select::executor::validation::find_aggregate_in_expression(group_expr)
+                    .is_some()
+                {
+                    return Err(crate::errors::ExecutorError::AggregateInGroupBy);
+                }
             }
         }
 

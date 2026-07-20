@@ -536,6 +536,11 @@ impl SelectExecutor<'_> {
         let has_unsupported_select_aggregates = select_aggregates.is_none();
         let mut aggregates = select_aggregates.unwrap_or_default();
 
+        // Number of aggregates that belong to the SELECT projection. Any
+        // aggregates appended below for HAVING-only predicates land *after*
+        // these and must be stripped from the output projection (Issue #6192).
+        let select_agg_count = aggregates.len();
+
         // Add aggregates from HAVING if not already present
         let mut has_unsupported_having_aggregates = false;
         if !having_aggregates.is_empty() {
@@ -722,7 +727,7 @@ impl SelectExecutor<'_> {
         #[cfg(feature = "profile-q6")]
         let exec_start = std::time::Instant::now();
 
-        let result = if has_group_by {
+        let mut result = if has_group_by {
             // GROUP BY path: Use hash-based grouping
             // Catch unsupported feature errors and fall back to row-oriented execution
             let group_by_result = match self.execute_columnar_group_by(
@@ -848,6 +853,23 @@ impl SelectExecutor<'_> {
         {
             let exec_time = exec_start.elapsed();
             eprintln!("[PROFILE-Q6] Native columnar execution: {:?}", exec_time);
+        }
+
+        // Strip HAVING-only aggregate columns from the output projection.
+        //
+        // Aggregates that appear *only* in a HAVING predicate (e.g.
+        // `SELECT up FROM t GROUP BY up HAVING sum(down) > 16`) are appended to
+        // `aggregates` above purely so the predicate can be evaluated. The
+        // grouped result layout is `[group_keys..., select_aggregates...,
+        // having_only_aggregates...]`, so those extra values are always the
+        // trailing columns. They must not leak into the result set (Issue
+        // #6192). The HAVING filter has already consumed them by this point.
+        let having_only_agg_count = aggregates.len().saturating_sub(select_agg_count);
+        if having_only_agg_count > 0 {
+            for row in &mut result {
+                let keep = row.values.len().saturating_sub(having_only_agg_count);
+                row.values.truncate(keep);
+            }
         }
 
         log::info!(
