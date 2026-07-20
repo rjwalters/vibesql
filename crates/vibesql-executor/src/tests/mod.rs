@@ -136,6 +136,7 @@ mod select_values;
 mod select_where;
 mod select_window_aggregate;
 mod select_without_from;
+mod savepoint_implicit_transaction;
 mod set_operations_associativity;
 mod sql_mode_tests;
 mod subquery_mysql_compat;

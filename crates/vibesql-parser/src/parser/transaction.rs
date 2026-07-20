@@ -7,6 +7,17 @@ use crate::{keywords::Keyword, parser::ParseError, token::Token};
 /// SQL:1999 behavior (as implemented in this codebase):
 /// - Unquoted identifiers are case-insensitive (normalized to lowercase)
 /// - Quoted identifiers preserve their original case
+///
+/// SQLite compatibility: a savepoint name is parsed with the `nm` grammar
+/// rule, which accepts `JOIN_KW` (CROSS, FULL, INNER, LEFT, NATURAL, OUTER,
+/// RIGHT) and every `%fallback ID` keyword in addition to plain and delimited
+/// identifiers — only truly-reserved words (`SELECT`, `TABLE`, ...) are
+/// rejected. So `SAVEPOINT outer`, `RELEASE inner`, and `ROLLBACK TO outer`
+/// are all legal (fkey2-2.*). We reuse `Keyword::can_be_identifier_in_expression`,
+/// the same contextual-keyword set that `parse_column_name` accepts, which
+/// covers the join keywords and fallback identifiers while still rejecting
+/// reserved words. Keyword-derived names are lowercased, matching the lexer's
+/// normalization of unquoted identifiers.
 fn parse_savepoint_name(parser: &mut super::Parser) -> Result<String, ParseError> {
     match parser.peek() {
         Token::Identifier(name) => {
@@ -18,6 +29,11 @@ fn parse_savepoint_name(parser: &mut super::Parser) -> Result<String, ParseError
             let preserved = name.clone();
             parser.advance();
             Ok(preserved)
+        }
+        Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
+            let name = kw.to_string().to_lowercase();
+            parser.advance();
+            Ok(name)
         }
         Token::Keyword { keyword: kw, .. } => Err(ParseError {
             message: format!(

@@ -229,3 +229,44 @@ fn test_parse_release_without_savepoint_keyword() {
         other => panic!("Expected ReleaseSavepoint, got {:?}", other),
     }
 }
+
+#[test]
+fn test_parse_savepoint_join_keyword_name() {
+    // SQLite's `nm` grammar rule accepts JOIN_KW (OUTER, INNER, ...) as a
+    // savepoint name (fkey2-2.38: `SAVEPOINT outer`). The keyword is
+    // lowercased like any unquoted identifier.
+    for (sql, expected) in
+        [("SAVEPOINT outer", "outer"), ("SAVEPOINT inner", "inner"), ("SAVEPOINT LEFT", "left")]
+    {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "{sql} err: {:?}", result);
+        match result.unwrap() {
+            vibesql_ast::Statement::Savepoint(stmt) => assert_eq!(stmt.name, expected),
+            other => panic!("Expected Savepoint for {sql}, got {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_parse_release_and_rollback_to_join_keyword_name() {
+    // `RELEASE outer` and `ROLLBACK TO outer` must resolve to the same
+    // lowercased name as `SAVEPOINT outer` (fkey2-2.40 / fkey2-2.48).
+    match Parser::parse_sql("RELEASE outer").unwrap() {
+        vibesql_ast::Statement::ReleaseSavepoint(stmt) => assert_eq!(stmt.name, "outer"),
+        other => panic!("Expected ReleaseSavepoint, got {:?}", other),
+    }
+    match Parser::parse_sql("ROLLBACK TO outer").unwrap() {
+        vibesql_ast::Statement::RollbackToSavepoint(stmt) => assert_eq!(stmt.name, "outer"),
+        other => panic!("Expected RollbackToSavepoint, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_savepoint_reserved_keyword_still_rejected() {
+    // Truly-reserved words that would create grammar ambiguity (e.g. SELECT)
+    // are still not valid unquoted savepoint names: `parse_savepoint_name`
+    // reuses the same contextual-keyword set as column names, which excludes
+    // them. They remain usable only via delimited identifiers.
+    assert!(Parser::parse_sql("SAVEPOINT select").is_err());
+    assert!(Parser::parse_sql("SAVEPOINT where").is_err());
+}
