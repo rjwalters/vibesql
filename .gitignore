@@ -138,4 +138,4 @@ profile-*.json.gz
 .loom/*.log
 .loom/*.sock
 
-tcl-baseline-2026-07-16/
+tcl-baseline-*/

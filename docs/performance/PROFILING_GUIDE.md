@@ -453,5 +453,5 @@ for event, stats in timing.items():
 ## See Also
 
 - [CPU_PROFILING.md](CPU_PROFILING.md) - CPU profiling with samply (flame graphs)
-- [Performance Analysis](PERFORMANCE_ANALYSIS.md) - Detailed breakdown of performance characteristics
-- [Benchmarking Guide](../benchmarks/README.md) - How to run comprehensive benchmarks
+- [Performance Analysis](../archive/PERFORMANCE_ANALYSIS.md) - Detailed breakdown of performance characteristics
+- [Benchmarking Guide](../../benchmarks/README.md) - How to run comprehensive benchmarks

@@ -222,7 +222,7 @@ make benchmark-all
 
 # Individual benchmark suites
 make benchmark-tpch       # TPC-H decision support (22 queries)
-make benchmark-tpcds      # TPC-DS decision support (99 queries)
+make benchmark-tpcds      # TPC-DS decision support (102 queries)
 make benchmark-tpcc       # TPC-C OLTP transactions
 make benchmark-sysbench   # Sysbench micro-benchmarks
 ```

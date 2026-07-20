@@ -69,8 +69,8 @@ When adding new reference materials:
 ## 🔗 Related Documentation
 
 - [Architecture Decisions](../decisions/) - Decisions informed by these references
-- [Optimization Guide](../OPTIMIZATION.md) - Applying techniques from references
-- [Performance Analysis](../PERFORMANCE_ANALYSIS.md) - Measuring effectiveness of optimizations
+- [Optimization Guide](../performance/OPTIMIZATION.md) - Applying techniques from references
+- [Performance Analysis](../archive/PERFORMANCE_ANALYSIS.md) - Measuring effectiveness of optimizations
 - [Lessons Learned](../lessons/) - What we learned from studying references
 
 ## 📖 External Resources
