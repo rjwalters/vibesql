@@ -473,17 +473,23 @@ pub(super) fn execute_internal(
                 continue; // Skip this row
             }
 
-            // Validate foreign key constraints
+            // Validate foreign key constraints.
+            //
+            // Unlike NOT NULL / UNIQUE / PK / CHECK conflicts above, a FOREIGN
+            // KEY violation is NOT subject to the OR IGNORE conflict-resolution
+            // algorithm: SQLite always raises "FOREIGN KEY constraint failed"
+            // for an immediate violation and defers a DEFERRABLE one to COMMIT,
+            // regardless of OR IGNORE (fkey2-20.3). So propagate the immediate
+            // error instead of skipping the row; only genuinely deferred
+            // violations are queued.
             if !schema.foreign_keys.is_empty() {
-                match ForeignKeyValidator::collect_constraints_with_old(
+                let deferred = ForeignKeyValidator::collect_constraints_with_old(
                     database,
                     table_name,
                     &new_row.values,
                     Some(&row.values),
-                ) {
-                    Ok(deferred) => pending_deferred_violations.extend(deferred),
-                    Err(_) => continue, // Skip this row
-                }
+                )?;
+                pending_deferred_violations.extend(deferred);
             }
         } else if use_replace {
             // For REPLACE: validate NOT NULL and CHECK constraints, but skip PK/UNIQUE

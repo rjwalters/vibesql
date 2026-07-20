@@ -102,6 +102,7 @@ mod nested_with_tests;
 mod non_unique_disk_index_tests;
 mod not_operator_tests;
 mod operator_edge_cases;
+mod or_ignore_fk_enforcement;
 mod order_by_compaction_tests;
 mod order_by_index_optimization_tests;
 mod phase3_join_optimization;
