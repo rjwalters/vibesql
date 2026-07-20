@@ -125,6 +125,7 @@ mod secondary_index_fast_path;
 mod select_basic_projection;
 mod select_derived_columns;
 mod select_distinct;
+mod select_having_projection;
 mod select_into_tests;
 mod select_joins;
 mod select_order_by;

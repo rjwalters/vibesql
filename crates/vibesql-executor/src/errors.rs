@@ -91,6 +91,10 @@ pub enum ExecutorError {
     MisuseOfAliasedWindowFunction {
         alias_name: String,
     },
+    /// Aggregate function used in a GROUP BY clause (SQLite-compatible error)
+    /// e.g., `SELECT max(a) FROM t GROUP BY max(b)`
+    /// Format: "aggregate functions are not allowed in the GROUP BY clause"
+    AggregateInGroupBy,
     /// Row value used in scalar context (SQLite-compatible error)
     /// e.g., HAVING (SELECT (a, b)) — a row value where a scalar is expected
     /// Format: "row value misused"
@@ -697,6 +701,10 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::MisuseOfAliasedWindowFunction { alias_name } => {
                 // SQLite-compatible error message format
                 write!(f, "misuse of aliased window function {}", alias_name)
+            }
+            ExecutorError::AggregateInGroupBy => {
+                // SQLite-compatible error message format (parse.c)
+                write!(f, "aggregate functions are not allowed in the GROUP BY clause")
             }
             ExecutorError::RowValueMisused => {
                 // SQLite-compatible error message format
