@@ -43,10 +43,22 @@ impl Parser {
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Blob(blob_val))))
             }
             Token::Keyword { keyword: Keyword::True, .. } => {
+                // SQLite compatibility: TRUE/FALSE are not reserved words. When
+                // immediately followed by `.` they are the qualifier of a dotted
+                // name, not a boolean literal (istrue.test istrue-800/830/850:
+                // `SELECT 9 IN (false.false)` must parse as a column reference and
+                // fail with "no such column", not a syntax error). Defer to
+                // `parse_identifier_expression`, which builds the ColumnRef.
+                if matches!(self.peek_next(), Token::Symbol('.')) {
+                    return Ok(None);
+                }
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(true))))
             }
             Token::Keyword { keyword: Keyword::False, .. } => {
+                if matches!(self.peek_next(), Token::Symbol('.')) {
+                    return Ok(None);
+                }
                 self.advance();
                 Ok(Some(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(false))))
             }

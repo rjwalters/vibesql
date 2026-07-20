@@ -653,3 +653,65 @@ fn test_parse_date_time_as_bare_identifiers() {
     let result = crate::arena_parser::parse_select_to_owned("SELECT date, time FROM t");
     assert!(result.is_ok(), "arena: bare date/time should parse as column refs: {:?}", result);
 }
+
+// ========================================================================
+// TRUE / FALSE: boolean literals vs. non-reserved identifiers (istrue.test)
+// ========================================================================
+
+#[test]
+fn test_bare_true_false_remain_boolean_literals() {
+    // Regression guard: in ordinary primary position TRUE/FALSE stay boolean
+    // literals; the qualified-name special-case below must not disturb this.
+    let stmt = Parser::parse_sql("SELECT true, false;").expect("bare true/false should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            let is_bool = |item: &vibesql_ast::SelectItem, want: bool| match item {
+                vibesql_ast::SelectItem::Expression { expr, .. } => matches!(
+                    expr,
+                    vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(b))
+                        if *b == want
+                ),
+                _ => false,
+            };
+            assert!(is_bool(&select.select_list[0], true), "first item should be TRUE literal");
+            assert!(is_bool(&select.select_list[1], false), "second item should be FALSE literal");
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_false_dot_false_parses_as_qualified_column_ref() {
+    // istrue.test istrue-800/830/850: TRUE/FALSE are not reserved, so `false.false`
+    // is the column `false` of table `false`, not a syntax error on the boolean
+    // literal. It must parse as a qualified ColumnRef (later resolved / rejected as
+    // "no such column").
+    let stmt = Parser::parse_sql("SELECT false.false;").expect("false.false should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::ColumnRef(col) => {
+                    assert_eq!(col.table_canonical().as_deref(), Some("false"));
+                    assert_eq!(col.column_canonical(), "false");
+                }
+                other => panic!("Expected qualified ColumnRef, got {:?}", other),
+            },
+            _ => panic!("Expected expression"),
+        },
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+#[test]
+fn test_true_false_usable_as_table_name() {
+    // istrue.test istrue-850/851: `SELECT ... FROM false` — TRUE/FALSE are plain
+    // table names in table position (no boolean literal can occur there).
+    assert!(
+        Parser::parse_sql("SELECT 1 FROM false;").is_ok(),
+        "FROM false should parse as a table reference"
+    );
+    assert!(
+        Parser::parse_sql("SELECT 1 FROM true;").is_ok(),
+        "FROM true should parse as a table reference"
+    );
+}

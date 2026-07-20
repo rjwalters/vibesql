@@ -82,43 +82,18 @@ pub(super) fn expression_references_column(expr: &Expression, column: &str) -> b
     }
 }
 
-/// Evaluate a simple default expression (literals and basic expressions)
-/// For more complex expressions, this would need full evaluation context
+/// Evaluate a simple default expression (literals and constant expressions).
+///
+/// This is the DEFAULT materializer for `ALTER TABLE ... ADD COLUMN ... DEFAULT
+/// <expr>`. It delegates to the canonical `evaluate_default_expression` so that
+/// ALTER and CREATE/INSERT share one set of SQLite-accurate DEFAULT semantics —
+/// unary +/- (including string-to-number coercion, `DEFAULT -'0xFF'` → 0),
+/// logical/bitwise NOT, and constant scalar functions — rather than the weaker
+/// literals-and-negation-only subset this used to reimplement (literal.test
+/// 1.9/1.13, which exercise `+0x7FFFFFFFFFFFFFFF` and `-'0xFF'` as ALTER
+/// defaults).
 pub(super) fn evaluate_simple_default(expr: &Expression) -> Result<SqlValue, ExecutorError> {
-    match expr {
-        Expression::Literal(val) => Ok(val.clone()),
-        Expression::UnaryOp { op, expr } => {
-            let val = evaluate_simple_default(expr)?;
-            match op {
-                vibesql_ast::UnaryOperator::Not => match val {
-                    SqlValue::Boolean(b) => Ok(SqlValue::Boolean(!b)),
-                    SqlValue::Null => Ok(SqlValue::Null),
-                    _ => Err(ExecutorError::TypeMismatch {
-                        left: val,
-                        op: "NOT".to_string(),
-                        right: SqlValue::Null,
-                    }),
-                },
-                vibesql_ast::UnaryOperator::Minus => match val {
-                    SqlValue::Integer(i) => Ok(SqlValue::Integer(-i)),
-                    SqlValue::Numeric(d) => Ok(SqlValue::Numeric(-d)),
-                    SqlValue::Null => Ok(SqlValue::Null),
-                    _ => Err(ExecutorError::TypeMismatch {
-                        left: val,
-                        op: "-".to_string(),
-                        right: SqlValue::Null,
-                    }),
-                },
-                _ => Err(ExecutorError::UnsupportedExpression(format!(
-                    "Unsupported unary operator in default: {:?}",
-                    op
-                ))),
-            }
-        }
-        _ => Err(ExecutorError::UnsupportedExpression(
-            "Complex expressions in DEFAULT not yet supported. Use simple literals.".to_string(),
-        )),
-    }
+    crate::insert::defaults::evaluate_default_expression(expr)
 }
 
 /// Check if type conversion is safe (widening conversions only)

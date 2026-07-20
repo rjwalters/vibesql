@@ -30,6 +30,21 @@ impl Parser {
                 self.advance();
                 (name, true)
             }
+            // SQLite compatibility: TRUE/FALSE are boolean literals in ordinary
+            // primary position but plain identifiers when they qualify a dotted
+            // name (istrue.test istrue-800/830/850: `false.false` is the column
+            // `false` of table `false`). `parse_literal` only defers here when a
+            // `.` actually follows, so a bare TRUE/FALSE still parses as a
+            // literal; this arm handles just the qualified-reference case.
+            // (These two words are excluded from `can_be_identifier_in_expression`
+            // precisely to keep bare literals working, so they need their own arm.)
+            Token::Keyword { keyword: kw @ (Keyword::True | Keyword::False), .. }
+                if matches!(self.peek_next(), Token::Symbol('.')) =>
+            {
+                let name = format!("{}", kw).to_lowercase();
+                self.advance();
+                (name, false)
+            }
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_expression() => {
                 // SQLite compatibility: in expression / primary position, a keyword that
                 // is not a reserved operator, clause-structure word, or special primary
