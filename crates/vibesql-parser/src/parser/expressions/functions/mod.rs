@@ -450,6 +450,15 @@ impl Parser {
         if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. }) {
             self.advance(); // consume OVER
 
+            // DISTINCT is not permitted on any window function. SQLite reports
+            // this verbatim (window6-9.3): `count(DISTINCT x) OVER (...)` ->
+            // "DISTINCT is not supported for window functions".
+            if distinct {
+                return Err(ParseError {
+                    message: "DISTINCT is not supported for window functions".to_string(),
+                });
+            }
+
             // Validate argument count for window functions
             self.validate_window_function_args(&function_name_upper, args.len(), &first)?;
 

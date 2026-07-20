@@ -577,7 +577,8 @@ impl<'a> SelectExecutor<'a> {
         // Scan SELECT list for MAX or MIN aggregates on a column
         for item in select_list {
             if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
-                if let vibesql_ast::Expression::AggregateFunction { name, args, .. } = expr {
+                if let vibesql_ast::Expression::AggregateFunction { name, args, filter, .. } = expr
+                {
                     let name_upper = name.to_uppercase();
 
                     // We only care about MAX/MIN aggregates on columns
@@ -587,6 +588,22 @@ impl<'a> SelectExecutor<'a> {
                         let mut best_val: Option<SqlValue> = None;
 
                         for (idx, row) in group_rows.iter().enumerate() {
+                            evaluator.clear_cse_cache();
+
+                            // Honor the aggregate's FILTER (WHERE ...) clause: a
+                            // row excluded by the filter cannot determine the
+                            // MIN/MAX, so it cannot be the representative row for
+                            // bare column references. When the filter excludes
+                            // every row, no representative is found and the caller
+                            // falls back to the first row of the group — matching
+                            // SQLite (filter1-3.3 / 3.5).
+                            if let Some(filter_expr) = filter {
+                                match evaluator.eval(filter_expr, row) {
+                                    Ok(fv) if self.is_truthy(&fv).unwrap_or(false) => {}
+                                    _ => continue,
+                                }
+                            }
+
                             if let Ok(val) = evaluator.eval(&args[0], row) {
                                 // Skip NULL values
                                 if matches!(val, SqlValue::Null) {

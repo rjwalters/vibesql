@@ -215,3 +215,74 @@ fn test_range_frame_text_keys_collate_nocase() {
         assert_eq!(frame, i..i + 1, "frame for row {} should be its own peer group", i);
     }
 }
+
+/// Build an `N PRECEDING` bound from an integer literal.
+fn preceding(n: i64) -> FrameBound {
+    FrameBound::Preceding(Box::new(Expression::Literal(SqlValue::Integer(n))))
+}
+
+/// Build an `N FOLLOWING` bound from an integer literal.
+fn following(n: i64) -> FrameBound {
+    FrameBound::Following(Box::new(Expression::Literal(SqlValue::Integer(n))))
+}
+
+fn frame(unit: FrameUnit, start: FrameBound, end: Option<FrameBound>) -> Option<WindowFrame> {
+    Some(WindowFrame { unit, start, end, exclude: None })
+}
+
+// window6.test 9.7.1: `ROWS BETWEEN CURRENT ROW AND 4 PRECEDING` — a CURRENT
+// ROW start paired with an <expr> PRECEDING end is rejected by SQLite as an
+// "unsupported frame specification".
+#[test]
+fn test_validate_frame_current_to_preceding_rejected() {
+    let spec = frame(FrameUnit::Rows, FrameBound::CurrentRow, Some(preceding(4)));
+    assert_eq!(validate_frame(&spec), Err("unsupported frame specification".to_string()));
+}
+
+// window6.test 9.7.2: a single `ROWS 4 FOLLOWING` bound (end defaults to CURRENT
+// ROW) starts at <expr> FOLLOWING, which SQLite rejects.
+#[test]
+fn test_validate_frame_single_following_rejected() {
+    let spec = frame(FrameUnit::Rows, following(4), None);
+    assert_eq!(validate_frame(&spec), Err("unsupported frame specification".to_string()));
+}
+
+// window6.test 9.7.3: `ROWS BETWEEN 4 FOLLOWING AND CURRENT ROW`.
+#[test]
+fn test_validate_frame_following_to_current_rejected() {
+    let spec = frame(FrameUnit::Rows, following(4), Some(FrameBound::CurrentRow));
+    assert_eq!(validate_frame(&spec), Err("unsupported frame specification".to_string()));
+}
+
+// window6.test 9.7.4: `ROWS BETWEEN 4 FOLLOWING AND 2 PRECEDING`.
+#[test]
+fn test_validate_frame_following_to_preceding_rejected() {
+    let spec = frame(FrameUnit::Rows, following(4), Some(preceding(2)));
+    assert_eq!(validate_frame(&spec), Err("unsupported frame specification".to_string()));
+}
+
+// Valid frames whose bounds are correctly ordered must NOT be rejected by the
+// new ordering check. These mirror frames exercised by window1/window5/window6.
+#[test]
+fn test_validate_frame_valid_specs_accepted() {
+    // BETWEEN 1 PRECEDING AND 1 FOLLOWING
+    assert!(validate_frame(&frame(FrameUnit::Rows, preceding(1), Some(following(1)))).is_ok());
+    // BETWEEN 2 FOLLOWING AND 3 FOLLOWING (window6-5.5)
+    assert!(validate_frame(&frame(FrameUnit::Rows, following(2), Some(following(3)))).is_ok());
+    // BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    assert!(validate_frame(&frame(
+        FrameUnit::Range,
+        FrameBound::UnboundedPreceding,
+        Some(FrameBound::UnboundedFollowing),
+    ))
+    .is_ok());
+    // BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING (window1-10.5)
+    assert!(validate_frame(&frame(
+        FrameUnit::Rows,
+        FrameBound::CurrentRow,
+        Some(FrameBound::UnboundedFollowing),
+    ))
+    .is_ok());
+    // Single CURRENT ROW bound
+    assert!(validate_frame(&frame(FrameUnit::Rows, FrameBound::CurrentRow, None)).is_ok());
+}

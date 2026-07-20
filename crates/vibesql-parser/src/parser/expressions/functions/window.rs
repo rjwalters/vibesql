@@ -266,6 +266,28 @@ impl Parser {
     }
 
     /// Parse frame clause (ROWS/RANGE/GROUPS BETWEEN ... AND ... [EXCLUDE ...])
+    /// Reject UNBOUNDED FOLLOWING used as a frame *start* bound.
+    ///
+    /// SQLite's grammar (`frame_bound_s`) does not allow UNBOUNDED FOLLOWING at
+    /// the start of a frame; it reports `near "FOLLOWING": syntax error`.
+    fn reject_unbounded_start(bound: &vibesql_ast::FrameBound) -> Result<(), ParseError> {
+        if matches!(bound, vibesql_ast::FrameBound::UnboundedFollowing) {
+            return Err(ParseError { message: "near \"FOLLOWING\": syntax error".to_string() });
+        }
+        Ok(())
+    }
+
+    /// Reject UNBOUNDED PRECEDING used as a frame *end* bound.
+    ///
+    /// SQLite's grammar (`frame_bound_e`) does not allow UNBOUNDED PRECEDING at
+    /// the end of a frame; it reports `near "PRECEDING": syntax error`.
+    fn reject_unbounded_end(bound: &vibesql_ast::FrameBound) -> Result<(), ParseError> {
+        if matches!(bound, vibesql_ast::FrameBound::UnboundedPreceding) {
+            return Err(ParseError { message: "near \"PRECEDING\": syntax error".to_string() });
+        }
+        Ok(())
+    }
+
     pub(super) fn parse_frame_clause(&mut self) -> Result<vibesql_ast::WindowFrame, ParseError> {
         // Parse frame unit (ROWS, RANGE, or GROUPS)
         let unit = match self.peek() {
@@ -297,15 +319,25 @@ impl Parser {
                 self.advance(); // consume BETWEEN
 
                 let start = self.parse_frame_bound()?;
+                // A start bound may not be UNBOUNDED FOLLOWING (SQLite grammar:
+                // frame_bound_s excludes UNBOUNDED FOLLOWING). SQLite reports a
+                // syntax error at the FOLLOWING token.
+                Self::reject_unbounded_start(&start)?;
 
                 self.expect_keyword(Keyword::And)?;
 
                 let end = self.parse_frame_bound()?;
+                // An end bound may not be UNBOUNDED PRECEDING (SQLite grammar:
+                // frame_bound_e excludes UNBOUNDED PRECEDING). SQLite reports a
+                // syntax error at the PRECEDING token.
+                Self::reject_unbounded_end(&end)?;
 
                 (start, Some(end))
             } else {
-                // Single bound (defaults to CURRENT ROW as end)
+                // Single bound (defaults to CURRENT ROW as end). A single start
+                // bound is subject to the same restriction as a BETWEEN start.
                 let start = self.parse_frame_bound()?;
+                Self::reject_unbounded_start(&start)?;
 
                 (start, None)
             };

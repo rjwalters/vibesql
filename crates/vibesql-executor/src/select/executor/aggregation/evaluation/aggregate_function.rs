@@ -234,6 +234,45 @@ fn extract_collations(order_items: &[vibesql_ast::OrderByItem]) -> Vec<Option<St
         .collect()
 }
 
+/// Return the display name of the first aggregate function nested anywhere
+/// within `expr`, or `None` if there is none.
+///
+/// Used to detect an aggregate illegally nested inside another aggregate's
+/// FILTER clause (SQLite: "misuse of aggregate function X()"). Window functions
+/// are intentionally *not* matched here — they are diagnosed elsewhere with
+/// their own "misuse of window function" wording.
+fn first_nested_aggregate_name(expr: &vibesql_ast::Expression) -> Option<String> {
+    use vibesql_ast::Expression;
+    match expr {
+        Expression::AggregateFunction { name, .. } => Some(name.display().to_string()),
+        Expression::Function { args, .. } => args.iter().find_map(first_nested_aggregate_name),
+        Expression::BinaryOp { left, right, .. } => {
+            first_nested_aggregate_name(left).or_else(|| first_nested_aggregate_name(right))
+        }
+        Expression::UnaryOp { expr, .. } => first_nested_aggregate_name(expr),
+        Expression::Case { operand, when_clauses, else_result, .. } => operand
+            .as_ref()
+            .and_then(|e| first_nested_aggregate_name(e))
+            .or_else(|| {
+                when_clauses.iter().find_map(|clause| {
+                    clause
+                        .conditions
+                        .iter()
+                        .find_map(first_nested_aggregate_name)
+                        .or_else(|| first_nested_aggregate_name(&clause.result))
+                })
+            })
+            .or_else(|| else_result.as_ref().and_then(|e| first_nested_aggregate_name(e))),
+        Expression::InList { expr, values, .. } => first_nested_aggregate_name(expr)
+            .or_else(|| values.iter().find_map(first_nested_aggregate_name)),
+        Expression::Between { expr, low, high, .. } => first_nested_aggregate_name(expr)
+            .or_else(|| first_nested_aggregate_name(low))
+            .or_else(|| first_nested_aggregate_name(high)),
+        Expression::Collate { expr, .. } => first_nested_aggregate_name(expr),
+        _ => None,
+    }
+}
+
 /// Validate aggregate function argument count
 /// Returns error with SQLite-compatible message if validation fails
 /// `name` is the FunctionIdentifier which provides both canonical (lowercase) and display forms
@@ -361,6 +400,18 @@ pub(super) fn evaluate(
         }
     };
 
+    // An aggregate function may not appear inside another aggregate's FILTER
+    // clause. SQLite reports this verbatim as "misuse of aggregate function
+    // X()" (filter1-2.3) — note this is the "function" spelling, distinct from
+    // the "misuse of aggregate: X()" context error used for a stray aggregate
+    // in e.g. ORDER BY. A window function nested in the FILTER is diagnosed
+    // separately by the evaluator ("misuse of window function X()").
+    if let Some(filter_expr) = filter {
+        if let Some(inner_name) = first_nested_aggregate_name(filter_expr) {
+            return Err(ExecutorError::MisuseOfAggregate { function_name: inner_name });
+        }
+    }
+
     // Validate argument count first
     validate_aggregate_args(name, args)?;
 
@@ -388,8 +439,13 @@ pub(super) fn evaluate(
     }
 
     // Special handling for COUNT(*)
-    if name.to_uppercase() == "COUNT" && args.len() == 1 {
-        let is_count_star = matches!(args[0], vibesql_ast::Expression::Wildcard)
+    //
+    // A bare `count()` with no arguments is equivalent to `count(*)` in SQLite,
+    // so it takes this same path (it must still be honored when it carries a
+    // FILTER clause, which routes through the row-oriented evaluator here).
+    if name.to_uppercase() == "COUNT" && args.len() <= 1 {
+        let is_count_star = args.is_empty()
+            || matches!(args[0], vibesql_ast::Expression::Wildcard)
             || matches!(
                 &args[0],
                 vibesql_ast::Expression::ColumnRef(col_id) if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() && col_id.column_canonical() == "*"
