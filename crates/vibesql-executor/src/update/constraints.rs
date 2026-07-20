@@ -330,8 +330,15 @@ impl<'a> ConstraintValidator<'a> {
         Ok(())
     }
 
-    /// Validate CHECK constraints
-    fn validate_check_constraints(
+    /// Validate CHECK constraints against a fully-materialized updated row.
+    ///
+    /// `new_row` must contain every column of the table (typically the original
+    /// row with the SET assignments applied), because a CHECK expression may
+    /// reference columns that the UPDATE did not touch — e.g. `CHECK(b > a)`
+    /// with only `b` in the SET list. Callers that mutate columns in place
+    /// without materializing the full row (the super-fast UPDATE path) must not
+    /// use this method; they should fall back to the row-materializing path.
+    pub(super) fn validate_check_constraints(
         &self,
         new_row: &vibesql_storage::Row,
     ) -> Result<(), ExecutorError> {

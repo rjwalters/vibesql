@@ -379,6 +379,18 @@ impl CreateTableExecutor {
         // Apply constraint results to schema (sets PK, unique, and check constraints)
         ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
 
+        // Resolve CHECK constraint column references against the new table.
+        // SQLite rejects a CREATE TABLE whose CHECK names an unknown column
+        // (check-3.3 `CHECK(q<x)`) or a foreign table (check-3.5 `CHECK(t2.x<x)`)
+        // before any table is created, so validate here — after the columns and
+        // check constraints are known but before the table is inserted into the
+        // catalog.
+        crate::constraint_validator::validate_check_constraint_columns(
+            &table_schema.name,
+            &table_schema.columns,
+            &table_schema.check_constraints,
+        )?;
+
         // WITHOUT ROWID tables must have a PRIMARY KEY (SQLite requirement, Issue #4953)
         if stmt.without_rowid && table_schema.primary_key.is_none() {
             return Err(ExecutorError::ConstraintViolation(

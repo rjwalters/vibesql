@@ -197,6 +197,16 @@ pub(super) fn try_fast_path_update(
         }
     }
 
+    // Enforce CHECK constraints against the fully-materialized new row. The
+    // fast path previously validated NOT NULL only, silently bypassing CHECK
+    // for single-row PK-equality UPDATEs (check.test 9.2/9.3). `new_row` is a
+    // full clone of the old row with the assignments applied, so a CHECK that
+    // references untouched columns or the rowid evaluates correctly here.
+    if !schema.check_constraints.is_empty() {
+        super::constraints::ConstraintValidator::new(schema)
+            .validate_check_constraints(&new_row)?;
+    }
+
     // Check PK uniqueness if updating PK columns
     let pk_indices = schema.get_primary_key_indices();
     if let Some(ref pk_idx) = pk_indices {
@@ -272,6 +282,17 @@ fn try_super_fast_path(
 ) -> Result<Option<usize>, ExecutorError> {
     // Use canonical table name from schema for all storage operations
     let table_name = &schema.name;
+
+    // CHECK constraints may reference columns the UPDATE does not touch (e.g.
+    // `CHECK(b > a)` with only `b` assigned) or the rowid, so they can only be
+    // evaluated against a fully-materialized row. The super-fast path mutates
+    // columns in place without building such a row, so defer any table carrying
+    // CHECK constraints to the row-materializing fast/normal path where the
+    // check is actually enforced (regression: single-row PK UPDATEs silently
+    // bypassed CHECK — see check.test 9.2/9.3).
+    if !schema.check_constraints.is_empty() {
+        return Ok(None);
+    }
 
     // Collect all literal updates that can be done in-place
     let mut inplace_updates: Vec<(usize, SqlValue)> = Vec::new();
