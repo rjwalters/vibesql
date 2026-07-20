@@ -36,6 +36,28 @@ fn index_hint_rejection_message(hint: &vibesql_ast::IndexHint) -> String {
     }
 }
 
+/// SQLite rejects an `ORDER BY` or `LIMIT` clause on an UPDATE/DELETE statement
+/// inside a trigger body as a plain grammar syntax error — the trigger-program
+/// grammar simply has no ORDER BY / LIMIT productions for its DML statements,
+/// and this holds "regardless of the compilation options used to build SQLite"
+/// (R-57359-59558 for UPDATE, R-64942-06615 for DELETE; e_update-2.5 /
+/// e_delete-2.5). The offending token reported is `ORDER` when an ORDER BY is
+/// present and otherwise `LIMIT` (an OFFSET can only follow a LIMIT, so a bare
+/// OFFSET never occurs). Top-level UPDATE/DELETE ... LIMIT keeps working because
+/// this check only runs on trigger-body statements.
+fn trigger_body_limit_order_rejection(
+    order_by_present: bool,
+    limit_present: bool,
+) -> Option<ParseError> {
+    if order_by_present {
+        Some(ParseError { message: "near \"ORDER\": syntax error".to_string() })
+    } else if limit_present {
+        Some(ParseError { message: "near \"LIMIT\": syntax error".to_string() })
+    } else {
+        None
+    }
+}
+
 impl Parser {
     /// Parse CREATE TRIGGER statement
     ///
@@ -448,6 +470,12 @@ impl Parser {
                 if let Some(hint) = &update.index_hint {
                     return Err(ParseError { message: index_hint_rejection_message(hint) });
                 }
+                if let Some(e) = trigger_body_limit_order_rejection(
+                    update.order_by.is_some(),
+                    update.limit.is_some(),
+                ) {
+                    return Err(e);
+                }
             }
             Statement::Delete(delete) => {
                 if Self::dml_target_is_schema_qualified(&delete.table_name, delete.quoted) {
@@ -455,6 +483,12 @@ impl Parser {
                 }
                 if let Some(hint) = &delete.index_hint {
                     return Err(ParseError { message: index_hint_rejection_message(hint) });
+                }
+                if let Some(e) = trigger_body_limit_order_rejection(
+                    delete.order_by.is_some(),
+                    delete.limit.is_some(),
+                ) {
+                    return Err(e);
                 }
             }
             _ => {}

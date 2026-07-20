@@ -1182,6 +1182,28 @@ impl DeleteExecutor {
                 // Any negative OFFSET is treated as 0 (SQLite semantics, #5747).
                 SqlValue::Integer(n) if n < 0 => 0,
                 SqlValue::Bigint(n) if n < 0 => 0,
+                // SQLite applies integer affinity to OFFSET, but only a REAL
+                // that converts *losslessly* to an integer is accepted (e.g.
+                // `LIMIT 2+2, 16/4` supplies OFFSET `2+2`=4 and LIMIT `16/4`
+                // which evaluates to REAL 4.0 -> 4). A negative integral real
+                // clamps to 0, matching the integer branch. A non-integral real
+                // (e.g. 1.2) falls through to the error arm (e_delete-3.1).
+                SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f)
+                    if f.is_finite() && f.fract() == 0.0 =>
+                {
+                    if f >= 0.0 {
+                        f as usize
+                    } else {
+                        0
+                    }
+                }
+                SqlValue::Float(f) if f.is_finite() && f.fract() == 0.0 => {
+                    if f >= 0.0 {
+                        f as usize
+                    } else {
+                        0
+                    }
+                }
                 SqlValue::Null => 0, // NULL offset treated as 0
                 _ => {
                     return Err(ExecutorError::TypeError(
@@ -1202,6 +1224,27 @@ impl DeleteExecutor {
                 // Any negative LIMIT means "no limit" (SQLite semantics, #5747).
                 SqlValue::Integer(n) if n < 0 => None,
                 SqlValue::Bigint(n) if n < 0 => None,
+                // Integer affinity: a REAL LIMIT that converts losslessly to an
+                // integer is accepted (`16/4` -> 4.0 -> LIMIT 4); a negative
+                // integral real means "no limit", matching the integer branch.
+                // A non-integral real (e.g. 1.2) falls through to the error arm
+                // (e_delete-3.1 comma-form LIMIT).
+                SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f)
+                    if f.is_finite() && f.fract() == 0.0 =>
+                {
+                    if f >= 0.0 {
+                        Some(f as usize)
+                    } else {
+                        None
+                    }
+                }
+                SqlValue::Float(f) if f.is_finite() && f.fract() == 0.0 => {
+                    if f >= 0.0 {
+                        Some(f as usize)
+                    } else {
+                        None
+                    }
+                }
                 SqlValue::Null => None, // NULL limit treated as no limit
                 _ => {
                     return Err(ExecutorError::TypeError(
