@@ -790,6 +790,93 @@ fn test_cte_circular_reference_errors() {
     assert_eq!(err.to_string(), "circular reference: tmp1", "cycle named by root entry tmp1");
 }
 
+/// Two CTEs sharing a name in one WITH clause are rejected up front with
+/// SQLite's `duplicate WITH table name: <name>` wording (issue #6189,
+/// with1.test 3.2). A name redefined by a *nested* WITH is a separate scope and
+/// must still be accepted (with1.test 3.4).
+#[test]
+fn test_duplicate_with_table_name_errors() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE t1(a)").unwrap();
+
+    let err = execute_sql(
+        &mut db,
+        "WITH tmp(a) AS (SELECT * FROM t1), tmp(a) AS (SELECT * FROM t1) SELECT * FROM tmp",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "duplicate WITH table name: tmp");
+
+    // A nested WITH may reuse an outer CTE name (different scope): no error.
+    execute_sql(&mut db, "CREATE TABLE t3(x)").unwrap();
+    execute_sql(&mut db, "CREATE TABLE t4(x)").unwrap();
+    execute_sql(&mut db, "INSERT INTO t3 VALUES('T3')").unwrap();
+    execute_sql(&mut db, "INSERT INTO t4 VALUES('T4')").unwrap();
+    let rows = execute_sql(
+        &mut db,
+        "WITH tmp AS ( SELECT * FROM t3 ), \
+              tmp2 AS ( WITH tmp AS ( SELECT * FROM t4 ) SELECT * FROM tmp ) \
+         SELECT * FROM tmp2",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("T4")));
+}
+
+/// A recursive term must reference the CTE exactly once, and only as a base
+/// table in FROM. Two malformed shapes are rejected before any rows are
+/// produced (issue #6189, with1.test 7.4/7.5):
+///   - the only self-reference is buried in a subquery -> "circular reference";
+///   - a FROM reference plus a subquery reference -> "multiple recursive
+///     references".
+#[test]
+fn test_recursive_term_reference_shape_errors() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE tree(i, p)").unwrap();
+    execute_sql(&mut db, "INSERT INTO tree VALUES(1, NULL), (2, 1), (3, 1), (4, 2), (5, 4)")
+        .unwrap();
+
+    // Self-reference only inside a WHERE subquery, none in FROM (with1.test 7.4).
+    let err = execute_sql(
+        &mut db,
+        "WITH t(id) AS ( \
+            VALUES(2) \
+            UNION ALL \
+            SELECT i FROM tree WHERE p IN (SELECT id FROM t) \
+         ) SELECT id FROM t",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: t");
+
+    // Self-reference in FROM *and* in a WHERE subquery (with1.test 7.5).
+    let err = execute_sql(
+        &mut db,
+        "WITH t(id) AS ( \
+            VALUES(2) \
+            UNION ALL \
+            SELECT i FROM tree, t WHERE p = id AND p IN (SELECT id FROM t) \
+         ) SELECT id FROM t",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "multiple recursive references: t");
+
+    // Sanity: the well-formed single FROM self-reference still runs (7.3).
+    let rows = execute_sql(
+        &mut db,
+        "WITH t(id) AS ( VALUES(2) UNION ALL SELECT i FROM tree, t WHERE p = id ) \
+         SELECT id FROM t ORDER BY id",
+    )
+    .unwrap();
+    let ids: Vec<_> = rows.iter().map(|r| r.values[0].clone()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            vibesql_types::SqlValue::Integer(2),
+            vibesql_types::SqlValue::Integer(4),
+            vibesql_types::SqlValue::Integer(5),
+        ]
+    );
+}
+
 /// CTE arity validation uses SQLite's `table X has N values for M columns`
 /// wording and fires before the UNION-consistency check (issue #6189,
 /// with1.test 5.6.x, with3.test 6.0/6.1).

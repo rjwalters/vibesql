@@ -217,6 +217,23 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
     M: Fn(usize) -> Result<(), ExecutorError>,
 {
+    // Two CTEs sharing a name within the same WITH clause are rejected by SQLite
+    // at prepare time, before any lazy pruning or body evaluation
+    // (with1.test 3.2: `WITH tmp(a) AS (...), tmp(a) AS (...)`). The check is
+    // scoped to this single list — a name may be redefined by a *nested* WITH in
+    // a CTE body (with1.test 3.4), which arrives here as a separate list.
+    {
+        let mut seen: HashSet<String> = HashSet::with_capacity(ctes.len());
+        for cte in ctes {
+            if !seen.insert(cte.name.to_ascii_lowercase()) {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "duplicate WITH table name: {}",
+                    cte.name
+                )));
+            }
+        }
+    }
+
     let needed = match root {
         Some(stmt) => compute_needed_ctes(ctes, stmt),
         None => vec![true; ctes.len()],
@@ -1342,6 +1359,40 @@ where
         ));
     }
 
+    // SQLite requires a recursive term to reference the CTE exactly once, and
+    // only as a base table in its FROM clause. Two shapes are rejected before
+    // any rows are produced (with1.test 7.4/7.5):
+    //   - the sole reference is buried in a subquery (no direct FROM ref)
+    //     -> "circular reference: <name>" (7.4:
+    //     `... FROM tree WHERE p IN (SELECT id FROM t)`);
+    //   - more than one reference — a FROM ref plus a subquery ref, or the
+    //     name twice in FROM -> "multiple recursive references: <name>" (7.5:
+    //     `... FROM tree, t WHERE p=id AND p IN (SELECT id FROM t)`).
+    // Only this leading recursive term is inspected; a compound recursive term
+    // (`... UNION R1 UNION R2`, with5.test 110-112) keeps its sibling terms in
+    // its own set-operation chain, which the counters deliberately do not walk,
+    // so each legitimately references the CTE once.
+    {
+        let self_name = &cte.name;
+        let from_refs = recursive_query
+            .from
+            .as_ref()
+            .map_or(0, |from| count_from_table_occurrences(from, self_name));
+        let indirect = recursive_term_has_indirect_ref(recursive_query, self_name);
+        if from_refs > 1 || (from_refs >= 1 && indirect) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "multiple recursive references: {}",
+                self_name
+            )));
+        }
+        if from_refs == 0 && indirect {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "circular reference: {}",
+                self_name
+            )));
+        }
+    }
+
     // Try static validation first (works for explicit column lists and VALUES)
     // This provides better SQLite compatibility by catching errors at prepare time
     // rather than waiting until runtime
@@ -1762,6 +1813,69 @@ fn is_cte_self_referential(cte: &vibesql_ast::CommonTableExpr) -> bool {
 
     // Check if the recursive term references this CTE
     stmt_references_table(&set_op.right, &cte.name)
+}
+
+/// Count how many times `name` appears as a direct base table in a FROM clause,
+/// descending through joins but NOT into FROM-clause subqueries. Used to tell a
+/// well-formed single FROM-clause recursive self-reference apart from references
+/// buried elsewhere (with1.test 7.4/7.5).
+fn count_from_table_occurrences(from: &vibesql_ast::FromClause, name: &str) -> usize {
+    match from {
+        vibesql_ast::FromClause::Table { name: t, .. } => usize::from(t.eq_ignore_ascii_case(name)),
+        vibesql_ast::FromClause::Join { left, right, .. } => {
+            count_from_table_occurrences(left, name) + count_from_table_occurrences(right, name)
+        }
+        _ => 0,
+    }
+}
+
+/// True when `name` is referenced anywhere in a recursive term OTHER than a
+/// direct FROM-clause base table: a FROM-clause subquery, a JOIN-condition
+/// subquery, or a subquery in WHERE / the SELECT list / HAVING. Does not walk
+/// the statement's own set-operation chain, so sibling terms of a compound
+/// recursive term are not counted here.
+fn recursive_term_has_indirect_ref(stmt: &vibesql_ast::SelectStmt, name: &str) -> bool {
+    if let Some(from) = &stmt.from {
+        if from_clause_has_indirect_ref(from, name) {
+            return true;
+        }
+    }
+    if let Some(where_clause) = &stmt.where_clause {
+        if expr_references_table(where_clause, name) {
+            return true;
+        }
+    }
+    for item in &stmt.select_list {
+        if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+            if expr_references_table(expr, name) {
+                return true;
+            }
+        }
+    }
+    if let Some(having) = &stmt.having {
+        if expr_references_table(having, name) {
+            return true;
+        }
+    }
+    false
+}
+
+/// True when `name` is referenced through a FROM-clause subquery or a
+/// JOIN-condition subquery (a direct base-table match is NOT an indirect ref).
+fn from_clause_has_indirect_ref(from: &vibesql_ast::FromClause, name: &str) -> bool {
+    match from {
+        vibesql_ast::FromClause::Table { .. } => false,
+        vibesql_ast::FromClause::Subquery { query, .. } => stmt_references_table(query, name),
+        vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+            from_clause_has_indirect_ref(left, name)
+                || from_clause_has_indirect_ref(right, name)
+                || condition.as_ref().is_some_and(|c| expr_references_table(c, name))
+        }
+        vibesql_ast::FromClause::Values { .. } => false,
+        vibesql_ast::FromClause::TableFunction { args, .. } => {
+            args.iter().any(|expr| expr_references_table(expr, name))
+        }
+    }
 }
 
 /// Check if a SELECT statement references a table name
