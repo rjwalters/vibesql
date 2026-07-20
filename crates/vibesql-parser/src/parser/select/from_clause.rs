@@ -12,7 +12,24 @@ impl Parser {
         // Parse the first table reference
         let mut left = self.parse_table_reference()?;
 
-        // Check for USING without a preceding JOIN - SQLite error compatibility
+        // Check for a bare ON / USING with no preceding JOIN - SQLite error
+        // compatibility (tkt3935). A join constraint may only appear after a
+        // join operator (a JOIN keyword or a legacy comma-join), so when one
+        // directly follows the first table term SQLite emits a descriptive
+        // error rather than a bare token syntax error.
+        if self.peek_keyword(Keyword::On) {
+            // Consume "ON <expr>" first: SQLite parses the ON constraint before
+            // deciding what went wrong. If a USING clause then follows the ON
+            // expression (`... ON b USING(a)`), that trailing USING is a
+            // token-level syntax error (`near "USING": syntax error`); a bare
+            // `... ON b` instead reports the missing-JOIN diagnostic.
+            self.consume_keyword(Keyword::On)?;
+            let _ = self.parse_expression()?;
+            if self.peek_keyword(Keyword::Using) {
+                return Err(ParseError { message: self.peek().syntax_error() });
+            }
+            return Err(ParseError { message: "a JOIN clause is required before ON".to_string() });
+        }
         if self.peek_keyword(Keyword::Using) {
             return Err(ParseError {
                 message: "a JOIN clause is required before USING".to_string(),
