@@ -503,3 +503,52 @@ fn test_window_function_argument_count_validation() {
     let sql = "SELECT lag(x, 1, 0) OVER () FROM t";
     assert!(Parser::parse_sql(sql).is_ok(), "lag(x, 1, 0) should work");
 }
+
+// window6.test 9.4/9.5: UNBOUNDED FOLLOWING may not be used as a frame *start*
+// bound. SQLite reports `near "FOLLOWING": syntax error`.
+#[test]
+fn test_frame_start_unbounded_following_rejected() {
+    for sql in [
+        "SELECT count() OVER (ORDER BY x RANGE UNBOUNDED FOLLOWING) FROM c",
+        "SELECT count() OVER (ORDER BY x RANGE BETWEEN UNBOUNDED FOLLOWING AND UNBOUNDED FOLLOWING) FROM c",
+    ] {
+        let err = Parser::parse_sql(sql).expect_err("UNBOUNDED FOLLOWING start must error");
+        assert!(
+            err.message.contains("near \"FOLLOWING\": syntax error"),
+            "unexpected error for {sql:?}: {err:?}"
+        );
+    }
+}
+
+// window6.test 9.6: UNBOUNDED PRECEDING may not be used as a frame *end* bound.
+// SQLite reports `near "PRECEDING": syntax error`.
+#[test]
+fn test_frame_end_unbounded_preceding_rejected() {
+    let sql =
+        "SELECT count() OVER (ORDER BY x RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED PRECEDING) FROM c";
+    let err = Parser::parse_sql(sql).expect_err("UNBOUNDED PRECEDING end must error");
+    assert!(err.message.contains("near \"PRECEDING\": syntax error"), "unexpected error: {err:?}");
+}
+
+// A full-partition frame `BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`
+// must still parse — the bound restrictions only reject the reversed forms.
+#[test]
+fn test_frame_unbounded_preceding_to_following_ok() {
+    let sql =
+        "SELECT sum(x) OVER (ORDER BY x RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) FROM c";
+    assert!(
+        Parser::parse_sql(sql).is_ok(),
+        "UNBOUNDED PRECEDING..UNBOUNDED FOLLOWING should parse"
+    );
+}
+
+// window6.test 9.3: DISTINCT is not permitted on a window aggregate.
+#[test]
+fn test_distinct_window_aggregate_rejected() {
+    let sql = "SELECT count(DISTINCT x) OVER (ORDER BY x) FROM c";
+    let err = Parser::parse_sql(sql).expect_err("DISTINCT window aggregate must error");
+    assert!(
+        err.message.contains("DISTINCT is not supported for window functions"),
+        "unexpected error: {err:?}"
+    );
+}

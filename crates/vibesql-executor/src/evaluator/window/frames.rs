@@ -34,6 +34,32 @@ pub fn validate_frame(frame_spec: &Option<WindowFrame>) -> Result<(), String> {
         validate_frame_bound(end_bound, false)?;
     }
 
+    // Validate the relative ordering of the start and end bounds.
+    //
+    // SQLite (window.c) rejects frames whose boundaries cannot describe a
+    // non-degenerate window with "unsupported frame specification". The
+    // offending combinations (where an omitted end bound defaults to CURRENT
+    // ROW) are:
+    //   * start = CURRENT ROW,          end = <expr> PRECEDING
+    //   * start = <expr> FOLLOWING,     end = <expr> PRECEDING
+    //   * start = <expr> FOLLOWING,     end = CURRENT ROW
+    // (UNBOUNDED PRECEDING as an end bound and UNBOUNDED FOLLOWING as a start
+    // bound are already rejected at parse time, so they cannot reach here.)
+    let start_is_current = matches!(frame.start, FrameBound::CurrentRow);
+    let start_is_following = matches!(frame.start, FrameBound::Following(_));
+    let (end_is_preceding, end_is_current) = match &frame.end {
+        Some(FrameBound::Preceding(_)) => (true, false),
+        Some(FrameBound::CurrentRow) => (false, true),
+        // An omitted end bound defaults to CURRENT ROW.
+        None => (false, true),
+        _ => (false, false),
+    };
+    if (start_is_current && end_is_preceding)
+        || (start_is_following && (end_is_preceding || end_is_current))
+    {
+        return Err("unsupported frame specification".to_string());
+    }
+
     Ok(())
 }
 
