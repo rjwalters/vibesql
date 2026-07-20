@@ -2084,52 +2084,6 @@ impl SqlExecutor {
             },
         };
 
-        // Recover per-column *declaration* facts that the catalog's affinity-only
-        // `data_type` / `nullable` fields cannot express, by re-parsing the
-        // verbatim CREATE TABLE text (`sql_source`). Two SQLite `table_info`
-        // quirks depend on the original declaration rather than the internal
-        // affinity/rowid state:
-        //
-        //   * The `type` column echoes the *declared* type text. A typeless
-        //     column (`CREATE TABLE t(a)`) reports an empty type in SQLite, but
-        //     VibeSQL folds it into BLOB affinity — so without this we'd wrongly
-        //     print "BLOB". `type_source == None` marks the typeless case.
-        //   * The `notnull` column reflects only an *explicit* NOT NULL clause.
-        //     An `INTEGER PRIMARY KEY` rowid alias is internally non-nullable
-        //     (VibeSQL sets `nullable = false`) yet SQLite reports `notnull = 0`
-        //     for it. Deriving notnull from the explicit NOT NULL constraint in
-        //     the source matches SQLite exactly.
-        //
-        // Keyed by lowercase column name. Absent (no sql_source, a CREATE ... AS
-        // SELECT with no explicit column list, or a re-parse failure) means we
-        // fall back to the catalog-derived behavior below, unchanged.
-        let decl_facts: std::collections::HashMap<String, (bool, bool)> = {
-            let mut map = std::collections::HashMap::new();
-            if let Some(src) = schema.sql_source.as_deref() {
-                if let Ok(vibesql_ast::Statement::CreateTable(create)) =
-                    vibesql_parser::Parser::parse_sql(src)
-                {
-                    if create.as_query.is_none() {
-                        for col in &create.columns {
-                            let is_typeless = col.type_source.is_none();
-                            let explicit_not_null = col.constraints.iter().any(|c| {
-                                matches!(
-                                    c.kind,
-                                    vibesql_ast::ColumnConstraintKind::NotNull
-                                        | vibesql_ast::ColumnConstraintKind::NotNullWithConflict { .. }
-                                )
-                            });
-                            map.insert(
-                                col.name.to_lowercase(),
-                                (is_typeless, explicit_not_null),
-                            );
-                        }
-                    }
-                }
-            }
-            map
-        };
-
         let mut rows: Vec<Vec<Option<String>>> = Vec::with_capacity(schema.columns.len());
         for (cid, column) in schema.columns.iter().enumerate() {
             let decl = decl_facts.get(&column.name.to_lowercase());
