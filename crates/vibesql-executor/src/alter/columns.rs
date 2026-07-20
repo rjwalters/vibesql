@@ -16,11 +16,42 @@ fn is_auto_index(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("sqlite_autoindex_")
 }
 
+/// Whether a DEFAULT expression is a compile-time constant, mirroring SQLite's
+/// `sqlite3ExprIsConstant` gate in `sqlite3AlterFinishAddColumn`. SQLite rejects
+/// `ALTER TABLE ... ADD COLUMN` with a non-constant default (e.g. `CURRENT_TIME`,
+/// a function call, or a column reference) because the new column's value must be
+/// materializable without a row context. Literals and arithmetic/unary
+/// combinations of literals are constant; everything else (CURRENT_*, functions,
+/// column refs, subqueries) is not.
+fn is_constant_default(expr: &Expression) -> bool {
+    match expr {
+        Expression::Literal(_) => true,
+        Expression::UnaryOp { expr, .. } => is_constant_default(expr),
+        Expression::BinaryOp { left, right, .. } => {
+            is_constant_default(left) && is_constant_default(right)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a DEFAULT expression is (or folds to) SQL NULL. SQLite treats
+/// `DEFAULT NULL` as equivalent to no default when deciding whether a NOT NULL
+/// column can be added.
+fn is_null_default(expr: &Expression) -> bool {
+    matches!(expr, Expression::Literal(SqlValue::Null))
+}
+
 /// Execute ADD COLUMN
 pub(super) fn execute_add_column(
     stmt: &AddColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
+    // A view is not a table: SQLite rejects `ALTER TABLE <view> ADD COLUMN` with
+    // a view-specific message, before any table/column resolution (alter3-2.5).
+    if database.catalog.get_view(&stmt.table_name).is_some() {
+        return Err(ExecutorError::Other("Cannot add a column to a view".to_string()));
+    }
+
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
@@ -28,6 +59,45 @@ pub(super) fn execute_add_column(
     // Check if column already exists
     if table.schema.has_column(&stmt.column_def.name) {
         return Err(ExecutorError::ColumnAlreadyExists(stmt.column_def.name.clone()));
+    }
+
+    // SQLite's ADD COLUMN restrictions (`sqlite3AlterFinishAddColumn`), checked in
+    // SQLite's order and *before* any schema mutation so a rejected ALTER leaves
+    // the table untouched (alter3-2.*, verified against sqlite3 3.51.0):
+    //   1. A PRIMARY KEY column cannot be added.
+    //   2. A UNIQUE column cannot be added.
+    //   3. A NOT NULL column with a NULL (or absent) default cannot be added.
+    //   4. A column with a non-constant default cannot be added.
+    let has_primary_key = stmt
+        .column_def
+        .constraints
+        .iter()
+        .any(|c| matches!(c.kind, ColumnConstraintKind::PrimaryKey { .. }));
+    if has_primary_key {
+        return Err(ExecutorError::Other("Cannot add a PRIMARY KEY column".to_string()));
+    }
+    let has_unique = stmt
+        .column_def
+        .constraints
+        .iter()
+        .any(|c| matches!(c.kind, ColumnConstraintKind::Unique { .. }));
+    if has_unique {
+        return Err(ExecutorError::Other("Cannot add a UNIQUE column".to_string()));
+    }
+    // A DEFAULT NULL is equivalent to no default for the NOT NULL check.
+    let default_is_null_or_absent =
+        stmt.column_def.default_value.as_deref().is_none_or(is_null_default);
+    if !stmt.column_def.nullable && default_is_null_or_absent {
+        return Err(ExecutorError::Other(
+            "Cannot add a NOT NULL column with default value NULL".to_string(),
+        ));
+    }
+    if let Some(default_expr) = stmt.column_def.default_value.as_deref() {
+        if !is_constant_default(default_expr) {
+            return Err(ExecutorError::Other(
+                "Cannot add a column with non-constant default".to_string(),
+            ));
+        }
     }
 
     // A STORED generated column may only be added while the table is empty.

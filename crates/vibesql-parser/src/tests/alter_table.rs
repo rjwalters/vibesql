@@ -507,6 +507,22 @@ fn test_parse_alter_table_add_plain_column_has_no_generated_expr() {
     }
 }
 
+#[test]
+fn test_parse_alter_table_add_column_not_null_then_default() {
+    // A DEFAULT clause following other column constraints (any order) must be
+    // captured, not dropped. Previously `NOT NULL DEFAULT 10` lost the DEFAULT
+    // because DEFAULT was only parsed before the constraint loop (alter3-2.4).
+    let result = Parser::parse_sql("ALTER TABLE t1 ADD c NOT NULL DEFAULT 10");
+    assert!(result.is_ok(), "err: {:?}", result);
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert!(!add.column_def.nullable, "NOT NULL should be captured");
+            assert!(add.column_def.default_value.is_some(), "DEFAULT 10 should be captured");
+        }
+        other => panic!("Expected ADD COLUMN, got {:?}", other),
+    }
+}
+
 // ========================================================================
 // RENAME COLUMN with contextual-keyword column names (issue #5945)
 //
