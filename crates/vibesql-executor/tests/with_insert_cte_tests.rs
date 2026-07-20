@@ -243,6 +243,53 @@ fn test_with_update_returning_cte_subquery() {
     assert_eq!(returning.rows[0].values.to_vec(), vec![SqlValue::Integer(8)]);
 }
 
+/// `INSERT INTO t WITH cte AS (...) SELECT * FROM cte` — the WITH clause is
+/// attached to the *source SELECT*, not the INSERT statement. The bulk-transfer
+/// fast path used to treat `FROM cte` as a catalog table and fail with "no such
+/// table: cte" (with2.test 5.7/5.8/7.1). The source-WITH now disables xfer, so
+/// the CTE materializes. Values verified against sqlite3 3.51.0.
+#[test]
+fn test_insert_source_with_recursive_cte() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t5(x INTEGER)");
+    run_stmt(
+        &mut db,
+        "INSERT INTO t5 \
+         WITH s(x) AS ( VALUES(7) UNION ALL SELECT x+7 FROM s WHERE x<49 ) \
+         SELECT * FROM s",
+    );
+    assert_eq!(
+        query(&db, "SELECT x FROM t5 ORDER BY x"),
+        vec![
+            vec![SqlValue::Integer(7)],
+            vec![SqlValue::Integer(14)],
+            vec![SqlValue::Integer(21)],
+            vec![SqlValue::Integer(28)],
+            vec![SqlValue::Integer(35)],
+            vec![SqlValue::Integer(42)],
+            vec![SqlValue::Integer(49)],
+        ]
+    );
+}
+
+/// The non-recursive shape of the same source-WITH form: a plain `SELECT * FROM
+/// cte` still bypasses the bulk-transfer table lookup (with2.test 5.7/5.8).
+#[test]
+fn test_insert_source_with_non_recursive_cte() {
+    let mut db = vibesql_storage::Database::new();
+    run_stmt(&mut db, "CREATE TABLE t2(a, b)");
+    run_stmt(&mut db, "CREATE TABLE dst(a, b)");
+    run_stmt(&mut db, "INSERT INTO t2 VALUES(1, 2), (3, 4)");
+    run_stmt(&mut db, "INSERT INTO dst WITH x AS (SELECT a, b FROM t2) SELECT * FROM x");
+    assert_eq!(
+        query(&db, "SELECT a, b FROM dst ORDER BY a"),
+        vec![
+            vec![SqlValue::Integer(1), SqlValue::Integer(2)],
+            vec![SqlValue::Integer(3), SqlValue::Integer(4)],
+        ]
+    );
+}
+
 /// DELETE with WITH: CTE visible in the WHERE subquery (sqlite3: only row 10
 /// remains), and DELETE ... RETURNING sees the CTE too (sqlite3: returns 9).
 #[test]

@@ -55,6 +55,16 @@ pub fn try_bulk_transfer(
 
 /// Extract table name from simple SELECT * FROM table pattern
 fn extract_simple_table_select(select_stmt: &SelectStmt) -> Option<String> {
+    // A WITH clause on the source SELECT disables the bulk-transfer fast path:
+    // the `FROM <name>` might resolve to a CTE rather than a catalog table, so
+    // reading it directly from storage would raise a spurious "no such table"
+    // (with2.test 5.7/5.8/7.1 — `INSERT INTO t WITH cte AS (...) SELECT * FROM
+    // cte`). This also matches SQLite, which disables the xfer optimization
+    // whenever a WITH clause is attached (with2.test 5.5-5.8 expect no xfer).
+    if select_stmt.with_clause.is_some() {
+        return None;
+    }
+
     // Must have: SELECT * or SELECT table.*
     let is_wildcard =
         select_stmt.select_list.iter().any(|item| matches!(item, SelectItem::Wildcard { .. }));
