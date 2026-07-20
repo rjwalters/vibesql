@@ -85,15 +85,100 @@ pub fn append_column(create_sql: &str, coldef: &str) -> Option<String> {
         return None;
     }
     let tokens = tokenize(create_sql)?;
-    let (_open, close) = column_list_parens(&tokens)?;
-    let insert_at = tokens[close].1.start;
+    let (open, close) = column_list_parens(&tokens)?;
 
+    // SQLite inserts the new column immediately after the last *column*
+    // definition — i.e. before any trailing table-level constraints — not merely
+    // before the closing `)` (verified against sqlite3 3.51.0: alter3-1.6/1.7,
+    // `CREATE TABLE t(a, b, UNIQUE(a, b))` + `ADD c` →
+    // `CREATE TABLE t(a, b, c, UNIQUE(a, b))`).
+    //
+    // Find the first top-level definition that begins with a table-constraint
+    // keyword. When every definition from there to the close is also a
+    // constraint (the normal case: all constraints trail the columns), insert the
+    // new column just before that constraint. Otherwise fall back to appending
+    // before the closing paren (constraints interleaved with columns — rare; the
+    // simple end-append stays valid and re-parseable).
+    if let Some(first_constraint) = first_trailing_constraint_start(&tokens, open, close) {
+        let insert_at = tokens[first_constraint].1.start;
+        let mut out = String::with_capacity(create_sql.len() + coldef.len() + 2);
+        out.push_str(&create_sql[..insert_at]);
+        out.push_str(coldef);
+        out.push_str(", ");
+        out.push_str(&create_sql[insert_at..]);
+        return Some(out);
+    }
+
+    let insert_at = tokens[close].1.start;
     let mut out = String::with_capacity(create_sql.len() + coldef.len() + 2);
     out.push_str(&create_sql[..insert_at]);
     out.push_str(", ");
     out.push_str(coldef);
     out.push_str(&create_sql[insert_at..]);
     Some(out)
+}
+
+/// Token index of the first top-level (depth-1) definition in the column list
+/// that begins with a table-level constraint keyword (`CONSTRAINT`, `PRIMARY`,
+/// `UNIQUE`, `CHECK`, `FOREIGN`), *provided* every definition from there to the
+/// closing paren is also a constraint. Returns `None` when there are no trailing
+/// table constraints, or when a column definition appears after a constraint
+/// (interleaved layout — the caller then appends at the end instead).
+///
+/// `open`/`close` are the column-list paren token indices from
+/// [`column_list_parens`]. Only the first token of each top-level definition is
+/// inspected, so a column-level constraint keyword (e.g. the `PRIMARY` in
+/// `a INTEGER PRIMARY KEY`) is never mistaken for a table constraint.
+fn first_trailing_constraint_start(
+    tokens: &[(Token, Span)],
+    open: usize,
+    close: usize,
+) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut at_def_start = false;
+    let mut first_constraint: Option<usize> = None;
+
+    let mut idx = open;
+    while idx < close {
+        let (tok, _) = &tokens[idx];
+        match tok {
+            Token::LParen => {
+                depth += 1;
+                if depth == 1 {
+                    at_def_start = true;
+                }
+            }
+            Token::RParen => depth -= 1,
+            Token::Comma if depth == 1 => at_def_start = true,
+            _ if depth == 1 && at_def_start => {
+                at_def_start = false;
+                let is_constraint = matches!(
+                    tok,
+                    Token::Keyword {
+                        keyword: Keyword::Constraint
+                            | Keyword::Primary
+                            | Keyword::Unique
+                            | Keyword::Check
+                            | Keyword::Foreign,
+                        ..
+                    }
+                );
+                if is_constraint {
+                    if first_constraint.is_none() {
+                        first_constraint = Some(idx);
+                    }
+                } else if first_constraint.is_some() {
+                    // A column definition follows a constraint: interleaved
+                    // layout. Bail so the caller appends at the end.
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    first_constraint
 }
 
 /// Whether `tok` is an identifier-like token whose text matches `name`
@@ -717,6 +802,40 @@ mod tests {
     fn append_column_no_column_list_returns_none() {
         // CREATE TABLE ... AS SELECT has no editable column list.
         assert!(append_column("CREATE TABLE t AS SELECT 1", "c INTEGER").is_none());
+    }
+
+    #[test]
+    fn append_column_before_trailing_table_constraint() {
+        // SQLite inserts the new column before a trailing table-level constraint,
+        // not before the closing paren (alter3-1.6/1.7).
+        let sql = "CREATE TABLE t2(a, b, UNIQUE(a, b))";
+        let out = append_column(sql, "c REFERENCES t1(c)").unwrap();
+        assert_eq!(out, "CREATE TABLE t2(a, b, c REFERENCES t1(c), UNIQUE(a, b))");
+    }
+
+    #[test]
+    fn append_column_before_multiple_trailing_constraints() {
+        let sql = "CREATE TABLE t(a, b, PRIMARY KEY(a), CHECK(b > 0))";
+        let out = append_column(sql, "c INTEGER").unwrap();
+        assert_eq!(out, "CREATE TABLE t(a, b, c INTEGER, PRIMARY KEY(a), CHECK(b > 0))");
+    }
+
+    #[test]
+    fn append_column_no_table_constraint_appends_at_end() {
+        // Column-level PRIMARY KEY is part of a column definition, not a
+        // table-level constraint, so the new column still appends at the end.
+        let sql = "CREATE TABLE t(a INTEGER PRIMARY KEY, b)";
+        let out = append_column(sql, "c INTEGER").unwrap();
+        assert_eq!(out, "CREATE TABLE t(a INTEGER PRIMARY KEY, b, c INTEGER)");
+    }
+
+    #[test]
+    fn append_column_interleaved_constraint_falls_back_to_end() {
+        // A column definition after a table constraint is an unusual layout;
+        // fall back to appending at the end (still valid + re-parseable).
+        let sql = "CREATE TABLE t(a, CHECK(a > 0), b)";
+        let out = append_column(sql, "c INTEGER").unwrap();
+        assert_eq!(out, "CREATE TABLE t(a, CHECK(a > 0), b, c INTEGER)");
     }
 
     #[test]

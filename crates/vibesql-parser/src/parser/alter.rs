@@ -123,7 +123,7 @@ fn parse_add_column(
     let mut generated = parse_optional_generated_clause(parser)?;
 
     // Parse optional DEFAULT clause
-    let default_value = if parser.peek_keyword(Keyword::Default) {
+    let mut default_value = if parser.peek_keyword(Keyword::Default) {
         parser.advance(); // consume DEFAULT
         Some(Box::new(parser.parse_expression()?))
     } else {
@@ -198,6 +198,18 @@ fn parse_add_column(
                         deferral: None,
                     },
                 });
+            }
+            // A DEFAULT clause may appear among the other column constraints in
+            // any order (e.g. `ADD c NOT NULL DEFAULT 10`). SQLite accepts column
+            // constraints in any order; parsing DEFAULT only before the loop
+            // dropped a trailing `DEFAULT` and left the column with no default
+            // (alter3-2.4). The first DEFAULT seen wins.
+            Token::Keyword { keyword: Keyword::Default, .. } => {
+                parser.advance();
+                let expr = parser.parse_expression()?;
+                if default_value.is_none() {
+                    default_value = Some(Box::new(expr));
+                }
             }
             _ => break,
         }

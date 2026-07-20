@@ -66,6 +66,7 @@ mod aggregate_min_max_tests;
 mod aggregate_percentile_tests;
 mod aggregate_random_patterns;
 mod aggregate_without_from;
+mod alter_add_column_restrictions;
 mod alter_rename_collision;
 mod alter_rename_column_triggers;
 mod alter_table_constraints;
