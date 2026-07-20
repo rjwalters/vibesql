@@ -679,6 +679,16 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (near "[^"]+": syntax error)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Malformed lexeme rejected by the tokenizer: SQLite reports these as
+    # `unrecognized token: "X"` (distinct from a grammar "near X: syntax error").
+    # Strip the optional "Parse error: " prefix and pass the SQLite form through.
+    if {[regexp {^(?:Parse error: )?(unrecognized token: "[^"]*")$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    # Oversized hex literal: SQLite reports `hex literal too big: 0x...`.
+    if {[regexp {^(?:Parse error: )?(hex literal too big: .+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Special case for "incomplete input" - return as-is (SQLite format)
     if {[regexp -nocase {^Parse error: incomplete input$} $error_msg]} {
         return "incomplete input"

@@ -47,13 +47,33 @@ pub struct LexerError {
     pub near_token: Option<String>,
 }
 
+impl LexerError {
+    /// Construct an error for a token the tokenizer could not form into a valid
+    /// lexeme. SQLite reports these as `unrecognized token: "X"` (distinct from
+    /// the grammar-level `near "X": syntax error`), so we carry the full
+    /// offending run in a pre-formatted `message` and leave `near_token` unset.
+    pub fn unrecognized_token(token: &str, position: usize) -> Self {
+        LexerError::preformatted(format!("unrecognized token: \"{}\"", token), position)
+    }
+
+    /// Construct an error whose `message` is already a fully-formed,
+    /// SQLite-compatible diagnostic. `near_token` is left unset so `Display`
+    /// emits the message verbatim rather than wrapping it as a syntax error.
+    pub fn preformatted(message: String, position: usize) -> Self {
+        LexerError { message, position, near_token: None }
+    }
+}
+
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // SQLite-compatible error format: near "TOKEN": syntax error
         if let Some(ref token) = self.near_token {
+            // SQLite-compatible grammar error: near "TOKEN": syntax error
             write!(f, "near \"{}\": syntax error", token)
         } else {
-            write!(f, "Lexer error at position {}: {}", self.position, self.message)
+            // A pre-formatted, SQLite-compatible diagnostic (e.g.
+            // `unrecognized token: "X"`, `hex literal too big: X`) — emitted
+            // verbatim so it matches SQLite exactly.
+            write!(f, "{}", self.message)
         }
     }
 }
