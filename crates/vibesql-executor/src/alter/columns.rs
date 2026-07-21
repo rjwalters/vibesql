@@ -85,9 +85,17 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::Other("Cannot add a UNIQUE column".to_string()));
     }
     // A DEFAULT NULL is equivalent to no default for the NOT NULL check.
+    // Generated columns are exempt: their value comes from the generation
+    // expression (not a default), so SQLite permits `ADD COLUMN x AS (expr)
+    // NOT NULL` and instead validates the computed value of every existing row
+    // against the NOT NULL constraint (alter3-9.5..9.7). That per-row check runs
+    // after the backfill below.
     let default_is_null_or_absent =
         stmt.column_def.default_value.as_deref().is_none_or(is_null_default);
-    if !stmt.column_def.nullable && default_is_null_or_absent {
+    if !stmt.column_def.nullable
+        && default_is_null_or_absent
+        && stmt.column_def.generated_expr.is_none()
+    {
         return Err(ExecutorError::Other(
             "Cannot add a NOT NULL column with default value NULL".to_string(),
         ));
@@ -190,6 +198,75 @@ pub(super) fn execute_add_column(
 
         for row in table.rows_mut() {
             row.add_value(default_value.clone());
+        }
+    }
+
+    // SQLite validates the constraints declared on an added column against the
+    // *existing* table contents and aborts the whole ALTER (leaving the table
+    // untouched) if any current row would violate them (alter3-9.*). We check
+    // the added column's:
+    //   - column-level CHECK constraints, and
+    //   - NOT NULL, but only for a generated column (a non-generated column is
+    //     already guaranteed non-NULL by the constant-default rule enforced
+    //     above; a generated column's value is computed per row and may be NULL).
+    // Rows are scanned in order and CHECK is evaluated before NOT NULL within a
+    // row, matching sqlite3 3.51.0 (alter3-9.6 reports the CHECK failure even
+    // though a later row would also fail NOT NULL).
+    let added_check_exprs: Vec<Expression> = stmt
+        .column_def
+        .constraints
+        .iter()
+        .filter_map(|c| match &c.kind {
+            ColumnConstraintKind::Check { expr, .. } => Some((**expr).clone()),
+            _ => None,
+        })
+        .collect();
+    let needs_not_null_check =
+        !stmt.column_def.nullable && stmt.column_def.generated_expr.is_some();
+
+    if !added_check_exprs.is_empty() || needs_not_null_check {
+        let schema_snapshot = table.schema.clone();
+        let new_col_index = schema_snapshot.columns.len() - 1;
+        let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
+            .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
+
+        let mut violation: Option<ExecutorError> = None;
+        for row in table.rows_mut() {
+            for expr in &added_check_exprs {
+                if evaluator.eval(expr, row)? == SqlValue::Boolean(false) {
+                    // SQLite emits the bare message (no constraint name) for the
+                    // ADD COLUMN existing-row validation path.
+                    violation = Some(ExecutorError::SqliteCompatError(
+                        "CHECK constraint failed".to_string(),
+                    ));
+                    break;
+                }
+            }
+            if violation.is_some() {
+                break;
+            }
+            if needs_not_null_check
+                && matches!(row.values.get(new_col_index), Some(SqlValue::Null))
+            {
+                violation = Some(ExecutorError::SqliteCompatError(
+                    "NOT NULL constraint failed".to_string(),
+                ));
+                break;
+            }
+        }
+
+        if let Some(err) = violation {
+            // Roll back the schema + row mutations so the rejected ALTER leaves
+            // the table exactly as it was (SQLite is atomic here).
+            for row in table.rows_mut() {
+                let _ = row.remove_value(new_col_index);
+            }
+            let _ = table.schema_mut().remove_column(new_col_index);
+            if added_strict_type.is_some() {
+                table.schema_mut().strict_types.pop();
+            }
+            database.invalidate_columnar_cache(&stmt.table_name);
+            return Err(err);
         }
     }
 

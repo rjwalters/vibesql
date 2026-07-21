@@ -573,3 +573,19 @@ fn test_parse_rename_column_rejects_reserved_keyword() {
     let result = Parser::parse_sql("ALTER TABLE t1 RENAME COLUMN select TO n");
     assert!(result.is_err(), "reserved keyword `select` must be rejected as a column name");
 }
+
+#[test]
+fn test_parse_add_column_with_check_constraint() {
+    // A column-level CHECK on an added column must be captured in the parsed
+    // constraints (previously the CHECK tokens were silently dropped).
+    let stmt = Parser::parse_sql("ALTER TABLE t1 ADD COLUMN c CHECK(a!=1)").unwrap();
+    match stmt {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            let has_check = add.column_def.constraints.iter().any(|c| {
+                matches!(c.kind, vibesql_ast::ColumnConstraintKind::Check { .. })
+            });
+            assert!(has_check, "ADD COLUMN CHECK constraint should be parsed");
+        }
+        _ => panic!("Expected ALTER TABLE ADD COLUMN statement"),
+    }
+}
