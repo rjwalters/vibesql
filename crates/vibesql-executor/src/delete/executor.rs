@@ -1176,40 +1176,15 @@ impl DeleteExecutor {
             // Evaluate the offset expression without a row context
             // (it should be a constant or simple expression)
             let empty_row = vibesql_storage::Row::new(vec![]);
-            match evaluator.eval(offset_expr, &empty_row)? {
-                SqlValue::Integer(n) if n >= 0 => n as usize,
-                SqlValue::Bigint(n) if n >= 0 => n as usize,
-                // Any negative OFFSET is treated as 0 (SQLite semantics, #5747).
-                SqlValue::Integer(n) if n < 0 => 0,
-                SqlValue::Bigint(n) if n < 0 => 0,
-                // SQLite applies integer affinity to OFFSET, but only a REAL
-                // that converts *losslessly* to an integer is accepted (e.g.
-                // `LIMIT 2+2, 16/4` supplies OFFSET `2+2`=4 and LIMIT `16/4`
-                // which evaluates to REAL 4.0 -> 4). A negative integral real
-                // clamps to 0, matching the integer branch. A non-integral real
-                // (e.g. 1.2) falls through to the error arm (e_delete-3.1).
-                SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f)
-                    if f.is_finite() && f.fract() == 0.0 =>
-                {
-                    if f >= 0.0 {
-                        f as usize
-                    } else {
-                        0
-                    }
-                }
-                SqlValue::Float(f) if f.is_finite() && f.fract() == 0.0 => {
-                    if f >= 0.0 {
-                        f as usize
-                    } else {
-                        0
-                    }
-                }
-                SqlValue::Null => 0, // NULL offset treated as 0
-                _ => {
-                    return Err(ExecutorError::TypeError(
-                        "OFFSET value must be a non-negative integer".to_string(),
-                    ))
-                }
+            let value = evaluator.eval(offset_expr, &empty_row)?;
+            // SQLite numeric-affinity coercion shared with SELECT and UPDATE
+            // (#6193): INTEGER as-is, a losslessly-integral REAL or numeric
+            // TEXT ('4' -> 4, '1.0' -> 1) accepted, NULL/BLOB/non-numeric TEXT/
+            // non-integral REAL raise `datatype mismatch`. A negative OFFSET is
+            // then treated as 0 (SQLite semantics, #5747).
+            match crate::select::coerce_limit_offset_to_i64(value)? {
+                n if n < 0 => 0,
+                n => n as usize,
             }
         } else {
             0
@@ -1218,39 +1193,13 @@ impl DeleteExecutor {
         // Evaluate LIMIT expression if present
         let limit_val = if let Some(ref limit_expr) = limit {
             let empty_row = vibesql_storage::Row::new(vec![]);
-            match evaluator.eval(limit_expr, &empty_row)? {
-                SqlValue::Integer(n) if n >= 0 => Some(n as usize),
-                SqlValue::Bigint(n) if n >= 0 => Some(n as usize),
-                // Any negative LIMIT means "no limit" (SQLite semantics, #5747).
-                SqlValue::Integer(n) if n < 0 => None,
-                SqlValue::Bigint(n) if n < 0 => None,
-                // Integer affinity: a REAL LIMIT that converts losslessly to an
-                // integer is accepted (`16/4` -> 4.0 -> LIMIT 4); a negative
-                // integral real means "no limit", matching the integer branch.
-                // A non-integral real (e.g. 1.2) falls through to the error arm
-                // (e_delete-3.1 comma-form LIMIT).
-                SqlValue::Real(f) | SqlValue::Double(f) | SqlValue::Numeric(f)
-                    if f.is_finite() && f.fract() == 0.0 =>
-                {
-                    if f >= 0.0 {
-                        Some(f as usize)
-                    } else {
-                        None
-                    }
-                }
-                SqlValue::Float(f) if f.is_finite() && f.fract() == 0.0 => {
-                    if f >= 0.0 {
-                        Some(f as usize)
-                    } else {
-                        None
-                    }
-                }
-                SqlValue::Null => None, // NULL limit treated as no limit
-                _ => {
-                    return Err(ExecutorError::TypeError(
-                        "LIMIT value must be a non-negative integer".to_string(),
-                    ))
-                }
+            let value = evaluator.eval(limit_expr, &empty_row)?;
+            // Same numeric-affinity coercion as OFFSET above (#6193). A negative
+            // LIMIT means "no limit" (SQLite semantics, #5747); a non-coercible
+            // value (NULL, BLOB, 'abc', 1.2) raises `datatype mismatch`.
+            match crate::select::coerce_limit_offset_to_i64(value)? {
+                n if n < 0 => None,
+                n => Some(n as usize),
             }
         } else {
             None
@@ -1269,6 +1218,12 @@ impl DeleteExecutor {
         if let Some(limit) = limit_val {
             rows_and_indices.truncate(limit);
         }
+
+        // ORDER BY only determines *which* rows fall within the LIMIT; the rows
+        // are then always deleted in rowid (physical-index) order, so AFTER
+        // DELETE triggers fire in rowid order regardless of the ORDER BY
+        // direction (SQLite lang_delete.html R-07548-13422; e_delete-3.10).
+        rows_and_indices.sort_by_key(|(index, _)| *index);
 
         Ok(())
     }
