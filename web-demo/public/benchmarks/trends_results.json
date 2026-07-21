@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-15T18:21:58.155761",
-  "git_commit": "164aabd88",
+  "generated_at": "2026-07-21T17:00:09.381668",
+  "git_commit": "b0b842f",
   "description": "VibeSQL Embedded performance trends over time",
   "benchmarks": {
     "tpch": {
@@ -590,6 +590,17 @@
           "geomean_ms": 50.19,
           "queries_passed": 22,
           "total_queries": 22
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T04:32:48.509736",
+          "commit": "b0b842f7",
+          "avg_ms": 56.64,
+          "min_ms": 1.64,
+          "max_ms": 222.41,
+          "geomean_ms": 24.52,
+          "queries_passed": 22,
+          "total_queries": 22
         }
       ]
     },
@@ -839,6 +850,39 @@
           "geomean_ms": 10.33,
           "queries_passed": 408,
           "total_queries": 408
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T04:41:49.236606",
+          "commit": "b0b842f7",
+          "avg_ms": 41.07,
+          "min_ms": 0.05,
+          "max_ms": 384.01,
+          "geomean_ms": 14.18,
+          "queries_passed": 101,
+          "total_queries": 103
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T15:25:10.154657",
+          "commit": "b0b842f7",
+          "avg_ms": 38.06,
+          "min_ms": 0.05,
+          "max_ms": 354.45,
+          "geomean_ms": 13.43,
+          "queries_passed": 101,
+          "total_queries": 103
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T16:45:55.686978",
+          "commit": "b0b842f7",
+          "avg_ms": 38.52,
+          "min_ms": 0.04,
+          "max_ms": 365.94,
+          "geomean_ms": 13.47,
+          "queries_passed": 404,
+          "total_queries": 412
         }
       ]
     },
@@ -1030,6 +1074,13 @@
           "commit": "965bfdd4",
           "tps": 5306.65,
           "latency_us": 276.15
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T04:39:15.055450",
+          "commit": "b0b842f7",
+          "tps": 7729.8,
+          "latency_us": 182.16
         }
       ]
     },
@@ -1341,6 +1392,39 @@
             "delete": 0.0046,
             "range_queries": 0.0333
           }
+        },
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T04:51:06.302998",
+          "commit": "b0b842f7",
+          "avg_ms": 0.0118,
+          "min_ms": 0.0034,
+          "max_ms": 0.0345,
+          "workloads": {
+            "point_select": 0.0034,
+            "insert": 0.0176,
+            "update_index": 0.0058,
+            "update_non_index": 0.0035,
+            "delete": 0.0057,
+            "range_queries": 0.0345
+          }
+        }
+      ]
+    },
+    "hnsw_recall": {
+      "suite": "hnsw_recall",
+      "display_name": "HNSW Recall@k",
+      "description": "Vector index recall under delete-heavy workloads",
+      "metric": "recall",
+      "metric_label": "Recall@k",
+      "data": [
+        {
+          "date": "2026-07-21",
+          "timestamp": "2026-07-21T06:38:46.014832",
+          "commit": "b0b842f7",
+          "recall_fresh": 0.9998,
+          "recall_degraded": 0.934,
+          "recall_compacted": 0.9998
         }
       ]
     }

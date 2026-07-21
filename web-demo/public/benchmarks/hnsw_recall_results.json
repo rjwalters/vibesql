@@ -1,8 +1,141 @@
 {
-  "measurements": [],
+  "measurements": [
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "fresh",
+      "recall": 0.999
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "degraded",
+      "recall": 0.982
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "compacted",
+      "recall": 0.999
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "fresh",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "degraded",
+      "recall": 0.809
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 12,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "compacted",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "fresh",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "degraded",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.5,
+      "live_count": 1500,
+      "deleted_count": 1500,
+      "index_state": "compacted",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "fresh",
+      "recall": 1.0
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "degraded",
+      "recall": 0.945
+    },
+    {
+      "k": 10,
+      "dataset_size": 3000,
+      "dimensions": 16,
+      "ef_search": 40,
+      "delete_ratio": 0.8,
+      "live_count": 600,
+      "deleted_count": 2400,
+      "index_state": "compacted",
+      "recall": 1.0
+    }
+  ],
   "metadata": {
     "suite": "hnsw_recall",
-    "timestamp": null,
-    "git_commit": null
+    "timestamp": "2026-07-21T06:38:46.014832",
+    "git_commit": "b0b842f7"
   }
 }

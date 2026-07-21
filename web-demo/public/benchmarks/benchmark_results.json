@@ -3,10 +3,10 @@
     {
       "name": "tpch_q1_vibesql",
       "stats": {
-        "mean": 0.49753,
-        "stddev": 0.0248765,
-        "min": 0.47265349999999995,
-        "max": 0.5224065,
+        "mean": 0.0085,
+        "stddev": 0.00042500000000000003,
+        "min": 0.008075,
+        "max": 0.008925,
         "rounds": 5,
         "status": "passed"
       }
@@ -14,10 +14,10 @@
     {
       "name": "tpch_q2_vibesql",
       "stats": {
-        "mean": 0.00875,
-        "stddev": 0.00043750000000000006,
-        "min": 0.0083125,
-        "max": 0.009187500000000001,
+        "mean": 0.00164,
+        "stddev": 8.2e-05,
+        "min": 0.001558,
+        "max": 0.001722,
         "rounds": 5,
         "status": "passed"
       }
@@ -25,10 +25,10 @@
     {
       "name": "tpch_q3_vibesql",
       "stats": {
-        "mean": 0.08097,
-        "stddev": 0.0040485,
-        "min": 0.07692149999999999,
-        "max": 0.08501850000000001,
+        "mean": 0.04175,
+        "stddev": 0.0020875000000000004,
+        "min": 0.0396625,
+        "max": 0.0438375,
         "rounds": 5,
         "status": "passed"
       }
@@ -36,10 +36,10 @@
     {
       "name": "tpch_q4_vibesql",
       "stats": {
-        "mean": 0.00248,
-        "stddev": 0.000124,
-        "min": 0.002356,
-        "max": 0.002604,
+        "mean": 0.00414,
+        "stddev": 0.000207,
+        "min": 0.003932999999999999,
+        "max": 0.004347,
         "rounds": 5,
         "status": "passed"
       }
@@ -47,10 +47,10 @@
     {
       "name": "tpch_q5_vibesql",
       "stats": {
-        "mean": 0.039740000000000004,
-        "stddev": 0.0019870000000000005,
-        "min": 0.037753,
-        "max": 0.04172700000000001,
+        "mean": 0.02014,
+        "stddev": 0.001007,
+        "min": 0.019133,
+        "max": 0.021147000000000003,
         "rounds": 5,
         "status": "passed"
       }
@@ -58,10 +58,10 @@
     {
       "name": "tpch_q6_vibesql",
       "stats": {
-        "mean": 0.00393,
-        "stddev": 0.00019650000000000003,
-        "min": 0.0037335000000000003,
-        "max": 0.004126500000000001,
+        "mean": 0.00347,
+        "stddev": 0.00017350000000000002,
+        "min": 0.0032965,
+        "max": 0.0036435,
         "rounds": 5,
         "status": "passed"
       }
@@ -69,10 +69,10 @@
     {
       "name": "tpch_q7_vibesql",
       "stats": {
-        "mean": 0.03,
-        "stddev": 0.0015,
-        "min": 0.028499999999999998,
-        "max": 0.0315,
+        "mean": 0.022949999999999998,
+        "stddev": 0.0011474999999999999,
+        "min": 0.0218025,
+        "max": 0.024097499999999997,
         "rounds": 5,
         "status": "passed"
       }
@@ -80,10 +80,10 @@
     {
       "name": "tpch_q8_vibesql",
       "stats": {
-        "mean": 0.05319,
-        "stddev": 0.0026595000000000004,
-        "min": 0.0505305,
-        "max": 0.0558495,
+        "mean": 0.02404,
+        "stddev": 0.001202,
+        "min": 0.022837999999999997,
+        "max": 0.025242,
         "rounds": 5,
         "status": "passed"
       }
@@ -91,10 +91,10 @@
     {
       "name": "tpch_q9_vibesql",
       "stats": {
-        "mean": 0.08627,
-        "stddev": 0.0043135000000000005,
-        "min": 0.0819565,
-        "max": 0.0905835,
+        "mean": 0.08473,
+        "stddev": 0.0042365,
+        "min": 0.0804935,
+        "max": 0.0889665,
         "rounds": 5,
         "status": "passed"
       }
@@ -102,236 +102,16 @@
     {
       "name": "tpch_q10_vibesql",
       "stats": {
-        "mean": 0.03132,
-        "stddev": 0.0015660000000000001,
-        "min": 0.029754,
-        "max": 0.032886000000000006,
+        "mean": 0.0185,
+        "stddev": 0.000925,
+        "min": 0.017574999999999997,
+        "max": 0.019425,
         "rounds": 5,
         "status": "passed"
       }
     },
     {
       "name": "tpch_q11_vibesql",
-      "stats": {
-        "mean": 0.05404,
-        "stddev": 0.002702,
-        "min": 0.051337999999999995,
-        "max": 0.056742,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q12_vibesql",
-      "stats": {
-        "mean": 0.0077800000000000005,
-        "stddev": 0.000389,
-        "min": 0.007391,
-        "max": 0.008169000000000001,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q13_vibesql",
-      "stats": {
-        "mean": 0.17880000000000001,
-        "stddev": 0.008940000000000002,
-        "min": 0.16986,
-        "max": 0.18774000000000002,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q14_vibesql",
-      "stats": {
-        "mean": 0.38108,
-        "stddev": 0.019054,
-        "min": 0.36202599999999996,
-        "max": 0.400134,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q15_vibesql",
-      "stats": {
-        "mean": 0.00369,
-        "stddev": 0.0001845,
-        "min": 0.0035055,
-        "max": 0.0038745000000000003,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q16_vibesql",
-      "stats": {
-        "mean": 0.04375,
-        "stddev": 0.0021874999999999998,
-        "min": 0.041562499999999995,
-        "max": 0.0459375,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q17_vibesql",
-      "stats": {
-        "mean": 0.31457999999999997,
-        "stddev": 0.015729,
-        "min": 0.298851,
-        "max": 0.33030899999999996,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q18_vibesql",
-      "stats": {
-        "mean": 0.06792000000000001,
-        "stddev": 0.0033960000000000006,
-        "min": 0.064524,
-        "max": 0.07131600000000002,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q19_vibesql",
-      "stats": {
-        "mean": 0.32371,
-        "stddev": 0.016185500000000002,
-        "min": 0.3075245,
-        "max": 0.3398955,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q20_vibesql",
-      "stats": {
-        "mean": 0.18943000000000002,
-        "stddev": 0.0094715,
-        "min": 0.1799585,
-        "max": 0.19890150000000004,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q21_vibesql",
-      "stats": {
-        "mean": 0.28419,
-        "stddev": 0.0142095,
-        "min": 0.2699805,
-        "max": 0.2983995,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q22_vibesql",
-      "stats": {
-        "mean": 0.025589999999999998,
-        "stddev": 0.0012795,
-        "min": 0.0243105,
-        "max": 0.026869499999999998,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q1_sqlite",
-      "stats": {
-        "mean": 0.18881,
-        "stddev": 0.009440500000000001,
-        "min": 0.1793695,
-        "max": 0.19825050000000002,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q2_sqlite",
-      "stats": {
-        "mean": 0.00093952,
-        "stddev": 4.6976000000000006e-05,
-        "min": 0.000892544,
-        "max": 0.0009864960000000001,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q3_sqlite",
-      "stats": {
-        "mean": 0.00647,
-        "stddev": 0.0003235,
-        "min": 0.0061465,
-        "max": 0.0067935,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q4_sqlite",
-      "stats": {
-        "mean": 0.00087086,
-        "stddev": 4.3543e-05,
-        "min": 0.0008273169999999999,
-        "max": 0.000914403,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q5_sqlite",
-      "stats": {
-        "mean": 0.005019999999999999,
-        "stddev": 0.000251,
-        "min": 0.004768999999999999,
-        "max": 0.005271,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q6_sqlite",
-      "stats": {
-        "mean": 0.00395,
-        "stddev": 0.00019750000000000003,
-        "min": 0.0037525,
-        "max": 0.004147500000000001,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q7_sqlite",
-      "stats": {
-        "mean": 0.02122,
-        "stddev": 0.001061,
-        "min": 0.020159,
-        "max": 0.022281,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q8_sqlite",
-      "stats": {
-        "mean": 0.02187,
-        "stddev": 0.0010935,
-        "min": 0.0207765,
-        "max": 0.0229635,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q9_sqlite",
       "stats": {
         "mean": 0.01348,
         "stddev": 0.0006740000000000001,
@@ -342,12 +122,232 @@
       }
     },
     {
+      "name": "tpch_q12_vibesql",
+      "stats": {
+        "mean": 0.00647,
+        "stddev": 0.0003235,
+        "min": 0.0061465,
+        "max": 0.0067935,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q13_vibesql",
+      "stats": {
+        "mean": 0.09340000000000001,
+        "stddev": 0.0046700000000000005,
+        "min": 0.08873,
+        "max": 0.09807000000000002,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q14_vibesql",
+      "stats": {
+        "mean": 0.10862000000000001,
+        "stddev": 0.005431000000000001,
+        "min": 0.103189,
+        "max": 0.11405100000000001,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q15_vibesql",
+      "stats": {
+        "mean": 0.0035299999999999997,
+        "stddev": 0.0001765,
+        "min": 0.0033534999999999997,
+        "max": 0.0037064999999999997,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q16_vibesql",
+      "stats": {
+        "mean": 0.01517,
+        "stddev": 0.0007585000000000001,
+        "min": 0.014411499999999999,
+        "max": 0.0159285,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q17_vibesql",
+      "stats": {
+        "mean": 0.21749000000000002,
+        "stddev": 0.010874500000000002,
+        "min": 0.2066155,
+        "max": 0.22836450000000003,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q18_vibesql",
+      "stats": {
+        "mean": 0.046079999999999996,
+        "stddev": 0.002304,
+        "min": 0.043775999999999995,
+        "max": 0.048383999999999996,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q19_vibesql",
+      "stats": {
+        "mean": 0.13448,
+        "stddev": 0.006724,
+        "min": 0.12775599999999998,
+        "max": 0.141204,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q20_vibesql",
+      "stats": {
+        "mean": 0.1425,
+        "stddev": 0.007124999999999999,
+        "min": 0.135375,
+        "max": 0.14962499999999998,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q21_vibesql",
+      "stats": {
+        "mean": 0.22241,
+        "stddev": 0.0111205,
+        "min": 0.2112895,
+        "max": 0.2335305,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q22_vibesql",
+      "stats": {
+        "mean": 0.01261,
+        "stddev": 0.0006305,
+        "min": 0.011979499999999999,
+        "max": 0.0132405,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q1_sqlite",
+      "stats": {
+        "mean": 0.04564,
+        "stddev": 0.002282,
+        "min": 0.043358,
+        "max": 0.047922,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q2_sqlite",
+      "stats": {
+        "mean": 0.00121,
+        "stddev": 6.05e-05,
+        "min": 0.0011495,
+        "max": 0.0012705,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q3_sqlite",
+      "stats": {
+        "mean": 0.01307,
+        "stddev": 0.0006535,
+        "min": 0.012416499999999999,
+        "max": 0.013723500000000001,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q4_sqlite",
+      "stats": {
+        "mean": 0.0018700000000000001,
+        "stddev": 9.350000000000001e-05,
+        "min": 0.0017765,
+        "max": 0.0019635000000000004,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q5_sqlite",
+      "stats": {
+        "mean": 0.00901,
+        "stddev": 0.00045050000000000005,
+        "min": 0.0085595,
+        "max": 0.009460500000000002,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q6_sqlite",
+      "stats": {
+        "mean": 0.00661,
+        "stddev": 0.00033050000000000006,
+        "min": 0.0062795,
+        "max": 0.0069405000000000005,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q7_sqlite",
+      "stats": {
+        "mean": 0.01367,
+        "stddev": 0.0006835000000000001,
+        "min": 0.0129865,
+        "max": 0.0143535,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q8_sqlite",
+      "stats": {
+        "mean": 0.01117,
+        "stddev": 0.0005585,
+        "min": 0.0106115,
+        "max": 0.0117285,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q9_sqlite",
+      "stats": {
+        "mean": 0.01858,
+        "stddev": 0.000929,
+        "min": 0.017651,
+        "max": 0.019509,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
       "name": "tpch_q10_sqlite",
       "stats": {
-        "mean": 0.00418,
-        "stddev": 0.00020899999999999998,
-        "min": 0.003971,
-        "max": 0.004389,
+        "mean": 0.00883,
+        "stddev": 0.0004415,
+        "min": 0.008388499999999998,
+        "max": 0.0092715,
         "rounds": 5,
         "status": "passed"
       }
@@ -355,10 +355,10 @@
     {
       "name": "tpch_q11_sqlite",
       "stats": {
-        "mean": 0.0020299999999999997,
-        "stddev": 0.00010149999999999999,
-        "min": 0.0019284999999999997,
-        "max": 0.0021314999999999997,
+        "mean": 0.0030099999999999997,
+        "stddev": 0.0001505,
+        "min": 0.0028594999999999996,
+        "max": 0.0031604999999999997,
         "rounds": 5,
         "status": "passed"
       }
@@ -366,10 +366,10 @@
     {
       "name": "tpch_q12_sqlite",
       "stats": {
-        "mean": 0.00824,
-        "stddev": 0.00041200000000000004,
-        "min": 0.007828,
-        "max": 0.008652000000000002,
+        "mean": 0.0071200000000000005,
+        "stddev": 0.00035600000000000003,
+        "min": 0.006764,
+        "max": 0.007476000000000001,
         "rounds": 5,
         "status": "passed"
       }
@@ -377,10 +377,10 @@
     {
       "name": "tpch_q13_sqlite",
       "stats": {
-        "mean": 0.02336,
-        "stddev": 0.001168,
-        "min": 0.022191999999999996,
-        "max": 0.024528,
+        "mean": 0.01334,
+        "stddev": 0.0006670000000000001,
+        "min": 0.012672999999999999,
+        "max": 0.014007,
         "rounds": 5,
         "status": "passed"
       }
@@ -388,10 +388,10 @@
     {
       "name": "tpch_q14_sqlite",
       "stats": {
-        "mean": 0.00307,
-        "stddev": 0.0001535,
-        "min": 0.0029165,
-        "max": 0.0032235,
+        "mean": 0.00638,
+        "stddev": 0.00031900000000000006,
+        "min": 0.0060609999999999995,
+        "max": 0.006699000000000001,
         "rounds": 5,
         "status": "passed"
       }
@@ -399,10 +399,10 @@
     {
       "name": "tpch_q15_sqlite",
       "stats": {
-        "mean": 0.0030600000000000002,
-        "stddev": 0.00015300000000000003,
-        "min": 0.002907,
-        "max": 0.0032130000000000006,
+        "mean": 0.006730000000000001,
+        "stddev": 0.00033650000000000005,
+        "min": 0.006393500000000001,
+        "max": 0.007066500000000001,
         "rounds": 5,
         "status": "passed"
       }
@@ -410,10 +410,10 @@
     {
       "name": "tpch_q16_sqlite",
       "stats": {
-        "mean": 0.00135,
-        "stddev": 6.75e-05,
-        "min": 0.0012825,
-        "max": 0.0014175000000000001,
+        "mean": 0.00221,
+        "stddev": 0.00011050000000000002,
+        "min": 0.0020995000000000002,
+        "max": 0.0023205,
         "rounds": 5,
         "status": "passed"
       }
@@ -421,10 +421,10 @@
     {
       "name": "tpch_q17_sqlite",
       "stats": {
-        "mean": 0.00924,
-        "stddev": 0.000462,
-        "min": 0.008778,
-        "max": 0.009702,
+        "mean": 0.01485,
+        "stddev": 0.0007425000000000001,
+        "min": 0.0141075,
+        "max": 0.0155925,
         "rounds": 5,
         "status": "passed"
       }
@@ -432,10 +432,10 @@
     {
       "name": "tpch_q18_sqlite",
       "stats": {
-        "mean": 0.01488,
-        "stddev": 0.0007440000000000001,
-        "min": 0.014136000000000001,
-        "max": 0.015624,
+        "mean": 0.00714,
+        "stddev": 0.000357,
+        "min": 0.006782999999999999,
+        "max": 0.007497,
         "rounds": 5,
         "status": "passed"
       }
@@ -443,10 +443,10 @@
     {
       "name": "tpch_q19_sqlite",
       "stats": {
-        "mean": 0.022850000000000002,
-        "stddev": 0.0011425,
-        "min": 0.0217075,
-        "max": 0.023992500000000003,
+        "mean": 0.013359999999999999,
+        "stddev": 0.000668,
+        "min": 0.012691999999999998,
+        "max": 0.014027999999999999,
         "rounds": 5,
         "status": "passed"
       }
@@ -454,10 +454,10 @@
     {
       "name": "tpch_q20_sqlite",
       "stats": {
-        "mean": 0.1566,
-        "stddev": 0.00783,
-        "min": 0.14876999999999999,
-        "max": 0.16443,
+        "mean": 0.22841,
+        "stddev": 0.0114205,
+        "min": 0.2169895,
+        "max": 0.2398305,
         "rounds": 5,
         "status": "passed"
       }
@@ -465,10 +465,10 @@
     {
       "name": "tpch_q21_sqlite",
       "stats": {
-        "mean": 0.019600000000000003,
-        "stddev": 0.0009800000000000002,
-        "min": 0.01862,
-        "max": 0.020580000000000005,
+        "mean": 0.027440000000000003,
+        "stddev": 0.0013720000000000002,
+        "min": 0.026068,
+        "max": 0.028812000000000004,
         "rounds": 5,
         "status": "passed"
       }
@@ -476,10 +476,10 @@
     {
       "name": "tpch_q22_sqlite",
       "stats": {
-        "mean": 0.00539,
-        "stddev": 0.0002695,
-        "min": 0.005120499999999999,
-        "max": 0.0056595000000000005,
+        "mean": 0.00434,
+        "stddev": 0.00021700000000000002,
+        "min": 0.004123,
+        "max": 0.004557,
         "rounds": 5,
         "status": "passed"
       }
@@ -487,10 +487,10 @@
     {
       "name": "tpch_q1_duckdb",
       "stats": {
-        "mean": 0.00887,
-        "stddev": 0.0004435,
-        "min": 0.008426499999999998,
-        "max": 0.0093135,
+        "mean": 0.00299,
+        "stddev": 0.0001495,
+        "min": 0.0028404999999999997,
+        "max": 0.0031395000000000004,
         "rounds": 5,
         "status": "passed"
       }
@@ -498,10 +498,10 @@
     {
       "name": "tpch_q2_duckdb",
       "stats": {
-        "mean": 0.00679,
-        "stddev": 0.0003395,
-        "min": 0.0064505,
-        "max": 0.0071295,
+        "mean": 0.00335,
+        "stddev": 0.0001675,
+        "min": 0.0031825,
+        "max": 0.0035175000000000002,
         "rounds": 5,
         "status": "passed"
       }
@@ -509,10 +509,10 @@
     {
       "name": "tpch_q3_duckdb",
       "stats": {
-        "mean": 0.00292,
-        "stddev": 0.000146,
-        "min": 0.0027739999999999996,
-        "max": 0.003066,
+        "mean": 0.00276,
+        "stddev": 0.000138,
+        "min": 0.0026219999999999998,
+        "max": 0.002898,
         "rounds": 5,
         "status": "passed"
       }
@@ -520,10 +520,10 @@
     {
       "name": "tpch_q4_duckdb",
       "stats": {
-        "mean": 0.0063,
-        "stddev": 0.000315,
-        "min": 0.005985,
-        "max": 0.006615,
+        "mean": 0.00401,
+        "stddev": 0.0002005,
+        "min": 0.0038094999999999995,
+        "max": 0.0042105,
         "rounds": 5,
         "status": "passed"
       }
@@ -531,10 +531,10 @@
     {
       "name": "tpch_q5_duckdb",
       "stats": {
-        "mean": 0.00818,
-        "stddev": 0.000409,
-        "min": 0.007770999999999999,
-        "max": 0.008589,
+        "mean": 0.00368,
+        "stddev": 0.00018400000000000003,
+        "min": 0.003496,
+        "max": 0.0038640000000000002,
         "rounds": 5,
         "status": "passed"
       }
@@ -542,10 +542,10 @@
     {
       "name": "tpch_q6_duckdb",
       "stats": {
-        "mean": 0.00058662,
-        "stddev": 2.9331000000000004e-05,
-        "min": 0.000557289,
-        "max": 0.0006159510000000001,
+        "mean": 0.00069502,
+        "stddev": 3.4751e-05,
+        "min": 0.0006602689999999999,
+        "max": 0.000729771,
         "rounds": 5,
         "status": "passed"
       }
@@ -553,10 +553,10 @@
     {
       "name": "tpch_q7_duckdb",
       "stats": {
-        "mean": 0.0038799999999999998,
-        "stddev": 0.000194,
-        "min": 0.0036859999999999996,
-        "max": 0.0040739999999999995,
+        "mean": 0.00335,
+        "stddev": 0.0001675,
+        "min": 0.0031825,
+        "max": 0.0035175000000000002,
         "rounds": 5,
         "status": "passed"
       }
@@ -564,10 +564,10 @@
     {
       "name": "tpch_q8_duckdb",
       "stats": {
-        "mean": 0.00795,
-        "stddev": 0.00039750000000000007,
-        "min": 0.0075525,
-        "max": 0.0083475,
+        "mean": 0.00395,
+        "stddev": 0.00019750000000000003,
+        "min": 0.0037525,
+        "max": 0.004147500000000001,
         "rounds": 5,
         "status": "passed"
       }
@@ -575,10 +575,10 @@
     {
       "name": "tpch_q9_duckdb",
       "stats": {
-        "mean": 0.00862,
-        "stddev": 0.00043099999999999996,
-        "min": 0.008188999999999998,
-        "max": 0.009051,
+        "mean": 0.00441,
+        "stddev": 0.0002205,
+        "min": 0.0041895,
+        "max": 0.0046305,
         "rounds": 5,
         "status": "passed"
       }
@@ -586,10 +586,10 @@
     {
       "name": "tpch_q10_duckdb",
       "stats": {
-        "mean": 0.0086,
-        "stddev": 0.00043000000000000004,
-        "min": 0.00817,
-        "max": 0.00903,
+        "mean": 0.00391,
+        "stddev": 0.00019550000000000004,
+        "min": 0.0037145,
+        "max": 0.004105500000000001,
         "rounds": 5,
         "status": "passed"
       }
@@ -597,10 +597,10 @@
     {
       "name": "tpch_q11_duckdb",
       "stats": {
-        "mean": 0.00432,
-        "stddev": 0.00021600000000000002,
-        "min": 0.004104,
-        "max": 0.004536,
+        "mean": 0.00228,
+        "stddev": 0.000114,
+        "min": 0.002166,
+        "max": 0.002394,
         "rounds": 5,
         "status": "passed"
       }
@@ -608,10 +608,10 @@
     {
       "name": "tpch_q12_duckdb",
       "stats": {
-        "mean": 0.00617,
-        "stddev": 0.0003085,
-        "min": 0.0058614999999999995,
-        "max": 0.006478500000000001,
+        "mean": 0.00272,
+        "stddev": 0.00013600000000000003,
+        "min": 0.002584,
+        "max": 0.0028560000000000005,
         "rounds": 5,
         "status": "passed"
       }
@@ -619,49 +619,16 @@
     {
       "name": "tpch_q13_duckdb",
       "stats": {
-        "mean": 0.00455,
-        "stddev": 0.00022750000000000003,
-        "min": 0.0043225,
-        "max": 0.0047775000000000005,
+        "mean": 0.00226,
+        "stddev": 0.000113,
+        "min": 0.0021469999999999996,
+        "max": 0.002373,
         "rounds": 5,
         "status": "passed"
       }
     },
     {
       "name": "tpch_q14_duckdb",
-      "stats": {
-        "mean": 0.00442,
-        "stddev": 0.00022100000000000003,
-        "min": 0.0041990000000000005,
-        "max": 0.004641,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q15_duckdb",
-      "stats": {
-        "mean": 0.00378,
-        "stddev": 0.000189,
-        "min": 0.0035909999999999996,
-        "max": 0.003969,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q16_duckdb",
-      "stats": {
-        "mean": 0.00307,
-        "stddev": 0.0001535,
-        "min": 0.0029165,
-        "max": 0.0032235,
-        "rounds": 5,
-        "status": "passed"
-      }
-    },
-    {
-      "name": "tpch_q17_duckdb",
       "stats": {
         "mean": 0.00131,
         "stddev": 6.55e-05,
@@ -672,12 +639,45 @@
       }
     },
     {
+      "name": "tpch_q15_duckdb",
+      "stats": {
+        "mean": 0.00189,
+        "stddev": 9.45e-05,
+        "min": 0.0017954999999999998,
+        "max": 0.0019845,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q16_duckdb",
+      "stats": {
+        "mean": 0.00299,
+        "stddev": 0.0001495,
+        "min": 0.0028404999999999997,
+        "max": 0.0031395000000000004,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
+      "name": "tpch_q17_duckdb",
+      "stats": {
+        "mean": 0.0015,
+        "stddev": 7.500000000000001e-05,
+        "min": 0.001425,
+        "max": 0.001575,
+        "rounds": 5,
+        "status": "passed"
+      }
+    },
+    {
       "name": "tpch_q18_duckdb",
       "stats": {
-        "mean": 0.0026,
-        "stddev": 0.00013,
-        "min": 0.00247,
-        "max": 0.00273,
+        "mean": 0.00458,
+        "stddev": 0.000229,
+        "min": 0.004351,
+        "max": 0.004809,
         "rounds": 5,
         "status": "passed"
       }
@@ -685,10 +685,10 @@
     {
       "name": "tpch_q19_duckdb",
       "stats": {
-        "mean": 0.00359,
-        "stddev": 0.0001795,
-        "min": 0.0034105,
-        "max": 0.0037695,
+        "mean": 0.006719999999999999,
+        "stddev": 0.000336,
+        "min": 0.006383999999999999,
+        "max": 0.007056,
         "rounds": 5,
         "status": "passed"
       }
@@ -696,10 +696,10 @@
     {
       "name": "tpch_q20_duckdb",
       "stats": {
-        "mean": 0.00331,
-        "stddev": 0.0001655,
-        "min": 0.0031444999999999997,
-        "max": 0.0034755000000000003,
+        "mean": 0.00417,
+        "stddev": 0.00020850000000000003,
+        "min": 0.0039615,
+        "max": 0.0043785000000000004,
         "rounds": 5,
         "status": "passed"
       }
@@ -707,10 +707,10 @@
     {
       "name": "tpch_q21_duckdb",
       "stats": {
-        "mean": 0.00992,
-        "stddev": 0.000496,
-        "min": 0.009424,
-        "max": 0.010416,
+        "mean": 0.00764,
+        "stddev": 0.000382,
+        "min": 0.007258,
+        "max": 0.008022,
         "rounds": 5,
         "status": "passed"
       }
@@ -718,10 +718,10 @@
     {
       "name": "tpch_q22_duckdb",
       "stats": {
-        "mean": 0.0044,
-        "stddev": 0.00022000000000000003,
-        "min": 0.00418,
-        "max": 0.004620000000000001,
+        "mean": 0.00259,
+        "stddev": 0.0001295,
+        "min": 0.0024604999999999996,
+        "max": 0.0027195,
         "rounds": 5,
         "status": "passed"
       }
@@ -729,8 +729,8 @@
   ],
   "metadata": {
     "suite": "tpch",
-    "timestamp": "2026-06-15T13:45:29.323142",
-    "git_commit": "965bfdd4",
+    "timestamp": "2026-07-21T04:32:48.509736",
+    "git_commit": "b0b842f7",
     "scale_factor": "0.01",
     "total_queries": 22,
     "vibesql_queries": 22,
