@@ -758,21 +758,34 @@ impl Parser {
 
     /// Parse REINDEX statement
     ///
-    /// Syntax:
-    ///   REINDEX [database_name | table_name | index_name]
+    /// Syntax (SQLite):
+    ///   REINDEX
+    ///   REINDEX collation-name
+    ///   REINDEX [schema-name '.'] (table-name | index-name)
     pub(super) fn parse_reindex_statement(
         &mut self,
     ) -> Result<vibesql_ast::ReindexStmt, ParseError> {
         // Expect REINDEX keyword
         self.expect_keyword(Keyword::Reindex)?;
 
-        // Check for optional target (database, table, or index name)
+        // Check for optional target (collation, table, or index name, optionally
+        // qualified by a schema name: `schema.object`).
         let target = if self.peek() == &Token::Semicolon || self.peek() == &Token::Eof {
-            // No target specified - reindex all
+            // No target specified - reindex everything
             None
         } else {
-            // Parse optional identifier (could be database, table, or index name)
-            Some(self.parse_identifier()?)
+            // Parse the (possibly schema-qualified) target. When a `schema.`
+            // qualifier is present we keep only the object name for resolution;
+            // VibeSQL has a single ("main") schema, so the qualifier is
+            // informational and validation happens against the object part.
+            let first = self.parse_identifier()?;
+            if self.peek() == &Token::Symbol('.') {
+                self.advance(); // consume the dot
+                let object = self.parse_identifier()?;
+                Some(object)
+            } else {
+                Some(first)
+            }
         };
 
         Ok(vibesql_ast::ReindexStmt { target })

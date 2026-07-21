@@ -2532,19 +2532,13 @@ proc execsql {sql {db ""}} {
             }
         }
 
-        # Skip REINDEX statements
-        if {[string match "REINDEX*" $sql_upper]} {
-            if {[regexp -nocase {^REINDEX[^;]*;} [string trim $sql] match]} {
-                set rest [string range [string trim $sql] [string length $match] end]
-                set sql [string trim $rest]
-                if {$sql eq ""} {
-                    return {}
-                }
-                continue
-            } else {
-                return {}
-            }
-        }
+        # REINDEX is NOT stripped here (issue #6232). VibeSQL's engine handles
+        # REINDEX directly: it succeeds silently (raw format emits no DDL
+        # message) for a valid table/index/built-in-collation/schema target, and
+        # raises `unable to identify the object to be reindexed` for an
+        # unresolvable name (reindex-1.9). Stripping it to a no-op here masked
+        # that error and broke the catchsql assertion, so the statement is now
+        # passed through to the CLI unchanged.
 
         # No more statements to strip
         break
