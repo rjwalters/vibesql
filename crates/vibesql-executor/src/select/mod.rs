@@ -22,6 +22,8 @@ mod vectorized;
 pub(crate) mod view_reference_guard;
 pub(crate) mod window;
 
+pub(crate) use helpers::coerce_limit_offset_to_i64;
+
 pub use cte::CteResult;
 pub use executor::validation::{
     find_window_function_in_expression, validate_predicate_subquery_arity,

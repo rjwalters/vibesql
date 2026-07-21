@@ -134,13 +134,18 @@ fn test_delete_returning_order_by_limit() {
     execute_sql(&mut db, "CREATE TABLE t1(a INT)");
     execute_sql(&mut db, "INSERT INTO t1 VALUES (3), (1), (4), (2)");
 
-    // SQLite extension: DELETE ... ORDER BY ... LIMIT n deletes exactly
-    // the n rows selected by the sort; RETURNING reflects those rows.
+    // SQLite extension: DELETE ... ORDER BY ... LIMIT n deletes exactly the n
+    // rows selected by the sort. The ORDER BY only picks *which* rows fall
+    // within the LIMIT; the rows are then deleted — and RETURNING emitted — in
+    // rowid order, not ORDER BY order (SQLite lang_delete.html R-07548-13422;
+    // conformance test e_delete-3.10). Values (3),(1),(4),(2) occupy rowids
+    // 1..4, so `ORDER BY a DESC LIMIT 2` selects a=4 (rowid 3) and a=3 (rowid
+    // 1); emitted in rowid order that is [3, 4].
     let (count, returning) =
         execute_delete_returning(&mut db, "DELETE FROM t1 ORDER BY a DESC LIMIT 2 RETURNING a");
     assert_eq!(count, 2);
     let returning = returning.expect("RETURNING clause should produce a result");
-    assert_eq!(int_rows(&returning), vec![vec![4], vec![3]]);
+    assert_eq!(int_rows(&returning), vec![vec![3], vec![4]]);
 
     let remaining = execute_sql(&mut db, "SELECT a FROM t1");
     assert_eq!(remaining.len(), 2);

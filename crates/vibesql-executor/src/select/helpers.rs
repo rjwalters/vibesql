@@ -141,7 +141,11 @@ fn evaluate_limit_offset_expr_raw(
 ///   `'2abc'`, `'2.5'` error. Note this is deliberately NOT the leading-prefix parse used for
 ///   truthiness — SQLite raises "datatype mismatch" for partial parses here
 /// - NULL, BLOB and everything else error with SQLite's exact wording `datatype mismatch` (#5804)
-pub(in crate::select) fn coerce_limit_offset_to_i64(
+///
+/// Also shared with the DELETE/UPDATE executors' LIMIT/OFFSET handling
+/// (`SQLITE_ENABLE_UPDATE_DELETE_LIMIT` evidence tests e_delete-3.x /
+/// e_update-3.x; #6193) so all three statement types apply identical affinity.
+pub(crate) fn coerce_limit_offset_to_i64(
     value: vibesql_types::SqlValue,
 ) -> Result<i64, crate::ExecutorError> {
     use vibesql_types::SqlValue;
