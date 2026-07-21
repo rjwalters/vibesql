@@ -28,14 +28,14 @@ See `docs/templates/ADR_TEMPLATE.md` for the full template.
 ## Decisions by Category
 
 ### Core Technology Stack
-- [ADR-0001](docs/decisions/0001-language-choice.md) - **Language Choice: Rust** ✅ (Accepted 2025-10-25)
-- [ADR-0002](docs/decisions/0002-parser-strategy.md) - **Parser Strategy: Hand-Written** ✅ (Accepted 2025-10-25)
+- [ADR-0001](0001-language-choice.md) - **Language Choice: Rust** ✅ (Accepted 2025-10-25)
+- [ADR-0002](0002-parser-strategy.md) - **Parser Strategy: Hand-Written** ✅ (Accepted 2025-10-25)
 
 ### Replication and Distribution
-- [ADR-0004](docs/decisions/0004-consensus-library.md) - **Consensus Library: openraft (single-group topology)** ✅ (Accepted 2026-06-11)
+- [ADR-0004](0004-consensus-library.md) - **Consensus Library: openraft (single-group topology)** ✅ (Accepted 2026-06-11)
 
 ### SQL Language / Compatibility
-- [ADR-0005](docs/decisions/0005-json-table-valued-functions.md) - **JSON Table-Valued Functions (`json_each`/`json_tree`)** 🕐 (Proposed 2026-07-07)
+- [ADR-0005](0005-json-table-valued-functions.md) - **JSON Table-Valued Functions (`json_each`/`json_tree`)** 🕐 (Proposed 2026-07-07)
 
 ## Decision Process
 
@@ -78,9 +78,9 @@ Create an ADR when:
 
 ## Related Documentation
 
-- [Documentation Guide](docs/README.md) - Overview of all documentation
+- [Documentation Guide](../README.md) - Overview of all documentation
 - [Lessons Learned](../lessons/LESSONS_LEARNED.md) - Insights from implementation
-- [Architecture Docs](docs/architecture/) - Detailed component designs
+- [Architecture Docs](../architecture/) - Detailed component designs
 
 ## Contributing
 

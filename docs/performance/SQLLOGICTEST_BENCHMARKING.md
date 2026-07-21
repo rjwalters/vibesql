@@ -425,10 +425,10 @@ impl MultiEngineReport {
 
 - [SQLLogicTest Documentation](https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki)
 - [SQL:1999 Standard](https://www.iso.org/standard/53681.html)
-- [Benchmark Test Files](../tests/benchmarks/)
-- [Metrics Module](../tests/sqllogictest/metrics.rs)
-- [Report Generator](../tests/sqllogictest/report.rs)
-- [SQLite Wrapper](../tests/sqllogictest_sqlite.rs)
+- [Benchmark Test Files](../../tests/benchmarks/)
+- [Metrics Module](../../tests/sqllogictest/metrics.rs)
+- [Report Generator](../../tests/sqllogictest/report.rs)
+- [SQLite Wrapper](../../tests/z_compliance/sqllogictest_sqlite.rs)
 
 ## Contributing
 

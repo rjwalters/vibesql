@@ -204,7 +204,7 @@ make benchmark          # TPC-H, TPC-C, TPC-DS, Sysbench
 # Individual benchmarks
 make benchmark-tpch     # TPC-H (22 queries, SF 0.01)
 make benchmark-tpcc     # TPC-C (OLTP, SF 1)
-make benchmark-tpcds    # TPC-DS (99 queries, SF 0.001)
+make benchmark-tpcds    # TPC-DS (102 queries, SF 0.001)
 make benchmark-sysbench # Sysbench (point lookups, range scans)
 
 # With custom parameters

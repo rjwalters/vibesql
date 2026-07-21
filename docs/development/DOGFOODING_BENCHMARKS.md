@@ -359,6 +359,6 @@ make benchmark-tpch
 
 ## See Also
 
-- [SQLLogicTest Dogfooding](../docs/sqllogictest/SQLLOGICTEST_DATABASE.md)
-- [TPC-H Benchmarking](../docs/performance/BENCHMARKING.md)
-- [Performance Optimization Guide](../docs/performance/OPTIMIZATION.md)
+- [SQLLogicTest Dogfooding](../archive/SQLLOGICTEST_DATABASE.md)
+- [TPC-H Benchmarking](BENCHMARKING.md)
+- [Performance Optimization Guide](../performance/OPTIMIZATION.md)
