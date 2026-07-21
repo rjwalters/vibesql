@@ -656,6 +656,22 @@ fn collect_correlation_refs_from_expr(
                     refs,
                 );
             }
+            // The aggregate FILTER predicate can reference outer columns, e.g.
+            // `sum(total) FILTER (WHERE sales.emp != outer.emp) OVER (...)`
+            // inside a correlated scalar subquery (window1-10.8). Omitting it
+            // yields an empty correlation set, an identical cache key for every
+            // outer row, and thus the first row's result for all rows.
+            if let vibesql_ast::WindowFunctionSpec::Aggregate { filter: Some(filter), .. } =
+                function
+            {
+                collect_correlation_refs_from_expr(
+                    filter,
+                    outer_schema,
+                    subquery_tables,
+                    database,
+                    refs,
+                );
+            }
             if let Some(partition_by) = &over.partition_by {
                 for p in partition_by {
                     collect_correlation_refs_from_expr(

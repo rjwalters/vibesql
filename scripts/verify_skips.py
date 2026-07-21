@@ -129,12 +129,14 @@ BUCKET_A_CLASSIFICATION = {
     "incrblob_err": "A4", "incrblobfault": "A4",
     # A5: Harness-only functions & TCL helpers
     "intreal": "A5", "func4": "A5", "trigger6": "A5", "update2": "A5",
+    "window5": "A5",  # sqlite3_create_window_function() C-API + custom win/sumint/sum (#6191, #5720)
     # A6: Permutation / suite dispatchers
     "all": "A6", "full": "A6", "quick": "A6", "veryquick": "A6",
     "extraquick": "A6", "rbu": "A6", "session": "A6",
     # A7: Internal optimizer / VDBE counters
     "insert4": "A7", "insert5": "A7", "whereJ": "A7", "where8": "A7",
     "malloc4": "A7", "manydb": "A7",
+    "windowfault": "A7",  # tvfs fault-injection VFS + OOM scaffolding at file scope (#6191)
     # A8: Built-in-test fuzzers
     "bitvec": "A8",
     # A9: Documented intentional engine divergence
