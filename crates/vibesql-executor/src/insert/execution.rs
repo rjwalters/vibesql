@@ -135,6 +135,90 @@ fn coerce_rowid_affinity(value: &vibesql_types::SqlValue) -> Result<RowidAffinit
 }
 
 /// Internal implementation of INSERT execution
+/// Pre-evaluate VALUES rows that contain window functions into literal rows.
+///
+/// SQLite treats a `VALUES` row containing a window function as its own
+/// single-row `SELECT` coroutine, so a row such as `(7, row_number() OVER ())`
+/// evaluates to `(7, 1)` (`row_number()` over a single constant row is 1).
+/// The plain per-row expression evaluator used by the INSERT path rejects
+/// window functions with "misuse of window function", so any window-bearing
+/// row is instead executed here as a FROM-less `SELECT <expr>, ...` (the same
+/// window-aware path standalone `VALUES` already uses, issue #5036) and
+/// replaced with the resulting literal values. Rows without window functions
+/// are passed through unchanged, so the common case is a cheap scan with no
+/// allocation of new expression vectors (issue #6190).
+fn materialize_window_values_rows(
+    db: &vibesql_storage::Database,
+    rows: Vec<Vec<vibesql_ast::Expression>>,
+    cte_results: Option<
+        &std::collections::HashMap<String, crate::select::cte::CteResult>,
+    >,
+) -> Result<Vec<Vec<vibesql_ast::Expression>>, ExecutorError> {
+    // Fast path: no window function anywhere -> return the rows untouched.
+    if !rows.iter().any(|row| {
+        row.iter().any(crate::select::window::expression_has_window_function)
+    }) {
+        return Ok(rows);
+    }
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let has_window =
+            row.iter().any(crate::select::window::expression_has_window_function);
+        if !has_window {
+            out.push(row);
+            continue;
+        }
+
+        // Build `SELECT <expr1>, <expr2>, ...` with no FROM clause and execute
+        // it through the window-aware SELECT path. A FROM-less SELECT evaluates
+        // over a single synthetic row, matching SQLite's per-row coroutine
+        // semantics for a window function inside a VALUES row.
+        let select_list: Vec<vibesql_ast::SelectItem> = row
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| vibesql_ast::SelectItem::Expression {
+                expr: expr.clone(),
+                alias: Some(format!("column{}", i + 1)),
+                source_text: None,
+            })
+            .collect();
+        let temp_stmt = vibesql_ast::SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list,
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        };
+        let executor = match cte_results {
+            Some(ctes) => crate::SelectExecutor::new_with_cte(db, ctes),
+            None => crate::SelectExecutor::new(db),
+        };
+        let result = executor.execute_with_columns(&temp_stmt)?;
+        // A FROM-less SELECT of one VALUES row produces exactly one output row.
+        let literal_row = result
+            .rows
+            .into_iter()
+            .next()
+            .map(|r| {
+                r.values.into_iter().map(vibesql_ast::Expression::Literal).collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        out.push(literal_row);
+    }
+    Ok(out)
+}
+
 fn execute_insert_internal(
     db: &mut vibesql_storage::Database,
     stmt: &vibesql_ast::InsertStmt,
@@ -297,8 +381,17 @@ fn execute_insert_internal(
     // Get the rows to insert based on the source
     let rows_to_insert = match &stmt.source {
         vibesql_ast::InsertSource::Values(values) => {
-            // For VALUES, we already have the rows as expressions
-            values.clone()
+            // For VALUES, we already have the rows as expressions. A VALUES
+            // row may contain a window function, e.g.
+            // `INSERT INTO t VALUES(7, row_number() OVER ())`. SQLite treats
+            // each such row as its own single-row SELECT coroutine, so
+            // `row_number() OVER ()` evaluates to 1. The plain per-row
+            // expression evaluator rejects window functions with
+            // "misuse of window function", so pre-evaluate any window-bearing
+            // rows through the window-aware FROM-less SELECT path and
+            // substitute the resulting literals (issue #6190, values.test
+            // sections 3 and 16).
+            materialize_window_values_rows(db, values.clone(), cte_results.as_ref())?
         }
         vibesql_ast::InsertSource::DefaultValues => {
             // For DEFAULT VALUES, insert a single row with DEFAULT for all columns
