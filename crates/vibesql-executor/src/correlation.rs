@@ -462,10 +462,23 @@ fn is_expression_correlated(
         }
 
         Expression::WindowFunction { function, over } => {
-            // Check window function arguments
+            // Check window function arguments (and the aggregate FILTER clause).
+            //
+            // The FILTER predicate of a window aggregate can reference outer
+            // columns — e.g. `sum(total) FILTER (WHERE sales.emp != outer.emp)
+            // OVER (...)` inside a correlated scalar subquery (window1-10.8).
+            // Walking only the args (and PARTITION/ORDER BY) misses that
+            // correlation, so the subquery is wrongly cached and every outer
+            // row receives the first row's result.
             let func_correlated = match function {
-                vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
-                | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+                    args.iter().any(|arg| {
+                        is_expression_correlated(arg, outer_schema, subquery_tables, database)
+                    }) || filter.as_ref().is_some_and(|f| {
+                        is_expression_correlated(f, outer_schema, subquery_tables, database)
+                    })
+                }
+                vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
                 | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args.iter().any(|arg| {
                     is_expression_correlated(arg, outer_schema, subquery_tables, database)
                 }),
@@ -745,6 +758,94 @@ mod tests {
         assert!(
             is_correlated(&subquery, &outer_schema, None),
             "row-value WHERE clause referencing outer columns must be correlated"
+        );
+    }
+
+    /// Regression test for window1-10.8: a scalar subquery whose window
+    /// aggregate carries a FILTER clause referencing an outer column must be
+    /// detected as correlated. Previously the FILTER predicate was not walked,
+    /// so the subquery was treated as non-correlated and cached, and every
+    /// outer row received the first row's result.
+    ///
+    /// Models: `SELECT (SELECT sum(total) FILTER (WHERE sales.emp != outer.emp)
+    /// OVER (...) FROM sales) FROM sales AS outer` where `sales(emp,total)` is
+    /// the inner table and the outer schema exposes `outer(emp)`.
+    #[test]
+    fn test_window_filter_referencing_outer_is_correlated() {
+        // Outer schema: table alias "outer" with column emp.
+        let outer_columns = vec![vibesql_catalog::ColumnSchema {
+            name: "emp".to_string(),
+            data_type: vibesql_types::DataType::Varchar { max_length: None },
+            nullable: true,
+            default_value: None,
+            generated_expr: None,
+            is_exact_integer_type: false,
+            collation: None,
+        }];
+        let outer_schema = CombinedSchema::from_table(
+            "outer".to_string(),
+            vibesql_catalog::TableSchema::new("outer".to_string(), outer_columns),
+        );
+
+        // FILTER (WHERE sales.emp != outer.emp): sales.emp is the inner table's
+        // column; outer.emp is the outer table's column.
+        let filter = Expression::BinaryOp {
+            op: BinaryOperator::NotEqual,
+            left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "sales", false, "emp", false,
+            ))),
+            right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::qualified(
+                "outer", false, "emp", false,
+            ))),
+        };
+
+        let window_expr = Expression::WindowFunction {
+            function: vibesql_ast::WindowFunctionSpec::Aggregate {
+                name: vibesql_ast::FunctionIdentifier::new("sum"),
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "total", false,
+                ))],
+                filter: Some(Box::new(filter)),
+            },
+            over: vibesql_ast::WindowSpec {
+                base_window_name: None,
+                partition_by: None,
+                order_by: None,
+                frame: None,
+            },
+        };
+
+        let subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: window_expr,
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "sales".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        };
+
+        assert!(
+            is_correlated(&subquery, &outer_schema, None),
+            "window aggregate FILTER referencing an outer column must be correlated"
         );
     }
 
