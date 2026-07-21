@@ -77,10 +77,10 @@ echo "--- Phase 1: VibeSQL-only ---" >> "$OUTPUT_FILE"
 if cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features in-memory-indexes -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ VibeSQL benchmark completed${NC}"
-    ((ENGINES_PASSED++))
+    ENGINES_PASSED=$((ENGINES_PASSED+1))
 else
     echo -e "${RED}✗ VibeSQL benchmark failed${NC}"
-    ((ENGINES_FAILED++))
+    ENGINES_FAILED=$((ENGINES_FAILED+1))
 fi
 echo "" >> "$OUTPUT_FILE"
 echo ""
@@ -93,10 +93,10 @@ echo "--- Phase 2: SQLite comparison ---" >> "$OUTPUT_FILE"
 if TPCDS_ENGINE=sqlite cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features sqlite,in-memory-indexes -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ SQLite comparison completed${NC}"
-    ((ENGINES_PASSED++))
+    ENGINES_PASSED=$((ENGINES_PASSED+1))
 else
     echo -e "${YELLOW}⚠ SQLite comparison failed (continuing)${NC}"
-    ((ENGINES_FAILED++))
+    ENGINES_FAILED=$((ENGINES_FAILED+1))
 fi
 echo "" >> "$OUTPUT_FILE"
 echo ""
@@ -111,10 +111,10 @@ echo "--- Phase 3: DuckDB comparison ---" >> "$OUTPUT_FILE"
 if TPCDS_ENGINE=duckdb cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features sqlite,in-memory-indexes,duckdb -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
     strip_quarantine
     echo -e "${GREEN}✓ DuckDB comparison completed${NC}"
-    ((ENGINES_PASSED++))
+    ENGINES_PASSED=$((ENGINES_PASSED+1))
 else
     echo -e "${YELLOW}⚠ DuckDB comparison failed (continuing)${NC}"
-    ((ENGINES_FAILED++))
+    ENGINES_FAILED=$((ENGINES_FAILED+1))
 fi
 echo "" >> "$OUTPUT_FILE"
 echo ""
@@ -129,10 +129,10 @@ if [ -n "$MYSQL_URL" ]; then
     if TPCDS_ENGINE=mysql cargo bench --package vibesql-executor --bench ${BENCH_NAME} --features sqlite,in-memory-indexes,mysql -- $CRITERION_ARGS 2>&1 | tee -a "$OUTPUT_FILE"; then
         strip_quarantine
         echo -e "${GREEN}✓ MySQL comparison completed${NC}"
-        ((ENGINES_PASSED++))
+        ENGINES_PASSED=$((ENGINES_PASSED+1))
     else
         echo -e "${YELLOW}⚠ MySQL comparison failed (continuing)${NC}"
-        ((ENGINES_FAILED++))
+        ENGINES_FAILED=$((ENGINES_FAILED+1))
     fi
     echo "" >> "$OUTPUT_FILE"
     echo ""
