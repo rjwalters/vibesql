@@ -47,9 +47,15 @@ where
 /// main statement is never evaluated, so errors inside its body are never
 /// reported (with2.test 11.x/12.1). This entry point mirrors that behavior for
 /// paths that execute a statement's WITH clause (issue #5838).
+///
+/// `outer_ctes` seeds the enclosing CTE scope so a local CTE body may reference
+/// a CTE from an outer query — needed when this statement is a subquery of an
+/// outer query that also has CTEs (with3.test 2.1). Pass an empty map for a
+/// top-level statement. Local names shadow outer names.
 pub fn execute_ctes_for_stmt<F>(
     ctes: &[vibesql_ast::CommonTableExpr],
     root: &vibesql_ast::SelectStmt,
+    outer_ctes: &HashMap<String, CteResult>,
     database: &vibesql_storage::Database,
     executor: F,
 ) -> Result<HashMap<String, CteResult>, ExecutorError>
@@ -59,7 +65,7 @@ where
         &HashMap<String, CteResult>,
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
 {
-    execute_ctes_with_memory_check(ctes, Some(root), database, executor, |_| Ok(()))
+    execute_ctes_with_outer(ctes, Some(root), outer_ctes, database, executor, |_| Ok(()))
 }
 
 /// SQLite evaluates a recursive CTE lazily against the queue that feeds the
@@ -158,6 +164,34 @@ where
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
     M: Fn(usize) -> Result<(), ExecutorError>,
 {
+    execute_ctes_with_outer(ctes, root, &HashMap::new(), database, executor, memory_check)
+}
+
+/// Like [`execute_ctes_with_memory_check`], but with an explicit `outer_ctes`
+/// scope seeded from an enclosing query.
+///
+/// When a statement that carries its own `WITH` clause is itself a subquery of
+/// an outer query that also has CTEs (`WITH x AS (...) SELECT ... FROM (WITH y
+/// AS (SELECT * FROM x) SELECT ...)`), the inner CTE bodies must be able to see
+/// the outer CTEs (with3.test 2.1). The top-level entry previously seeded the
+/// outer scope with an empty map, so a local CTE body referencing an outer CTE
+/// failed with a spurious "no such table". Threading `outer_ctes` through fixes
+/// that; local names still shadow outer names.
+pub(super) fn execute_ctes_with_outer<F, M>(
+    ctes: &[vibesql_ast::CommonTableExpr],
+    root: Option<&vibesql_ast::SelectStmt>,
+    outer_ctes: &HashMap<String, CteResult>,
+    database: &vibesql_storage::Database,
+    executor: F,
+    memory_check: M,
+) -> Result<HashMap<String, CteResult>, ExecutorError>
+where
+    F: Fn(
+        &vibesql_ast::SelectStmt,
+        &HashMap<String, CteResult>,
+    ) -> Result<Vec<vibesql_storage::Row>, ExecutorError>,
+    M: Fn(usize) -> Result<(), ExecutorError>,
+{
     // If the root statement reads a directly-referenced recursive CTE under a
     // LIMIT, thread that limit inward so lazy recursion can terminate early
     // (with1.test 5.1, 5.4). Only top-level CTEs of the root statement are
@@ -168,7 +202,7 @@ where
     execute_cte_list(
         ctes,
         root,
-        &HashMap::new(),
+        outer_ctes,
         &mut in_progress,
         false,
         outer_row_hint,

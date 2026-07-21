@@ -30,7 +30,7 @@ use crate::{
         PipelineInput,
     },
     select::{
-        cte::{execute_ctes_for_stmt, execute_ctes_with_memory_check, CteResult},
+        cte::{execute_ctes_for_stmt, execute_ctes_with_outer, CteResult},
         helpers::apply_limit_offset,
         join::FromResult,
         SelectResult,
@@ -365,9 +365,19 @@ impl SelectExecutor<'_> {
             // This query has its own CTEs - execute them with memory tracking.
             // The statement is passed as reachability root so unreferenced CTEs
             // are skipped (SQLite lazy expansion, issue #5838).
-            execute_ctes_with_memory_check(
+            //
+            // Seed the outer scope with any enclosing CTEs so a local CTE body
+            // may reference an outer CTE — e.g. an inner subquery that declares
+            // its own WITH but reads a CTE from the enclosing query
+            // (with3.test 2.1: `WITH x1 AS (...) SELECT * FROM (WITH x2 AS
+            // (SELECT * FROM x1) SELECT ... FROM x1, x2)`). Local names still
+            // shadow outer names.
+            let empty = HashMap::new();
+            let outer_ctes = self.cte_context.unwrap_or(&empty);
+            execute_ctes_with_outer(
                 with_clause,
                 Some(&optimized_stmt),
+                outer_ctes,
                 self.database,
                 |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
                 |size| self.track_memory_allocation(size),
@@ -611,9 +621,18 @@ impl SelectExecutor<'_> {
         // joins and NATURAL/USING deduplication). We do not return the rows.
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
-                execute_ctes_for_stmt(with_clause, stmt, self.database, |query, cte_ctx| {
-                    self.execute_with_ctes(query, cte_ctx)
-                })?
+                // Seed the outer CTE scope so a local CTE body can reference an
+                // enclosing query's CTE (with3.test 2.1): a derived-table
+                // subquery that declares its own WITH but reads an outer CTE.
+                let empty = HashMap::new();
+                let outer_ctes = self.cte_context.unwrap_or(&empty);
+                execute_ctes_for_stmt(
+                    with_clause,
+                    stmt,
+                    outer_ctes,
+                    self.database,
+                    |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
+                )?
             } else {
                 HashMap::new()
             };
@@ -699,9 +718,18 @@ impl SelectExecutor<'_> {
         // First, get the FROM result to access the schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
-                execute_ctes_for_stmt(with_clause, stmt, self.database, |query, cte_ctx| {
-                    self.execute_with_ctes(query, cte_ctx)
-                })?
+                // Seed the outer CTE scope so a local CTE body can reference an
+                // enclosing query's CTE (with3.test 2.1): a derived-table
+                // subquery that declares its own WITH but reads an outer CTE.
+                let empty = HashMap::new();
+                let outer_ctes = self.cte_context.unwrap_or(&empty);
+                execute_ctes_for_stmt(
+                    with_clause,
+                    stmt,
+                    outer_ctes,
+                    self.database,
+                    |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
+                )?
             } else {
                 HashMap::new()
             };
@@ -802,9 +830,18 @@ impl SelectExecutor<'_> {
         // Execute the FROM clause to get combined schema
         let from_result = if let Some(from_clause) = &stmt.from {
             let mut cte_results = if let Some(with_clause) = &stmt.with_clause {
-                execute_ctes_for_stmt(with_clause, stmt, self.database, |query, cte_ctx| {
-                    self.execute_with_ctes(query, cte_ctx)
-                })?
+                // Seed the outer CTE scope so a local CTE body can reference an
+                // enclosing query's CTE (with3.test 2.1): a derived-table
+                // subquery that declares its own WITH but reads an outer CTE.
+                let empty = HashMap::new();
+                let outer_ctes = self.cte_context.unwrap_or(&empty);
+                execute_ctes_for_stmt(
+                    with_clause,
+                    stmt,
+                    outer_ctes,
+                    self.database,
+                    |query, cte_ctx| self.execute_with_ctes(query, cte_ctx),
+                )?
             } else {
                 HashMap::new()
             };

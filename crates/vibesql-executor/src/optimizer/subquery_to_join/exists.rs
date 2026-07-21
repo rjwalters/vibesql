@@ -55,6 +55,15 @@ pub(super) fn try_convert_exists_to_join(
     subquery: &SelectStmt,
     negated: bool,
 ) -> Option<(FromClause, Option<Expression>)> {
+    // A subquery with its own CTEs resolves its FROM names against those CTEs, not
+    // catalog base tables. The rewrite below reads `subquery.from` as a real table
+    // and would synthesize a join against a non-existent table while dropping the
+    // subquery's WITH clause. Bail so the caller falls back to row-by-row EXISTS
+    // evaluation, whose `.execute()` path materializes the WITH clause correctly.
+    if subquery.with_clause.is_some() {
+        return None;
+    }
+
     // For EXISTS, we need to extract the correlation predicate from the WHERE clause
     // and use it as the join condition
 

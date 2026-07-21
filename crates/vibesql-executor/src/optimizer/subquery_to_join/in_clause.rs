@@ -274,6 +274,19 @@ pub(super) fn try_convert_in_to_join(
     database: &Database,
     with_clause: Option<&[CommonTableExpr]>,
 ) -> Option<InToJoinResult> {
+    // A subquery that declares its own CTEs — `x IN (WITH c AS (...) SELECT ... FROM c)`
+    // — resolves the names in its FROM clause against those CTEs, not against catalog
+    // base tables. The IN→SEMI/ANTI-join rewrite below reads `subquery.from` as if it
+    // named a real table and synthesizes a join against it, producing a bogus
+    // "no such table" for the CTE name (with2.test 7.5:
+    // `... WHERE y IN (WITH ss(x) AS (VALUES(7) UNION ALL SELECT x+7 FROM ss ...) SELECT x FROM ss)`).
+    // The subquery's WITH clause is also silently dropped by the rewrite. Bail so the
+    // caller falls back to row-by-row `eval_in_subquery`, whose `.execute()` path
+    // materializes the subquery's own WITH clause correctly.
+    if subquery.with_clause.is_some() {
+        return None;
+    }
+
     // Must have exactly one column in SELECT list
     if subquery.select_list.len() != 1 {
         return None;
