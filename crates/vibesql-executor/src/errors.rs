@@ -2,6 +2,10 @@
 pub enum ExecutorError {
     TableNotFound(String),
     TableAlreadyExists(String),
+    /// REINDEX names an object that is neither a table, an index, nor a
+    /// registered collating sequence. SQLite reports this with a fixed message
+    /// that carries no object name (matches `reindex-1.9`).
+    ReindexObjectUnknown,
     /// ALTER TABLE ... RENAME TO target collides with an existing table or
     /// index name. SQLite reports this with a distinct message that spans both
     /// the table and index namespaces.
@@ -530,6 +534,11 @@ impl std::fmt::Display for ExecutorError {
         match self {
             ExecutorError::TableNotFound(name) => {
                 write!(f, "{}", vibe_msg!("executor-table-not-found", name = name.as_str()))
+            }
+            ExecutorError::ReindexObjectUnknown => {
+                // SQLite-compatible, fixed wording (no object name), matching
+                // `reindex-1.9`'s `unable to identify the object to be reindexed`.
+                write!(f, "unable to identify the object to be reindexed")
             }
             ExecutorError::TableAlreadyExists(name) => {
                 write!(f, "{}", vibe_msg!("executor-table-already-exists", name = name.as_str()))

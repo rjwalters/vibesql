@@ -786,3 +786,40 @@ fn test_indexed_by_with_fallback_keyword_name() {
         }
     }
 }
+
+#[test]
+fn test_reindex_no_target() {
+    // Bare REINDEX rebuilds every index (no target).
+    let stmt = Parser::parse_sql("REINDEX").expect("parse REINDEX");
+    match stmt {
+        Statement::Reindex(r) => assert_eq!(r.target, None),
+        other => panic!("Expected Reindex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_reindex_single_name() {
+    // REINDEX <name> — a table, index, or collation name.
+    let stmt = Parser::parse_sql("REINDEX t1").expect("parse REINDEX t1");
+    match stmt {
+        Statement::Reindex(r) => assert_eq!(r.target.as_deref(), Some("t1")),
+        other => panic!("Expected Reindex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_reindex_schema_qualified() {
+    // REINDEX schema.object (#6232): the `main.` qualifier is accepted and the
+    // object name is retained for resolution.
+    let stmt = Parser::parse_sql("REINDEX main.t1").expect("parse REINDEX main.t1");
+    match stmt {
+        Statement::Reindex(r) => assert_eq!(r.target.as_deref(), Some("t1")),
+        other => panic!("Expected Reindex, got: {:?}", other),
+    }
+
+    let stmt = Parser::parse_sql("REINDEX main.i1").expect("parse REINDEX main.i1");
+    match stmt {
+        Statement::Reindex(r) => assert_eq!(r.target.as_deref(), Some("i1")),
+        other => panic!("Expected Reindex, got: {:?}", other),
+    }
+}
