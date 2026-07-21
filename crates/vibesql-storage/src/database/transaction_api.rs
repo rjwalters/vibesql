@@ -340,6 +340,23 @@ impl Database {
         self.lifecycle.transaction_manager_mut().release_savepoint(name)
     }
 
+    /// Mark the active transaction as implicitly opened by a `SAVEPOINT`
+    /// issued outside an explicit `BEGIN` (SQLite autocommit semantics).
+    pub fn mark_implicit_savepoint_txn(&mut self) {
+        self.lifecycle.transaction_manager_mut().mark_implicit_savepoint_txn();
+    }
+
+    /// True when the active transaction was implicitly opened by a
+    /// `SAVEPOINT` (see [`Self::mark_implicit_savepoint_txn`]).
+    pub fn is_implicit_savepoint_txn(&self) -> bool {
+        self.lifecycle.transaction_manager().is_implicit_savepoint_txn()
+    }
+
+    /// Number of live named savepoints in the current transaction.
+    pub fn savepoint_depth(&self) -> usize {
+        self.lifecycle.transaction_manager().savepoint_depth()
+    }
+
     // ========================================================================
     // Implicit statement-level savepoint (#5417 — RAISE(ABORT) scope)
     // ========================================================================

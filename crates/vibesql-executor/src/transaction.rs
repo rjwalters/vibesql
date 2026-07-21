@@ -397,11 +397,41 @@ impl RollbackExecutor {
 pub struct SavepointExecutor;
 
 impl SavepointExecutor {
-    /// Execute a SAVEPOINT statement
+    /// Execute a SAVEPOINT statement.
+    ///
+    /// SQLite semantics: a `SAVEPOINT` issued outside an explicit
+    /// `BEGIN`/`START TRANSACTION` implicitly opens a transaction (the
+    /// connection leaves autocommit mode). That transaction is auto-committed
+    /// when the matching outermost `RELEASE` empties the savepoint stack
+    /// (see [`ReleaseSavepointExecutor`]). We flag such transactions so
+    /// `RELEASE` knows to commit them, while an explicit `BEGIN; SAVEPOINT
+    /// ...; RELEASE ...` keeps the transaction open until an explicit
+    /// `COMMIT` (fkey2-2.38+, savepoint-driven deferred-FK matrix).
     pub fn execute(stmt: &SavepointStmt, db: &mut Database) -> Result<String, ExecutorError> {
-        db.create_savepoint(stmt.name.clone()).map_err(|e| {
-            ExecutorError::StorageError(format!("Failed to create savepoint: {}", e))
-        })?;
+        let auto_started = if db.in_transaction() {
+            false
+        } else {
+            db.begin_transaction().map_err(|e| {
+                ExecutorError::StorageError(format!("Failed to begin transaction: {}", e))
+            })?;
+            true
+        };
+
+        if let Err(e) = db.create_savepoint(stmt.name.clone()) {
+            // Roll back the transaction we just auto-started so a failed
+            // savepoint creation does not strand the connection mid-transaction.
+            if auto_started {
+                let _ = db.rollback_transaction();
+            }
+            return Err(ExecutorError::StorageError(format!(
+                "Failed to create savepoint: {}",
+                e
+            )));
+        }
+
+        if auto_started {
+            db.mark_implicit_savepoint_txn();
+        }
 
         Ok(format!("Savepoint '{}' created", stmt.name))
     }
@@ -428,7 +458,16 @@ impl RollbackToSavepointExecutor {
 pub struct ReleaseSavepointExecutor;
 
 impl ReleaseSavepointExecutor {
-    /// Execute a RELEASE SAVEPOINT statement
+    /// Execute a RELEASE SAVEPOINT statement.
+    ///
+    /// SQLite semantics: releasing the outermost savepoint of a transaction
+    /// that was *implicitly* opened by a `SAVEPOINT` (i.e. no enclosing
+    /// `BEGIN`) commits that transaction. The commit runs the deferred-FK
+    /// re-check via [`CommitExecutor`], so a `RELEASE` that finalizes a
+    /// transaction carrying an outstanding deferred violation fails with
+    /// "FOREIGN KEY constraint failed" exactly as SQLite does (fkey2-2.40).
+    /// For a transaction opened by an explicit `BEGIN`, `RELEASE` of the last
+    /// savepoint leaves the transaction open until an explicit `COMMIT`.
     pub fn execute(
         stmt: &ReleaseSavepointStmt,
         db: &mut Database,
@@ -436,6 +475,12 @@ impl ReleaseSavepointExecutor {
         db.release_savepoint(stmt.name.clone()).map_err(|e| {
             ExecutorError::StorageError(format!("Failed to release savepoint: {}", e))
         })?;
+
+        // If this RELEASE emptied the savepoint stack of an implicitly-opened
+        // transaction, commit it (SQLite autocommit-on-outermost-release).
+        if db.is_implicit_savepoint_txn() && db.savepoint_depth() == 0 {
+            CommitExecutor::execute(&CommitStmt, db)?;
+        }
 
         Ok(format!("Savepoint '{}' released", stmt.name))
     }

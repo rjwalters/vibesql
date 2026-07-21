@@ -184,6 +184,15 @@ pub enum TransactionState {
         ///
         /// See [`crate::mvcc::TxnSnapshot`] for the predicate contract.
         snapshot: TxnSnapshot,
+        /// True when this transaction was opened *implicitly* by a
+        /// `SAVEPOINT` issued outside any explicit `BEGIN` (SQLite
+        /// autocommit semantics). SQLite auto-starts a transaction on such a
+        /// savepoint and auto-commits it when the matching outermost
+        /// `RELEASE` empties the savepoint stack. `false` for a transaction
+        /// started by an explicit `BEGIN`/`START TRANSACTION`, where
+        /// `RELEASE` of the last savepoint leaves the transaction open until
+        /// an explicit `COMMIT`. See `SavepointExecutor` / `ReleaseSavepointExecutor`.
+        implicit_savepoint_txn: bool,
     },
 }
 
@@ -328,6 +337,7 @@ impl TransactionManager {
                     durability,
                     deferred_fk_violations: Vec::new(),
                     snapshot,
+                    implicit_savepoint_txn: false,
                 };
                 Ok(())
             }
@@ -650,6 +660,36 @@ impl TransactionManager {
         }
     }
 
+    /// Mark the current transaction as one that was auto-started by a
+    /// `SAVEPOINT` outside any explicit `BEGIN` (SQLite autocommit
+    /// semantics). No-op when no transaction is active.
+    pub fn mark_implicit_savepoint_txn(&mut self) {
+        if let TransactionState::Active { implicit_savepoint_txn, .. } = &mut self.transaction_state
+        {
+            *implicit_savepoint_txn = true;
+        }
+    }
+
+    /// True when the active transaction was implicitly opened by a
+    /// `SAVEPOINT` (see [`Self::mark_implicit_savepoint_txn`]). `false` when
+    /// no transaction is active or it was started by an explicit `BEGIN`.
+    pub fn is_implicit_savepoint_txn(&self) -> bool {
+        matches!(
+            self.transaction_state,
+            TransactionState::Active { implicit_savepoint_txn: true, .. }
+        )
+    }
+
+    /// Number of live named savepoints in the current transaction (0 when no
+    /// transaction is active). Used to detect when a `RELEASE` has emptied
+    /// the stack of an implicitly-opened transaction so it can auto-commit.
+    pub fn savepoint_depth(&self) -> usize {
+        match &self.transaction_state {
+            TransactionState::Active { savepoints, .. } => savepoints.len(),
+            TransactionState::None => 0,
+        }
+    }
+
     /// Rollback to a named savepoint - returns the changes that need to be undone
     pub fn rollback_to_savepoint(
         &mut self,
@@ -734,8 +774,13 @@ impl TransactionManager {
                         StorageError::TransactionError(format!("Savepoint '{}' not found", name))
                     })?;
 
-                // Remove the savepoint
-                savepoints.remove(savepoint_idx);
+                // SQLite: RELEASE removes the named savepoint *and every
+                // savepoint created after it* (SAVEPOINT/RELEASE nest like a
+                // stack). Truncating at the match index drops the named
+                // savepoint and all more-recent ones, so a later
+                // `savepoint_depth()` correctly reports the stack emptying when
+                // the outermost savepoint is released.
+                savepoints.truncate(savepoint_idx);
 
                 Ok(())
             }
