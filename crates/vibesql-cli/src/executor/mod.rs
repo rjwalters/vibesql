@@ -20,6 +20,16 @@ pub struct SqlExecutor {
     /// When ON, INSERT/UPDATE/DELETE statements return a one-row, one-column
     /// result containing the change count.
     count_changes: bool,
+    /// PRAGMA auto_vacuum session setting (SQLite-compatible, default 0=NONE).
+    /// VibeSQL does not implement pager auto-vacuum, but it parses, normalizes
+    /// and echoes the setting exactly like SQLite so introspection round-trips
+    /// (pragma.test pragma-17). Canonical codes: 0=NONE, 1=FULL, 2=INCREMENTAL.
+    auto_vacuum: i64,
+    /// PRAGMA temp_store session setting (SQLite-compatible, default 0=DEFAULT).
+    /// Parsed/normalized/echoed like SQLite (pragma.test pragma-18); VibeSQL
+    /// demotes TEMP tables to persistent so the value is advisory only.
+    /// Canonical codes: 0=DEFAULT, 1=FILE, 2=MEMORY.
+    temp_store: i64,
     /// Active WAL persistence state, present only when the opt-in
     /// `[database] wal = true` flag is set AND a file-backed database is in use.
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
@@ -359,6 +369,8 @@ impl SqlExecutor {
                     db,
                     timing_enabled: false,
                     count_changes: false,
+                    auto_vacuum: 0,
+                    temp_store: 0,
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
@@ -399,6 +411,8 @@ impl SqlExecutor {
             db,
             timing_enabled: false,
             count_changes: false,
+            auto_vacuum: 0,
+            temp_store: 0,
             wal_state: None,
             db_path,
             _db_lock: db_lock,
@@ -1434,6 +1448,37 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "AUTO_VACUUM" => {
+                    // SQLite-compatible PRAGMA auto_vacuum set (pragma.test
+                    // pragma-17). VibeSQL has no pager auto-vacuum, but it
+                    // parses/normalizes/echoes the setting so a set-then-read
+                    // round-trip matches SQLite. Symbolic (none/full/incremental)
+                    // and numeric spellings are both accepted; out-of-range or
+                    // negative integers normalize to 0 (NONE), matching SQLite.
+                    self.auto_vacuum = normalize_auto_vacuum(value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "TEMP_STORE" => {
+                    // SQLite-compatible PRAGMA temp_store set (pragma.test
+                    // pragma-18). Parsed/normalized/echoed like SQLite; the
+                    // value is advisory (VibeSQL demotes TEMP tables to
+                    // persistent). Symbolic (file/memory) and numeric spellings
+                    // accepted; out-of-range/negative integers -> 0 (DEFAULT).
+                    self.temp_store = normalize_temp_store(value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -1573,6 +1618,30 @@ impl SqlExecutor {
                     Ok(QueryResult {
                         columns: vec!["deferred_fk_count".to_string()],
                         rows: vec![vec![Some(count.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "AUTO_VACUUM" => {
+                    // SQLite-compatible PRAGMA auto_vacuum read (pragma.test
+                    // pragma-17). Reports the normalized session setting
+                    // (0=NONE, 1=FULL, 2=INCREMENTAL); default 0.
+                    Ok(QueryResult {
+                        columns: vec!["auto_vacuum".to_string()],
+                        rows: vec![vec![Some(self.auto_vacuum.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "TEMP_STORE" => {
+                    // SQLite-compatible PRAGMA temp_store read (pragma.test
+                    // pragma-18). Reports the normalized session setting
+                    // (0=DEFAULT, 1=FILE, 2=MEMORY); default 0.
+                    Ok(QueryResult {
+                        columns: vec!["temp_store".to_string()],
+                        rows: vec![vec![Some(self.temp_store.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,
@@ -2403,6 +2472,59 @@ fn pragma_value_to_i64(value: &vibesql_ast::PragmaValue) -> Option<i64> {
         }
         vibesql_ast::PragmaValue::String(s) => s.trim().parse::<i64>().ok(),
         vibesql_ast::PragmaValue::Identifier(_) => None,
+    }
+}
+
+/// Extract the raw textual spelling of a PRAGMA value, regardless of how the
+/// parser classified it (bare identifier, string literal, or number). Used by
+/// the enum-style config PRAGMAs (`auto_vacuum`, `temp_store`) that accept both
+/// symbolic (`full`, `memory`) and numeric (`1`, `2`) spellings.
+fn pragma_value_text(value: &vibesql_ast::PragmaValue) -> &str {
+    match value {
+        vibesql_ast::PragmaValue::Identifier(s)
+        | vibesql_ast::PragmaValue::String(s)
+        | vibesql_ast::PragmaValue::Number(s)
+        | vibesql_ast::PragmaValue::SignedNumber(s) => s.as_str(),
+    }
+}
+
+/// Normalize a `PRAGMA auto_vacuum = <value>` argument to its canonical integer
+/// code, matching SQLite's parse rules (pragma.test pragma-17):
+///   `none` / `0` / any other integer (incl. negative or out-of-range) -> 0
+///   `full` / `1`        -> 1
+///   `incremental` / `2` -> 2
+/// Symbolic names are case-insensitive.
+fn normalize_auto_vacuum(value: &vibesql_ast::PragmaValue) -> i64 {
+    let text = pragma_value_text(value);
+    match text.to_ascii_uppercase().as_str() {
+        "NONE" => 0,
+        "FULL" => 1,
+        "INCREMENTAL" => 2,
+        _ => match text.trim().parse::<i64>() {
+            Ok(1) => 1,
+            Ok(2) => 2,
+            _ => 0,
+        },
+    }
+}
+
+/// Normalize a `PRAGMA temp_store = <value>` argument to its canonical integer
+/// code, matching SQLite's parse rules (pragma.test pragma-18):
+///   `default` / `0` / any other integer (incl. negative or out-of-range) -> 0
+///   `file` / `1`   -> 1
+///   `memory` / `2` -> 2
+/// Symbolic names are case-insensitive.
+fn normalize_temp_store(value: &vibesql_ast::PragmaValue) -> i64 {
+    let text = pragma_value_text(value);
+    match text.to_ascii_uppercase().as_str() {
+        "DEFAULT" => 0,
+        "FILE" => 1,
+        "MEMORY" => 2,
+        _ => match text.trim().parse::<i64>() {
+            Ok(1) => 1,
+            Ok(2) => 2,
+            _ => 0,
+        },
     }
 }
 

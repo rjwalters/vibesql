@@ -920,3 +920,80 @@ fn test_pragma_index_list_origins() {
     let result = executor.execute("PRAGMA index_list(nope)").unwrap();
     assert_eq!(result.row_count, 0);
 }
+
+// ============================================================================
+// PRAGMA auto_vacuum / temp_store parse-normalize-echo tests (issue #6175,
+// pragma.test pragma-17 / pragma-18). VibeSQL has no pager auto-vacuum and
+// demotes TEMP tables to persistent, but it parses/normalizes/echoes both
+// settings exactly like SQLite so introspection round-trips.
+// ============================================================================
+
+#[test]
+fn test_pragma_auto_vacuum_default_and_normalization() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 0 (NONE).
+    let result = executor.execute("PRAGMA auto_vacuum").unwrap();
+    assert_eq!(result.columns, vec!["auto_vacuum".to_string()]);
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // Numeric + symbolic spellings normalize to the canonical code, and the
+    // value round-trips through a subsequent read. (setting, expected-echo)
+    for (set, want) in [
+        ("0", "0"),
+        ("1", "1"),
+        ("2", "2"),
+        ("3", "0"),            // out-of-range -> NONE
+        ("-1", "0"),           // negative -> NONE
+        ("1234", "0"),
+        ("-1234", "0"),
+        ("none", "0"),
+        ("NONE", "0"),
+        ("NoNe", "0"),
+        ("full", "1"),
+        ("FULL", "1"),
+        ("incremental", "2"),
+        ("INCREMENTAL", "2"),
+    ] {
+        executor.execute(&format!("PRAGMA auto_vacuum={set}")).unwrap();
+        let result = executor.execute("PRAGMA auto_vacuum").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some(want.to_string())]],
+            "auto_vacuum={set} should echo {want}"
+        );
+    }
+}
+
+#[test]
+fn test_pragma_temp_store_default_and_normalization() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 0 (DEFAULT).
+    let result = executor.execute("PRAGMA temp_store").unwrap();
+    assert_eq!(result.columns, vec!["temp_store".to_string()]);
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    for (set, want) in [
+        ("0", "0"),
+        ("1", "1"),
+        ("2", "2"),
+        ("3", "0"),   // out-of-range -> DEFAULT
+        ("-1", "0"),  // negative -> DEFAULT
+        ("file", "1"),
+        ("FILE", "1"),
+        ("fIlE", "1"),
+        ("memory", "2"),
+        ("MEMORY", "2"),
+        ("MeMoRy", "2"),
+        ("default", "0"),
+    ] {
+        executor.execute(&format!("PRAGMA temp_store={set}")).unwrap();
+        let result = executor.execute("PRAGMA temp_store").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some(want.to_string())]],
+            "temp_store={set} should echo {want}"
+        );
+    }
+}
