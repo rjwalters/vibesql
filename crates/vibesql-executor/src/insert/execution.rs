@@ -1945,8 +1945,18 @@ fn execute_insert_on_view(
             let mut row_values = vec![vibesql_types::SqlValue::Null; view_schema.columns.len()];
 
             for (expr, (col_idx, _col)) in value_exprs.iter().zip(target_columns.iter()) {
-                // Evaluate expression - for INSERT, these are typically literals
-                let value = evaluator.eval(expr, &dummy_row)?;
+                // A view column has no column-level DEFAULT, so a `DEFAULT`
+                // placeholder (from `INSERT INTO view DEFAULT VALUES`, or an
+                // explicit `DEFAULT` in a VALUES row) resolves to NULL — the
+                // INSTEAD OF trigger then sees NEW.<col> = NULL. This mirrors
+                // sqlite3 3.51.0 (triggerC-11.4). Evaluating the placeholder
+                // directly would raise "DEFAULT keyword is only valid in
+                // INSERT VALUES and UPDATE SET clauses".
+                let value = if matches!(expr, vibesql_ast::Expression::Default) {
+                    vibesql_types::SqlValue::Null
+                } else {
+                    evaluator.eval(expr, &dummy_row)?
+                };
                 row_values[*col_idx] = value;
             }
 

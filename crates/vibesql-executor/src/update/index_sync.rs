@@ -278,6 +278,16 @@ pub(super) fn detect_surviving_replace_conflict(
     Ok(())
 }
 
+/// Format a constraint's columns as sqlite3's `table.col1, table.col2` list for
+/// a "UNIQUE constraint failed" message (e.g. `t1.a` or `t1.c, t1.d`).
+fn qualify_constraint_columns(table_name: &str, columns: &[String]) -> String {
+    columns
+        .iter()
+        .map(|col| format!("{}.{}", table_name, col))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Validate that multiple updates in the same batch don't produce conflicting
 /// PK or UNIQUE constraint values. This ensures SQL's deferred constraint semantics
 /// where all rows must satisfy constraints after the entire UPDATE completes.
@@ -305,9 +315,12 @@ pub(super) fn validate_cross_update_uniqueness(
 
             if !seen_pks.insert(pk_values.clone()) {
                 let pk_col_names: Vec<String> = schema.primary_key.as_ref().unwrap().clone();
+                // sqlite3 3.51.0 reports "UNIQUE constraint failed: t1.a"
+                // (each column qualified by the table name), with no
+                // parenthetical suffix. See triggerC-1.15.
                 return Err(ExecutorError::ConstraintViolation(format!(
-                    "UNIQUE constraint failed: {} (multiple rows would have same key)",
-                    pk_col_names.join(", ")
+                    "UNIQUE constraint failed: {}",
+                    qualify_constraint_columns(&schema.name, &pk_col_names)
                 )));
             }
         }
@@ -332,8 +345,8 @@ pub(super) fn validate_cross_update_uniqueness(
                 let unique_col_names: Vec<String> =
                     schema.unique_constraints[constraint_idx].clone();
                 return Err(ExecutorError::ConstraintViolation(format!(
-                    "UNIQUE constraint failed: {} (multiple rows would have same key)",
-                    unique_col_names.join(", ")
+                    "UNIQUE constraint failed: {}",
+                    qualify_constraint_columns(&schema.name, &unique_col_names)
                 )));
             }
         }
