@@ -199,6 +199,25 @@ fn parse_add_column(
                     },
                 });
             }
+            // A column-level CHECK constraint on the added column. Without this
+            // arm the loop broke at CHECK and the `CHECK(<expr>)` tokens were
+            // silently discarded, so the constraint was neither stored nor
+            // validated against existing rows (alter3-9.*). Mirror the CREATE
+            // TABLE column-constraint parser (create/constraints.rs), preserving
+            // the verbatim expression text for SQLite-compatible messages.
+            Token::Keyword { keyword: Keyword::Check, .. } => {
+                parser.advance(); // consume CHECK
+                let lparen_pos = parser.current_position();
+                parser.expect_token(Token::LParen)?;
+                let expr = parser.parse_expression()?;
+                let rparen_pos = parser.current_position();
+                parser.expect_token(Token::RParen)?;
+                let source_text = parser.source_inside_delimiters(lparen_pos, rparen_pos);
+                constraints.push(ColumnConstraint {
+                    name: None,
+                    kind: ColumnConstraintKind::Check { expr: Box::new(expr), source_text },
+                });
+            }
             // A DEFAULT clause may appear among the other column constraints in
             // any order (e.g. `ADD c NOT NULL DEFAULT 10`). SQLite accepts column
             // constraints in any order; parsing DEFAULT only before the loop

@@ -89,3 +89,63 @@ fn add_column_to_view_is_rejected() {
     let err = exec_sql(&mut db, "ALTER TABLE v1 ADD COLUMN d").unwrap_err();
     assert_eq!(err, "Cannot add a column to a view");
 }
+
+#[test]
+fn add_column_check_violated_by_existing_row_is_rejected() {
+    // alter3-9.2: `ADD COLUMN c CHECK(a!=1)` must abort because an existing row
+    // has a=1. SQLite reports the bare "CHECK constraint failed" for this path.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
+    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN c CHECK(a!=1)").unwrap_err();
+    assert_eq!(err, "CHECK constraint failed");
+}
+
+#[test]
+fn add_column_check_rollback_leaves_table_untouched() {
+    // A rejected ADD COLUMN CHECK must be atomic: the column is not left behind,
+    // so a subsequent non-violating ADD of the same column name succeeds
+    // (alter3-9.2..9.4 depend on this rollback).
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
+    let _ = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN c CHECK(a!=1)").unwrap_err();
+    // No row has a=2, so this CHECK holds for every existing row.
+    assert!(exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN c CHECK(a!=2)").is_ok());
+}
+
+#[test]
+fn add_column_check_satisfied_by_all_rows_is_allowed() {
+    // alter3-9.4: `ADD COLUMN c CHECK(a!=2)` succeeds because no existing row
+    // has a=2.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
+    assert!(exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN c CHECK(a!=2)").is_ok());
+}
+
+#[test]
+fn add_generated_not_null_column_null_value_is_rejected() {
+    // alter3-9.5: a generated NOT NULL column is permitted (no static NULL-default
+    // rejection), but its computed value is validated per existing row. Row
+    // ('null!', NULL) yields b+1 = NULL, violating NOT NULL.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
+    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d AS (b+1) NOT NULL").unwrap_err();
+    assert_eq!(err, "NOT NULL constraint failed");
+}
+
+#[test]
+fn add_generated_not_null_check_reports_check_first() {
+    // alter3-9.6: with both a CHECK and NOT NULL on a generated column, the first
+    // existing row (a=1) fails CHECK(a!=1); SQLite reports CHECK even though a
+    // later row would also fail NOT NULL. CHECK is evaluated before NOT NULL
+    // within a row and rows are scanned in order.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
+    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d AS (b+1) NOT NULL CHECK(a!=1)")
+        .unwrap_err();
+    assert_eq!(err, "CHECK constraint failed");
+}
