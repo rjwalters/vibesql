@@ -2,7 +2,8 @@
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
+# Cargo.lock IS committed — this workspace ships binaries (CLI/server/l10n/fuzz)
+# and the release flow treats it as a version source. Do not ignore it.
 
 # IDE
 .vscode/
@@ -87,6 +88,8 @@ benchmarks/suite/results/
 # Fuzzing
 fuzz/target/
 fuzz/artifacts/
+# fuzz/Cargo.lock stays ignored — the fuzz harness is a dev-only tool whose
+# lock cargo-fuzz regenerates; only the root Cargo.lock is a tracked artifact.
 fuzz/Cargo.lock
 fuzzy.log
 
