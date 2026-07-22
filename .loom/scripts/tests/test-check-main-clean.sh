@@ -215,6 +215,43 @@ fi
 
 rm -rf "$REPO"
 
+# ========================================================================
+# cwd-reset contamination stand-in: a NEW TRACKED-FILE change on main (#3719)
+# ========================================================================
+# Tests 12/13 exercise an *untracked* stray file. This case covers the shape
+# builders actually hit: after a cwd reset a repo-relative Write lands a new
+# SOURCE MODULE in the main worktree, and the builder `git add`s it — a staged
+# (tracked) change, not just an untracked one. The baseline backstop must still
+# flag it (exit 3, naming the path) while ignoring a change that was already
+# recorded in the pre-sweep snapshot. This is the detection defense the issue's
+# "test simulating a cwd-reset mid-build" AC retargets at (the prevention guard
+# `guard-worktree-paths.sh` cannot fire on the Task-subagent path — see PR body).
+
+# -------- Test 17: baseline flags a NEW staged source module (exit 3) --------
+echo "Test 17: baseline flags a new tracked-file change, ignores a baselined one"
+REPO=$(make_repo)
+# A change that predates the sweep and IS captured in the snapshot: a staged file.
+printf 'baseline = 1\n' > "$REPO/baseline_mod.py"
+git -C "$REPO" add baseline_mod.py
+SNAP="$REPO/.loom/sweep-checkpoint/main-clean-baseline.txt"
+( cd "$REPO" && "$SCRIPT" --snapshot "$SNAP" >/dev/null 2>&1 ); RC=$?
+if [[ "$RC" -ne 0 ]]; then fail "Test 17 setup: --snapshot expected 0, got $RC"; fi
+
+# Simulate the cwd-reset trap: a NEW source module written to main root, staged.
+printf 'def widget():\n    return 42\n' > "$REPO/stray_module.py"
+git -C "$REPO" add stray_module.py
+
+out=$( cd "$REPO" && "$SCRIPT" --baseline "$SNAP" 2>&1 ); RC=$?
+offending=$(echo "$out" | sed -n '/Offending changes:/,$p')
+if [[ "$RC" -eq 3 ]] \
+   && echo "$offending" | grep -q "stray_module.py" \
+   && ! echo "$offending" | grep -q "baseline_mod.py"; then
+    pass "exit 3 naming the new staged module, ignoring the baselined change"
+else
+    fail "expected 3 reporting only stray_module.py, got rc=$RC; offending=$offending"
+fi
+rm -rf "$REPO"
+
 # -------- Summary --------
 echo ""
 if [[ "$TESTS_FAILED" -eq 0 ]]; then

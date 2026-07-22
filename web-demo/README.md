@@ -406,4 +406,4 @@ For web demo specific improvements:
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) for details.
+MIT License - See [LICENSE-MIT](../LICENSE-MIT) for details.

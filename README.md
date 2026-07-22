@@ -217,16 +217,16 @@ See [Benchmarking Guide](docs/development/BENCHMARKING.md) for details on parame
 ## Development
 
 ```bash
-# Full build, test, and benchmark (runs in background)
-make all            # Starts in background, shows monitoring instructions
-make status         # Check progress
-make logs           # Follow full output
+# Full build + test (foreground by default)
+make all            # Build, test, and run TCL tests (foreground)
+make all-bg         # Same, in the background (long builds)
+make status         # Check progress of a background run
+make logs           # Follow full output of a background run
 
 # Individual targets
 make build          # Build all crates
 make test           # Run all tests (unit + integration + sqllogictest)
 make benchmark      # Run TPC-H/TPC-C/TPC-DS/Sysbench benchmarks
-make all-fg         # Run everything in foreground (blocking)
 make help           # Show all targets
 ```
 

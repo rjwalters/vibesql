@@ -77,7 +77,7 @@ This directory contains lessons learned, challenges overcome, and insights gaine
 
 - [Architecture Decisions](../decisions/) - Why we made specific technical choices
 - [Archive](../archive/) - Historical context for early challenges
-- [Testing Strategy](../TESTING_STRATEGY.md) - How TDD approach is applied
+- [Testing Strategy](../testing/TESTING_STRATEGY.md) - How TDD approach is applied
 
 ## 📝 Contributing Lessons
 

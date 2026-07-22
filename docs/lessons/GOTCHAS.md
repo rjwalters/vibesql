@@ -471,9 +471,9 @@ For each gotcha:
 
 ## Related Documents
 
-- [LESSONS_LEARNED.md](../../LESSONS_LEARNED.md) - General lessons
+- [LESSONS_LEARNED.md](./LESSONS_LEARNED.md) - General lessons
 - [CHALLENGES.md](CHALLENGES.md) - Major challenges
-- [SQL1999_RESEARCH.md](../../SQL1999_RESEARCH.md) - Standard research
+- SQL1999_RESEARCH.md - Standard research
 
 ---
 

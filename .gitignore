@@ -2,7 +2,8 @@
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
+# Cargo.lock IS committed — this workspace ships binaries (CLI/server/l10n/fuzz)
+# and the release flow treats it as a version source. Do not ignore it.
 
 # IDE
 .vscode/
@@ -22,41 +23,6 @@ Cargo.lock
 # Testing
 *.profdata
 *.profraw
-# >>> loom-managed (do not edit) >>>
-# Loom runtime state (don't commit these)
-.loom-in-use
-.loom-checkpoint
-.loom/.daemon.pid
-.loom/.daemon.log
-.loom/daemon.sock
-.loom/daemon-loop.pid
-.loom/daemon-metrics.json
-.loom/loom-source-path
-.loom/spawn-loop-state.json
-.loom/issue-failures.json
-.loom/interventions/
-.loom/worktrees/
-.loom/state.json
-.loom/mcp-command.json
-.loom/activity.db
-.loom/claims/
-.loom/locks/
-.loom/signals/
-.loom/status/
-.loom/retry-state/
-.loom/sweep-checkpoint/
-.loom/diagnostics/
-.loom/guide-docs-state.json
-.loom/metrics_state.json
-.loom/manifest.json
-.loom/stuck-config.json
-.loom/metrics/
-.loom/usage-cache.json
-.loom/claude-config/
-.loom/*.log
-.loom/*.sock
-.loom/logs/
-# <<< loom-managed <<<
 lcov.info
 conformance_test_output.log
 validation_run.log
@@ -122,6 +88,8 @@ benchmarks/suite/results/
 # Fuzzing
 fuzz/target/
 fuzz/artifacts/
+# fuzz/Cargo.lock stays ignored — the fuzz harness is a dev-only tool whose
+# lock cargo-fuzz regenerates; only the root Cargo.lock is a tracked artifact.
 fuzz/Cargo.lock
 fuzzy.log
 
@@ -146,3 +114,41 @@ tcl-baseline-*/
 
 # Repo Skills machine-local install metadata (absolute source path + timestamp)
 .claude/skills/repo/.install-local.json
+# >>> loom-managed (do not edit) >>>
+# Loom runtime state (don't commit these)
+.loom-in-use
+.loom-checkpoint
+.loom/.daemon.pid
+.loom/.daemon.log
+.loom/daemon.sock
+.loom/daemon-loop.pid
+.loom/daemon-metrics.json
+.loom/loom-source-path
+.loom/spawn-loop-state.json
+.loom/issue-failures.json
+.loom/interventions/
+.loom/worktrees/
+.loom/state.json
+.loom/mcp-command.json
+.loom/activity.db
+.loom/claims/
+.loom/locks/
+.loom/signals/
+.loom/status/
+.loom/retry-state/
+.loom/sweep-checkpoint/
+.loom/diagnostics/
+.loom/guide-docs-state.json
+.loom/metrics_state.json
+.loom/manifest.json
+.loom/stuck-config.json
+.loom/metrics/
+.loom/usage-cache.json
+.loom/claude-config/
+.loom/tokens/
+.loom/accounts.env
+.loom/CANARY
+.loom/*.log
+.loom/*.sock
+.loom/logs/
+# <<< loom-managed <<<

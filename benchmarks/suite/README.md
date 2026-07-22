@@ -193,7 +193,7 @@ When optimizing performance:
 
 ## Documentation
 
-Full documentation: [docs/BENCHMARKING.md](../docs/BENCHMARKING.md)
+Full documentation: [docs/BENCHMARKING.md](../../docs/development/BENCHMARKING.md)
 
 Includes:
 - Test-level benchmarking (individual .slt files)
@@ -205,7 +205,7 @@ Includes:
 
 ## Test Infrastructure
 
-Rust benchmark harness: [tests/sqllogictest_benchmark.rs](../tests/sqllogictest_benchmark.rs)
+Rust benchmark harness: [tests/sqllogictest_benchmark.rs](../../tests/z_compliance/sqllogictest_benchmark.rs)
 
 Provides:
 - `SqliteDB` wrapper - SQLite AsyncDB implementation
