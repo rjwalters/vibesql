@@ -3,7 +3,7 @@
 ## Performance Profiling
 
 When debugging performance issues, see **[docs/performance/CPU_PROFILING.md](docs/performance/CPU_PROFILING.md)** for a decision tree that helps you choose the right tool:
-- **samply** (`make profile-tpch Q=X`) for CPU profiling / flame graphs
+- **samply** (`make profile-tpch` for all queries, or `make profile-query Q=Q6` for one) for CPU profiling / flame graphs
 - **Environment variables** (`JOIN_REORDER_VERBOSE=1`, etc.) for optimizer decision logging
 
 ## SQLite TCL Test Suite

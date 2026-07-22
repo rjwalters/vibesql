@@ -55,7 +55,7 @@ Each challenge entry includes:
 **Status**: Resolved with documented testing strategy
 
 **References**:
-- [TESTING_STRATEGY.md](../../TESTING_STRATEGY.md)
+- [TESTING_STRATEGY.md](../testing/TESTING_STRATEGY.md)
 - [GitHub Issue #6](https://github.com/posix4e/nistmemsql/issues/6)
 
 ---
@@ -94,7 +94,7 @@ Each challenge entry includes:
 **Status**: Resolved with adjusted expectations and phased plan
 
 **References**:
-- [RESEARCH_SUMMARY.md](../../RESEARCH_SUMMARY.md)
+- RESEARCH_SUMMARY.md
 - [README.md](../../README.md) - Implementation Phases
 
 ---
@@ -171,10 +171,10 @@ Each challenge entry includes:
 
 ## Related Documents
 
-- [LESSONS_LEARNED.md](../../LESSONS_LEARNED.md) - General lessons
+- [LESSONS_LEARNED.md](./LESSONS_LEARNED.md) - General lessons
 - [WEEKLY.md](WEEKLY.md) - Week-by-week learnings
 - [GOTCHAS.md](GOTCHAS.md) - SQL:1999 edge cases
-- [DECISIONS.md](../../DECISIONS.md) - Architecture decisions
+- DECISIONS.md - Architecture decisions
 
 ---
 

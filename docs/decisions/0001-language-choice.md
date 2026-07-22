@@ -7,8 +7,8 @@
 **Deciders**: Claude Code + rwalters
 
 **Related**:
-- [REQUIREMENTS.md](../../REQUIREMENTS.md) - No language preference from upstream
-- [MAJOR_SIMPLIFICATIONS.md](../../MAJOR_SIMPLIFICATIONS.md) - Correctness over performance
+- [REQUIREMENTS.md](../archive/REQUIREMENTS.md) - No language preference from upstream
+- [MAJOR_SIMPLIFICATIONS.md](../archive/MAJOR_SIMPLIFICATIONS.md) - Correctness over performance
 
 ## Context and Problem Statement
 

@@ -244,5 +244,5 @@ python3 --version
 ## See Also
 
 - [Benchmark Strategy](../performance/BENCHMARK_STRATEGY.md)
-- [Performance Profiling](../profiling/)
+- Performance Profiling
 - [TPC-H Documentation](../reference/)
