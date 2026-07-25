@@ -162,10 +162,21 @@ fn rename_walk(expr: &mut Expression, old: &str, new: &str, changed: &mut bool) 
                 rename_walk(msg, old, new, changed);
             }
         }
+        // A `NEW.<col>` / `OLD.<col>` pseudo-variable inside a trigger's WHEN
+        // condition references the trigger's subject table. When that table's
+        // column is renamed, the pseudo-variable's column must be rewritten too
+        // (index expressions never contain pseudo-variables, so this arm is
+        // inert for the index-metadata caller).
+        Expression::PseudoVariable { column, .. } => {
+            if column.eq_ignore_ascii_case(old) {
+                *column = new.to_string();
+                *changed = true;
+            }
+        }
         // Leaf / out-of-scope forms: literals, placeholders, wildcard,
-        // current date/time, DEFAULT, sequence refs, pseudo/session variables,
+        // current date/time, DEFAULT, sequence refs, session variables,
         // subqueries, EXISTS, and window functions carry no rewritable
-        // column reference for index metadata.
+        // column reference here.
         _ => {}
     }
 }
@@ -249,5 +260,36 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn renames_new_old_pseudo_variable_column() {
+        // `NEW.b < 0` — the pseudo-variable's column must be rewritten so a
+        // trigger WHEN condition tracks a RENAME COLUMN of its subject table.
+        let mut expr = Expression::BinaryOp {
+            op: BinaryOperator::LessThan,
+            left: Box::new(Expression::PseudoVariable {
+                pseudo_table: crate::expression::PseudoTable::New,
+                column: "B".to_string(),
+            }),
+            right: Box::new(Expression::Literal(SqlValue::Integer(0))),
+        };
+        assert!(rename_column_in_expression(&mut expr, "b", "d"));
+        match &expr {
+            Expression::BinaryOp { left, .. } => match left.as_ref() {
+                Expression::PseudoVariable { column, .. } => assert_eq!(column, "d"),
+                other => panic!("expected pseudo-variable, got {other:?}"),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn leaves_unrelated_pseudo_variable_column_untouched() {
+        let mut expr = Expression::PseudoVariable {
+            pseudo_table: crate::expression::PseudoTable::Old,
+            column: "c".to_string(),
+        };
+        assert!(!rename_column_in_expression(&mut expr, "b", "d"));
     }
 }

@@ -276,6 +276,12 @@ pub(super) fn rewrite_triggers_for_column_rename(
         let body_text = match &existing.triggered_action {
             TriggerAction::RawSql(sql) => sql.clone(),
         };
+        // The `NEW`/`OLD` pseudo-tables always alias the trigger's own subject
+        // table, so `new.<col>` / `old.<col>` references resolve to the renamed
+        // table only when this trigger fires on the renamed table. Gate the
+        // new/old rewrite on that (SQLite rewrites the WHEN clause and body
+        // `new.old_col` references for such triggers, e.g. altercol-3.x).
+        let subject_is_renamed = existing.table_name.eq_ignore_ascii_case(table);
         // An ambiguous unqualified reference to the renamed column aborts the
         // ALTER (SQLite: "error in trigger <name>: ambiguous column name: <col>").
         // Map the resolver error to that message, using `Other` so the verbatim
@@ -292,6 +298,7 @@ pub(super) fn rewrite_triggers_for_column_rename(
             old_column,
             new_column,
             &table_has_column,
+            subject_is_renamed,
         )
         .map_err(ambiguity_error)?;
         let new_sql_definition = existing
@@ -304,15 +311,37 @@ pub(super) fn rewrite_triggers_for_column_rename(
                     old_column,
                     new_column,
                     &table_has_column,
+                    subject_is_renamed,
                 )
             })
             .transpose()
             .map_err(ambiguity_error)?;
 
+        // The runtime WHEN condition is stored as a separate AST (evaluated per
+        // row, not re-parsed from the trigger text), so it must be rewritten in
+        // its own right. A WHEN clause can only reference the subject table's
+        // columns via `NEW`/`OLD`, so rewriting is unambiguous when the trigger
+        // fires on the renamed table (altercol-3.3).
+        let new_when_condition = if subject_is_renamed {
+            existing.when_condition.as_ref().map(|expr| {
+                let mut rewritten = expr.clone();
+                let changed = vibesql_ast::rename::rename_column_in_expression(
+                    &mut rewritten,
+                    old_column,
+                    new_column,
+                );
+                (rewritten, changed)
+            })
+        } else {
+            None
+        };
+
         let body_changed = new_body != body_text;
         let sql_def_changed = new_sql_definition.as_deref() != existing.sql_definition.as_deref();
+        let when_changed =
+            new_when_condition.as_ref().map(|(_, changed)| *changed).unwrap_or(false);
 
-        if !body_changed && !sql_def_changed {
+        if !body_changed && !sql_def_changed && !when_changed {
             continue;
         }
 
@@ -322,6 +351,11 @@ pub(super) fn rewrite_triggers_for_column_rename(
         }
         if sql_def_changed {
             updated.sql_definition = new_sql_definition;
+        }
+        if when_changed {
+            if let Some((rewritten, _)) = new_when_condition {
+                updated.when_condition = Some(rewritten);
+            }
         }
         pending_updates.push(updated);
     }
@@ -470,6 +504,8 @@ pub(super) fn rewrite_views_for_column_rename(
             old_column,
             new_column,
             &table_has_column,
+            // A view has no NEW/OLD pseudo-tables.
+            false,
         )
         .map_err(|col| {
             ExecutorError::Other(format!("error in view {}: ambiguous column name: {}", name, col))

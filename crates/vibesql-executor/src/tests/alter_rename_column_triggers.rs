@@ -206,6 +206,76 @@ fn rename_column_ambiguous_in_trigger_aborts_and_leaves_schema_unchanged() {
 }
 
 #[test]
+fn rename_column_rewrites_new_old_refs_in_when_clause_and_body() {
+    // altercol.test 3.x: a trigger on the renamed table references the renamed
+    // column via the NEW/OLD pseudo-tables in both its WHEN clause and body.
+    // SQLite rewrites those references (the pseudo-tables alias the subject
+    // table). Prior to the fix, `WHEN new.y<0` and `SET x=new.y` were left
+    // stale, so the stored `CREATE TRIGGER` text and the runtime WHEN condition
+    // both still referenced the old column.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t4(x, y, z)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER ttt AFTER INSERT ON t4 WHEN new.y<0 BEGIN \
+         UPDATE t4 SET x=new.y WHERE old.y IS NULL; END",
+    )
+    .unwrap();
+
+    exec(&mut db, "ALTER TABLE t4 RENAME y TO abc").unwrap();
+
+    // Stored verbatim CREATE TRIGGER: WHEN clause and NEW/OLD body refs rewritten.
+    let sql = trigger_sql(&db, "ttt");
+    assert!(sql.contains("WHEN new.abc<0"), "WHEN clause not rewritten: {sql}");
+    assert!(sql.contains("x=new.abc"), "NEW body ref not rewritten: {sql}");
+    assert!(sql.contains("old.abc IS NULL"), "OLD body ref not rewritten: {sql}");
+    assert!(!sql.contains(".y"), "stale reference to old column remains: {sql}");
+
+    // Runtime WHEN condition AST (evaluated per row, not re-parsed from text) is
+    // rewritten so the trigger fires without a "no such column: new.y" error.
+    use vibesql_ast::pretty_print::ToSql;
+    let when_sql = db
+        .catalog
+        .get_trigger("ttt")
+        .expect("trigger exists")
+        .when_condition
+        .as_ref()
+        .expect("WHEN condition preserved")
+        .to_sql();
+    assert!(
+        when_sql.to_ascii_lowercase().contains("abc"),
+        "runtime WHEN not rewritten: {when_sql}"
+    );
+    assert!(
+        !when_sql.to_ascii_lowercase().contains("new.y"),
+        "runtime WHEN still references old column: {when_sql}"
+    );
+}
+
+#[test]
+fn rename_column_leaves_new_old_refs_untouched_for_trigger_on_other_table() {
+    // A trigger whose subject table is NOT the renamed table has NEW/OLD
+    // pseudo-tables aliasing a different table, so a `new.<name>` reference must
+    // not be rewritten even if the name collides with the renamed column.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec(&mut db, "CREATE TABLE t2(a, c)").unwrap();
+    // Trigger fires on t2; NEW.a here is t2.a, unrelated to t1.a being renamed.
+    exec(
+        &mut db,
+        "CREATE TRIGGER g AFTER INSERT ON t2 WHEN new.a<0 BEGIN \
+         INSERT INTO t1 VALUES(new.a, new.c); END",
+    )
+    .unwrap();
+
+    exec(&mut db, "ALTER TABLE t1 RENAME a TO renamed").unwrap();
+
+    let sql = trigger_sql(&db, "g");
+    assert!(sql.contains("WHEN new.a<0"), "NEW.a on unrelated trigger must be untouched: {sql}");
+    assert!(sql.contains("new.a, new.c"), "unrelated NEW refs must be untouched: {sql}");
+}
+
+#[test]
 fn rename_column_unambiguous_still_succeeds_with_other_table_sharing_name() {
     // Guard against over-eager aborting: a qualified `t3.e` is unambiguous even
     // though t4 also owns `e`, so the ALTER must still succeed.
