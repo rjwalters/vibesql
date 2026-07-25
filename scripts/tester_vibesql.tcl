@@ -7592,11 +7592,21 @@ proc sqlite3_db_config {args} {
 # grep confirmed no file-scope logic branches on these return values, so an
 # empty return never re-introduces a file-scope abort. Commands whose return
 # value carries real SQL semantics — sqlite3_step / sqlite3_column_* /
-# sqlite3_prepare* / sqlite3_bind_* / sqlite3_errcode / sqlite3_get_autocommit
+# sqlite3_prepare* / sqlite3_bind_* / sqlite3_errcode
 # and the rest of the statement-handle family — are DELIBERATELY NOT stubbed
 # here; those remain the substance of the pure-C-API test files (capi2/capi3*
 # etc.) and are handled by the file-level skip list, so their honest failures
 # are preserved.
+#
+# EXCEPTION: sqlite3_get_autocommit IS implemented below (not stubbed to a
+# constant) because the shim already tracks the connection's transaction state
+# in $::in_transaction. Returning that tracked state is an HONEST emulation —
+# exactly like `db last_insert_rowid` reports the shim's tracked rowid — not a
+# fabricated constant. It reports 1 (autocommit on) outside a transaction and 0
+# inside a BEGIN...COMMIT/ROLLBACK batch, mirroring the C API. This rescues the
+# INSERT/UPDATE documentation-evidence autocommit assertions (e_insert-4.1.*.3,
+# e_update-1.8.*.3) and, at file scope, prevents an "invalid command name"
+# abort that would lose every later test in a file (#6193).
 proc sqlite3_shutdown {args} { return "" }
 proc sqlite3_initialize {args} { return "" }
 proc sqlite3_config {args} { return "" }
@@ -7620,6 +7630,19 @@ proc sqlite3_hard_heap_limit64 {args} { return 0 }
 proc sqlite3_enable_shared_cache {args} { return "" }
 proc sqlite3_release_memory {args} { return 0 }
 proc sqlite3_db_release_memory {args} { return 0 }
+
+# sqlite3_get_autocommit DB — report the connection's autocommit flag.
+#
+# SQLite returns 1 when the connection is in autocommit mode (no explicit
+# transaction open) and 0 while an explicit BEGIN...COMMIT/ROLLBACK is active.
+# The shim tracks exactly this in $::in_transaction (set on BEGIN, cleared on
+# COMMIT/ROLLBACK and on an OR ROLLBACK / RAISE(ROLLBACK) conflict that unwinds
+# the whole transaction — see the execsql transaction-batching branches), so we
+# report the tracked state directly. See the honesty note in the C-API stub
+# block above: this is a real tracked value, not a fabricated constant.
+proc sqlite3_get_autocommit {db} {
+    return [expr {$::in_transaction ? 0 : 1}]
+}
 
 proc sqlite3_exec {db sql} {
     # SQLite sqlite3_exec API - execute SQL statement(s) directly.

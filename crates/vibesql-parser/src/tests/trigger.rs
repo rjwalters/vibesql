@@ -1210,6 +1210,23 @@ fn test_create_trigger_rejects_order_by_in_delete_body() {
     );
 }
 
+// A trigger-body INSERT may not use the "DEFAULT VALUES" form. SQLite supports
+// DEFAULT VALUES for top-level INSERT statements only; the trigger-program
+// grammar has no DEFAULT VALUES production, so a body `INSERT INTO t DEFAULT
+// VALUES` is rejected at create time with a plain syntax error at the `DEFAULT`
+// token (R-15888-36326; e_insert-5.2.1).
+const TRIGGER_DEFAULT_SYNTAX_ERR: &str = "near \"DEFAULT\": syntax error";
+
+#[test]
+fn test_create_trigger_rejects_default_values_in_insert_body() {
+    // e_insert-5.2.1
+    assert_trigger_rejected_with(
+        "CREATE TRIGGER tr1 AFTER UPDATE ON tA BEGIN \
+         INSERT INTO t16 DEFAULT VALUES; END;",
+        TRIGGER_DEFAULT_SYNTAX_ERR,
+    );
+}
+
 #[test]
 fn test_create_trigger_accepts_unqualified_body_dml() {
     // Negative control: an ordinary unqualified body DML with no index hint is
