@@ -101,6 +101,15 @@ impl Database {
             &mut self.operations,
         )?;
 
+        // #6199 Phase 3: perform_rollback restored every table from its
+        // snapshot, but the transparent columnar representation cache is not
+        // part of that snapshot. Rows appended in place by `append_rows`
+        // during the rolled-back transaction would otherwise remain resident
+        // and be served by the next analytical scan (stale read). A full
+        // ROLLBACK does not carry a cheap touched-table set, so drop the whole
+        // cache — rollbacks are rare and correctness beats cleverness here.
+        self.clear_columnar_cache();
+
         // SQLite: PRAGMA defer_foreign_keys is automatically reset to OFF at
         // every COMMIT or ROLLBACK (R-21752-26913, fkey6-1.10.1).
         self.set_defer_foreign_keys(false);
@@ -302,8 +311,24 @@ impl Database {
         let changes_to_undo =
             self.lifecycle.transaction_manager_mut().rollback_to_savepoint(name)?;
 
+        // #6199 Phase 3: collect the tables touched by the undone changes so we
+        // can drop their columnar cache entries after the row store is
+        // restored. Rows appended in place by `append_rows` during the undone
+        // window must not survive in the resident columnar copy.
+        let mut affected: Vec<String> = Vec::new();
+        for change in &changes_to_undo {
+            let table = change.table_name();
+            if !affected.iter().any(|n| n == table) {
+                affected.push(table.to_string());
+            }
+        }
+
         for change in changes_to_undo.into_iter().rev() {
             self.undo_change(change)?;
+        }
+
+        for table_name in &affected {
+            self.invalidate_columnar_cache_for_rollback(table_name);
         }
 
         Ok(())
@@ -403,6 +428,15 @@ impl Database {
         self.catalog = catalog;
         self.tables = tables;
         self.operations = operations;
+        if restored {
+            // #6199 Phase 3: the statement savepoint restored every table from
+            // its snapshot wholesale. Drop the transparent columnar cache so a
+            // row appended in place by `append_rows` during the aborted
+            // statement is not served stale by the next analytical scan. Like
+            // the full-ROLLBACK path this has no cheap touched-table set, so
+            // clear the whole cache (statement aborts are rare).
+            self.clear_columnar_cache();
+        }
         restored
     }
 

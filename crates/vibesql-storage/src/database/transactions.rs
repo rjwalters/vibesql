@@ -16,6 +16,18 @@ pub enum TransactionChange {
     Delete { table_name: String, row: Row },
 }
 
+impl TransactionChange {
+    /// The table this change mutated. Used by savepoint rollback to invalidate
+    /// the affected table's columnar cache entry (#6199 Phase 3).
+    pub fn table_name(&self) -> &str {
+        match self {
+            TransactionChange::Insert { table_name, .. }
+            | TransactionChange::Update { table_name, .. }
+            | TransactionChange::Delete { table_name, .. } => table_name,
+        }
+    }
+}
+
 /// A foreign-key violation that has been deferred until COMMIT.
 ///
 /// Phase C2 of #5085 introduces this queue: when a FK constraint is

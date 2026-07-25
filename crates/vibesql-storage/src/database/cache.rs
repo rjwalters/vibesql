@@ -149,6 +149,27 @@ impl Database {
         self.record_write(table_name);
     }
 
+    /// #6199 Phase 3: discard a table's columnar cache entry after a
+    /// transaction/savepoint ROLLBACK.
+    ///
+    /// Rollback restores the row store from a snapshot. Because
+    /// [`Database::insert_row`] / [`insert_rows_batch`] now maintain the
+    /// resident columnar copy *in place* via `append_rows` (instead of
+    /// dropping it), any rows appended during the rolled-back window would
+    /// otherwise survive in the cache and be served by the next analytical
+    /// scan — a stale read of rolled-back data. Dropping the entry forces the
+    /// next scan to rebuild from the restored row store.
+    ///
+    /// Unlike [`Database::invalidate_columnar_cache`], this deliberately does
+    /// **not** record a write signal: a rollback is not a write and must not
+    /// perturb the hotness/access-pattern signal that drives columnar
+    /// dispatch. For native columnar tables (never in this cache) it is a
+    /// harmless no-op — their authoritative data is restored with the table
+    /// snapshot.
+    pub fn invalidate_columnar_cache_for_rollback(&self, table_name: &str) {
+        self.columnar_cache.invalidate(table_name);
+    }
+
     /// Clear all columnar cache entries
     pub fn clear_columnar_cache(&self) {
         self.columnar_cache.clear();
@@ -717,5 +738,136 @@ mod tests {
         assert_eq!(stats.conversions, 0, "inserts alone must not populate the cache");
         assert_eq!(stats.incremental_updates, 0, "nothing resident to maintain");
         assert!(db.columnar_cache_memory_usage() == 0, "cache stays empty until first scan");
+    }
+
+    // ========================================================================
+    // #6199 Phase 3 — rollback must never leave a stale columnar copy
+    //
+    // Phase 3 replaced eager cache invalidation on INSERT with in-place
+    // `append_rows`. That is only safe if every rollback path (which restores
+    // the row store from a snapshot) also drops the resident columnar copy —
+    // otherwise a row appended inside a transaction survives in the cache after
+    // ROLLBACK and the next analytical scan serves rolled-back data.
+    // ========================================================================
+
+    /// Judge repro shape: warm the columnar cache, append a row inside a
+    /// transaction, ROLLBACK, then confirm the columnar view matches the
+    /// (restored) row store — not the rolled-back count.
+    #[test]
+    fn test_rollback_transaction_discards_appended_columnar_row() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm the columnar cache to residency.
+        let warmed = db.get_columnar("t").unwrap().expect("table should be resident");
+        assert_eq!(warmed.row_count(), 600, "cache warmed to 600 rows");
+
+        // Append one row inside a transaction, then roll it back.
+        db.begin_transaction().unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+        db.rollback_transaction().unwrap();
+
+        // The row store is back to 600 rows.
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "row store must be restored to 600 rows by ROLLBACK");
+
+        // The columnar view must agree — no stale rolled-back row.
+        let columnar_len = db.get_columnar("t").unwrap().expect("table exists").row_count();
+        assert_eq!(
+            columnar_len, row_store_len,
+            "columnar cache must not retain a rolled-back row (row store {}, columnar {})",
+            row_store_len, columnar_len
+        );
+    }
+
+    /// Rollback parity must also hold with the representation cache disabled
+    /// (`columnar_cache_budget = 0`): the row path alone already reflects the
+    /// rollback, so this pins the row-store side of the parity invariant.
+    #[test]
+    fn test_rollback_transaction_parity_with_cache_disabled() {
+        let mut config = crate::DatabaseConfig::server_default();
+        config.columnar_cache_budget = 0;
+        let mut db = Database::with_config(config);
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        db.begin_transaction().unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+        db.rollback_transaction().unwrap();
+
+        assert!(db.get_columnar("t").unwrap().is_none(), "cache disabled -> row path only");
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "row store must reflect ROLLBACK even with cache disabled");
+    }
+
+    /// Savepoint rollback variant: an in-place columnar append made after a
+    /// SAVEPOINT must be discarded when rolling back to that savepoint.
+    #[test]
+    fn test_rollback_to_savepoint_discards_appended_columnar_row() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm to residency.
+        assert_eq!(
+            db.get_columnar("t").unwrap().expect("resident").row_count(),
+            600,
+            "cache warmed to 600 rows"
+        );
+
+        db.begin_transaction().unwrap();
+        db.create_savepoint("sp1".to_string()).unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+
+        // Appending inside the savepoint kept the resident copy fresh at 601.
+        assert_eq!(
+            db.get_columnar("t").unwrap().expect("resident").row_count(),
+            601,
+            "in-place append made the resident copy 601 before rollback"
+        );
+
+        // Isolate the savepoint path: check parity right after the savepoint
+        // rollback (transaction still open) before tearing the txn down.
+        db.rollback_to_savepoint("sp1".to_string()).unwrap();
+
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "savepoint rollback must restore the row store to 600");
+
+        let columnar_len = db.get_columnar("t").unwrap().expect("table exists").row_count();
+        assert_eq!(
+            columnar_len, row_store_len,
+            "columnar cache must not retain a savepoint-rolled-back row (row store {}, columnar {})",
+            row_store_len, columnar_len
+        );
+
+        db.rollback_transaction().unwrap();
     }
 }
