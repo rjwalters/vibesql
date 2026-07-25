@@ -1309,6 +1309,142 @@ fn collect_select_list_columns(
     Some(names)
 }
 
+/// The seed/recursive partition of a recursive CTE body produced by
+/// [`split_recursive_compound`].
+struct RecursiveSplit {
+    /// The non-recursive seed, possibly itself a compound of leading terms.
+    base_query: vibesql_ast::SelectStmt,
+    /// The recursive term(s), executed against the working table each iteration.
+    recursive_query: vibesql_ast::SelectStmt,
+    /// `true` for UNION (deduplicate recursive rows), `false` for UNION ALL.
+    dedup_rows: bool,
+}
+
+/// Copy a compound term into a standalone `SelectStmt`.
+///
+/// Drops the set-operation link (the term is lifted out of its chain) and the
+/// compound-level ORDER BY/LIMIT/OFFSET (queue directives handled by the caller,
+/// not per-term clauses). All other clauses — including a leading term's own
+/// WITH clause — are preserved.
+fn strip_compound_term(stmt: &vibesql_ast::SelectStmt) -> vibesql_ast::SelectStmt {
+    vibesql_ast::SelectStmt {
+        with_clause: stmt.with_clause.clone(),
+        distinct: stmt.distinct,
+        select_list: stmt.select_list.clone(),
+        into_table: stmt.into_table.clone(),
+        into_variables: stmt.into_variables.clone(),
+        from: stmt.from.clone(),
+        where_clause: stmt.where_clause.clone(),
+        group_by: stmt.group_by.clone(),
+        having: stmt.having.clone(),
+        window_definitions: stmt.window_definitions.clone(),
+        order_by: None,
+        limit: None,
+        offset: None,
+        set_operation: None,
+        values: stmt.values.clone(),
+    }
+}
+
+/// Reassemble a right-leaning compound `SelectStmt` from a slice of standalone
+/// terms and the operators connecting each term to the next.
+///
+/// `connectors[i]` joins `terms[i]` to `terms[i + 1]`, so
+/// `connectors.len() == terms.len() - 1`. With a single term the term is
+/// returned verbatim.
+fn rebuild_compound(
+    terms: &[vibesql_ast::SelectStmt],
+    connectors: &[(vibesql_ast::SetOperator, bool)],
+) -> vibesql_ast::SelectStmt {
+    debug_assert_eq!(terms.len(), connectors.len() + 1);
+    let mut acc = terms[terms.len() - 1].clone();
+    for i in (0..connectors.len()).rev() {
+        let (op, all) = connectors[i].clone();
+        let mut term = terms[i].clone();
+        term.set_operation =
+            Some(vibesql_ast::SetOperation { op, all, right: Box::new(acc) });
+        acc = term;
+    }
+    acc
+}
+
+/// Partition a recursive CTE body into a non-recursive seed and its recursive
+/// term(s).
+///
+/// The body is a compound chain `T0 op0 T1 op1 T2 …`. The seed is the maximal
+/// leading run of terms that do NOT reference the CTE; the recursive part is
+/// every term from the first self-referencing term onward. Seed terms keep their
+/// own operators (any of UNION / UNION ALL / INTERSECT / EXCEPT — with5.test 113
+/// `… INTERSECT …`, 114/131 `… UNION ALL …`).
+///
+/// The operators joining the seed to the first recursive term and the recursive
+/// terms to one another must all be UNION or UNION ALL and identical:
+/// INTERSECT/EXCEPT there is rejected, and a UNION/UNION ALL mismatch is the
+/// SQLite "circular reference" case (with5.test 120/121). The shared boundary
+/// operator decides whether recursive rows are deduplicated (UNION) or kept
+/// (UNION ALL).
+fn split_recursive_compound(
+    cte: &vibesql_ast::CommonTableExpr,
+) -> Result<RecursiveSplit, ExecutorError> {
+    // Flatten the right-leaning set-operation chain into standalone terms plus
+    // the (operator, all) connecting each term to the next.
+    let mut terms: Vec<vibesql_ast::SelectStmt> = Vec::new();
+    let mut connectors: Vec<(vibesql_ast::SetOperator, bool)> = Vec::new();
+    let mut node = &cte.query;
+    loop {
+        terms.push(strip_compound_term(node));
+        match &node.set_operation {
+            Some(set_op) => {
+                connectors.push((set_op.op.clone(), set_op.all));
+                node = &set_op.right;
+            }
+            None => break,
+        }
+    }
+
+    // The recursive part starts at the first term referencing the CTE. A
+    // self-reference in the leading (base) term is circular, not recursion
+    // (with1.test 17.3); so is a body that references itself nowhere in a term
+    // we can split on.
+    let split_idx = match terms.iter().position(|t| stmt_references_table(t, &cte.name)) {
+        Some(0) | None => {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "circular reference: {}",
+                cte.name
+            )));
+        }
+        Some(idx) => idx,
+    };
+
+    // Operators joining the seed to the recursive part (connectors[split_idx-1])
+    // and the recursive terms to one another (connectors[split_idx..]).
+    let recursive_connectors = &connectors[split_idx - 1..];
+    for (op, _) in recursive_connectors {
+        if *op != vibesql_ast::SetOperator::Union {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "Recursive CTE '{}' must use UNION or UNION ALL (not INTERSECT or EXCEPT)",
+                cte.name
+            )));
+        }
+    }
+    // Every recursive connector must agree on UNION vs UNION ALL; SQLite reports
+    // a mix as a circular reference (with5.test 120/121).
+    let boundary = recursive_connectors[0].clone();
+    if recursive_connectors.iter().any(|c| *c != boundary) {
+        return Err(ExecutorError::SqliteCompatError(format!(
+            "circular reference: {}",
+            cte.name
+        )));
+    }
+    // UNION (all == false) deduplicates; UNION ALL (all == true) keeps rows.
+    let dedup_rows = !boundary.1;
+
+    let base_query = rebuild_compound(&terms[..split_idx], &connectors[..split_idx - 1]);
+    let recursive_query = rebuild_compound(&terms[split_idx..], &connectors[split_idx..]);
+
+    Ok(RecursiveSplit { base_query, recursive_query, dedup_rows })
+}
+
 /// Execute a recursive CTE using iterative evaluation.
 ///
 /// Recursive CTEs in SQL:1999/SQLite are defined with UNION or UNION ALL:
@@ -1354,58 +1490,26 @@ where
 {
     use crate::limits::MAX_RECURSIVE_CTE_ITERATIONS;
 
-    // Validate that recursive CTE uses UNION ALL
-    let set_op = cte.query.set_operation.as_ref().ok_or_else(|| {
-        ExecutorError::UnsupportedFeature(format!(
-            "Recursive CTE '{}' must use UNION ALL",
-            cte.name
-        ))
-    })?;
-
-    if set_op.op != vibesql_ast::SetOperator::Union {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "Recursive CTE '{}' must use UNION or UNION ALL (not INTERSECT or EXCEPT)",
-            cte.name
-        )));
-    }
-
-    // Extract base and recursive terms
-    // Base term: the main SELECT (before UNION [ALL])
-    // Recursive term: the right side of UNION [ALL]
-
-    // ORDER BY / LIMIT / OFFSET written after the `UNION ALL` bind to the
-    // *compound* query (the parser stores them on `cte.query`, not on the base
-    // or recursive terms). For a recursive CTE these are queue directives — the
+    // ORDER BY / LIMIT / OFFSET written after the compound bind to the *whole*
+    // recursive CTE (the parser stores them on `cte.query`, not on the base or
+    // recursive terms). For a recursive CTE these are queue directives — the
     // ORDER BY controls the priority-queue traversal, and LIMIT/OFFSET cap and
     // window the total result — so they must NOT be applied to the base term or
-    // re-applied on each recursive iteration. We interpret them here and strip
-    // them from the base term.
+    // re-applied on each recursive iteration. We interpret them here and keep
+    // them off the individual terms.
     let recursive_order_by = cte.query.order_by.clone();
 
-    // Create base-only query without the UNION ALL set operation
-    // This prevents the base term from trying to reference the CTE before it exists
-    let base_query = vibesql_ast::SelectStmt {
-        with_clause: cte.query.with_clause.clone(),
-        distinct: cte.query.distinct,
-        select_list: cte.query.select_list.clone(),
-        into_table: cte.query.into_table.clone(),
-        into_variables: cte.query.into_variables.clone(),
-        from: cte.query.from.clone(),
-        where_clause: cte.query.where_clause.clone(),
-        group_by: cte.query.group_by.clone(),
-        having: cte.query.having.clone(),
-        window_definitions: cte.query.window_definitions.clone(),
-        // Compound-level ORDER BY/LIMIT/OFFSET do not apply to the base term.
-        order_by: None,
-        limit: None,
-        offset: None,
-        set_operation: None, // Remove UNION ALL for base term execution
-        values: cte.query.values.clone(),
-    };
-
-    // The recursive term drives per-iteration expansion; execute it as written
-    // (it already carries no compound-level ORDER BY/LIMIT/OFFSET).
-    let recursive_query = &set_op.right;
+    // Split the (possibly compound) CTE body into a non-recursive seed and the
+    // recursive term(s). The seed may itself be a compound of several leading
+    // terms combined with any set operator — `VALUES(..) INTERSECT VALUES(..)`
+    // (with5.test 113), `VALUES(..) UNION ALL VALUES(..)` (114/131) — and there
+    // may be more than one recursive term. `split_recursive_compound` performs
+    // the seed/recursive partition and validates the recursive connectors.
+    let RecursiveSplit { base_query, recursive_query, dedup_rows } =
+        split_recursive_compound(cte)?;
+    // The recursive term(s) drive per-iteration expansion; execute as written
+    // (they carry no compound-level ORDER BY/LIMIT/OFFSET).
+    let recursive_query = &recursive_query;
 
     // SQLite compatibility: window functions are not allowed in the recursive
     // part of a recursive CTE (window1.test 15.0). SQLite reports the exact
@@ -1422,9 +1526,13 @@ where
     //   - the sole reference is buried in a subquery (no direct FROM ref)
     //     -> "circular reference: <name>" (7.4:
     //     `... FROM tree WHERE p IN (SELECT id FROM t)`);
-    //   - more than one reference — a FROM ref plus a subquery ref, or the
-    //     name twice in FROM -> "multiple recursive references: <name>" (7.5:
+    //   - the name appears more than once in the FROM clause
+    //     -> "multiple references to recursive table: <name>" (with2.test 1.16:
+    //     `... FROM t4, main.t4, t4 ...`);
+    //   - a single FROM ref plus a subquery ref
+    //     -> "multiple recursive references: <name>" (7.5:
     //     `... FROM tree, t WHERE p=id AND p IN (SELECT id FROM t)`).
+    // SQLite distinguishes these two verbatim (confirmed against sqlite3 3.51).
     // Only this leading recursive term is inspected; a compound recursive term
     // (`... UNION R1 UNION R2`, with5.test 110-112) keeps its sibling terms in
     // its own set-operation chain, which the counters deliberately do not walk,
@@ -1436,7 +1544,13 @@ where
             .as_ref()
             .map_or(0, |from| count_from_table_occurrences(from, self_name));
         let indirect = recursive_term_has_indirect_ref(recursive_query, self_name);
-        if from_refs > 1 || (from_refs >= 1 && indirect) {
+        if from_refs > 1 {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "multiple references to recursive table: {}",
+                self_name
+            )));
+        }
+        if from_refs >= 1 && indirect {
             return Err(ExecutorError::SqliteCompatError(format!(
                 "multiple recursive references: {}",
                 self_name
@@ -1495,7 +1609,7 @@ where
 
     // Track seen rows for UNION (deduplication)
     // For UNION ALL, we skip tracking to preserve all rows
-    let mut seen_rows: Option<HashSet<vibesql_storage::RowValues>> = if !set_op.all {
+    let mut seen_rows: Option<HashSet<vibesql_storage::RowValues>> = if dedup_rows {
         let mut seen = HashSet::with_capacity(base_rows.len());
         // For plain UNION, SQLite also deduplicates the base term itself, not
         // just recursive-term rows (issue #5838, item 7; with1.test 26.2).
@@ -1511,7 +1625,7 @@ where
     // alias/column name). `None` means "no priority ordering" (FIFO). An
     // unresolvable term is a name-resolution error (with1.test 10.7.1).
     let order_indices = match &recursive_order_by {
-        Some(items) => Some(resolve_recursive_order_indices(items, &set_op.right, &base_query)?),
+        Some(items) => Some(resolve_recursive_order_indices(items, recursive_query, &base_query)?),
         None => None,
     };
 
@@ -1863,13 +1977,21 @@ fn is_cte_self_referential(cte: &vibesql_ast::CommonTableExpr) -> bool {
     // UNION or UNION ALL" error rather than a generic "table not found". A
     // `WITH RECURSIVE` CTE with no set operation (issue #5838, item 3) is not
     // self-referential and runs as an ordinary CTE.
-    let set_op = match &cte.query.set_operation {
-        Some(op) => op,
-        None => return false,
-    };
-
-    // Check if the recursive term references this CTE
-    stmt_references_table(&set_op.right, &cte.name)
+    // Walk every non-leading term in the compound chain. The recursive
+    // self-reference may live in a term after a multi-term non-recursive seed —
+    // `VALUES(..) INTERSECT VALUES(..) UNION SELECT .. FROM cte` (with5.test
+    // 113/114/131) — so checking only the immediate right of the first set
+    // operation would misclassify those bodies as non-recursive. Each term is
+    // inspected without descending its own set-operation link (that is the next
+    // node in the walk), so sibling terms are counted exactly once.
+    let mut node = &cte.query;
+    while let Some(set_op) = &node.set_operation {
+        if stmt_references_table(&set_op.right, &cte.name) {
+            return true;
+        }
+        node = &set_op.right;
+    }
+    false
 }
 
 /// Count how many times `name` appears as a direct base table in a FROM clause,
