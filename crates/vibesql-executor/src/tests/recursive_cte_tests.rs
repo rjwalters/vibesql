@@ -934,3 +934,144 @@ fn test_unreferenced_cte_not_validated() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].values[0], vibesql_types::SqlValue::Integer(10));
 }
+
+/// A recursive CTE whose non-recursive seed is itself a compound of several
+/// leading terms (combined with any set operator) must partition into that
+/// full seed plus the recursive term(s) — not misfire as a circular reference
+/// (issue #6189, with5.test 113/114/131).
+#[test]
+fn test_recursive_cte_compound_seed() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE link(aa INT, bb INT)").unwrap();
+    execute_sql(
+        &mut db,
+        "INSERT INTO link(aa,bb) VALUES \
+         (1,3),(5,3),(7,1),(7,9),(9,9),(5,11),(11,7),(2,4),(4,6),(8,6)",
+    )
+    .unwrap();
+
+    let ints = |rows: &[vibesql_storage::Row]| -> Vec<i64> {
+        rows.iter()
+            .map(|r| match &r.values[0] {
+                vibesql_types::SqlValue::Integer(i) => *i,
+                other => panic!("expected integer, got {:?}", other),
+            })
+            .collect()
+    };
+
+    // with5.test 113: `VALUES(1),(200),(300),(400) INTERSECT VALUES(1)` seed,
+    // then two recursive UNION terms. The seed reduces to {1}.
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE closure(x) AS ( \
+            VALUES(1),(200),(300),(400) \
+            INTERSECT \
+            VALUES(1) \
+            UNION \
+            SELECT bb FROM closure, link WHERE link.aa=closure.x \
+            UNION \
+            SELECT aa FROM link, closure WHERE link.bb=closure.x \
+         ) SELECT x FROM closure ORDER BY x",
+    )
+    .unwrap();
+    assert_eq!(ints(&rows), vec![1, 3, 5, 7, 9, 11]);
+
+    // with5.test 114: `VALUES(1),(200),(300),(400) UNION ALL VALUES(2)` seed
+    // keeps every seed row, then two recursive UNION terms.
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE closure(x) AS ( \
+            VALUES(1),(200),(300),(400) \
+            UNION ALL \
+            VALUES(2) \
+            UNION \
+            SELECT bb FROM closure, link WHERE link.aa=closure.x \
+            UNION \
+            SELECT aa FROM link, closure WHERE link.bb=closure.x \
+         ) SELECT x FROM closure ORDER BY x",
+    )
+    .unwrap();
+    assert_eq!(ints(&rows), vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 200, 300, 400]);
+
+    // with5.test 131: compound `SELECT..UNION ALL SELECT..` seed with an ordered
+    // LIMIT over the whole recursion.
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE closure(x) AS ( \
+            SELECT 1 AS x \
+            UNION ALL \
+            SELECT 2 \
+            UNION \
+            SELECT aa FROM link JOIN closure ON bb=x \
+            UNION \
+            SELECT bb FROM link JOIN closure ON aa=x \
+            ORDER BY x LIMIT 4 \
+         ) SELECT * FROM closure",
+    )
+    .unwrap();
+    assert_eq!(ints(&rows), vec![1, 2, 3, 4]);
+}
+
+/// When a recursive CTE mixes UNION and UNION ALL across its recursive
+/// connectors, SQLite reports a circular reference (issue #6189, with5.test
+/// 120/121). A uniform-operator compound seed must NOT trip this.
+#[test]
+fn test_recursive_cte_mixed_recursive_operators_circular() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE link(aa INT, bb INT)").unwrap();
+    execute_sql(&mut db, "INSERT INTO link(aa,bb) VALUES (1,3),(5,3),(7,1)").unwrap();
+
+    // with5.test 120: seed→R1 is UNION ALL but R1→R2 is UNION (mixed).
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE closure(x) AS ( \
+            VALUES(1),(200) \
+            UNION ALL \
+            VALUES(2) \
+            UNION ALL \
+            SELECT bb FROM closure, link WHERE link.aa=closure.x \
+            UNION \
+            SELECT aa FROM link, closure WHERE link.bb=closure.x \
+         ) SELECT x FROM closure ORDER BY x",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: closure");
+
+    // with5.test 121: seed→R1 is UNION but R1→R2 is UNION ALL (mixed).
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE closure(x) AS ( \
+            VALUES(1),(200) \
+            UNION ALL \
+            VALUES(2) \
+            UNION \
+            SELECT bb FROM closure, link WHERE link.aa=closure.x \
+            UNION ALL \
+            SELECT aa FROM link, closure WHERE link.bb=closure.x \
+         ) SELECT x FROM closure ORDER BY x",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "circular reference: closure");
+}
+
+/// SQLite distinguishes "multiple references to recursive table" (the name
+/// appears more than once in FROM) from "multiple recursive references" (a
+/// single FROM ref plus a subquery ref) (issue #6189, with2.test 1.16 vs
+/// with1.test 7.5).
+#[test]
+fn test_recursive_cte_multiple_from_references_message() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE main_t4(x)").unwrap();
+
+    // with2.test 1.16: three FROM references to the recursive table.
+    let err = execute_sql(
+        &mut db,
+        "WITH t4(x) AS ( \
+            VALUES(4) \
+            UNION ALL \
+            SELECT x+1 FROM t4, t4, t4 WHERE x<10 \
+         ) SELECT * FROM t4",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "multiple references to recursive table: t4");
+}
