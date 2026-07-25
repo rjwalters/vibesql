@@ -160,6 +160,14 @@ pub(super) fn try_fast_path_update(
             }
         })?;
 
+        // Assigning the INTEGER PRIMARY KEY (rowid alias) column relocates the
+        // rowid and applies rowid affinity (`datatype mismatch` on non-integer
+        // values, trigger1-15.1) — fall back to the normal path, same as a
+        // `SET rowid = ...` assignment above.
+        if schema.rowid_alias_column == Some(col_index) {
+            return Ok(None);
+        }
+
         let new_value = match &assignment.value {
             vibesql_ast::Expression::Default => {
                 let column = &schema.columns[col_index];

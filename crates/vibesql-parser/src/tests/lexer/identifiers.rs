@@ -501,3 +501,28 @@ fn test_tokenize_backtick_vs_doublequote_identifiers() {
 }
 
 // ============================================================================
+
+// ============================================================================
+// to_sql round-trip for delimited identifiers with embedded quotes
+// (triggerC-15.2, issue #6176)
+// ============================================================================
+
+/// `"""x2"""` lexes to the identifier `"x2"`, and `to_sql()` must re-emit it
+/// with the embedded quotes doubled (`"""x2"""`), not the unlexable `""x2""`.
+/// Trigger bodies are stored as reconstructed token text and re-parsed at fire
+/// time, so a non-round-tripping to_sql broke any trigger touching such a
+/// table (triggerC-15.2.1).
+#[test]
+fn test_delimited_identifier_with_embedded_quotes_roundtrips_through_to_sql() {
+    let mut lexer = Lexer::new("SELECT * FROM \"\"\"x2\"\"\"");
+    let tokens = lexer.tokenize().unwrap();
+    let ident = &tokens[3];
+    assert_eq!(*ident, Token::DelimitedIdentifier("\"x2\"".to_string()));
+
+    // Re-emit as SQL and lex again: must produce the same identifier.
+    let sql = ident.to_sql();
+    assert_eq!(sql, "\"\"\"x2\"\"\"");
+    let mut relexer = Lexer::new(&sql);
+    let retokens = relexer.tokenize().unwrap();
+    assert_eq!(retokens[0], Token::DelimitedIdentifier("\"x2\"".to_string()));
+}

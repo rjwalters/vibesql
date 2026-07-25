@@ -73,7 +73,7 @@ pub fn execute_insert_with_trigger_context(
 
 /// Result of applying SQLite rowid (INTEGER) affinity to a value supplied for
 /// the rowid / INTEGER PRIMARY KEY position on INSERT.
-enum RowidAffinity {
+pub(crate) enum RowidAffinity {
     /// The value coerced to a concrete integer rowid.
     Value(i64),
     /// The value was NULL (or DEFAULT) — auto-assign the next rowid.
@@ -96,7 +96,9 @@ enum RowidAffinity {
 /// (`INSERT INTO t(rowid) VALUES(-42.0)` stores rowid -42; triggerC-4.1.4), so
 /// no positivity restriction is applied — only the affinity coercion and the
 /// lossless-integer check.
-fn coerce_rowid_affinity(value: &vibesql_types::SqlValue) -> Result<RowidAffinity, ExecutorError> {
+pub(crate) fn coerce_rowid_affinity(
+    value: &vibesql_types::SqlValue,
+) -> Result<RowidAffinity, ExecutorError> {
     use vibesql_types::SqlValue;
 
     let datatype_mismatch =
@@ -514,11 +516,13 @@ fn execute_insert_internal(
 
     // For multi-row INSERT, validate all rows first, then insert all
     // This ensures atomicity: all rows succeed or all fail (unless IGNORE is used)
-    // Each entry is (row values, explicit rowid, ipk_auto_assigned,
-    // candidate_last_id). The `ipk_auto_assigned` flag records whether the row's
-    // INTEGER PRIMARY KEY (rowid alias) value was auto-allocated rather than
-    // supplied by the INSERT; it is used to present `NEW.<ipk>` as the
-    // unwritten-rowid sentinel (-1) to BEFORE INSERT triggers.
+    // Each entry is (row values, explicit rowid, rowid_auto_assigned,
+    // candidate_last_id). The `rowid_auto_assigned` flag records whether the
+    // row's rowid — the INTEGER PRIMARY KEY (rowid alias) value, or an explicit
+    // `rowid` pseudo-column supplied as NULL/DEFAULT (triggerC-4.1.5) — was
+    // auto-allocated rather than supplied by the INSERT; it is used to present
+    // `NEW.<ipk>` / `NEW.rowid` as the unwritten-rowid sentinel (-1) to BEFORE
+    // INSERT triggers.
     //
     // `candidate_last_id` is the value this row would contribute to
     // last_insert_rowid() *if it is actually inserted* — the row's INTEGER
@@ -624,6 +628,14 @@ fn execute_insert_internal(
 
         // Extract rowid value if present (SQLite compatibility)
         // For NULL rowids, auto-assign using batch_max_rowid + 1
+        //
+        // Track whether the supplied rowid value was NULL/DEFAULT and therefore
+        // auto-assigned: SQLite does not allocate the real rowid until the row
+        // is written, so a BEFORE INSERT trigger must observe the
+        // unwritten-rowid sentinel (-1) for `INSERT INTO t(rowid,...)
+        // VALUES(NULL, ...)` exactly as it does when the rowid column is
+        // omitted (triggerC-4.1.5).
+        let mut rowid_was_auto = false;
         let explicit_rowid = if let Some(rowid_pos) = rowid_position {
             // Get the rowid expression
             let rowid_expr = &value_exprs[rowid_pos];
@@ -649,6 +661,7 @@ fn execute_insert_internal(
                         Ok(i as u64)
                     }
                     RowidAffinity::Auto => {
+                        rowid_was_auto = true;
                         // sqlite3 parity (issue #5894): max rowid + 1, but when the
                         // running max is already i64::MAX, delegate to the storage
                         // allocator's random-probe / SQLITE_FULL fallback instead of
@@ -971,7 +984,7 @@ fn execute_insert_internal(
         validated_rows.push((
             full_row_values,
             explicit_rowid,
-            ipk_auto_assigned,
+            ipk_auto_assigned || rowid_was_auto,
             candidate_last_id,
         ));
     }
@@ -1213,9 +1226,13 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for (mut full_row_values, mut explicit_rowid, ipk_auto_assigned, candidate_last_id) in
+        for (mut full_row_values, mut explicit_rowid, rowid_auto_assigned, candidate_last_id) in
             validated_rows
         {
+            // Set when a REPLACE conflict resolution fixes this row's rowid
+            // before triggers fire; the BEFORE INSERT trigger then observes
+            // the fixed rowid rather than the unwritten-rowid sentinel.
+            let mut replace_fixed_rowid = false;
             // Check if ON DUPLICATE KEY UPDATE is specified
             if let Some(ref assignments) = stmt.on_duplicate_key_update {
                 // Try to update an existing row if there's a conflict
@@ -1300,6 +1317,7 @@ fn execute_insert_internal(
                                     &full_row_values,
                                     explicit_rowid,
                                 )?);
+                                replace_fixed_rowid = true;
                             }
                             Some(vibesql_ast::ConflictClause::Ignore) => continue,
                             _ => return Err(ExecutorError::ConstraintViolation(message)),
@@ -1315,6 +1333,7 @@ fn execute_insert_internal(
                     &full_row_values,
                     explicit_rowid,
                 )?);
+                replace_fixed_rowid = true;
             }
 
             // Fire BEFORE INSERT triggers only if triggers exist.
@@ -1328,8 +1347,11 @@ fn execute_insert_internal(
             // but the trigger must observe the sentinel — except when the rowid
             // was supplied explicitly (then the supplied value is visible as-is),
             // or when a REPLACE reservation has fixed the rowid before triggers
-            // (`explicit_rowid` is then `Some`). insert3-2.1/2.2, triggerC-4.1.2.
-            let row_to_insert = if ipk_auto_assigned && explicit_rowid.is_none() {
+            // (`replace_fixed_rowid`). `rowid_auto_assigned` covers both the
+            // omitted-IPK/NULL-IPK case and an explicit `rowid` pseudo-column
+            // supplied as NULL/DEFAULT (triggerC-4.1.5). insert3-2.1/2.2,
+            // triggerC-4.1.2.
+            let row_to_insert = if rowid_auto_assigned && !replace_fixed_rowid {
                 let mut trigger_values = full_row_values.clone();
                 if let Some(idx) = ipk_col_idx {
                     trigger_values[idx] = vibesql_types::SqlValue::Integer(-1);
