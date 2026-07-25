@@ -302,9 +302,7 @@ fn test_filter_on_non_aggregate_window_rejected() {
     }
 
     // FILTER on an *aggregate* window function stays valid.
-    assert!(
-        Parser::parse_sql("SELECT sum(x) FILTER (WHERE x>0) OVER (ORDER BY x) FROM t1").is_ok()
-    );
+    assert!(Parser::parse_sql("SELECT sum(x) FILTER (WHERE x>0) OVER (ORDER BY x) FROM t1").is_ok());
 }
 
 #[test]
@@ -661,6 +659,29 @@ fn test_real_window_clause_still_parses() {
         vibesql_ast::Statement::Select(select) => {
             let defs = select.window_definitions.expect("WINDOW clause must be captured");
             assert!(!defs.is_empty(), "WINDOW clause must define at least one window");
+        }
+        _ => panic!("expected a SELECT"),
+    }
+}
+
+// Regression (window6.test 10.0): a WITH-prefixed SELECT went through a
+// duplicated parser (`parse_select_statement_after_with`) that never parsed the
+// trailing WINDOW clause, so `window_definitions` was silently dropped and
+// `OVER w1` failed to resolve ("no such window: w1"). The WINDOW clause must be
+// captured on the CTE-prefixed path exactly as on the plain path.
+#[test]
+fn test_window_clause_parses_after_with_clause() {
+    let sql = "WITH t1(a, b) AS (VALUES(1, 2)) \
+               SELECT count() OVER w1 FROM t1 WINDOW w1 AS (ORDER BY a)";
+    let stmt = Parser::parse_sql(sql).expect("WITH + WINDOW clause should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert!(select.with_clause.is_some(), "CTE list must be attached");
+            let defs = select
+                .window_definitions
+                .expect("WINDOW clause must survive a leading WITH clause");
+            assert_eq!(defs.len(), 1, "exactly one named window expected");
+            assert_eq!(defs[0].name.to_lowercase(), "w1");
         }
         _ => panic!("expected a SELECT"),
     }
