@@ -1031,6 +1031,17 @@ impl Parser {
             None
         };
 
+        // Parse optional WINDOW clause (named window definitions).
+        // Mirrors `parse_select_statement_internal`; without this a WITH-prefixed
+        // query silently drops its named windows so `OVER win` fails to resolve
+        // ("no such window") — window6.test 10.0.
+        let window_definitions = if self.peek_keyword(Keyword::Window) {
+            self.consume_keyword(Keyword::Window)?;
+            Some(self.parse_window_definitions()?)
+        } else {
+            None
+        };
+
         // Parse set operations (UNION, INTERSECT, EXCEPT)
         let set_operation = if self.peek_keyword(Keyword::Union)
             || self.peek_keyword(Keyword::Intersect)
@@ -1176,7 +1187,7 @@ impl Parser {
             where_clause,
             group_by,
             having,
-            window_definitions: None, // Legacy path - WINDOW clause parsed separately
+            window_definitions,
             order_by,
             limit,
             offset,
