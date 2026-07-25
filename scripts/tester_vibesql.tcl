@@ -2193,6 +2193,99 @@ proc trial_check_in_transaction {new_sql} {
     }
 }
 
+proc is_readonly_query {sql} {
+    # True when $sql is a pure read-only query whose rows must be returned even
+    # while a batched transaction is open: a top-level SELECT or VALUES, or a
+    # WITH ... SELECT/VALUES CTE form (but NOT WITH ... INSERT/UPDATE/DELETE,
+    # which is_dml_statement flags). Such a query has no side effects, so it can
+    # be answered from an isolated trial copy without being added to the batch.
+    set u [string toupper [string trim $sql]]
+    if {[regexp {^(SELECT|VALUES)([^A-Z_]|$)} $u]} {
+        return 1
+    }
+    if {[regexp {^WITH([^A-Z_]|$)} $u] && ![is_dml_statement $u]} {
+        return 1
+    }
+    return 0
+}
+
+proc query_in_transaction {new_sql} {
+    # Answer a read-only query issued WHILE a batched transaction is open,
+    # returning the rows it would see from inside that transaction: the committed
+    # shared-DB state PLUS the uncommitted mutations accumulated in $::sql_batch.
+    #
+    # The shim runs each execsql in a fresh process and defers the batched
+    # BEGIN/DML to the eventual COMMIT/ROLLBACK flush (flush_batch), so those
+    # mutations are not yet in the shared DB. Historically an in-transaction query
+    # therefore fell through to `return {}` and reported ZERO rows for every
+    # SELECT between a BEGIN and its COMMIT/ROLLBACK — failing e.g. the
+    # e_insert-4.1.* and e_update-1.8.* evidence checks that read the table state
+    # after each conflict-clause UPDATE/INSERT inside a transaction.
+    #
+    # Replay the accumulated batch together with the query against an isolated
+    # COPY of the shared DB (never $::db_file) so the query observes the
+    # in-transaction state with zero persistent effect; the real batch stays
+    # intact in $::sql_batch for the flush. The query itself is read-only and is
+    # NOT appended to the batch. (#6193.)
+    #
+    # If $::db_file is unset (pure in-memory), keep the historical empty result.
+    if {$::db_file eq ""} {
+        return {}
+    }
+
+    set batch_stmts {}
+    foreach stmt $::sql_batch {
+        set s [string trimright [string trimright $stmt] ";"]
+        lappend batch_stmts $s
+    }
+    set new_clean [string trimright [string trimright $new_sql] ";"]
+    set pragma_prefix [build_pragma_prefix]
+
+    # CLI statement index (1-based) at which the QUERY begins: the leading
+    # `.mode raw` dot-command, the pragma-prefix statements, and the
+    # already-batched statements are all numbered before it (the CLI counts the
+    # dot-command as statement 1). A genuine error raised by the query has an
+    # index >= this; re-fired, already-attributed errors from batched statements
+    # (which the eventual flush re-attributes) have a lower index and must be
+    # ignored here. Mirrors trial_check_in_transaction's new_stmt_index math, plus
+    # one for the `.mode raw` dot-command this path prepends.
+    set prefix_part $pragma_prefix
+    if {[llength $batch_stmts] > 0} {
+        append prefix_part [join $batch_stmts ";\n"] ";\n"
+    }
+    set query_index [expr {[count_cli_statements $prefix_part] + 2}]
+
+    set stmts $batch_stmts
+    lappend stmts $new_clean
+    set combined ".mode raw\n${pragma_prefix}[join $stmts ";\n"]"
+
+    set trial_db "/tmp/vibesql_txread_[pid]_[clock microseconds].vbsql"
+    copy_db_with_wal $::db_file $trial_db
+    set tmpfile "/tmp/vibesql_txread_[pid]_[clock microseconds].sql"
+    set fd [open $tmpfile w]
+    puts -nonewline $fd $combined
+    close $fd
+    set cmd "$::vibesql_path $trial_db < $tmpfile 2>&1"
+    set pipe [open "|/bin/sh -c [list $cmd]" r]
+    set result [read $pipe]
+    catch {close $pipe}
+    catch {file delete $tmpfile}
+    delete_db_with_wal $trial_db
+
+    # Surface a genuine error raised by the QUERY itself (index >= query_index).
+    set qerr [select_error_line_for_stmt $result $query_index]
+    if {$qerr ne ""} {
+        error [translate_error_to_sqlite $qerr]
+    }
+
+    # Strip the CLI's script-summary trailer (present only when some statement
+    # errored) and any re-fired, already-attributed batched-statement error lines,
+    # leaving only the query's \x1e/\x1f-framed raw rows for parse_raw_result.
+    regsub {(?s)\n?=== Script Execution Summary ===.*$} $result "" result
+    regsub -all {Error executing statement [0-9]+: [^\n]*\n?} $result "" result
+    return [parse_raw_result $result]
+}
+
 proc flush_batch {{tolerate_attributed_error 0}} {
     # Execute accumulated SQL statements
     # Uses a temp file to avoid "argument list too long" errors for large batches
@@ -2740,6 +2833,17 @@ proc execsql {sql {db ""}} {
         # (e.g., "BEGIN; INSERT...; COMMIT;")
         # Fall through to direct execution below
     } elseif {$::in_transaction} {
+        # A read-only query (SELECT / VALUES / WITH...SELECT) must return the rows
+        # visible from INSIDE the open transaction: the committed shared-DB state
+        # plus the uncommitted mutations accumulated in $::sql_batch. Answer it
+        # from an isolated trial copy without touching the shared DB or the batch.
+        # Without this, an in-transaction query fell through to `return {}` below
+        # and reported ZERO rows for every SELECT between BEGIN and COMMIT/ROLLBACK
+        # (e_insert-4.1.*, e_update-1.8.*). (#6193.)
+        if {[is_readonly_query $sql]} {
+            return [query_in_transaction $sql]
+        }
+
         # Inside a transaction - trial-execute first so per-statement errors
         # surface at the submitting test, then add to batch.
         #
