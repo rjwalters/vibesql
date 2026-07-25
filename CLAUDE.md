@@ -267,8 +267,6 @@ general repository hygiene and environment commands invoked as `/repo:<command>`
 guide. Hygiene commands apply safe, reversible fixes by default and report each
 change; run with `--ask` to review first, and `--prune` to allow irreversible
 removals. Managed by `install.sh` — edit outside the markers only.
-<!-- END REPO-SKILLS -->
-
-<!-- BEGIN LOOM ORCHESTRATION -->
+<!-- END REPO-SKILLS --><!-- BEGIN LOOM ORCHESTRATION -->
 This repository uses [Loom](https://github.com/rjwalters/loom) for AI-powered development orchestration — see the Loom repository for the full guide (roles, labels, worktrees, configuration). When installed, Loom also writes a locally-substituted copy of that guide to `.loom/CLAUDE.md`.
 <!-- END LOOM ORCHESTRATION -->
