@@ -462,6 +462,18 @@ impl Parser {
                 if insert.schema_name.is_some() {
                     return Err(ParseError { message: TRIGGER_QUALIFIED_TABLE.to_string() });
                 }
+                // The "DEFAULT VALUES" form of INSERT is supported for top-level
+                // INSERT statements only, never inside a trigger program — the
+                // trigger-body grammar has no DEFAULT VALUES production, so SQLite
+                // reports a plain syntax error at the `DEFAULT` token regardless of
+                // compilation options (R-15888-36326; e_insert-5.2.1). Top-level
+                // `INSERT INTO t DEFAULT VALUES` keeps working because this check
+                // only runs on trigger-body statements.
+                if matches!(insert.source, vibesql_ast::InsertSource::DefaultValues) {
+                    return Err(ParseError {
+                        message: "near \"DEFAULT\": syntax error".to_string(),
+                    });
+                }
             }
             Statement::Update(update) => {
                 if Self::dml_target_is_schema_qualified(&update.table_name, update.quoted) {
