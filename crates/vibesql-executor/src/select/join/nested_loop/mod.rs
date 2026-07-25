@@ -235,54 +235,109 @@ pub(in crate::select::join) fn nested_loop_right_outer_join(
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
 ) -> Result<FromResult, ExecutorError> {
-    // Note: Memory check removed - delegates to LEFT OUTER JOIN which also doesn't check.
+    // Note: No memory check here (matches the LEFT/FULL OUTER nested-loop paths).
+    //
+    // Row ordering (issue #6190): SQLite drives a RIGHT JOIN from the *left*
+    // table in the nested loop (the same order a LEFT/INNER join uses) and only
+    // appends the unmatched right rows at the end. Implementing RIGHT JOIN by
+    // swapping the sides into a LEFT JOIN reversed that order (right-driven),
+    // which produced correct *sets* but SQLite-incompatible row *order*
+    // (values.test 8.1.3/8.1.4). We therefore iterate left-outer / right-inner
+    // directly and track which right rows matched, mirroring FULL OUTER's two
+    // passes but emitting NULL-extended rows only for the right side.
 
-    // RIGHT OUTER JOIN = LEFT OUTER JOIN with sides swapped
-    // Then we need to reorder columns to put left first, right second
+    // Total left column count (handles nested joins with multiple tables).
+    let left_column_count = left.schema.total_columns;
 
-    // Save original schemas before swapping - we need these to build the correct output schema
-    let left_schema = left.schema.clone();
-    let right_schema = right.schema.clone();
+    // Extract table names for ROWID tracking (issue #4370).
+    let left_table_names = left.schema.table_names();
+    let right_table_names = right.schema.table_names();
 
-    // Get the right column count (handles nested joins with multiple tables)
-    let right_col_count = right_schema.total_columns;
+    // Combine schemas using merge to preserve all tables from nested joins.
+    let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
-    // Do LEFT OUTER JOIN with swapped sides
-    // Issue #4994: Pass outer context through
-    let swapped_result = nested_loop_left_outer_join(
-        right,
-        left,
-        condition,
-        database,
-        timeout_ctx,
-        outer_row,
-        outer_schema,
-    )?;
+    // Issue #4994: Create evaluator with outer context if available.
+    let evaluator = match (outer_row, outer_schema) {
+        (Some(outer_row), Some(outer_schema)) => {
+            CombinedExpressionEvaluator::with_database_and_outer_context(
+                &combined_schema,
+                database,
+                outer_row,
+                outer_schema,
+            )
+        }
+        _ => CombinedExpressionEvaluator::with_database(&combined_schema, database),
+    };
 
-    // Now we need to reorder the columns in the result
-    // The swapped result has right columns first, then left columns
-    // We need to reverse this to left first, then right
+    // Use as_slice() for zero-cost access without triggering row materialization.
+    let left_slice = left.as_slice();
+    let right_slice = right.as_slice();
 
-    // Reorder rows: move left columns (currently at positions right_col_count..) to front
-    // Use as_slice() for zero-cost access
-    let reordered_rows: Vec<vibesql_storage::Row> = swapped_result
-        .as_slice()
-        .iter()
-        .map(|row| {
-            let mut new_values = Vec::new();
-            // Add left columns (currently at end)
-            new_values.extend_from_slice(&row.values[right_col_count..]);
-            // Add right columns (currently at start)
-            new_values.extend_from_slice(&row.values[0..right_col_count]);
-            vibesql_storage::Row::new(new_values)
-        })
-        .collect();
+    let mut result_rows = Vec::new();
+    let mut right_matched = vec![false; right_slice.len()];
+    let mut iterations = 0;
 
-    // Build the correct schema: left columns first, then right columns
-    // The swapped_result.schema has [right, left] order, so we need to merge correctly
-    let correct_schema = CombinedSchema::merge(left_schema, right_schema);
+    // First pass: drive from the left (preserves SQLite's left-to-right order).
+    for left_row in left_slice {
+        for (right_idx, right_row) in right_slice.iter().enumerate() {
+            // Check timeout periodically.
+            iterations += 1;
+            if iterations % CHECK_INTERVAL == 0 {
+                timeout_ctx.check()?;
+            }
 
-    Ok(FromResult::from_rows(correct_schema, reordered_rows))
+            // Combine rows preserving ROWIDs for multi-table queries (issue #4370).
+            let combined_row = vibesql_storage::Row::combine_for_join(
+                left_row,
+                right_row,
+                &left_table_names,
+                &right_table_names,
+            );
+
+            // Clear CSE cache before evaluating join condition for this row
+            // combination to prevent stale cached column values from previous rows.
+            evaluator.clear_cse_cache();
+
+            let matches = if let Some(cond) = condition {
+                eval_join_condition_to_bool(evaluator.eval(cond, &combined_row)?)?
+            } else {
+                true // No condition = every pairing matches (cross product)
+            };
+
+            if matches {
+                result_rows.push(combined_row);
+                right_matched[right_idx] = true;
+            }
+        }
+    }
+
+    // Second pass: append unmatched right rows with NULLs for the left columns,
+    // preserving right-side ROWIDs (issue #4370).
+    for (right_idx, right_row) in right_slice.iter().enumerate() {
+        if !right_matched[right_idx] {
+            let mut combined_values =
+                Vec::with_capacity(left_column_count + right_row.values.len());
+            combined_values.extend(vec![vibesql_types::SqlValue::Null; left_column_count]);
+            combined_values.extend_from_slice(&right_row.values);
+
+            let mut row_ids = std::collections::HashMap::new();
+            if let Some(ref right_row_ids) = right_row.row_ids {
+                row_ids.extend(right_row_ids.iter().map(|(k, v)| (k.clone(), *v)));
+            } else if let Some(row_id) = right_row.row_id {
+                if let Some(table_name) = right_table_names.first() {
+                    row_ids.insert(table_name.to_lowercase(), row_id);
+                }
+            }
+
+            if row_ids.is_empty() {
+                result_rows.push(vibesql_storage::Row::new(combined_values));
+            } else {
+                result_rows.push(vibesql_storage::Row::with_row_ids(combined_values, row_ids));
+            }
+        }
+    }
+
+    Ok(FromResult::from_rows(combined_schema, result_rows))
 }
 
 /// Nested loop FULL OUTER JOIN implementation
