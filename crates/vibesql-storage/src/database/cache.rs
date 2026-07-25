@@ -128,6 +128,27 @@ impl Database {
         self.columnar_cache.invalidate(table_name);
     }
 
+    /// #6199 Phase 3: post-INSERT bookkeeping for a statement whose rows were
+    /// already appended to the resident columnar copy incrementally by
+    /// [`Database::insert_row`] / [`Database::insert_rows_batch`].
+    ///
+    /// Unlike [`Database::invalidate_columnar_cache`] (used by UPDATE / DELETE /
+    /// DDL, which cannot be maintained incrementally and must drop the cache),
+    /// this records the write for the access-pattern signal **without** dropping
+    /// the cache — the cache is already consistent, so the next analytical scan
+    /// avoids a full rebuild. This is the seam that lets an end-to-end SQL
+    /// write-plus-scan workload stop thrashing.
+    ///
+    /// Every *other* table mutation in the INSERT executor (ON CONFLICT DO
+    /// UPDATE, REPLACE deletes, trigger DML, assertion rollback) independently
+    /// invalidates the cache, so skipping the drop here is safe: the only rows
+    /// that reach a still-resident entry are the ones already appended in place.
+    pub fn note_insert_maintained_columnar_cache(&self, table_name: &str) {
+        // Mirror the write-signal accounting of `invalidate_columnar_cache`
+        // (recorded for every INSERT/UPDATE/DELETE, including native columnar).
+        self.record_write(table_name);
+    }
+
     /// Clear all columnar cache entries
     pub fn clear_columnar_cache(&self) {
         self.columnar_cache.clear();
@@ -571,5 +592,130 @@ mod tests {
             "a small budget must force at least one eviction (got {})",
             stats.evictions
         );
+    }
+
+    // ========================================================================
+    // #6199 Phase 3 — incremental maintenance across writes
+    // ========================================================================
+
+    /// Column-value view of a set of rows, dropping row metadata (rowid, MVCC
+    /// stamps) so a columnar copy (whose reconstructed rows carry no metadata)
+    /// can be compared value-for-value against the row path.
+    fn values_of(rows: &[Row]) -> Vec<Vec<vibesql_types::SqlValue>> {
+        rows.iter().map(|r| r.values.to_vec()).collect()
+    }
+
+    /// Build one test row shaped like `create_test_rows` (Integer id, Varchar
+    /// name) for a given id.
+    fn one_row(id: i64) -> Row {
+        Row::new(vec![
+            SqlValue::Integer(id),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{}", id))),
+        ])
+    }
+
+    /// A write-plus-scan workload must NOT rebuild the columnar copy on every
+    /// write. Once the table is resident (one conversion), each INSERT appends
+    /// to the cached copy incrementally and each scan is served from it — so
+    /// `conversions` stays at 1 while `incremental_updates` climbs, and the
+    /// columnar copy stays in perfect parity with the row path.
+    #[test]
+    fn test_write_plus_scan_does_not_rebuild_per_write() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm the cache: one (and only one) conversion makes it resident.
+        db.get_columnar("t").unwrap();
+        assert_eq!(
+            db.columnar_cache_stats().conversions,
+            1,
+            "warming should convert the table exactly once"
+        );
+
+        // Interleave inserts and scans. Under the old full-invalidate behavior
+        // every scan-after-write would miss and re-convert (conversions would
+        // climb with the loop); with incremental maintenance it must not.
+        for id in 600..660 {
+            db.insert_row("t", one_row(id)).unwrap();
+            let columnar = db.get_columnar("t").unwrap().expect("t is resident");
+            assert_eq!(
+                columnar.row_count(),
+                id as usize + 1,
+                "each appended row must be immediately visible via the cached columnar copy"
+            );
+        }
+
+        let stats = db.columnar_cache_stats();
+        assert_eq!(
+            stats.conversions, 1,
+            "no full rebuild per write: only the initial warm conversion (got {})",
+            stats.conversions
+        );
+        assert!(
+            stats.incremental_updates >= 60,
+            "every insert into the resident table must be maintained incrementally (got {})",
+            stats.incremental_updates
+        );
+
+        // Parity 1: the incrementally-maintained columnar copy equals a fresh
+        // from-scratch rebuild of the current table state.
+        let incremental = values_of(&db.get_columnar("t").unwrap().unwrap().to_rows());
+        let full_rebuild = values_of(&db.get_table("t").unwrap().scan_columnar().unwrap().to_rows());
+        assert_eq!(incremental, full_rebuild, "incremental cache must equal a full rebuild");
+
+        // Parity 2: it also equals the row path (the source of truth).
+        let row_path = values_of(&db.get_table("t").unwrap().scan_live_vec());
+        assert_eq!(incremental, row_path, "columnar path must match the row path exactly");
+    }
+
+    /// The batch insert API is maintained incrementally too: appending a batch
+    /// to a resident table is a single incremental update, not a rebuild, and
+    /// preserves parity.
+    #[test]
+    fn test_batch_insert_maintains_cache_incrementally() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        db.insert_rows_batch("t", create_test_rows(600)).unwrap();
+
+        db.get_columnar("t").unwrap(); // resident (conversion #1)
+        let before = db.columnar_cache_stats();
+        assert_eq!(before.conversions, 1);
+
+        let batch: Vec<Row> = (600..700).map(one_row).collect();
+        db.insert_rows_batch("t", batch).unwrap();
+
+        let after = db.columnar_cache_stats();
+        assert_eq!(after.conversions, 1, "a batch insert must not trigger a rebuild");
+        assert_eq!(
+            after.incremental_updates,
+            before.incremental_updates + 1,
+            "the whole batch is one incremental append"
+        );
+
+        let columnar = db.get_columnar("t").unwrap().unwrap();
+        assert_eq!(columnar.row_count(), 700);
+        let incremental = values_of(&columnar.to_rows());
+        let row_path = values_of(&db.get_table("t").unwrap().scan_live_vec());
+        assert_eq!(incremental, row_path, "batch-appended columnar copy must match the row path");
+    }
+
+    /// Inserting into a table that is not resident never converts it eagerly —
+    /// incremental maintenance only maintains what is already cached; the next
+    /// scan converts the up-to-date table fresh.
+    #[test]
+    fn test_insert_into_non_resident_table_does_not_convert() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+
+        for row in create_test_rows(50) {
+            db.insert_row("t", row).unwrap();
+        }
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 0, "inserts alone must not populate the cache");
+        assert_eq!(stats.incremental_updates, 0, "nothing resident to maintain");
+        assert!(db.columnar_cache_memory_usage() == 0, "cache stays empty until first scan");
     }
 }

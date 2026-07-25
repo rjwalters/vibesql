@@ -1,10 +1,18 @@
-//! Tests for INSERT + columnar cache invalidation
+//! Tests for INSERT + columnar cache freshness
 //!
-//! This module tests that INSERT operations correctly invalidate the columnar cache,
-//! ensuring that subsequent reads via `Database::get_columnar()` return the updated data
-//! rather than stale cached data.
+//! This module tests that after an INSERT, reads via `Database::get_columnar()`
+//! return the *updated* data rather than stale cached data.
 //!
-//! Related: #3915
+//! Since #6199 Phase 3 the mechanism that guarantees this changed: instead of
+//! dropping the whole cached columnar copy on every INSERT and rebuilding it on
+//! the next scan, the inserted rows are appended to the resident copy
+//! incrementally (`CacheStats.incremental_updates`), so a resident table is
+//! kept fresh *without* a full re-conversion (`CacheStats.conversions` stays
+//! flat). The invariant these tests protect — no stale data after INSERT — is
+//! unchanged; only the counter that evidences it moved from `conversions` to
+//! `incremental_updates`.
+//!
+//! Related: #3915, #6199 (Phase 3)
 
 use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_executor::InsertExecutor;
@@ -47,16 +55,18 @@ fn insert_product(db: &mut Database, id: i64, name: &str, price: i64) {
     InsertExecutor::execute(db, &stmt).unwrap();
 }
 
-/// Regression test for issue #3915:
-/// Verify that INSERT correctly invalidates the database-level columnar cache.
+/// Regression test for issue #3915 (updated for #6199 Phase 3):
+/// Verify that after an INSERT, the database-level columnar cache returns the
+/// updated data — now via incremental maintenance rather than a full rebuild.
 ///
 /// This test:
 /// 1. Creates a table and populates it with initial data
 /// 2. Warms the columnar cache via `database.get_columnar()`
 /// 3. Executes an INSERT statement that adds new rows
 /// 4. Verifies the columnar cache returns the updated data (not stale cached data)
+/// 5. Verifies the freshness came from an incremental append, not a re-conversion
 #[test]
-fn test_insert_invalidates_columnar_cache() {
+fn test_insert_keeps_columnar_cache_fresh_incrementally() {
     let mut db = Database::new();
     setup_products_table(&mut db);
 
@@ -82,7 +92,7 @@ fn test_insert_invalidates_columnar_cache() {
         .collect();
     assert_eq!(prices, vec![100, 200], "Initial prices should be 100, 200");
 
-    // Insert a new row - this should invalidate the cache
+    // Insert a new row - this must keep the cache fresh (incrementally)
     insert_product(&mut db, 3, "Gizmo", 300);
 
     // Get columnar data again - should reflect the updated data
@@ -102,12 +112,19 @@ fn test_insert_invalidates_columnar_cache() {
     assert!(updated_prices.contains(&100), "Existing price 100 should still exist");
     assert!(updated_prices.contains(&200), "Existing price 200 should still exist");
 
-    // Verify cache was invalidated and re-converted
+    // #6199 Phase 3: freshness came from an incremental append, NOT a full
+    // re-conversion. The single initial conversion still stands, and the insert
+    // registered as an incremental update.
     let final_stats = db.columnar_cache_stats();
-    assert!(
-        final_stats.conversions >= 2,
-        "Should have re-converted after INSERT (conversions: {})",
+    assert_eq!(
+        final_stats.conversions, 1,
+        "resident table must be maintained incrementally, not rebuilt (conversions: {})",
         final_stats.conversions
+    );
+    assert!(
+        final_stats.incremental_updates >= 1,
+        "INSERT into a resident table must record an incremental update (got {})",
+        final_stats.incremental_updates
     );
 }
 
@@ -145,9 +162,9 @@ fn test_insert_invalidates_prewarmed_cache() {
     assert!(has_new_price, "New price 75 should be visible after INSERT");
 }
 
-/// Test multi-row INSERT invalidates cache correctly
+/// Test multi-row INSERT keeps the cache fresh (incrementally) — #6199 Phase 3
 #[test]
-fn test_multi_row_insert_invalidates_cache() {
+fn test_multi_row_insert_maintains_cache_incrementally() {
     let mut db = Database::new();
     setup_products_table(&mut db);
 
@@ -214,11 +231,16 @@ fn test_multi_row_insert_invalidates_cache() {
     assert!(prices.contains(&300), "New price 300 should exist");
     assert!(prices.contains(&400), "New price 400 should exist");
 
-    // Cache should have been invalidated
+    // #6199 Phase 3: the multi-row INSERT is maintained incrementally — no
+    // re-conversion, one incremental append for the batch.
     let stats_after = db.columnar_cache_stats();
+    assert_eq!(
+        stats_after.conversions, stats_before.conversions,
+        "multi-row INSERT into a resident table must not rebuild the columnar copy"
+    );
     assert!(
-        stats_after.conversions > stats_before.conversions,
-        "Should have re-converted after multi-row INSERT"
+        stats_after.incremental_updates > stats_before.incremental_updates,
+        "multi-row INSERT must record an incremental update"
     );
 }
 

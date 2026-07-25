@@ -29,7 +29,7 @@ use std::sync::RwLock;
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
 
-use crate::ColumnarTable;
+use crate::{ColumnarTable, Row};
 
 /// Normalize table name for cache key (case-insensitive matching)
 /// Uses uppercase to match SQLite/SQL standard behavior
@@ -51,6 +51,13 @@ pub struct CacheStats {
     pub conversions: u64,
     /// Number of invalidations (due to table modifications)
     pub invalidations: u64,
+    /// #6199 Phase 3: number of times a resident columnar copy was maintained
+    /// **incrementally** across a write (rows appended in place) instead of being
+    /// dropped and fully rebuilt on the next scan. A write-plus-scan workload
+    /// that keeps this counter climbing while `conversions`/`invalidations` stay
+    /// flat is proof the cache is no longer thrashing (one rebuild, then
+    /// incremental upkeep) — the acceptance signal for Phase 3.
+    pub incremental_updates: u64,
 }
 
 impl CacheStats {
@@ -346,6 +353,103 @@ impl ColumnarCache {
         data
     }
 
+    /// #6199 Phase 3: incrementally maintain the cached columnar copy of
+    /// `table_name` across an INSERT by **appending** `rows` to the resident
+    /// representation in place, instead of dropping the whole entry (the
+    /// historical [`ColumnarCache::invalidate`] behavior) and forcing a full
+    /// rebuild on the next analytical scan. This is what stops a write-plus-scan
+    /// workload from thrashing.
+    ///
+    /// The append is copy-on-write: [`Arc::make_mut`] clones the columnar table
+    /// only if an in-flight query still holds the previous `Arc`, so outstanding
+    /// read snapshots stay valid and unmodified. `LruCache::peek_mut` is used so
+    /// maintaining the entry does **not** bump its recency (a write is not a read).
+    ///
+    /// Correctness before efficiency: if the columnar append cannot be applied
+    /// (e.g. an arity/type mismatch after a schema-level change), the entry is
+    /// dropped via the invalidation path so a stale representation can never be
+    /// served. The caller then falls back to a fresh conversion on the next scan.
+    ///
+    /// # Returns
+    /// * `true`  — a resident entry was maintained in place (no full rebuild).
+    /// * `false` — nothing resident to maintain (the next scan converts the
+    ///   already-updated table fresh), the cache is disabled, `rows` is empty,
+    ///   or the append failed and the entry was invalidated instead.
+    pub fn append_rows(&self, table_name: &str, rows: &[Row]) -> bool {
+        // #6199 Phase 0: a disabled cache is never resident, so there is nothing
+        // to maintain. Also short-circuit the trivial empty-append.
+        if self.max_memory == 0 || rows.is_empty() {
+            return false;
+        }
+
+        let key = normalize_cache_key(table_name);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut cache = self.cache.write();
+            let mut current_memory = self.current_memory.write();
+            let mut stats = self.stats.write();
+            Self::append_rows_locked(&mut cache, &mut current_memory, &mut stats, &key, rows)
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut cache = self.cache.write().unwrap();
+            let mut current_memory = self.current_memory.write().unwrap();
+            let mut stats = self.stats.write().unwrap();
+            Self::append_rows_locked(&mut cache, &mut current_memory, &mut stats, &key, rows)
+        }
+    }
+
+    /// Shared body of [`ColumnarCache::append_rows`] operating on already-acquired
+    /// lock targets, so the native and wasm code paths do not diverge.
+    fn append_rows_locked(
+        cache: &mut lru::LruCache<String, CacheEntry>,
+        current_memory: &mut usize,
+        stats: &mut CacheStats,
+        key: &str,
+        rows: &[Row],
+    ) -> bool {
+        // `peek_mut` fetches the entry WITHOUT marking it most-recently-used: a
+        // write should not refresh eviction recency the way a read (scan) does.
+        let (maintained, old_size, new_size) = {
+            let entry = match cache.peek_mut(key) {
+                Some(entry) => entry,
+                // Not resident: nothing cached to keep in sync. The row table is
+                // the source of truth, so the next scan converts it fresh.
+                None => return false,
+            };
+            let old_size = entry.size_bytes;
+            // Copy-on-write: only clones if another Arc holder (an in-flight
+            // query) exists; otherwise mutates the resident copy in place.
+            let table = Arc::make_mut(&mut entry.data);
+            match table.append_rows(rows) {
+                Ok(()) => {
+                    let new_size = table.size_in_bytes();
+                    entry.size_bytes = new_size;
+                    (true, old_size, new_size)
+                }
+                // A partial append may have mutated the (now-owned) copy; the
+                // entry is dropped below so that partial state is never served.
+                Err(_) => (false, old_size, 0),
+            }
+        };
+
+        if maintained {
+            *current_memory = current_memory.saturating_sub(old_size).saturating_add(new_size);
+            stats.incremental_updates += 1;
+            true
+        } else {
+            // Append failed — invalidate to guarantee no stale representation is
+            // ever returned (correctness before efficiency).
+            if let Some(evicted) = cache.pop(key) {
+                *current_memory = current_memory.saturating_sub(evicted.size_bytes);
+                stats.invalidations += 1;
+            }
+            false
+        }
+    }
+
     /// Refresh the stored hotness of a cached table without disturbing its LRU
     /// recency or the memory accounting (#6199 Phase 2). No-op if the table is
     /// not resident. Called on cache hits so a table's eviction priority tracks
@@ -508,7 +612,6 @@ mod tests {
     use vibesql_types::SqlValue;
 
     use super::*;
-    use crate::Row;
 
     fn create_test_columnar(rows: usize) -> ColumnarTable {
         let row_data: Vec<Row> = (0..rows)
@@ -636,10 +739,138 @@ mod tests {
         assert_eq!(cache.len(), 1);
     }
 
+    /// Build `count` rows shaped like `create_test_columnar` (Integer id,
+    /// Varchar name), starting the id sequence at `start`.
+    fn make_rows(start: usize, count: usize) -> Vec<Row> {
+        (start..start + count)
+            .map(|i| {
+                Row::new(vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{}", i))),
+                ])
+            })
+            .collect()
+    }
+
+    // ========================================================================
+    // #6199 Phase 3 — incremental append maintenance
+    // ========================================================================
+
+    /// Appending to a resident entry maintains it in place: the row count grows,
+    /// the entry is NOT dropped (no invalidation), and `incremental_updates`
+    /// climbs instead of `conversions`.
+    #[test]
+    fn test_append_rows_maintains_resident_entry() {
+        let cache = ColumnarCache::new(1024 * 1024);
+        let _ = cache.insert("t", create_test_columnar(100));
+        assert_eq!(cache.get("t").unwrap().row_count(), 100);
+
+        let maintained = cache.append_rows("t", &make_rows(100, 5));
+        assert!(maintained, "a resident entry must be maintained in place");
+
+        let cached = cache.get("t").expect("entry must still be resident");
+        assert_eq!(cached.row_count(), 105, "appended rows must be visible via the cache");
+
+        let stats = cache.stats();
+        assert_eq!(stats.incremental_updates, 1, "one incremental maintenance");
+        assert_eq!(stats.invalidations, 0, "append must not invalidate a healthy entry");
+        assert_eq!(stats.conversions, 1, "only the initial insert converted");
+    }
+
+    /// Appended rows must exactly match a from-scratch rebuild — parity between
+    /// incremental maintenance and full conversion.
+    #[test]
+    fn test_append_rows_parity_with_full_rebuild() {
+        let cache = ColumnarCache::new(1024 * 1024);
+        let _ = cache.insert("t", create_test_columnar(100));
+        cache.append_rows("t", &make_rows(100, 25));
+
+        let incremental = cache.get("t").unwrap().to_rows();
+        // Equivalent full rebuild: the base 100 rows plus the same 25 appended.
+        let full = create_test_columnar(125).to_rows();
+        assert_eq!(incremental, full, "incremental append must equal a full rebuild");
+    }
+
+    /// Appending to a table that is not resident is a no-op (returns false) and
+    /// never fabricates an entry — the row table remains the source of truth.
+    #[test]
+    fn test_append_rows_absent_entry_is_noop() {
+        let cache = ColumnarCache::new(1024 * 1024);
+        assert!(!cache.append_rows("ghost", &make_rows(0, 3)));
+        assert!(!cache.contains("ghost"));
+        let stats = cache.stats();
+        assert_eq!(stats.incremental_updates, 0);
+        assert_eq!(stats.invalidations, 0);
+    }
+
+    /// A disabled cache (budget 0) never maintains anything.
+    #[test]
+    fn test_append_rows_disabled_cache_is_noop() {
+        let cache = ColumnarCache::new(0);
+        let _ = cache.insert("t", create_test_columnar(10));
+        assert!(!cache.append_rows("t", &make_rows(10, 5)));
+        assert_eq!(cache.memory_usage(), 0);
+        assert_eq!(cache.stats().incremental_updates, 0);
+    }
+
+    /// An append whose arity does not match the cached columns cannot be applied
+    /// safely, so the entry is invalidated rather than left partially mutated —
+    /// guaranteeing no stale representation is ever served.
+    #[test]
+    fn test_append_rows_mismatch_invalidates_rather_than_corrupts() {
+        let cache = ColumnarCache::new(1024 * 1024);
+        let _ = cache.insert("t", create_test_columnar(100));
+
+        // Wrong arity (1 column vs the cached 2) → append fails.
+        let bad = vec![Row::new(vec![SqlValue::Integer(1)])];
+        let maintained = cache.append_rows("t", &bad);
+        assert!(!maintained, "a mismatched append must not report success");
+        assert!(!cache.contains("t"), "the entry must be dropped, not left corrupt");
+
+        let stats = cache.stats();
+        assert_eq!(stats.incremental_updates, 0, "no successful maintenance");
+        assert_eq!(stats.invalidations, 1, "the unsafe entry was invalidated");
+    }
+
+    /// Memory accounting tracks incremental growth: appending rows increases the
+    /// reported memory usage.
+    #[test]
+    fn test_append_rows_updates_memory_accounting() {
+        let cache = ColumnarCache::new(1024 * 1024);
+        let _ = cache.insert("t", create_test_columnar(100));
+        let before = cache.memory_usage();
+        cache.append_rows("t", &make_rows(100, 100));
+        let after = cache.memory_usage();
+        assert!(after > before, "appending rows must grow tracked memory ({before} -> {after})");
+    }
+
+    /// Appending does not refresh LRU recency (a write is not a read): the
+    /// least-recently-used ordering is preserved so eviction still targets the
+    /// genuinely cold entry.
+    #[test]
+    fn test_append_rows_does_not_refresh_lru_recency() {
+        // Budget holds two small entries but not a third.
+        let cache = ColumnarCache::new(1024 * 1024);
+        let _ = cache.insert("a", create_test_columnar(10));
+        let _ = cache.insert("b", create_test_columnar(10));
+        // `a` is currently the LRU end. Appending to it must NOT promote it.
+        cache.append_rows("a", &make_rows(10, 1));
+        // Both still resident; the append only touched data, not recency.
+        assert!(cache.contains("a"));
+        assert!(cache.contains("b"));
+        assert_eq!(cache.get("a").unwrap().row_count(), 11);
+    }
+
     #[test]
     fn test_hit_rate() {
-        let stats =
-            CacheStats { hits: 80, misses: 20, evictions: 0, conversions: 0, invalidations: 0 };
+        let stats = CacheStats {
+            hits: 80,
+            misses: 20,
+            evictions: 0,
+            conversions: 0,
+            invalidations: 0,
+            incremental_updates: 0,
+        };
 
         assert!((stats.hit_rate() - 80.0).abs() < 0.001);
     }
