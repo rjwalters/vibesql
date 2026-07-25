@@ -91,6 +91,20 @@ impl Parser {
         }
     }
 
+    /// Returns true when the token immediately after `OVER` can begin a window
+    /// specification: a `(` for an inline spec, or a window-name reference. A
+    /// window name may be a plain identifier or a keyword that is usable as an
+    /// identifier (SQLite fallback), e.g. `OVER over` / `OVER window` (window6
+    /// 5.1-5.4). When this returns false, `OVER` is being used as a fallback
+    /// identifier (a column alias), not a window clause.
+    pub(super) fn over_starts_window_spec(&self) -> bool {
+        match self.peek_next() {
+            Token::LParen | Token::Identifier(_) | Token::DelimitedIdentifier(_) => true,
+            Token::Keyword { keyword, .. } => keyword.can_be_identifier(),
+            _ => false,
+        }
+    }
+
     /// Parse window specification (OVER clause contents)
     ///
     /// Supports:
@@ -105,6 +119,18 @@ impl Parser {
         match self.peek() {
             Token::Identifier(name) => {
                 let base_name = name.clone();
+                self.advance();
+                return Ok(vibesql_ast::WindowSpec {
+                    base_window_name: Some(base_name),
+                    partition_by: None,
+                    order_by: None,
+                    frame: None,
+                });
+            }
+            // A window-name reference may also be a keyword used as a fallback
+            // identifier, e.g. `OVER over` / `OVER window` (window6 5.1-5.4).
+            Token::Keyword { keyword, original, .. } if keyword.can_be_identifier() => {
+                let base_name = original.clone();
                 self.advance();
                 return Ok(vibesql_ast::WindowSpec {
                     base_window_name: Some(base_name),

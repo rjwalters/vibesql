@@ -135,6 +135,26 @@ impl Parser {
                 }
                 _ => None,
             }
+        } else if let Token::Keyword { keyword, original, .. } = self.peek() {
+            // A keyword usable as a fallback identifier is a valid AS-less alias,
+            // e.g. `SELECT sum(x) over FROM over` aliases the aggregate as `over`
+            // (window6 5.0). Clause/operator keywords (FROM, WHERE, ORDER, ...) are
+            // not `can_be_identifier()` and so continue to terminate the item.
+            //
+            // RETURNING and WINDOW are excluded even though they are fallback
+            // identifiers: each introduces a trailing clause that can directly
+            // follow the final select item (`INSERT ... SELECT 1 RETURNING a`,
+            // `SELECT 1 WINDOW w AS ()`), so grabbing them as an AS-less alias would
+            // swallow the clause (regression on insert-compound-returning, #5271).
+            if keyword.can_be_identifier()
+                && !matches!(keyword, Keyword::Returning | Keyword::Window)
+            {
+                let alias = original.clone();
+                self.advance();
+                Some(alias)
+            } else {
+                None
+            }
         } else {
             None
         };
