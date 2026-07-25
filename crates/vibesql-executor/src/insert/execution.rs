@@ -1609,13 +1609,18 @@ fn execute_insert_internal(
         }
     }
 
-    // Invalidate the database-level columnar cache since table data changed.
-    // Note: The table-level cache is already invalidated by insert_row()/insert_rows_batch().
-    // Both invalidations are necessary because they manage separate caches:
-    // - Table-level cache: used by Table::scan_columnar() for SIMD filtering
-    // - Database-level cache: used by Database::get_columnar() for cached access
+    // #6199 Phase 3: the rows inserted above went through
+    // `insert_row()`/`insert_rows_batch()`, which now maintain the columnar
+    // representation cache **incrementally** (appending in place) instead of
+    // dropping it. So this post-statement hook must NOT invalidate — doing so
+    // would throw away that incremental work and force a full rebuild on the
+    // next scan, reintroducing the write-plus-scan thrash Phase 3 removes.
+    // Record only the write for the access-pattern signal; the cache is already
+    // consistent. Every non-append mutation inside this statement (ON CONFLICT
+    // DO UPDATE, REPLACE deletes, trigger DML, assertion rollback) independently
+    // invalidates the cache, so leaving a still-resident entry intact is safe.
     if rows_inserted > 0 {
-        db.invalidate_columnar_cache(&storage_table_name);
+        db.note_insert_maintained_columnar_cache(&storage_table_name);
     }
 
     // Check all assertions after INSERT completes (SQL:1999 Feature F671/F672)

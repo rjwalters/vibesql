@@ -128,6 +128,48 @@ impl Database {
         self.columnar_cache.invalidate(table_name);
     }
 
+    /// #6199 Phase 3: post-INSERT bookkeeping for a statement whose rows were
+    /// already appended to the resident columnar copy incrementally by
+    /// [`Database::insert_row`] / [`Database::insert_rows_batch`].
+    ///
+    /// Unlike [`Database::invalidate_columnar_cache`] (used by UPDATE / DELETE /
+    /// DDL, which cannot be maintained incrementally and must drop the cache),
+    /// this records the write for the access-pattern signal **without** dropping
+    /// the cache — the cache is already consistent, so the next analytical scan
+    /// avoids a full rebuild. This is the seam that lets an end-to-end SQL
+    /// write-plus-scan workload stop thrashing.
+    ///
+    /// Every *other* table mutation in the INSERT executor (ON CONFLICT DO
+    /// UPDATE, REPLACE deletes, trigger DML, assertion rollback) independently
+    /// invalidates the cache, so skipping the drop here is safe: the only rows
+    /// that reach a still-resident entry are the ones already appended in place.
+    pub fn note_insert_maintained_columnar_cache(&self, table_name: &str) {
+        // Mirror the write-signal accounting of `invalidate_columnar_cache`
+        // (recorded for every INSERT/UPDATE/DELETE, including native columnar).
+        self.record_write(table_name);
+    }
+
+    /// #6199 Phase 3: discard a table's columnar cache entry after a
+    /// transaction/savepoint ROLLBACK.
+    ///
+    /// Rollback restores the row store from a snapshot. Because
+    /// [`Database::insert_row`] / [`insert_rows_batch`] now maintain the
+    /// resident columnar copy *in place* via `append_rows` (instead of
+    /// dropping it), any rows appended during the rolled-back window would
+    /// otherwise survive in the cache and be served by the next analytical
+    /// scan — a stale read of rolled-back data. Dropping the entry forces the
+    /// next scan to rebuild from the restored row store.
+    ///
+    /// Unlike [`Database::invalidate_columnar_cache`], this deliberately does
+    /// **not** record a write signal: a rollback is not a write and must not
+    /// perturb the hotness/access-pattern signal that drives columnar
+    /// dispatch. For native columnar tables (never in this cache) it is a
+    /// harmless no-op — their authoritative data is restored with the table
+    /// snapshot.
+    pub fn invalidate_columnar_cache_for_rollback(&self, table_name: &str) {
+        self.columnar_cache.invalidate(table_name);
+    }
+
     /// Clear all columnar cache entries
     pub fn clear_columnar_cache(&self) {
         self.columnar_cache.clear();
@@ -571,5 +613,261 @@ mod tests {
             "a small budget must force at least one eviction (got {})",
             stats.evictions
         );
+    }
+
+    // ========================================================================
+    // #6199 Phase 3 — incremental maintenance across writes
+    // ========================================================================
+
+    /// Column-value view of a set of rows, dropping row metadata (rowid, MVCC
+    /// stamps) so a columnar copy (whose reconstructed rows carry no metadata)
+    /// can be compared value-for-value against the row path.
+    fn values_of(rows: &[Row]) -> Vec<Vec<vibesql_types::SqlValue>> {
+        rows.iter().map(|r| r.values.to_vec()).collect()
+    }
+
+    /// Build one test row shaped like `create_test_rows` (Integer id, Varchar
+    /// name) for a given id.
+    fn one_row(id: i64) -> Row {
+        Row::new(vec![
+            SqlValue::Integer(id),
+            SqlValue::Varchar(arcstr::ArcStr::from(format!("name_{}", id))),
+        ])
+    }
+
+    /// A write-plus-scan workload must NOT rebuild the columnar copy on every
+    /// write. Once the table is resident (one conversion), each INSERT appends
+    /// to the cached copy incrementally and each scan is served from it — so
+    /// `conversions` stays at 1 while `incremental_updates` climbs, and the
+    /// columnar copy stays in perfect parity with the row path.
+    #[test]
+    fn test_write_plus_scan_does_not_rebuild_per_write() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm the cache: one (and only one) conversion makes it resident.
+        db.get_columnar("t").unwrap();
+        assert_eq!(
+            db.columnar_cache_stats().conversions,
+            1,
+            "warming should convert the table exactly once"
+        );
+
+        // Interleave inserts and scans. Under the old full-invalidate behavior
+        // every scan-after-write would miss and re-convert (conversions would
+        // climb with the loop); with incremental maintenance it must not.
+        for id in 600..660 {
+            db.insert_row("t", one_row(id)).unwrap();
+            let columnar = db.get_columnar("t").unwrap().expect("t is resident");
+            assert_eq!(
+                columnar.row_count(),
+                id as usize + 1,
+                "each appended row must be immediately visible via the cached columnar copy"
+            );
+        }
+
+        let stats = db.columnar_cache_stats();
+        assert_eq!(
+            stats.conversions, 1,
+            "no full rebuild per write: only the initial warm conversion (got {})",
+            stats.conversions
+        );
+        assert!(
+            stats.incremental_updates >= 60,
+            "every insert into the resident table must be maintained incrementally (got {})",
+            stats.incremental_updates
+        );
+
+        // Parity 1: the incrementally-maintained columnar copy equals a fresh
+        // from-scratch rebuild of the current table state.
+        let incremental = values_of(&db.get_columnar("t").unwrap().unwrap().to_rows());
+        let full_rebuild = values_of(&db.get_table("t").unwrap().scan_columnar().unwrap().to_rows());
+        assert_eq!(incremental, full_rebuild, "incremental cache must equal a full rebuild");
+
+        // Parity 2: it also equals the row path (the source of truth).
+        let row_path = values_of(&db.get_table("t").unwrap().scan_live_vec());
+        assert_eq!(incremental, row_path, "columnar path must match the row path exactly");
+    }
+
+    /// The batch insert API is maintained incrementally too: appending a batch
+    /// to a resident table is a single incremental update, not a rebuild, and
+    /// preserves parity.
+    #[test]
+    fn test_batch_insert_maintains_cache_incrementally() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        db.insert_rows_batch("t", create_test_rows(600)).unwrap();
+
+        db.get_columnar("t").unwrap(); // resident (conversion #1)
+        let before = db.columnar_cache_stats();
+        assert_eq!(before.conversions, 1);
+
+        let batch: Vec<Row> = (600..700).map(one_row).collect();
+        db.insert_rows_batch("t", batch).unwrap();
+
+        let after = db.columnar_cache_stats();
+        assert_eq!(after.conversions, 1, "a batch insert must not trigger a rebuild");
+        assert_eq!(
+            after.incremental_updates,
+            before.incremental_updates + 1,
+            "the whole batch is one incremental append"
+        );
+
+        let columnar = db.get_columnar("t").unwrap().unwrap();
+        assert_eq!(columnar.row_count(), 700);
+        let incremental = values_of(&columnar.to_rows());
+        let row_path = values_of(&db.get_table("t").unwrap().scan_live_vec());
+        assert_eq!(incremental, row_path, "batch-appended columnar copy must match the row path");
+    }
+
+    /// Inserting into a table that is not resident never converts it eagerly —
+    /// incremental maintenance only maintains what is already cached; the next
+    /// scan converts the up-to-date table fresh.
+    #[test]
+    fn test_insert_into_non_resident_table_does_not_convert() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+
+        for row in create_test_rows(50) {
+            db.insert_row("t", row).unwrap();
+        }
+        let stats = db.columnar_cache_stats();
+        assert_eq!(stats.conversions, 0, "inserts alone must not populate the cache");
+        assert_eq!(stats.incremental_updates, 0, "nothing resident to maintain");
+        assert!(db.columnar_cache_memory_usage() == 0, "cache stays empty until first scan");
+    }
+
+    // ========================================================================
+    // #6199 Phase 3 — rollback must never leave a stale columnar copy
+    //
+    // Phase 3 replaced eager cache invalidation on INSERT with in-place
+    // `append_rows`. That is only safe if every rollback path (which restores
+    // the row store from a snapshot) also drops the resident columnar copy —
+    // otherwise a row appended inside a transaction survives in the cache after
+    // ROLLBACK and the next analytical scan serves rolled-back data.
+    // ========================================================================
+
+    /// Judge repro shape: warm the columnar cache, append a row inside a
+    /// transaction, ROLLBACK, then confirm the columnar view matches the
+    /// (restored) row store — not the rolled-back count.
+    #[test]
+    fn test_rollback_transaction_discards_appended_columnar_row() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm the columnar cache to residency.
+        let warmed = db.get_columnar("t").unwrap().expect("table should be resident");
+        assert_eq!(warmed.row_count(), 600, "cache warmed to 600 rows");
+
+        // Append one row inside a transaction, then roll it back.
+        db.begin_transaction().unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+        db.rollback_transaction().unwrap();
+
+        // The row store is back to 600 rows.
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "row store must be restored to 600 rows by ROLLBACK");
+
+        // The columnar view must agree — no stale rolled-back row.
+        let columnar_len = db.get_columnar("t").unwrap().expect("table exists").row_count();
+        assert_eq!(
+            columnar_len, row_store_len,
+            "columnar cache must not retain a rolled-back row (row store {}, columnar {})",
+            row_store_len, columnar_len
+        );
+    }
+
+    /// Rollback parity must also hold with the representation cache disabled
+    /// (`columnar_cache_budget = 0`): the row path alone already reflects the
+    /// rollback, so this pins the row-store side of the parity invariant.
+    #[test]
+    fn test_rollback_transaction_parity_with_cache_disabled() {
+        let mut config = crate::DatabaseConfig::server_default();
+        config.columnar_cache_budget = 0;
+        let mut db = Database::with_config(config);
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        db.begin_transaction().unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+        db.rollback_transaction().unwrap();
+
+        assert!(db.get_columnar("t").unwrap().is_none(), "cache disabled -> row path only");
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "row store must reflect ROLLBACK even with cache disabled");
+    }
+
+    /// Savepoint rollback variant: an in-place columnar append made after a
+    /// SAVEPOINT must be discarded when rolling back to that savepoint.
+    #[test]
+    fn test_rollback_to_savepoint_discards_appended_columnar_row() {
+        let mut db = Database::new();
+        db.create_table(create_test_table_schema("t")).unwrap();
+        for row in create_test_rows(600) {
+            db.insert_row("t", row).unwrap();
+        }
+
+        // Warm to residency.
+        assert_eq!(
+            db.get_columnar("t").unwrap().expect("resident").row_count(),
+            600,
+            "cache warmed to 600 rows"
+        );
+
+        db.begin_transaction().unwrap();
+        db.create_savepoint("sp1".to_string()).unwrap();
+        db.insert_row(
+            "t",
+            Row::new(vec![
+                SqlValue::Integer(600),
+                SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+            ]),
+        )
+        .unwrap();
+
+        // Appending inside the savepoint kept the resident copy fresh at 601.
+        assert_eq!(
+            db.get_columnar("t").unwrap().expect("resident").row_count(),
+            601,
+            "in-place append made the resident copy 601 before rollback"
+        );
+
+        // Isolate the savepoint path: check parity right after the savepoint
+        // rollback (transaction still open) before tearing the txn down.
+        db.rollback_to_savepoint("sp1".to_string()).unwrap();
+
+        let row_store_len = db.get_table("t").expect("table exists").scan_live_vec().len();
+        assert_eq!(row_store_len, 600, "savepoint rollback must restore the row store to 600");
+
+        let columnar_len = db.get_columnar("t").unwrap().expect("table exists").row_count();
+        assert_eq!(
+            columnar_len, row_store_len,
+            "columnar cache must not retain a savepoint-rolled-back row (row store {}, columnar {})",
+            row_store_len, columnar_len
+        );
+
+        db.rollback_transaction().unwrap();
     }
 }

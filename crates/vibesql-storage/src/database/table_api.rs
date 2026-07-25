@@ -402,8 +402,13 @@ impl Database {
             pk,
         });
 
-        // Invalidate columnar cache for this table
-        self.columnar_cache.invalidate(table_name);
+        // #6199 Phase 3: keep the cached columnar copy in sync incrementally
+        // rather than dropping it. If the table is resident, the just-inserted
+        // row is appended to the columnar representation in place (no full
+        // rebuild on the next scan); if it is not resident (or the append can't
+        // be applied), `append_rows` leaves the cache consistent. Native
+        // columnar tables are never in this cache, so this is a no-op for them.
+        self.columnar_cache.append_rows(table_name, std::slice::from_ref(&row));
 
         Ok(())
     }
@@ -481,6 +486,14 @@ impl Database {
             t.schema.get_column_index(name).map(|idx| (name.to_lowercase(), idx))
         });
 
+        // #6199 Phase 3: keep the cached columnar copy in sync incrementally by
+        // appending the whole batch in place, rather than dropping the entry and
+        // forcing a full rebuild on the next scan. Done here, before the
+        // consuming loop below moves `rows`. No-op when the table is not resident
+        // (or native columnar); leaves the cache consistent on an unapplicable
+        // append.
+        self.columnar_cache.append_rows(table_name, &rows);
+
         // Record changes for transaction management, emit WAL entries, and broadcast events
         for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
             self.record_change(TransactionChange::Insert {
@@ -512,8 +525,7 @@ impl Database {
             });
         }
 
-        // Invalidate columnar cache for this table
-        self.columnar_cache.invalidate(table_name);
+        // Columnar cache already maintained incrementally above (Phase 3).
 
         Ok(row_indices.len())
     }
