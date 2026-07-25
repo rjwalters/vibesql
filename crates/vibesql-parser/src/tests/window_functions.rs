@@ -552,3 +552,112 @@ fn test_distinct_window_aggregate_rejected() {
         "unexpected error: {err:?}"
     );
 }
+
+// -----------------------------------------------------------------------------
+// window6.test: WINDOW / OVER / FILTER are fallback identifiers (keyword1-style).
+// These regression tests cover the reserved-keyword-as-identifier gaps fixed for
+// issue #6191 (window6 filescope-err.1 / 4.1 / 5.0 / 5.1 / 1.5.4) without
+// regressing the genuine WINDOW / OVER / FILTER clauses.
+// -----------------------------------------------------------------------------
+
+// window6 iteration 5 file-scope setup: `window`/`over`/`filter` are legal
+// column type names (`CREATE TABLE over(following, preceding window)`).
+#[test]
+fn test_window_over_filter_as_type_names() {
+    for ty in ["window", "over", "filter"] {
+        let sql = format!("CREATE TABLE t(a, b {ty})");
+        assert!(Parser::parse_sql(&sql).is_ok(), "`{ty}` should be a legal type name");
+    }
+}
+
+// window6 5.0: `SELECT sum(x) over FROM over` — OVER is a column alias (not a
+// window clause) because it is not followed by `(` or a window name.
+#[test]
+fn test_over_used_as_column_alias() {
+    let sql = "SELECT sum(x) over FROM over";
+    let stmt = Parser::parse_sql(sql).expect("OVER-as-alias should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                assert!(
+                    matches!(expr, vibesql_ast::Expression::AggregateFunction { .. }),
+                    "expected a plain aggregate, not a window function"
+                );
+                assert_eq!(alias.as_deref(), Some("over"));
+            }
+            _ => panic!("expected an expression select item"),
+        },
+        _ => panic!("expected a SELECT"),
+    }
+}
+
+// window6 1.5.4: `SELECT sum(x) filter FROM t` — FILTER is a column alias because
+// it is not followed by `(`.
+#[test]
+fn test_filter_used_as_column_alias() {
+    let sql = "SELECT sum(x) filter FROM t";
+    let stmt = Parser::parse_sql(sql).expect("FILTER-as-alias should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, alias, .. } => {
+                assert!(matches!(
+                    expr,
+                    vibesql_ast::Expression::AggregateFunction { filter: None, .. }
+                ));
+                assert_eq!(alias.as_deref(), Some("filter"));
+            }
+            _ => panic!("expected an expression select item"),
+        },
+        _ => panic!("expected a SELECT"),
+    }
+}
+
+// window6 5.1: `OVER over` references a named window whose name is the keyword
+// `over`; the genuine WINDOW clause defines it.
+#[test]
+fn test_over_keyword_window_name() {
+    let sql = "SELECT sum(x) over over FROM over WINDOW over AS ()";
+    assert!(Parser::parse_sql(sql).is_ok(), "keyword window name after OVER should parse");
+}
+
+// window6 4.1: `SELECT * FROM t4 window, t4` — WINDOW is a table alias, not the
+// start of a WINDOW clause (which would be `WINDOW <name> AS (...)`).
+#[test]
+fn test_window_used_as_table_alias() {
+    let sql = "SELECT * FROM t4 window, t4";
+    assert!(Parser::parse_sql(sql).is_ok(), "WINDOW-as-table-alias should parse");
+}
+
+// Guard: a genuine trailing WINDOW clause is still recognized (not swallowed as
+// an alias) when it is a real `WINDOW <name> AS (...)`.
+#[test]
+fn test_real_window_clause_still_parses() {
+    let sql = "SELECT sum(x) OVER w FROM t1 WINDOW w AS (ORDER BY y)";
+    let stmt = Parser::parse_sql(sql).expect("real WINDOW clause should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            let defs = select.window_definitions.expect("WINDOW clause must be captured");
+            assert!(!defs.is_empty(), "WINDOW clause must define at least one window");
+        }
+        _ => panic!("expected a SELECT"),
+    }
+}
+
+// Guard: a genuine FILTER clause is still recognized when followed by `(`.
+#[test]
+fn test_real_filter_clause_still_parses() {
+    let sql = "SELECT sum(x) FILTER (WHERE x > 0) FROM t";
+    let stmt = Parser::parse_sql(sql).expect("real FILTER clause should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => {
+                assert!(matches!(
+                    expr,
+                    vibesql_ast::Expression::AggregateFunction { filter: Some(_), .. }
+                ));
+            }
+            _ => panic!("expected an expression select item"),
+        },
+        _ => panic!("expected a SELECT"),
+    }
+}

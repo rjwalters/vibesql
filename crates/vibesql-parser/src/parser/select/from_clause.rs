@@ -398,11 +398,15 @@ impl Parser {
                     }
                 } else if matches!(self.peek(), Token::Keyword { keyword: _, .. })
                     && !self.is_join_keyword()
-                    && !self.is_clause_keyword()
+                    && (!self.is_clause_keyword() || self.window_keyword_used_as_alias())
                     && !self.peek_index_hint()
                 {
                     // Allow non-reserved keywords as implicit aliases (e.g., FROM t m)
-                    // Keywords like M, YEAR, etc. can be used as aliases
+                    // Keywords like M, YEAR, etc. can be used as aliases. WINDOW is
+                    // normally a clause keyword, but `FROM t4 window, t4` uses it as a
+                    // table alias (window6 4.1); `window_keyword_used_as_alias()`
+                    // permits that only when WINDOW does not begin a real
+                    // `WINDOW <name> AS (...)` clause.
                     match self.peek() {
                         Token::Keyword { keyword: kw, .. } => {
                             let alias = kw.to_string();
@@ -612,6 +616,30 @@ impl Parser {
                 | Token::Keyword { keyword: Keyword::Natural, .. }
                 | Token::Keyword { keyword: Keyword::Outer, .. }
         )
+    }
+
+    /// Returns true when the current `WINDOW` keyword begins a real WINDOW clause,
+    /// i.e. it is followed by `<name> AS`. SQLite treats `WINDOW` as a fallback
+    /// identifier otherwise: `SELECT * FROM t4 window, t4` uses `window` as the
+    /// table alias of `t4` (window6 4.1), not as the start of a WINDOW clause.
+    pub(crate) fn peek_window_starts_clause(&self) -> bool {
+        if !matches!(self.peek(), Token::Keyword { keyword: Keyword::Window, .. }) {
+            return false;
+        }
+        let name_follows = matches!(
+            self.peek_next(),
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::Keyword { .. }
+        );
+        name_follows
+            && matches!(self.peek_at_offset(2), Token::Keyword { keyword: Keyword::As, .. })
+    }
+
+    /// Returns true when the current token is `WINDOW` used as an identifier (table
+    /// alias) rather than as the start of a WINDOW clause. See
+    /// `peek_window_starts_clause` for the disambiguation rule.
+    pub(crate) fn window_keyword_used_as_alias(&self) -> bool {
+        matches!(self.peek(), Token::Keyword { keyword: Keyword::Window, .. })
+            && !self.peek_window_starts_clause()
     }
 
     /// Check if current token is a clause keyword that cannot be used as implicit alias

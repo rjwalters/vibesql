@@ -67,6 +67,15 @@ impl Parser {
             // through to the UserDefined catch-all below and is stored by
             // affinity (#5804).
             Token::Keyword { keyword: Keyword::Type, .. } => "type".to_string(),
+            // The window-function contextual keywords WINDOW, OVER, and FILTER are
+            // fallback identifiers in SQLite and are legal type names (window6.test
+            // iteration 5: `CREATE TABLE over(following, preceding window)` uses
+            // `window` as a column type). They are not in the general SQLite
+            // fallback set above, so each needs its own arm; all three fall through
+            // to the UserDefined affinity catch-all below.
+            Token::Keyword { keyword: Keyword::Window, .. } => "window".to_string(),
+            Token::Keyword { keyword: Keyword::Over, .. } => "over".to_string(),
+            Token::Keyword { keyword: Keyword::Filter, .. } => "filter".to_string(),
             _ => return Err(ParseError { message: "Expected data type".to_string() }),
         };
         self.advance();

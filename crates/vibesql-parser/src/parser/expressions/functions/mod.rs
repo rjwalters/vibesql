@@ -435,7 +435,14 @@ impl Parser {
 
         // Parse optional FILTER clause (SQL:2003)
         // Syntax: aggregate(...) FILTER (WHERE condition) [OVER (...)]
-        let filter = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Filter, .. }) {
+        //
+        // FILTER is a fallback identifier in SQLite: `SELECT sum(x) filter FROM t`
+        // uses `filter` as the output column alias (window6 1.5.4). A genuine FILTER
+        // clause is always `FILTER (`, so only consume it when a `(` follows;
+        // otherwise leave FILTER for the SELECT-list alias parser.
+        let filter = if matches!(self.peek(), Token::Keyword { keyword: Keyword::Filter, .. })
+            && matches!(self.peek_next(), Token::LParen)
+        {
             self.advance(); // consume FILTER
             self.expect_token(Token::LParen)?;
             self.expect_keyword(Keyword::Where)?;
@@ -446,8 +453,18 @@ impl Parser {
             None
         };
 
-        // Check for OVER clause (window function)
-        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. }) {
+        // Check for OVER clause (window function).
+        //
+        // OVER is a fallback identifier in SQLite: `SELECT sum(x) over FROM over`
+        // uses `over` as the output column alias, not as a window clause (window6
+        // 5.0). A genuine OVER clause is only present when the token after OVER can
+        // begin a window specification — `(` or a window-name (identifier, or a
+        // keyword usable as an identifier such as `over`/`window`). If it cannot
+        // (e.g. the next token is FROM/WHERE/`,`), OVER is being used as an alias,
+        // so we do not consume it here and let the SELECT-list alias parser take it.
+        if matches!(self.peek(), Token::Keyword { keyword: Keyword::Over, .. })
+            && self.over_starts_window_spec()
+        {
             self.advance(); // consume OVER
 
             // DISTINCT is not permitted on any window function. SQLite reports
