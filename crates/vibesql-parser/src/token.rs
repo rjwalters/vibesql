@@ -107,7 +107,12 @@ impl Token {
         match self {
             Token::Keyword { keyword, .. } => keyword.to_string(),
             Token::Identifier(id) => id.clone(),
-            Token::DelimitedIdentifier(id) => format!("\"{}\"", id),
+            // Escape embedded double quotes by doubling them (SQL-standard),
+            // so an identifier like `"x2"` round-trips as `"""x2"""` instead of
+            // the unlexable `""x2""` (triggerC-15.2). This matters because
+            // trigger bodies are stored as reconstructed token text and
+            // re-parsed at fire time.
+            Token::DelimitedIdentifier(id) => format!("\"{}\"", id.replace('"', "\"\"")),
             Token::Number(n) => n.clone(),
             Token::String(s) => format!("'{}'", s.replace('\'', "''")),
             Token::BlobLiteral(bytes) => {

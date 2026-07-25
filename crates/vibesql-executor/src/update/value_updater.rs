@@ -5,8 +5,30 @@ use std::collections::HashSet;
 use vibesql_ast::Assignment;
 
 use crate::{
-    errors::ExecutorError, evaluator::ExpressionEvaluator, insert::validation::coerce_value,
+    errors::ExecutorError,
+    evaluator::ExpressionEvaluator,
+    insert::validation::coerce_value,
+    insert::{coerce_rowid_affinity, RowidAffinity},
 };
+
+/// Apply SQLite's rowid (INTEGER) affinity to a value assigned to the rowid —
+/// either the INTEGER PRIMARY KEY alias column or the virtual `rowid`
+/// pseudo-column — by an UPDATE statement.
+///
+/// Shares the INSERT-path coercion rules (`coerce_rowid_affinity`): integers
+/// pass through, lossless-integer TEXT/REAL values are coerced, everything
+/// else raises `datatype mismatch`. Unlike INSERT, where NULL means
+/// "auto-assign the next rowid", sqlite3 3.51.0 rejects `UPDATE t SET
+/// rowid=NULL` (and `SET <ipk>=NULL`) with `datatype mismatch`
+/// (trigger1-15.1).
+fn coerce_update_rowid_value(value: &vibesql_types::SqlValue) -> Result<i64, ExecutorError> {
+    match coerce_rowid_affinity(value)? {
+        RowidAffinity::Value(i) => Ok(i),
+        RowidAffinity::Auto => {
+            Err(ExecutorError::SqliteCompatError("datatype mismatch".to_string()))
+        }
+    }
+}
 
 /// Applies assignment expressions to rows
 pub struct ValueUpdater<'a> {
@@ -99,27 +121,24 @@ impl<'a> ValueUpdater<'a> {
                 // If the table has an INTEGER PRIMARY KEY (rowid alias), update that column
                 // Otherwise, update the row's internal row_id field
                 if let Some(ipk_col_idx) = self.schema.rowid_alias_column {
-                    // The INTEGER PRIMARY KEY column IS the rowid - update it
+                    // The INTEGER PRIMARY KEY column IS the rowid - update it.
+                    // Apply SQLite's rowid (INTEGER) affinity: lossless TEXT/REAL
+                    // integers coerce; anything else — including NULL, which is
+                    // valid on INSERT (auto-assign) but not on UPDATE — raises
+                    // `datatype mismatch` (trigger1-15.1, sqlite3 3.51.0).
                     let new_value = self.evaluator.eval(&assignment.value, original_row)?;
+                    let coerced = coerce_update_rowid_value(&new_value)?;
                     new_row
-                        .set(ipk_col_idx, new_value)
+                        .set(ipk_col_idx, vibesql_types::SqlValue::Integer(coerced))
                         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
                     changed_columns.insert(ipk_col_idx);
                 } else {
-                    // No INTEGER PRIMARY KEY - update the virtual rowid
-                    // Evaluate the new rowid value
+                    // No INTEGER PRIMARY KEY - update the virtual rowid.
+                    // Same rowid affinity rules as the alias path: sqlite3 raises
+                    // `datatype mismatch` for NULL / BLOB / non-numeric TEXT /
+                    // fractional REAL, and coerces lossless TEXT/REAL integers.
                     let new_value = self.evaluator.eval(&assignment.value, original_row)?;
-                    // Convert to u64 for row_id
-                    let new_rowid = match new_value {
-                        vibesql_types::SqlValue::Integer(i) => i as u64,
-                        vibesql_types::SqlValue::Bigint(i) => i as u64,
-                        other => {
-                            return Err(ExecutorError::UnsupportedExpression(format!(
-                                "ROWID must be an integer, got {:?}",
-                                other
-                            )));
-                        }
-                    };
+                    let new_rowid = coerce_update_rowid_value(&new_value)? as u64;
                     new_row.row_id = Some(new_rowid);
                     // Note: We don't add anything to changed_columns since row_id
                     // is not a real column. The storage layer will use the updated row_id.
@@ -166,8 +185,15 @@ impl<'a> ValueUpdater<'a> {
             // e.g., UPDATE t SET r='5' on a REAL column stores 5.0, not '5'.
             // STRICT tables (issue #5837) apply the rigid strict-datatype rules
             // instead, matching the INSERT strict gate.
+            //
+            // The INTEGER PRIMARY KEY rowid-alias column applies SQLite's rowid
+            // affinity instead: the stored value must be a (losslessly coerced)
+            // integer, and anything else — including NULL, which INSERT would
+            // auto-assign — raises `datatype mismatch` (trigger1-15.1).
             let column = &self.schema.columns[col_index];
-            let coerced_value = if let Some(st) = self.schema.strict_type_of(col_index) {
+            let coerced_value = if self.schema.rowid_alias_column == Some(col_index) {
+                vibesql_types::SqlValue::Integer(coerce_update_rowid_value(&new_value)?)
+            } else if let Some(st) = self.schema.strict_type_of(col_index) {
                 crate::strict::enforce_strict_type(new_value, st, &self.schema.name, &column.name)?
             } else {
                 coerce_value(new_value, &column.data_type)?

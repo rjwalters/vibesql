@@ -12,6 +12,7 @@ pub mod validation;
 use crate::errors::ExecutorError;
 
 pub use execution::InsertOutcome;
+pub(crate) use execution::{coerce_rowid_affinity, RowidAffinity};
 
 /// Executor for INSERT statements
 pub struct InsertExecutor;

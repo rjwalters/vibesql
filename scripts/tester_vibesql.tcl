@@ -2497,7 +2497,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -3241,7 +3241,7 @@ proc execsql2 {sql {db ""}} {
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
         # Allow supported PRAGMAs through
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|data_version|collation_list|index_list|index_xinfo|index_info)} [string trim $sql]]} {
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|data_version|collation_list|index_list|index_xinfo|index_info)} [string trim $sql]]} {
             # Pass through to VibeSQL - these are supported
         } else {
             return {}  ;# Skip unsupported PRAGMA statements
@@ -7003,6 +7003,9 @@ proc sqlite3 {db args} {
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0
+    # recursive_triggers is per-connection in SQLite (OFF by default); a fresh
+    # open must not inherit the previous connection's setting (#5909).
+    set ::pragma_recursive_triggers 0
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
     set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
 
@@ -7370,6 +7373,8 @@ proc reset_db {} {
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0
+    # recursive_triggers is per-connection in SQLite (OFF by default; #5909).
+    set ::pragma_recursive_triggers 0
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
     # Drop all temp view/trigger replay state — reset_db wipes the database, so
     # replaying stale temp-object DDL into the fresh db would resurrect objects
@@ -7402,6 +7407,14 @@ proc forcedelete {args} {
     # `file rootname test.db-journal` is "test", whose siblings belong to
     # the still-live test.db).
     foreach f $args {
+        # The shim maps "test.db" to a unique per-run temp file (see the
+        # `sqlite3` proc), so `forcedelete test.db` must delete THAT file —
+        # deleting the literal ./test.db is a no-op and the "deleted" database
+        # silently survives into the next open (triggerC-12.1 saw a stale
+        # `table t1 already exists`). Apply the same mapping here.
+        if {[file tail $f] eq "test.db" && [info exists ::db_file] && $::db_file ne ""} {
+            set f $::db_file
+        }
         catch {file delete -force $f}
         if {[string match "*-journal" $f] || [string match "*-wal" $f] \
                 || [string match "*-shm" $f] || [string match "*-checkpoints" $f]} {

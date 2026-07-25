@@ -176,3 +176,63 @@ fn trigger_observes_coerced_rowid_for_negative_real() {
     // sqlite3 3.51.0: new.rowid = -42 (integer), new.b = -42 (integer).
     assert_eq!(rows[0][0], SqlValue::Varchar("-42 integer -42 integer".into()));
 }
+
+/// triggerC-4.1.5 (issue #6176): `INSERT INTO t(rowid, ...) VALUES(NULL, ...)`
+/// auto-assigns the rowid, so a BEFORE INSERT trigger must observe the
+/// unwritten-rowid sentinel (-1) — exactly as it does when the rowid column is
+/// omitted — while an AFTER INSERT trigger observes the real assigned rowid.
+#[test]
+fn before_trigger_sees_sentinel_for_explicit_null_rowid() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log(t TEXT)").unwrap();
+    exec(&mut db, "CREATE TABLE t4(a TEXT)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bi BEFORE INSERT ON t4 BEGIN \
+         INSERT INTO log VALUES('before ' || new.rowid || ' ' || typeof(new.rowid)); \
+         END",
+    )
+    .unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4ai AFTER INSERT ON t4 BEGIN \
+         INSERT INTO log VALUES('after ' || new.rowid || ' ' || typeof(new.rowid)); \
+         END",
+    )
+    .unwrap();
+
+    exec(&mut db, "INSERT INTO t4(rowid, a) VALUES(NULL, 'x')").unwrap();
+
+    let rows = query(&db, "SELECT t FROM log ORDER BY rowid");
+    assert_eq!(rows.len(), 2);
+    // sqlite3 3.51.0: BEFORE sees -1 (sentinel), AFTER sees the assigned rowid 1.
+    assert_eq!(rows[0][0], SqlValue::Varchar("before -1 integer".into()));
+    assert_eq!(rows[1][0], SqlValue::Varchar("after 1 integer".into()));
+
+    // The stored row carries the real assigned rowid.
+    let (rowid, ty) = rowid_and_type(&db, "t4");
+    assert_eq!(rowid, 1);
+    assert_eq!(ty, SqlValue::Varchar("integer".into()));
+}
+
+/// An EXPLICIT (non-NULL) rowid remains visible as-is to BEFORE INSERT
+/// triggers — the sentinel only applies to auto-assigned rowids.
+#[test]
+fn before_trigger_sees_explicit_rowid_value() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE log(t TEXT)").unwrap();
+    exec(&mut db, "CREATE TABLE t4(a TEXT)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TRIGGER t4bi BEFORE INSERT ON t4 BEGIN \
+         INSERT INTO log VALUES('before ' || new.rowid); \
+         END",
+    )
+    .unwrap();
+
+    exec(&mut db, "INSERT INTO t4(rowid, a) VALUES(45, 'x')").unwrap();
+
+    let rows = query(&db, "SELECT t FROM log");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], SqlValue::Varchar("before 45".into()));
+}
