@@ -284,6 +284,29 @@ fn test_value_functions() {
     assert!(result.is_ok());
 }
 
+// window1 6.3: FILTER is only valid on aggregate window functions. A ranking or
+// value window function with a FILTER clause is a parse error, matching SQLite's
+// "FILTER clause may only be used with aggregate window functions".
+#[test]
+fn test_filter_on_non_aggregate_window_rejected() {
+    for sql in [
+        "SELECT lag(x) FILTER (WHERE (x%2)=0) OVER w FROM t1 WINDOW w AS (ORDER BY x)",
+        "SELECT row_number() FILTER (WHERE x>0) OVER (ORDER BY x) FROM t1",
+        "SELECT rank() FILTER (WHERE x>0) OVER (ORDER BY x) FROM t1",
+    ] {
+        let err = Parser::parse_sql(sql).expect_err(sql);
+        assert_eq!(
+            err.message, "FILTER clause may only be used with aggregate window functions",
+            "sql: {sql}"
+        );
+    }
+
+    // FILTER on an *aggregate* window function stays valid.
+    assert!(
+        Parser::parse_sql("SELECT sum(x) FILTER (WHERE x>0) OVER (ORDER BY x) FROM t1").is_ok()
+    );
+}
+
 #[test]
 fn test_complex_window_spec() {
     let sql = "SELECT RANK() OVER (PARTITION BY dept ORDER BY salary DESC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM t";
