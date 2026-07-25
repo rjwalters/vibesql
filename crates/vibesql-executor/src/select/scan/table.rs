@@ -43,8 +43,13 @@ use crate::{
     },
 };
 
-/// Minimum row count to benefit from SIMD columnar filtering
-/// Below this threshold, row-by-row filtering is faster due to conversion overhead
+/// Minimum row count to benefit from SIMD columnar filtering on a *native*
+/// `STORAGE COLUMNAR` table, whose typed columns are already resident (no
+/// conversion cost). Below this the row-by-row path wins.
+///
+/// #6199 Phase 2: this constant now gates only the native-columnar SIMD path.
+/// The row-oriented representation-cache path is gated by the adaptive,
+/// signal-driven `Database::should_use_columnar` instead of this bare row count.
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
 /// Apply SQL:1999 E051-09 column aliases to a table schema
@@ -904,11 +909,10 @@ pub(crate) fn execute_table_scan(
                 let all_rows = table.scan();
                 // sqlite_search_count: Track rows examined during table scan
                 database.increment_search_count(all_rows.len() as u64);
-                // Phase 1 of #6199: record this analytical (columnar-eligible)
-                // scan and its projected column width (measurement only — no
-                // behavior change). `schema.total_columns` is the scan's output
-                // column count.
-                database.record_scan(table_name, schema.total_columns as u64);
+                // #6199: record this analytical (columnar-eligible) scan. The
+                // recorded scan/point-lookup/write mix drives the Phase 2
+                // adaptive dispatch decision below (`should_use_columnar`).
+                database.record_scan(table_name);
 
                 if crate::profiling::is_scan_debug_enabled() {
                     eprintln!(
@@ -980,7 +984,15 @@ pub(crate) fn execute_table_scan(
                 // post-SIMD filter so that rows tombstoned by concurrent
                 // writers or written by uncommitted/future txns are not
                 // surfaced through the columnar fast path.
-                if all_rows.len() >= SIMD_COLUMNAR_THRESHOLD {
+                // #6199 Phase 2: adaptive, signal-driven dispatch replaces the
+                // former bare `all_rows.len() >= SIMD_COLUMNAR_THRESHOLD` gate.
+                // `should_use_columnar` keeps hot analytical tables on the
+                // columnar (representation-cache) path while leaving small,
+                // point-lookup-dominated, or write-thrashed tables on the row
+                // path (so they are never converted/cached). The scan was
+                // already recorded above via `record_scan`, so the decision
+                // reflects the current access pattern.
+                if database.should_use_columnar(table_name, all_rows.len()) {
                     if let Ok(mut filtered_rows) = filter_with_cached_columnar(
                         database,
                         table,

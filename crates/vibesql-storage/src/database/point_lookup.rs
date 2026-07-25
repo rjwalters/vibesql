@@ -45,12 +45,14 @@ impl Database {
         table_name: &str,
         pk_value: &vibesql_types::SqlValue,
     ) -> Result<Option<&Row>, StorageError> {
-        // Phase 1 of #6199: record the point lookup (measurement only).
-        self.record_point_lookup(table_name);
-
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+
+        // #6199: record the point lookup (measurement only), AFTER the
+        // table-existence check so a lookup on a non-existent table does not
+        // create an empty signal entry (Phase 2 carry-forward tidy).
+        self.record_point_lookup(table_name);
 
         let pk_index = table.primary_key_index().ok_or_else(|| {
             StorageError::Other(format!("Table '{}' has no primary key", table_name))
@@ -88,12 +90,14 @@ impl Database {
         pk_value: &vibesql_types::SqlValue,
         column_index: usize,
     ) -> Result<Option<&vibesql_types::SqlValue>, StorageError> {
-        // Phase 1 of #6199: record the point lookup (measurement only).
-        self.record_point_lookup(table_name);
-
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+
+        // #6199: record the point lookup (measurement only), AFTER the
+        // table-existence check so a lookup on a non-existent table does not
+        // create an empty signal entry (Phase 2 carry-forward tidy).
+        self.record_point_lookup(table_name);
 
         // Validate column index
         if column_index >= table.schema.columns.len() {
@@ -136,12 +140,14 @@ impl Database {
         table_name: &str,
         pk_values: &[vibesql_types::SqlValue],
     ) -> Result<Option<&Row>, StorageError> {
-        // Phase 1 of #6199: record the point lookup (measurement only).
-        self.record_point_lookup(table_name);
-
         let table = self
             .get_table(table_name)
             .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+
+        // #6199: record the point lookup (measurement only), AFTER the
+        // table-existence check so a lookup on a non-existent table does not
+        // create an empty signal entry (Phase 2 carry-forward tidy).
+        self.record_point_lookup(table_name);
 
         let pk_index = table.primary_key_index().ok_or_else(|| {
             StorageError::Other(format!("Table '{}' has no primary key", table_name))

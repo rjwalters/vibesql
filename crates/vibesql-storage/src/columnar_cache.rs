@@ -71,6 +71,15 @@ struct CacheEntry {
     data: Arc<ColumnarTable>,
     /// Size in bytes (cached to avoid recomputation)
     size_bytes: usize,
+    /// #6199 Phase 2: structural "hotness" of this table (higher = more
+    /// analytically hot). Computed from the per-table access signal by
+    /// `database::columnar_hotness` and refreshed on insert / access. Under
+    /// memory pressure the *coldest* resident entry is evicted first, so hot
+    /// analytical tables stay resident. `0` (the default supplied by the legacy
+    /// two-argument [`ColumnarCache::insert`]) makes eviction fall back to pure
+    /// LRU tie-breaking, preserving the historical behavior for callers that do
+    /// not supply a hotness.
+    hotness: u64,
 }
 
 /// LRU cache for columnar table representations
@@ -112,6 +121,56 @@ pub struct ColumnarCache {
     current_memory: RwLock<usize>,
     /// Cache statistics
     stats: RwLock<CacheStats>,
+}
+
+/// Evict the coldest resident entries until `size_bytes` fits within
+/// `max_memory`, or until only entries strictly hotter than `incoming_hotness`
+/// remain (#6199 Phase 2, hotness-aware eviction).
+///
+/// Victim selection is by lowest `hotness`, tie-broken toward the LRU end:
+/// `LruCache::iter` yields most- to least-recently-used, and the `<=`
+/// comparison lets a later (more-LRU) entry win a hotness tie. A resident entry
+/// strictly hotter than the incoming table's `incoming_hotness` is protected —
+/// eviction stops rather than displace hotter analytical data for a colder
+/// newcomer. The caller then admits the newcomer even if that leaves the cache
+/// over budget; the next insert reclaims it (bounded to budget + one entry).
+///
+/// Operates on already-acquired lock targets so it is shared between the native
+/// and wasm code paths.
+fn evict_coldest_to_fit(
+    cache: &mut lru::LruCache<String, CacheEntry>,
+    current_memory: &mut usize,
+    stats: &mut CacheStats,
+    size_bytes: usize,
+    max_memory: usize,
+    incoming_hotness: u64,
+) {
+    while *current_memory + size_bytes > max_memory {
+        // Find the coldest resident entry (tie-break toward LRU).
+        let mut victim_key: Option<String> = None;
+        let mut victim_hotness = u64::MAX;
+        for (k, entry) in cache.iter() {
+            if entry.hotness <= victim_hotness {
+                victim_hotness = entry.hotness;
+                victim_key = Some(k.clone());
+            }
+        }
+
+        match victim_key {
+            // Protect residents strictly hotter than the incoming table.
+            Some(_) if victim_hotness > incoming_hotness => break,
+            Some(key) => {
+                if let Some(evicted) = cache.pop(&key) {
+                    *current_memory = current_memory.saturating_sub(evicted.size_bytes);
+                    stats.evictions += 1;
+                } else {
+                    break;
+                }
+            }
+            // Cache empty — nothing left to evict.
+            None => break,
+        }
+    }
 }
 
 impl ColumnarCache {
@@ -173,20 +232,48 @@ impl ColumnarCache {
         }
     }
 
-    /// Insert or update a columnar table in the cache
+    /// Insert or update a columnar table in the cache (hotness-agnostic).
     ///
-    /// If the table is already cached, the existing entry is updated.
-    /// If inserting would exceed the memory budget, least recently used
-    /// entries are evicted until there's sufficient space.
+    /// Equivalent to [`ColumnarCache::insert_with_hotness`] with a hotness of
+    /// `0`, which makes eviction fall back to pure LRU tie-breaking. Retained
+    /// for callers (and tests) that have no access-pattern signal to supply;
+    /// the adaptive [`crate::database::Database::get_columnar`] path uses
+    /// `insert_with_hotness` so that hot analytical tables are protected under
+    /// memory pressure.
+    ///
+    /// # Returns
+    /// The Arc-wrapped columnar table (for immediate use)
+    pub fn insert(&self, table_name: &str, columnar: ColumnarTable) -> Arc<ColumnarTable> {
+        self.insert_with_hotness(table_name, columnar, 0)
+    }
+
+    /// Insert or update a columnar table in the cache with a structural
+    /// **hotness** (#6199 Phase 2).
+    ///
+    /// If the table is already cached, the existing entry is replaced. If
+    /// inserting would exceed the memory budget, the *coldest* resident entries
+    /// are evicted first (hotness-aware eviction, not pure LRU) until there is
+    /// room — but a resident entry strictly hotter than `hotness` is never
+    /// displaced by this colder newcomer. When only hotter residents remain the
+    /// incoming entry is still admitted (possibly over budget); the over-budget
+    /// condition self-corrects on the next insert (bounded to budget + one
+    /// entry), matching the historical "always admit" behavior.
+    ///
     /// Table names are normalized for case-insensitive matching.
     ///
     /// # Arguments
     /// * `table_name` - Name of the table
     /// * `columnar` - The columnar table data to cache
+    /// * `hotness` - Structural hotness from `database::columnar_hotness`
     ///
     /// # Returns
     /// The Arc-wrapped columnar table (for immediate use)
-    pub fn insert(&self, table_name: &str, columnar: ColumnarTable) -> Arc<ColumnarTable> {
+    pub fn insert_with_hotness(
+        &self,
+        table_name: &str,
+        columnar: ColumnarTable,
+        hotness: u64,
+    ) -> Arc<ColumnarTable> {
         let data = Arc::new(columnar);
 
         // #6199 Phase 0: a zero budget disables the representation cache. Never
@@ -213,19 +300,17 @@ impl ColumnarCache {
                 *current_memory = current_memory.saturating_sub(old_entry.size_bytes);
             }
 
-            // Evict until we have space (or cache is empty)
-            while *current_memory + size_bytes > self.max_memory {
-                if let Some((_, evicted)) = cache.pop_lru() {
-                    *current_memory = current_memory.saturating_sub(evicted.size_bytes);
-                    stats.evictions += 1;
-                } else {
-                    // Cache is empty, can't evict more
-                    break;
-                }
-            }
+            evict_coldest_to_fit(
+                &mut cache,
+                &mut current_memory,
+                &mut stats,
+                size_bytes,
+                self.max_memory,
+                hotness,
+            );
 
             // Insert new entry
-            let entry = CacheEntry { data: Arc::clone(&data), size_bytes };
+            let entry = CacheEntry { data: Arc::clone(&data), size_bytes, hotness };
             cache.put(key, entry);
             *current_memory += size_bytes;
             stats.conversions += 1;
@@ -242,25 +327,46 @@ impl ColumnarCache {
                 *current_memory = current_memory.saturating_sub(old_entry.size_bytes);
             }
 
-            // Evict until we have space (or cache is empty)
-            while *current_memory + size_bytes > self.max_memory {
-                if let Some((_, evicted)) = cache.pop_lru() {
-                    *current_memory = current_memory.saturating_sub(evicted.size_bytes);
-                    stats.evictions += 1;
-                } else {
-                    // Cache is empty, can't evict more
-                    break;
-                }
-            }
+            evict_coldest_to_fit(
+                &mut cache,
+                &mut current_memory,
+                &mut stats,
+                size_bytes,
+                self.max_memory,
+                hotness,
+            );
 
             // Insert new entry
-            let entry = CacheEntry { data: Arc::clone(&data), size_bytes };
+            let entry = CacheEntry { data: Arc::clone(&data), size_bytes, hotness };
             cache.put(key, entry);
             *current_memory += size_bytes;
             stats.conversions += 1;
         }
 
         data
+    }
+
+    /// Refresh the stored hotness of a cached table without disturbing its LRU
+    /// recency or the memory accounting (#6199 Phase 2). No-op if the table is
+    /// not resident. Called on cache hits so a table's eviction priority tracks
+    /// its evolving access pattern rather than the hotness captured at insert.
+    pub fn update_hotness(&self, table_name: &str, hotness: u64) {
+        let key = normalize_cache_key(table_name);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut cache = self.cache.write();
+            if let Some(entry) = cache.peek_mut(&key) {
+                entry.hotness = hotness;
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut cache = self.cache.write().unwrap();
+            if let Some(entry) = cache.peek_mut(&key) {
+                entry.hotness = hotness;
+            }
+        }
     }
 
     /// Invalidate a cached table entry

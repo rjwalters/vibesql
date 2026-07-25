@@ -57,8 +57,18 @@ impl Database {
             return Ok(None);
         }
 
+        // #6199 Phase 2: structural hotness for this table, used to protect hot
+        // analytical tables from eviction by colder newcomers. Derived from the
+        // per-table access signal (never wall-clock).
+        let hotness =
+            super::columnar_policy::columnar_hotness(self.table_access_signal(table_name));
+
         // Check cache first (for row-oriented tables)
         if let Some(cached) = self.columnar_cache.get(table_name) {
+            // Refresh the resident entry's eviction priority so it tracks the
+            // table's evolving access pattern rather than the hotness captured
+            // at first insert.
+            self.columnar_cache.update_hotness(table_name, hotness);
             return Ok(Some(cached));
         }
 
@@ -71,9 +81,27 @@ impl Database {
         // Convert to columnar format
         let columnar = table.scan_columnar()?;
 
-        // Insert into cache and return
-        let cached = self.columnar_cache.insert(table_name, columnar);
+        // Insert into cache (hotness-aware eviction) and return
+        let cached = self.columnar_cache.insert_with_hotness(table_name, columnar, hotness);
         Ok(Some(cached))
+    }
+
+    /// Structural (non-timing) decision — should a row-oriented table of
+    /// `row_count` rows use its columnar representation for an analytical scan?
+    ///
+    /// #6199 Phase 2: this replaces the executor's former hardcoded
+    /// `SIMD_COLUMNAR_THRESHOLD = 500` row-count-only gate. The decision is
+    /// driven purely by structural signals — the row count and the per-table
+    /// access-pattern signal (scan / point-lookup / write mix) — never by
+    /// wall-clock timing. Point-lookup-dominated and write-thrashed tables stay
+    /// on the row path even when large; hot analytical tables convert. See
+    /// [`crate::database::should_use_columnar`] for the exact policy.
+    ///
+    /// Native `STORAGE COLUMNAR` tables are authoritative and are handled by
+    /// their own always-resident path; this gate governs only the transparent
+    /// row-table representation cache.
+    pub fn should_use_columnar(&self, table_name: &str, row_count: usize) -> bool {
+        super::columnar_policy::should_use_columnar(row_count, self.table_access_signal(table_name))
     }
 
     /// Invalidate columnar cache entry for a table
@@ -437,6 +465,83 @@ mod tests {
         assert!(
             enabled.columnar_cache_stats().conversions > 0,
             "an enabled cache must record at least one conversion"
+        );
+    }
+
+    // ========================================================================
+    // #6199 Phase 2 — adaptive dispatch + hotness-aware eviction
+    // ========================================================================
+
+    /// Warm `count` identical 100-row tables through `get_columnar` on a fresh
+    /// generous-budget database and return the cached size of one table, so a
+    /// test can pick a budget that holds exactly one table.
+    fn one_table_cached_size() -> usize {
+        let mut db = Database::new(); // default (256MB) budget — nothing evicts
+        db.create_table(create_test_table_schema("probe")).unwrap();
+        for row in create_test_rows(100) {
+            db.insert_row("probe", row).unwrap();
+        }
+        db.get_columnar("probe").unwrap();
+        let sz = db.columnar_cache_memory_usage();
+        assert!(sz > 0, "probe table should occupy non-zero cache memory");
+        sz
+    }
+
+    /// Hotness-aware eviction (structural, never wall-clock): an analytically
+    /// hot table stays resident under cache pressure while a colder,
+    /// point-lookup-dominated newcomer is admitted without displacing it.
+    ///
+    /// With pure LRU (the pre-Phase-2 behavior) the newcomer would evict the
+    /// least-recently-used entry — the hot table — and the subsequent access to
+    /// the hot table would re-convert it. Here the hot table must instead be a
+    /// cache hit with no re-conversion, proving eviction is ordered by hotness.
+    #[test]
+    fn test_hot_analytical_table_survives_cache_pressure() {
+        // Budget holds exactly one table, so admitting a second forces the
+        // eviction path to run (and, here, to protect the hotter resident).
+        let mut config = crate::DatabaseConfig::server_default();
+        config.columnar_cache_budget = one_table_cached_size();
+        let mut db = Database::with_config(config);
+
+        for name in ["hot", "cold"] {
+            db.create_table(create_test_table_schema(name)).unwrap();
+            for row in create_test_rows(100) {
+                db.insert_row(name, row).unwrap();
+            }
+        }
+
+        // Structural access signal: `hot` is scan-dominated, `cold` is
+        // point-lookup-dominated. (Recorded directly — the executor records the
+        // same counters end-to-end; here we drive them to isolate the policy.)
+        for _ in 0..50 {
+            db.record_scan("hot");
+        }
+        for _ in 0..50 {
+            db.record_point_lookup("cold");
+        }
+
+        // Warm `hot` into the cache (one conversion, now resident).
+        db.get_columnar("hot").unwrap();
+
+        // Admit the cold newcomer. It is colder than the resident hot table, so
+        // hotness-aware eviction must NOT displace `hot` (it is admitted
+        // over-budget instead). This converts `cold`.
+        db.get_columnar("cold").unwrap();
+
+        // `hot` must still be resident: accessing it is a cache hit with no
+        // re-conversion. Under pure LRU it would have been evicted by the cold
+        // insert and re-converted here.
+        let before = db.columnar_cache_stats();
+        db.get_columnar("hot").unwrap();
+        let after = db.columnar_cache_stats();
+        assert_eq!(
+            after.conversions, before.conversions,
+            "hot analytical table must stay resident (no re-conversion) under cache pressure"
+        );
+        assert_eq!(
+            after.hits,
+            before.hits + 1,
+            "accessing the still-resident hot table must be a cache hit"
         );
     }
 
