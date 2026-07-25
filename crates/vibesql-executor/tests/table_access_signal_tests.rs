@@ -2,7 +2,7 @@
 //!
 //! These verify the end-to-end plumbing of the measurement-only access signal
 //! through the real executor + storage paths:
-//!   - analytical scans increment `scan_count` and record projection width,
+//!   - analytical scans increment `scan_count`,
 //!   - point lookups increment `point_lookup_count`,
 //!   - writes increment `write_count` (including for a native-columnar table,
 //!     proving the increment fires before the `is_native_columnar` early-return),
@@ -75,13 +75,6 @@ fn test_scan_count_matches_number_of_analytical_scans() {
 
     let sig = db.table_access_signal("items").expect("items should have a signal");
     assert_eq!(sig.scan_count, n, "scan_count should equal number of analytical scans");
-    // Projection width is the scan's output column count (all 3 columns of items).
-    assert_eq!(sig.projection_width_n, n, "one width recorded per scan");
-    assert_eq!(
-        sig.avg_projection_width(),
-        Some(3.0),
-        "avg projection width = items column count (id, name, price)"
-    );
     // Scans must not be miscounted as writes/lookups.
     assert_eq!(sig.point_lookup_count, 0);
     assert_eq!(sig.write_count, 0);
@@ -193,6 +186,22 @@ fn test_two_tables_independent_and_case_insensitive() {
 
     // Case-insensitive accessor lookup.
     assert_eq!(db.table_access_signal("ITEMS"), db.table_access_signal("items"));
+}
+
+#[test]
+fn test_point_lookup_on_missing_table_creates_no_signal() {
+    // #6199 Phase 2 carry-forward: a point lookup on a non-existent table must
+    // return an error WITHOUT creating an empty signal entry (record_point_lookup
+    // now fires after the table-existence check).
+    let db = Database::new();
+
+    let result = db.get_row_by_pk("ghost", &SqlValue::Integer(1));
+    assert!(result.is_err(), "lookup on a non-existent table should error");
+    assert_eq!(
+        db.table_access_signal("ghost"),
+        None,
+        "a lookup on a missing table must not create a signal entry"
+    );
 }
 
 #[test]

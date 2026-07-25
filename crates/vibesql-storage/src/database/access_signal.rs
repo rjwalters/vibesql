@@ -3,9 +3,16 @@
 // ============================================================================
 //
 // A cheap, always-on per-table usage counter used to make the columnar
-// representation cache adaptive in a later phase (#6199, Phase 2). This module
-// only *observes* how each table is used; it changes no dispatch, promotion, or
-// eviction behavior. Phase 2 is the sole consumer.
+// representation cache adaptive. Phase 1 (#6199) added the counters as
+// measurement only; Phase 2 (`columnar_policy.rs`) is the sole consumer,
+// converting the scan / point-lookup / write mix into dispatch and hotness-
+// eviction decisions.
+//
+// #6199 Phase 2 note: a `projection_width` counter recorded here in Phase 1 was
+// removed. The scan hook only had the table's full arity (a per-table constant)
+// to record, not the real SELECT projection list, so the "average projection
+// width" it produced carried no projection information and no adaptive decision
+// consumed it. It was dropped rather than left as a misleading dead signal.
 //
 // The read/scan path operates on `&Database` (a shared immutable ref) and scans
 // tables `&self`, so the signal must use interior mutability — it must never be
@@ -52,11 +59,6 @@ pub(super) struct TableAccessSignal {
     pub(super) scan_count: AtomicU64,
     /// Primary-key / point lookups of the table.
     pub(super) point_lookup_count: AtomicU64,
-    /// Running sum of projected column counts across recorded scans.
-    pub(super) projection_width_sum: AtomicU64,
-    /// Number of scans that contributed to `projection_width_sum`, so the
-    /// average projection width can be derived.
-    pub(super) projection_width_n: AtomicU64,
     /// Writes (INSERT/UPDATE/DELETE/TRUNCATE/ALTER) routed through the DML
     /// invalidation funnel.
     pub(super) write_count: AtomicU64,
@@ -72,24 +74,8 @@ pub struct AccessSignalSnapshot {
     pub scan_count: u64,
     /// Primary-key / point lookups of the table.
     pub point_lookup_count: u64,
-    /// Running sum of projected column counts across recorded scans.
-    pub projection_width_sum: u64,
-    /// Number of scans that contributed to `projection_width_sum`.
-    pub projection_width_n: u64,
     /// Writes routed through the DML invalidation funnel.
     pub write_count: u64,
-}
-
-impl AccessSignalSnapshot {
-    /// Average projected column width across recorded scans, or `None` when no
-    /// scan has recorded a width yet.
-    pub fn avg_projection_width(&self) -> Option<f64> {
-        if self.projection_width_n == 0 {
-            None
-        } else {
-            Some(self.projection_width_sum as f64 / self.projection_width_n as f64)
-        }
-    }
 }
 
 // ----------------------------------------------------------------------------
@@ -155,13 +141,17 @@ impl Database {
         });
     }
 
-    /// Record one analytical scan of `table_name` with the given projected
-    /// column width (the scan's output column count).
-    pub fn record_scan(&self, table_name: &str, projection_width: u64) {
+    /// Record one analytical scan of `table_name`.
+    ///
+    /// #6199 Phase 2: the former `projection_width` parameter was dropped. The
+    /// scan hook only had access to the table's full arity (a per-table
+    /// constant), not the real SELECT projection list, so the recorded
+    /// "projection width" carried no projection information and was never
+    /// consumed by the adaptive policy. Rather than record a misleading
+    /// constant, the field was removed (see the module docs).
+    pub fn record_scan(&self, table_name: &str) {
         self.with_access_signal(table_name, |sig| {
             sig.scan_count.fetch_add(1, Ordering::Relaxed);
-            sig.projection_width_sum.fetch_add(projection_width, Ordering::Relaxed);
-            sig.projection_width_n.fetch_add(1, Ordering::Relaxed);
         });
     }
 
@@ -187,8 +177,6 @@ impl Database {
             map.get(&key).map(|sig| AccessSignalSnapshot {
                 scan_count: sig.scan_count.load(Ordering::Relaxed),
                 point_lookup_count: sig.point_lookup_count.load(Ordering::Relaxed),
-                projection_width_sum: sig.projection_width_sum.load(Ordering::Relaxed),
-                projection_width_n: sig.projection_width_n.load(Ordering::Relaxed),
                 write_count: sig.write_count.load(Ordering::Relaxed),
             })
         })
@@ -205,19 +193,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_scan_count_and_projection_width() {
+    fn test_scan_count() {
         let db = Database::new();
 
-        // Record N scans of table "T" with projection widths 2, 4, 6.
-        db.record_scan("T", 2);
-        db.record_scan("T", 4);
-        db.record_scan("T", 6);
+        // Record N scans of table "T".
+        db.record_scan("T");
+        db.record_scan("T");
+        db.record_scan("T");
 
         let sig = db.table_access_signal("T").expect("signal should exist after scans");
         assert_eq!(sig.scan_count, 3, "scan_count should equal number of scans");
-        assert_eq!(sig.projection_width_n, 3);
-        assert_eq!(sig.projection_width_sum, 12);
-        assert_eq!(sig.avg_projection_width(), Some(4.0), "avg width = mean of recorded widths");
         assert_eq!(sig.point_lookup_count, 0);
         assert_eq!(sig.write_count, 0);
     }
@@ -247,20 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn test_avg_projection_width_none_when_no_scans() {
-        let db = Database::new();
-        db.record_point_lookup("t");
-
-        let sig = db.table_access_signal("t").expect("signal should exist");
-        assert_eq!(sig.avg_projection_width(), None, "no scans yet => no avg width");
-    }
-
-    #[test]
     fn test_tables_are_independent() {
         let db = Database::new();
 
-        db.record_scan("a", 3);
-        db.record_scan("a", 3);
+        db.record_scan("a");
+        db.record_scan("a");
         db.record_point_lookup("b");
 
         let a = db.table_access_signal("a").expect("a exists");
@@ -277,8 +253,8 @@ mod tests {
         let db = Database::new();
 
         // Mixed casing must all land on the same entry.
-        db.record_scan("Users", 2);
-        db.record_scan("users", 2);
+        db.record_scan("Users");
+        db.record_scan("users");
         db.record_point_lookup("USERS");
 
         let via_lower = db.table_access_signal("users").expect("exists");
@@ -298,7 +274,7 @@ mod tests {
     fn test_reset_access_signals() {
         let db = Database::new();
 
-        db.record_scan("t", 4);
+        db.record_scan("t");
         db.record_point_lookup("t");
         db.record_write("t");
         assert!(db.table_access_signal("t").is_some());
@@ -310,7 +286,7 @@ mod tests {
     #[test]
     fn test_clone_resets_signals() {
         let db = Database::new();
-        db.record_scan("t", 4);
+        db.record_scan("t");
 
         let cloned = db.clone();
         assert_eq!(

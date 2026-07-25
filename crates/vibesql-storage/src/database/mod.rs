@@ -5,6 +5,7 @@
 mod access_signal;
 mod cache;
 mod change_events_api;
+mod columnar_policy;
 mod config;
 mod constructors;
 mod core;
@@ -27,6 +28,9 @@ pub mod transactions;
 mod tests;
 
 pub use access_signal::AccessSignalSnapshot;
+pub use columnar_policy::{
+    columnar_hotness, should_use_columnar, MIN_COLUMNAR_ROWS, SCAN_DOMINANCE_FACTOR,
+};
 pub use core::{Database, ExportedSpatialIndexMetadata as SpatialIndexMetadata};
 // The WAL recovery path (`wal::recovery`) shares the CreateTable schema-blob
 // layout with the emit path here; its tests round-trip through the real
