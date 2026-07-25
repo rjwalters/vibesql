@@ -2809,7 +2809,23 @@ proc execsql {sql {db ""}} {
             set raw_sql ".mode raw\n${pragma_prefix}${trimmed_sql};\nSELECT changes();"
         }
     } else {
-        set raw_sql ".mode raw\n${pragma_prefix}$sql"
+        # Read-only (non-DML) block. Because each execsql runs in a FRESH
+        # process, a SELECT that references last_insert_rowid() would evaluate it
+        # to 0 instead of the value tracked across process invocations
+        # (::last_insert_rowid, #5843). The shim already tracks that value from
+        # the INSERT that ran in a previous process, so substitute it here as an
+        # integer literal. Only do this for pure read blocks (no INSERT/REPLACE/
+        # UPDATE/DELETE keyword) so a block that itself mutates rows still gets
+        # the engine's in-process value. (Part of #6193 — e_insert last_insert_rowid
+        # evidence tests such as e_insert-1.3.*b.)
+        set read_sql $sql
+        if {![regexp {(^|[^A-Z_])(INSERT|REPLACE|UPDATE|DELETE)([^A-Z_]|$)} $sql_upper]} {
+            if {[regexp -nocase {last_insert_rowid\s*\(\s*\)} $read_sql]} {
+                regsub -all -nocase {last_insert_rowid\s*\(\s*\)} \
+                    $read_sql $::last_insert_rowid read_sql
+            }
+        }
+        set raw_sql ".mode raw\n${pragma_prefix}$read_sql"
     }
 
     # Use exec_preserve_newlines to avoid TCL's exec stripping trailing newlines.
