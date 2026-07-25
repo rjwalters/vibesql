@@ -369,6 +369,41 @@ fn build_window_map(
     Ok(resolved_map)
 }
 
+/// Enforce the SQL:2011 restrictions on a window spec that references a base
+/// window by name. See the sibling implementation in
+/// `select::window::collection::validate_window_override` for the rationale;
+/// duplicated here because this GROUP BY window path resolves specs
+/// independently of the non-aggregate window path.
+fn validate_window_override(
+    base_name: &str,
+    spec: &WindowSpec,
+    base_spec: &WindowSpec,
+) -> Result<(), ExecutorError> {
+    if spec.partition_by.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override PARTITION clause of window: {}",
+            base_name
+        )));
+    }
+    if spec.order_by.is_some() && base_spec.order_by.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override ORDER BY clause of window: {}",
+            base_name
+        )));
+    }
+    // Only a chaining reference (one that adds a clause) may not target a framed
+    // base window; a bare `OVER win` uses the base as-is and is always legal.
+    let is_chaining =
+        spec.partition_by.is_some() || spec.order_by.is_some() || spec.frame.is_some();
+    if is_chaining && base_spec.frame.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override frame specification of window: {}",
+            base_name
+        )));
+    }
+    Ok(())
+}
+
 /// Recursively resolve a window spec, handling inheritance chains
 fn resolve_window_spec_recursive(
     spec: &WindowSpec,
@@ -385,6 +420,8 @@ fn resolve_window_spec_recursive(
             } else {
                 return Err(ExecutorError::Other(format!("no such window: {}", base_name)));
             };
+
+            validate_window_override(base_name, spec, &base_spec)?;
 
             Ok(WindowSpec {
                 base_window_name: None,
@@ -407,6 +444,8 @@ fn resolve_window_spec(
             let base_spec = window_map
                 .get(&base_name.to_lowercase())
                 .ok_or_else(|| ExecutorError::Other(format!("no such window: {}", base_name)))?;
+
+            validate_window_override(base_name, spec, base_spec)?;
 
             Ok(WindowSpec {
                 base_window_name: None,

@@ -564,6 +564,14 @@ proc translate_error_to_sqlite {vibesql_error} {
         return $parse_msg
     }
 
+    # FILTER on a ranking/value window function (window1-6.3) — SQLite returns
+    # this message verbatim, not wrapped in "near ...: syntax error". The
+    # optional `Parse error:` prefix is handled the same way as above (idempotent
+    # across execsql's/catchsql's double translation).
+    if {[regexp -nocase {^(?:Parse error: )?(FILTER clause may only be used with aggregate window functions)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+
     # Legacy: Aggregate in ORDER BY context (for old error messages)
     if {[regexp -nocase {aggregate.*ORDER BY|ORDER BY.*aggregate} $error_msg]} {
         if {[regexp -nocase {(min|max|sum|avg|count)} $error_msg -> func_name]} {
@@ -5747,19 +5755,11 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite_exec() (SQLite internal)"]
     }
 
-    # Named WINDOW clause - SQL:2003 feature not yet supported in VibeSQL
-    # Pattern: WINDOW name AS (...) in SELECT statements
-    # Example: SELECT sum(x) OVER win FROM t WINDOW win AS (ORDER BY y)
-    if {[regexp -nocase {WINDOW\s+\w+\s+AS\s*\(} $script]} {
-        return [list 1 "uses named WINDOW clause (not yet supported)"]
-    }
-    # Also detect OVER <name> without parentheses (references a named window)
-    # Example: sum(x) OVER win
-    # But avoid false positives with OVER ( - the normal inline window spec
-    if {[regexp -nocase {OVER\s+[a-zA-Z_]\w*(?:\s|$|,|\))} $script] &&
-        ![regexp -nocase {OVER\s*\(} $script]} {
-        return [list 1 "uses named window reference (not yet supported)"]
-    }
+    # Note: the named WINDOW clause (WINDOW win AS (...)) and named window
+    # references (sum(x) OVER win, including window chaining WINDOW w2 AS (w1 ...))
+    # ARE supported by VibeSQL's parser + executor. The skips that previously
+    # matched these patterns were removed when the runtime support landed
+    # (#6191); do not re-add them.
 
     # Unsupported window functions
     # total() as window function - note: total() as aggregate IS supported

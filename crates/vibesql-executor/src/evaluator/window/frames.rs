@@ -145,6 +145,10 @@ fn evaluate_offset_expr(expr: &Expression) -> Result<Option<f64>, String> {
         Expression::Literal(SqlValue::Real(f)) => Ok(Some(*f)),
         Expression::Literal(SqlValue::Double(f)) => Ok(Some(*f)),
         Expression::Literal(SqlValue::Numeric(f)) => Ok(Some(*f)),
+        // SQLite coerces boolean literals to their numeric value (true -> 1,
+        // false -> 0) when used as a frame offset (window1 30.0:
+        // `RANGE BETWEEN 5.2 PRECEDING AND true PRECEDING`).
+        Expression::Literal(SqlValue::Boolean(b)) => Ok(Some(if *b { 1.0 } else { 0.0 })),
         Expression::Literal(SqlValue::Null) => {
             // NULL is treated as invalid (not a number)
             Ok(None)

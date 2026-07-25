@@ -286,3 +286,17 @@ fn test_validate_frame_valid_specs_accepted() {
     // Single CURRENT ROW bound
     assert!(validate_frame(&frame(FrameUnit::Rows, FrameBound::CurrentRow, None)).is_ok());
 }
+
+// SQLite coerces boolean literals to their numeric value (`true` -> 1, `false`
+// -> 0) when they appear as a frame offset. Previously VibeSQL rejected a
+// boolean offset as "frame ending offset must be a non-negative integer"
+// (window1 30.0: `RANGE BETWEEN 5.2 PRECEDING AND true PRECEDING`).
+#[test]
+fn test_validate_frame_boolean_offset_accepted() {
+    let bool_bound =
+        |b: bool| FrameBound::Preceding(Box::new(Expression::Literal(SqlValue::Boolean(b))));
+    // BETWEEN 5 PRECEDING AND true PRECEDING (true -> 1, non-negative, accepted)
+    assert!(validate_frame(&frame(FrameUnit::Rows, preceding(5), Some(bool_bound(true)))).is_ok());
+    // BETWEEN 5 PRECEDING AND false PRECEDING (false -> 0, likewise valid)
+    assert!(validate_frame(&frame(FrameUnit::Rows, preceding(5), Some(bool_bound(false)))).is_ok());
+}

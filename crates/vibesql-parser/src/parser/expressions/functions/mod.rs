@@ -479,6 +479,18 @@ impl Parser {
             // Validate argument count for window functions
             self.validate_window_function_args(&function_name_upper, args.len(), &first)?;
 
+            // FILTER is only meaningful on *aggregate* window functions. The
+            // ranking (ROW_NUMBER, RANK, ...) and value (LAG, LEAD, NTH_VALUE,
+            // ...) window functions reject it. SQLite: `lag(x) FILTER (WHERE ..)
+            // OVER w` -> "FILTER clause may only be used with aggregate window
+            // functions" (window1 6.3).
+            if filter.is_some() && self.is_window_only_function(&function_name_upper) {
+                return Err(ParseError {
+                    message: "FILTER clause may only be used with aggregate window functions"
+                        .to_string(),
+                });
+            }
+
             // Parse window specification
             let window_spec = self.parse_window_spec()?;
 

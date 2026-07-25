@@ -29,6 +29,46 @@ fn build_window_map(
     Ok(resolved_map)
 }
 
+/// Enforce the SQL:2011 restrictions on a window spec that references a base
+/// window by name (`OVER (base ...)` or `WINDOW w AS (base ...)`).
+///
+/// Mirrors SQLite's `sqlite3WindowChain`: a referencing window may not add a
+/// `PARTITION BY` clause, may add an `ORDER BY` only if the base has none, and
+/// may not reference a base that itself carries an explicit frame
+/// specification. Checks are ordered PARTITION -> ORDER BY -> frame to match
+/// SQLite's diagnostic precedence.
+pub(super) fn validate_window_override(
+    base_name: &str,
+    spec: &WindowSpec,
+    base_spec: &WindowSpec,
+) -> Result<(), ExecutorError> {
+    if spec.partition_by.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override PARTITION clause of window: {}",
+            base_name
+        )));
+    }
+    if spec.order_by.is_some() && base_spec.order_by.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override ORDER BY clause of window: {}",
+            base_name
+        )));
+    }
+    // The frame restriction only applies to a *chaining* reference — one that
+    // adds a clause of its own (`OVER (win ORDER BY x)` / `WINDOW w2 AS (win
+    // ...)`). A bare direct reference (`OVER win`) uses the base window as-is,
+    // frame included, and is always legal (window1 7.4, 10.5, 10.6, 27.2).
+    let is_chaining =
+        spec.partition_by.is_some() || spec.order_by.is_some() || spec.frame.is_some();
+    if is_chaining && base_spec.frame.is_some() {
+        return Err(ExecutorError::Other(format!(
+            "cannot override frame specification of window: {}",
+            base_name
+        )));
+    }
+    Ok(())
+}
+
 /// Recursively resolve a window spec, handling inheritance chains
 fn resolve_window_spec_recursive(
     spec: &WindowSpec,
@@ -48,6 +88,8 @@ fn resolve_window_spec_recursive(
             } else {
                 return Err(ExecutorError::Other(format!("no such window: {}", base_name)));
             };
+
+            validate_window_override(base_name, spec, &base_spec)?;
 
             // Merge: inherit from base, override with any values from current spec
             Ok(WindowSpec {
@@ -72,6 +114,8 @@ fn resolve_window_spec(
             let base_spec = window_map
                 .get(&base_name.to_lowercase())
                 .ok_or_else(|| ExecutorError::Other(format!("no such window: {}", base_name)))?;
+
+            validate_window_override(base_name, spec, base_spec)?;
 
             // Merge: inherit from base, override with any values from current spec
             Ok(WindowSpec {
@@ -259,4 +303,90 @@ fn collect_from_expression(
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_ast::{
+        Expression, FrameBound, FrameUnit, OrderByItem, OrderDirection, WindowFrame,
+    };
+    use vibesql_types::SqlValue;
+
+    use super::*;
+
+    fn order_by() -> Option<Vec<OrderByItem>> {
+        Some(vec![OrderByItem {
+            expr: Expression::Literal(SqlValue::Integer(1)),
+            direction: OrderDirection::Asc,
+            nulls_order: None,
+        }])
+    }
+
+    fn framed() -> Option<WindowFrame> {
+        Some(WindowFrame {
+            unit: FrameUnit::Rows,
+            start: FrameBound::Preceding(Box::new(Expression::Literal(SqlValue::Integer(1)))),
+            end: Some(FrameBound::Following(Box::new(Expression::Literal(SqlValue::Integer(1))))),
+            exclude: None,
+        })
+    }
+
+    fn spec(
+        base: Option<&str>,
+        partition: Option<Vec<Expression>>,
+        order: Option<Vec<OrderByItem>>,
+        frame: Option<WindowFrame>,
+    ) -> WindowSpec {
+        WindowSpec {
+            base_window_name: base.map(str::to_string),
+            partition_by: partition,
+            order_by: order,
+            frame,
+        }
+    }
+
+    // window1 18.1.3 / 18.2.3: a window referencing a base may not add PARTITION BY.
+    #[test]
+    fn override_partition_rejected() {
+        let referencing = spec(Some("win1"), Some(vec![Expression::Literal(SqlValue::Integer(1))]), None, None);
+        let base = spec(None, None, None, None);
+        let err = validate_window_override("win1", &referencing, &base).unwrap_err();
+        assert_eq!(err.to_string(), "cannot override PARTITION clause of window: win1");
+    }
+
+    // window1 18.1.4 / 18.2.4: adding ORDER BY when the base already has one is rejected.
+    #[test]
+    fn override_order_by_rejected() {
+        let referencing = spec(Some("win1"), None, order_by(), None);
+        let base = spec(None, None, order_by(), None);
+        let err = validate_window_override("win1", &referencing, &base).unwrap_err();
+        assert_eq!(err.to_string(), "cannot override ORDER BY clause of window: win1");
+    }
+
+    // window1 18.1.1 / 18.2.1: chaining onto a base that carries an explicit frame is rejected.
+    #[test]
+    fn override_frame_rejected_for_chaining() {
+        let referencing = spec(Some("win1"), None, order_by(), None);
+        let base = spec(None, None, None, framed());
+        let err = validate_window_override("win1", &referencing, &base).unwrap_err();
+        assert_eq!(err.to_string(), "cannot override frame specification of window: win1");
+    }
+
+    // window1 7.4 / 10.5: a bare `OVER win` reference (adds no clause) uses the
+    // framed base as-is and must NOT trip the frame-override guard.
+    #[test]
+    fn bare_reference_to_framed_base_allowed() {
+        let referencing = spec(Some("win"), None, None, None);
+        let base = spec(None, None, order_by(), framed());
+        assert!(validate_window_override("win", &referencing, &base).is_ok());
+    }
+
+    // window1 18.3.x: adding ORDER BY to a base that has only PARTITION BY (no
+    // ORDER BY, no frame) is the canonical legal chaining case.
+    #[test]
+    fn adding_order_by_to_partition_only_base_allowed() {
+        let referencing = spec(Some("win1"), None, order_by(), None);
+        let base = spec(None, Some(vec![Expression::Literal(SqlValue::Integer(1))]), None, None);
+        assert!(validate_window_override("win1", &referencing, &base).is_ok());
+    }
 }
