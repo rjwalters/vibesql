@@ -215,12 +215,20 @@ fn is_table_position(
 /// in that case with `error in trigger <name>: ambiguous column name: <col>`
 /// and leaves the schema unchanged; the caller is responsible for surfacing
 /// that error and not committing the rename.
+///
+/// When `new_old_refer_to_renamed_table` is true, a `new.<col>` / `old.<col>`
+/// qualified reference is treated as belonging to the renamed table. This is
+/// correct only when the trigger's own subject table *is* the renamed table
+/// (the `NEW`/`OLD` pseudo-tables always alias the trigger's subject table), so
+/// the caller must gate it on that. Views and triggers on other tables pass
+/// `false` and leave `new.`/`old.` references untouched.
 pub fn rewrite_column_refs_in_trigger_sql(
     sql: &str,
     renamed_table: &str,
     old_column: &str,
     new_column: &str,
     table_has_column: &dyn Fn(&str, &str) -> bool,
+    new_old_refer_to_renamed_table: bool,
 ) -> Result<String, String> {
     let tokens = match Lexer::new(sql).tokenize_with_spans() {
         Ok(t) => t,
@@ -246,13 +254,17 @@ pub fn rewrite_column_refs_in_trigger_sql(
             let qual_idx = significant[pos - 2];
             if matches!(tokens[dot_idx].0, Token::Symbol('.')) {
                 if let Token::Identifier(qualifier) = &tokens[qual_idx].0 {
+                    let is_new_old_ref = new_old_refer_to_renamed_table
+                        && (qualifier.eq_ignore_ascii_case("new")
+                            || qualifier.eq_ignore_ascii_case("old"));
                     if name.eq_ignore_ascii_case(old_column)
-                        && qualifier_is_renamed_table(
-                            qualifier,
-                            renamed_table,
-                            paren_scope_at(&tokens, &significant, pos),
-                            &scopes,
-                        )
+                        && (is_new_old_ref
+                            || qualifier_is_renamed_table(
+                                qualifier,
+                                renamed_table,
+                                paren_scope_at(&tokens, &significant, pos),
+                                &scopes,
+                            ))
                     {
                         edits.push(tokens[idx].1);
                     }
@@ -559,12 +571,12 @@ mod tests {
     }
 
     fn rewrite_col(sql: &str, table: &str, old: &str, new: &str) -> String {
-        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema)
+        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema, true)
             .expect("rewrite should not be ambiguous in this fixture")
     }
 
     fn rewrite_col_result(sql: &str, table: &str, old: &str, new: &str) -> Result<String, String> {
-        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema)
+        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema, true)
     }
 
     #[test]
