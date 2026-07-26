@@ -958,6 +958,17 @@ impl CreateTableExecutor {
                             for col in &schema.columns {
                                 columns.push((col.name.clone(), col.data_type.sqlite_affinity()));
                             }
+                        } else if let Some(view) = database.catalog.get_view(&table_name) {
+                            // A view has no declared column affinity of its own
+                            // (SQLite: `CREATE TABLE ... AS SELECT * FROM <view>`
+                            // stamps every column with no type), so every
+                            // expanded column gets `TypeAffinity::None` — same
+                            // as the `resolve_ctas_affinity` fallback below for
+                            // a bare `SELECT viewcol` (issue #6172,
+                            // affinity3.test 200).
+                            for name in Self::view_output_column_names(view)? {
+                                columns.push((name, TypeAffinity::None));
+                            }
                         } else {
                             return Err(ExecutorError::TableNotFound(table_name));
                         }
@@ -968,6 +979,10 @@ impl CreateTableExecutor {
                     if let Some(schema) = database.catalog.get_table(qualifier) {
                         for col in &schema.columns {
                             columns.push((col.name.clone(), col.data_type.sqlite_affinity()));
+                        }
+                    } else if let Some(view) = database.catalog.get_view(qualifier) {
+                        for name in Self::view_output_column_names(view)? {
+                            columns.push((name, TypeAffinity::None));
                         }
                     } else {
                         return Err(ExecutorError::TableNotFound(qualifier.clone()));
@@ -1147,6 +1162,26 @@ impl CreateTableExecutor {
         }
 
         Ok(names)
+    }
+
+    /// Resolve a view's exposed output column names for wildcard expansion in
+    /// a CTAS select list (`SELECT * FROM <view>` / `SELECT <view>.*`).
+    ///
+    /// Uses the view's explicit column list, which `CREATE VIEW` derives
+    /// eagerly (by executing the body once) whenever it isn't already
+    /// supplied explicitly. The rare "lax view" case (issue #5795) where
+    /// column resolution is deferred to query time has no statically known
+    /// column list, so it is reported as unsupported here rather than
+    /// re-executing the view body from a schema-only derivation path.
+    fn view_output_column_names(
+        view: &vibesql_catalog::ViewDefinition,
+    ) -> Result<Vec<String>, ExecutorError> {
+        view.columns.clone().ok_or_else(|| {
+            ExecutorError::UnsupportedFeature(format!(
+                "CREATE TABLE AS SELECT * from view '{}' with unresolved columns not supported",
+                view.name
+            ))
+        })
     }
 
     /// Derive a column name from a CTAS select-list expression.
