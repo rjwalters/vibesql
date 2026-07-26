@@ -212,8 +212,37 @@ impl Parser {
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
 
-        // Parse table name
-        let table_name = self.parse_identifier()?;
+        // Parse table name, allowing an optional schema qualifier
+        // (`CREATE TRIGGER tr1 ... ON main.t1 ...` / `... ON temp.t1 ...`).
+        // SQLite accepts a schema-qualified trigger target (e_delete-2.2.1.1 /
+        // e_update-2.1.1: `CREATE TRIGGER main.tr1 AFTER INSERT ON main.t7 ...`);
+        // previously this used `parse_identifier()`, which cannot consume the
+        // `schema.` prefix and hit a bare `near ".": syntax error` on any
+        // qualified ON target. `table_name` downstream is looked up via
+        // `Database::get_table`/`catalog.table_exists`, which already
+        // special-cases an explicit `temp.` prefix (mapping it to the session's
+        // temp schema) but has no separate "main" schema namespace — main
+        // tables are stored unqualified — so a `main.` qualifier is stripped
+        // here (dropping it is a no-op for resolution) while a `temp.`
+        // qualifier and any other schema name (e.g. `aux.` — unsupported,
+        // ATTACH-blocked) are preserved verbatim so a missing/foreign-schema
+        // target still resolves (or fails) using its own qualified name rather
+        // than silently colliding with a same-named main-schema table.
+        let on_table_ref = self.parse_table_ref()?;
+        let table_name = match &on_table_ref.schema_name {
+            Some(schema) if schema.eq_ignore_ascii_case("main") => on_table_ref.name.clone(),
+            // Normalize to lowercase "temp." — the `temp` keyword renders as
+            // "TEMP" via `Keyword::to_string()`, but the rest of the codebase
+            // (e.g. `CreateTriggerStmt::schema`, `Database::get_table`'s own
+            // `temp.` special-case) conventionally spells it lowercase.
+            // `get_table` compares case-insensitively either way, so this only
+            // affects the round-tripped spelling, not resolution.
+            Some(schema) if schema.eq_ignore_ascii_case("temp") => {
+                format!("temp.{}", on_table_ref.name)
+            }
+            Some(_) => on_table_ref.full_name(),
+            None => on_table_ref.name,
+        };
 
         // Parse optional FOR EACH ROW.
         //

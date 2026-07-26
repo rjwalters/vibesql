@@ -1309,3 +1309,74 @@ fn test_drop_trigger_if_exists_single_quoted_name() {
         _ => panic!("Expected DropTrigger statement"),
     }
 }
+
+// -- Schema-qualified ON target (e_delete-2.2.1.1 / e_update-2.1.1) --------
+
+#[test]
+fn test_create_trigger_on_main_qualified_target_strips_qualifier() {
+    // `ON main.t7` previously used `parse_identifier()`, which cannot consume
+    // the `schema.` prefix and hit a bare `near ".": syntax error`. The
+    // `main.` qualifier is a no-op for resolution (main tables are stored
+    // unqualified), so `table_name` drops it — matching the unqualified form.
+    let sql = "CREATE TRIGGER tr1 AFTER INSERT ON main.t7 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.table_name, "t7");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_on_temp_qualified_target_preserves_qualifier() {
+    // `ON temp.t7`: the `temp.` qualifier is preserved verbatim because
+    // `Database::get_table` special-cases it (mapping to the session's temp
+    // schema), unlike a bare `main.` qualifier which has no separate storage
+    // namespace.
+    let sql = "CREATE TRIGGER tr1 AFTER INSERT ON temp.t7 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.table_name, "temp.t7");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_on_both_name_and_target_qualified() {
+    // Both the trigger name and its ON target can independently carry a
+    // `main.` qualifier (e_delete-2.2.1.1: `CREATE TRIGGER main.tr1 ... ON
+    // main.t7 ...`).
+    let sql = "CREATE TRIGGER main.tr1 AFTER INSERT ON main.t7 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.trigger_name, "tr1");
+            assert_eq!(trigger.schema.as_deref(), Some("main"));
+            assert_eq!(trigger.table_name, "t7");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_on_unrecognized_schema_target_preserves_qualifier() {
+    // An unsupported/foreign schema qualifier (e.g. an ATTACH-blocked `aux`
+    // schema) is preserved verbatim rather than silently colliding with a
+    // same-named main-schema table; it resolves (or fails) using its own
+    // qualified name.
+    let sql = "CREATE TRIGGER tr1 AFTER INSERT ON aux.t7 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.table_name, "aux.t7");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}

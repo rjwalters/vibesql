@@ -145,9 +145,15 @@ impl UpdateExecutor {
         // SQLite per-variant RAISE scope handling for the top-level statement
         // (#5417): see [`crate::raise_scope::run_top_level_dml`].
         let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
-            executor::execute_internal(stmt, database, None, None, None).map(|(count, _)| count)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            database,
+            may_fire,
+            stmt.conflict_clause,
+            |database| {
+                executor::execute_internal(stmt, database, None, None, None)
+                    .map(|(count, _)| count)
+            },
+        )
     }
 
     /// Execute an UPDATE statement, capturing RETURNING rows (SQLite 3.35.0+)
@@ -166,9 +172,12 @@ impl UpdateExecutor {
         // statement-savepoint scope as the bare `execute` path; when it aborts
         // the statement the error propagates (no rows returned).
         let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
-            executor::execute_internal(stmt, database, None, None, None)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            database,
+            may_fire,
+            stmt.conflict_clause,
+            |database| executor::execute_internal(stmt, database, None, None, None),
+        )
     }
 
     /// Execute an UPDATE statement with procedural context
@@ -182,10 +191,15 @@ impl UpdateExecutor {
         // fired from a trigger inside a procedure/script gets the same
         // statement-savepoint scope as the bare `execute` path.
         let may_fire = crate::raise_scope::table_may_fire_trigger(database, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(database, may_fire, |database| {
-            executor::execute_internal(stmt, database, None, Some(procedural_context), None)
-                .map(|(count, _)| count)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            database,
+            may_fire,
+            stmt.conflict_clause,
+            |database| {
+                executor::execute_internal(stmt, database, None, Some(procedural_context), None)
+                    .map(|(count, _)| count)
+            },
+        )
     }
 
     /// Execute an UPDATE statement with trigger context
