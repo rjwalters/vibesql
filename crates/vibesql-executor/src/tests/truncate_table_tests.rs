@@ -398,7 +398,8 @@ fn test_truncate_resets_auto_increment() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
@@ -516,7 +517,8 @@ fn test_truncate_resets_auto_increment_multiple_inserts() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
