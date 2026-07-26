@@ -34,11 +34,15 @@ impl Modulo {
         // Use helper for type coercion
         let coerced = coerce_numeric_values(left, right, "%")?;
 
-        // Check for modulo by zero and return NULL (SQL standard behavior)
+        // Check for modulo by zero and return NULL (SQL standard behavior).
+        // For the floating branches this must check the *truncated* divisor
+        // (matching sqlite3's iA==0 check on the already-(i64)-cast right
+        // operand below), not the raw float — e.g. `5 % 0.9` truncates the
+        // divisor to 0 and must return NULL even though 0.9 != 0.0.
         let is_zero = match &coerced {
             super::CoercedValues::ExactNumeric(_, right) => *right == 0,
-            super::CoercedValues::ApproximateNumeric(_, right) => *right == 0.0,
-            super::CoercedValues::Numeric(_, right) => *right == 0.0,
+            super::CoercedValues::ApproximateNumeric(_, right) => (*right as i64) == 0,
+            super::CoercedValues::Numeric(_, right) => (*right as i64) == 0,
         };
 
         if is_zero {
@@ -54,8 +58,27 @@ impl Modulo {
                     Ok(Integer(a % b))
                 }
             }
-            super::CoercedValues::ApproximateNumeric(a, b) => Ok(Float((a % b) as f32)),
-            super::CoercedValues::Numeric(a, b) => Ok(Numeric(a % b)),
+            // SQLite's % operator always truncates BOTH operands to INTEGER
+            // (i64) before computing the remainder, even when one or both
+            // operands are floating point — it never computes a true
+            // floating-point `fmod`. The result is then represented using
+            // the coerced-out floating type (REAL/NUMERIC), not INTEGER
+            // (matches sqlite3 vdbe.c's fp_math OP_Remainder path: iA=(i64)
+            // rA; iB=(i64)rB; rB=(double)(iB%iA)). So `72.35 % 5` truncates
+            // 72.35 -> 72 first, giving 72%5=2, printed as REAL `2.0` — not
+            // a literal fmod(72.35, 5) = 2.35 (#6172).
+            super::CoercedValues::ApproximateNumeric(a, b) => {
+                let ia = a as i64;
+                let ib = b as i64;
+                let ib = if ib == -1 { 1 } else { ib };
+                Ok(Float((ia % ib) as f32))
+            }
+            super::CoercedValues::Numeric(a, b) => {
+                let ia = a as i64;
+                let ib = b as i64;
+                let ib = if ib == -1 { 1 } else { ib };
+                Ok(Numeric((ia % ib) as f64))
+            }
         }
     }
 }
