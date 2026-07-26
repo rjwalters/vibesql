@@ -87,10 +87,26 @@ fn deferred_child_insert_without_parent_fails_at_commit() {
     let err = run(&mut db, "COMMIT").expect_err("COMMIT must fail when FK still violated");
     assert!(err.contains("FOREIGN KEY"), "expected FK error message, got: {}", err);
 
-    // Auto-rollback: child row must NOT be present in the committed state.
-    assert!(!db.in_transaction(), "transaction must be auto-rolled back after failed COMMIT");
+    // Per EVIDENCE-OF R-37736-42616, a COMMIT that fails on an outstanding
+    // deferred FK violation does NOT force-roll-back the transaction — the
+    // transaction stays OPEN so the caller can fix the violation and retry
+    // (or explicitly ROLLBACK). The child row remains present in that still-
+    // open transaction.
+    assert!(db.in_transaction(), "transaction must remain open after failed COMMIT");
     let c = db.get_table("c").expect("table c");
-    assert_eq!(c.scan().len(), 0, "child row must be rolled back");
+    assert_eq!(
+        c.scan_live().count(),
+        1,
+        "child row remains present in the still-open transaction"
+    );
+
+    // Resolve the violation by inserting the missing parent, then retry the
+    // COMMIT — it must now succeed and persist the child row.
+    run(&mut db, "INSERT INTO p VALUES (99)").unwrap();
+    run(&mut db, "COMMIT").expect("COMMIT must succeed once the violation is resolved");
+    assert!(!db.in_transaction(), "transaction closes after the successful retry COMMIT");
+    let c = db.get_table("c").expect("table c");
+    assert_eq!(c.scan_live().count(), 1, "child row is committed");
 }
 
 #[test]
@@ -180,9 +196,11 @@ fn pragma_defer_foreign_keys_defers_non_deferrable_fk() {
     run(&mut db, "INSERT INTO c VALUES (1, 99)").unwrap();
     assert_eq!(db.deferred_fk_violations().len(), 1);
 
-    // COMMIT fails, transaction auto-rolls back.
+    // COMMIT fails on the unresolved violation but, per EVIDENCE-OF
+    // R-37736-42616, leaves the transaction OPEN (no force-rollback).
     let err = run(&mut db, "COMMIT").expect_err("COMMIT must fail with unresolved violation");
     assert!(err.contains("FOREIGN KEY"));
+    assert!(db.in_transaction(), "failed COMMIT must not roll the transaction back");
 }
 
 #[test]
