@@ -7097,12 +7097,20 @@ proc sqlite3 {db args} {
     # when multiple tests run in parallel.
     if {$filename eq ":memory:" || $filename eq ""} {
         # Use temp file instead of :memory: for persistence
-        # IMPORTANT: Each :memory: open should get a FRESH database, so we always delete
+        # IMPORTANT: Each :memory: open should get a FRESH database, so we always delete.
+        #
+        # Use forcedelete (NOT a bare `file delete`) so the VibeSQL durability
+        # siblings — <root>.wal / <root>-checkpoints/ / <root>.lock — are purged
+        # too. WAL is on by default for file-backed databases, so deleting only
+        # the main .vbsql snapshot leaves a stale WAL + checkpoint archive that
+        # the next open replays, resurrecting the "deleted" tables and producing
+        # spurious `table <name> already exists` errors on the fresh
+        # `sqlite3 db :memory:` (gencol1-12.10/13.10; same #5843 resurrection
+        # class as the forcedelete / test.db path, which the :memory: fast path
+        # had missed).
         set new_file [file normalize "/tmp/vibesql_test_[pid].vbsql"]
         # Always delete for :memory: - SQLite gives fresh empty database each time
-        if {[file exists $new_file]} {
-            catch {file delete -force $new_file}
-        }
+        forcedelete $new_file
     } elseif {$filename eq "test.db" || [file tail $filename] eq "test.db"} {
         # Map test.db to a unique temp file to prevent race conditions
         # Use current db_file if set (from run_test_file), otherwise create unique
