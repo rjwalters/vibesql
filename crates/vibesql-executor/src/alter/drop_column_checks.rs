@@ -24,8 +24,8 @@
 
 use vibesql_ast::{
     visitor::{walk_expression, walk_statement, ExpressionVisitor, StatementVisitor, VisitResult},
-    ColumnConstraintKind, ColumnIdentifier, Expression, FromClause, PseudoTable, SelectItem,
-    Statement, TableConstraintKind, TriggerAction,
+    ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FromClause, InsertSource,
+    PseudoTable, SelectItem, SelectStmt, Statement, TableConstraintKind, TriggerAction,
 };
 use vibesql_catalog::{TableSchema, TriggerDefinition, ViewDefinition};
 use vibesql_storage::Database;
@@ -97,10 +97,10 @@ fn check_schema_objects(
 
     for name in database.catalog.list_triggers() {
         if let Some(trigger) = database.catalog.get_trigger(&name) {
-            if let Some(missing) = find_missing_pseudo_in_trigger(trigger, &sim) {
+            if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
                 return Err(ExecutorError::Other(format!(
-                    "error in trigger {}{}: no such column: {}",
-                    trigger.name, suffix, missing
+                    "error in trigger {}{}: {}",
+                    trigger.name, suffix, inner
                 )));
             }
         }
@@ -170,11 +170,28 @@ struct FromSource {
     columns: Vec<String>,
 }
 
+/// Re-parse a verbatim `CREATE VIEW ... AS <select>` definition and return the
+/// defining `SELECT`. `None` when the text does not parse to a `CREATE VIEW`.
+fn reparse_view_query(sql_definition: &str) -> Option<SelectStmt> {
+    match vibesql_parser::Parser::parse_sql(sql_definition).ok()? {
+        Statement::CreateView(create) => Some(*create.query),
+        _ => None,
+    }
+}
+
 /// First column reference in `view`'s defining query that does not resolve
 /// against the (possibly simulated) schema, in SQL text order — or `None`
 /// when the view is valid or too complex to validate statically.
 fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> Option<String> {
-    let query = &view.query;
+    // Resolve against the view's verbatim `CREATE VIEW` text — the same text
+    // SQLite itself re-parses — rather than the stored `query` AST. The AST can
+    // drift from the definition across a persistence round-trip (e.g. a quoted
+    // multi-word column such as `"big c"` currently reloads as `big`), and
+    // judging a view by a drifted AST would report a column missing that the
+    // definition in fact names. Fall back to the stored AST when the verbatim
+    // text is absent or does not re-parse to a `CREATE VIEW`.
+    let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
+    let query = reparsed.as_ref().unwrap_or(&view.query);
 
     // Constructs that introduce additional name scopes are skipped wholesale:
     // resolving them faithfully would duplicate the planner, and a false
@@ -401,12 +418,48 @@ fn check_column_ref(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String>
 // Trigger validation
 // ============================================================================
 
+/// First resolution error in `trigger`, returned as the inner message SQLite
+/// appends after `error in trigger <name>[ <suffix>]: ` — either
+/// `no such table: main.<t>` (a body statement references a table that does
+/// not exist) or `no such column: <new|old>.<c>` (a `NEW.`/`OLD.` reference
+/// names a column absent from the target table). `None` when the trigger is
+/// valid or cannot be judged.
+///
+/// SQLite re-parses and re-resolves every dependent trigger on ALTER TABLE
+/// RENAME/DROP; a trigger that was *already* broken (e.g. its body inserts
+/// into a table that was never created) aborts the ALTER. Missing-table
+/// resolution is checked first because SQLite reports it before descending
+/// into NEW/OLD column resolution.
+fn find_trigger_resolution_error(
+    trigger: &TriggerDefinition,
+    sim: &DropSimulation,
+) -> Option<String> {
+    // Parse the body once; an unparseable body cannot be judged, so skip it.
+    let TriggerAction::RawSql(sql) = &trigger.triggered_action;
+    let statements = crate::trigger_execution::TriggerFirer::parse_trigger_sql(sql).ok()?;
+
+    // 1) A body statement that reads from / writes to a non-existent table
+    //    aborts the ALTER, matching SQLite's schema re-parse
+    //    (`error in trigger <name>: no such table: main.<t>`).
+    if let Some(missing) = find_missing_table_in_statements(&statements, sim.db) {
+        return Some(format!("no such table: {}", missing));
+    }
+
+    // 2) A NEW./OLD. reference to a column absent from the target table.
+    if let Some(pseudo) = find_missing_pseudo_in_trigger(trigger, &statements, sim) {
+        return Some(format!("no such column: {}", pseudo));
+    }
+
+    None
+}
+
 /// First `NEW.<col>` / `OLD.<col>` reference in `trigger` (WHEN condition
-/// first, then the body statements in order) that does not name a column of
-/// the trigger's target table — formatted as `new.<col>` / `old.<col>` for the
-/// error message. `None` when the trigger is valid or cannot be judged.
+/// first, then the pre-parsed body `statements` in order) that does not name a
+/// column of the trigger's target table — formatted as `new.<col>` /
+/// `old.<col>`. `None` when the trigger is valid or cannot be judged.
 fn find_missing_pseudo_in_trigger(
     trigger: &TriggerDefinition,
+    statements: &[Statement],
     sim: &DropSimulation,
 ) -> Option<String> {
     // NEW/OLD resolve against the trigger's target table (or view for
@@ -418,15 +471,8 @@ fn find_missing_pseudo_in_trigger(
     if let Some(when) = &trigger.when_condition {
         collect_pseudo_refs_in_expr(when, &mut refs);
     }
-    let TriggerAction::RawSql(sql) = &trigger.triggered_action;
-    match crate::trigger_execution::TriggerFirer::parse_trigger_sql(sql) {
-        Ok(statements) => {
-            for stmt in &statements {
-                collect_pseudo_refs_in_statement(stmt, &mut refs);
-            }
-        }
-        // Unparseable body: cannot judge, skip.
-        Err(_) => return None,
+    for stmt in statements {
+        collect_pseudo_refs_in_statement(stmt, &mut refs);
     }
 
     for (pseudo, column) in refs {
@@ -442,6 +488,129 @@ fn find_missing_pseudo_in_trigger(
         }
     }
     None
+}
+
+// ============================================================================
+// Missing-table resolution in trigger bodies
+// ============================================================================
+
+/// First base-table reference in `statements` (INSERT/UPDATE/DELETE targets and
+/// FROM-clause tables, in SQL text order) that resolves to neither a table nor a
+/// view — named the way SQLite's `no such table:` message spells it (an
+/// unqualified name is reported as `main.<name>`). CTE names in scope are
+/// excluded (they are not base tables), and the check is skipped (returns
+/// `None`) for anything it cannot judge — conservative in the direction that
+/// never blocks an ALTER SQLite allows.
+fn find_missing_table_in_statements(statements: &[Statement], db: &Database) -> Option<String> {
+    let mut refs: Vec<String> = Vec::new();
+    let mut cte_names: Vec<String> = Vec::new();
+    for stmt in statements {
+        collect_table_refs_in_statement(stmt, &mut refs, &mut cte_names);
+    }
+
+    for name in refs {
+        let bare = name.rsplit('.').next().unwrap_or(&name);
+        // A WITH-clause name is not a base table.
+        if cte_names.iter().any(|c| c.eq_ignore_ascii_case(bare)) {
+            continue;
+        }
+        // Resolve as written (handles `schema.table`, temp shadowing, and the
+        // implicit main schema) and, failing that, by its bare name.
+        if db.catalog.get_table(&name).is_some()
+            || db.catalog.get_view(&name).is_some()
+            || db.catalog.get_table(bare).is_some()
+            || db.catalog.get_view(bare).is_some()
+        {
+            continue;
+        }
+        return Some(if name.contains('.') { name } else { format!("main.{}", name) });
+    }
+    None
+}
+
+/// Accumulate base-table references and CTE names from one trigger-body
+/// statement. Only INSERT/UPDATE/DELETE targets and FROM-clause tables are
+/// collected; subqueries nested inside expressions are intentionally not
+/// descended into (a false negative is safe, a false positive is not).
+fn collect_table_refs_in_statement(
+    stmt: &Statement,
+    refs: &mut Vec<String>,
+    cte_names: &mut Vec<String>,
+) {
+    match stmt {
+        Statement::Insert(insert) => {
+            collect_cte_names(&insert.with_clause, refs, cte_names);
+            let target = match &insert.schema_name {
+                Some(schema) => format!("{}.{}", schema, insert.table_name),
+                None => insert.table_name.clone(),
+            };
+            refs.push(target);
+            if let InsertSource::Select(select) = &insert.source {
+                collect_table_refs_in_select(select, refs, cte_names);
+            }
+        }
+        Statement::Update(update) => {
+            refs.push(update.table_name.clone());
+            if let Some(from) = &update.from_clause {
+                for source in from {
+                    collect_table_refs_in_from(source, refs, cte_names);
+                }
+            }
+        }
+        Statement::Delete(delete) => {
+            refs.push(delete.table_name.clone());
+        }
+        Statement::Select(select) => collect_table_refs_in_select(select, refs, cte_names),
+        _ => {}
+    }
+}
+
+/// Accumulate references from a SELECT: its CTE names, its FROM tables, and
+/// (recursively) any set-operation right-hand side.
+fn collect_table_refs_in_select(
+    select: &SelectStmt,
+    refs: &mut Vec<String>,
+    cte_names: &mut Vec<String>,
+) {
+    collect_cte_names(&select.with_clause, refs, cte_names);
+    if let Some(from) = &select.from {
+        collect_table_refs_in_from(from, refs, cte_names);
+    }
+    if let Some(set_op) = &select.set_operation {
+        collect_table_refs_in_select(&set_op.right, refs, cte_names);
+    }
+}
+
+/// Record the names defined by a WITH clause and descend into each CTE body.
+fn collect_cte_names(
+    with_clause: &Option<Vec<CommonTableExpr>>,
+    refs: &mut Vec<String>,
+    cte_names: &mut Vec<String>,
+) {
+    if let Some(ctes) = with_clause {
+        for cte in ctes {
+            cte_names.push(cte.name.clone());
+            collect_table_refs_in_select(&cte.query, refs, cte_names);
+        }
+    }
+}
+
+/// Accumulate base-table names from a FROM tree (recursing joins; skipping
+/// subqueries, VALUES, and table-valued functions).
+fn collect_table_refs_in_from(
+    from: &FromClause,
+    refs: &mut Vec<String>,
+    cte_names: &mut Vec<String>,
+) {
+    match from {
+        FromClause::Table { name, .. } => refs.push(name.clone()),
+        FromClause::Join { left, right, .. } => {
+            collect_table_refs_in_from(left, refs, cte_names);
+            collect_table_refs_in_from(right, refs, cte_names);
+        }
+        FromClause::Subquery { query, .. } => collect_table_refs_in_select(query, refs, cte_names),
+        FromClause::Values { .. } | FromClause::TableFunction { .. } => {}
+    }
 }
 
 /// Visitor collecting every `NEW.x` / `OLD.x` reference in encounter order.

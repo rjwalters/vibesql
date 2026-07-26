@@ -528,27 +528,48 @@ pub(super) fn execute_rename_column(
     stmt: &RenameColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
+    // Resolve the table + column and check for a name conflict with an
+    // immutable borrow so the whole-schema precheck below can also borrow the
+    // database immutably. The mutable borrow for the actual rename is taken
+    // afterwards (once these checks and the precheck have passed).
+    let col_index = {
+        let table = database
+            .get_table(&stmt.table_name)
+            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+        // The old column must exist.
+        let col_index = table.schema.get_column_index(&stmt.old_column_name).ok_or_else(|| {
+            ExecutorError::ColumnNotFound {
+                column_name: stmt.old_column_name.clone(),
+                table_name: stmt.table_name.clone(),
+                searched_tables: vec![stmt.table_name.clone()],
+                available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
+            }
+        })?;
+
+        // Renaming to an existing (different) column name is a conflict. Allow a
+        // case-only rename of the same column.
+        if !stmt.new_column_name.eq_ignore_ascii_case(&stmt.old_column_name)
+            && table.schema.has_column(&stmt.new_column_name)
+        {
+            return Err(ExecutorError::ColumnAlreadyExists(stmt.new_column_name.clone()));
+        }
+
+        col_index
+    };
+
+    // Whole-schema dependent-object re-validation, matching SQLite's schema
+    // re-parse on ALTER TABLE RENAME COLUMN (the same check DROP COLUMN runs):
+    // a view or trigger that is *already* broken — e.g. a trigger body that
+    // inserts into a table that was never created, or a view that references a
+    // column that does not exist — aborts the ALTER with
+    // `error in <type> <name>: <inner error>`, leaving the schema untouched.
+    // Runs before any mutation so a failed RENAME COLUMN is atomic.
+    super::drop_column_checks::precheck_schema_objects(database)?;
+
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
-
-    // The old column must exist.
-    let col_index = table.schema.get_column_index(&stmt.old_column_name).ok_or_else(|| {
-        ExecutorError::ColumnNotFound {
-            column_name: stmt.old_column_name.clone(),
-            table_name: stmt.table_name.clone(),
-            searched_tables: vec![stmt.table_name.clone()],
-            available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
-        }
-    })?;
-
-    // Renaming to an existing (different) column name is a conflict. Allow a
-    // case-only rename of the same column.
-    if !stmt.new_column_name.eq_ignore_ascii_case(&stmt.old_column_name)
-        && table.schema.has_column(&stmt.new_column_name)
-    {
-        return Err(ExecutorError::ColumnAlreadyExists(stmt.new_column_name.clone()));
-    }
 
     // Rename in the schema (keeps the column-index cache consistent).
     table.schema_mut().rename_column(col_index, &stmt.new_column_name)?;
