@@ -141,13 +141,19 @@ impl Parser {
             // (window6 5.0). Clause/operator keywords (FROM, WHERE, ORDER, ...) are
             // not `can_be_identifier()` and so continue to terminate the item.
             //
-            // RETURNING and WINDOW are excluded even though they are fallback
-            // identifiers: each introduces a trailing clause that can directly
-            // follow the final select item (`INSERT ... SELECT 1 RETURNING a`,
-            // `SELECT 1 WINDOW w AS ()`), so grabbing them as an AS-less alias would
-            // swallow the clause (regression on insert-compound-returning, #5271).
+            // RETURNING is excluded even though it is a fallback identifier: it
+            // introduces a trailing clause that can directly follow the final
+            // select item (`INSERT ... SELECT 1 RETURNING a`), so grabbing it as
+            // an AS-less alias would swallow the clause (regression on
+            // insert-compound-returning, #5271).
+            //
+            // WINDOW is excluded only when it actually begins a real
+            // `WINDOW <name> AS (...)` clause (`SELECT 1 WINDOW w AS ()`); when it
+            // does not (`SELECT sum(window) OVER window window FROM ...`, window6
+            // 5.4), it is a valid AS-less alias like any other fallback identifier.
             if keyword.can_be_identifier()
-                && !matches!(keyword, Keyword::Returning | Keyword::Window)
+                && !matches!(keyword, Keyword::Returning)
+                && !(matches!(keyword, Keyword::Window) && self.peek_window_starts_clause())
             {
                 let alias = original.clone();
                 self.advance();

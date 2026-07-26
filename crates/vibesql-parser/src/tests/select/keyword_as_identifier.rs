@@ -239,3 +239,71 @@ fn test_reserved_keywords_in_operand_position_still_error() {
         assert!(Parser::parse_sql(sql).is_err(), "expected a syntax error for: {sql}");
     }
 }
+
+// --- window6.test keyword-as-identifier torture cases (Part of #6191) ---
+
+#[test]
+fn test_keyword_alias_after_keyword_table_name() {
+    // A fallback-identifier keyword may serve as the implicit alias of a keyword
+    // table name. Previously the keyword-table-name branch of the FROM parser only
+    // accepted an *identifier* alias, so `FROM over over` / `FROM window window`
+    // produced a syntax error (window6 5.2/5.3/5.4, 1.5.3).
+    for sql in [
+        "SELECT x FROM over over;",
+        "SELECT x FROM window window;",
+        // The keyword table name is aliased and then referenced qualified.
+        "SELECT filter.following FROM over filter;",
+    ] {
+        assert!(Parser::parse_sql(sql).is_ok(), "expected to parse: {sql}");
+    }
+}
+
+#[test]
+fn test_window6_5_2_over_torture() {
+    // window6 5.2/5.3: `over` used as column, OVER keyword, window name, AS-less
+    // column alias, table name, and table alias — all in one statement.
+    let sql = "SELECT sum(over) over over over \
+               FROM over over WINDOW over AS (ORDER BY over);";
+    assert!(Parser::parse_sql(sql).is_ok(), "window6 5.2 should parse: {sql}");
+}
+
+#[test]
+fn test_window6_5_4_window_torture() {
+    // window6 5.4: `window` used as column, OVER window name, AS-less column
+    // alias, table name, table alias, and to start the WINDOW clause. Requires
+    // both the keyword-table-alias fix and allowing WINDOW as an AS-less column
+    // alias when it does not begin a real `WINDOW <name> AS (...)` clause.
+    let sql = "SELECT sum(window) OVER window window \
+               FROM window window window window AS (ORDER BY window);";
+    assert!(Parser::parse_sql(sql).is_ok(), "window6 5.4 should parse: {sql}");
+}
+
+#[test]
+fn test_window_keyword_as_asless_select_alias() {
+    // `WINDOW` is a valid AS-less column alias when it does not start a real
+    // WINDOW clause (the token after it is not `<name> AS`).
+    assert!(
+        Parser::parse_sql("SELECT sum(x) OVER w window FROM t WINDOW w AS ();").is_ok(),
+        "WINDOW as an AS-less select alias should parse"
+    );
+}
+
+#[test]
+fn test_window_clause_still_not_swallowed_as_alias() {
+    // Regression guard: a real trailing `WINDOW <name> AS (...)` clause must NOT
+    // be grabbed as an AS-less alias of the final select item.
+    let stmt = Parser::parse_sql("SELECT sum(x) OVER w FROM t WINDOW w AS ();")
+        .expect("SELECT ... WINDOW w AS () should parse");
+    match stmt {
+        vibesql_ast::Statement::Select(select) => {
+            assert_eq!(select.select_list.len(), 1, "WINDOW clause must not become an alias");
+            match &select.select_list[0] {
+                vibesql_ast::SelectItem::Expression { alias, .. } => {
+                    assert!(alias.is_none(), "final item must have no alias, got {alias:?}");
+                }
+                other => panic!("expected expression select item, got {other:?}"),
+            }
+        }
+        _ => panic!("Expected SELECT statement"),
+    }
+}
