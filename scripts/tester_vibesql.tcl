@@ -6608,7 +6608,16 @@ proc check_single_capability {cap} {
     # `fts3_unicode` is the FTS3/4 unicode61 tokenizer compile-time option; FTS
     # is unsupported in VibeSQL, so fts4unicode.test self-skips via its
     # `ifcapable !fts3_unicode` guard (#5843).
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest}
+    # `utf16` (SQLITE_OMIT_UTF16 off) gates the many `PRAGMA encoding =
+    # 'utf-16le'/'utf-16be'` blocks scattered across e_expr/cast/enc*/capi3*
+    # etc. VibeSQL always stores TEXT as UTF-8 and treats `PRAGMA encoding`
+    # as a no-op, so those blocks were previously miscounted as "supported"
+    # (not in this list) and executed with real UTF-8 storage, producing
+    # wrong-encoding CAST/blob results that got recorded as FAILED rather
+    # than skipped (e.g. e_expr-27.4.7..9/28.1.3..4/30.1.5..8, #6172).
+    # Marking it unsupported routes `ifcapable {utf16}` guards to their
+    # skip/else branch, matching a real SQLITE_OMIT_UTF16 build.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -7042,6 +7051,29 @@ proc sqlite3_mprintf_double {args} {
 # Database setup
 #-----------------------------------------------------------------------------
 
+# Real sqlite3 database handles are distinct Tcl commands, so closing one
+# (`db close`) deletes the command entirely and a later `rename db2 db`
+# (restoring a saved-off connection) finds the name free. This shim instead
+# keeps ONE stateless alias-based dispatcher (::tcltest_db_master, see
+# below) that every connection name ("db", "db2", ...) aliases to, and
+# `db close` is a no-op that keeps the alias alive (used everywhere in the
+# suite as "close, then reopen the same name later"). That combination
+# means e_expr.test's `rename db db2; sqlite3 db :memory:; ...; db close;
+# rename db2 db` idiom (temporarily swapping in a fresh :memory: connection
+# while preserving the original under a different name) fails on the final
+# rename with "can't rename to db: command already exists", because our
+# recreated "db" alias is still there (#6172). Since renaming an alias never
+# changes behavior (every name still points at the same stateless
+# dispatcher), it is always safe to drop a same-named alias before letting a
+# rename proceed — so wrap the builtin to do exactly that.
+rename ::rename ::tcltest_tcl_core_rename
+proc ::rename {oldname newname} {
+    if {$newname ne "" && [llength [info commands $newname]] > 0} {
+        catch {::tcltest_tcl_core_rename $newname {}}
+    }
+    return [::tcltest_tcl_core_rename $oldname $newname]
+}
+
 proc sqlite3 {db args} {
     # Handle special flags first (like "sqlite3 -version")
     if {$db eq "-version"} {
@@ -7129,14 +7161,26 @@ proc sqlite3 {db args} {
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
     set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
 
-    # Create db command alias - if name is not "db" (which already exists)
-    # create an alias to the global db proc
-    if {$db ne "db"} {
-        interp alias {} $db {} db
+    # Create/refresh the "$db" command as an alias to the shared master
+    # dispatcher. Only create it if the name doesn't already resolve to a
+    # command: most connections open under a name ("db", "db2", ...) that
+    # is either brand new or was torn down by `rename $db {}` / `db close`
+    # equivalents, but e_expr.test's `rename db db2; sqlite3 db :memory:`
+    # idiom (used to temporarily swap in a fresh :memory: connection while
+    # preserving the original under a different name) LITERALLY renames the
+    # "db" command away first, so a name-equality check ("if $db ne db")
+    # incorrectly concluded "db" still existed and skipped recreating it,
+    # leaving no command named "db" at all -> "invalid command name db" on
+    # every subsequent `db eval`/`db close` until the file's matching
+    # `rename db2 db` (which itself needs "db" to be absent to succeed)
+    # (#6172). Checking real existence handles both the fresh-name and the
+    # renamed-away cases uniformly.
+    if {[llength [info commands $db]] == 0} {
+        interp alias {} $db {} ::tcltest_db_master
     }
 }
 
-proc db {cmd args} {
+proc ::tcltest_db_master {cmd args} {
     # Default db command - supports multiple call patterns:
     # db eval SQL                    - returns results as list
     # db eval SQL script             - iterates over rows, setting column names as local vars
@@ -7394,6 +7438,13 @@ proc db {cmd args} {
         }
     }
 }
+
+# The default connection is named "db" from the start of every test file, the
+# same way proc sqlite3 creates aliases for secondary connections (db2, db3,
+# ...). See the "rename db db2" idiom note above proc sqlite3's alias check
+# (#6172) for why this must be a real alias rather than making "db" itself
+# the master proc's literal name.
+interp alias {} db {} ::tcltest_db_master
 
 #-----------------------------------------------------------------------------
 # Utility commands

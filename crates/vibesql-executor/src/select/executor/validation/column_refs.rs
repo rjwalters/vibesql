@@ -296,6 +296,37 @@ pub fn validate_column_ref(
         }
     }
 
+    // Qualified reference whose qualifier doesn't match ANY known table/alias
+    // (inner scope, or outer scope for correlated subqueries) is a distinct
+    // SQLite error from "column not found in a real table": SQLite reports
+    // the full `qualifier.column` in the message (e.g. `9 IN (false.false)`
+    // -> "no such column: false.false"), not a bare column-not-found lookup
+    // scoped to a nonexistent table (istrue.test istrue-820, #6172). Without
+    // this check, the qualifier was silently used as `table_name` /
+    // `searched_tables` below even when it names no real table, producing a
+    // message that drops the qualifier ("no such column: false").
+    if let Some(ref qualifier) = col_ref.table {
+        let qualifier_lower = qualifier.to_lowercase();
+        let qualifier_is_known_table =
+            schema.table_schemas.keys().any(|k| k.canonical() == qualifier_lower)
+                || outer_schema.is_some_and(|outer| {
+                    outer.contains_table_in_chain(&vibesql_catalog::TableIdentifier::from(
+                        qualifier.as_str(),
+                    ))
+                });
+        if !qualifier_is_known_table {
+            let mut available_tables = schema.table_names();
+            if let Some(outer) = outer_schema {
+                available_tables.extend(outer.table_names());
+            }
+            return Err(ExecutorError::InvalidTableQualifier {
+                qualifier: qualifier.clone(),
+                column: col_ref.column.clone(),
+                available_tables,
+            });
+        }
+    }
+
     // Column not found - build error with context
     let mut searched_tables: Vec<String> = if let Some(ref table) = col_ref.table {
         // If qualified, only report that table
