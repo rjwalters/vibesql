@@ -812,6 +812,17 @@ impl TriggerFirer {
                     // Restore before propagating so a failed trigger body does
                     // not corrupt the caller's changes() value.
                     db.set_last_changes_count(saved_changes);
+                    // A trigger body statement referencing a table that does not
+                    // exist errors `no such table: main.<name>` when the trigger
+                    // itself is NOT in the temp schema — sqlite3 resolves an
+                    // unqualified trigger-body table name in the trigger's own
+                    // schema and qualifies the "missing" report with it
+                    // (R-28818-63526; e_delete-2.2.1.1 / e_update-2.2.1). A TEMP
+                    // trigger's missing target is left unqualified instead
+                    // (R-31567-38587). This only affects the *message*; the
+                    // lookup itself still uses the connection's normal
+                    // temp-then-main search order.
+                    let e = if trigger.is_temp() { e } else { e.with_main_schema_qualifier() };
                     return Err(e);
                 }
             }

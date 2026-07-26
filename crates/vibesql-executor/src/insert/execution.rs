@@ -592,6 +592,20 @@ fn execute_insert_internal(
             }]
         );
 
+    // `INSERT OR FAIL` (SQLite conflict-resolution algorithm): a constraint
+    // violation stops the statement at the offending row, but — unlike the
+    // default ABORT — the rows the statement already validated/applied before
+    // that row are KEPT rather than rolled back (e_insert-4.1.1.9). The
+    // validation loop below collects rows into `validated_rows` before any are
+    // physically written, so "keep the rows applied so far" means: stop
+    // collecting at the first violation (breaking out of the loop instead of
+    // propagating the error via `?`) and let the normal write path insert only
+    // the rows collected up to that point, then surface the violation
+    // afterward instead of the usual `Ok`. This mirrors the already-correct
+    // `RAISE(FAIL)` scope in `raise_scope::apply_raise_scope`.
+    let use_fail = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Fail));
+    let mut fail_error: Option<ExecutorError> = None;
+
     // Track the most recently generated ID for last_insert_rowid() support.
     // SQLite semantics: last_insert_rowid() returns the rowid of the most
     // recently inserted row, so for multi-row INSERT ... VALUES / INSERT ... SELECT
@@ -935,7 +949,25 @@ fn execute_insert_internal(
             }
         }
 
-        let validation_result = validator.validate(&full_row_values)?;
+        let validation_result = match validator.validate(&full_row_values) {
+            Ok(v) => v,
+            // A FOREIGN KEY violation is exempt from `OR FAIL` (as from every
+            // other conflict clause) — SQLite always aborts the whole
+            // statement for it regardless of the conflict-resolution
+            // algorithm requested (fkey2-20.2.6.x). Only non-FK constraint
+            // violations (UNIQUE/PK/CHECK/NOT NULL) get the "keep partial"
+            // OR FAIL treatment.
+            Err(e) if use_fail && !e.is_foreign_key_violation() => {
+                // OR FAIL: stop at the offending row, but keep every row
+                // already collected into `validated_rows` — the normal write
+                // path below inserts exactly that (smaller) set, and the
+                // stashed error is returned after the write instead of `Ok`
+                // so the caller still observes the constraint failure.
+                fail_error = Some(e);
+                break;
+            }
+            Err(e) => return Err(e),
+        };
         drop(validator); // release the immutable &Database borrow before the queue push below
 
         // Track PK values for batch duplicate checking (using pre-extracted keys)
@@ -1679,6 +1711,14 @@ fn execute_insert_internal(
     } else {
         None
     };
+
+    // OR FAIL: the rows collected before the offending row (if any) have just
+    // been written by the normal path above, exactly matching SQLite's "keep
+    // prior changes" semantics; surface the stashed violation now instead of
+    // reporting success.
+    if let Some(e) = fail_error {
+        return Err(e);
+    }
 
     Ok(InsertOutcome {
         affected_rows: rows_inserted,

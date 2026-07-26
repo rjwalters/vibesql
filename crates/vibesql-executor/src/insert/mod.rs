@@ -29,9 +29,12 @@ impl InsertExecutor {
         // just this statement, RAISE(FAIL) keeps its partial changes, and
         // RAISE(ROLLBACK) rolls back the whole transaction.
         let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
-            execution::execute_insert(db, stmt)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            db,
+            may_fire,
+            stmt.conflict_clause,
+            |db| execution::execute_insert(db, stmt),
+        )
     }
 
     /// Execute an INSERT statement, capturing RETURNING rows (SQLite 3.35.0+)
@@ -55,9 +58,12 @@ impl InsertExecutor {
         // aborts the statement the error propagates (no rows returned) and the
         // chosen variant's scope is applied.
         let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
-            execution::execute_insert_returning(db, stmt)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            db,
+            may_fire,
+            stmt.conflict_clause,
+            |db| execution::execute_insert_returning(db, stmt),
+        )
     }
 
     /// Execute an INSERT statement with procedural context
@@ -72,9 +78,12 @@ impl InsertExecutor {
         // fired from a trigger inside a procedure/script gets the same
         // statement-savepoint scope as the bare `execute` path.
         let may_fire = crate::raise_scope::table_may_fire_trigger(db, &stmt.table_name);
-        crate::raise_scope::run_top_level_dml(db, may_fire, |db| {
-            execution::execute_insert_with_procedural_context(db, stmt, procedural_context)
-        })
+        crate::raise_scope::run_top_level_dml_with_conflict_scope(
+            db,
+            may_fire,
+            stmt.conflict_clause,
+            |db| execution::execute_insert_with_procedural_context(db, stmt, procedural_context),
+        )
     }
 }
 

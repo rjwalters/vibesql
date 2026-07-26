@@ -1440,6 +1440,30 @@ impl ExecutorError {
         )
     }
 
+    /// True for a `FOREIGN KEY constraint failed` violation.
+    ///
+    /// SQLite documents that a statement's `OR <action>` conflict-resolution
+    /// clause has **no effect** on a FOREIGN KEY violation — it always behaves
+    /// as `ABORT`, regardless of `OR IGNORE`/`OR FAIL`/`OR ROLLBACK`/`OR
+    /// REPLACE` on the statement (lang_conflict.html; fkey2-20.2.x/20.3.x
+    /// verify this for every conflict-clause variant). Callers that apply a
+    /// statement's own conflict-clause scope to a non-`RAISE` error (see
+    /// `raise_scope::run_top_level_dml_with_conflict_scope`) must exclude FK
+    /// violations from that scoping and fall back to the default ABORT
+    /// handling instead.
+    pub fn is_foreign_key_violation(&self) -> bool {
+        // Different call sites report varying detail — the update path's
+        // terse "FOREIGN KEY constraint failed" vs. the insert path's
+        // "FOREIGN KEY constraint '<name>' violated: key (...) not found in
+        // table '<parent>'" — so match on the substring both share (the same
+        // substring the TCL conformance shim normalizes on) rather than an
+        // exact prefix.
+        matches!(
+            self,
+            ExecutorError::ConstraintViolation(msg) if msg.contains("FOREIGN KEY constraint")
+        )
+    }
+
     /// Qualify a `TableNotFound` for an unqualified table name with the implicit
     /// `main.` schema prefix, matching sqlite3's reporting when a table is
     /// resolved against the database schema (e.g. a table referenced in a view

@@ -45,7 +45,7 @@
 //! strictly coarser, equally-deterministic scope; see
 //! `vibesql-consensus::state_machine`.)
 
-use vibesql_ast::RaiseAction;
+use vibesql_ast::{ConflictClause, RaiseAction};
 use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
@@ -180,23 +180,63 @@ pub(crate) fn run_top_level_dml<T, F>(
 where
     F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
 {
-    // Fast path: nothing can RAISE and no trigger program can apply rows
-    // incrementally — run directly with no transaction/snapshot overhead.
-    if !may_fire_trigger {
+    run_top_level_dml_with_conflict_scope(db, may_fire_trigger, None, f)
+}
+
+/// Like [`run_top_level_dml`], but also applies the *statement's own*
+/// `OR <action>` conflict-resolution clause (`ConflictClause`, e.g.
+/// `INSERT/UPDATE/DELETE OR ROLLBACK|FAIL|ABORT`) to a non-`RAISE` error —
+/// not just a `RAISE()` fired from a trigger body.
+///
+/// SQLite's `OR ROLLBACK`/`OR FAIL` conflict-resolution algorithms have the
+/// exact same transaction-scope semantics as the identically-named
+/// `RAISE(ROLLBACK|FAIL, …)` variants (R-59980-59522 for `ROLLBACK`): a bare
+/// constraint violation (`ExecutorError::ConstraintViolation` /
+/// `SqliteCompatError`, not `ExecutorError::Raise`) under `OR ROLLBACK` must
+/// abort the whole enclosing transaction (autocommit re-enabled), and under
+/// `OR FAIL` must keep the rows already applied before the offending row.
+/// Passing `None` (via [`run_top_level_dml`]) preserves the prior behavior:
+/// any non-`RAISE` error rolls back just the statement, matching the implicit
+/// default (`ABORT`).
+pub(crate) fn run_top_level_dml_with_conflict_scope<T, F>(
+    db: &mut Database,
+    may_fire_trigger: bool,
+    conflict_clause: Option<ConflictClause>,
+    f: F,
+) -> Result<T, ExecutorError>
+where
+    F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
+{
+    // A statement carrying `OR ROLLBACK`/`OR FAIL` needs the same
+    // transaction/savepoint wrapping a trigger-fireable statement gets, even
+    // when the table has no triggers at all — a bare constraint violation
+    // must still get the ROLLBACK/FAIL scope rather than the trigger-free
+    // fast path's "just propagate the error" behavior.
+    let needs_scope_wrapper = may_fire_trigger
+        || matches!(conflict_clause, Some(ConflictClause::Rollback) | Some(ConflictClause::Fail));
+
+    // Fast path: nothing can RAISE, no trigger program can apply rows
+    // incrementally, and the statement's own conflict clause needs no special
+    // transaction scope — run directly with no transaction/snapshot overhead.
+    if !needs_scope_wrapper {
         return f(db);
     }
 
     if db.in_transaction() {
-        run_inside_transaction(db, f)
+        run_inside_transaction(db, conflict_clause, f)
     } else {
-        run_auto_commit(db, f)
+        run_auto_commit(db, conflict_clause, f)
     }
 }
 
 /// Statement-scope handling when an explicit transaction is already open: arm
 /// an implicit statement savepoint so a `RAISE(ABORT)` undoes just this
 /// statement, leaving earlier statements (and the transaction) intact.
-fn run_inside_transaction<T, F>(db: &mut Database, f: F) -> Result<T, ExecutorError>
+fn run_inside_transaction<T, F>(
+    db: &mut Database,
+    conflict_clause: Option<ConflictClause>,
+    f: F,
+) -> Result<T, ExecutorError>
 where
     F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
 {
@@ -215,23 +255,51 @@ where
             Err(apply_raise_scope(db, action, message))
         }
         Err(other) => {
-            // Non-RAISE errors (constraint violations — FK/UNIQUE/CHECK/NOT
-            // NULL, including the cascade-orphan immediate-FK check from #5465)
-            // get SQLite's statement-atomicity scope: roll the statement
-            // savepoint *back*, undoing every partial change this statement
-            // applied (e.g. an already-cascaded child DELETE), while leaving
-            // the enclosing transaction open for the application to COMMIT or
-            // ROLLBACK. This mirrors the auto-commit path (`run_auto_commit`),
-            // which rolls back its whole implicit transaction on any `Err`, and
-            // `RAISE(ABORT)`, which also rolls the statement back.
-            //
-            // Releasing instead of rolling back (the pre-#5502 behavior) relied
-            // on the DML executors performing their own targeted rollback, but
-            // for cascade/multi-row paths there is no such rollback — leaving
-            // inconsistent partial state (#5502). RAISE-variant scopes are
-            // unaffected: they are handled in the arm above.
-            if armed {
-                db.rollback_statement_savepoint();
+            // A FOREIGN KEY violation is exempt from the statement's own
+            // conflict clause — SQLite always treats it as ABORT regardless of
+            // `OR IGNORE`/`OR FAIL`/`OR ROLLBACK`/`OR REPLACE` on the statement
+            // (fkey2-20.2.x/20.3.x). Route it through the default arm below
+            // even when `conflict_clause` says otherwise.
+            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            match scoped_clause {
+                Some(ConflictClause::Rollback) => {
+                    // `OR ROLLBACK`: abort the entire enclosing transaction,
+                    // exactly like `RAISE(ROLLBACK)` (R-59980-59522).
+                    db.release_statement_savepoint();
+                    if db.in_transaction() {
+                        let _ = db.rollback_transaction();
+                    }
+                }
+                Some(ConflictClause::Fail) => {
+                    // `OR FAIL`: keep the rows already applied before the
+                    // offending row; only release the now-unneeded snapshot.
+                    // (The insert/update executors already stop collecting at
+                    // the offending row themselves — this only matters when
+                    // `may_fire_trigger` armed the wrapper for an unrelated
+                    // reason, e.g. a trigger-bearing table elsewhere in an FK
+                    // cascade.)
+                    db.release_statement_savepoint();
+                }
+                _ => {
+                    // Non-RAISE errors (constraint violations — FK/UNIQUE/CHECK/NOT
+                    // NULL, including the cascade-orphan immediate-FK check from #5465)
+                    // get SQLite's statement-atomicity scope: roll the statement
+                    // savepoint *back*, undoing every partial change this statement
+                    // applied (e.g. an already-cascaded child DELETE), while leaving
+                    // the enclosing transaction open for the application to COMMIT or
+                    // ROLLBACK. This mirrors the auto-commit path (`run_auto_commit`),
+                    // which rolls back its whole implicit transaction on any `Err`, and
+                    // `RAISE(ABORT)`, which also rolls the statement back.
+                    //
+                    // Releasing instead of rolling back (the pre-#5502 behavior) relied
+                    // on the DML executors performing their own targeted rollback, but
+                    // for cascade/multi-row paths there is no such rollback — leaving
+                    // inconsistent partial state (#5502). RAISE-variant scopes are
+                    // unaffected: they are handled in the arm above.
+                    if armed {
+                        db.rollback_statement_savepoint();
+                    }
+                }
             }
             Err(other)
         }
@@ -245,7 +313,11 @@ where
 /// If the implicit `begin_transaction` fails (it should not in auto-commit, but
 /// be defensive) we fall back to running `f` directly — no worse than the
 /// pre-#5464 behavior.
-fn run_auto_commit<T, F>(db: &mut Database, f: F) -> Result<T, ExecutorError>
+fn run_auto_commit<T, F>(
+    db: &mut Database,
+    conflict_clause: Option<ConflictClause>,
+    f: F,
+) -> Result<T, ExecutorError>
 where
     F: FnOnce(&mut Database) -> Result<T, ExecutorError>,
 {
@@ -281,8 +353,18 @@ where
             // Any other error (constraint violation, FK failure, …) rolls back
             // the whole statement — SQLite's statement atomicity. This undoes
             // partial multi-row / cascade changes that the executor's own
-            // targeted rollback may have left behind.
-            rollback_implicit_best_effort(db);
+            // targeted rollback may have left behind. In auto-commit the
+            // implicit transaction *is* the statement, so `OR ROLLBACK` needs
+            // no different handling here than the default (both discard the
+            // whole statement); `OR FAIL` commits the partial changes instead,
+            // mirroring `RAISE(FAIL)` above — except a FOREIGN KEY violation,
+            // which is exempt from the statement's own conflict clause and
+            // always gets the default (rollback) scope (fkey2-20.2.x/20.3.x).
+            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            match scoped_clause {
+                Some(ConflictClause::Fail) => commit_implicit_best_effort(db),
+                _ => rollback_implicit_best_effort(db),
+            }
             Err(other)
         }
     }
