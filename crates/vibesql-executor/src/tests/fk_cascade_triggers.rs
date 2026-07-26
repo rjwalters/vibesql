@@ -879,3 +879,67 @@ fn cascade_orphan_in_explicit_txn_preserves_earlier_statements() {
     crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db).expect("COMMIT ok");
     assert_eq!(query_col(&db, "SELECT id FROM log"), vec![SqlValue::Integer(100)]);
 }
+
+/// fkey2-3.1.3 (#6170): a multi-level `ON UPDATE CASCADE` chain (`ab` ->
+/// `cd` -> `ef`) that lands on a value forbidden by the grandchild's own
+/// CHECK constraint must abort the whole outer UPDATE — the cascade rewrite
+/// is itself an UPDATE on `ef` and must satisfy `ef`'s own constraints, not
+/// silently write the row anyway. Also verifies the multi-level propagation
+/// itself: `cd`'s cascaded PK change must further cascade to `ef`.
+#[test]
+fn multi_level_cascade_update_checks_grandchild_constraints() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE ab(a PRIMARY KEY, b)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE cd(c PRIMARY KEY REFERENCES ab ON UPDATE CASCADE ON DELETE CASCADE, d)",
+    )
+    .unwrap();
+    exec(&mut db, "CREATE TABLE ef(e REFERENCES cd ON UPDATE CASCADE, f, CHECK (e!=5))").unwrap();
+    exec(&mut db, "INSERT INTO ab VALUES(1, 'b')").unwrap();
+    exec(&mut db, "INSERT INTO cd VALUES(1, 'd')").unwrap();
+    exec(&mut db, "INSERT INTO ef VALUES(1, 'e')").unwrap();
+
+    // Cascading ab.a: 1->5 propagates to cd.c (1->5), which must further
+    // cascade to ef.e (1->5) -- but ef has CHECK(e!=5), so the whole UPDATE
+    // must fail and leave every table unchanged.
+    let err = exec(&mut db, "UPDATE ab SET a = 5").unwrap_err();
+    assert!(err.contains("CHECK constraint failed"), "got: {err}");
+    assert_eq!(query_col(&db, "SELECT a FROM ab"), vec![SqlValue::Integer(1)]);
+    assert_eq!(query_col(&db, "SELECT c FROM cd"), vec![SqlValue::Integer(1)]);
+    assert_eq!(query_col(&db, "SELECT e FROM ef"), vec![SqlValue::Integer(1)]);
+
+    // A value that clears the grandchild's CHECK constraint cascades cleanly
+    // through both levels.
+    exec(&mut db, "UPDATE ab SET a = 2").unwrap();
+    assert_eq!(query_col(&db, "SELECT a FROM ab"), vec![SqlValue::Integer(2)]);
+    assert_eq!(query_col(&db, "SELECT c FROM cd"), vec![SqlValue::Integer(2)]);
+    assert_eq!(query_col(&db, "SELECT e FROM ef"), vec![SqlValue::Integer(2)]);
+}
+
+/// fkey2-9.1.5 (#6170): `ON DELETE SET DEFAULT` must re-validate that the
+/// column's default value is itself a valid parent key. If the default no
+/// longer resolves to an existing parent row, the whole DELETE must fail
+/// with a FOREIGN KEY violation instead of silently writing an orphaned
+/// default value into the child row.
+#[test]
+fn on_delete_set_default_revalidates_default_against_parent() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE t2(c INTEGER PRIMARY KEY, d INTEGER DEFAULT 1 REFERENCES t1 ON DELETE SET DEFAULT)",
+    )
+    .unwrap();
+    // Deliberately do NOT insert a row with a=1, so the default (1) does not
+    // resolve to any parent row once t1's only row (a=2) is deleted.
+    exec(&mut db, "INSERT INTO t1 VALUES(2, 'two')").unwrap();
+    exec(&mut db, "INSERT INTO t2 VALUES(1, 2)").unwrap();
+
+    let err = exec(&mut db, "DELETE FROM t1").unwrap_err();
+    assert!(err.contains("FOREIGN KEY constraint"), "got: {err}");
+    // Nothing was mutated: the child row keeps its original (valid) value
+    // and the parent row was not deleted.
+    assert_eq!(query_col(&db, "SELECT a FROM t1"), vec![SqlValue::Integer(2)]);
+    assert_eq!(query_col(&db, "SELECT d FROM t2"), vec![SqlValue::Integer(2)]);
+}

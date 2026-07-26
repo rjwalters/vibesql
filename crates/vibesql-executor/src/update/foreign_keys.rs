@@ -152,7 +152,9 @@ impl ForeignKeyValidator {
             let key_exists = {
                 #[cfg(feature = "mvcc_enabled")]
                 {
-                    parent_table.scan_visible(&snapshot).any(|(_, parent_row)| row_satisfies(parent_row))
+                    parent_table
+                        .scan_visible(&snapshot)
+                        .any(|(_, parent_row)| row_satisfies(parent_row))
                 }
                 #[cfg(not(feature = "mvcc_enabled"))]
                 {
@@ -619,6 +621,54 @@ impl ForeignKeyValidator {
                         continue;
                     }
                 }
+
+                // A cascading UPDATE/SET NULL/SET DEFAULT is itself an UPDATE
+                // on the child table and must satisfy the child's own NOT
+                // NULL/CHECK constraints, exactly like a user-issued UPDATE
+                // would. Without this, a CASCADE chain that lands on a value
+                // forbidden by the child's CHECK constraint silently wrote the
+                // row anyway instead of aborting the whole outer statement
+                // (fkey2-3.1.3: `ab` -ON UPDATE CASCADE-> `cd` -ON UPDATE
+                // CASCADE-> `ef` landing on `e=5` must trip `CHECK(e!=5)`).
+                let child_schema_for_check = db.catalog.get_table(&table_name).unwrap().clone();
+                crate::update::constraints::ConstraintValidator::new(&child_schema_for_check)
+                    .validate_row_skip_uniqueness(&table_name, &new_row)?;
+
+                // SET DEFAULT in particular can rewrite the FK column(s) to a
+                // default value that is not itself a valid parent key (e.g.
+                // the default references a parent row that no longer
+                // exists) -- re-validate the rewritten row's own foreign keys
+                // exactly as a user-issued UPDATE would (mirrors the
+                // DELETE-side ON DELETE SET DEFAULT check, fkey2-9.1.5).
+                //
+                // This must NOT run for CASCADE: the cascaded value is the
+                // parent's brand-new key, which this very function applies to
+                // the parent's own row *after* this child-cascade loop
+                // returns (Step 7 runs before the parent row is written) --
+                // re-checking existence here would spuriously fail against
+                // the not-yet-written parent key. SET NULL is unaffected
+                // either way since NULL always short-circuits the FK check.
+                if matches!(fk.on_update, vibesql_catalog::ReferentialAction::SetDefault)
+                    && !child_schema_for_check.foreign_keys.is_empty()
+                {
+                    let deferred = Self::collect_constraints_with_old(
+                        db,
+                        &table_name,
+                        &new_row.values,
+                        Some(&old_row.values),
+                    )?;
+                    for violation in deferred {
+                        db.queue_deferred_fk_violation(violation);
+                    }
+                }
+
+                // Multi-level cascade: if this rewrite changed the child's own
+                // primary key (e.g. the FK column doubles as the child's PK),
+                // recursively propagate to grandchildren that reference *this*
+                // table before the row is written, mirroring the DELETE-side
+                // cascade's recursive `check_no_child_references` call for
+                // multi-level chains (fkey2-3.1.*).
+                Self::check_no_child_references(db, &table_name, &old_row, &new_row)?;
 
                 let child_table = db.get_table_mut(&table_name).unwrap();
                 child_table

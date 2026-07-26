@@ -210,6 +210,13 @@ pub enum ExecutorError {
     MultiplePrimaryKeys {
         table_name: String,
     },
+    /// A `FOREIGN KEY(...)` column list names a column that does not exist on
+    /// the child table (SQLite-compatible error, distinct from the generic
+    /// `no such column` wording used elsewhere). Format:
+    /// `unknown column "<name>" in foreign key definition`
+    UnknownColumnInForeignKeyDefinition {
+        column_name: String,
+    },
     CannotDropColumn(String),
     ConstraintNotFound {
         constraint_name: String,
@@ -885,6 +892,12 @@ impl std::fmt::Display for ExecutorError {
             ExecutorError::ForeignKeyMismatch { child, parent } => {
                 // SQLite-compatible error format from fkey.c::sqlite3FkLocateIndex.
                 write!(f, "foreign key mismatch - \"{}\" referencing \"{}\"", child, parent)
+            }
+            ExecutorError::UnknownColumnInForeignKeyDefinition { column_name } => {
+                // SQLite-compatible error format from build.c::sqlite3AddCheckConstraint
+                // / resolveFkReferences (fkey2-10.2.1). Hardcoded (not localized)
+                // to stay byte-identical to SQLite, matching ForeignKeyMismatch.
+                write!(f, "unknown column \"{}\" in foreign key definition", column_name)
             }
             ExecutorError::MultiplePrimaryKeys { table_name } => {
                 // SQLite-compatible error format from build.c (misc1-7.1/7.2,

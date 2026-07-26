@@ -100,19 +100,17 @@ pub(super) fn execute_add_column(
             "Cannot add a NOT NULL column with default value NULL".to_string(),
         ));
     }
-    if let Some(default_expr) = stmt.column_def.default_value.as_deref() {
-        if !is_constant_default(default_expr) {
-            return Err(ExecutorError::Other(
-                "Cannot add a column with non-constant default".to_string(),
-            ));
-        }
-    }
     // A REFERENCES column cannot carry a non-NULL default (SQLite's
     // `sqlite3AlterFinishAddColumn`, fkey2-14.1.4/1.5, e_fkey-61.1.1): the
     // added column's default would need to satisfy the FK constraint for
     // every existing row without an FK existence check ever running, which
     // SQLite refuses to do. `DEFAULT NULL` (or no default) is fine because
-    // NULL never participates in FK matching.
+    // NULL never participates in FK matching. This check runs *before* the
+    // non-constant-default check below: SQLite's own restriction ordering
+    // reports the REFERENCES-specific message even when the default is also
+    // non-constant (e.g. `f REFERENCES t1 DEFAULT CURRENT_TIME`,
+    // fkey2-14.1.5) -- both restrictions apply, but SQLite surfaces this one
+    // first.
     let has_references = stmt
         .column_def
         .constraints
@@ -122,6 +120,13 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::Other(
             "Cannot add a REFERENCES column with non-NULL default value".to_string(),
         ));
+    }
+    if let Some(default_expr) = stmt.column_def.default_value.as_deref() {
+        if !is_constant_default(default_expr) {
+            return Err(ExecutorError::Other(
+                "Cannot add a column with non-constant default".to_string(),
+            ));
+        }
     }
 
     // A STORED generated column may only be added while the table is empty.
@@ -261,8 +266,7 @@ pub(super) fn execute_add_column(
             if violation.is_some() {
                 break;
             }
-            if needs_not_null_check
-                && matches!(row.values.get(new_col_index), Some(SqlValue::Null))
+            if needs_not_null_check && matches!(row.values.get(new_col_index), Some(SqlValue::Null))
             {
                 violation = Some(ExecutorError::SqliteCompatError(
                     "NOT NULL constraint failed".to_string(),
