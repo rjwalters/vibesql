@@ -520,6 +520,8 @@ impl ExpressionEvaluator<'_> {
             // SQLite coerces numeric types to strings for LIKE comparison
             vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl, not raw f64/f32
             // `to_string()`. Rust's `f64::to_string` emits fixed-point text
             // ("18446744073709550000") while SQLite coerces REAL to its %!.15g
@@ -527,7 +529,8 @@ impl ExpressionEvaluator<'_> {
             // already matches SQLite 3.51 (fixes atof-3.1's GLOB comparison).
             f @ (vibesql_types::SqlValue::Float(_)
             | vibesql_types::SqlValue::Double(_)
-            | vibesql_types::SqlValue::Real(_)) => arcstr::ArcStr::from(f.to_string()),
+            | vibesql_types::SqlValue::Real(_)
+            | vibesql_types::SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
             vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for LIKE comparison
@@ -551,6 +554,8 @@ impl ExpressionEvaluator<'_> {
             // SQLite coerces numeric types to strings for LIKE comparison
             vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl, not raw f64/f32
             // `to_string()`. Rust's `f64::to_string` emits fixed-point text
             // ("18446744073709550000") while SQLite coerces REAL to its %!.15g
@@ -558,7 +563,8 @@ impl ExpressionEvaluator<'_> {
             // already matches SQLite 3.51 (fixes atof-3.1's GLOB comparison).
             f @ (vibesql_types::SqlValue::Float(_)
             | vibesql_types::SqlValue::Double(_)
-            | vibesql_types::SqlValue::Real(_)) => arcstr::ArcStr::from(f.to_string()),
+            | vibesql_types::SqlValue::Real(_)
+            | vibesql_types::SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
             vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for the LIKE pattern too:
@@ -648,6 +654,8 @@ impl ExpressionEvaluator<'_> {
             // SQLite coerces numeric types to strings for GLOB comparison
             vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl, not raw f64/f32
             // `to_string()`. Rust's `f64::to_string` emits fixed-point text
             // ("18446744073709550000") while SQLite coerces REAL to its %!.15g
@@ -655,7 +663,8 @@ impl ExpressionEvaluator<'_> {
             // already matches SQLite 3.51 (fixes atof-3.1's GLOB comparison).
             f @ (vibesql_types::SqlValue::Float(_)
             | vibesql_types::SqlValue::Double(_)
-            | vibesql_types::SqlValue::Real(_)) => arcstr::ArcStr::from(f.to_string()),
+            | vibesql_types::SqlValue::Real(_)
+            | vibesql_types::SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
             vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for GLOB comparison
@@ -679,6 +688,8 @@ impl ExpressionEvaluator<'_> {
             // SQLite coerces numeric types to strings for GLOB comparison
             vibesql_types::SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             vibesql_types::SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            vibesql_types::SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl, not raw f64/f32
             // `to_string()`. Rust's `f64::to_string` emits fixed-point text
             // ("18446744073709550000") while SQLite coerces REAL to its %!.15g
@@ -686,7 +697,8 @@ impl ExpressionEvaluator<'_> {
             // already matches SQLite 3.51 (fixes atof-3.1's GLOB comparison).
             f @ (vibesql_types::SqlValue::Float(_)
             | vibesql_types::SqlValue::Double(_)
-            | vibesql_types::SqlValue::Real(_)) => arcstr::ArcStr::from(f.to_string()),
+            | vibesql_types::SqlValue::Real(_)
+            | vibesql_types::SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
             // SQLite has no boolean type: EXISTS/IN results behave as integers 0/1
             vibesql_types::SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             // SQLite treats blob bytes as raw text for the GLOB pattern too

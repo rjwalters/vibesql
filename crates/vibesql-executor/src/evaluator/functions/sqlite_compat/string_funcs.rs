@@ -378,7 +378,15 @@ fn format_float_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {
     format!("{:.prec$}", f, prec = precision)
 }
 
-fn format_scientific_with_spec(val: &SqlValue, uppercase: bool, _spec: &FormatSpec) -> String {
+/// `%e`/`%E` scientific-notation formatting, matching C's `printf("%e", ...)`:
+/// `[-]d.dddddde±dd` — exactly one digit before the decimal point, `precision`
+/// digits after it (default 6 when no precision is given), and an exponent
+/// with an explicit sign and a minimum of two digits. Rust's `{:e}` Display
+/// (used previously) instead emits Rust-style notation with no default
+/// precision and no exponent sign/padding (e.g. "1.234567891e6" instead of
+/// "1.234568e+06"), so it cannot be used directly — this builds the C form
+/// from Rust's precision-aware `{:.N e}` mantissa/exponent split.
+fn format_scientific_with_spec(val: &SqlValue, uppercase: bool, spec: &FormatSpec) -> String {
     let f = match val {
         SqlValue::Null => return "(null)".to_string(),
         SqlValue::Integer(i) => *i as f64,
@@ -391,11 +399,37 @@ fn format_scientific_with_spec(val: &SqlValue, uppercase: bool, _spec: &FormatSp
         _ => 0.0,
     };
 
-    if uppercase {
-        format!("{:E}", f)
-    } else {
-        format!("{:e}", f)
+    if f.is_nan() {
+        return if uppercase { "NAN".to_string() } else { "nan".to_string() };
     }
+    if f.is_infinite() {
+        let sign = if f < 0.0 { "-" } else { "" };
+        return format!("{}{}", sign, if uppercase { "INF" } else { "inf" });
+    }
+
+    let precision = spec.precision.unwrap_or(6);
+    let negative = f.is_sign_negative() && f != 0.0;
+
+    // Rust's `{:.N e}` on the absolute value already normalizes to exactly one
+    // non-zero digit before the point (d.ddddde<exp>, no sign, no exponent
+    // padding) — split that apart and re-render the exponent in C form.
+    let formatted = format!("{:.prec$e}", f.abs(), prec = precision);
+    let (mantissa, exp_str) = formatted.split_once('e').unwrap_or((formatted.as_str(), "0"));
+    let exp: i32 = exp_str.parse().unwrap_or(0);
+    let exp_sign = if exp < 0 { '-' } else { '+' };
+
+    let sign = if negative {
+        "-"
+    } else if spec.show_sign {
+        "+"
+    } else if spec.space_sign {
+        " "
+    } else {
+        ""
+    };
+
+    let e_char = if uppercase { 'E' } else { 'e' };
+    format!("{}{}{}{}{:02}", sign, mantissa, e_char, exp_sign, exp.abs())
 }
 
 fn format_string_with_spec(val: &SqlValue, spec: &FormatSpec) -> String {

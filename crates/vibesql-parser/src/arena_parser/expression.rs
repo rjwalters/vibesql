@@ -1639,7 +1639,13 @@ impl<'arena> ArenaParser<'arena> {
 
     /// Parse data type (simplified).
     pub(crate) fn parse_data_type(&mut self) -> Result<vibesql_types::DataType, ParseError> {
-        // Get type name as uppercase string
+        // Get type name as uppercase string (for matching known type names below),
+        // while also keeping the original-case spelling for the UserDefined
+        // fallback (unknown type names, e.g. CAST(x AS banana)/CAST(x AS shobblob_x)).
+        let original_name = match self.peek() {
+            Token::Identifier(type_name) => Some(type_name.clone()),
+            _ => None,
+        };
         let type_upper = match self.peek() {
             Token::Identifier(type_name) => type_name.to_uppercase(),
             Token::Keyword { keyword: Keyword::Date, .. } => "DATE".to_string(),
@@ -1753,8 +1759,18 @@ impl<'arena> ArenaParser<'arena> {
                 Ok(vibesql_types::DataType::Character { length })
             }
             _ => {
-                // Unknown type - default to varchar
-                Ok(vibesql_types::DataType::Varchar { max_length: None })
+                // Unknown type name (e.g. CAST(x AS banana), CAST(x AS shobblob_x)):
+                // SQLite accepts any type name and derives affinity from it via
+                // substring rules (INT/CHAR-CLOB-TEXT/BLOB/REAL-FLOA-DOUB, else
+                // NUMERIC) — see DataType::sqlite_affinity(). This used to
+                // default to `Varchar` (TEXT affinity unconditionally), which
+                // silently made CAST(x AS <unrecognized-name>) a no-op for text
+                // values instead of applying the declared name's real affinity
+                // (e_expr-27.3.2/27.3.3: `CAST('def' AS shobblob_x)` must yield
+                // BLOB, not TEXT, because the name contains "BLOB").
+                Ok(vibesql_types::DataType::UserDefined {
+                    type_name: original_name.unwrap_or(type_upper),
+                })
             }
         }
     }

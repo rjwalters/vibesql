@@ -1056,13 +1056,17 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl (SQLite %!.15g
             // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
             // Display already matches SQLite 3.51; this keeps stored/CTE REAL
             // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
-            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
-                arcstr::ArcStr::from(f.to_string())
-            }
+            f @ (SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Real(_)
+            | SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
@@ -1077,13 +1081,18 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl (SQLite %!.15g
             // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
             // Display already matches SQLite 3.51; this keeps stored/CTE REAL
             // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
-            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
-                arcstr::ArcStr::from(f.to_string())
-            }
+            f @ (SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Real(_)
+            | SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
+            SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "LIKE requires string operands, got {:?} and {:?}",
@@ -1109,13 +1118,17 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl (SQLite %!.15g
             // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
             // Display already matches SQLite 3.51; this keeps stored/CTE REAL
             // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
-            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
-                arcstr::ArcStr::from(f.to_string())
-            }
+            f @ (SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Real(_)
+            | SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
             SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
@@ -1130,13 +1143,18 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             SqlValue::Varchar(s) | SqlValue::Character(s) => s.clone(),
             SqlValue::Integer(i) => arcstr::ArcStr::from(i.to_string()),
             SqlValue::Bigint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Smallint(i) => arcstr::ArcStr::from(i.to_string()),
+            SqlValue::Unsigned(u) => arcstr::ArcStr::from(u.to_string()),
             // Render floats through the SqlValue Display impl (SQLite %!.15g
             // scientific rendering), not raw f64/f32 `to_string()` (fixed-point).
             // Display already matches SQLite 3.51; this keeps stored/CTE REAL
             // values consistent with inline literals for LIKE/GLOB (fixes atof-3.1).
-            f @ (SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Real(_)) => {
-                arcstr::ArcStr::from(f.to_string())
-            }
+            f @ (SqlValue::Float(_)
+            | SqlValue::Double(_)
+            | SqlValue::Real(_)
+            | SqlValue::Numeric(_)) => arcstr::ArcStr::from(f.to_string()),
+            SqlValue::Boolean(b) => arcstr::ArcStr::from(if *b { "1" } else { "0" }),
+            SqlValue::Blob(b) => arcstr::ArcStr::from(String::from_utf8_lossy(b).into_owned()),
             _ => {
                 return Err(ExecutorError::TypeError(format!(
                     "GLOB requires string operands, got {:?} and {:?}",

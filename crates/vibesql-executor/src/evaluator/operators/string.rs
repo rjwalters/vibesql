@@ -30,11 +30,17 @@ impl StringOps {
             // Boolean - SQLite treats as integer 0/1
             Boolean(b) => if *b { "1" } else { "0" }.to_string(),
 
-            // Float types - use Rust's default formatting which is SQLite-compatible
-            Numeric(n) => format_float(*n),
-            Float(f) => format_float(*f as f64),
-            Real(r) => format_float(*r as f64),
-            Double(d) => format_float(*d),
+            // Float types - delegate to SqlValue's canonical Display impl
+            // (vibesql-types sql_value::display::format_f64/format_f32), which
+            // already implements SQLite's %!.15g rendering including scientific
+            // notation for |n| >= 1e15 or very small magnitudes. This used to be
+            // a second, independent formatter (`format_float` below) that only
+            // used scientific notation via Rust's bare `to_string()` fallback —
+            // which does NOT match SQLite's %!.15g scientific form — and never
+            // triggered for values like 9223372036854775808.0 that are exactly
+            // representable as an f64 "whole number" but far too large to print
+            // in fixed-point (e_expr-32.2.8: `CAST(x AS NUMERIC)||''`).
+            Numeric(_) | Float(_) | Real(_) | Double(_) => value.to_string(),
 
             // Temporal types
             Date(d) => d.to_string(),
@@ -72,30 +78,6 @@ impl StringOps {
         let left_str = Self::to_concat_string(left);
         let right_str = Self::to_concat_string(right);
         Ok(SqlValue::Varchar(arcstr::ArcStr::from(format!("{}{}", left_str, right_str))))
-    }
-}
-
-/// Format a float value for concatenation (SQLite-compatible).
-///
-/// Uses minimal representation: integers show without decimals,
-/// floats show their natural decimal representation.
-#[inline]
-fn format_float(n: f64) -> String {
-    if n.is_nan() {
-        "NaN".to_string()
-    } else if n.is_infinite() {
-        if n > 0.0 {
-            "Infinity".to_string()
-        } else {
-            "-Infinity".to_string()
-        }
-    } else if n.fract() == 0.0 && n.abs() < 1e15 {
-        // Whole number - format without decimals but add .0 for floats
-        // SQLite shows "10.0" for float 10.0, not "10"
-        format!("{}.0", n as i64)
-    } else {
-        // Fractional or very large - use default formatting
-        n.to_string()
     }
 }
 

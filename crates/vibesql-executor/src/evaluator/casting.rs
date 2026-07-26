@@ -173,6 +173,104 @@ pub(crate) fn string_to_number(s: &str) -> (i64, f64, bool) {
     }
 }
 
+/// SQLite `NUMERIC`-affinity conversion of a text value: decide INTEGER vs REAL
+/// exactly as SQLite does when casting text to NUMERIC (or applying NUMERIC
+/// affinity). Non-numeric text yields INTEGER 0.
+///
+/// Rules (SQLite datatype3 / e_expr-32 evidence):
+/// * Integer-form text (no '.' and no exponent) that fits in a signed 64-bit
+///   integer -> INTEGER; integer-form text describing a value outside the i64
+///   range -> REAL (R-50300-26941: "text input that describes a value outside
+///   the range of a 64-bit signed integer yields a REAL result").
+/// * Float-form text (has a '.' and/or an exponent) -> REAL, unless the value
+///   round-trips losslessly through a ~51-bit signed integer, in which case the
+///   result is INTEGER (R-47045-23194: no fractional part and -2^51 <= v < 2^51).
+///
+/// This differs from the naive "integral && fits i64 -> INTEGER" rule in two
+/// SQLite-significant ways: an integer literal that overflows i64 is REAL (not a
+/// clamped i64::MAX/MIN), and a float-form value whose magnitude exceeds 2^51
+/// stays REAL even though it has no fractional part.
+pub(crate) fn text_to_numeric(s: &str) -> vibesql_types::SqlValue {
+    use vibesql_types::SqlValue;
+    // 2^51 — the window inside which every integer is exactly representable as an
+    // f64 and thus round-trips losslessly (matches SQLite's sqlite3RealSameAsInt).
+    const LOSSLESS_INT_LIMIT: f64 = 2_251_799_813_685_248.0;
+
+    let trimmed = s.trim_start();
+    if trimmed.is_empty() {
+        return SqlValue::Integer(0);
+    }
+
+    // Keep the sign separate so we can parse the magnitude and still recognise
+    // i64::MIN, whose magnitude (9223372036854775808) does not itself fit in i64.
+    let (negative, rest) = match trimmed.chars().next() {
+        Some('-') => (true, &trimmed[1..]),
+        Some('+') => (false, &trimmed[1..]),
+        _ => (false, trimmed),
+    };
+
+    // Scan the numeric prefix, tracking whether it is float-form ('.'/exponent).
+    let chars: Vec<char> = rest.chars().collect();
+    let len = chars.len();
+    let mut has_decimal = false;
+    let mut has_exponent = false;
+    let mut end_idx = 0;
+    while end_idx < len {
+        let c = chars[end_idx];
+        if c.is_ascii_digit() {
+            end_idx += 1;
+        } else if c == '.' && !has_decimal && !has_exponent {
+            has_decimal = true;
+            end_idx += 1;
+        } else if (c == 'e' || c == 'E') && !has_exponent && end_idx > 0 {
+            // Only accept the exponent if a valid exponent digit follows the
+            // optional sign; otherwise the 'e' terminates the numeric prefix.
+            let mut j = end_idx + 1;
+            if j < len && (chars[j] == '+' || chars[j] == '-') {
+                j += 1;
+            }
+            if j < len && chars[j].is_ascii_digit() {
+                has_exponent = true;
+                end_idx = j;
+                while end_idx < len && chars[end_idx].is_ascii_digit() {
+                    end_idx += 1;
+                }
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    if end_idx == 0 {
+        return SqlValue::Integer(0);
+    }
+
+    let magnitude: String = chars[..end_idx].iter().collect();
+    let float_form = has_decimal || has_exponent;
+
+    if !float_form {
+        // Integer-form text: INTEGER when it fits in i64, else REAL.
+        let signed = if negative { format!("-{magnitude}") } else { magnitude.clone() };
+        if let Ok(n) = signed.parse::<i64>() {
+            return SqlValue::Integer(n);
+        }
+        let f = magnitude.parse::<f64>().unwrap_or(0.0);
+        return SqlValue::Numeric(if negative { -f } else { f });
+    }
+
+    // Float-form text: REAL, narrowed to INTEGER only when it round-trips
+    // losslessly through a ~51-bit signed integer.
+    let m = magnitude.parse::<f64>().unwrap_or(0.0);
+    let f = if negative { -m } else { m };
+    if f.fract() == 0.0 && f >= -LOSSLESS_INT_LIMIT && f < LOSSLESS_INT_LIMIT {
+        SqlValue::Integer(f as i64)
+    } else {
+        SqlValue::Numeric(f)
+    }
+}
+
 /// SQLite-compatible string-to-integer coercion for CAST to INTEGER
 ///
 /// According to SQLite documentation (R-24225-46995):
@@ -420,28 +518,10 @@ pub(crate) fn cast_value(
                 // String/blob: convert to most appropriate type
                 // SQLite NUMERIC affinity: use INTEGER if value is exact integer
                 // '1.0' -> 1 (integer), '1.5' -> 1.5 (real)
-                SqlValue::Varchar(s) | SqlValue::Character(s) => {
-                    let (int_val, float_val, _) = string_to_number(s);
-                    if float_val.fract() == 0.0
-                        && float_val >= i64::MIN as f64
-                        && float_val <= i64::MAX as f64
-                    {
-                        Ok(SqlValue::Integer(int_val))
-                    } else {
-                        Ok(SqlValue::Numeric(float_val))
-                    }
-                }
+                SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(text_to_numeric(s)),
                 SqlValue::Blob(bytes) => {
                     let text = std::str::from_utf8(bytes).unwrap_or("");
-                    let (int_val, float_val, _) = string_to_number(text);
-                    if float_val.fract() == 0.0
-                        && float_val >= i64::MIN as f64
-                        && float_val <= i64::MAX as f64
-                    {
-                        Ok(SqlValue::Integer(int_val))
-                    } else {
-                        Ok(SqlValue::Numeric(float_val))
-                    }
+                    Ok(text_to_numeric(text))
                 }
                 _ => Ok(SqlValue::Integer(0)), // SQLite: Default to 0 for unknown types
             }
@@ -721,26 +801,25 @@ pub(crate) fn cast_value(
             vibesql_types::TypeAffinity::None => cast_value(value, &BinaryLargeObject, sql_mode),
             vibesql_types::TypeAffinity::Real => cast_value(value, &DoublePrecision, sql_mode),
             vibesql_types::TypeAffinity::Numeric => {
-                // SQLite NUMERIC cast: text converts to INTEGER when the value
-                // is integral and representable losslessly, otherwise REAL;
-                // non-numeric text converts to 0.
-                let numeric_from_text = |s: &str| -> vibesql_types::SqlValue {
-                    let (i, f, is_float) = string_to_number(s);
-                    if is_float {
-                        if f == f.trunc() && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
-                            SqlValue::Integer(f as i64)
-                        } else {
-                            SqlValue::Double(f)
-                        }
-                    } else {
-                        SqlValue::Integer(i)
-                    }
+                // SQLite NUMERIC cast: text converts to INTEGER when the value is
+                // integral and losslessly representable, otherwise REAL; values
+                // outside the i64 range become REAL and non-numeric text is 0.
+                // text_to_numeric's REAL branch tags its result as `Numeric`;
+                // this call site's established convention (predating this
+                // shared helper) is `Double` for the CAST-to-unknown-typename
+                // NUMERIC-affinity path, so re-tag here rather than changing
+                // text_to_numeric's variant and disturbing its other caller.
+                let retag_double = |v: SqlValue| match v {
+                    SqlValue::Numeric(f) => SqlValue::Double(f),
+                    other => other,
                 };
                 match value {
-                    SqlValue::Varchar(s) | SqlValue::Character(s) => Ok(numeric_from_text(s)),
+                    SqlValue::Varchar(s) | SqlValue::Character(s) => {
+                        Ok(retag_double(text_to_numeric(s)))
+                    }
                     SqlValue::Blob(bytes) => {
                         let text = std::str::from_utf8(bytes).unwrap_or("");
-                        Ok(numeric_from_text(text))
+                        Ok(retag_double(text_to_numeric(text)))
                     }
                     SqlValue::Boolean(b) => Ok(SqlValue::Integer(if *b { 1 } else { 0 })),
                     // Values that already have a numeric storage class keep it

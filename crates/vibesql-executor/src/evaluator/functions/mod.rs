@@ -175,6 +175,14 @@ pub(super) fn eval_scalar_function(
         "INTREAL" => sqlite_compat::intreal(args),
         "GLOB" => sqlite_compat::glob(args),
         "LIKE" => sqlite_compat::like(args),
+        // Default `match()` application-defined function backing the `X MATCH Y`
+        // operator (parsed as `match(Y, X)`). SQLite ships a genuine default
+        // implementation that always raises "unable to use function MATCH in
+        // the requested context" (R-42037-37826); there is deliberately no
+        // "REGEXP" case here — SQLite has no default `regexp()`, so `X REGEXP Y`
+        // (parsed as `regexp(Y, X)`) falls through to the generic "no such
+        // function: REGEXP" error below, matching SQLite exactly.
+        "MATCH" => sqlite_compat::match_default(args),
 
         // JSON functions (SQLite JSON1 extension)
         //
