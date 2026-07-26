@@ -213,6 +213,28 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
         }
     }
 
+    // ---- AUTOINCREMENT flag (issue #6173) ----
+    // `TableSchema::is_autoincrement` is not a serialized binary field either
+    // (same rationale as `rowid_alias_column`/`strict` above): rederive it
+    // from the re-parsed source so a process restart doesn't silently forget
+    // an AUTOINCREMENT column and start reusing rowids after a full DELETE.
+    // Mirrors `create_table.rs`'s validation: only column-level AUTOINCREMENT
+    // is checked here (the table-level `PRIMARY KEY(x AUTOINCREMENT)` spelling
+    // is not yet accepted by the parser), and only takes effect when the
+    // column ended up as the rowid alias above.
+    if let Some(col_idx) = schema.rowid_alias_column {
+        let col_name = &schema.columns[col_idx].name;
+        let is_autoincrement = create.columns.iter().any(|col_def| {
+            col_def.name.eq_ignore_ascii_case(col_name)
+                && col_def.constraints.iter().any(|c| {
+                    matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
+                })
+        });
+        if is_autoincrement {
+            schema.is_autoincrement = true;
+        }
+    }
+
     // ---- PRIMARY KEY key-part collations (issue #5881) ----
     // The explicit per-key-part COLLATE (`PRIMARY KEY(a COLLATE nocase)`) is not
     // a serialized binary field, so before this rehydration a reloaded WITHOUT

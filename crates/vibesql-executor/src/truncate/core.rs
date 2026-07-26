@@ -30,6 +30,19 @@ pub fn reset_auto_increment_sequences(
         }
     }
 
+    // Capture the real-AUTOINCREMENT display name (issue #6173): an INTEGER
+    // PRIMARY KEY AUTOINCREMENT table tracks its high-water mark in the real
+    // `sqlite_sequence` table rather than a synthetic `NextValue` sequence, so
+    // it never appears in `sequence_names` above. TRUNCATE resets the counter
+    // to 1, mirrored by removing the `sqlite_sequence` row for this table (an
+    // empty table with no `seq` row makes the next NULL insert restart at 1);
+    // `bump_sequence_after_insert` lazily recreates the row on the next insert.
+    let autoincrement_display_name = if table_schema.is_autoincrement {
+        Some(table_schema.name.clone())
+    } else {
+        None
+    };
+
     // Now reset the sequences
     for sequence_name in sequence_names {
         if let Ok(sequence) = database.catalog.get_sequence_mut(&sequence_name) {
@@ -38,6 +51,11 @@ pub fn reset_auto_increment_sequences(
         }
         // Note: If sequence doesn't exist, we silently continue.
         // This shouldn't happen in normal operation but makes the function more robust.
+    }
+
+    // Reset the real `sqlite_sequence` high-water mark for AUTOINCREMENT tables.
+    if let Some(display_name) = autoincrement_display_name {
+        crate::autoincrement::remove_sequence_entry(database, &display_name)?;
     }
 
     Ok(())

@@ -632,6 +632,27 @@ fn execute_insert_internal(
     let table_max_rowid: Option<i64> =
         db.get_table(&storage_table_name).and_then(|t| t.max_rowid_signed());
 
+    // AUTOINCREMENT tables (issue #6173) fold in the `sqlite_sequence`
+    // high-water mark here too. This path (the `rowid`/`_rowid_`/`oid`
+    // pseudo-column *and* the INTEGER PRIMARY KEY-named-column auto-rowid
+    // computation below) and `apply_default_values_with_batch_context`'s IPK
+    // NULL-fill (`insert/defaults.rs`) both auto-generate the SAME logical
+    // value — the IPK column value IS the rowid — and must start from the
+    // same baseline, or the row's stored column value and its *tracked*
+    // high-water mark (what future allocations in this table read from) would
+    // silently diverge.
+    let table_max_rowid: Option<i64> = if schema.is_autoincrement {
+        let seq = crate::autoincrement::sequence_high_water_mark(db, &schema.name);
+        match (table_max_rowid, seq) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    } else {
+        table_max_rowid
+    };
+
     // Track maximum signed rowid seen so far (updated as we process each row)
     let mut batch_max_rowid: Option<i64> = table_max_rowid;
 
@@ -1691,6 +1712,29 @@ fn execute_insert_internal(
             }
         }
         return Err(assertion_error);
+    }
+
+    // AUTOINCREMENT bookkeeping (issue #6173): on ANY successfully-completed
+    // INSERT statement against an AUTOINCREMENT table, bump (or lazily
+    // create) its `sqlite_sequence` entry to `max(existing, batch_max_ipk)`.
+    // `batch_max_ipk` already reflects the highest rowid this statement
+    // considered for the target table — explicit or auto-generated, and
+    // including rows later discarded by `OR IGNORE`/`ON CONFLICT DO NOTHING`
+    // (sqlite3 still bumps the sequence for those) — since it is updated
+    // unconditionally in the per-row loop above, before any conflict
+    // resolution. `unwrap_or(0)` covers a statement that considered zero rows
+    // (e.g. `INSERT ... SELECT` whose SELECT is empty): sqlite3 still creates
+    // a `(table, 0)` row on such a statement's first successful run
+    // (autoinc-9.1). Placed after every fallible step in this function
+    // (including the assertion-rollback path above), so a statement that
+    // ultimately errors out never reaches it — matching sqlite3's
+    // whole-statement rollback of the bookkeeping too.
+    if schema.is_autoincrement {
+        crate::autoincrement::bump_sequence_after_insert(
+            db,
+            &schema.name,
+            batch_max_ipk.unwrap_or(0),
+        )?;
     }
 
     // Project the RETURNING clause against the rows actually inserted/updated

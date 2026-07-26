@@ -69,6 +69,15 @@ impl DropTableExecutor {
             ));
         }
 
+        // `sqlite_sequence` (AUTOINCREMENT bookkeeping, issue #6173) may never
+        // be dropped either, matching sqlite3 3.51.0 (autoinc-1.5): `table
+        // sqlite_sequence may not be dropped`.
+        if crate::autoincrement::is_sqlite_sequence_table(&stmt.table_name) {
+            return Err(ExecutorError::SqliteCompatError(
+                "table sqlite_sequence may not be dropped".to_string(),
+            ));
+        }
+
         // Check if table exists
         let table_exists = database.catalog.table_exists(&stmt.table_name);
 
@@ -96,6 +105,18 @@ impl DropTableExecutor {
         // still present. `foreign key mismatch` errors are ignored here, exactly
         // as SQLite ignores them for the implicit DELETE (R-57242-37005).
         crate::delete::integrity::check_drop_table_references(database, &stmt.table_name)?;
+
+        // Remember whether this is an AUTOINCREMENT table (and its declared-
+        // case display name) before it's removed from the catalog, so its
+        // `sqlite_sequence` row can be cleaned up after the drop succeeds.
+        // SQLite: dropping an AUTOINCREMENT table removes its entry from
+        // `sqlite_sequence`, but `sqlite_sequence` itself stays behind
+        // (autoinc-3.2/3.3/3.4, issue #6173).
+        let autoincrement_display_name = database
+            .catalog
+            .get_table(&stmt.table_name)
+            .filter(|schema| schema.is_autoincrement)
+            .map(|schema| schema.name.clone());
 
         // Drop all indexes associated with this table first
         let dropped_indexes = database.catalog.drop_table_indexes(&stmt.table_name);
@@ -131,6 +152,10 @@ impl DropTableExecutor {
         database
             .drop_table(&stmt.table_name)
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+        if let Some(display_name) = autoincrement_display_name {
+            crate::autoincrement::remove_sequence_entry(database, &display_name)?;
+        }
 
         // Return success message
         match (index_count, trigger_count) {

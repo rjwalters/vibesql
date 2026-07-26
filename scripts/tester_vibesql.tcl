@@ -6774,7 +6774,14 @@ proc check_single_capability {cap} {
     # than skipped (e.g. e_expr-27.4.7..9/28.1.3..4/30.1.5..8, #6172).
     # Marking it unsupported routes `ifcapable {utf16}` guards to their
     # skip/else branch, matching a real SQLITE_OMIT_UTF16 build.
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16}
+    # `rowid32` (the SQLITE_32BIT_ROWID compile-time option) is OFF in a normal
+    # SQLite build and in VibeSQL: rowids/INTEGER PRIMARY KEY values are signed
+    # 64-bit. Marking it unsupported routes `ifcapable {rowid32}` blocks to their
+    # skip/else branch and `ifcapable {!rowid32}` blocks to their run branch,
+    # matching a 64-bit-rowid build. Without this, autoinc-6.1 took the 32-bit
+    # branch (INSERT 2147483647) and autoinc-6.2's follow-on NULL insert did not
+    # overflow i64, so the expected "database or disk is full" never fired (#6173).
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16 rowid32}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

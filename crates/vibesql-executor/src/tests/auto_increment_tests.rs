@@ -32,7 +32,8 @@ fn test_auto_increment_basic_inserts() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
@@ -186,7 +187,8 @@ fn test_last_insert_rowid_basic() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
@@ -285,7 +287,8 @@ fn test_last_insert_rowid_multi_row_insert() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
@@ -452,7 +455,8 @@ fn test_last_insert_rowid_via_select() {
                 default_value: None,
                 comment: None,
                 generated_expr: None,
-                is_exact_integer_type: false,
+                // INTEGER PRIMARY KEY AUTOINCREMENT is a genuine rowid-alias column.
+                is_exact_integer_type: true,
                 type_source: None,
             },
             ColumnDef {
