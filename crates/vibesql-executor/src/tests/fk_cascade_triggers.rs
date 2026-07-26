@@ -31,6 +31,9 @@ fn exec(db: &mut Database, sql: &str) -> Result<String, String> {
         Statement::Update(s) => crate::update::UpdateExecutor::execute(&s, db)
             .map(|count| format!("{} row(s) updated", count))
             .map_err(|e| e.to_string()),
+        Statement::DropTable(s) => {
+            crate::DropTableExecutor::execute(&s, db).map_err(|e| e.to_string())
+        }
         other => Err(format!("Unsupported statement type: {:?}", other)),
     }
 }
@@ -942,4 +945,101 @@ fn on_delete_set_default_revalidates_default_against_parent() {
     // and the parent row was not deleted.
     assert_eq!(query_col(&db, "SELECT a FROM t1"), vec![SqlValue::Integer(2)]);
     assert_eq!(query_col(&db, "SELECT d FROM t2"), vec![SqlValue::Integer(2)]);
+}
+
+// ---------------------------------------------------------------------------
+// DROP TABLE performs SQLite's implicit FK-enforcing DELETE FROM (fkey3-1.3/1.5,
+// e_fkey-57/58/61.3). EVIDENCE-OF R-14208-23986 / R-11078-03945: the implicit
+// DELETE removes all rows and may invoke FK actions or constraint violations.
+// ---------------------------------------------------------------------------
+
+/// DROP TABLE of a parent still referenced (immediate NO ACTION) by a child
+/// row raises FOREIGN KEY constraint failed and leaves the table in place
+/// (EVIDENCE-OF R-32768-47925; fkey3-1.3).
+#[test]
+fn drop_table_referenced_parent_raises_and_keeps_table() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY)").unwrap();
+    exec(&mut db, "INSERT INTO t1 VALUES(100), (101)").unwrap();
+    exec(&mut db, "CREATE TABLE t2(y INTEGER REFERENCES t1(x))").unwrap();
+    exec(&mut db, "INSERT INTO t2 VALUES(100), (101)").unwrap();
+
+    let err = exec(&mut db, "DROP TABLE t1").unwrap_err();
+    assert!(err.contains("FOREIGN KEY constraint"), "got: {err}");
+    // Table t1 must still exist and retain its rows.
+    assert!(db.catalog.table_exists("t1"));
+    assert_eq!(
+        query_col(&db, "SELECT x FROM t1 ORDER BY x"),
+        vec![SqlValue::Integer(100), SqlValue::Integer(101)]
+    );
+
+    // After dropping the child, the parent drops cleanly (fkey3-1.4/1.5).
+    exec(&mut db, "DROP TABLE t2").unwrap();
+    exec(&mut db, "DROP TABLE t1").unwrap();
+    assert!(!db.catalog.table_exists("t1"));
+}
+
+/// DROP TABLE of a parent with an ON DELETE CASCADE child empties the child
+/// via the implicit DELETE, then drops the parent (e_fkey-57.4).
+#[test]
+fn drop_table_cascades_into_child() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE p(a, b, PRIMARY KEY(a, b))").unwrap();
+    exec(&mut db, "CREATE TABLE c3(c, d, FOREIGN KEY(c, d) REFERENCES p ON DELETE CASCADE)")
+        .unwrap();
+    exec(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
+    exec(&mut db, "INSERT INTO c3 VALUES(1, 2)").unwrap();
+
+    exec(&mut db, "DROP TABLE p").unwrap();
+    assert!(!db.catalog.table_exists("p"));
+    // The cascade emptied the child.
+    assert_eq!(query_col(&db, "SELECT count(*) FROM c3"), vec![SqlValue::Integer(0)]);
+}
+
+/// DROP TABLE of a parent with an ON DELETE SET NULL child nulls the child's
+/// FK columns via the implicit DELETE, then drops the parent (e_fkey-61.3.1).
+#[test]
+fn drop_table_set_null_on_child() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE p(a UNIQUE)").unwrap();
+    exec(&mut db, "CREATE TABLE c(b REFERENCES p(a) ON DELETE SET NULL)").unwrap();
+    exec(&mut db, "INSERT INTO p VALUES('x')").unwrap();
+    exec(&mut db, "INSERT INTO c VALUES('x')").unwrap();
+
+    exec(&mut db, "DROP TABLE p").unwrap();
+    assert!(!db.catalog.table_exists("p"));
+    // The child's FK column was set to NULL by the SET NULL action.
+    assert_eq!(query_col(&db, "SELECT b FROM c"), vec![SqlValue::Null]);
+}
+
+/// A self-referential FK never blocks a DROP TABLE: once the whole table is
+/// removed both sides of every self-reference disappear together, so the
+/// implicit DELETE can never leave an orphan (fkey3-3.* families rely on this).
+#[test]
+fn drop_table_self_referential_fk_does_not_block() {
+    let mut db = fresh_db();
+    exec(
+        &mut db,
+        "CREATE TABLE t3(a, b, c, d, UNIQUE(a, b), FOREIGN KEY(c, d) REFERENCES t3(a, b))",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO t3 VALUES(1, 2, 1, 2)").unwrap();
+
+    exec(&mut db, "DROP TABLE t3").unwrap();
+    assert!(!db.catalog.table_exists("t3"));
+}
+
+/// The special DROP-TABLE FK behavior only applies when foreign keys are
+/// enabled: with PRAGMA foreign_keys OFF a referenced parent drops freely
+/// (EVIDENCE-OF R-54142-41346).
+#[test]
+fn drop_table_referenced_parent_allowed_when_fk_disabled() {
+    let mut db = Database::new(); // foreign keys default OFF
+    exec(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY)").unwrap();
+    exec(&mut db, "INSERT INTO t1 VALUES(100)").unwrap();
+    exec(&mut db, "CREATE TABLE t2(y INTEGER REFERENCES t1(x))").unwrap();
+    exec(&mut db, "INSERT INTO t2 VALUES(100)").unwrap();
+
+    exec(&mut db, "DROP TABLE t1").unwrap();
+    assert!(!db.catalog.table_exists("t1"));
 }
