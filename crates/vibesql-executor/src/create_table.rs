@@ -309,18 +309,15 @@ impl CreateTableExecutor {
             .columns
             .iter()
             .map(|col_def| {
-                // For AUTO_INCREMENT columns, set default to NEXT VALUE FOR sequence
-                let default_value = if col_def
-                    .constraints
-                    .iter()
-                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
-                {
-                    // Create sequence name: {table_name}_{column_name}_seq
-                    let sequence_name = format!("{}_{}_seq", table_name, col_def.name);
-                    Some(vibesql_ast::Expression::NextValue { sequence_name })
-                } else {
-                    col_def.default_value.as_ref().map(|expr| (**expr).clone())
-                };
+                // AUTO_INCREMENT/AUTOINCREMENT columns get no synthetic default
+                // expression: NULL-fill for the INTEGER PRIMARY KEY (rowid
+                // alias) column is handled by the dedicated
+                // `apply_default_values_with_batch_context` IPK path, which
+                // consults the real `sqlite_sequence` table for AUTOINCREMENT
+                // tables (issue #6173) — this runs BEFORE the generic
+                // default-value pass ever inspects this column, so a
+                // default_value here would be unreachable dead code.
+                let default_value = col_def.default_value.as_ref().map(|expr| (**expr).clone());
 
                 // Extract column-level collation from constraints
                 let collation = col_def.constraints.iter().find_map(|c| {
@@ -398,6 +395,16 @@ impl CreateTableExecutor {
             ));
         }
 
+        // AUTOINCREMENT is meaningless on a WITHOUT ROWID table (there is no
+        // rowid to auto-generate) — SQLite rejects it at CREATE time (issue
+        // #6173, tableopts-1.1b). Checked before rowid-alias detection since a
+        // WITHOUT ROWID table never gets a `rowid_alias_column` regardless.
+        if stmt.without_rowid && !auto_increment_columns.is_empty() {
+            return Err(ExecutorError::SqliteCompatError(
+                "AUTOINCREMENT not allowed on WITHOUT ROWID tables".to_string(),
+            ));
+        }
+
         // Detect INTEGER PRIMARY KEY for SQLite rowid aliasing (Issue #4536)
         // In SQLite, a single-column PRIMARY KEY with exactly "INTEGER" type is an alias for rowid.
         // The column's value IS the rowid, and SELECT rowid returns this column's value.
@@ -412,6 +419,24 @@ impl CreateTableExecutor {
                     }
                 }
             }
+        }
+
+        // AUTOINCREMENT requires the column to be *the* single-column INTEGER
+        // PRIMARY KEY / rowid alias (SQLite: "AUTOINCREMENT is only allowed on
+        // an INTEGER PRIMARY KEY", issue #6173, autoinc-7.2). This also
+        // rejects AUTOINCREMENT on a composite PRIMARY KEY or on a PK column
+        // whose type isn't exactly INTEGER (e.g. `x TEXT PRIMARY KEY
+        // AUTOINCREMENT`), since neither becomes the rowid alias above.
+        if let Some(auto_inc_col) = auto_increment_columns.first() {
+            let is_rowid_alias = table_schema
+                .rowid_alias_column
+                .is_some_and(|idx| table_schema.columns[idx].name == *auto_inc_col);
+            if !is_rowid_alias {
+                return Err(ExecutorError::SqliteCompatError(
+                    "AUTOINCREMENT is only allowed on an INTEGER PRIMARY KEY".to_string(),
+                ));
+            }
+            table_schema.is_autoincrement = true;
         }
 
         // Check for STORAGE table option and apply storage format
@@ -633,27 +658,6 @@ impl CreateTableExecutor {
                 .map_err(|e| ExecutorError::StorageError(format!("Schema error: {:?}", e)))?;
         }
 
-        // Create internal sequences for AUTO_INCREMENT columns
-        for auto_inc_col in &auto_increment_columns {
-            let sequence_name = format!("{}_{}_seq", table_name, auto_inc_col);
-            database
-                .catalog
-                .create_sequence(
-                    sequence_name.clone(),
-                    Some(1), // start_with: 1
-                    1,       // increment_by: 1
-                    Some(1), // min_value: 1
-                    None,    // max_value: unlimited
-                    false,   // cycle: false
-                )
-                .map_err(|e| {
-                    ExecutorError::StorageError(format!(
-                        "Failed to create sequence for AUTO_INCREMENT: {:?}",
-                        e
-                    ))
-                })?;
-        }
-
         // Create table using Database API with TableIdentifier (handles both catalog and storage)
         // Note: identifier was created at the start of this function with proper quoted semantics
         let result = database
@@ -665,6 +669,16 @@ impl CreateTableExecutor {
 
         // Auto-create indexes for PRIMARY KEY and UNIQUE constraints
         Self::create_implicit_indexes(database, &table_name, &table_schema)?;
+
+        // Lazily create the real `sqlite_sequence` table (issue #6173) the
+        // first time an AUTOINCREMENT table exists in this schema. Runs AFTER
+        // the table itself is created so `sqlite_master`/`sqlite_sequence`
+        // list in creation order (`t1` then `sqlite_sequence`, matching
+        // sqlite3 3.51.0 autoinc-1.2) — `sqlite_sequence` gets no row for
+        // this table yet; that happens lazily on the table's first INSERT.
+        if table_schema.is_autoincrement {
+            crate::autoincrement::ensure_sqlite_sequence_table(database)?;
+        }
 
         // Restore original schema if we switched
         if needs_schema_switch {

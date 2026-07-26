@@ -49,6 +49,16 @@ pub fn try_bulk_transfer(
         return Ok(None); // Fall back to normal path
     }
 
+    // AUTOINCREMENT tables (issue #6173) need their `sqlite_sequence`
+    // high-water mark bumped as part of the INSERT statement (matching
+    // sqlite3's "xfer optimization" — the `sqlite_sequence` write-back still
+    // happens even when the row data itself is bulk-copied). Rather than
+    // duplicating that bookkeeping here, fall back to the normal per-row path
+    // (`execute_insert_internal`), which already has it (autoinc-10.1).
+    if dest_schema.is_autoincrement {
+        return Ok(None);
+    }
+
     // Phase 3: Execute optimized transfer
     execute_bulk_transfer(db, dest_table, &source_table, &dest_schema, &compat_result)
 }

@@ -68,6 +68,16 @@ pub fn validate_create_index(
         });
     }
 
+    // `sqlite_sequence` (AUTOINCREMENT bookkeeping, issue #6173) may not be
+    // indexed either, matching sqlite3 3.51.0 (autoinc-1.3.1): `table
+    // sqlite_sequence may not be indexed`.
+    if crate::autoincrement::is_sqlite_sequence_table(&table_name) {
+        return Err(ExecutorError::SqliteSystemTableReadOnly {
+            table_name: table_name.clone(),
+            operation: "indexed".to_string(),
+        });
+    }
+
     // Reject user attempts to create an index with a reserved name. Like
     // CREATE TABLE, SQLite forbids the `sqlite_` prefix for user objects and
     // errors `object name reserved for internal use: <name>` (sqlite3 3.51.0,

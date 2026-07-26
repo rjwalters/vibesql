@@ -368,8 +368,20 @@ pub fn apply_default_values_with_batch_context(
     // This must happen before regular default value processing
     if let Some(ipk_idx) = schema.get_integer_primary_key_index() {
         if row_values[ipk_idx] == vibesql_types::SqlValue::Null {
-            // Auto-generate: max(existing_pk, batch_max) + 1, or 1 if table is empty
-            let table_max = compute_next_integer_pk_value(database, storage_table_name)?;
+            // Auto-generate: max(existing_pk, batch_max) + 1, or 1 if table is empty.
+            // AUTOINCREMENT tables (issue #6173) additionally consult the real
+            // `sqlite_sequence` high-water mark, so a NULL insert is always
+            // larger than any rowid the table has EVER held — even across a
+            // full DELETE that reset the table's own live max back to empty.
+            let table_max = if schema.is_autoincrement {
+                crate::autoincrement::compute_next_autoincrement_rowid(
+                    database,
+                    storage_table_name,
+                    &schema.name,
+                )?
+            } else {
+                compute_next_integer_pk_value(database, storage_table_name)?
+            };
             // The next value should be max of (table_max, batch_max_ipk + 1)
             let next_val = match batch_max_ipk {
                 Some(batch_max) => table_max.max(batch_max + 1),
