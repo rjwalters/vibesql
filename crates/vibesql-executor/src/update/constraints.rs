@@ -352,9 +352,10 @@ impl<'a> ConstraintValidator<'a> {
                 // Evaluate the CHECK expression against the updated row
                 let result = evaluator.eval(check_expr, new_row)?;
 
-                // CHECK constraint passes if result is TRUE or NULL (UNKNOWN)
-                // CHECK constraint fails if result is FALSE
-                if result == vibesql_types::SqlValue::Boolean(false) {
+                // CHECK passes if the result is NULL or casts to a non-zero
+                // NUMERIC; it fails when the result casts to zero (integer 0 /
+                // real 0.0), which includes non-numeric text like 'abc' → 0.
+                if crate::evaluator::operators::check_constraint_violated(&result) {
                     // SQLite-compatible error format: "CHECK constraint failed: <name_or_expr>"
                     return Err(ExecutorError::SqliteCompatError(format!(
                         "CHECK constraint failed: {}",
