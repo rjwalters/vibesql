@@ -378,46 +378,7 @@ impl Parser {
 
                 // Check for optional alias
                 // Parse optional table alias - keywords allowed after AS (e.g., FROM t AS year)
-                let alias = if self.peek_keyword(Keyword::As) {
-                    self.consume_keyword(Keyword::As)?;
-                    Some(self.parse_alias_name()?)
-                } else if matches!(
-                    self.peek(),
-                    Token::Identifier(_) | Token::DelimitedIdentifier(_)
-                ) && !self.is_join_keyword()
-                    && !self.peek_index_hint()
-                {
-                    // Implicit alias (no AS keyword) - but not a JOIN keyword
-                    match self.peek() {
-                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
-                            self.advance();
-                            Some(alias)
-                        }
-                        _ => None,
-                    }
-                } else if matches!(self.peek(), Token::Keyword { keyword: _, .. })
-                    && !self.is_join_keyword()
-                    && (!self.is_clause_keyword() || self.window_keyword_used_as_alias())
-                    && !self.peek_index_hint()
-                {
-                    // Allow non-reserved keywords as implicit aliases (e.g., FROM t m)
-                    // Keywords like M, YEAR, etc. can be used as aliases. WINDOW is
-                    // normally a clause keyword, but `FROM t4 window, t4` uses it as a
-                    // table alias (window6 4.1); `window_keyword_used_as_alias()`
-                    // permits that only when WINDOW does not begin a real
-                    // `WINDOW <name> AS (...)` clause.
-                    match self.peek() {
-                        Token::Keyword { keyword: kw, .. } => {
-                            let alias = kw.to_string();
-                            self.advance();
-                            Some(alias)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
+                let alias = self.parse_optional_table_alias()?;
 
                 // Parse optional column aliases: AS alias (col1, col2, ...)
                 // SQL:1999 Feature E051-09
@@ -449,27 +410,10 @@ impl Parser {
             Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_table_position() => {
                 let table = self.parse_table_ref()?;
 
-                // Check for optional alias
-                let alias = if self.peek_keyword(Keyword::As) {
-                    self.consume_keyword(Keyword::As)?;
-                    Some(self.parse_alias_name()?)
-                } else if matches!(
-                    self.peek(),
-                    Token::Identifier(_) | Token::DelimitedIdentifier(_)
-                ) && !self.is_join_keyword()
-                    && !self.peek_index_hint()
-                {
-                    match self.peek() {
-                        Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
-                            let alias = id.clone();
-                            self.advance();
-                            Some(alias)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
+                // Check for optional alias. Uses the shared helper so a keyword
+                // may serve as the alias of a keyword table name too — e.g.
+                // `FROM over over` / `FROM window window` (window6 5.2/5.3/5.4).
+                let alias = self.parse_optional_table_alias()?;
 
                 let column_aliases =
                     if alias.is_some() { self.parse_column_alias_list()? } else { None };
@@ -665,6 +609,63 @@ impl Parser {
                 // implicit (AS-less) table alias.
                 | Token::Keyword { keyword: Keyword::Returning, .. }
         )
+    }
+
+    /// Parse an optional table alias in FROM position.
+    ///
+    /// Handles three forms, mirroring SQLite:
+    /// - `AS <name>` (explicit; keywords allowed after AS)
+    /// - `<identifier>` (implicit, no AS) — but not a JOIN keyword / index hint
+    /// - `<keyword>` used as an implicit alias (e.g. `FROM t m`, and the
+    ///   fallback-identifier keywords `FROM over over` / `FROM t4 window`),
+    ///   excluding JOIN keywords, clause keywords (unless `WINDOW` is being used
+    ///   as an alias rather than starting a real WINDOW clause), and index hints.
+    ///
+    /// Shared by both the identifier-table-name and keyword-table-name branches
+    /// so keyword aliases (`OVER`, `WINDOW`, ...) work after a keyword table name
+    /// too (window6 5.2/5.3/5.4: `FROM over over`, `FROM window window`).
+    pub(crate) fn parse_optional_table_alias(&mut self) -> Result<Option<String>, ParseError> {
+        let alias = if self.peek_keyword(Keyword::As) {
+            self.consume_keyword(Keyword::As)?;
+            Some(self.parse_alias_name()?)
+        } else if matches!(
+            self.peek(),
+            Token::Identifier(_) | Token::DelimitedIdentifier(_)
+        ) && !self.is_join_keyword()
+            && !self.peek_index_hint()
+        {
+            // Implicit alias (no AS keyword) - but not a JOIN keyword
+            match self.peek() {
+                Token::Identifier(id) | Token::DelimitedIdentifier(id) => {
+                    let alias = id.clone();
+                    self.advance();
+                    Some(alias)
+                }
+                _ => None,
+            }
+        } else if matches!(self.peek(), Token::Keyword { keyword: _, .. })
+            && !self.is_join_keyword()
+            && (!self.is_clause_keyword() || self.window_keyword_used_as_alias())
+            && !self.peek_index_hint()
+        {
+            // Allow non-reserved keywords as implicit aliases (e.g., FROM t m).
+            // Keywords like M, YEAR, etc. can be used as aliases. WINDOW is
+            // normally a clause keyword, but `FROM t4 window, t4` uses it as a
+            // table alias (window6 4.1); `window_keyword_used_as_alias()`
+            // permits that only when WINDOW does not begin a real
+            // `WINDOW <name> AS (...)` clause.
+            match self.peek() {
+                Token::Keyword { keyword: kw, .. } => {
+                    let alias = kw.to_string();
+                    self.advance();
+                    Some(alias)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        Ok(alias)
     }
 
     /// Parse JOIN type (INNER JOIN, LEFT JOIN, NATURAL JOIN, etc.)
