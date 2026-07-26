@@ -26,7 +26,7 @@
 pub(crate) mod constraints;
 mod executor;
 mod fast_path;
-mod foreign_keys;
+pub(crate) mod foreign_keys;
 mod from_clause;
 mod index_sync;
 mod row_selector;
@@ -150,8 +150,7 @@ impl UpdateExecutor {
             may_fire,
             stmt.conflict_clause,
             |database| {
-                executor::execute_internal(stmt, database, None, None, None)
-                    .map(|(count, _)| count)
+                executor::execute_internal(stmt, database, None, None, None).map(|(count, _)| count)
             },
         )
     }

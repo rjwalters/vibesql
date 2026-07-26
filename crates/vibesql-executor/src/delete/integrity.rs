@@ -698,6 +698,33 @@ fn apply_cascade_child_updates(
             }
         }
 
+        // A cascading SET NULL/SET DEFAULT rewrite is itself an UPDATE on the
+        // child table and must satisfy the child's own NOT NULL/CHECK
+        // constraints, exactly like a user-issued UPDATE would (mirrors the
+        // equivalent check on the UPDATE-cascade path in
+        // update/foreign_keys.rs, fkey2-3.1.*).
+        let child_schema_for_check = db.catalog.get_table(child_table_name).unwrap().clone();
+        crate::update::constraints::ConstraintValidator::new(&child_schema_for_check)
+            .validate_row_skip_uniqueness(child_table_name, &new_row)?;
+
+        // SET DEFAULT in particular can rewrite the FK column(s) to a default
+        // value that is not itself a valid parent key -- re-validate the
+        // rewritten row's own foreign keys exactly as a user-issued UPDATE
+        // would (mirrors the equivalent check on the UPDATE-cascade path in
+        // update/foreign_keys.rs, fkey2-9.1.5).
+        if !child_schema_for_check.foreign_keys.is_empty() {
+            let deferred =
+                crate::update::foreign_keys::ForeignKeyValidator::collect_constraints_with_old(
+                    db,
+                    child_table_name,
+                    &new_row.values,
+                    Some(&old_row.values),
+                )?;
+            for violation in deferred {
+                db.queue_deferred_fk_violation(violation);
+            }
+        }
+
         let child_table_mut = db.get_table_mut(child_table_name).unwrap();
         child_table_mut
             .update_row(idx, new_row.clone())

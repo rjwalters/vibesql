@@ -677,6 +677,17 @@ proc translate_error_to_sqlite {vibesql_error} {
         return $error_msg
     }
 
+    # ALTER TABLE ADD COLUMN restrictions (sqlite3AlterFinishAddColumn): these
+    # are SQLite's own verbatim wordings and must pass through unchanged.
+    # Both "...NOT NULL column with default value NULL" and "...REFERENCES
+    # column with non-NULL default value" contain the substring "NULL", so
+    # without this early pass-through they fall into the generic
+    # `cannot.*NULL` -> "NOT NULL constraint failed" fallback below and lose
+    # their real wording (fkey2-14.1.4/1.5, e_fkey-61.1.1, alter3-2.4).
+    if {[regexp -nocase {^Cannot add a (NOT NULL column with default value NULL|REFERENCES column with non-NULL default value)$} $error_msg]} {
+        return $error_msg
+    }
+
     # Constraint violations - VibeSQL now outputs SQLite-compatible format directly
     # Format: "UNIQUE constraint failed: table.column" or "UNIQUE constraint failed: table.col1, table.col2"
     if {[regexp -nocase {UNIQUE constraint failed: (.+)$} $error_msg -> col_spec]} {

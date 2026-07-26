@@ -432,20 +432,18 @@ impl CreateTableExecutor {
                 deferral,
             } = &constraint.kind
             {
-                // Resolve column indices for FK columns
+                // Resolve column indices for FK columns. SQLite reports a
+                // dedicated "unknown column ... in foreign key definition"
+                // message here (distinct from the generic "no such column"
+                // used elsewhere) -- e.g. `FOREIGN KEY(rowid) REFERENCES t1(a)`
+                // on a table with no column literally named `rowid`
+                // (fkey2-10.2.1).
                 let column_indices: Vec<usize> = fk_columns
                     .iter()
                     .map(|col_name| {
                         table_schema.get_column_index(col_name).ok_or_else(|| {
-                            ExecutorError::ColumnNotFound {
+                            ExecutorError::UnknownColumnInForeignKeyDefinition {
                                 column_name: col_name.to_string(),
-                                table_name: table_name.clone(),
-                                searched_tables: vec![table_name.clone()],
-                                available_columns: table_schema
-                                    .columns
-                                    .iter()
-                                    .map(|c| c.name.clone())
-                                    .collect(),
                             }
                         })
                     })
