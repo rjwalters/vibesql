@@ -211,3 +211,65 @@ fn test_non_correlated_aggregate_in_union_arm_not_flagged() {
         execute_sql(&mut db, "SELECT a FROM t0 WHERE (a,1)=(SELECT 2,2 UNION SELECT sum(5),1)");
     assert!(rows.is_ok(), "non-correlated aggregate in UNION arm must not be flagged: {rows:?}");
 }
+
+// ------------------------------------------------------------------------
+// 52.2-52.4 — multi-window output order: a partitioned window's sort order
+// takes precedence over a trailing ORDER-BY-only window when there is no
+// statement-level ORDER BY (window1.test 52.2-52.4).
+//
+// Previously the final output order was captured from the textually-last
+// window that had any ORDER BY (here `count(a) OVER (ORDER BY b)`), so rows
+// came out in `b` order. SQLite leaves the rows in the partitioned window's
+// (`win2 = PARTITION BY 6 ORDER BY a`) `a` order instead.
+// ------------------------------------------------------------------------
+
+fn first_column_ints(db: &mut vibesql_storage::Database, sql: &str) -> Vec<i64> {
+    execute_sql(db, sql)
+        .unwrap()
+        .iter()
+        .map(|r| match &r.values[0] {
+            SqlValue::Integer(n) => *n,
+            other => panic!("expected integer first column, got {other:?}"),
+        })
+        .collect()
+}
+
+fn setup_w52(db: &mut vibesql_storage::Database) {
+    execute_sql(db, "CREATE TABLE t1(a, b, c)").unwrap();
+    execute_sql(db, "INSERT INTO t1 VALUES('AA','bb',356)").unwrap();
+    execute_sql(db, "INSERT INTO t1 VALUES('CC','aa',158)").unwrap();
+    execute_sql(db, "INSERT INTO t1 VALUES('BB','aa',399)").unwrap();
+    execute_sql(db, "INSERT INTO t1 VALUES('FF','bb',938)").unwrap();
+}
+
+#[test]
+fn test_multi_window_partitioned_order_wins_over_trailing_orderby() {
+    let mut db = vibesql_storage::Database::new();
+    setup_w52(&mut db);
+    // window1.test 52.2: `count() OVER win1` is a running count over ORDER BY a,
+    // so a-sorted output must read 1,2,3,4 (AA,BB,CC,FF) — NOT b-sorted order.
+    let counts = first_column_ints(
+        &mut db,
+        "SELECT count() OVER win1, sum(c) OVER win2, first_value(c) OVER win2, \
+                count(a) OVER (ORDER BY b) \
+         FROM t1 \
+         WINDOW win1 AS (ORDER BY a), \
+                win2 AS (PARTITION BY 6 ORDER BY a \
+                         RANGE BETWEEN 5 PRECEDING AND 0 PRECEDING)",
+    );
+    assert_eq!(counts, vec![1, 2, 3, 4], "output must be in win2's `a` order");
+}
+
+#[test]
+fn test_multi_window_orderby_only_falls_back_to_last() {
+    // Regression guard for window9.test 1.4: when NO window is partitioned, the
+    // last ORDER-BY-only window still determines output order. Here both windows
+    // share ORDER BY a, so the running count reads 1,2,3,4.
+    let mut db = vibesql_storage::Database::new();
+    setup_w52(&mut db);
+    let counts = first_column_ints(
+        &mut db,
+        "SELECT count() OVER (ORDER BY a), count(a) OVER (ORDER BY a) FROM t1",
+    );
+    assert_eq!(counts, vec![1, 2, 3, 4]);
+}
