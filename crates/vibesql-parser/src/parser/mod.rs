@@ -71,6 +71,14 @@ pub struct Parser {
     /// `RAISE()` inside a trigger body and reject it everywhere else,
     /// matching sqlite3 (`RAISE() may only be used within a trigger-program`).
     in_trigger_body: bool,
+    /// Verbatim source text of each CREATE TABLE column's `DEFAULT` expression,
+    /// as `(lowercase column name, source text)` pairs in declaration order.
+    /// Populated only when the parser was built with source/span info
+    /// ([`Parser::new_with_source`]). `PRAGMA table_info` reads this (via
+    /// [`Parser::parse_sql_with_default_sources`]) to echo the original default
+    /// spelling — e.g. `X'abcdef'`, `'abcde'`, `-1` — rather than a lossy
+    /// `ToSql` re-render (which uppercases blob hex and drops operator spacing).
+    column_default_sources: Vec<(String, String)>,
 }
 
 impl Parser {
@@ -87,6 +95,7 @@ impl Parser {
             in_trigger_body: false,
             source: String::new(),
             spans: Vec::new(),
+            column_default_sources: Vec::new(),
         }
     }
 
@@ -96,7 +105,15 @@ impl Parser {
     /// with its original quoting), which SQLite preserves in some error
     /// messages.
     pub fn new_with_source(tokens: Vec<Token>, spans: Vec<Span>, source: String) -> Self {
-        Parser { tokens, position: 0, placeholder_count: 0, in_trigger_body: false, source, spans }
+        Parser {
+            tokens,
+            position: 0,
+            placeholder_count: 0,
+            in_trigger_body: false,
+            source,
+            spans,
+            column_default_sources: Vec::new(),
+        }
     }
 
     /// Current token index (cursor position within the token stream).
@@ -201,6 +218,32 @@ impl Parser {
 
         let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
         parser.parse_statement()
+    }
+
+    /// Parse SQL and, for a `CREATE TABLE`, also return the verbatim source text
+    /// of each column's `DEFAULT` expression, keyed by lowercase column name.
+    ///
+    /// `PRAGMA table_info` uses this so the `dflt_value` column echoes the
+    /// original default spelling (e.g. `X'abcdef'`, `'abcde'`, `-1`,
+    /// `CURRENT_TIME`) exactly as written in the CREATE TABLE statement, which
+    /// SQLite does. A plain `expr.to_sql()` re-render is lossy here: it
+    /// uppercases blob-literal hex (`x'ABCDEF'`) and normalizes operator
+    /// spacing. The map is empty for non-`CREATE TABLE` input or columns without
+    /// a DEFAULT.
+    pub fn parse_sql_with_default_sources(
+        input: &str,
+    ) -> Result<(vibesql_ast::Statement, std::collections::HashMap<String, String>), ParseError>
+    {
+        let mut lexer = Lexer::new(input);
+        let tokens_with_spans = lexer
+            .tokenize_with_spans()
+            .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
+
+        let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
+        let stmt = parser.parse_statement()?;
+        let map = parser.column_default_sources.iter().cloned().collect();
+        Ok((stmt, map))
     }
 
     /// Parse a single SQL statement that originates from a `CREATE TRIGGER`

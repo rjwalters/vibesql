@@ -128,6 +128,86 @@ fn sqlite_declared_type(
     }
 }
 
+/// Strip a single surrounding pair of SQL identifier delimiters from a declared
+/// type name, so `PRAGMA table_info` echoes it the way SQLite does.
+///
+/// SQLite records the declared type verbatim but without the delimiters that
+/// quote it: `CREATE TABLE t(b [TYPE_Y], c "TYPE_Z")` reports the types
+/// `TYPE_Y` and `TYPE_Z` (pragma-6.2). A non-delimited type such as
+/// `VARCHAR(45, 65)` is returned unchanged, parentheses and all. Only a matching
+/// outer pair of `[...]`, `"..."`, or `` `...` `` is removed; an unmatched or
+/// absent delimiter leaves the text untouched.
+fn strip_type_delimiters(type_source: &str) -> String {
+    let t = type_source.trim();
+    let bytes = t.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        let matched = (first == b'[' && last == b']')
+            || (first == b'"' && last == b'"')
+            || (first == b'`' && last == b'`');
+        if matched {
+            return t[1..t.len() - 1].to_string();
+        }
+    }
+    t.to_string()
+}
+
+/// Apply SQLite's case normalization to a (delimiter-stripped) declared type
+/// name for `PRAGMA table_info`.
+///
+/// SQLite echoes declared types verbatim (preserving case and any argument
+/// list) with one exception: when the whole type name matches — case
+/// insensitively — one of the five canonical storage-class names `INTEGER`,
+/// `INT`, `TEXT`, `BLOB`, or `REAL`, it is reported upper-cased. So `text`
+/// becomes `TEXT` and `integer` becomes `INTEGER`, but `numeric`, `varchar`,
+/// `double`, `int(11)`, and `bigint` are all left exactly as written (verified
+/// against sqlite3 3.x). Anything not in the set is returned unchanged.
+fn canonicalize_sqlite_decltype(stripped_type: &str) -> String {
+    const CANONICAL: [&str; 5] = ["INTEGER", "INT", "TEXT", "BLOB", "REAL"];
+    for name in CANONICAL {
+        if stripped_type.eq_ignore_ascii_case(name) {
+            return name.to_string();
+        }
+    }
+    stripped_type.to_string()
+}
+
+/// Strip a single balanced outer parenthesis pair from a DEFAULT expression's
+/// verbatim source, matching SQLite's `dflt_value` normalization.
+///
+/// SQLite reports `CREATE TABLE t(b DEFAULT (5+3))` as the default `5+3`
+/// (pragma-6.2.2) — one layer of the outer parentheses that wrap the whole
+/// expression is removed. Text that is not wholly wrapped in a single balanced
+/// pair (e.g. `(1)+(2)` or `-1`) is returned unchanged.
+fn strip_outer_parens(default_source: &str) -> String {
+    let s = default_source.trim();
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'(') || bytes.last() != Some(&b')') {
+        return s.to_string();
+    }
+    // Confirm the leading '(' closes at the trailing ')', not earlier — so
+    // `(1)+(2)` (whose first '(' closes mid-string) is left untouched.
+    let mut depth = 0usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    // The opening paren's match: strip only if it is the final byte.
+                    if i == bytes.len() - 1 {
+                        return s[1..s.len() - 1].trim().to_string();
+                    }
+                    return s.to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    s.to_string()
+}
+
 /// Format SqlValue for output in SQLite-compatible format
 /// - Booleans are displayed as 0/1 instead of FALSE/TRUE
 /// - Other values use their standard Display format
@@ -2088,14 +2168,31 @@ impl SqlExecutor {
         // a CREATE ... AS SELECT with no explicit column list, or a re-parse
         // failure) means we fall back to the catalog-derived behavior below,
         // unchanged. `pk_source_positions` is likewise a best-effort override.
+        //   * The `type` column echoes the *declared* type text verbatim, as
+        //     written in the CREATE TABLE statement (only the surrounding
+        //     delimiters of a bracketed/quoted type name are stripped). The
+        //     catalog's affinity-only `data_type` is lossy — it renders
+        //     `VARCHAR(45, 65)` as `VARCHAR(45)` — so we prefer the re-parsed
+        //     `type_source`. `decl_type` holds the delimiter-stripped verbatim
+        //     text; `None` marks a typeless column (empty type).
+        //   * The `dflt_value` column echoes the *verbatim* DEFAULT expression
+        //     source (e.g. `X'abcdef'`, `'abcde'`, `-1`, `CURRENT_TIME`) rather
+        //     than a lossy `ToSql` re-render that uppercases blob hex and drops
+        //     operator spacing. A single balanced outer parenthesis pair is
+        //     stripped (`DEFAULT (5+3)` -> `5+3`), matching SQLite.
         let mut decl_facts: std::collections::HashMap<String, (bool, bool)> =
+            std::collections::HashMap::new();
+        let mut decl_types: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        let mut default_sources: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut pk_source_positions: Option<std::collections::HashMap<String, usize>> = None;
         if let Some(src) = schema.sql_source.as_deref() {
-            if let Ok(vibesql_ast::Statement::CreateTable(create)) =
-                vibesql_parser::Parser::parse_sql(src)
+            if let Ok((vibesql_ast::Statement::CreateTable(create), dflt_srcs)) =
+                vibesql_parser::Parser::parse_sql_with_default_sources(src)
             {
                 if create.as_query.is_none() {
+                    default_sources = dflt_srcs;
                     for col in &create.columns {
                         let is_typeless = col.type_source.is_none();
                         let explicit_not_null = col.constraints.iter().any(|c| {
@@ -2107,6 +2204,13 @@ impl SqlExecutor {
                         });
                         decl_facts
                             .insert(col.name.to_lowercase(), (is_typeless, explicit_not_null));
+                        // Delimiter-stripped verbatim declared-type text; `None`
+                        // for a typeless column (reports empty type in SQLite).
+                        let decl_type = col
+                            .type_source
+                            .as_deref()
+                            .map(|ts| canonicalize_sqlite_decltype(&strip_type_delimiters(ts)));
+                        decl_types.insert(col.name.to_lowercase(), decl_type);
                     }
 
                     // Derive raw pk ordinals from a table-level PRIMARY KEY
@@ -2157,14 +2261,24 @@ impl SqlExecutor {
         for (cid, column) in schema.columns.iter().enumerate() {
             let decl = decl_facts.get(&column.name.to_lowercase());
 
-            // Type column: SQLite reports the declared type as supplied in the
-            // CREATE TABLE statement. A typeless column reports the empty
-            // string; otherwise we map our DataType back to the canonical
-            // SQLite-flavor name (we don't preserve the verbatim text).
-            let type_str = if matches!(decl, Some((true, _))) {
-                String::new()
-            } else {
-                sqlite_declared_type(&column.data_type, column.is_exact_integer_type)
+            // Type column: SQLite reports the declared type verbatim, exactly as
+            // supplied in the CREATE TABLE statement (delimiters aside). Prefer
+            // the re-parsed `type_source` (delimiter-stripped) so declarations
+            // the catalog's affinity mapping cannot round-trip — e.g.
+            // `VARCHAR(45, 65)` — echo faithfully. A typeless column reports the
+            // empty string. Fall back to the canonical affinity name only when
+            // no source declaration is available (programmatic table, reload
+            // without `sql_source`, or a re-parse failure).
+            let type_str = match decl_types.get(&column.name.to_lowercase()) {
+                Some(Some(decl_type)) => decl_type.clone(),
+                Some(None) => String::new(),
+                None => {
+                    if matches!(decl, Some((true, _))) {
+                        String::new()
+                    } else {
+                        sqlite_declared_type(&column.data_type, column.is_exact_integer_type)
+                    }
+                }
             };
 
             // notnull: 1 only for an *explicit* NOT NULL clause. An INTEGER
@@ -2188,11 +2302,21 @@ impl SqlExecutor {
                 }
             };
 
-            // dflt_value: render the default expression as SQL text, or NULL.
-            let dflt_value: Option<String> = column.default_value.as_ref().map(|e| {
-                use vibesql_ast::pretty_print::ToSql;
-                e.to_sql()
-            });
+            // dflt_value: echo the verbatim DEFAULT source text (SQLite does),
+            // falling back to a `ToSql` re-render only when the verbatim source
+            // is unavailable (programmatic table or reload without `sql_source`).
+            // The verbatim text preserves original spelling that `ToSql` loses:
+            // blob-literal hex casing (`X'abcdef'`, not `x'ABCDEF'`), quoted
+            // string delimiters, and operator spacing.
+            let dflt_value: Option<String> = default_sources
+                .get(&column.name.to_lowercase())
+                .map(|s| strip_outer_parens(s))
+                .or_else(|| {
+                    column.default_value.as_ref().map(|e| {
+                        use vibesql_ast::pretty_print::ToSql;
+                        e.to_sql()
+                    })
+                });
 
             // pk: 1-based position within the primary key, or 0 if not PK.
             let pk = pk_positions.get(&column.name.to_lowercase()).copied().unwrap_or(0);
