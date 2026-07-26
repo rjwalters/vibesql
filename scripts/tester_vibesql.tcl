@@ -243,6 +243,7 @@ set ::pragma_foreign_keys 0              ;# Default: OFF (SQLite default)
 set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/ROLLBACK
 set ::pragma_recursive_triggers 0        ;# Default: OFF (VibeSQL/SQLite default; #5535, #5840)
 set ::pragma_trigger_depth_limit 0       ;# 0 = default cap; >0 = per-connection SQLITE_LIMIT_TRIGGER_DEPTH (#5536)
+set ::pragma_encoding ""                 ;# "" = default (UTF-8); otherwise the last value set via PRAGMA encoding=... (#6172)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -1612,6 +1613,15 @@ proc build_pragma_prefix {} {
     if {$::pragma_trigger_depth_limit > 0} {
         append prefix "PRAGMA trigger_depth_limit=$::pragma_trigger_depth_limit;\n"
     }
+    # Replay PRAGMA encoding so a value set in an earlier batch (e.g.
+    # `PRAGMA encoding='utf16le'`) is still visible to a later `PRAGMA
+    # encoding` query issued as its own, separate per-batch CLI process
+    # (numcast.test numcast-utf8.0/utf16le.0/utf16be.0, #6172). VibeSQL only
+    # ever stores TEXT as UTF-8 — this only carries forward the pragma's
+    # *echoed* value, not real multi-encoding storage.
+    if {$::pragma_encoding ne ""} {
+        append prefix "PRAGMA encoding='$::pragma_encoding';\n"
+    }
     # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
     # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
     # current batch (avoids a redundant create). IF NOT EXISTS keeps replay safe.
@@ -1753,6 +1763,15 @@ proc track_pragma_setting {sql} {
         } else {
             set ::pragma_recursive_triggers 0
         }
+        set found 1
+    }
+
+    # Look for encoding settings (find all occurrences, use last one). Unlike
+    # the boolean pragmas above, the value is a string (e.g. utf8, utf16le,
+    # utf-16be), optionally quoted.
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?encoding\s*=\s*'?([A-Za-z0-9-]+)'?} $sql]
+    foreach {match value} $matches {
+        set ::pragma_encoding $value
         set found 1
     }
 
@@ -2722,7 +2741,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -7329,6 +7348,7 @@ proc sqlite3 {db args} {
     # recursive_triggers is per-connection in SQLite (OFF by default); a fresh
     # open must not inherit the previous connection's setting (#5909).
     set ::pragma_recursive_triggers 0
+    set ::pragma_encoding ""  ;# Fresh connection: encoding resets to default UTF-8 (#6172)
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
     set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
 
@@ -7717,6 +7737,7 @@ proc reset_db {} {
     set ::pragma_defer_foreign_keys 0
     # recursive_triggers is per-connection in SQLite (OFF by default; #5909).
     set ::pragma_recursive_triggers 0
+    set ::pragma_encoding ""  ;# reset_db: encoding resets to default UTF-8 (#6172)
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
     # Drop all temp view/trigger replay state — reset_db wipes the database, so
     # replaying stale temp-object DDL into the fresh db would resurrect objects

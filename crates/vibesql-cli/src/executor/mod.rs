@@ -30,6 +30,12 @@ pub struct SqlExecutor {
     /// demotes TEMP tables to persistent so the value is advisory only.
     /// Canonical codes: 0=DEFAULT, 1=FILE, 2=MEMORY.
     temp_store: i64,
+    /// PRAGMA encoding session setting (SQLite-compatible, default "UTF-8").
+    /// VibeSQL only ever stores TEXT as UTF-8, but it parses, normalizes and
+    /// echoes the setting exactly like SQLite so introspection round-trips
+    /// (numcast.test numcast-utf8.0/utf16le.0/utf16be.0) even though the
+    /// UTF-16 encodings themselves are not actually implemented.
+    encoding: String,
     /// Active WAL persistence state, present only when the opt-in
     /// `[database] wal = true` flag is set AND a file-backed database is in use.
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
@@ -371,6 +377,7 @@ impl SqlExecutor {
                     count_changes: false,
                     auto_vacuum: 0,
                     temp_store: 0,
+                    encoding: default_encoding(),
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
@@ -413,6 +420,7 @@ impl SqlExecutor {
             count_changes: false,
             auto_vacuum: 0,
             temp_store: 0,
+            encoding: default_encoding(),
             wal_state: None,
             db_path,
             _db_lock: db_lock,
@@ -1479,6 +1487,26 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "ENCODING" => {
+                    // SQLite-compatible PRAGMA encoding set (numcast.test
+                    // numcast-utf8.0/utf16le.0/utf16be.0). VibeSQL only ever
+                    // stores TEXT as UTF-8 — an unrecognized or UTF-16 value
+                    // is still accepted and echoed back verbatim-normalized
+                    // (matching SQLite's textual round-trip), it just has no
+                    // effect on actual storage. An unrecognized value is a
+                    // silent no-op, matching SQLite's behavior of ignoring an
+                    // invalid encoding name.
+                    if let Some(normalized) = normalize_encoding(value) {
+                        self.encoding = normalized;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -1642,6 +1670,18 @@ impl SqlExecutor {
                     Ok(QueryResult {
                         columns: vec!["temp_store".to_string()],
                         rows: vec![vec![Some(self.temp_store.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "ENCODING" => {
+                    // SQLite-compatible PRAGMA encoding read (numcast.test
+                    // numcast-utf8.0/utf16le.0/utf16be.0). Reports the
+                    // normalized session setting; default "UTF-8".
+                    Ok(QueryResult {
+                        columns: vec!["encoding".to_string()],
+                        rows: vec![vec![Some(self.encoding.clone())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,
@@ -2525,6 +2565,41 @@ fn normalize_temp_store(value: &vibesql_ast::PragmaValue) -> i64 {
             Ok(2) => 2,
             _ => 0,
         },
+    }
+}
+
+/// The default `PRAGMA encoding` value for a fresh session, matching SQLite's
+/// default text encoding.
+fn default_encoding() -> String {
+    "UTF-8".to_string()
+}
+
+/// Normalize a `PRAGMA encoding = <value>` argument to SQLite's canonical
+/// echoed spelling, matching `sqlite3_db_config`/`pragma.c`'s `encnames[]`
+/// table (numcast.test numcast-utf8.0/utf16le.0/utf16be.0):
+///   `utf8` / `utf-8`               -> `UTF-8`
+///   `utf16le` / `utf-16le`         -> `UTF-16le`
+///   `utf16be` / `utf-16be`         -> `UTF-16be`
+///   `utf16` / `utf-16`             -> native byte order (`UTF-16le` here)
+/// Matching is case-insensitive and tolerant of an optional `-` before `8`/`16`
+/// (SQLite accepts both spellings). An unrecognized value returns `None` so
+/// the caller can leave the previous setting untouched, matching SQLite's
+/// silent-no-op behavior for an invalid encoding name.
+///
+/// VibeSQL only ever stores TEXT as UTF-8 internally — this normalizes the
+/// pragma's *echoed* value only, it does not switch the actual storage
+/// encoding.
+fn normalize_encoding(value: &vibesql_ast::PragmaValue) -> Option<String> {
+    let text = pragma_value_text(value);
+    let canon: String = text.trim().to_ascii_lowercase().chars().filter(|&c| c != '-').collect();
+    match canon.as_str() {
+        "utf8" => Some("UTF-8".to_string()),
+        "utf16le" => Some("UTF-16le".to_string()),
+        "utf16be" => Some("UTF-16be".to_string()),
+        // Bare "UTF-16" resolves to the host's native byte order; VibeSQL
+        // targets little-endian platforms (SQLite: SQLITE_UTF16NATIVE).
+        "utf16" => Some("UTF-16le".to_string()),
+        _ => None,
     }
 }
 
