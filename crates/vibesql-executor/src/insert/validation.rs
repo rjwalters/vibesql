@@ -651,15 +651,53 @@ pub fn coerce_value(
                     // NUMERIC affinity: try integer first, then real, else keep as text
                     // This is SQLite's behavior for types like NUM, NUMBER, etc.
                     match &value {
-                        // Numeric types pass through
+                        // Integer-storage-class types pass through unchanged.
                         SqlValue::Integer(_)
                         | SqlValue::Bigint(_)
                         | SqlValue::Smallint(_)
-                        | SqlValue::Numeric(_)
-                        | SqlValue::Double(_)
-                        | SqlValue::Real(_)
-                        | SqlValue::Float(_)
                         | SqlValue::Unsigned(_) => Ok(value),
+                        // Floating-point types: NUMERIC affinity losslessly converts a
+                        // whole-number REAL to INTEGER storage class (e.g. 6.0 -> 6), same
+                        // as SQLite. Without this, a column with an unrecognized declared
+                        // type (e.g. `ANY`, which defaults to NUMERIC affinity per the
+                        // SQLite algorithm) keeps 6.0 as REAL, so quote()/typeof() diverge
+                        // from SQLite (window1.test 29.2, #6191).
+                        SqlValue::Numeric(f) => {
+                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                                Ok(SqlValue::Integer(*f as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Double(f) => {
+                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                                Ok(SqlValue::Integer(*f as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Real(f) => {
+                            let f64_val = *f as f64;
+                            if f64_val.fract() == 0.0
+                                && f64_val >= i64::MIN as f64
+                                && f64_val <= i64::MAX as f64
+                            {
+                                Ok(SqlValue::Integer(f64_val as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
+                        SqlValue::Float(f) => {
+                            let f64_val = *f as f64;
+                            if f64_val.fract() == 0.0
+                                && f64_val >= i64::MIN as f64
+                                && f64_val <= i64::MAX as f64
+                            {
+                                Ok(SqlValue::Integer(f64_val as i64))
+                            } else {
+                                Ok(value)
+                            }
+                        }
                         // Text: try to convert to number
                         SqlValue::Varchar(s) | SqlValue::Character(s) => {
                             let trimmed = s.trim();
@@ -843,5 +881,55 @@ mod boolean_affinity_tests {
             coerce_to_bool_col(SqlValue::Varchar(arcstr::ArcStr::from("abc"))),
             SqlValue::Varchar(arcstr::ArcStr::from("abc"))
         );
+    }
+}
+
+#[cfg(test)]
+mod user_defined_numeric_affinity_tests {
+    use vibesql_types::{DataType, SqlValue};
+
+    use super::coerce_value;
+
+    fn coerce_to_any_col(value: SqlValue) -> SqlValue {
+        coerce_value(value, &DataType::UserDefined { type_name: "ANY".to_string() })
+            .expect("coercion into an unrecognized/ANY-declared column should succeed")
+    }
+
+    /// A column declared with an unrecognized type name (e.g. `ANY`) gets
+    /// NUMERIC affinity per SQLite's column-affinity algorithm (no INT/CHAR/
+    /// CLOB/TEXT/BLOB/REAL/FLOA/DOUB substring match -> falls to rule 5,
+    /// NUMERIC). NUMERIC affinity losslessly converts a whole-number REAL to
+    /// INTEGER storage class on insert, matching `typeof()`/`quote()` on real
+    /// SQLite (verified against sqlite3 3.51.0: `CREATE TABLE t1(d ANY);
+    /// INSERT INTO t1 VALUES(6.0); SELECT typeof(d)` -> `integer`).
+    /// Previously only text values went through this conversion; already-
+    /// numeric REAL/DOUBLE/NUMERIC/FLOAT values passed through unchanged,
+    /// which broke window1.test 29.2's `quote(d)`/RANGE-frame comparisons
+    /// (#6191).
+    #[test]
+    fn whole_real_becomes_integer() {
+        assert_eq!(coerce_to_any_col(SqlValue::Real(6.0)), SqlValue::Integer(6));
+        assert_eq!(coerce_to_any_col(SqlValue::Double(9.0)), SqlValue::Integer(9));
+        assert_eq!(coerce_to_any_col(SqlValue::Numeric(1.0)), SqlValue::Integer(1));
+        assert_eq!(coerce_to_any_col(SqlValue::Float(-42.0)), SqlValue::Integer(-42));
+    }
+
+    /// Fractional reals are NOT coerced to integer and keep their original
+    /// floating-point storage class.
+    #[test]
+    fn fractional_real_stays_real() {
+        assert_eq!(coerce_to_any_col(SqlValue::Real(2.5)), SqlValue::Real(2.5));
+        assert_eq!(coerce_to_any_col(SqlValue::Double(8.25)), SqlValue::Double(8.25));
+        assert_eq!(coerce_to_any_col(SqlValue::Numeric(6.5)), SqlValue::Numeric(6.5));
+    }
+
+    /// Non-numeric text and other storage classes pass through unchanged.
+    #[test]
+    fn non_numeric_text_unchanged() {
+        assert_eq!(
+            coerce_to_any_col(SqlValue::Varchar(arcstr::ArcStr::from("xyz"))),
+            SqlValue::Varchar(arcstr::ArcStr::from("xyz"))
+        );
+        assert_eq!(coerce_to_any_col(SqlValue::Integer(6)), SqlValue::Integer(6));
     }
 }

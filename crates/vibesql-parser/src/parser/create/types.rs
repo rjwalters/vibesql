@@ -703,9 +703,16 @@ impl Parser {
                 Ok((vibesql_types::DataType::BinaryLargeObject, false))
             }
             "CLOB" => Ok((vibesql_types::DataType::CharacterLargeObject, false)),
-            // SQLite ANY type - represents any type, stored with BLOB affinity (no type affinity)
-            // This allows expressions like CAST(x AS ANY) to return the original type
-            "ANY" => Ok((vibesql_types::DataType::BinaryLargeObject, false)),
+            // SQLite ANY type: intentionally NOT special-cased to BLOB/no-affinity here.
+            // A plain (non-STRICT) column declared ANY does not match the INT/CHAR/
+            // CLOB/TEXT/BLOB/REAL/FLOA/DOUB substring rules, so per SQLite's column
+            // affinity algorithm (https://www.sqlite.org/datatype3.html#affinity) it
+            // falls through to rule 5 and gets NUMERIC affinity — e.g. inserting the
+            // REAL literal 6.0 into an ANY column stores it as INTEGER 6, matching
+            // `typeof()`/`quote()` on real SQLite (verified against sqlite3 3.51.0;
+            // window1.test 29.2, #6191). STRICT-table `ANY` columns (no affinity at
+            // all) are validated separately via `StrictType::Any` in
+            // vibesql-executor/src/strict.rs and are unaffected by this fallthrough.
             _ => {
                 // SQLite compatibility: Accept ANY string as a type name.
                 // SQLite uses type affinity rules to determine storage, but accepts
