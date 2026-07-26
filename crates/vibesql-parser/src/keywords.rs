@@ -60,6 +60,7 @@ pub enum Keyword {
     Symmetric,
     Like,
     Glob,
+    Regexp,
     Escape,
     Exists,
     If,
@@ -624,6 +625,7 @@ impl Keyword {
                 | Keyword::Level
                 | Keyword::Like
                 | Keyword::Match
+                | Keyword::Regexp
                 | Keyword::Materialized
                 | Keyword::No
                 | Keyword::Nulls
@@ -722,6 +724,7 @@ impl fmt::Display for Keyword {
             Keyword::Symmetric => "SYMMETRIC",
             Keyword::Like => "LIKE",
             Keyword::Glob => "GLOB",
+            Keyword::Regexp => "REGEXP",
             Keyword::Escape => "ESCAPE",
             Keyword::Exists => "EXISTS",
             Keyword::If => "IF",

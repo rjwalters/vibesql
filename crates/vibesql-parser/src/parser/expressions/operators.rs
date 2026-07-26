@@ -369,6 +369,27 @@ impl Parser {
     /// list/subquery or a table name), so a tighter-binding operator that follows an
     /// IN node takes the whole IN expression as its left operand:
     /// `1 IN (SELECT 1) + 1` parses as `(1 IN (SELECT 1)) + 1`.
+    /// Build the function-call AST for the `MATCH` / `REGEXP` infix operators.
+    ///
+    /// Per SQLite docs (R-37916-47407, R-33693-50180) `X MATCH Y` and
+    /// `X REGEXP Y` are pure syntactic sugar for the application-defined
+    /// function calls `match(Y, X)` / `regexp(Y, X)` — note the swapped
+    /// argument order (pattern first, expr second). Unlike LIKE/GLOB there is
+    /// no ESCAPE clause for either operator. `fn_name` is used verbatim as the
+    /// function's *display* name (SQLite reports "no such function: REGEXP",
+    /// preserving the operator's case, when no such function is registered).
+    fn build_match_regexp_call(
+        fn_name: &str,
+        expr: vibesql_ast::Expression,
+        pattern: vibesql_ast::Expression,
+    ) -> vibesql_ast::Expression {
+        vibesql_ast::Expression::Function {
+            name: vibesql_ast::FunctionIdentifier::new(fn_name),
+            args: vec![pattern, expr],
+            character_unit: None,
+        }
+    }
+
     pub(super) fn parse_comparison_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
@@ -556,6 +577,27 @@ impl Parser {
                         pattern: Box::new(pattern),
                         negated: true,
                         escape,
+                    };
+                    continue;
+                } else if self.peek_keyword(Keyword::Match) {
+                    // It's NOT MATCH. Per SQLite (R-37916-47407): "X MATCH Y" is
+                    // syntactic sugar for the application-defined function call
+                    // "match(Y, X)" (argument order swapped), no ESCAPE clause.
+                    self.consume_keyword(Keyword::Match)?;
+                    let pattern = self.parse_relational_expression()?;
+                    left = vibesql_ast::Expression::UnaryOp {
+                        op: vibesql_ast::UnaryOperator::Not,
+                        expr: Box::new(Self::build_match_regexp_call("MATCH", left, pattern)),
+                    };
+                    continue;
+                } else if self.peek_keyword(Keyword::Regexp) {
+                    // It's NOT REGEXP. Per SQLite (R-33693-50180): "X REGEXP Y" is
+                    // syntactic sugar for the function call "regexp(Y, X)".
+                    self.consume_keyword(Keyword::Regexp)?;
+                    let pattern = self.parse_relational_expression()?;
+                    left = vibesql_ast::Expression::UnaryOp {
+                        op: vibesql_ast::UnaryOperator::Not,
+                        expr: Box::new(Self::build_match_regexp_call("REGEXP", left, pattern)),
                     };
                     continue;
                 } else if self.peek_keyword(Keyword::Null) {
@@ -799,6 +841,20 @@ impl Parser {
                     negated: false,
                     escape,
                 };
+                continue;
+            } else if self.peek_keyword(Keyword::Match) {
+                // It's MATCH (not negated). Per SQLite (R-37916-47407): "X MATCH Y"
+                // is syntactic sugar for the function call "match(Y, X)".
+                self.consume_keyword(Keyword::Match)?;
+                let pattern = self.parse_relational_expression()?;
+                left = Self::build_match_regexp_call("MATCH", left, pattern);
+                continue;
+            } else if self.peek_keyword(Keyword::Regexp) {
+                // It's REGEXP (not negated). Per SQLite (R-33693-50180): "X REGEXP Y"
+                // is syntactic sugar for the function call "regexp(Y, X)".
+                self.consume_keyword(Keyword::Regexp)?;
+                let pattern = self.parse_relational_expression()?;
+                left = Self::build_match_regexp_call("REGEXP", left, pattern);
                 continue;
             }
 

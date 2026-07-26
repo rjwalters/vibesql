@@ -42,6 +42,7 @@ impl Parser {
             | Token::Keyword { keyword: Keyword::Glob, .. }
             | Token::Keyword { keyword: Keyword::Like, .. }
             | Token::Keyword { keyword: Keyword::Match, .. }
+            | Token::Keyword { keyword: Keyword::Regexp, .. }
             | Token::Keyword { keyword: Keyword::Date, .. }
             | Token::Keyword { keyword: Keyword::Time, .. }
             | Token::Keyword { keyword: Keyword::If, .. } => {
@@ -58,6 +59,7 @@ impl Parser {
                     Token::Keyword { keyword: Keyword::Glob, .. } => "glob",
                     Token::Keyword { keyword: Keyword::Like, .. } => "like",
                     Token::Keyword { keyword: Keyword::Match, .. } => "match",
+                    Token::Keyword { keyword: Keyword::Regexp, .. } => "regexp",
                     Token::Keyword { keyword: Keyword::Date, .. } => "date",
                     Token::Keyword { keyword: Keyword::Time, .. } => "time",
                     Token::Keyword { keyword: Keyword::If, .. } => "if",
@@ -82,12 +84,12 @@ impl Parser {
         };
 
         self.advance(); // consume '('
-        // JSONB aggregate accept-and-convert: `jsonb_group_array` /
-        // `jsonb_group_object` are text-mode aliases of their `json_group_*`
-        // counterparts (VibeSQL does not implement binary JSONB — see #5786).
-        // Normalize them to the canonical `json_group_*` name here so every
-        // downstream aggregate site (detection, evaluation, window) recognizes
-        // them without duplicating the alias in each match.
+                        // JSONB aggregate accept-and-convert: `jsonb_group_array` /
+                        // `jsonb_group_object` are text-mode aliases of their `json_group_*`
+                        // counterparts (VibeSQL does not implement binary JSONB — see #5786).
+                        // Normalize them to the canonical `json_group_*` name here so every
+                        // downstream aggregate site (detection, evaluation, window) recognizes
+                        // them without duplicating the alias in each match.
         let first = match function_name.to_uppercase().as_str() {
             "JSONB_GROUP_ARRAY" => "json_group_array".to_string(),
             "JSONB_GROUP_OBJECT" => "json_group_object".to_string(),

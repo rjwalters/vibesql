@@ -52,10 +52,9 @@ pub(crate) fn like(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         // Floats coerce through the SqlValue Display impl (%!.15g), not the raw
         // f64/f32 `to_string()`. SQLite compares against the %!.15g rendering, so
         // `2.0 LIKE '2.0'` is true and `1e300 LIKE '1.0e+300'` is true.
-        SqlValue::Real(_)
-        | SqlValue::Double(_)
-        | SqlValue::Numeric(_)
-        | SqlValue::Float(_) => Cow::Owned(args[1].to_string()),
+        SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) | SqlValue::Float(_) => {
+            Cow::Owned(args[1].to_string())
+        }
         SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
         other => Cow::Owned(other.to_string()),
     };
@@ -132,10 +131,9 @@ pub(crate) fn glob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
         // Floats coerce through the SqlValue Display impl (%!.15g), not the raw
         // f64/f32 `to_string()`, matching SQLite's GLOB coercion.
-        SqlValue::Real(_)
-        | SqlValue::Double(_)
-        | SqlValue::Numeric(_)
-        | SqlValue::Float(_) => Cow::Owned(args[1].to_string()),
+        SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) | SqlValue::Float(_) => {
+            Cow::Owned(args[1].to_string())
+        }
         SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
         other => Cow::Owned(other.to_string()),
     };
@@ -143,6 +141,25 @@ pub(crate) fn glob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     // Use the pattern matching function from pattern.rs
     let matched = crate::evaluator::pattern::glob_match(&text, pattern);
     Ok(SqlValue::Integer(if matched { 1 } else { 0 }))
+}
+
+/// match(pattern, string) - the default `match()` application-defined function
+/// that backs the `X MATCH Y` infix operator (parsed as `match(Y, X)`).
+///
+/// SQLite ships a genuine default implementation of `match()` (R-42037-37826):
+/// unlike `regexp()` (which simply doesn't exist unless an extension registers
+/// it), `match()` is always present and its default behavior is to raise this
+/// exact error — it is only useful once an extension (e.g. FTS3/4/5) or a
+/// user-registered function overrides it with real matching logic. VibeSQL has
+/// no virtual-table MATCH override mechanism, so this default is always what
+/// callers get, matching SQLite's out-of-the-box behavior.
+pub(crate) fn match_default(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 2 {
+        return Err(ExecutorError::WrongNumberOfArguments { function_name: "match".to_string() });
+    }
+    Err(ExecutorError::SqliteCompatError(
+        "unable to use function MATCH in the requested context".to_string(),
+    ))
 }
 
 #[cfg(test)]
