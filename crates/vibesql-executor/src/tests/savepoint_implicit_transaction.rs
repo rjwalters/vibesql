@@ -113,8 +113,13 @@ fn rollback_to_implicit_savepoint_keeps_transaction_open() {
 
 #[test]
 fn release_runs_deferred_fk_check_and_can_fail() {
-    // fkey2-2.40: a deferred FK violation queued under an implicit-savepoint
-    // transaction must surface when the outermost RELEASE commits.
+    // fkey2-2.40/2.41: a deferred FK violation queued under an
+    // implicit-savepoint transaction must surface when the outermost
+    // RELEASE attempts to commit. Per EVIDENCE-OF R-37736-42616, a COMMIT
+    // (or RELEASE of a transaction savepoint) that fails this way leaves
+    // the transaction — and the savepoint itself — open, exactly as before:
+    // later statements can resolve the violation and release the *same*
+    // savepoint successfully.
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
     exec_sql(
@@ -127,11 +132,24 @@ fn release_runs_deferred_fk_check_and_can_fail() {
     exec_sql(&mut db, "SAVEPOINT outer").unwrap();
     // References a non-existent parent (3) — deferred, so it does not fail now.
     exec_sql(&mut db, "INSERT INTO node VALUES(2, 3)").unwrap();
-    // RELEASE commits, which runs the deferred check and fails.
+    // RELEASE attempts to commit, which runs the deferred check and fails.
     let err = exec_sql(&mut db, "RELEASE outer").unwrap_err();
     assert!(err.contains("FOREIGN KEY constraint failed"), "unexpected error: {err}");
-    // The failed commit rolled the transaction back to autocommit.
+    // The transaction remains open — the failed RELEASE did NOT roll back.
+    assert!(db.in_transaction());
+    assert_eq!(db.savepoint_depth(), 1);
+
+    // A subsequent COMMIT attempt also fails (violation still unresolved).
+    let err2 = exec_sql(&mut db, "COMMIT").unwrap_err();
+    assert!(err2.contains("FOREIGN KEY constraint failed"), "unexpected error: {err2}");
+    assert!(db.in_transaction());
+
+    // Resolve the violation by inserting the missing parent row, then the
+    // SAME "outer" savepoint releases (and commits) successfully.
+    exec_sql(&mut db, "INSERT INTO node VALUES(3, 1)").unwrap();
+    exec_sql(&mut db, "RELEASE outer").unwrap();
     assert!(!db.in_transaction());
+    assert_eq!(row_count(&db, "node"), 3);
 }
 
 #[test]

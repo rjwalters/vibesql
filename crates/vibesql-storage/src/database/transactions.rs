@@ -702,6 +702,23 @@ impl TransactionManager {
         }
     }
 
+    /// True when `name` is the outermost (bottom-of-stack) live savepoint —
+    /// i.e. releasing it would empty the savepoint stack entirely (matches
+    /// [`Self::release_savepoint`]'s `truncate(savepoint_idx)` semantics: a
+    /// release at index 0 leaves zero savepoints). Read-only: does not
+    /// mutate the stack. Used to decide, *before* actually releasing, whether
+    /// this RELEASE would auto-commit an implicitly-opened transaction, so
+    /// the caller can run the deferred-FK pre-check first (EVIDENCE-OF
+    /// R-37736-42616: a failing commit must leave the savepoint untouched).
+    pub fn is_outermost_savepoint(&self, name: &str) -> bool {
+        match &self.transaction_state {
+            TransactionState::Active { savepoints, .. } => {
+                savepoints.first().map(|sp| sp.name == name).unwrap_or(false)
+            }
+            TransactionState::None => false,
+        }
+    }
+
     /// Rollback to a named savepoint - returns the changes that need to be undone
     pub fn rollback_to_savepoint(
         &mut self,

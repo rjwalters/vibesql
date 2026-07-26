@@ -1824,6 +1824,21 @@ fn resolve_replace_conflicts_for_row(
 
     super::constraints::enforce_unique_indexes(db, schema, table_name, full_row_values)?;
 
+    // Re-validate the new row's OWN foreign keys too (fkey1-5.2/5.4): the
+    // conflict-clearing delete above may have run a CASCADE / SET NULL /
+    // SET DEFAULT action (`enforce_replace_fk_actions`, inside
+    // `handle_replace_conflicts`) that removed the very parent row this new
+    // row is about to reference — e.g. a self-referential `ON DELETE
+    // CASCADE` where replacing row 2 cascades away row 3, and the new row
+    // being inserted for key 2 itself references key 3. The row's FK
+    // existence was already checked once by `RowValidator::validate_foreign_keys`
+    // before REPLACE conflict resolution ran (against the pre-cascade
+    // state), so it must be checked again now against the post-cascade
+    // state. `validate_foreign_key_constraints` is a no-op when
+    // `PRAGMA foreign_keys` is off and only re-does the read-only
+    // existence/deferred-queue work — it does not re-run PK/UNIQUE checks.
+    super::foreign_keys::validate_foreign_key_constraints(db, table_name, full_row_values)?;
+
     // Release the reservation now that all delete triggers have fired.
     // The REPLACE INSERT uses the returned rowid as its explicit rowid, so it
     // will not fail on its own reservation.

@@ -382,6 +382,13 @@ impl Database {
         self.lifecycle.transaction_manager().savepoint_depth()
     }
 
+    /// True when `name` is the outermost live savepoint (releasing it would
+    /// empty the stack). See
+    /// [`TransactionManager::is_outermost_savepoint`] for the rationale.
+    pub fn is_outermost_savepoint(&self, name: &str) -> bool {
+        self.lifecycle.transaction_manager().is_outermost_savepoint(name)
+    }
+
     // ========================================================================
     // Implicit statement-level savepoint (#5417 — RAISE(ABORT) scope)
     // ========================================================================

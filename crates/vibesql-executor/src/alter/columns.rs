@@ -107,6 +107,22 @@ pub(super) fn execute_add_column(
             ));
         }
     }
+    // A REFERENCES column cannot carry a non-NULL default (SQLite's
+    // `sqlite3AlterFinishAddColumn`, fkey2-14.1.4/1.5, e_fkey-61.1.1): the
+    // added column's default would need to satisfy the FK constraint for
+    // every existing row without an FK existence check ever running, which
+    // SQLite refuses to do. `DEFAULT NULL` (or no default) is fine because
+    // NULL never participates in FK matching.
+    let has_references = stmt
+        .column_def
+        .constraints
+        .iter()
+        .any(|c| matches!(c.kind, ColumnConstraintKind::References { .. }));
+    if has_references && !default_is_null_or_absent {
+        return Err(ExecutorError::Other(
+            "Cannot add a REFERENCES column with non-NULL default value".to_string(),
+        ));
+    }
 
     // A STORED generated column may only be added while the table is empty.
     // sqlite3 3.51.0 rejects `ADD COLUMN ... GENERATED ALWAYS AS (expr) STORED`

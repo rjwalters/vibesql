@@ -62,13 +62,34 @@ pub struct CommitExecutor;
 impl CommitExecutor {
     /// Execute a COMMIT statement.
     ///
-    /// Phase C2 of #5085: drains the transaction's deferred FK
-    /// violation queue and re-checks each entry against the current
-    /// parent state. If any deferred violation still holds, the COMMIT
-    /// fails and the transaction is rolled back, matching SQLite
-    /// semantics ("FOREIGN KEY constraint failed" raised at COMMIT).
+    /// Phase C2 of #5085: re-checks the transaction's deferred FK
+    /// violation queue against the current parent state. If any deferred
+    /// violation still holds, the COMMIT fails.
+    ///
+    /// EVIDENCE-OF R-37736-42616 (e_fkey-38.3/38.4, fkey2-2.40/2.41): when a
+    /// COMMIT (or the RELEASE of a transaction SAVEPOINT that empties the
+    /// savepoint stack) fails because of an outstanding deferred FK
+    /// violation, the transaction — and any nested savepoints — remain
+    /// open exactly as before. The caller can fix the violation with more
+    /// statements and retry COMMIT, or explicitly ROLLBACK. So the queue
+    /// must only be peeked (read-only) here; nothing may be drained or
+    /// rolled back unless the commit is actually going to succeed.
     pub fn execute(_stmt: &CommitStmt, db: &mut Database) -> Result<String, ExecutorError> {
-        // Drain and re-validate deferred FK violations before commit.
+        Self::check_deferred_fk_only(db)?;
+        Self::finalize(db)?;
+        Ok("Transaction committed".to_string())
+    }
+
+    /// Phase 1: read-only pre-check. Returns `Err` (without mutating any
+    /// transaction state) when an outstanding deferred FK violation would
+    /// still fail; returns `Ok(())` when the commit is safe to finalize.
+    ///
+    /// Split out so [`ReleaseSavepointExecutor`] can run this check BEFORE
+    /// popping the savepoint that would trigger the auto-commit — a failing
+    /// check must leave the named savepoint (and the transaction) untouched.
+    fn check_deferred_fk_only(db: &Database) -> Result<(), ExecutorError> {
+        // Peek (read-only) at deferred FK violations before mutating any
+        // transaction state.
         //
         // Phase 1d of #5136 — FK deferred-replay coordination:
         // Capture a fresh **commit-time** snapshot for the re-validation
@@ -81,25 +102,25 @@ impl CommitExecutor {
         // treats every transaction id allocated so far as committed,
         // making the committing transaction's own writes (stamped with
         // `xmin = current_txn_id`) pass `visible_to`.
-        let pending = db.take_deferred_fk_violations();
         let commit_snapshot = db.capture_commit_time_snapshot();
+        let pending: Vec<_> = db.deferred_fk_violations().to_vec();
         if let Some(err_msg) = check_deferred_fk_violations(db, &pending, &commit_snapshot) {
-            // Deferred violation still holds at COMMIT — abort the
-            // commit and roll back. SQLite raises "FOREIGN KEY
-            // constraint failed" here; auto-rollback follows the same
-            // convention as Bucket D (#5087, merged 17f23988).
-            //
-            // We ignore the rollback's own error: if rollback also
-            // fails, the original FK error is the more useful one.
-            let _ = db.rollback_transaction();
+            // Deferred violation still holds at COMMIT: fail without
+            // touching the transaction or its queue (see doc comment above).
             return Err(ExecutorError::ConstraintViolation(err_msg));
         }
+        Ok(())
+    }
 
+    /// Phase 2: drain the (now-confirmed-clean) deferred FK queue and
+    /// actually commit. Callers must have already called
+    /// [`Self::check_deferred_fk_only`] successfully.
+    fn finalize(db: &mut Database) -> Result<(), ExecutorError> {
+        let _ = db.take_deferred_fk_violations();
         db.commit_transaction().map_err(|e| {
             ExecutorError::StorageError(format!("Failed to commit transaction: {}", e))
         })?;
-
-        Ok("Transaction committed".to_string())
+        Ok(())
     }
 }
 
@@ -205,14 +226,21 @@ fn check_deferred_fk_violations(
         let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
         // Phase 1d: scan visible parent rows (commit-time snapshot).
-        // Under MVCC OFF this is equivalent to scanning all rows
-        // (matches previous behavior of `parent_table.scan().iter()`,
-        // which did not filter the deletion bitmap; we keep the
-        // pre-existing wider semantics by also looking at non-bitmap-
-        // deleted rows — the `scan_visible` iterator filters the
-        // bitmap, but pre-Phase-1d the parent scan included deleted
-        // rows too, so to preserve OFF-state semantics exactly we
-        // continue to use `scan()` when MVCC is off).
+        //
+        // fkey2-2.15c: a deferred violation must stay a violation when the
+        // parent row that triggered it is still gone at COMMIT time. The
+        // previous OFF-state implementation deliberately scanned via
+        // `scan()`, which does NOT filter VibeSQL's bitmap-tombstone
+        // deletes — so a parent row deleted earlier in the very same
+        // transaction (as `DELETE FROM node WHERE nodeid=2` does here)
+        // still physically exists in backing storage and was wrongly
+        // treated as "the parent still exists", silently clearing the
+        // violation and letting COMMIT succeed. Use `scan_live()` (bitmap-
+        // filtered) instead — matching both the child-side check just
+        // above and `live_deferred_fk_violation_count`'s parent-side scan,
+        // which already uses `scan_live()`. Under MVCC ON, `scan_visible`
+        // additionally honors the commit-time snapshot for cross-
+        // transaction visibility.
         let key_exists = {
             #[cfg(feature = "mvcc_enabled")]
             {
@@ -232,7 +260,7 @@ fn check_deferred_fk_violations(
             #[cfg(not(feature = "mvcc_enabled"))]
             {
                 let _ = snapshot;
-                parent_table.scan().iter().any(|parent_row| {
+                parent_table.scan_live().any(|(_, parent_row)| {
                     parent_indices.iter().zip(&snapshot_fk_values).enumerate().all(
                         |(i, (&parent_idx, fk_val))| match parent_row.get(parent_idx) {
                             Some(parent_val) => fk_values_equal(
@@ -468,18 +496,37 @@ impl ReleaseSavepointExecutor {
     /// "FOREIGN KEY constraint failed" exactly as SQLite does (fkey2-2.40).
     /// For a transaction opened by an explicit `BEGIN`, `RELEASE` of the last
     /// savepoint leaves the transaction open until an explicit `COMMIT`.
+    ///
+    /// EVIDENCE-OF R-37736-42616: when this auto-commit fails because of an
+    /// outstanding deferred FK violation, the named savepoint (and every
+    /// nested savepoint) must remain exactly as they were — the RELEASE
+    /// itself must not take effect. So the deferred-FK check runs BEFORE
+    /// popping the savepoint stack (fkey2-2.40/2.41: `RELEASE outer` fails,
+    /// then later statements resolve the violation and the *same* `outer`
+    /// savepoint is released successfully).
     pub fn execute(
         stmt: &ReleaseSavepointStmt,
         db: &mut Database,
     ) -> Result<String, ExecutorError> {
+        let will_finalize =
+            db.is_implicit_savepoint_txn() && db.is_outermost_savepoint(&stmt.name);
+
+        if will_finalize {
+            // Read-only pre-check: does NOT mutate the savepoint stack or
+            // the deferred FK queue. On failure this returns without ever
+            // calling `release_savepoint`, so the savepoint survives.
+            CommitExecutor::check_deferred_fk_only(db)?;
+        }
+
         db.release_savepoint(stmt.name.clone()).map_err(|e| {
             ExecutorError::StorageError(format!("Failed to release savepoint: {}", e))
         })?;
 
-        // If this RELEASE emptied the savepoint stack of an implicitly-opened
-        // transaction, commit it (SQLite autocommit-on-outermost-release).
-        if db.is_implicit_savepoint_txn() && db.savepoint_depth() == 0 {
-            CommitExecutor::execute(&CommitStmt, db)?;
+        // The pre-check above already confirmed no outstanding deferred
+        // violation, so this can only fail on the (unexpected) storage-level
+        // commit itself — not on a deferred FK re-check.
+        if will_finalize {
+            CommitExecutor::finalize(db)?;
         }
 
         Ok(format!("Savepoint '{}' released", stmt.name))

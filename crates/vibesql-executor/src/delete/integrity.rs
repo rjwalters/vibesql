@@ -315,7 +315,7 @@ fn queue_orphaned_children(
 
 /// Delete child rows that reference a deleted parent row (CASCADE action)
 #[allow(clippy::too_many_arguments)]
-fn cascade_delete(
+pub(crate) fn cascade_delete(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
@@ -460,7 +460,7 @@ fn cascade_delete(
 
 /// Set child FK columns to NULL (SET NULL action)
 #[allow(clippy::too_many_arguments)]
-fn set_null(
+pub(crate) fn set_null(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
@@ -526,7 +526,7 @@ fn set_null(
 
 /// Set child FK columns to their default values (SET DEFAULT action)
 #[allow(clippy::too_many_arguments)]
-fn set_default(
+pub(crate) fn set_default(
     db: &mut vibesql_storage::Database,
     child_table_name: &str,
     fk: &vibesql_catalog::ForeignKeyConstraint,
