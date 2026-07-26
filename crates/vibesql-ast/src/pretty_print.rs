@@ -933,6 +933,19 @@ impl ToSql for SelectStmt {
             if let Some(having) = &self.having {
                 result.push_str(&format!(" HAVING {}", having.to_sql()));
             }
+
+            // WINDOW clause (named window definitions, e.g. `WINDOW w AS (...)`).
+            // Dropping this on a persistence round-trip silently orphans every
+            // `OVER <name>` reference in the view body, surfacing as "no such
+            // window: <name>" the next time the view is loaded from storage
+            // (window1.test 8.1.2 / #6191).
+            if let Some(window_defs) = &self.window_definitions {
+                let defs_sql: Vec<String> = window_defs
+                    .iter()
+                    .map(|d| format!("{} AS ({})", format_identifier(&d.name), d.spec.to_sql()))
+                    .collect();
+                result.push_str(&format!(" WINDOW {}", defs_sql.join(", ")));
+            }
         }
 
         // Set operation (UNION, INTERSECT, EXCEPT) must be rendered BEFORE
@@ -1231,7 +1244,7 @@ impl ToSql for MixedGroupingItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ColumnIdentifier, FunctionIdentifier};
+    use crate::{select::WindowDefinition, ColumnIdentifier, FunctionIdentifier};
 
     #[test]
     fn test_binary_operators() {
@@ -1613,5 +1626,71 @@ mod tests {
             },
         };
         assert_eq!(expr.to_sql(), "ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC)");
+    }
+
+    /// A `SELECT ... WINDOW w AS (...)` statement must round-trip its named
+    /// window definitions through `to_sql()`. Views are persisted by
+    /// re-rendering their defining `SelectStmt` to SQL text and re-parsing it
+    /// on load; dropping `window_definitions` here silently orphaned every
+    /// `OVER <name>` reference in the view body, surfacing as "no such
+    /// window: <name>" the first time the view was reloaded from storage
+    /// (window1.test 8.1.2, #6191).
+    #[test]
+    fn test_select_with_window_clause_round_trips() {
+        let stmt = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::WindowFunction {
+                    function: WindowFunctionSpec::Aggregate {
+                        name: FunctionIdentifier::new("sum"),
+                        args: vec![Expression::ColumnRef(ColumnIdentifier::simple("b", false))],
+                        filter: None,
+                    },
+                    over: WindowSpec {
+                        base_window_name: Some("win".to_string()),
+                        partition_by: None,
+                        order_by: None,
+                        frame: None,
+                    },
+                },
+                alias: None,
+                source_text: None,
+            }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "t3".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: Some(vec![WindowDefinition {
+                name: "win".to_string(),
+                spec: WindowSpec {
+                    base_window_name: None,
+                    partition_by: None,
+                    order_by: Some(vec![OrderByItem {
+                        expr: Expression::ColumnRef(ColumnIdentifier::simple("c", false)),
+                        direction: OrderDirection::Asc,
+                        nulls_order: None,
+                    }]),
+                    frame: None,
+                },
+            }]),
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        };
+        assert_eq!(
+            stmt.to_sql(),
+            "SELECT SUM(b) OVER (win) FROM t3 WINDOW win AS (ORDER BY c ASC)"
+        );
     }
 }
