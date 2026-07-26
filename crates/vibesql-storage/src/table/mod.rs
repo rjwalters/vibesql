@@ -298,17 +298,40 @@ impl Table {
         }
     }
 
-    /// Track a row's effective *signed* rowid for allocation (issue #5835).
+    /// Track a row's effective *signed* rowid for allocation (issue #5835,
+    /// extended by issue #6173).
     ///
-    /// `row_id` is the explicit rowid bit pattern if the row carries one;
-    /// `position` is the physical index the row occupies, from which an
-    /// implicit rowid (`position + 1`) is derived otherwise.
+    /// For a table with an INTEGER PRIMARY KEY rowid alias
+    /// (`schema.rowid_alias_column`), the alias COLUMN'S value IS the rowid —
+    /// `row.row_id` is deliberately left unset for such rows (see the INSERT
+    /// executor's "Skip INTEGER PRIMARY KEY (rowid alias) tables" comment),
+    /// so falling back to `row.row_id`/physical position here would silently
+    /// under-track the true max whenever the alias column's value diverges
+    /// from insertion order — e.g. an `INSERT INTO t(b) VALUES(...)` that
+    /// omits the named IPK column, following an earlier row whose IPK value
+    /// was itself non-sequential (an explicit large value, a gap left by
+    /// DELETE, or — the case that surfaced this — a BEFORE/AFTER INSERT
+    /// trigger recursively inserting extra rows into the same table). Without
+    /// this, a later NULL/omitted-IPK insert could recompute the SAME "next"
+    /// value twice and collide with a row already written (autoinc-3928).
+    ///
+    /// For any other table, `row_id` is the explicit rowid bit pattern if the
+    /// row carries one; `position` is the physical index the row occupies,
+    /// from which an implicit rowid (`position + 1`) is derived otherwise.
     #[inline]
-    fn track_effective_rowid(&mut self, row_id: Option<u64>, position: usize) {
-        let effective: i64 = match row_id {
+    fn track_effective_rowid(&mut self, row: &Row, position: usize) {
+        let alias_value = self
+            .schema
+            .rowid_alias_column
+            .and_then(|idx| row.values.get(idx))
+            .and_then(|v| if let SqlValue::Integer(i) = v { Some(*i) } else { None });
+        let effective: i64 = match alias_value {
+            Some(v) => v,
             // SQLite rowids are signed; reinterpret the stored bit pattern.
-            Some(rid) => rid as i64,
-            None => position as i64 + 1,
+            None => match row.row_id {
+                Some(rid) => rid as i64,
+                None => position as i64 + 1,
+            },
         };
         self.max_assigned_rowid =
             Some(self.max_assigned_rowid.map_or(effective, |m| m.max(effective)));
@@ -339,7 +362,7 @@ impl Table {
 
         // Track the largest effective rowid ever assigned (issue #5835) so
         // future implicit-rowid allocation never collides with it.
-        self.track_effective_rowid(normalized_row.row_id, self.rows.len());
+        self.track_effective_rowid(&normalized_row, self.rows.len());
 
         // Add row to table (always stored for indexing and potential row access)
         let row_index = self.rows.len();
@@ -453,7 +476,7 @@ impl Table {
         // Phase 3: Insert all rows into storage
         for row in normalized_rows {
             // Track the largest effective rowid ever assigned (issue #5835).
-            self.track_effective_rowid(row.row_id, self.rows.len());
+            self.track_effective_rowid(&row, self.rows.len());
             self.rows.push(row);
             self.deleted.push(false);
         }
@@ -1024,12 +1047,17 @@ impl Table {
         let normalizer = RowNormalizer::new(&self.schema);
         let normalized_row = normalizer.normalize_and_validate(row)?;
 
-        // Track the largest explicit rowid ever assigned (issue #5835).
-        // Only explicit rowids are tracked here: an UPDATE replaces a row in
-        // place, so a `None` row_id cannot introduce a new effective rowid
-        // beyond what its insert already tracked.
-        if let Some(rid) = normalized_row.row_id {
-            self.track_effective_rowid(Some(rid), index);
+        // Track the largest explicit rowid ever assigned (issue #5835), or
+        // (issue #6173) the largest INTEGER PRIMARY KEY alias value: an
+        // UPDATE replaces a row in place, so a row with neither an explicit
+        // `row_id` NOR a rowid-alias column cannot introduce a new effective
+        // rowid beyond what its insert already tracked — but `UPDATE t SET
+        // <ipk_col>=<bigger value>` on a rowid-alias table changes the
+        // row's *effective* rowid without ever touching `row_id`, and that
+        // new high-water mark must still be tracked (same reasoning as
+        // `track_effective_rowid`'s doc comment on the INSERT paths).
+        if normalized_row.row_id.is_some() || self.schema.rowid_alias_column.is_some() {
+            self.track_effective_rowid(&normalized_row, index);
         }
 
         // Get old row for index updates (clone to avoid borrow issues)

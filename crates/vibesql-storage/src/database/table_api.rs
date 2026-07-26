@@ -737,6 +737,110 @@ impl Database {
         Ok(true)
     }
 
+    /// Update the first LIVE row matching `predicate`, without requiring a
+    /// primary key (direct API, no SQL parsing).
+    ///
+    /// Unlike [`Database::update_row_by_pk`], this does not consult a PK index
+    /// — it scans live rows and updates the first match by content, via the
+    /// same `predicate` used to find it. Returns `Ok(false)` when no row
+    /// matches. This is intended for small internal system tables that have
+    /// no declared PRIMARY KEY, no user indexes, and no triggers — currently
+    /// only `sqlite_sequence` (AUTOINCREMENT bookkeeping, issue #6173) —
+    /// where the caller already guarantees at most one live row can match.
+    pub fn update_row_matching<F>(
+        &mut self,
+        table_name: &str,
+        mut predicate: F,
+        column_updates: Vec<(&str, vibesql_types::SqlValue)>,
+    ) -> Result<bool, StorageError>
+    where
+        F: FnMut(&Row) -> bool,
+    {
+        let (row_index, old_row, schema, resolved_name) = {
+            let table = self
+                .get_table(table_name)
+                .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+            let Some((row_index, row)) = table.scan_live().find(|(_, row)| predicate(row)) else {
+                return Ok(false);
+            };
+            let old_row = row.clone();
+            let schema = table.schema.clone();
+            let resolved_name = schema.name.clone();
+            (row_index, old_row, schema, resolved_name)
+        };
+
+        let mut new_row = old_row.clone();
+        let mut changed_columns = std::collections::HashSet::new();
+        for (col_name, new_value) in &column_updates {
+            let col_index =
+                schema.get_column_index(col_name).ok_or_else(|| StorageError::ColumnNotFound {
+                    column_name: col_name.to_string(),
+                    table_name: resolved_name.clone(),
+                })?;
+            new_row.set(col_index, new_value.clone())?;
+            changed_columns.insert(col_index);
+        }
+
+        let txn_id = self.transaction_id();
+        crate::mvcc::stamp_xmin_for_write(&mut new_row, txn_id);
+        new_row.xmax = None;
+
+        let table_mut = self.get_table_mut(table_name).unwrap();
+        table_mut.update_row_selective(row_index, new_row.clone(), &changed_columns)?;
+
+        if !self.is_temp_table(&resolved_name) {
+            self.emit_wal_op(WalOp::Update {
+                table_id: self.table_name_to_id(&resolved_name),
+                table_name: resolved_name.clone(),
+                row_id: row_index as u64,
+                old_values: old_row.values.to_vec(),
+                new_values: new_row.values.to_vec(),
+            });
+        }
+
+        self.columnar_cache.invalidate(&resolved_name);
+
+        Ok(true)
+    }
+
+    /// Delete the first LIVE row matching `predicate`, without requiring a
+    /// primary key (direct API, no SQL parsing).
+    ///
+    /// Same restriction and intended use as [`Database::update_row_matching`]:
+    /// internal system tables with no PK/indexes/triggers to maintain
+    /// (currently only `sqlite_sequence`). Returns `Ok(false)` when no row
+    /// matches.
+    pub fn delete_row_matching<F>(
+        &mut self,
+        table_name: &str,
+        predicate: F,
+    ) -> Result<bool, StorageError>
+    where
+        F: FnMut(&Row) -> bool + Clone,
+    {
+        let (row_index, old_values, resolved_name) = {
+            let table = self
+                .get_table(table_name)
+                .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+            let mut p = predicate.clone();
+            let Some((row_index, row)) = table.scan_live().find(|(_, row)| p(row)) else {
+                return Ok(false);
+            };
+            (row_index, row.values.to_vec(), table.schema.name.clone())
+        };
+
+        if !self.is_temp_table(&resolved_name) {
+            self.emit_wal_delete(&resolved_name, row_index as u64, old_values);
+        }
+
+        let table_mut = self.get_table_mut(table_name).unwrap();
+        table_mut.delete_where(predicate);
+
+        self.columnar_cache.invalidate(&resolved_name);
+
+        Ok(true)
+    }
+
     /// List all table names
     pub fn list_tables(&self) -> Vec<String> {
         self.catalog.list_tables()

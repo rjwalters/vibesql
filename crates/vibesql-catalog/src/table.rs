@@ -106,6 +106,22 @@ pub struct TableSchema {
     /// STRICT tables enforce rigid per-column datatypes on INSERT/UPDATE. See
     /// <https://sqlite.org/stricttables.html>.
     pub strict: bool,
+    /// If true, this table's INTEGER PRIMARY KEY (rowid alias) column was
+    /// declared with the AUTOINCREMENT keyword (SQLite compatibility, issue
+    /// #6173). Only ever set together with `rowid_alias_column` — SQLite
+    /// requires AUTOINCREMENT to be used on a single-column INTEGER PRIMARY
+    /// KEY, never on a WITHOUT ROWID table. When set, the engine tracks a
+    /// monotonically-increasing high-water-mark for this table's rowid in
+    /// the real `sqlite_sequence` table (created lazily the first time any
+    /// AUTOINCREMENT table exists), guaranteeing a NULL-inserted rowid is
+    /// always larger than any rowid the table has EVER held — even across a
+    /// full `DELETE FROM` and a process restart — unlike a plain (non-
+    /// AUTOINCREMENT) INTEGER PRIMARY KEY, which may reuse rowids after the
+    /// table becomes empty. Not serialized in the binary catalog — like
+    /// `rowid_alias_column`/`strict`, it is rederived from `sql_source` on
+    /// load, so no format bump is needed. See
+    /// <https://sqlite.org/autoinc.html>.
+    pub is_autoincrement: bool,
     /// Per-column STRICT storage-type classification, parallel to `columns`.
     /// Empty when the table is not STRICT. When non-empty, `strict_types[i]` is
     /// the declared strict type of `columns[i]` (validated at CREATE time to be
@@ -170,6 +186,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -208,6 +225,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -236,6 +254,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -264,6 +283,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -293,6 +313,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -324,6 +345,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
@@ -352,6 +374,7 @@ impl TableSchema {
             is_view: false,
             sql_source: None,
             strict: false,
+            is_autoincrement: false,
             strict_types: Vec::new(),
             primary_key_collations: None,
             unique_constraint_collations: Vec::new(),
