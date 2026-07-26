@@ -295,10 +295,39 @@ fn test_tokenize_question_numbered_placeholder_in_expression() {
 
 #[test]
 fn test_tokenize_question_zero_rejected() {
-    // SQLite rejects ?0: "variable number must be between ?1 and ?NNN"
+    // SQLite rejects ?0 with the verbatim diagnostic (not a `near "…": syntax
+    // error` wrapping): "variable number must be between ?1 and ?999".
     let mut lexer = Lexer::new("SELECT ?0");
     let err = lexer.tokenize().unwrap_err();
-    assert!(err.message.contains("?1"), "expected ?0 rejection message, got: {}", err.message);
+    assert_eq!(err.message, "variable number must be between ?1 and ?999");
+    // near_token must be unset so Display emits the message verbatim.
+    assert_eq!(err.to_string(), "variable number must be between ?1 and ?999");
+}
+
+#[test]
+fn test_tokenize_question_over_limit_rejected() {
+    // ?1000 exceeds SQLITE_MAX_VARIABLE_NUMBER (999) and is rejected with the
+    // same range diagnostic (SQLite e_expr-11.1.3).
+    let mut lexer = Lexer::new("SELECT ?1000");
+    let err = lexer.tokenize().unwrap_err();
+    assert_eq!(err.to_string(), "variable number must be between ?1 and ?999");
+}
+
+#[test]
+fn test_tokenize_question_max_allowed() {
+    // ?999 is exactly at the limit and must lex successfully.
+    let mut lexer = Lexer::new("SELECT ?999");
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[1], Token::NumberedPlaceholder(999));
+}
+
+#[test]
+fn test_tokenize_question_overflow_rejected() {
+    // A parameter number too large to represent yields the same range error
+    // rather than panicking or wrapping (SQLite e_expr-11.1.5..13).
+    let mut lexer = Lexer::new("SELECT ?12345678903456789034567890234567890");
+    let err = lexer.tokenize().unwrap_err();
+    assert_eq!(err.to_string(), "variable number must be between ?1 and ?999");
 }
 
 #[test]

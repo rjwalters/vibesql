@@ -370,9 +370,23 @@ fn evaluate_expr_on_result_row(
                                 aggregates,
                                 schema,
                             )?;
-                            if crate::evaluator::ExpressionEvaluator::values_are_equal(
-                                &operand_val,
-                                &when_val,
+                            // Strict (no cross-type guessing) equality via the
+                            // same `eval_binary_op_static` `=` comparator this
+                            // file already uses for BinaryOp/IN/BETWEEN, not
+                            // the permissive `values_are_equal` used for
+                            // hash-join keys. A bare TEXT literal carries no
+                            // affinity here, so `HAVING CASE c WHEN '2' THEN
+                            // ...` must not match an INTEGER c=2 against TEXT
+                            // '2' (e_expr-23.1.6, same fix as the main
+                            // evaluators).
+                            if matches!(
+                                crate::evaluator::ExpressionEvaluator::eval_binary_op_static(
+                                    &operand_val,
+                                    &vibesql_ast::BinaryOperator::Equal,
+                                    &when_val,
+                                    SqlMode::default(),
+                                )?,
+                                SqlValue::Boolean(true)
                             ) {
                                 return evaluate_expr_on_result_row(
                                     &when_clause.result,

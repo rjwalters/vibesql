@@ -511,6 +511,59 @@ impl CombinedExpressionEvaluator<'_> {
         (left_val, right_val)
     }
 
+    /// Compare two already-evaluated values for SQL equality: apply SQLite's
+    /// affinity-based coercion (via [`Self::apply_affinity_for_comparison`],
+    /// which only converts a TEXT/NUMERIC value when the *other* operand is a
+    /// real column with NUMERIC/INTEGER/REAL or TEXT affinity), then fall back
+    /// to a strict, storage-class-aware comparison with no further guessing.
+    ///
+    /// This is the correct semantics for CASE and `IS`/`IS NOT` (via
+    /// `Self::affinity_aware_is_distinct`) and NULLIF. It must NOT reuse the
+    /// permissive `values_are_equal` cross-type coercion used for hash-join key
+    /// comparisons — that helper unconditionally tries to parse TEXT as a
+    /// number regardless of affinity, which is wrong once affinity has already
+    /// been correctly resolved (or found not to apply). Two bare literals
+    /// (e.g. `55` and `'55'`) carry no affinity and must compare unequal by
+    /// storage class per SQLite datatype3 §4.2 (e_expr-23.1.6: `CASE 55 WHEN
+    /// '55' THEN 'A' ELSE 'B' END` -> 'B').
+    pub(crate) fn affinity_aware_equal(
+        &self,
+        left_expr: &vibesql_ast::Expression,
+        left_val: SqlValue,
+        right_expr: &vibesql_ast::Expression,
+        right_val: SqlValue,
+    ) -> Result<bool, ExecutorError> {
+        let (l, r) = self.apply_affinity_for_comparison(left_expr, left_val, right_expr, right_val);
+        let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        Ok(matches!(
+            ExpressionEvaluator::eval_binary_op_static(
+                &l,
+                &vibesql_ast::BinaryOperator::Equal,
+                &r,
+                sql_mode,
+            )?,
+            SqlValue::Boolean(true)
+        ))
+    }
+
+    /// NULL-safe counterpart of [`Self::affinity_aware_equal`] for `IS` /
+    /// `IS NOT` (IS NOT DISTINCT FROM / IS DISTINCT FROM): both-NULL is not
+    /// distinct, exactly one NULL is distinct, otherwise defers to the
+    /// affinity-aware equality check.
+    pub(crate) fn affinity_aware_is_distinct(
+        &self,
+        left_expr: &vibesql_ast::Expression,
+        left_val: SqlValue,
+        right_expr: &vibesql_ast::Expression,
+        right_val: SqlValue,
+    ) -> Result<bool, ExecutorError> {
+        match (&left_val, &right_val) {
+            (SqlValue::Null, SqlValue::Null) => Ok(false),
+            (SqlValue::Null, _) | (_, SqlValue::Null) => Ok(true),
+            _ => Ok(!self.affinity_aware_equal(left_expr, left_val, right_expr, right_val)?),
+        }
+    }
+
     /// Apply SQLite type affinity rules for IN expression comparisons.
     ///
     /// IN expressions have different affinity rules than regular comparisons:

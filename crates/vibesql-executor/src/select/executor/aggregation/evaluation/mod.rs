@@ -500,10 +500,22 @@ impl SelectExecutor<'_> {
                                     grouping_context,
                                 )?;
 
-                                if crate::evaluator::ExpressionEvaluator::values_are_equal(
-                                    &operand_value,
-                                    &when_value,
-                                ) {
+                                // Affinity-aware equality (not the permissive
+                                // `values_are_equal` used for hash-join keys):
+                                // a bare literal operand carries no affinity,
+                                // so `CASE COUNT(*) WHEN '2' THEN ...` must not
+                                // match INTEGER 2 against TEXT '2'
+                                // (e_expr-23.1.6, same fix as the main
+                                // evaluators). Route through the shared
+                                // affinity-aware comparator on the combined
+                                // evaluator; the operand/condition expressions
+                                // are threaded through here.
+                                if evaluator.affinity_aware_equal(
+                                    operand_expr,
+                                    operand_value.clone(),
+                                    condition_expr,
+                                    when_value,
+                                )? {
                                     return self.evaluate_with_aggregates_and_grouping(
                                         &when_clause.result,
                                         group_rows,
@@ -633,8 +645,14 @@ impl SelectExecutor<'_> {
                     evaluator,
                     grouping_context,
                 )?;
+                // Affinity-aware, NULL-safe distinctness (not the permissive
+                // `values_are_equal` used for hash-join keys), matching the
+                // main evaluators' `IsDistinctFrom` fix: `COUNT(*) IS NOT '2'`
+                // must treat INTEGER 2 as distinct from TEXT '2'
+                // (e_expr-23.1.6). The operand expressions are threaded
+                // through here, so route through the shared comparator.
                 let is_distinct =
-                    !crate::evaluator::ExpressionEvaluator::values_are_equal(&left_val, &right_val);
+                    evaluator.affinity_aware_is_distinct(left, left_val, right, right_val)?;
                 Ok(vibesql_types::SqlValue::Boolean(if *negated {
                     !is_distinct
                 } else {

@@ -519,8 +519,12 @@ impl<'a> Lexer<'a> {
     }
 
     /// Tokenize a SQLite-style numbered placeholder (?1, ?2, etc.).
-    /// 1-indexed like `$N`; `?0` is rejected (SQLite: "variable number must
-    /// be between ?1 and ?NNN"). Only called when a digit follows the `?`.
+    /// 1-indexed; the number NNN must be between 1 and
+    /// `SQLITE_MAX_VARIABLE_NUMBER` (SQLite's documented default, 999).
+    /// A `?0`, an over-limit `?1000`, or a value too large to represent all
+    /// raise SQLite's `variable number must be between ?1 and ?999` diagnostic
+    /// (emitted verbatim, not wrapped as a `near "…": syntax error`). Only
+    /// called when a digit follows the `?`.
     fn tokenize_question_numbered_placeholder(&mut self) -> Result<Token, LexerError> {
         self.advance(); // consume '?'
 
@@ -538,22 +542,27 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let index: usize = num_str.parse().map_err(|_| LexerError {
-            message: format!("Invalid numbered placeholder: ?{}", num_str),
-            position: start_pos,
-            near_token: Some(format!("?{}", num_str)),
-        })?;
+        // SQLite's default SQLITE_MAX_VARIABLE_NUMBER. The valid range for a
+        // `?NNN` parameter is 1..=MAX; anything outside it — including a value
+        // too large to parse — is the same "variable number must be between"
+        // error. Parse into u64 so an out-of-range literal is rejected with the
+        // proper diagnostic instead of panicking or wrapping on `usize`.
+        const MAX_VARIABLE_NUMBER: u64 = 999;
+        let out_of_range = || {
+            LexerError::preformatted(
+                format!("variable number must be between ?1 and ?{}", MAX_VARIABLE_NUMBER),
+                start_pos,
+            )
+        };
 
-        // SQLite requires ?1 or higher (no ?0)
-        if index == 0 {
-            return Err(LexerError {
-                message: "variable number must be between ?1 and ?NNN".to_string(),
-                position: start_pos,
-                near_token: Some(format!("?{}", num_str)),
-            });
+        match num_str.parse::<u64>() {
+            Ok(index) if index >= 1 && index <= MAX_VARIABLE_NUMBER => {
+                Ok(Token::NumberedPlaceholder(index as usize))
+            }
+            // 0, over the limit, or too large to parse: all report the same
+            // SQLite-compatible range error.
+            _ => Err(out_of_range()),
         }
-
-        Ok(Token::NumberedPlaceholder(index))
     }
 
     /// Tokenize a named placeholder (:name, :user_id, etc.).

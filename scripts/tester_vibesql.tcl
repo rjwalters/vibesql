@@ -734,6 +734,12 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp {^(?:Parse error: )?(hex literal too big: .+)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Out-of-range numbered parameter (`?0`, `?1000`, or a value too large to
+    # represent): SQLite reports `variable number must be between ?1 and ?NNN`
+    # verbatim, not wrapped as a `near "…": syntax error` (e_expr-11.1.2..13).
+    if {[regexp {^(?:Parse error: )?(variable number must be between \?1 and \?[0-9]+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Special case for "incomplete input" - return as-is (SQLite format)
     if {[regexp -nocase {^Parse error: incomplete input$} $error_msg]} {
         return "incomplete input"
