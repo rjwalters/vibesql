@@ -924,12 +924,9 @@ impl CombinedExpressionEvaluator<'_> {
             right_val,
             collation.as_deref(),
         );
-        let (left_val, right_val) =
-            self.apply_affinity_for_comparison(left, left_val, right, right_val);
-
-        // Use values_are_distinct for SQLite-compatible comparison
-        // This handles Boolean/Integer comparison (SQLite treats 0 as FALSE, non-zero as TRUE)
-        let is_distinct = super::super::core::values_are_distinct(&left_val, &right_val);
+        // Affinity-aware, NULL-safe equality (not the permissive
+        // `values_are_distinct`/`values_are_equal` used for hash-join keys).
+        let is_distinct = self.affinity_aware_is_distinct(left, left_val, right, right_val)?;
 
         // IS NOT DISTINCT FROM inverts the result
         let result = if negated { !is_distinct } else { is_distinct };

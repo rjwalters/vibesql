@@ -547,7 +547,25 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::IsDistinctFrom { left, right, negated } => {
                 let left_val = self.eval_with_depth(left, row)?;
                 let right_val = self.eval_with_depth(right, row)?;
-                let is_distinct = super::core::values_are_distinct(&left_val, &right_val);
+                // NULL-safe equality via the strict (no cross-type guessing)
+                // comparator, matching the arena evaluator's own affinity-less
+                // `=` operator (`eval_binary_op` below) rather than the
+                // permissive `values_are_distinct`/`values_are_equal` used for
+                // hash-join keys. Same bug class as e_expr-23.1.6, fixed for
+                // the core/combined evaluators below.
+                let is_distinct = match (&left_val, &right_val) {
+                    (SqlValue::Null, SqlValue::Null) => false,
+                    (SqlValue::Null, _) | (_, SqlValue::Null) => true,
+                    _ => !matches!(
+                        super::core::eval_binary_op_static(
+                            &left_val,
+                            &vibesql_ast::BinaryOperator::Equal,
+                            &right_val,
+                            self.sql_mode.clone(),
+                        )?,
+                        SqlValue::Boolean(true)
+                    ),
+                };
                 Ok(SqlValue::Boolean(if *negated { !is_distinct } else { is_distinct }))
             }
 
@@ -1002,7 +1020,20 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             for when_clause in when_clauses.iter() {
                 for condition in when_clause.conditions.iter() {
                     let cond_val = self.eval_with_depth(condition, row)?;
-                    if super::core::values_are_equal(&op_val, &cond_val) {
+                    // Strict (no cross-type guessing) equality, matching the
+                    // arena evaluator's own affinity-less `=` operator rather
+                    // than the permissive `values_are_equal` used for
+                    // hash-join keys (e_expr-23.1.6: `CASE 55 WHEN '55' THEN
+                    // ...` must not match).
+                    if matches!(
+                        super::core::eval_binary_op_static(
+                            &op_val,
+                            &vibesql_ast::BinaryOperator::Equal,
+                            &cond_val,
+                            self.sql_mode.clone(),
+                        )?,
+                        SqlValue::Boolean(true)
+                    ) {
                         return self.eval_with_depth(&when_clause.result, row);
                     }
                 }

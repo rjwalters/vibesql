@@ -59,10 +59,16 @@ impl ExpressionEvaluator<'_> {
                     for condition_expr in &when_clause.conditions {
                         let when_value = self.eval(condition_expr, row)?;
 
-                        if super::super::core::ExpressionEvaluator::values_are_equal(
-                            &operand_value,
-                            &when_value,
-                        ) {
+                        // Affinity-aware equality (not the permissive
+                        // `values_are_equal` used for hash-join keys): a bare
+                        // literal operand carries no affinity, so `CASE 55
+                        // WHEN '55' THEN ...` must not match (e_expr-23.1.6).
+                        if self.affinity_aware_equal(
+                            operand_expr,
+                            operand_value.clone(),
+                            condition_expr,
+                            when_value,
+                        )? {
                             return self.eval(&when_clause.result, row);
                         }
                     }
@@ -153,8 +159,22 @@ impl ExpressionEvaluator<'_> {
             return Ok(val1);
         }
 
-        // Check equality and return accordingly
-        if super::super::core::ExpressionEvaluator::values_are_equal(&val1, &val2) {
+        // NULLIF never applies column affinity, unlike `=`/CASE/IS: SQLite
+        // implements it as a plain scalar function (func.c `nullifFunc`) that
+        // compares the two already-evaluated `sqlite3_value`s directly via
+        // `sqlite3MemCompare` with no affinity conversion, even when an
+        // argument is a real affinity-carrying column reference. So a TEXT
+        // column holding '1' is NOT NULLIF-equal to the integer literal 1
+        // even though `x = 1` is TRUE for that same column (verified against
+        // SQLite: `CREATE TABLE t(x TEXT); INSERT INTO t VALUES(1); SELECT
+        // NULLIF(x, 1) FROM t` -> '1', not NULL). Use the strict (no
+        // cross-type guessing) comparator directly — not
+        // `affinity_aware_equal` (which is for `=`/CASE/IS) and not the
+        // permissive `values_are_equal` used for hash-join keys.
+        if matches!(
+            self.eval_binary_op(&val1, &vibesql_ast::BinaryOperator::Equal, &val2)?,
+            vibesql_types::SqlValue::Boolean(true)
+        ) {
             Ok(vibesql_types::SqlValue::Null)
         } else {
             Ok(val1)
