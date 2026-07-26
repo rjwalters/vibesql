@@ -68,6 +68,23 @@ pub fn is_truthy(value: &SqlValue) -> bool {
     }
 }
 
+/// Determine whether a CHECK-constraint result value constitutes a violation.
+///
+/// SQLite evaluates each CHECK expression and casts the result to a NUMERIC
+/// value "in the same way as a CAST expression". A constraint violation occurs
+/// only when the result is zero (integer value 0 or real value 0.0). If the
+/// result is NULL, or any other non-zero value, it is *not* a violation
+/// (EVIDENCE-OF: R-55435-14303, R-34109-39108).
+///
+/// This means non-numeric text such as `'abc'` casts to 0 and therefore
+/// violates, while `'1abc'` casts to 1 and passes. Relying on `is_truthy`
+/// gives exactly SQLite's leading-numeric coercion; NULL is handled here as a
+/// pass because `is_truthy(Null)` is `false` (row-selection semantics) whereas
+/// a CHECK treats NULL as satisfied.
+pub fn check_constraint_violated(value: &SqlValue) -> bool {
+    !matches!(value, SqlValue::Null) && !is_truthy(value)
+}
+
 fn parse_leading_numeric(s: &str) -> f64 {
     let s = s.trim_start();
     if s.is_empty() {
@@ -238,6 +255,28 @@ impl LogicalOps {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_check_constraint_violated() {
+        use arcstr::ArcStr;
+        // NULL passes (not a violation)
+        assert!(!check_constraint_violated(&SqlValue::Null));
+        // Boolean false / zero numerics violate
+        assert!(check_constraint_violated(&SqlValue::Boolean(false)));
+        assert!(check_constraint_violated(&SqlValue::Integer(0)));
+        assert!(check_constraint_violated(&SqlValue::Real(0.0)));
+        // Non-zero numerics pass
+        assert!(!check_constraint_violated(&SqlValue::Boolean(true)));
+        assert!(!check_constraint_violated(&SqlValue::Integer(1)));
+        assert!(!check_constraint_violated(&SqlValue::Integer(-4)));
+        assert!(!check_constraint_violated(&SqlValue::Real(0.5)));
+        // Text casts to leading NUMERIC: 'abc1' → 0 (violation), '1abc' → 1 (pass)
+        assert!(check_constraint_violated(&SqlValue::Varchar(ArcStr::from("abc1"))));
+        assert!(check_constraint_violated(&SqlValue::Varchar(ArcStr::from(""))));
+        assert!(check_constraint_violated(&SqlValue::Varchar(ArcStr::from("0"))));
+        assert!(!check_constraint_violated(&SqlValue::Varchar(ArcStr::from("1abc"))));
+        assert!(!check_constraint_violated(&SqlValue::Varchar(ArcStr::from("42"))));
+    }
 
     #[test]
     fn test_and_operator() {

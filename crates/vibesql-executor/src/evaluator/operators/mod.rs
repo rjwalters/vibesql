@@ -20,7 +20,7 @@ use string::StringOps;
 use vector::VectorOps;
 
 // Re-export truthiness helpers for use in CASE evaluation and row selection
-pub use logical::{is_truthy, is_truthy_string};
+pub use logical::{check_constraint_violated, is_truthy, is_truthy_string};
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;
