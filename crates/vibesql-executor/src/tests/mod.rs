@@ -94,6 +94,7 @@ mod index_hint_validation;
 mod index_optimization;
 mod index_scan_tests;
 mod insert_returning;
+mod issue_6191_window_filter_tests;
 mod issue_938_integer_type_preservation;
 mod join_aggregation;
 mod lazy_evaluation_tests;
