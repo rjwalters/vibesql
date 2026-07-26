@@ -3,7 +3,7 @@
 use super::super::super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
-    evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
+    evaluator::CombinedExpressionEvaluator,
 };
 
 /// Evaluate CASE expression with potential aggregates in operand/conditions/results
@@ -42,8 +42,20 @@ pub(super) fn evaluate(
                         evaluator,
                     )?;
 
-                    // Use IS NOT DISTINCT FROM semantics (NULL = NULL is TRUE)
-                    if ExpressionEvaluator::values_are_equal(&operand_value, &when_value) {
+                    // Affinity-aware equality (not the permissive
+                    // `values_are_equal` used for hash-join keys): a bare
+                    // literal operand carries no affinity, so `CASE COUNT(*)
+                    // WHEN '2' THEN ...` must not match an INTEGER 2 against
+                    // TEXT '2' (e_expr-23.1.6, same fix as the main
+                    // evaluators). The operand/condition expressions are
+                    // threaded through here, so route through the shared
+                    // affinity-aware comparator on the combined evaluator.
+                    if evaluator.affinity_aware_equal(
+                        operand_expr,
+                        operand_value.clone(),
+                        condition_expr,
+                        when_value,
+                    )? {
                         // Evaluate result (may contain aggregates)
                         return executor.evaluate_with_aggregates(
                             &when_clause.result,

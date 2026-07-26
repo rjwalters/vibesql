@@ -232,7 +232,26 @@ pub fn optimize_expression(
             if let (Expression::Literal(left_val), Expression::Literal(right_val)) =
                 (&left_opt, &right_opt)
             {
-                let is_distinct = ExpressionEvaluator::values_are_distinct(left_val, right_val);
+                // NULL-safe distinctness via the strict (no cross-type
+                // guessing) `=` comparator, not the permissive
+                // `values_are_distinct` used for hash-join keys. Folding two
+                // bare literals carries no affinity, so `55 IS NOT '55'` must
+                // fold to TRUE (distinct storage classes, e_expr-23.1.6),
+                // matching the runtime `IsDistinctFrom` evaluators.
+                let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
+                let is_distinct = match (left_val, right_val) {
+                    (SqlValue::Null, SqlValue::Null) => false,
+                    (SqlValue::Null, _) | (_, SqlValue::Null) => true,
+                    _ => !matches!(
+                        ExpressionEvaluator::eval_binary_op_static(
+                            left_val,
+                            &BinaryOperator::Equal,
+                            right_val,
+                            sql_mode,
+                        )?,
+                        SqlValue::Boolean(true)
+                    ),
+                };
                 let result = if *negated { !is_distinct } else { is_distinct };
                 Ok(Expression::Literal(SqlValue::Boolean(result)))
             } else {
