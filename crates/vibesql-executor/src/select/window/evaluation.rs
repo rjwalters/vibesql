@@ -86,6 +86,11 @@ pub(super) struct WindowEvaluationResult {
     /// Row indices in partition order (if PARTITION BY is present)
     /// This maps: partition_order_index -> original_row_index
     pub partition_order: Option<Vec<usize>>,
+    /// Whether this window has a non-empty PARTITION BY clause. Used by the
+    /// multi-window driver to decide which window's sort order determines the
+    /// final (no statement-level ORDER BY) output order: a partitioned window
+    /// takes precedence over a plain ORDER-BY-only window (window1.test 52.2-52.4).
+    pub has_partition_by: bool,
 }
 
 /// Evaluate a single window function over all rows
@@ -329,7 +334,7 @@ pub(super) fn evaluate_single_window_function(
     results_with_indices.sort_by_key(|(idx, _)| *idx);
     let values = results_with_indices.into_iter().map(|(_, result)| result).collect();
 
-    Ok(WindowEvaluationResult { values, partition_order })
+    Ok(WindowEvaluationResult { values, partition_order, has_partition_by })
 }
 
 /// Sequential evaluation of window function partitions

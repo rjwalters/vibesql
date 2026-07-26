@@ -83,27 +83,47 @@ pub(super) fn evaluate_window_functions(
     // Track the column index where window function results start
     let base_column_count = if rows.is_empty() { 0 } else { rows[0].values.len() };
 
-    // Track row reordering from the last window function with PARTITION BY/ORDER BY.
+    // Track row reordering that determines the final (no statement-level ORDER BY)
+    // output order.
     //
     // SQLite rewrites multi-window queries into nested sorting passes; when there
     // is no statement-level ORDER BY, rows are left in the order produced by the
-    // *last* window's sort pass. We mirror that by overwriting the captured order
-    // for each window function that has one (issue #5291, window9.test 1.4).
+    // final relevant sort pass. Empirically that pass is the last *partitioned*
+    // window when one exists, and otherwise the last plain ORDER-BY-only window:
+    //
+    //   - window9.test 1.4: `dense_rank() OVER (ORDER BY name)` followed by
+    //     `dense_rank() OVER (PARTITION BY name ORDER BY color)` — output is in the
+    //     partitioned window's order (issue #5291).
+    //   - window1.test 52.2-52.4: several windows over `PARTITION BY <const> ORDER BY a`
+    //     followed by a trailing `count(a) OVER (ORDER BY b)` — output is in the
+    //     partitioned window's `a` order, NOT the trailing ORDER-BY-b window's order.
+    //
+    // So a partitioned window's order takes precedence: once we have captured a
+    // partitioned window's order, a later ORDER-BY-only window must not override it.
+    // Among partitioned windows the last one wins; when no window is partitioned we
+    // fall back to the last ORDER-BY-only window (previous behavior).
     //
     // Known limitation: each pass's order is computed from the *original* input
     // order, whereas SQLite's chained passes stable-sort over the previous pass's
-    // output. These differ only when the last window's (PARTITION BY, ORDER BY)
+    // output. These differ only when the winning window's (PARTITION BY, ORDER BY)
     // keys have ties. If a future test demands exact tie behavior, reorder `rows`
     // (plus previously computed window columns) sequentially after each pass.
     let mut row_reordering: Option<Vec<usize>> = None;
+    let mut reordering_is_partitioned = false;
 
     for (idx, win_func) in window_functions.iter().enumerate() {
         let result = evaluation::evaluate_single_window_function(&rows, win_func, evaluator)?;
+        let has_partition_by = result.has_partition_by;
         window_results.push(result.values);
 
-        // Capture row reordering from the last window function that has one
+        // Capture row reordering, preferring partitioned windows over ORDER-BY-only ones.
         if result.partition_order.is_some() {
-            row_reordering = result.partition_order;
+            if has_partition_by {
+                row_reordering = result.partition_order;
+                reordering_is_partitioned = true;
+            } else if !reordering_is_partitioned {
+                row_reordering = result.partition_order;
+            }
         }
 
         // Build mapping: WindowFunctionKey -> column index
