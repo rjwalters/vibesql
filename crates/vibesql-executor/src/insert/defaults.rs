@@ -550,6 +550,44 @@ mod tests {
     }
 }
 
+/// Substitute the column DEFAULT value for a NOT NULL violation under the
+/// statement-level `REPLACE` conflict-resolution algorithm (`INSERT OR
+/// REPLACE` / `REPLACE INTO`).
+///
+/// Per <https://www.sqlite.org/lang_conflict.html>: "the REPLACE conflict
+/// resolution algorithm replaces the NULL value with the default value for
+/// that column, or if the column has no default value, then the ABORT
+/// algorithm is used." This is a distinct rule from REPLACE's usual
+/// duplicate-row-deletion behavior for PRIMARY KEY/UNIQUE — it fires even
+/// though a NOT NULL violation has no conflicting row to delete.
+///
+/// Must run after ordinary default-value application (so already-defaulted
+/// columns are a no-op here) but before generated-column evaluation, since a
+/// generated column may itself be declared NOT NULL by deriving from a
+/// stored column this substitution just fixed up (gencol1-7.11/7.20/7.30).
+/// A column with no default is left NULL, so the normal NOT NULL check
+/// downstream still raises the ABORT-equivalent error (gencol1's own
+/// fallback semantics).
+pub fn apply_replace_not_null_defaults(
+    schema: &vibesql_catalog::TableSchema,
+    row_values: &mut [vibesql_types::SqlValue],
+) -> Result<(), ExecutorError> {
+    for (col_idx, col) in schema.columns.iter().enumerate() {
+        if col.nullable || col.generated_expr.is_some() {
+            continue;
+        }
+        if row_values[col_idx] != vibesql_types::SqlValue::Null {
+            continue;
+        }
+        if let Some(default_expr) = &col.default_value {
+            let default_value = evaluate_default_expression(default_expr)?;
+            let coerced_value = super::validation::coerce_value(default_value, &col.data_type)?;
+            row_values[col_idx] = coerced_value;
+        }
+    }
+    Ok(())
+}
+
 /// Apply generated/computed column values
 /// Generated columns are defined with AS(expression) syntax and computed on INSERT/UPDATE
 pub fn apply_generated_columns(
@@ -560,13 +598,32 @@ pub fn apply_generated_columns(
     // Create a temporary row to evaluate generated expressions.
     // GeneratedColumn context: non-deterministic date/time uses (e.g.
     // `z AS (date())`) are rejected at evaluation time (SQLite, date2-140).
-    let temp_row = vibesql_storage::Row::new(row_values.to_vec());
+    let mut temp_row = vibesql_storage::Row::new(row_values.to_vec());
     let evaluator = crate::ExpressionEvaluator::new(schema)
         .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
 
-    for (col_idx, col) in schema.columns.iter().enumerate() {
-        // If column has a generated expression, compute and apply it
-        if let Some(generated_expr) = &col.generated_expr {
+    // Generated columns may reference other generated columns (e.g. a VIRTUAL
+    // column computed from a STORED column, strict1-7.1: `a INT AS (b*2)
+    // VIRTUAL, b INT AS (c*2) STORED`). A single pass in column-definition
+    // order only sees up-to-date values for *earlier*-indexed generated
+    // columns, so a forward reference (like `a` -> `b` above) would evaluate
+    // against `b`'s stale placeholder value. Iterate to a fixed point,
+    // re-evaluating and folding each freshly computed value back into
+    // `temp_row` so later (and earlier, on subsequent passes) columns see it.
+    // Bounded by the number of generated columns, which is also the longest
+    // possible acyclic dependency chain; SQLite rejects circular generated
+    // column definitions at CREATE TABLE time, so this always converges.
+    let generated_indices: Vec<usize> = schema
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, col)| col.generated_expr.as_ref().map(|_| idx))
+        .collect();
+
+    for _pass in 0..generated_indices.len().max(1) {
+        for &col_idx in &generated_indices {
+            let col = &schema.columns[col_idx];
+            let generated_expr = col.generated_expr.as_ref().expect("filtered above");
             let generated_value = evaluator.eval(generated_expr, &temp_row)?;
             // STRICT tables (issue #6173) apply SQLite's rigid strict-datatype
             // rules to the *computed* value of a generated column, exactly as
@@ -578,7 +635,8 @@ pub fn apply_generated_columns(
             } else {
                 super::validation::coerce_value(generated_value, &col.data_type)?
             };
-            row_values[col_idx] = coerced_value;
+            row_values[col_idx] = coerced_value.clone();
+            temp_row.values[col_idx] = coerced_value;
         }
     }
     Ok(())

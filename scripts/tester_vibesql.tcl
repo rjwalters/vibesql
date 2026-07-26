@@ -367,23 +367,49 @@ proc translate_error_to_sqlite {vibesql_error} {
     # - "child process exited abnormally"
     # We need to extract just the actual error message
 
-    # First, try to extract just the error line
+    # First, try to extract just the error line. A VibeSQL error message can
+    # itself span multiple lines (e.g. a CHECK constraint failure echoes the
+    # constraint's verbatim, possibly multi-line, source text: "CHECK
+    # constraint failed: x+y==11\n    OR x*y==12\n..." — check-4.6/4.9). Once
+    # the initial "Error executing statement N:" / "Error:" line is found,
+    # keep folding in subsequent RAW lines that are still part of the same
+    # message: stop at the next recognized error line, the CLI's
+    # "=== Script Execution Summary ===" trailer, EOF, or a line carrying the
+    # raw-mode row-framing control bytes (0x1e/0x1f) — which can only be
+    # genuine row output from a later statement, never engine error text.
     set error_msg ""
-    foreach line [split $vibesql_error "\n"] {
-        set line [string trim $line]
+    set lines [split $vibesql_error "\n"]
+    set nlines [llength $lines]
+    for {set li 0} {$li < $nlines} {incr li} {
+        set raw_line [lindex $lines $li]
+        set line [string trim $raw_line]
+        set msg ""
+        set matched 0
         # Look for "Error executing statement N: <message>"
         if {[regexp {^Error executing statement \d+: (.+)$} $line -> msg]} {
-            set error_msg $msg
-            break
+            set matched 1
+        } elseif {[regexp {^Error: (.+)$} $line -> msg]} {
+            # Also handle plain "Error: <message>"
+            set matched 1
+        } elseif {[string match "Error *" $line]} {
+            # Handle error lines that start with "Error" but have different format
+            set msg $line
+            set matched 1
         }
-        # Also handle plain "Error: <message>"
-        if {[regexp {^Error: (.+)$} $line -> msg]} {
+        if {$matched} {
             set error_msg $msg
-            break
-        }
-        # Handle error lines that start with "Error" but have different format
-        if {[string match "Error *" $line]} {
-            set error_msg $line
+            for {set lj [expr {$li + 1}]} {$lj < $nlines} {incr lj} {
+                set cont_raw [lindex $lines $lj]
+                set cont [string trim $cont_raw]
+                if {$cont eq ""} { break }
+                if {[string match "Error*" $cont]} { break }
+                if {[string match "=== Script Execution Summary ===*" $cont]} { break }
+                if {[string first "\x1e" $cont_raw] >= 0
+                        || [string first "\x1f" $cont_raw] >= 0} {
+                    break
+                }
+                append error_msg "\n" $cont
+            }
             break
         }
     }

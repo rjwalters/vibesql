@@ -878,6 +878,16 @@ fn execute_insert_internal(
             &assigned_columns,
         )?;
 
+        // INSERT OR REPLACE / REPLACE INTO: a NOT NULL column still holding
+        // NULL after ordinary default-value application (i.e. NULL was
+        // explicitly supplied, or the column was omitted and has no
+        // default-triggered value yet) gets the column's DEFAULT value
+        // substituted, per SQLite's REPLACE conflict-resolution rule for
+        // NOT NULL (gencol1-7.1x/7.2x/7.3x/7.4x/7.5x).
+        if matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace)) {
+            super::defaults::apply_replace_not_null_defaults(&schema, &mut full_row_values)?;
+        }
+
         // Apply generated/computed column values (AS(expression) syntax)
         super::defaults::apply_generated_columns(&schema, &mut full_row_values, db)?;
 
