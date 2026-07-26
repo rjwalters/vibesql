@@ -85,6 +85,18 @@ impl DropTableExecutor {
         // Check DROP privilege on the table
         PrivilegeChecker::check_drop(database, &stmt.table_name)?;
 
+        // Emulate SQLite's implicit `DELETE FROM <table>` before the drop when
+        // foreign keys are enabled (EVIDENCE-OF R-14208-23986 / R-11078-03945).
+        // This enforces referential actions (CASCADE / SET NULL / SET DEFAULT)
+        // on child tables and raises an immediate FOREIGN KEY constraint
+        // violation — leaving the table in place (R-32768-47925) — when a
+        // referencing row would be orphaned. Deferred violations are queued for
+        // the COMMIT-time re-check (R-05903-08460). Runs BEFORE any catalog
+        // mutation so an immediate failure aborts the whole DROP with the table
+        // still present. `foreign key mismatch` errors are ignored here, exactly
+        // as SQLite ignores them for the implicit DELETE (R-57242-37005).
+        crate::delete::integrity::check_drop_table_references(database, &stmt.table_name)?;
+
         // Drop all indexes associated with this table first
         let dropped_indexes = database.catalog.drop_table_indexes(&stmt.table_name);
         let index_count = dropped_indexes.len();

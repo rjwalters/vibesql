@@ -26,6 +26,86 @@ pub fn check_no_child_references(
     parent_table_name: &str,
     parent_row: &vibesql_storage::Row,
 ) -> Result<(), ExecutorError> {
+    check_child_references_impl(db, parent_table_name, parent_row, false)
+}
+
+/// Emulate SQLite's implicit `DELETE FROM <table>` that a `DROP TABLE`
+/// performs when foreign keys are enabled (`sqlite3FkDropTable`).
+///
+/// EVIDENCE-OF R-14208-23986 / R-11078-03945: the implicit DELETE removes
+/// all rows and *may invoke foreign key actions or constraint violations*,
+/// but does **not** fire SQL triggers on the dropped table. We therefore run
+/// the child-reference enforcement (RESTRICT / NO ACTION raise, CASCADE /
+/// SET NULL / SET DEFAULT actions) for every live parent row, but never fire
+/// the parent's own DELETE triggers (this path bypasses the DELETE executor).
+///
+/// Foreign keys where the child table *is* the table being dropped are
+/// skipped: a self-referential FK is always satisfied once the entire table
+/// (all parent and child rows) disappears together, so it can never block the
+/// drop (mirrors SQLite's statement-scoped counter reaching zero after the
+/// whole-table delete). Only FKs from *other* tables can be violated.
+///
+/// EVIDENCE-OF R-57242-37005: any "foreign key mismatch" that would be
+/// reported by an equivalent explicit DELETE is ignored here — an FK whose
+/// parent-side key columns do not resolve to a valid parent key is skipped
+/// rather than raised (handled by `check_child_references_impl` skipping
+/// unresolved parent indices).
+pub fn check_drop_table_references(
+    db: &mut vibesql_storage::Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
+    // Skip FK enforcement when PRAGMA foreign_keys is OFF (default). The
+    // special DROP-TABLE behavior only applies when foreign keys are enabled
+    // (EVIDENCE-OF R-54142-41346).
+    if !db.foreign_keys_enabled() {
+        return Ok(());
+    }
+
+    // Fast exit: only tables *other* than the one being dropped can hold an FK
+    // that this drop could violate. A self-referential FK never blocks a drop.
+    let has_incoming_fks = db.catalog.list_tables().iter().any(|t| {
+        !t.eq_ignore_ascii_case(table_name)
+            && db
+                .catalog
+                .get_table(t)
+                .map(|schema| {
+                    schema
+                        .foreign_keys
+                        .iter()
+                        .any(|fk| fk.parent_table.eq_ignore_ascii_case(table_name))
+                })
+                .unwrap_or(false)
+    });
+    if !has_incoming_fks {
+        return Ok(());
+    }
+
+    // Snapshot every live parent row before mutating any child table, so the
+    // set of rows the implicit DELETE removes is fixed up front (a CASCADE
+    // into another table must not perturb this iteration).
+    let snapshot = crate::mvcc::read_snapshot(db);
+    let parent_rows: Vec<vibesql_storage::Row> = match db.get_table(table_name) {
+        Some(t) => t.scan_visible(&snapshot).map(|(_, r)| r.clone()).collect(),
+        None => return Ok(()),
+    };
+
+    for parent_row in &parent_rows {
+        check_child_references_impl(db, table_name, parent_row, true)?;
+    }
+
+    Ok(())
+}
+
+/// Shared implementation behind [`check_no_child_references`] and
+/// [`check_drop_table_references`]. When `exclude_self_table` is true, foreign
+/// keys whose child table is `parent_table_name` are skipped (the DROP TABLE
+/// self-reference case above); otherwise all child tables are considered.
+fn check_child_references_impl(
+    db: &mut vibesql_storage::Database,
+    parent_table_name: &str,
+    parent_row: &vibesql_storage::Row,
+    exclude_self_table: bool,
+) -> Result<(), ExecutorError> {
     // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
     if !db.foreign_keys_enabled() {
         return Ok(());
@@ -86,6 +166,13 @@ pub fn check_no_child_references(
     )> = Vec::new();
 
     for table_name in db.catalog.list_tables() {
+        // DROP TABLE's implicit DELETE skips self-referential FKs: once the
+        // whole table is removed both sides of the reference disappear, so it
+        // can never be violated (see `check_drop_table_references`).
+        if exclude_self_table && table_name.eq_ignore_ascii_case(parent_table_name) {
+            continue;
+        }
+
         let child_schema = db.catalog.get_table(&table_name).unwrap();
 
         if child_schema.foreign_keys.is_empty() {

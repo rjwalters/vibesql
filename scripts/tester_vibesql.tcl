@@ -8254,6 +8254,17 @@ proc drop_all_tables {} {
     if {$::db_file eq ""} {
         return
     }
+    # Mirror the canonical SQLite tester.tcl `drop_all_tables`, which disables
+    # foreign-key enforcement while dropping (and restores it afterward) so
+    # tables drop regardless of their referential-dependency order. A DROP
+    # TABLE now performs SQLite's implicit FK-enforcing DELETE FROM when
+    # `PRAGMA foreign_keys` is ON, so without this a table still referenced by
+    # another would refuse to drop and leak into the next test section
+    # (e.g. fkey2-1.2.0 "table t1 already exists"). `::pragma_foreign_keys` is
+    # the shim's tracked session state that seeds every batch's PRAGMA
+    # preamble, so toggling it here is what actually reaches the engine.
+    set saved_fk $::pragma_foreign_keys
+    set ::pragma_foreign_keys 0
     # Get list of tables
     set tables [execsql {SELECT name FROM sqlite_master WHERE type='table'}]
     # In case sqlite_master doesn't work, try an alternative approach
@@ -8267,6 +8278,7 @@ proc drop_all_tables {} {
             catch {execsql "DROP TABLE IF EXISTS $table"}
         }
     }
+    set ::pragma_foreign_keys $saved_fk
     return
 }
 
