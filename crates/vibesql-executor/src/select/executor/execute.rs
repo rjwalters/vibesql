@@ -116,14 +116,12 @@ impl SelectExecutor<'_> {
         // context. SQLite has two distinct behaviors depending on where the
         // subquery appears:
         //
-        // * SELECT-list (#5104): `SELECT (SELECT avg(a)) FROM t2` is allowed —
-        //   the outer query implicitly collapses to a single-row aggregate. We
-        //   pass `SubqueryContext::SelectList` so the validator skips the
-        //   "misuse of aggregate" rejection in this position.
-        // * WHERE / HAVING / ORDER BY (and arguments to outer functions): an
-        //   outer-correlated aggregate inside a bare scalar subquery is still
-        //   a misuse and must be rejected. We pass `WhereOrEqual` for ORDER BY
-        //   to preserve SQLite's rejection there.
+        // * SELECT-list (#5104): `SELECT (SELECT avg(a)) FROM t2` is allowed — the outer query
+        //   implicitly collapses to a single-row aggregate. We pass `SubqueryContext::SelectList`
+        //   so the validator skips the "misuse of aggregate" rejection in this position.
+        // * WHERE / HAVING / ORDER BY (and arguments to outer functions): an outer-correlated
+        //   aggregate inside a bare scalar subquery is still a misuse and must be rejected. We pass
+        //   `WhereOrEqual` for ORDER BY to preserve SQLite's rejection there.
         //
         // Row-value misuse (`(SELECT (a, b))`) is detected in both contexts.
         for item in &stmt.select_list {
@@ -1091,6 +1089,7 @@ impl SelectExecutor<'_> {
                     &stmt.select_list,
                     &all_aliases,
                     &collations,
+                    cte_results,
                 )?;
             }
 

@@ -38,18 +38,18 @@ pub(super) fn evaluate_scalar(
     };
 
     if let Some(row) = representative_row {
-        // Issue #5104: when the subquery is a bare scalar subquery whose body
-        // has an aggregate referencing an outer column, override `outer_rows`
-        // with the current group's rows so the inner aggregate can iterate
-        // them (via the #4930 outer-correlated-aggregate path). For other
-        // subqueries the parent evaluator's outer_rows are preserved.
-        if scalar_subquery_needs_outer_rows(expr) {
+        // Issue #5104 / #5135: when the scalar subquery (bare or FROM-bearing)
+        // has a body whose aggregate references an outer column, override
+        // `outer_rows` with the current group's rows so the inner aggregate
+        // can iterate them (via the #4930 outer-correlated-aggregate path).
+        // For other subqueries the parent evaluator's outer_rows are preserved.
+        if scalar_subquery_needs_outer_rows(executor, expr) {
             let mut overridden = evaluator.clone_for_new_expression();
             overridden.set_outer_rows(group_rows);
             return overridden.eval(expr, row);
         }
         evaluator.eval(expr, row)
-    } else if scalar_subquery_needs_outer_rows(expr) {
+    } else if scalar_subquery_needs_outer_rows(executor, expr) {
         // Issue #5232 (window1.test 61.4.2): empty group, but the subquery
         // triggers implicit-outer-aggregate-collapse — the aggregation still
         // produces exactly one row, with the inner aggregate computed over
@@ -70,41 +70,45 @@ pub(super) fn evaluate_scalar(
 
 /// Check whether `expr` is a scalar subquery (or a compound expression
 /// containing one) that needs `outer_rows` set to the current group's rows
-/// for SQLite's implicit-outer-aggregate-collapse semantics (#5104).
+/// for SQLite's implicit-outer-aggregate-collapse semantics (#5104 / #5135).
 ///
-/// The pattern: a bare (FROM-less) scalar subquery whose body contains an
-/// aggregate function whose argument / FILTER / ORDER BY references an outer
-/// column. Inside a bare subquery, *any* column reference is necessarily an
-/// outer reference, so we just check for any column ref in the aggregate.
-fn scalar_subquery_needs_outer_rows(expr: &vibesql_ast::Expression) -> bool {
+/// Delegates the actual collapse test to
+/// `SelectExecutor::subquery_triggers_outer_aggregate_collapse`, the same
+/// scope-aware analysis used to decide whether the *outer* query collapses
+/// to a single-row aggregate in the first place (detection.rs). This covers
+/// both a bare (FROM-less) subquery, where any column reference is
+/// necessarily outer, and a FROM-bearing subquery whose aggregate argument
+/// resolves to a column outside its own FROM scope (filter1.test 6.3:
+/// `SELECT (SELECT COUNT(a) FROM t2) FROM t1` — `a` is not a column of `t2`).
+fn scalar_subquery_needs_outer_rows(
+    executor: &SelectExecutor,
+    expr: &vibesql_ast::Expression,
+) -> bool {
     use vibesql_ast::Expression;
 
     match expr {
         Expression::ScalarSubquery(stmt) => {
-            if stmt.from.is_some() {
-                return false;
-            }
-            stmt.select_list.iter().any(|item| match item {
-                vibesql_ast::SelectItem::Expression { expr: inner, .. } => {
-                    bare_subquery_inner_has_outer_aggregate(inner)
-                }
-                _ => false,
-            })
+            executor.subquery_triggers_outer_aggregate_collapse(stmt)
         }
         Expression::BinaryOp { left, right, .. } => {
-            scalar_subquery_needs_outer_rows(left) || scalar_subquery_needs_outer_rows(right)
+            scalar_subquery_needs_outer_rows(executor, left)
+                || scalar_subquery_needs_outer_rows(executor, right)
         }
-        Expression::UnaryOp { expr, .. } => scalar_subquery_needs_outer_rows(expr),
-        Expression::Cast { expr, .. } => scalar_subquery_needs_outer_rows(expr),
-        Expression::IsNull { expr, .. } => scalar_subquery_needs_outer_rows(expr),
-        Expression::Function { args, .. } => args.iter().any(scalar_subquery_needs_outer_rows),
+        Expression::UnaryOp { expr, .. } => scalar_subquery_needs_outer_rows(executor, expr),
+        Expression::Cast { expr, .. } => scalar_subquery_needs_outer_rows(executor, expr),
+        Expression::IsNull { expr, .. } => scalar_subquery_needs_outer_rows(executor, expr),
+        Expression::Function { args, .. } => {
+            args.iter().any(|a| scalar_subquery_needs_outer_rows(executor, a))
+        }
         Expression::Case { operand, when_clauses, else_result } => {
-            operand.as_ref().is_some_and(|e| scalar_subquery_needs_outer_rows(e))
+            operand.as_ref().is_some_and(|e| scalar_subquery_needs_outer_rows(executor, e))
                 || when_clauses.iter().any(|w| {
-                    w.conditions.iter().any(scalar_subquery_needs_outer_rows)
-                        || scalar_subquery_needs_outer_rows(&w.result)
+                    w.conditions.iter().any(|c| scalar_subquery_needs_outer_rows(executor, c))
+                        || scalar_subquery_needs_outer_rows(executor, &w.result)
                 })
-                || else_result.as_ref().is_some_and(|e| scalar_subquery_needs_outer_rows(e))
+                || else_result
+                    .as_ref()
+                    .is_some_and(|e| scalar_subquery_needs_outer_rows(executor, e))
         }
         _ => false,
     }

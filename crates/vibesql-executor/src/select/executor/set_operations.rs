@@ -298,6 +298,7 @@ impl SelectExecutor<'_> {
         all_union_aliases: &[Vec<Option<String>>], /* Aliases from all UNION branches (wildcards
                                                     * expanded) */
         column_collations: &[Option<String>], // Inherited collations from first SELECT columns
+        cte_results: &HashMap<String, CteResult>, // For name-resolution of ORDER BY subqueries
     ) -> Result<Vec<vibesql_storage::Row>, ExecutorError> {
         // Build column name map from the first branch's aliases (with wildcards already expanded)
         // The all_union_aliases already contains expanded column names from collect_union_aliases
@@ -401,7 +402,19 @@ impl SelectExecutor<'_> {
                     .or_else(|| inherited_collations.get(col_idx).cloned().flatten());
                 sort_columns.push((col_idx, is_desc, nulls_first, collation));
             } else {
-                // ORDER BY term doesn't match any column in the result set
+                // ORDER BY term doesn't match any column in the result set.
+                //
+                // Before reporting that, mirror SQLite's compile-order: name
+                // resolution of any subquery/window-ORDER-BY embedded in this
+                // term happens *before* the "does not match any column" check
+                // is reached, so a reference to a nonexistent table surfaces
+                // as "no such table: ..." instead of being masked by the
+                // column-match error (window1.test 67.1 vs 67.2).
+                if let Some(missing_table) =
+                    Self::find_missing_table_in_expr(&item.expr, self.database, cte_results)
+                {
+                    return Err(ExecutorError::TableNotFound(missing_table));
+                }
                 return Err(ExecutorError::OrderByTermNotInResultSet {
                     term_position: term_index + 1,
                 });
@@ -466,6 +479,222 @@ impl SelectExecutor<'_> {
         });
 
         Ok(rows)
+    }
+
+    /// Look for a table reference that does not exist anywhere within a
+    /// compound-query ORDER BY expression that failed to match a result
+    /// column, including inside scalar/EXISTS/IN subqueries and named-window
+    /// PARTITION BY / ORDER BY clauses.
+    ///
+    /// SQLite resolves names within an expression (including nested
+    /// subqueries) while compiling it, independent of whether the expression
+    /// ultimately matches an output column. That means a missing table
+    /// inside such a subquery is reported *before* the "does not match any
+    /// column in the result set" error (window1.test 67.1). This is a
+    /// best-effort, read-only static check — it does not attempt full name
+    /// resolution (e.g. column existence), only table/CTE/view existence,
+    /// which is sufficient to reproduce SQLite's error-precedence for this
+    /// class of query without risking a false positive on a term that
+    /// legitimately fails only the column-match check (window1.test 67.2).
+    fn find_missing_table_in_expr(
+        expr: &vibesql_ast::Expression,
+        database: &vibesql_storage::Database,
+        cte_results: &HashMap<String, CteResult>,
+    ) -> Option<String> {
+        use vibesql_ast::Expression;
+        match expr {
+            Expression::ScalarSubquery(select) | Expression::Exists { subquery: select, .. } => {
+                Self::find_missing_table_in_select(select, database, cte_results)
+            }
+            Expression::In { expr: inner, subquery, .. } => {
+                Self::find_missing_table_in_expr(inner, database, cte_results)
+                    .or_else(|| Self::find_missing_table_in_select(subquery, database, cte_results))
+            }
+            Expression::WindowFunction { function, over } => {
+                let args: &[Expression] = match function {
+                    vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+                        if let Some(missing) = filter.as_deref().and_then(|f| {
+                            Self::find_missing_table_in_expr(f, database, cte_results)
+                        }) {
+                            return Some(missing);
+                        }
+                        args
+                    }
+                    vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                    | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args,
+                };
+                for arg in args {
+                    if let Some(missing) =
+                        Self::find_missing_table_in_expr(arg, database, cte_results)
+                    {
+                        return Some(missing);
+                    }
+                }
+                if let Some(partition_by) = &over.partition_by {
+                    for e in partition_by {
+                        if let Some(missing) =
+                            Self::find_missing_table_in_expr(e, database, cte_results)
+                        {
+                            return Some(missing);
+                        }
+                    }
+                }
+                if let Some(order_by) = &over.order_by {
+                    for item in order_by {
+                        if let Some(missing) =
+                            Self::find_missing_table_in_expr(&item.expr, database, cte_results)
+                        {
+                            return Some(missing);
+                        }
+                    }
+                }
+                None
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                Self::find_missing_table_in_expr(left, database, cte_results)
+                    .or_else(|| Self::find_missing_table_in_expr(right, database, cte_results))
+            }
+            Expression::UnaryOp { expr: inner, .. } => {
+                Self::find_missing_table_in_expr(inner, database, cte_results)
+            }
+            Expression::Function { args, .. } => {
+                args.iter().find_map(|a| Self::find_missing_table_in_expr(a, database, cte_results))
+            }
+            Expression::AggregateFunction { args, filter, .. } => {
+                if let Some(missing) = filter
+                    .as_deref()
+                    .and_then(|f| Self::find_missing_table_in_expr(f, database, cte_results))
+                {
+                    return Some(missing);
+                }
+                args.iter().find_map(|a| Self::find_missing_table_in_expr(a, database, cte_results))
+            }
+            Expression::Case { operand, when_clauses, else_result } => {
+                if let Some(missing) = operand
+                    .as_deref()
+                    .and_then(|o| Self::find_missing_table_in_expr(o, database, cte_results))
+                {
+                    return Some(missing);
+                }
+                for clause in when_clauses {
+                    for cond in &clause.conditions {
+                        if let Some(missing) =
+                            Self::find_missing_table_in_expr(cond, database, cte_results)
+                        {
+                            return Some(missing);
+                        }
+                    }
+                    if let Some(missing) =
+                        Self::find_missing_table_in_expr(&clause.result, database, cte_results)
+                    {
+                        return Some(missing);
+                    }
+                }
+                else_result
+                    .as_deref()
+                    .and_then(|e| Self::find_missing_table_in_expr(e, database, cte_results))
+            }
+            Expression::Collate { expr: inner, .. } => {
+                Self::find_missing_table_in_expr(inner, database, cte_results)
+            }
+            _ => None,
+        }
+    }
+
+    /// Check the FROM clause and any nested subqueries (WHERE, select list,
+    /// named WINDOW definitions) of a SELECT statement for a table reference
+    /// that does not exist. Returns the first missing table name found.
+    fn find_missing_table_in_select(
+        select: &vibesql_ast::SelectStmt,
+        database: &vibesql_storage::Database,
+        cte_results: &HashMap<String, CteResult>,
+    ) -> Option<String> {
+        if let Some(from) = &select.from {
+            if let Some(missing) = Self::find_missing_table_in_from(from, database, cte_results) {
+                return Some(missing);
+            }
+        }
+        for item in &select.select_list {
+            if let vibesql_ast::SelectItem::Expression { expr, .. } = item {
+                if let Some(missing) = Self::find_missing_table_in_expr(expr, database, cte_results)
+                {
+                    return Some(missing);
+                }
+            }
+        }
+        if let Some(where_clause) = &select.where_clause {
+            if let Some(missing) =
+                Self::find_missing_table_in_expr(where_clause, database, cte_results)
+            {
+                return Some(missing);
+            }
+        }
+        // Named WINDOW clause definitions are not reachable through the
+        // select list's window-function nodes (a bare `OVER w1` only carries
+        // the window's *name*), so they must be checked separately.
+        if let Some(defs) = &select.window_definitions {
+            for def in defs {
+                if let Some(partition_by) = &def.spec.partition_by {
+                    for e in partition_by {
+                        if let Some(missing) =
+                            Self::find_missing_table_in_expr(e, database, cte_results)
+                        {
+                            return Some(missing);
+                        }
+                    }
+                }
+                if let Some(order_by) = &def.spec.order_by {
+                    for item in order_by {
+                        if let Some(missing) =
+                            Self::find_missing_table_in_expr(&item.expr, database, cte_results)
+                        {
+                            return Some(missing);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Check whether every table directly named in a FROM clause exists
+    /// (as a base table, view, or CTE), recursing into joins and derived
+    /// subqueries. Returns the first missing table name found.
+    fn find_missing_table_in_from(
+        from: &vibesql_ast::FromClause,
+        database: &vibesql_storage::Database,
+        cte_results: &HashMap<String, CteResult>,
+    ) -> Option<String> {
+        match from {
+            vibesql_ast::FromClause::Table { name, .. } => {
+                if database.get_table(name).is_some() || database.catalog.get_view(name).is_some() {
+                    return None;
+                }
+                let is_cte = cte_results.contains_key(name)
+                    || cte_results.keys().any(|k| k.eq_ignore_ascii_case(name));
+                if is_cte {
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            }
+            vibesql_ast::FromClause::Subquery { query, .. } => {
+                Self::find_missing_table_in_select(query, database, cte_results)
+            }
+            vibesql_ast::FromClause::Join { left, right, condition, .. } => {
+                Self::find_missing_table_in_from(left, database, cte_results)
+                    .or_else(|| Self::find_missing_table_in_from(right, database, cte_results))
+                    .or_else(|| {
+                        condition.as_ref().and_then(|c| {
+                            Self::find_missing_table_in_expr(c, database, cte_results)
+                        })
+                    })
+            }
+            vibesql_ast::FromClause::Values { rows, .. } => rows.iter().find_map(|row| {
+                row.iter().find_map(|e| Self::find_missing_table_in_expr(e, database, cte_results))
+            }),
+            vibesql_ast::FromClause::TableFunction { .. } => None,
+        }
     }
 }
 

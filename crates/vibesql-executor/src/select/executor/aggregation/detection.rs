@@ -1082,6 +1082,22 @@ impl SelectExecutor<'_> {
         })
     }
 
+    /// Check whether a specific (possibly FROM-bearing) scalar-subquery
+    /// statement triggers SQLite's implicit-outer-aggregate-collapse
+    /// semantics (#5104 / #5135). Reused by scalar-subquery evaluation
+    /// (`evaluation/subquery.rs`, issue #6191/filter1.test 6.3) so the
+    /// decision of *whether* `outer_rows` must be propagated for a correct
+    /// aggregate value stays in sync with the (separate) decision of whether
+    /// the outer query collapses to a single row in the first place — both
+    /// must agree, or the outer query ends up with one output row computed
+    /// from only the representative row instead of all outer rows.
+    pub(in crate::select::executor) fn subquery_triggers_outer_aggregate_collapse(
+        &self,
+        stmt: &vibesql_ast::SelectStmt,
+    ) -> bool {
+        subquery_stmt_triggers_collapse(stmt, self.database)
+    }
+
     /// Check if statement is a simple COUNT(*) query that can use fast path
     ///
     /// Fast path conditions:
@@ -1167,7 +1183,7 @@ impl SelectExecutor<'_> {
             Some(vibesql_ast::FromClause::Join { .. }) => return None, // JOIN not allowed
             Some(vibesql_ast::FromClause::Subquery { .. }) => return None, // Subquery not allowed
             Some(vibesql_ast::FromClause::Values { .. }) => return None, // VALUES not allowed
-            Some(vibesql_ast::FromClause::TableFunction { .. }) => return None, // Table function not allowed
+            Some(vibesql_ast::FromClause::TableFunction { .. }) => return None, /* Table function not allowed */
             None => return None,                                                // No FROM clause
         };
 
