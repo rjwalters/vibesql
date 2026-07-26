@@ -442,10 +442,16 @@ impl Parser {
                     } else {
                         self.advance(); // consume NOT
                         self.expect_keyword(Keyword::Null)?;
-                        constraints.push(vibesql_ast::ColumnConstraint {
-                            name,
-                            kind: vibesql_ast::ColumnConstraintKind::NotNull,
-                        });
+                        // Parse optional ON CONFLICT clause (SQLite extension):
+                        // `col NOT NULL ON CONFLICT ROLLBACK|ABORT|FAIL|IGNORE|REPLACE`.
+                        let on_conflict = self.parse_constraint_conflict_clause()?;
+                        let kind = match on_conflict {
+                            Some(_) => vibesql_ast::ColumnConstraintKind::NotNullWithConflict {
+                                on_conflict,
+                            },
+                            None => vibesql_ast::ColumnConstraintKind::NotNull,
+                        };
+                        constraints.push(vibesql_ast::ColumnConstraint { name, kind });
                     }
                 }
                 Token::Keyword { keyword: Keyword::Deferrable, .. } => {
