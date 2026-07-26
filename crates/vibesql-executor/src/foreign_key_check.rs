@@ -316,7 +316,10 @@ pub(crate) fn check_fk_row_existence(
     // have returned before reaching this helper).
     let parent_table = db
         .get_table(&fk.parent_table)
-        .ok_or_else(|| crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone()))?;
+        .ok_or_else(|| {
+            crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
+                .with_main_schema_qualifier()
+        })?;
 
     let parent_collations = parent_collations_for_fk(db, fk);
     let parent_indices = resolved_parent_indices_for_fk(db, fk);

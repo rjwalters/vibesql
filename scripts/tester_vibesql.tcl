@@ -2193,6 +2193,87 @@ proc trial_check_in_transaction {new_sql} {
     }
 }
 
+proc trial_check_closing_transaction {sql} {
+    # Trial-run the about-to-be-flushed batch (the existing $::sql_batch
+    # plus this closing $sql, e.g. "COMMIT" or a stack-emptying "RELEASE")
+    # with an appended ROLLBACK against a throwaway copy of the DB — the
+    # same technique trial_check_in_transaction uses for mid-transaction
+    # statements. Determines, WITHOUT mutating any real shim/DB state,
+    # whether this close succeeds, fails and closes the transaction, or
+    # fails while the transaction survives.
+    #
+    # EVIDENCE-OF R-37736-42616: "If a COMMIT statement (or the RELEASE of
+    # a transaction SAVEPOINT) fails because the database is currently in a
+    # state that violates a deferred foreign key constraint ... the nested
+    # savepoints remain open." Because each execsql runs in a FRESH process
+    # and nothing is persisted until a flush actually succeeds, the shim
+    # must know this BEFORE clearing $::sql_batch / $::in_transaction, or
+    # the batched statements are lost and the transaction is wrongly
+    # treated as closed (fkey2-2.40/2.41, e_fkey-38.3/38.4).
+    #
+    # Sets $::txn_close_survived_trial_error to 1 when the trial's error
+    # left the appended ROLLBACK something to undo (the close failed but
+    # the transaction survives), 0 otherwise (the close's error genuinely
+    # ended the transaction, e.g. RAISE(ROLLBACK)). Raises a TCL error
+    # (translated to SQLite wording) when the trial reports an error;
+    # returns silently on success.
+    set batch_stmts {}
+    foreach stmt $::sql_batch {
+        set s [string trimright $stmt]
+        set s [string trimright $s ";"]
+        lappend batch_stmts $s
+    }
+    set new_clean [string trimright $sql]
+    set new_clean [string trimright $new_clean ";"]
+    set trial_stmts $batch_stmts
+    lappend trial_stmts $new_clean
+    lappend trial_stmts "ROLLBACK"
+
+    set combined [join $trial_stmts ";\n"]
+    set pragma_prefix [build_pragma_prefix]
+    set combined "${pragma_prefix}${combined}"
+
+    set tmpfile "/tmp/vibesql_closetrial_[pid]_[clock microseconds].sql"
+    set f [open $tmpfile w]
+    puts $f $combined
+    close $f
+
+    if {$::db_file eq ""} {
+        catch {exec $::vibesql_path < $tmpfile 2>@1} result
+    } else {
+        set trial_db "/tmp/vibesql_closetrialdb_[pid]_[clock microseconds].vbsql"
+        copy_db_with_wal $::db_file $trial_db
+        catch {exec $::vibesql_path $trial_db < $tmpfile 2>@1} result
+        delete_db_with_wal $trial_db
+    }
+    file delete -force $tmpfile
+
+    set ::txn_close_survived_trial_error 0
+    if {[regexp {(?m)^Error executing statement|^Error:} $result]} {
+        set err_line [select_error_line_for_stmt $result 1]
+        if {$err_line eq ""} {
+            foreach line [split $result "\n"] {
+                set line [string trim $line]
+                if {[regexp {^Error: } $line]} {
+                    if {[is_script_failed_summary $line]} {
+                        continue
+                    }
+                    set err_line $line
+                    break
+                }
+            }
+        }
+        if {$err_line eq ""} {
+            # No attributable error line found — defensively treat as
+            # success rather than raising an unattributable failure.
+            return
+        }
+        set ::txn_close_survived_trial_error \
+            [regexp {(?m)^Transaction rolled back} $result]
+        error [translate_error_to_sqlite $err_line]
+    }
+}
+
 proc is_readonly_query {sql} {
     # True when $sql is a pure read-only query whose rows must be returned even
     # while a batched transaction is open: a top-level SELECT or VALUES, or a
@@ -2798,6 +2879,11 @@ proc execsql {sql {db ""}} {
                 return {}
             }
         }
+        # Snapshot the batch as it stood BEFORE this closing statement, in
+        # case the close fails-but-survives (see below) and it needs
+        # restoring. Cheap: just a list copy, no extra CLI invocation.
+        set pre_close_batch $::sql_batch
+
         lappend ::sql_batch $sql
         set ::in_transaction 0
         # Did this transaction already surface an aborting error (RAISE(ABORT) /
@@ -2809,8 +2895,42 @@ proc execsql {sql {db ""}} {
         set tolerate_err $::txn_had_tolerated_error
         set ::txn_had_tolerated_error 0
         if {[catch {flush_batch $tolerate_err} result]} {
+            set translated_err [translate_error_to_sqlite $result]
+            #
+            # Deferred-FK "close fails but transaction survives" recovery
+            # (EVIDENCE-OF R-37736-42616, fkey2-2.40/2.41, e_fkey-38.3/38.4):
+            # a COMMIT (or a RELEASE that empties the savepoint stack) can
+            # fail on an outstanding deferred FK violation WITHOUT closing
+            # the transaction. The real flush above already tried and
+            # failed (and — critically — did NOT persist anything, since
+            # per-statement WAL entries for an uncommitted transaction are
+            # discarded on the next open/replay), so it is safe to re-derive
+            # "did it survive?" from a throwaway trial replay of the exact
+            # same (pre-close-statement) batch, run only on this rarer
+            # failure path so the common (successful-close) path pays no
+            # extra CLI invocation at all. Gated on $::pragma_foreign_keys:
+            # files that never enable FK enforcement can never hit this.
+            if {$::pragma_foreign_keys != 0 && !$tolerate_err} {
+                set ::sql_batch $pre_close_batch
+                if {[catch {trial_check_closing_transaction $sql} trial_err]} {
+                    if {$::txn_close_survived_trial_error} {
+                        # Leave $::sql_batch (restored above) / re-open
+                        # $::in_transaction — the failing closer is
+                        # deliberately NOT appended to the batch — so later
+                        # statements (including a retried close) replay
+                        # correctly from scratch at the next flush.
+                        set ::in_transaction 1
+                        error $trial_err
+                    }
+                }
+                # Trial says the close genuinely ends the transaction (or
+                # unexpectedly succeeded) — restore the batch to empty /
+                # in_transaction to 0 as the real flush attempt already set,
+                # and fall through to raise the real flush's own error.
+                set ::sql_batch {}
+            }
             # Translate error to SQLite format before re-raising
-            error [translate_error_to_sqlite $result]
+            error $translated_err
         }
         set parsed [parse_result $result $tolerate_err]
         # When the statement that closes this batched transaction is ONLY a
