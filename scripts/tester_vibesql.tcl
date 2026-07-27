@@ -6864,11 +6864,20 @@ proc normalize_result {val} {
             lappend elements $elem
         }
         # Rebuild as space-separated string
-        # For elements that still need quoting (contain spaces), use proper TCL escaping
+        # For elements that still need quoting (contain spaces), use proper TCL escaping.
+        # An EMPTY element also needs brace-protection ("{}"): a genuine Tcl list
+        # stringifies an empty element as a literal "{}" token to keep the list
+        # round-trippable (`puts [list a {} b]` prints "a {} b", not "a  b"), and
+        # SQLite's own tester.tcl regex-pattern matching (do_test's `/PATTERN/`
+        # convention) is written against that raw, un-normalized $result. Dropping
+        # the braces here silently deletes every empty/NULL column from the
+        # normalized string, so a pattern that legitimately expects a literal
+        # "{}" placeholder (e.g. an empty-string PRAGMA table_info column) can
+        # never match even though the underlying data is correct (#6175, pragma-23.4).
         set result {}
         foreach elem $elements {
-            if {[string first " " $elem] >= 0 || [string first "\t" $elem] >= 0} {
-                # Element contains whitespace - needs quoting
+            if {$elem eq "" || [string first " " $elem] >= 0 || [string first "\t" $elem] >= 0} {
+                # Element is empty or contains whitespace - needs quoting
                 append result "\{$elem\} "
             } else {
                 append result "$elem "
