@@ -26,11 +26,11 @@ use std::collections::HashSet;
 
 // Re-export public validation functions
 pub use aggregates::{
-    check_aggregate_arg_count, find_aggregate_in_expression, find_window_function_in_expression,
-    validate_aggregate_arguments, validate_group_by_window_misuse,
-    validate_having_aliased_aggregates, validate_no_nested_aggregates,
-    validate_order_by_aliased_window_functions, validate_subquery_context_misuse,
-    validate_window_query_order_by_aggregates, SubqueryContext,
+    check_aggregate_arg_count, expression_contains_aggregate, find_aggregate_in_expression,
+    find_window_function_in_expression, validate_aggregate_arguments,
+    validate_group_by_window_misuse, validate_having_aliased_aggregates,
+    validate_no_nested_aggregates, validate_order_by_aliased_window_functions,
+    validate_subquery_context_misuse, validate_window_query_order_by_aggregates, SubqueryContext,
 };
 pub use collation_names::validate_collation_names;
 pub use column_refs::{extract_column_refs, validate_column_ref};

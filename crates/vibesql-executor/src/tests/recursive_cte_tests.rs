@@ -1075,3 +1075,73 @@ fn test_recursive_cte_multiple_from_references_message() {
     .unwrap_err();
     assert_eq!(err.to_string(), "multiple references to recursive table: t4");
 }
+
+/// A CTE column-list arity mismatch must be detected even when the seed's
+/// select list contains a wildcard with no FROM clause to expand it against.
+/// SQLite treats such a wildcard as contributing exactly zero columns to the
+/// arity comparison (never "unknown"), so the mismatch error takes priority
+/// over the later "no tables specified" error that would otherwise fire once
+/// the query actually tries to execute the wildcard (issue #6189,
+/// with1.test 13.1/13.2/13.3, confirmed against sqlite3 3.51).
+#[test]
+fn test_cte_arity_check_with_unresolvable_wildcard_in_seed() {
+    let mut db = vibesql_storage::Database::new();
+
+    // Nominal width (1, from the literal `5`) mismatches the declared arity
+    // (2) -> the mismatch error fires before the wildcard is ever expanded.
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE c(i,j) AS (SELECT 5,* UNION ALL SELECT i+1,11 FROM c WHERE i<10) \
+         SELECT i FROM c",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "table c has 1 values for 2 columns");
+
+    // Nominal width (1) matches the declared arity (1) -> no mismatch is
+    // raised here, so the query falls through to the real "no tables
+    // specified" error when it tries to execute the wildcard.
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE c(i) AS (SELECT 5,* UNION ALL SELECT i+1 FROM c WHERE i<10) \
+         SELECT i FROM c",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "no tables specified");
+
+    // A select list that is *entirely* wildcards (nominal width 0) never
+    // triggers the mismatch check regardless of declared arity — SQLite
+    // always reports "no tables specified" in that case.
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE c(i) AS (SELECT * UNION ALL SELECT i+1 FROM c WHERE i<10) \
+         SELECT i FROM c",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "no tables specified");
+}
+
+/// SQLite rejects an aggregate function in the recursive term of a `WITH
+/// RECURSIVE` CTE with a dedicated error: each recursive step only ever sees
+/// the prior step's single working row, so aggregating "the recursive table"
+/// is meaningless (issue #6189, with1.test 16.1).
+#[test]
+fn test_recursive_cte_rejects_aggregate_in_recursive_term() {
+    let mut db = vibesql_storage::Database::new();
+
+    let err = execute_sql(
+        &mut db,
+        "WITH RECURSIVE i(x) AS (VALUES(1) UNION SELECT count(*) FROM i) SELECT * FROM i",
+    )
+    .unwrap_err();
+    assert_eq!(err.to_string(), "recursive aggregate queries not supported");
+
+    // The same aggregate in the *seed* (non-recursive) term is fine — only the
+    // recursive term is restricted.
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE i(x) AS (SELECT count(*) UNION ALL SELECT x+1 FROM i WHERE x<3) \
+         SELECT x FROM i",
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 3);
+}
