@@ -451,7 +451,10 @@ impl SavepointExecutor {
             if auto_started {
                 let _ = db.rollback_transaction();
             }
-            return Err(ExecutorError::StorageError(format!("Failed to create savepoint: {}", e)));
+            return Err(ExecutorError::StorageError(format!(
+                "Failed to create savepoint: {}",
+                e
+            )));
         }
 
         if auto_started {
@@ -505,7 +508,8 @@ impl ReleaseSavepointExecutor {
         stmt: &ReleaseSavepointStmt,
         db: &mut Database,
     ) -> Result<String, ExecutorError> {
-        let will_finalize = db.is_implicit_savepoint_txn() && db.is_outermost_savepoint(&stmt.name);
+        let will_finalize =
+            db.is_implicit_savepoint_txn() && db.is_outermost_savepoint(&stmt.name);
 
         if will_finalize {
             // Read-only pre-check: does NOT mutate the savepoint stack or

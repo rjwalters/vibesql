@@ -247,9 +247,14 @@ mod tests {
         data.insert(vec![SqlValue::Integer(3)], vec![2]);
 
         // Range ..=2
-        let iter =
-            OwnedStreamingRangeScan::new(&data, None, Some(SqlValue::Integer(2)), true, true)
-                .unwrap();
+        let iter = OwnedStreamingRangeScan::new(
+            &data,
+            None,
+            Some(SqlValue::Integer(2)),
+            true,
+            true,
+        )
+        .unwrap();
 
         let results: Vec<usize> = iter.collect();
         assert_eq!(results, vec![0, 1]); // Keys 1 and 2
@@ -263,9 +268,14 @@ mod tests {
         data.insert(vec![SqlValue::Integer(3)], vec![2]);
 
         // Range 2..
-        let iter =
-            OwnedStreamingRangeScan::new(&data, Some(SqlValue::Integer(2)), None, true, true)
-                .unwrap();
+        let iter = OwnedStreamingRangeScan::new(
+            &data,
+            Some(SqlValue::Integer(2)),
+            None,
+            true,
+            true,
+        )
+        .unwrap();
 
         let results: Vec<usize> = iter.collect();
         assert_eq!(results, vec![1, 2]); // Keys 2 and 3

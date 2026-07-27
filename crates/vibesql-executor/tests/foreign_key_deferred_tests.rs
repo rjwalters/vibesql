@@ -94,7 +94,11 @@ fn deferred_child_insert_without_parent_fails_at_commit() {
     // open transaction.
     assert!(db.in_transaction(), "transaction must remain open after failed COMMIT");
     let c = db.get_table("c").expect("table c");
-    assert_eq!(c.scan_live().count(), 1, "child row remains present in the still-open transaction");
+    assert_eq!(
+        c.scan_live().count(),
+        1,
+        "child row remains present in the still-open transaction"
+    );
 
     // Resolve the violation by inserting the missing parent, then retry the
     // COMMIT — it must now succeed and persist the child row.

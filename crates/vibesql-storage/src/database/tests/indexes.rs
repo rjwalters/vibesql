@@ -297,7 +297,10 @@ fn test_create_expression_index_does_not_panic() {
     index_manager
         .populate_expression_index("t3rs", vec![(vec![SqlValue::Integer(3)], 0)])
         .expect("populate should succeed");
-    assert!(!index_manager.is_index_pending_rebuild("t3rs"), "flag should clear after populate");
+    assert!(
+        !index_manager.is_index_pending_rebuild("t3rs"),
+        "flag should clear after populate"
+    );
     match index_manager.get_index_data("t3rs") {
         Some(IndexData::InMemory { data }) => {
             assert_eq!(data.len(), 1, "populated body should hold the one key");

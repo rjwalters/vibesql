@@ -70,12 +70,14 @@ impl ExpressionEvaluator<'_> {
             // wrongly coerce the column value to text). TEXT / BLOB casts stay
             // affinity-less (`None`) to avoid making a CAST-to-text look like a
             // TEXT column in the IN-list path (in-17.3/17.4).
-            vibesql_ast::Expression::Cast { data_type, .. } => match data_type.sqlite_affinity() {
-                affinity @ (vibesql_types::TypeAffinity::Numeric
-                | vibesql_types::TypeAffinity::Integer
-                | vibesql_types::TypeAffinity::Real) => Some(affinity),
-                _ => None,
-            },
+            vibesql_ast::Expression::Cast { data_type, .. } => {
+                match data_type.sqlite_affinity() {
+                    affinity @ (vibesql_types::TypeAffinity::Numeric
+                    | vibesql_types::TypeAffinity::Integer
+                    | vibesql_types::TypeAffinity::Real) => Some(affinity),
+                    _ => None,
+                }
+            }
             // Literals, functions, and other expressions don't have column affinity
             _ => None,
         }
@@ -1734,10 +1736,10 @@ impl ExpressionEvaluator<'_> {
             let tuple_val = self.eval(tuple_expr, row)?;
             // datatype3 §7.1 comparison collation with correct left-operand
             // precedence (`tuple_on_left` selects the left side).
-            let tuple_operand =
-                crate::evaluator::collation::operand_column_collation(tuple_expr, &|col_id| {
-                    self.column_collation_of(col_id)
-                });
+            let tuple_operand = crate::evaluator::collation::operand_column_collation(
+                tuple_expr,
+                &|col_id| self.column_collation_of(col_id),
+            );
             let sub_operand = sub_collations[idx].clone();
             let (left_operand, right_operand) = if tuple_on_left {
                 (tuple_operand, sub_operand)

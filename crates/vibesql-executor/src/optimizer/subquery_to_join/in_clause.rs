@@ -95,7 +95,9 @@ fn qualify_outer_expr_in_scope(
             // against the scanned table correctly.
             if is_rowid_pseudo_column(col_id.column_canonical()) {
                 return match single_outer_rowid_table(from, database) {
-                    Some(table) => Some(rewrite_column_refs_with_alias(expr, &table, &table)),
+                    Some(table) => {
+                        Some(rewrite_column_refs_with_alias(expr, &table, &table))
+                    }
                     None => None,
                 };
             }
@@ -207,11 +209,7 @@ fn subquery_projection_is_provably_non_null(
 /// joins, derived/VALUES sources, nullable columns, arbitrary expressions) is
 /// treated conservatively as possibly-NULL, aborting the rewrite in favor of the
 /// NULL-correct row-by-row path.
-fn outer_expr_is_provably_non_null(
-    expr: &Expression,
-    from: &FromClause,
-    database: &Database,
-) -> bool {
+fn outer_expr_is_provably_non_null(expr: &Expression, from: &FromClause, database: &Database) -> bool {
     match expr {
         Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
         // Resolve the column against the whole outer FROM scope (which may already
@@ -236,11 +234,7 @@ fn outer_expr_is_provably_non_null(
 /// NOT treated as non-NULL: SQLite (and VibeSQL) permit NULLs there. The bare
 /// `rowid` pseudo-column and all other expression shapes are treated
 /// conservatively as possibly-NULL.
-fn expression_is_provably_non_null(
-    expr: &Expression,
-    table_name: &str,
-    database: &Database,
-) -> bool {
+fn expression_is_provably_non_null(expr: &Expression, table_name: &str, database: &Database) -> bool {
     match expr {
         Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
         Expression::ColumnRef(col_id) => {

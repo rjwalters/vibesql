@@ -100,9 +100,11 @@ impl IndexManager {
                             // assigned to its nearest centroid (O(probe)); if the
                             // index is not yet trained it lands in the staging
                             // list, matching IVFFlatIndex::insert semantics.
-                            if let Some(col_idx) =
-                                Self::vector_index_column_idx(metadata, table_schema, index_name)
-                            {
+                            if let Some(col_idx) = Self::vector_index_column_idx(
+                                metadata,
+                                table_schema,
+                                index_name,
+                            ) {
                                 if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
                                     if let Err(e) = index.insert(row_index, vector) {
                                         log::warn!(
@@ -119,9 +121,11 @@ impl IndexManager {
                         IndexData::Hnsw { index } => {
                             // HNSW supports incremental inserts natively (no
                             // training step); wire the row's vector into the graph.
-                            if let Some(col_idx) =
-                                Self::vector_index_column_idx(metadata, table_schema, index_name)
-                            {
+                            if let Some(col_idx) = Self::vector_index_column_idx(
+                                metadata,
+                                table_schema,
+                                index_name,
+                            ) {
                                 if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
                                     if let Err(e) = index.insert(row_index, vector) {
                                         log::warn!(

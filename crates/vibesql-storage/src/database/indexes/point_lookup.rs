@@ -121,7 +121,9 @@ impl IndexData {
         let normalized_key: Vec<SqlValue> = key.iter().map(normalize_for_comparison).collect();
 
         match self {
-            IndexData::InMemory { data } => data.get(&normalized_key).cloned(),
+            IndexData::InMemory { data } => {
+                data.get(&normalized_key).cloned()
+            }
             IndexData::DiskBacked { btree, .. } => {
                 // Safely acquire lock and perform lookup
                 match acquire_btree_lock(btree) {

@@ -152,17 +152,21 @@ pub(crate) fn coerce_rowid_affinity(
 fn materialize_window_values_rows(
     db: &vibesql_storage::Database,
     rows: Vec<Vec<vibesql_ast::Expression>>,
-    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
+    cte_results: Option<
+        &std::collections::HashMap<String, crate::select::cte::CteResult>,
+    >,
 ) -> Result<Vec<Vec<vibesql_ast::Expression>>, ExecutorError> {
     // Fast path: no window function anywhere -> return the rows untouched.
-    if !rows.iter().any(|row| row.iter().any(crate::select::window::expression_has_window_function))
-    {
+    if !rows.iter().any(|row| {
+        row.iter().any(crate::select::window::expression_has_window_function)
+    }) {
         return Ok(rows);
     }
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let has_window = row.iter().any(crate::select::window::expression_has_window_function);
+        let has_window =
+            row.iter().any(crate::select::window::expression_has_window_function);
         if !has_window {
             out.push(row);
             continue;
@@ -208,7 +212,9 @@ fn materialize_window_values_rows(
             .rows
             .into_iter()
             .next()
-            .map(|r| r.values.into_iter().map(vibesql_ast::Expression::Literal).collect::<Vec<_>>())
+            .map(|r| {
+                r.values.into_iter().map(vibesql_ast::Expression::Literal).collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         out.push(literal_row);
     }

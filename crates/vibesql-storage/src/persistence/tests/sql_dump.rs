@@ -105,10 +105,12 @@ fn test_sql_dump_unnamed_check_preserves_source_spacing() {
     };
 
     let mut db = Database::new();
-    let mut schema = TableSchema::new(
-        "t".to_string(),
-        vec![ColumnSchema::new("d".to_string(), DataType::Integer, true)],
-    );
+    let mut schema =
+        TableSchema::new("t".to_string(), vec![ColumnSchema::new(
+            "d".to_string(),
+            DataType::Integer,
+            true,
+        )]);
     // No sql_source → the dump reconstructs the CREATE TABLE from fields,
     // exercising the CHECK reconstruction branch in save.rs. The stored name
     // is the verbatim (spaced) source text of the unnamed CHECK.
@@ -146,10 +148,12 @@ fn test_sql_dump_named_check_keeps_constraint_name() {
     };
 
     let mut db = Database::new();
-    let mut schema = TableSchema::new(
-        "t".to_string(),
-        vec![ColumnSchema::new("d".to_string(), DataType::Integer, true)],
-    );
+    let mut schema =
+        TableSchema::new("t".to_string(), vec![ColumnSchema::new(
+            "d".to_string(),
+            DataType::Integer,
+            true,
+        )]);
     schema.check_constraints = vec![("chk_d".to_string(), check_expr)];
     db.create_table(schema).unwrap();
 

@@ -449,7 +449,11 @@ pub(super) fn truncate_updates_for_or_fail(
 /// Format a constraint's columns as sqlite3's `table.col1, table.col2` list for
 /// a "UNIQUE constraint failed" message (e.g. `t1.a` or `t1.c, t1.d`).
 fn qualify_constraint_columns(table_name: &str, columns: &[String]) -> String {
-    columns.iter().map(|col| format!("{}.{}", table_name, col)).collect::<Vec<_>>().join(", ")
+    columns
+        .iter()
+        .map(|col| format!("{}.{}", table_name, col))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Validate that multiple updates in the same batch don't produce conflicting

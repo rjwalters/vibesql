@@ -256,12 +256,20 @@ mod tests {
     fn test_parse_seq_value() {
         assert_eq!(parse_seq_value(&SqlValue::Integer(1234)), Some(1234));
         assert_eq!(parse_seq_value(&SqlValue::Null), None);
-        assert_eq!(parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from("a-string"))), None);
         assert_eq!(
-            parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from("-12345678901234567890"))),
+            parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from("a-string"))),
             None
         );
-        assert_eq!(parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from("42"))), Some(42));
+        assert_eq!(
+            parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from(
+                "-12345678901234567890"
+            ))),
+            None
+        );
+        assert_eq!(
+            parse_seq_value(&SqlValue::Varchar(arcstr::ArcStr::from("42"))),
+            Some(42)
+        );
     }
 
     #[test]

@@ -1,7 +1,10 @@
 //! CASE expression evaluation in aggregate context
 
 use super::super::super::builder::SelectExecutor;
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
+use crate::{
+    errors::ExecutorError,
+    evaluator::CombinedExpressionEvaluator,
+};
 
 /// Evaluate CASE expression with potential aggregates in operand/conditions/results
 ///

@@ -226,10 +226,9 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
         let col_name = &schema.columns[col_idx].name;
         let is_autoincrement = create.columns.iter().any(|col_def| {
             col_def.name.eq_ignore_ascii_case(col_name)
-                && col_def
-                    .constraints
-                    .iter()
-                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
+                && col_def.constraints.iter().any(|c| {
+                    matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
+                })
         });
         if is_autoincrement {
             schema.is_autoincrement = true;

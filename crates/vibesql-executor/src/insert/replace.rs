@@ -455,7 +455,8 @@ fn enforce_replace_fk_actions(
     // Collect (child_table, fk, fk_idx, action) pairs up front so the
     // action-performing loop below does not hold a borrow of `db.catalog`
     // while mutating tables.
-    let mut matching_fks: Vec<(String, vibesql_catalog::ForeignKeyConstraint, usize)> = Vec::new();
+    let mut matching_fks: Vec<(String, vibesql_catalog::ForeignKeyConstraint, usize)> =
+        Vec::new();
     for child_table_name in db.catalog.list_tables() {
         let child_schema = match db.catalog.get_table(&child_table_name) {
             Some(s) => s,
@@ -567,13 +568,15 @@ fn enforce_replace_fk_actions(
                         if child_fk_values.iter().any(|v| matches!(v, SqlValue::Null)) {
                             return false;
                         }
-                        child_fk_values.iter().zip(&deleted_key).enumerate().all(|(i, (cv, pv))| {
-                            crate::foreign_key_check::fk_values_equal(
-                                cv,
-                                pv,
-                                parent_collations.get(i).and_then(|c| c.as_deref()),
-                            )
-                        })
+                        child_fk_values.iter().zip(&deleted_key).enumerate().all(
+                            |(i, (cv, pv))| {
+                                crate::foreign_key_check::fk_values_equal(
+                                    cv,
+                                    pv,
+                                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                                )
+                            },
+                        )
                     });
 
                     if orphaned {

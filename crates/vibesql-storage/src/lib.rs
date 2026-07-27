@@ -374,7 +374,11 @@ mod tests {
         // Explicit rowid larger than the physical count (the reload shape:
         // live rows persisted with rowids 1 and 7).
         table.insert(Row::with_row_id(vec![SqlValue::Integer(20)], 7)).unwrap();
-        assert_eq!(table.next_rowid(), 8, "must exceed the explicit rowid 7, not physical count 2");
+        assert_eq!(
+            table.next_rowid(),
+            8,
+            "must exceed the explicit rowid 7, not physical count 2"
+        );
 
         // Deletes never decrease it (monotone).
         assert!(table.mark_deleted_inplace(1));
@@ -399,8 +403,10 @@ mod tests {
         assert!(table.compact_if_needed(), "expected compaction with 60% deleted");
 
         // Survivors were at physical indices 6..=9 → implicit rowids 7..=10.
-        let rowids: Vec<u64> =
-            table.scan_live().map(|(_, row)| row.row_id.expect("materialized rowid")).collect();
+        let rowids: Vec<u64> = table
+            .scan_live()
+            .map(|(_, row)| row.row_id.expect("materialized rowid"))
+            .collect();
         assert_eq!(rowids, vec![7, 8, 9, 10]);
 
         // Allocation continues past the materialized max, not at the

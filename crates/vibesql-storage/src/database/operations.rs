@@ -1750,8 +1750,11 @@ mod spatial_schema_tests {
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .expect("create main.ix");
         // Same bare name on a temp-schema table must NOT collide with main.ix.
-        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
-            .expect("create temp_42.ix should not collide with main.ix");
+        ops.create_spatial_index(
+            meta("ix", "t", "temp_42"),
+            SpatialIndex::new("g".to_string()),
+        )
+        .expect("create temp_42.ix should not collide with main.ix");
 
         // Both keys are present: bare `ix` (main) and `temp_42.ix` (temp).
         let keys = ops.list_spatial_indexes();
@@ -1770,8 +1773,11 @@ mod spatial_schema_tests {
         let mut ops = Operations::new();
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .unwrap();
-        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
-            .unwrap();
+        ops.create_spatial_index(
+            meta("ix", "t", "temp_42"),
+            SpatialIndex::new("g".to_string()),
+        )
+        .unwrap();
 
         // Bare name resolves to the temp index (temp shadows main).
         assert_eq!(ops.get_spatial_index_metadata("ix").unwrap().schema, "temp_42");

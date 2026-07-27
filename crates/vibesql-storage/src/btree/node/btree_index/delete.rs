@@ -70,7 +70,8 @@ impl BTreeIndex {
         // row_ids for the key, so the inverse must re-insert every one of
         // them. Capture them before mutating, but only when logging is active
         // (the lookup is otherwise wasted work).
-        let undo_row_ids = if self.undo_log.is_some() { Some(self.lookup(key)?) } else { None };
+        let undo_row_ids =
+            if self.undo_log.is_some() { Some(self.lookup(key)?) } else { None };
 
         // Handle single-level tree (root is leaf)
         if self.height == 1 {

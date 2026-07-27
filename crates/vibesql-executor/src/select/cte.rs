@@ -1418,7 +1418,8 @@ fn rebuild_compound(
     for i in (0..connectors.len()).rev() {
         let (op, all) = connectors[i].clone();
         let mut term = terms[i].clone();
-        term.set_operation = Some(vibesql_ast::SetOperation { op, all, right: Box::new(acc) });
+        term.set_operation =
+            Some(vibesql_ast::SetOperation { op, all, right: Box::new(acc) });
         acc = term;
     }
     acc
@@ -1487,7 +1488,10 @@ fn split_recursive_compound(
     // a mix as a circular reference (with5.test 120/121).
     let boundary = recursive_connectors[0].clone();
     if recursive_connectors.iter().any(|c| *c != boundary) {
-        return Err(ExecutorError::SqliteCompatError(format!("circular reference: {}", cte.name)));
+        return Err(ExecutorError::SqliteCompatError(format!(
+            "circular reference: {}",
+            cte.name
+        )));
     }
     // UNION (all == false) deduplicates; UNION ALL (all == true) keeps rows.
     let dedup_rows = !boundary.1;
@@ -1558,7 +1562,8 @@ where
     // (with5.test 113), `VALUES(..) UNION ALL VALUES(..)` (114/131) — and there
     // may be more than one recursive term. `split_recursive_compound` performs
     // the seed/recursive partition and validates the recursive connectors.
-    let RecursiveSplit { base_query, recursive_query, dedup_rows } = split_recursive_compound(cte)?;
+    let RecursiveSplit { base_query, recursive_query, dedup_rows } =
+        split_recursive_compound(cte)?;
     // The recursive term(s) drive per-iteration expansion; execute as written
     // (they carry no compound-level ORDER BY/LIMIT/OFFSET).
     let recursive_query = &recursive_query;

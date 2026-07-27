@@ -348,8 +348,7 @@ mod tests {
     // window1 18.1.3 / 18.2.3: a window referencing a base may not add PARTITION BY.
     #[test]
     fn override_partition_rejected() {
-        let referencing =
-            spec(Some("win1"), Some(vec![Expression::Literal(SqlValue::Integer(1))]), None, None);
+        let referencing = spec(Some("win1"), Some(vec![Expression::Literal(SqlValue::Integer(1))]), None, None);
         let base = spec(None, None, None, None);
         let err = validate_window_override("win1", &referencing, &base).unwrap_err();
         assert_eq!(err.to_string(), "cannot override PARTITION clause of window: win1");

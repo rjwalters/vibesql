@@ -14,7 +14,9 @@
 //! 3. `DELETE FROM self` of a row that references itself must succeed.
 
 use vibesql_ast::Statement;
-use vibesql_executor::{CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor};
+use vibesql_executor::{
+    CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor,
+};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 

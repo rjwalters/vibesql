@@ -560,8 +560,9 @@ impl Database {
             match trigger_def.sql_definition.as_ref() {
                 Some(sql) => {
                     let sql = sql.trim_end_matches(';').trim();
-                    writeln!(writer, "{};", sql)
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    writeln!(writer, "{};", sql).map_err(|e| {
+                        StorageError::NotImplemented(format!("Write error: {}", e))
+                    })?;
                 }
                 None => {
                     writeln!(

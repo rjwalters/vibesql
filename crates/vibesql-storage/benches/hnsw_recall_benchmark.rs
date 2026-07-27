@@ -247,7 +247,10 @@ fn main() {
         "{:<10} {:>12} {:>8} {:>9} {:>10} {:>10} {:>10}",
         "EfSearch", "DeleteRatio", "Live", "Deleted", "Fresh", "Degraded", "Compacted"
     );
-    println!("{:-<10} {:->12} {:->8} {:->9} {:->10} {:->10} {:->10}", "", "", "", "", "", "", "");
+    println!(
+        "{:-<10} {:->12} {:->8} {:->9} {:->10} {:->10} {:->10}",
+        "", "", "", "", "", "", ""
+    );
 
     let mut points = Vec::new();
     for &ef_search in &ef_search_sweep {

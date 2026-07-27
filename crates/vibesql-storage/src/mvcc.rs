@@ -171,7 +171,11 @@ impl TxnSnapshot {
     /// safe-by-default — code that hasn't been migrated to capture real
     /// snapshots will see exactly the rows it saw before Phase 1.
     pub fn empty() -> Self {
-        TxnSnapshot { xmin_active: 0, xmax_committed: 0, in_progress: HashSet::new() }
+        TxnSnapshot {
+            xmin_active: 0,
+            xmax_committed: 0,
+            in_progress: HashSet::new(),
+        }
     }
 
     /// Create a snapshot from the explicit components.
@@ -179,7 +183,11 @@ impl TxnSnapshot {
     /// Intended for tests and for the transaction manager's capture
     /// logic; production code should prefer the manager-driven helpers
     /// in `database::transactions`.
-    pub fn new(xmin_active: TxnId, xmax_committed: TxnId, in_progress: HashSet<TxnId>) -> Self {
+    pub fn new(
+        xmin_active: TxnId,
+        xmax_committed: TxnId,
+        in_progress: HashSet<TxnId>,
+    ) -> Self {
         TxnSnapshot { xmin_active, xmax_committed, in_progress }
     }
 

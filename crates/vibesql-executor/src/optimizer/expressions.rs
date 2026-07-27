@@ -401,7 +401,8 @@ pub fn optimize_expression(
                 // NULL regardless of affinity). Numeric-affinity casts of a
                 // non-NULL constant must retain the CAST wrapper.
                 if !is_numeric_affinity || matches!(val, SqlValue::Null) {
-                    let sql_mode = evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
+                    let sql_mode =
+                        evaluator.database().map(|db| db.sql_mode()).unwrap_or_default();
                     match cast_value(val, data_type, &sql_mode) {
                         Ok(result) => return Ok(Expression::Literal(result)),
                         Err(_) => {

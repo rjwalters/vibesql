@@ -383,7 +383,9 @@ impl IndexManager {
         self.pending_expression_rebuilds
             .iter()
             .filter_map(|key| {
-                self.indexes.get(key).map(|meta| (meta.index_name.clone(), meta.table_name.clone()))
+                self.indexes
+                    .get(key)
+                    .map(|meta| (meta.index_name.clone(), meta.table_name.clone()))
             })
             .collect()
     }
@@ -872,7 +874,10 @@ mod tests {
                 where_clause: None,
             },
         );
-        manager.index_data.insert(index_name.to_string(), IndexData::InMemory { data });
+        manager.index_data.insert(
+            index_name.to_string(),
+            IndexData::InMemory { data },
+        );
 
         manager.spill_index_to_disk(index_name).unwrap();
 
@@ -930,7 +935,10 @@ mod tests {
                     where_clause: None,
                 },
             );
-            manager.index_data.insert(index_name.to_string(), IndexData::InMemory { data });
+            manager.index_data.insert(
+                index_name.to_string(),
+                IndexData::InMemory { data },
+            );
 
             manager.spill_index_to_disk(index_name).unwrap();
 
@@ -1001,7 +1009,10 @@ mod tests {
                 where_clause: None,
             },
         );
-        manager.index_data.insert(index_name.to_string(), IndexData::InMemory { data });
+        manager.index_data.insert(
+            index_name.to_string(),
+            IndexData::InMemory { data },
+        );
 
         manager.spill_index_to_disk(index_name).unwrap();
         match manager.index_data.get(index_name).unwrap() {
@@ -1131,13 +1142,19 @@ mod tests {
         let mut mem_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         mem_data.entry(vec![normalize_int(10)]).or_default().push(0);
         manager.indexes.insert("idx_mem".to_string(), mk_meta("idx_mem"));
-        manager.index_data.insert("idx_mem".to_string(), IndexData::InMemory { data: mem_data });
+        manager.index_data.insert(
+            "idx_mem".to_string(),
+            IndexData::InMemory { data: mem_data },
+        );
 
         // Disk-backed (spilled) index.
         let mut disk_data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
         disk_data.entry(vec![normalize_int(10)]).or_default().push(0);
         manager.indexes.insert("idx_disk".to_string(), mk_meta("idx_disk"));
-        manager.index_data.insert("idx_disk".to_string(), IndexData::InMemory { data: disk_data });
+        manager.index_data.insert(
+            "idx_disk".to_string(),
+            IndexData::InMemory { data: disk_data },
+        );
         manager.spill_index_to_disk("idx_disk").unwrap();
 
         // BEGIN: copy-on-write snapshot of the whole manager (restores in-memory
@@ -1740,7 +1757,12 @@ mod tests {
         assert_eq!(sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3), vec![0, 1, 2]);
 
         // DELETE row 0 (the closest to the query) without compaction.
-        manager.update_indexes_for_delete_with_values("v", &schema, &rows[0].values, 0);
+        manager.update_indexes_for_delete_with_values(
+            "v",
+            &schema,
+            &rows[0].values,
+            0,
+        );
 
         let ids = sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3);
         assert!(!ids.contains(&0), "deleted row 0 must not be returned: {:?}", ids);
@@ -1842,9 +1864,7 @@ mod tests {
         assert_eq!(near_origin[0].0, 1, "updated vector must be findable at its new location");
 
         match manager.index_data.get("idx_vec").unwrap() {
-            IndexData::Hnsw { index } => {
-                assert_eq!(index.len(), 2, "still two vectors after update")
-            }
+            IndexData::Hnsw { index } => assert_eq!(index.len(), 2, "still two vectors after update"),
             other => panic!("expected Hnsw, got {:?}", other),
         }
     }

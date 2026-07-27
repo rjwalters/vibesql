@@ -1811,10 +1811,10 @@ impl CombinedExpressionEvaluator<'_> {
             // collation (including its default BINARY) blocks fallback to the
             // right; an explicit COLLATE on either side wins first (rule 1).
             // `tuple_on_left` decides which side is the left operand.
-            let tuple_operand =
-                crate::evaluator::collation::operand_column_collation(tuple_expr, &|col_id| {
-                    self.column_collation_of(col_id)
-                });
+            let tuple_operand = crate::evaluator::collation::operand_column_collation(
+                tuple_expr,
+                &|col_id| self.column_collation_of(col_id),
+            );
             let sub_operand = sub_collations[idx].clone();
             let (left_operand, right_operand) = if tuple_on_left {
                 (tuple_operand, sub_operand)

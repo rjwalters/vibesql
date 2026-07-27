@@ -715,14 +715,16 @@ impl Database {
         // Broadcast change event to subscribers, carrying BOTH the pre-image and
         // post-image single-column PK so consumers can reason about a row that
         // moves into or out of a filter (or whose PK itself changed) (#5472).
-        let pk =
-            match (single_pk_identity(&schema, &old_row), single_pk_identity(&schema, &new_row)) {
-                (Some(old_pk), Some(new_pk)) => {
-                    Some(ChangeEventPk::updated(old_pk.column, old_pk.value, new_pk.value))
-                }
-                // If either image's PK is unavailable, fall back to no PK (re-query).
-                _ => None,
-            };
+        let pk = match (
+            single_pk_identity(&schema, &old_row),
+            single_pk_identity(&schema, &new_row),
+        ) {
+            (Some(old_pk), Some(new_pk)) => {
+                Some(ChangeEventPk::updated(old_pk.column, old_pk.value, new_pk.value))
+            }
+            // If either image's PK is unavailable, fall back to no PK (re-query).
+            _ => None,
+        };
         self.broadcast_change(ChangeEvent::Update {
             table_name: resolved_name.clone(),
             row_index,
