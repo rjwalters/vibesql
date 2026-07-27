@@ -81,6 +81,14 @@ pub struct Catalog {
     /// When true, identifier lookups are case-sensitive (SQL standard).
     /// When false (default), identifier lookups are case-insensitive (MySQL compatible).
     pub(crate) case_sensitive_identifiers: bool,
+    /// When true, unqualified table-name resolution does NOT consult the session
+    /// temp schema — it resolves against the main schema only. This models
+    /// SQLite's rule that a trigger created in the `main` (or an attached)
+    /// database resolves the unqualified table names in its body against its own
+    /// database, ignoring temp tables (trigger1-3.2..3.5). It is toggled on only
+    /// for the duration of a non-temp trigger body's execution and restored
+    /// afterward. Default `false` (temp shadows main) everywhere else.
+    pub(crate) suppress_temp_shadowing: bool,
 }
 
 impl Catalog {
@@ -123,6 +131,9 @@ impl Catalog {
             // The parser preserves original case from SQL text. We use case-insensitive
             // mode so lookups work regardless of case in queries.
             case_sensitive_identifiers: false,
+            // Temp shadowing is active by default; only a non-temp trigger body
+            // suppresses it (see field docs).
+            suppress_temp_shadowing: false,
         };
 
         // Create the default schema (SQLite uses "main")
@@ -199,6 +210,24 @@ impl Catalog {
     /// Check if identifier lookups are case-sensitive
     pub fn is_case_sensitive_identifiers(&self) -> bool {
         self.case_sensitive_identifiers
+    }
+
+    /// Suppress (or restore) temp-schema shadowing for unqualified table lookups.
+    ///
+    /// When enabled, unqualified table-name resolution ignores the session temp
+    /// schema and resolves against the main schema only. Used to model SQLite's
+    /// rule that a non-temp trigger's body resolves unqualified names against the
+    /// trigger's own (main) database — a `main` trigger cannot see a TEMP table
+    /// of the same name (trigger1-3.2..3.5). Returns the previous value so the
+    /// caller can restore it (correct nesting of trigger bodies).
+    pub fn set_suppress_temp_shadowing(&mut self, suppress: bool) -> bool {
+        std::mem::replace(&mut self.suppress_temp_shadowing, suppress)
+    }
+
+    /// Whether temp-schema shadowing is currently suppressed for unqualified
+    /// table lookups (see [`Self::set_suppress_temp_shadowing`]).
+    pub fn is_temp_shadowing_suppressed(&self) -> bool {
+        self.suppress_temp_shadowing
     }
 
     /// Normalize an identifier for lookup (applies case folding if case-insensitive mode)

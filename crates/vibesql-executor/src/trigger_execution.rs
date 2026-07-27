@@ -796,6 +796,17 @@ impl TriggerFirer {
         // the changes() the calling statement observes (e_changes-5.2/6.x/7.x).
         let saved_changes = db.last_changes_count();
 
+        // Scope unqualified table-name resolution in the body to the trigger's
+        // own schema. SQLite resolves the names in a non-temp trigger's body
+        // against the database the trigger belongs to, so a `main` trigger
+        // cannot see a TEMP table of the same name — an unqualified reference to
+        // a table that exists only in temp fails with `no such table: main.<t>`
+        // (trigger1-3.2..3.5). A TEMP trigger keeps normal resolution (temp
+        // shadows main). Nested trigger bodies restore the prior value, so a
+        // temp trigger fired from within a main trigger regains temp visibility.
+        let suppress_temp = !trigger.is_temp();
+        let prev_suppress = db.catalog.set_suppress_temp_shadowing(suppress_temp);
+
         // Execute each statement in the trigger body with trigger context.
         // A RAISE(IGNORE) inside any statement abandons the rest of this
         // trigger's action for the current row and asks the caller to skip the
@@ -810,7 +821,9 @@ impl TriggerFirer {
                 }
                 Err(e) => {
                     // Restore before propagating so a failed trigger body does
-                    // not corrupt the caller's changes() value.
+                    // not corrupt the caller's changes() value or leak the
+                    // temp-shadowing suppression to the caller.
+                    db.catalog.set_suppress_temp_shadowing(prev_suppress);
                     db.set_last_changes_count(saved_changes);
                     // A trigger body statement referencing a table that does not
                     // exist errors `no such table: main.<name>` when the trigger
@@ -819,15 +832,17 @@ impl TriggerFirer {
                     // schema and qualifies the "missing" report with it
                     // (R-28818-63526; e_delete-2.2.1.1 / e_update-2.2.1). A TEMP
                     // trigger's missing target is left unqualified instead
-                    // (R-31567-38587). This only affects the *message*; the
-                    // lookup itself still uses the connection's normal
-                    // temp-then-main search order.
-                    let e = if trigger.is_temp() { e } else { e.with_main_schema_qualifier() };
+                    // (R-31567-38587). With temp shadowing suppressed above, an
+                    // unqualified body reference to a table that exists only in
+                    // temp actually fails the lookup (not just the message),
+                    // matching SQLite (trigger1-3.2..3.5).
+                    let e = if suppress_temp { e.with_main_schema_qualifier() } else { e };
                     return Err(e);
                 }
             }
         }
 
+        db.catalog.set_suppress_temp_shadowing(prev_suppress);
         db.set_last_changes_count(saved_changes);
         Ok(outcome)
     }
