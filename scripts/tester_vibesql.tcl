@@ -6502,8 +6502,21 @@ proc do_test {name script expected} {
 
     if {[catch {uplevel 1 $script} result]} {
         # Check for cascading failure from skipped ATTACH test
+        #
+        # Most ATTACH-dependent cascades are SQL-level ("no such table" when
+        # a later test reads a table an unrun ATTACH-gated setup never
+        # created). But some ATTACH-gated setup blocks (e.g. pragma2.test's
+        # `ifcapable attach` section) create their own on-disk sibling file
+        # (`ATTACH 'test2.db' AS aux; ...`), and a later test-scoped Tcl
+        # command like `[file size test2.db]` fails at the Tcl-command level
+        # rather than the SQL level when that file was never created — a
+        # distinct, recognizable Tcl-native error ("could not read "<path>":
+        # no such file or directory") rather than a SQL error string.
+        # Recognize this variant too so it cascades to the same documented
+        # skip instead of surfacing as an unrelated FAILED (#6175).
         if {[info exists ::attach_skipped] && $::attach_skipped &&
-            [string match "*no such table*" $result]} {
+            ([string match "*no such table*" $result]
+                || [string match "*could not read *: no such file or directory*" $result])} {
             # Treat as skipped due to ATTACH dependency cascade
             incr ::nTest -1  ;# Don't count this as a run test
             omit_test $name "cascading from skipped ATTACH test"
