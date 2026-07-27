@@ -393,3 +393,36 @@ fn test_parse_cte_named_level() {
     let result = Parser::parse_sql("WITH level AS (SELECT 1) SELECT * FROM level;");
     assert!(result.is_ok(), "CTE named `level` should parse: {:?}", result);
 }
+
+#[test]
+fn test_parse_cte_trailing_comma_reports_offending_token() {
+    // A trailing comma in the WITH list leaves the parser expecting another CTE
+    // name; SQLite reports the offending token, not an internal expectation
+    // string: `near "SELECT": syntax error` (with1.test 3.6).
+    let result = Parser::parse_sql("WITH tmp AS ( SELECT 1 ), SELECT * FROM tmp;");
+    assert!(result.is_err(), "trailing comma in WITH list should not parse");
+    let msg = result.unwrap_err().message;
+    assert_eq!(msg, "near \"SELECT\": syntax error", "Unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_parse_cte_empty_column_list_is_syntax_error() {
+    // An empty CTE column list `t()` is a syntax error reported against the `)`
+    // token in SQLite: `near ")": syntax error` (with2.test 4.1).
+    let result = Parser::parse_sql("WITH x() AS ( SELECT 1,2,3 ) SELECT * FROM x;");
+    assert!(result.is_err(), "empty CTE column list should not parse");
+    let msg = result.unwrap_err().message;
+    assert_eq!(msg, "near \")\": syntax error", "Unexpected error message: {}", msg);
+}
+
+#[test]
+fn test_parse_cte_empty_column_list_via_arena_fallback() {
+    // The arena parser handles `WITH ...` first; it must reject an empty column
+    // list so the statement falls back to the standard parser and surfaces the
+    // SQLite-compatible `near ")": syntax error` rather than silently accepting a
+    // zero-column CTE (with2.test 4.1).
+    let result = crate::parse_with_arena_fallback("WITH x() AS ( SELECT 1,2,3 ) SELECT * FROM x;");
+    assert!(result.is_err(), "empty CTE column list should not parse via arena fallback");
+    let msg = result.unwrap_err().message;
+    assert_eq!(msg, "near \")\": syntax error", "Unexpected error message: {}", msg);
+}
