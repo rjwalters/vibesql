@@ -28,7 +28,7 @@
 - **Python bindings** with DB-API 2.0 interface
 - **WebAssembly** - runs in the browser
 
-Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/loomhq/loom).
+Built entirely by AI agents using [Claude Code](https://claude.com/claude-code) and [Loom](https://github.com/rjwalters/loom).
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ cargo build --release
 cargo run --release --bin vibesql
 
 # Or try the web demo
-cd web-demo && npm install && npm run dev
+cd web-demo && pnpm install && pnpm dev
 ```
 
 ### CLI Example

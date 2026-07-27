@@ -92,9 +92,9 @@ The project uses a **systematic punchlist approach** to achieve 100% SQLLogicTes
 
 ### Published Resources
 
-- **Punchlist Results**: `https://rjwalters.github.io/vibesql/badges/sqllogictest_punchlist.json`
-- **Badge Endpoint**: `https://img.shields.io/endpoint?url=https://rjwalters.github.io/vibesql/badges/sqllogictest.json`
-- **Conformance Report**: `https://rjwalters.github.io/vibesql/conformance.html`
+- **Punchlist Results**: `https://vibesql.org/badges/sqllogictest_punchlist.json`
+- **Badge Endpoint**: `https://img.shields.io/endpoint?url=https://vibesql.org/badges/sqllogictest.json`
+- **Conformance Report**: `https://vibesql.org/conformance.html`
 
 ## Maintenance
 

@@ -540,8 +540,8 @@ python3 scripts/query_test_results.py --preset progress
 ## File Organization
 
 ### Key Documentation
-- `SQLLOGICTEST_ROADMAP.md` - High-level roadmap with priority matrix
-- `TESTING.md` - Testing strategy and methodology
+- `SQLLOGICTEST_ROADMAP_ARCHIVED.md` - High-level roadmap with priority matrix
+- `../testing/TESTING_STRATEGY.md` - Testing strategy and methodology
 - `SQLLOGICTEST_ISSUES.md` - Known issues and investigation notes
 
 ### Test Scripts
@@ -633,8 +633,8 @@ rm target/sqllogictest_results.sql
 ## References
 
 - [SQLLogicTest Suite](https://github.com/duckdb/sqllogictest)
-- [Roadmap](./SQLLOGICTEST_ROADMAP.md) - Target improvements and priorities
-- [Strategy](./TESTING.md) - Testing methodology and approach
+- [Roadmap](./SQLLOGICTEST_ROADMAP_ARCHIVED.md) - Target improvements and priorities
+- [Strategy](../testing/TESTING_STRATEGY.md) - Testing methodology and approach
 - [Known Issues](./SQLLOGICTEST_ISSUES.md) - Documented bugs and blockers
 
 ---

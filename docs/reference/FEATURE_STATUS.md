@@ -111,7 +111,7 @@ This document provides a detailed breakdown of implemented features in VibeSQL a
 
 ## See Also
 
-- [SQL:1999 Conformance Report](https://rjwalters.github.io/vibesql/conformance.html) - Detailed conformance test results
+- [SQL:1999 Conformance Report](https://vibesql.org/conformance.html) - Detailed conformance test results
 - [Roadmap](../ROADMAP.md) - Future development plans
 - [CLI Guide](../CLI_GUIDE.md) - Complete CLI documentation
 - [HTTP API](../http-api.md) - REST and GraphQL endpoints

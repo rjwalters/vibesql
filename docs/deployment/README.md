@@ -4,10 +4,11 @@ This directory contains guides for deploying and configuring the VibeSQL web dem
 
 ## Current Setup
 
-The web demo is deployed to GitHub Pages at:
-- **URL**: https://rjwalters.github.io/vibesql/
-- **Workflow**: `.github/workflows/deploy-pages.yml`
-- **Trigger**: Automatic on push to `main`, or manual dispatch
+The web demo is deployed to Cloudflare Pages at:
+- **URL**: https://vibesql.org/
+- **Config**: `web-demo/wrangler.toml` (project `vibesql`, output dir `dist`)
+- **Trigger**: Manual — run `wrangler deploy` from `web-demo/` on the `main` branch.
+  There is no automatic deploy workflow (see `.github/workflows/ci-main.yml`).
 
 ## Guides
 
@@ -18,28 +19,28 @@ The web demo is deployed to GitHub Pages at:
 | Format | WASM Size | Savings |
 |--------|-----------|---------|
 | Raw | 5.3 MB | - |
-| Gzip (GitHub Pages default) | 1.5 MB | 72% |
-| Brotli (with Cloudflare) | 1.0 MB | 81% |
+| Gzip | 1.5 MB | 72% |
+| Brotli (Cloudflare default) | 1.0 MB | 81% |
 
 ## Quick Reference
 
 ### Manual Redeploy
 
 ```bash
-# Trigger manual deployment via GitHub CLI
-gh workflow run deploy-pages.yml
+# Build and deploy to Cloudflare Pages
+cd web-demo && pnpm build && wrangler deploy
 ```
 
 ### Check Deployment Status
 
 ```bash
-# View recent deployments
-gh run list --workflow=deploy-pages.yml
+# List recent Cloudflare Pages deployments
+cd web-demo && wrangler pages deployment list
 ```
 
 ### Verify Compression
 
 ```bash
-# Check current compression (should show gzip or br)
-curl -I -H "Accept-Encoding: br, gzip" https://rjwalters.github.io/vibesql/pkg/vibesql_wasm_bg.wasm 2>/dev/null | grep -i content-encoding
+# Check current compression (should show br)
+curl -I -H "Accept-Encoding: br, gzip" https://vibesql.org/pkg/vibesql_wasm_bg.wasm 2>/dev/null | grep -i content-encoding
 ```

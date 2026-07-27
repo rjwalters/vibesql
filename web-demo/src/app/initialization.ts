@@ -6,7 +6,7 @@ import { DatabaseManager } from './database-manager'
 import { EditorManager } from './editor-manager'
 import { loadMonaco } from '../editor/monaco-loader'
 
-const DEFAULT_SQL = `-- Welcome to NIST MemSQL Web Studio!
+const DEFAULT_SQL = `-- Welcome to VibeSQL Web Studio!
 -- Press Ctrl/Cmd + Enter to run queries
 -- Sample employees table is pre-loaded with 6 rows
 
