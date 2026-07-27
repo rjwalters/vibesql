@@ -8053,6 +8053,25 @@ proc forcedelete {args} {
     }
 }
 
+proc delete_file {args} {
+    # SQLite test utility: delete one or more files. In the canonical harness
+    # this is a pure-Tcl proc in tester.tcl (the non-`-force` sibling of
+    # `forcedelete`, via `do_delete_file false`), NOT a C testfixture command —
+    # so adding it here is straightforward parity with the real harness, not a
+    # stub for an unreachable engine primitive. The shim previously omitted it,
+    # so each file-scope `delete_file` call (pragma.test / pragma2.test remove
+    # stale database files between test sections) aborted at file scope and was
+    # recorded as a synthetic `filescope-err` failure (#6175).
+    #
+    # Delegate to forcedelete: VibeSQL correctness requires the same WAL /
+    # checkpoint / lock sibling cleanup (otherwise the next open of the same
+    # path replays the old WAL and the "deleted" database resurrects), plus the
+    # same "test.db" -> per-run temp-file mapping. The force-vs-non-force
+    # distinction is immaterial for the plain database files these tests target
+    # (mirrors copy_file / forcecopy both routing through copy_db_with_wal).
+    forcedelete {*}$args
+}
+
 proc copy_file {from to} {
     # SQLite test utility: copy a database file (used by malloc/recovery
     # tests to snapshot and restore db state). The shim's per-statement
