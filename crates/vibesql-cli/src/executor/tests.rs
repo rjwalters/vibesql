@@ -661,6 +661,71 @@ fn test_pragma_integrity_check_with_table_argument() {
 }
 
 #[test]
+fn test_pragma_table_info_verbatim_type_and_default() {
+    // PRAGMA table_info echoes the declared type verbatim (only bracket/quote
+    // delimiters stripped) and the verbatim DEFAULT source text, matching
+    // SQLite (pragma-6.7). Columns: cid, name, type, notnull, dflt_value, pk.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor
+        .execute(
+            "CREATE TABLE test_table(\
+                one INT NOT NULL DEFAULT -1, \
+                two text, \
+                three VARCHAR(45, 65) DEFAULT 'abcde', \
+                four REAL DEFAULT X'abcdef', \
+                five DEFAULT CURRENT_TIME)",
+        )
+        .unwrap();
+    let result = executor.execute("PRAGMA table_info(test_table)").unwrap();
+    let expect: Vec<(&str, &str, &str, Option<&str>)> = vec![
+        ("one", "INT", "1", Some("-1")),
+        // `text` (lowercase) canonicalizes to `TEXT`; a column with no DEFAULT
+        // reports NULL.
+        ("two", "TEXT", "0", None),
+        // Two-argument VARCHAR the affinity mapping cannot round-trip is echoed
+        // verbatim, and the string default keeps its quotes.
+        ("three", "VARCHAR(45, 65)", "0", Some("'abcde'")),
+        // Blob-literal default preserves SQLite's `X'..'` spelling (not the
+        // ToSql `x'ABCDEF'` re-render).
+        ("four", "REAL", "0", Some("X'abcdef'")),
+        // Typeless column reports an empty type; CURRENT_TIME default verbatim.
+        ("five", "", "0", Some("CURRENT_TIME")),
+    ];
+    assert_eq!(result.row_count, expect.len());
+    for (i, (name, ty, notnull, dflt)) in expect.into_iter().enumerate() {
+        assert_eq!(result.rows[i][1].as_deref(), Some(name), "name row {i}");
+        assert_eq!(result.rows[i][2].as_deref(), Some(ty), "type row {i}");
+        assert_eq!(result.rows[i][3].as_deref(), Some(notnull), "notnull row {i}");
+        assert_eq!(result.rows[i][4].as_deref(), dflt, "dflt_value row {i}");
+    }
+}
+
+#[test]
+fn test_pragma_table_info_strips_type_delimiters() {
+    // Bracketed / double-quoted type names report the inner name only
+    // (pragma-6.2): `[TYPE_Y]` -> `TYPE_Y`, `"TYPE_Z"` -> `TYPE_Z`. A plain
+    // user type is echoed unchanged.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor
+        .execute("CREATE TABLE t2(a TYPE_X, b [TYPE_Y], c \"TYPE_Z\")")
+        .unwrap();
+    let result = executor.execute("PRAGMA table_info(t2)").unwrap();
+    assert_eq!(result.rows[0][2].as_deref(), Some("TYPE_X"));
+    assert_eq!(result.rows[1][2].as_deref(), Some("TYPE_Y"));
+    assert_eq!(result.rows[2][2].as_deref(), Some("TYPE_Z"));
+}
+
+#[test]
+fn test_pragma_table_info_default_strips_outer_parens() {
+    // A parenthesized DEFAULT expression reports without its single outer paren
+    // pair, matching SQLite (`DEFAULT (5+3)` -> `5+3`, pragma-6.2.2).
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t9(b DEFAULT (5+3))").unwrap();
+    let result = executor.execute("PRAGMA table_info(t9)").unwrap();
+    assert_eq!(result.rows[0][4].as_deref(), Some("5+3"));
+}
+
+#[test]
 fn test_pragma_database_list_memory_no_temp() {
     // An in-memory session with no temp objects reports exactly one row:
     // seq=0, name=main, file="" — matching sqlite3 3.51.0, which omits the

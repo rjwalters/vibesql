@@ -196,9 +196,17 @@ impl Parser {
             // SQLite also allows DEFAULT to appear interleaved with column constraints
             // (e.g. `idx UNIQUE DEFAULT NULL`), so `parse_column_constraints` below may
             // also consume a DEFAULT clause and return it via its second tuple element.
+            // Verbatim source text of the DEFAULT expression, captured so
+            // PRAGMA table_info can echo the original spelling (#6175). A DEFAULT
+            // may appear here (before constraints) or interleaved with them
+            // (captured as `mid_default_source` below).
+            let mut default_source: Option<String> = None;
             let mut default_value = if self.peek_keyword(Keyword::Default) {
                 self.advance(); // consume DEFAULT
-                Some(Box::new(self.parse_expression()?))
+                let default_start = self.current_position();
+                let expr = self.parse_expression()?;
+                default_source = self.source_between(default_start, self.current_position());
+                Some(Box::new(expr))
             } else {
                 None
             };
@@ -225,7 +233,8 @@ impl Parser {
             // Parse column constraints (which may include NOT NULL, an
             // interleaved DEFAULT, and — in any order — a generated-column
             // `[GENERATED ALWAYS] AS (expr)` clause).
-            let (constraints, mid_default, mid_generated) = self.parse_column_constraints()?;
+            let (constraints, mid_default, mid_generated, mid_default_source) =
+                self.parse_column_constraints()?;
             if let Some(d) = mid_default {
                 if default_value.is_some() {
                     return Err(ParseError {
@@ -233,6 +242,7 @@ impl Parser {
                     });
                 }
                 default_value = Some(d);
+                default_source = mid_default_source;
             }
             if let Some(g) = mid_generated {
                 if generated_expr.is_some() {
@@ -260,6 +270,14 @@ impl Parser {
             let nullable = !constraints
                 .iter()
                 .any(|c| matches!(&c.kind, vibesql_ast::ColumnConstraintKind::NotNull));
+
+            // Record the verbatim DEFAULT source for PRAGMA table_info (#6175),
+            // keyed by lowercase column name. Only recorded when both a default
+            // and its captured source text are present (source capture requires
+            // the parser to have been built with source/span info).
+            if let Some(src) = default_source {
+                self.column_default_sources.push((name.to_lowercase(), src));
+            }
 
             columns.push(vibesql_ast::ColumnDef {
                 name,

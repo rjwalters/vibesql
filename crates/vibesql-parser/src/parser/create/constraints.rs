@@ -373,12 +373,17 @@ impl Parser {
             Vec<vibesql_ast::ColumnConstraint>,
             Option<Box<vibesql_ast::Expression>>,
             Option<Box<vibesql_ast::Expression>>,
+            Option<String>,
         ),
         ParseError,
     > {
         let mut constraints = Vec::new();
         let mut default_value: Option<Box<vibesql_ast::Expression>> = None;
         let mut generated_expr: Option<Box<vibesql_ast::Expression>> = None;
+        // Verbatim source text of an interleaved DEFAULT expression, captured so
+        // PRAGMA table_info can echo the original spelling (#6175). See
+        // `Parser::parse_sql_with_default_sources`.
+        let mut default_source: Option<String> = None;
 
         loop {
             // Check for optional CONSTRAINT keyword
@@ -413,12 +418,14 @@ impl Parser {
                         });
                     }
                     self.advance(); // consume DEFAULT
+                    let default_start = self.current_position();
                     let expr = self.parse_expression()?;
                     if default_value.is_some() {
                         return Err(ParseError {
                             message: "Multiple DEFAULT clauses for the same column".to_string(),
                         });
                     }
+                    default_source = self.source_between(default_start, self.current_position());
                     default_value = Some(Box::new(expr));
                 }
                 Token::Keyword { keyword: Keyword::Null, .. } => {
@@ -641,7 +648,7 @@ impl Parser {
             }
         }
 
-        Ok((constraints, default_value, generated_expr))
+        Ok((constraints, default_value, generated_expr, default_source))
     }
 
     /// Absorb trailing, body-less `CONSTRAINT <name>` clauses that SQLite accepts
