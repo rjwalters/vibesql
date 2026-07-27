@@ -82,6 +82,79 @@ fn insert_or_fail_keeps_rows_applied_before_the_conflict() {
 }
 
 #[test]
+fn update_or_fail_surfaces_not_null_violation_on_a_later_row() {
+    // Doctor regression for #6193: `UPDATE OR FAIL` that hits a NOT NULL
+    // violation on a NON-first row must (a) keep the rows updated before it and
+    // (b) still surface the NOT NULL error — not silently report success.
+    //
+    // The bug: the collect loop stashed `fail_error = Some(NOT NULL...)` and
+    // broke, but the unconditional `fail_error = truncate_updates_for_or_fail(..)`
+    // that follows overwrote it back to `None` whenever the collected prefix had
+    // no PK/UNIQUE conflict among itself (the common case) — discarding the real
+    // error. Here row 1's update is applied, row 2 (b -> NULL) is the offending
+    // row, and there is no PK/UNIQUE conflict in the kept prefix.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t(a INTEGER PRIMARY KEY, b INTEGER NOT NULL)").unwrap();
+    exec(&mut db, "INSERT INTO t VALUES(1,1),(2,2),(3,3)").unwrap();
+
+    let err = exec(
+        &mut db,
+        "UPDATE OR FAIL t SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("NOT NULL constraint failed"),
+        "expected a NOT NULL error, got: {err}"
+    );
+
+    // Row 1's update (b = 100) was applied before the offending row and is kept;
+    // rows 2 and 3 are untouched (the statement stopped at row 2).
+    assert_eq!(
+        query_all(&db, "SELECT a, b FROM t ORDER BY a"),
+        vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(100),
+            SqlValue::Integer(2),
+            SqlValue::Integer(2),
+            SqlValue::Integer(3),
+            SqlValue::Integer(3),
+        ]
+    );
+}
+
+#[test]
+fn update_or_fail_surfaces_not_null_violation_without_a_primary_key() {
+    // Same as above but with no PRIMARY KEY / UNIQUE key space at all, so
+    // `truncate_updates_for_or_fail` returns `None` via its empty-key-spaces
+    // early-out — the pre-existing NOT NULL error must survive that path too.
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t2(a INTEGER, b INTEGER NOT NULL)").unwrap();
+    exec(&mut db, "INSERT INTO t2 VALUES(1,1),(2,2),(3,3)").unwrap();
+
+    let err = exec(
+        &mut db,
+        "UPDATE OR FAIL t2 SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("NOT NULL constraint failed"),
+        "expected a NOT NULL error, got: {err}"
+    );
+
+    assert_eq!(
+        query_all(&db, "SELECT a, b FROM t2 ORDER BY a"),
+        vec![
+            SqlValue::Integer(1),
+            SqlValue::Integer(100),
+            SqlValue::Integer(2),
+            SqlValue::Integer(2),
+            SqlValue::Integer(3),
+            SqlValue::Integer(3),
+        ]
+    );
+}
+
+#[test]
 fn insert_default_abort_still_discards_the_whole_statement() {
     // Regression guard: without an OR clause (default ABORT), a multi-row
     // conflict must still roll back every row the statement applied,

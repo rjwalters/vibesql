@@ -618,13 +618,27 @@ pub(super) fn execute_internal(
             let table_for_check = database
                 .get_table(table_name)
                 .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
-            fail_error = index_sync::truncate_updates_for_or_fail(
+
+            // `fail_error` may already hold a NOT NULL / CHECK violation stashed
+            // by the collect loop when it `break`ed at the offending row (rows
+            // before it are kept in `updates`). `truncate_updates_for_or_fail`
+            // must still run — a PK/UNIQUE conflict among that already-collected
+            // prefix happens at an EARLIER row than the NOT NULL/CHECK stop and
+            // so takes precedence, cutting `updates` even shorter. But when it
+            // finds no such conflict it returns `None`, and that `None` must NOT
+            // clobber the pre-existing NOT NULL/CHECK error — otherwise the whole
+            // statement silently reports success (the #6193 doctor bug). So only
+            // let a Some(err) result replace `fail_error`; keep the original
+            // otherwise.
+            if let Some(err) = index_sync::truncate_updates_for_or_fail(
                 &mut updates,
                 schema,
                 table_for_check,
                 database,
                 table_name,
-            );
+            ) {
+                fail_error = Some(err);
+            }
 
             // Rowid relocation conflicts keep the existing all-or-nothing check
             // (a narrower, documented gap — not exercised by e_update.test): if
