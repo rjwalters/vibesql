@@ -808,6 +808,15 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (RAISE\(\) may only be used within a trigger-program)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # A TEMP trigger given a non-temp qualified name (trigger7-1.1), and a trigger
+    # name qualified with a database VibeSQL does not know (trigger7-1.2). SQLite
+    # returns both semantic messages verbatim, not wrapped as a syntax error.
+    if {[regexp -nocase {^Parse error: (temporary trigger may not have qualified name)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    if {[regexp {^Parse error: (unknown database .+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Trigger-body DML restrictions (ticket #3947, trigger1-16.1..16.7) — a
     # schema-qualified DML target, or an INDEXED BY / NOT INDEXED clause on a
     # body UPDATE/DELETE. SQLite returns each of these verbatim, not wrapped.

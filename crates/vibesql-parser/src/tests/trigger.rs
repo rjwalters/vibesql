@@ -676,6 +676,20 @@ fn test_create_temp_trigger_with_non_temp_schema_rejected() {
 }
 
 #[test]
+fn test_create_trigger_temporary_qualifier_is_unknown_database() {
+    // `TEMPORARY` is only a keyword synonym for `TEMP` in
+    // `CREATE TEMPORARY TRIGGER` syntax — it is NOT a valid `schema.object`
+    // qualifier. Real sqlite3 (3.51.0) rejects `CREATE TRIGGER temporary.r1 ...`
+    // with `unknown database temporary`, exactly as it rejects any other
+    // unrecognized qualifier. It must not be accepted as an alias of `temp`.
+    let err = Parser::parse_sql(
+        "CREATE TRIGGER temporary.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;",
+    )
+    .expect_err("CREATE TRIGGER temporary.r1 must be rejected as unknown database");
+    assert_eq!(err.message, "unknown database temporary", "got: {}", err.message);
+}
+
+#[test]
 fn test_create_temp_table_and_view_still_parse() {
     // Regression checks: the CREATE TEMP dispatch must keep routing TABLE and
     // VIEW correctly after learning about TRIGGER.
