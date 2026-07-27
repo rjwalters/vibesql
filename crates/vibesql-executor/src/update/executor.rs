@@ -623,7 +623,7 @@ pub(super) fn execute_internal(
 
         if !rows_to_delete_for_replace.is_empty() {
             // Get rows for index cleanup
-            let mut rows_for_index: Vec<(usize, Row)> = rows_to_delete_for_replace
+            let rows_for_index: Vec<(usize, Row)> = rows_to_delete_for_replace
                 .iter()
                 .filter_map(|&idx| table.scan().get(idx).map(|r| (idx, r.clone())))
                 .collect();
@@ -647,17 +647,42 @@ pub(super) fn execute_internal(
                 .is_some()
                 && database.recursive_triggers();
 
-            // Fire BEFORE DELETE triggers for each conflicting row before it is
-            // removed. A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that
-            // row's deletion (#5418 parity): drop it from the to-delete set so
-            // the conflicting row survives.
+            // SQLite processes REPLACE conflict-resolution deletes INTERLEAVED
+            // when DELETE triggers fire: for each conflicting row R it runs
+            // BEFORE DELETE on R, physically removes R, then runs AFTER DELETE on
+            // R, *before* moving to the next conflict row. A trigger body that
+            // reads the table mid-statement (e.g. `SELECT count(*) FROM t`)
+            // therefore observes the table shrink between conflict deletions
+            // (triggerC-5.1.7 / 5.2.7). Firing all BEFOREs, then batch-deleting,
+            // then all AFTERs made every trigger body observe the same stale
+            // pre-deletion state. This mirrors the INSERT OR REPLACE interleaved
+            // path in `insert/replace.rs` (#5840).
+            //
+            // A RAISE(IGNORE) in a BEFORE DELETE trigger abandons that row's
+            // deletion (#5418 parity): the conflicting row survives and may still
+            // collide with the pending UPDATE's NEW row.
             if fire_delete_triggers {
-                let mut kept = Vec::with_capacity(rows_for_index.len());
+                // Defer compaction across the whole loop so each remaining row's
+                // physical index stays valid until every conflict row is
+                // processed. If an ancestor statement already owns the iteration
+                // guard for this table, defer our compaction to it.
+                let defer_compaction = crate::compaction_guard::is_iterating(table_name);
+                let _iter_guard = crate::compaction_guard::IterationGuard::new(table_name);
+
+                // Phase 1c (Issue #5150 / #5136): capture the active txn id
+                // before any mutable borrow so we can stamp xmax on the
+                // REPLACE-conflict tombstones when MVCC is on.
+                #[cfg(feature = "mvcc_enabled")]
+                let mvcc_delete_txn_id = database.transaction_id();
+
                 // Rows whose deletion was abandoned by a BEFORE DELETE
                 // RAISE(IGNORE) — they stay live and may still collide with the
-                // pending UPDATE's NEW row.
+                // pending UPDATE's NEW row (#5490).
                 let mut abandoned: Vec<(usize, Row)> = Vec::new();
+                let mut any_deleted = false;
+
                 for (idx, row) in rows_for_index {
+                    // BEFORE(R): a RAISE(IGNORE) abandons this row's delete.
                     let outcome = crate::TriggerFirer::execute_before_triggers(
                         database,
                         table_name,
@@ -665,117 +690,147 @@ pub(super) fn execute_internal(
                         Some(&row),
                         None,
                     )?;
-                    if outcome != crate::TriggerOutcome::SkipRow {
-                        kept.push((idx, row));
-                    } else {
+                    if outcome == crate::TriggerOutcome::SkipRow {
                         abandoned.push((idx, row));
+                        continue;
                     }
-                }
-                rows_for_index = kept;
 
-                // Keep `rows_to_delete_for_replace` in sync with the rows that
-                // survived BEFORE-trigger RAISE(IGNORE) so the deletion below
-                // only tombstones the rows we actually removed.
-                let surviving: HashSet<usize> =
-                    rows_for_index.iter().map(|(idx, _)| *idx).collect();
-                rows_to_delete_for_replace.retain(|idx| surviving.contains(idx));
+                    // A trigger body may have already deleted R (e.g. a nested
+                    // DELETE on this table). Skip R rather than double-deleting.
+                    if database.get_table(table_name).map(|t| t.is_row_deleted(idx)).unwrap_or(true)
+                    {
+                        continue;
+                    }
 
-                // Issue #5490 (doctor): a BEFORE DELETE RAISE(IGNORE) that
-                // abandoned a conflict-row deletion leaves the conflicting row
-                // live. If a pending update's NEW row would land on the same
-                // PK/UNIQUE key, applying it would create a duplicate key
-                // (silent corruption). sqlite3 3.51 (recursive_triggers=ON)
-                // raises `UNIQUE constraint failed: <table>.<col>` and leaves
-                // the table unchanged — so detect the collision here, BEFORE any
-                // storage mutation, and abort.
-                detect_surviving_replace_conflict(
-                    &updates, schema, &abandoned, database, table_name,
-                )?;
-            }
+                    // Per-row index maintenance (indices stay valid: compaction
+                    // is deferred to the end of the loop).
+                    let rows_refs: Vec<(usize, &Row)> = vec![(idx, &row)];
+                    database.batch_update_indexes_for_delete(table_name, &rows_refs);
+                    expression_index_maintenance::maintain_expression_indexes_for_delete(
+                        database, table_name, &row, idx,
+                    );
+                    partial_index_maintenance::maintain_partial_indexes_for_delete(
+                        database, table_name, &row, idx,
+                    );
 
-            // Update indexes before deletion
-            let rows_refs: Vec<(usize, &Row)> =
-                rows_for_index.iter().map(|(idx, row)| (*idx, row)).collect();
-            database.batch_update_indexes_for_delete(table_name, &rows_refs);
+                    // delete(R): flip the deletion bitmap for just this row so the
+                    // AFTER trigger (and the next conflict row's BEFORE trigger)
+                    // observes R as gone. Compaction is deferred.
+                    {
+                        let table_mut = database
+                            .get_table_mut(table_name)
+                            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-            // Maintain expression indexes for each deleted row
-            for (row_index, row) in &rows_for_index {
-                expression_index_maintenance::maintain_expression_indexes_for_delete(
-                    database, table_name, row, *row_index,
-                );
-                partial_index_maintenance::maintain_partial_indexes_for_delete(
-                    database, table_name, row, *row_index,
-                );
-            }
+                        #[cfg(feature = "mvcc_enabled")]
+                        if let Some(id) = mvcc_delete_txn_id {
+                            table_mut.stamp_row_xmax_inplace(idx, id);
+                        }
 
-            // Phase 1c (Issue #5150 / #5136): capture the active txn id
-            // before the mutable borrow so we can stamp xmax on the
-            // REPLACE-conflict tombstones when MVCC is on.
-            #[cfg(feature = "mvcc_enabled")]
-            let mvcc_delete_txn_id = database.transaction_id();
+                        if table_mut.mark_deleted_inplace(idx) {
+                            any_deleted = true;
+                        }
+                    }
 
-            // Delete conflicting rows
-            let table_mut = database
-                .get_table_mut(table_name)
-                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                    // Invalidate the database-level columnar cache between the
+                    // bitmap delete and the AFTER trigger so a trigger body's
+                    // `SELECT count(*)` observes the decremented count.
+                    database.invalidate_columnar_cache(table_name);
 
-            #[cfg(feature = "mvcc_enabled")]
-            if let Some(id) = mvcc_delete_txn_id {
-                for &idx in &rows_to_delete_for_replace {
-                    table_mut.stamp_row_xmax_inplace(idx, id);
-                }
-            }
-
-            let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
-
-            // Handle index maintenance based on compaction.
-            //
-            // No compaction: the deleted keys' index entries were already
-            // removed by `batch_update_indexes_for_delete`, and the
-            // bitmap-delete model keeps every surviving row's physical position
-            // stable, so no row-id renumbering is needed (issue #5524 / #5537).
-            if delete_result.compacted {
-                database.rebuild_indexes(table_name);
-                // Partial indexes need WHERE-predicate evaluation per row;
-                // the storage `rebuild_indexes` path skips them. Without
-                // this call, partial-index row indices would point at the
-                // wrong table rows after compaction (silent corruption).
-                partial_index_maintenance::rebuild_partial_indexes_after_compaction(
-                    database, table_name,
-                );
-                // Stale `updates` row indices after compaction are repaired by
-                // `remap_update_indices_after_compaction` below (re-resolves each
-                // pending update's physical slot by matching its OLD row).
-            }
-
-            // Invalidate the database-level columnar cache since rows were
-            // removed (the table-level cache is handled by delete_by_indices).
-            if delete_result.deleted_count > 0 {
-                database.invalidate_columnar_cache(table_name);
-            }
-
-            // Fire AFTER DELETE triggers for each removed conflicting row, now
-            // that it is gone (issue #5490). The trigger body observes the
-            // post-delete table state — e.g. triggerF.test's
-            // `(SELECT count(*) FROM t1)` — matching sqlite3. A RAISE(IGNORE)
-            // here cannot un-delete the row (sqlite3 3.51 keeps it deleted), so
-            // the outcome is a no-op.
-            if fire_delete_triggers {
-                for (_, row) in &rows_for_index {
+                    // AFTER(R): the row is already gone; a RAISE(IGNORE) here
+                    // cannot un-delete it, so SkipRow is a no-op.
                     let _after_outcome = crate::TriggerFirer::execute_after_triggers(
                         database,
                         table_name,
                         vibesql_ast::TriggerEvent::Delete,
-                        Some(row),
+                        Some(&row),
                         None,
                     )?;
                 }
-            }
 
-            // Re-fetch table for the remaining operations
-            let _table = database
-                .get_table(table_name)
-                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+                // Issue #5490 (doctor): a BEFORE DELETE RAISE(IGNORE) that
+                // abandoned a conflict-row deletion leaves the conflicting row
+                // live. If a pending update's NEW row would land on the same
+                // PK/UNIQUE key, applying it would create a duplicate key.
+                // sqlite3 3.51 (recursive_triggers=ON) raises
+                // `UNIQUE constraint failed: <table>.<col>`.
+                detect_surviving_replace_conflict(
+                    &updates, schema, &abandoned, database, table_name,
+                )?;
+
+                // Compact once, after every conflict row is processed (unless an
+                // ancestor interleaved loop owns compaction). If it compacts,
+                // every row index moved and the indexes must be rebuilt.
+                if any_deleted && !defer_compaction {
+                    if let Some(table_mut) = database.get_table_mut(table_name) {
+                        if table_mut.compact_if_needed() {
+                            database.rebuild_indexes(table_name);
+                            expression_index_maintenance::rebuild_expression_indexes_after_compaction(
+                                database, table_name,
+                            );
+                            partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                                database, table_name,
+                            );
+                        }
+                    }
+                }
+            } else {
+                // ---- No DELETE triggers fire: fast batch-delete path ----
+
+                // Update indexes before deletion
+                let rows_refs: Vec<(usize, &Row)> =
+                    rows_for_index.iter().map(|(idx, row)| (*idx, row)).collect();
+                database.batch_update_indexes_for_delete(table_name, &rows_refs);
+
+                // Maintain expression indexes for each deleted row
+                for (row_index, row) in &rows_for_index {
+                    expression_index_maintenance::maintain_expression_indexes_for_delete(
+                        database, table_name, row, *row_index,
+                    );
+                    partial_index_maintenance::maintain_partial_indexes_for_delete(
+                        database, table_name, row, *row_index,
+                    );
+                }
+
+                // Phase 1c (Issue #5150 / #5136): capture the active txn id
+                // before the mutable borrow so we can stamp xmax on the
+                // REPLACE-conflict tombstones when MVCC is on.
+                #[cfg(feature = "mvcc_enabled")]
+                let mvcc_delete_txn_id = database.transaction_id();
+
+                // Delete conflicting rows
+                let table_mut = database
+                    .get_table_mut(table_name)
+                    .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+                #[cfg(feature = "mvcc_enabled")]
+                if let Some(id) = mvcc_delete_txn_id {
+                    for &idx in &rows_to_delete_for_replace {
+                        table_mut.stamp_row_xmax_inplace(idx, id);
+                    }
+                }
+
+                let delete_result = table_mut.delete_by_indices_batch(&rows_to_delete_for_replace);
+
+                // No compaction: the deleted keys' index entries were already
+                // removed by `batch_update_indexes_for_delete`, and the
+                // bitmap-delete model keeps every surviving row's physical
+                // position stable, so no row-id renumbering is needed (issue
+                // #5524 / #5537).
+                if delete_result.compacted {
+                    database.rebuild_indexes(table_name);
+                    // Partial indexes need WHERE-predicate evaluation per row;
+                    // the storage `rebuild_indexes` path skips them.
+                    partial_index_maintenance::rebuild_partial_indexes_after_compaction(
+                        database, table_name,
+                    );
+                }
+
+                // Invalidate the database-level columnar cache since rows were
+                // removed (the table-level cache is handled by delete_by_indices).
+                if delete_result.deleted_count > 0 {
+                    database.invalidate_columnar_cache(table_name);
+                }
+            }
 
             // Issue #5490: deleting the conflicting row(s) above may have
             // COMPACTED the table (the storage layer compacts once the
