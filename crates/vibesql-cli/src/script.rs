@@ -137,48 +137,7 @@ impl ScriptExecutor {
                 Ok(result) => {
                     self.formatter.print_result(&result);
                     success_count += 1;
-
-                    // Auto-save after modification statements if database path is provided.
-                    //
-                    // CRITICAL: Skip auto-save while a transaction is open. Persisting
-                    // uncommitted changes turns ROLLBACK into a no-op across CLI
-                    // invocations — the .vbsql dump captures the mid-transaction state
-                    // and the next process loads it as committed. This silently broke
-                    // deferred-FK semantics in the batched TCL shim path (every fkey6
-                    // test that ran ROLLBACK after an INSERT/UPDATE/DELETE was
-                    // observed to have lost data despite the rollback succeeding
-                    // in memory). The next save naturally happens at COMMIT or
-                    // ROLLBACK statement boundary, both of which match
-                    // `is_modification_statement` only if we add them — instead, we
-                    // also force a save when the transaction state transitions back
-                    // to "no active transaction" after this statement.
-                    if let Some(ref path) = self.database_path {
-                        let in_txn = self.executor.in_transaction();
-                        let should_save = is_modification_statement(stmt) && !in_txn;
-                        // Also save on the COMMIT/ROLLBACK boundary so the
-                        // post-commit (or post-rollback) state is durable.
-                        let upper = stmt.trim().to_uppercase();
-                        let is_txn_end = !in_txn
-                            && (upper.starts_with("COMMIT")
-                                || upper.starts_with("ROLLBACK")
-                                || upper.starts_with("END"));
-                        if should_save || is_txn_end {
-                            match self.executor.save_database(path) {
-                                Ok(()) => persist_failed = false,
-                                Err(e) => {
-                                    // Loud + fail-closed (issue #5832): the WAL
-                                    // is never truncated on a failed checkpoint,
-                                    // and the process must exit non-zero.
-                                    persist_failed = true;
-                                    crate::util::report_save_failure(
-                                        path,
-                                        self.executor.wal_active(),
-                                        &e,
-                                    );
-                                }
-                            }
-                        }
-                    }
+                    self.maybe_save_after_statement(stmt, &mut persist_failed);
                 }
                 Err(e) => {
                     eprintln!(
@@ -186,6 +145,25 @@ impl ScriptExecutor {
                         vibe_msg!("script-error", index = (idx + 1) as i64, error = e.to_string())
                     );
                     error_count += 1;
+
+                    // A top-level statement that returns an error can still have
+                    // legitimately applied (and kept) some changes in memory: an
+                    // `OR FAIL` conflict clause stops at the offending row but
+                    // keeps every row applied before it (R-28518-13457), and the
+                    // per-statement transaction-scope wrapper
+                    // (`raise_scope::run_top_level_dml_with_conflict_scope`) has
+                    // already decided, before returning here, whether to commit
+                    // that partial state or roll it back to the pre-statement
+                    // snapshot. Either way, the in-memory `Database` is now the
+                    // authoritative final state for this statement — persist it
+                    // exactly like a successful statement would, so a partial
+                    // `OR FAIL` apply survives across the process boundary
+                    // instead of being silently discarded when this process
+                    // exits without saving (issue #6193). For every other error
+                    // (full rollback already applied in-memory) this just
+                    // re-persists the unchanged prior state — a no-op.
+                    self.maybe_save_after_statement(stmt, &mut persist_failed);
+
                     // SQLite compatibility:
                     //   - Outside a transaction: stop on first error (issue #4731).
                     //     SQLite's TCL interface and CLI both stop execution on
@@ -225,6 +203,51 @@ impl ScriptExecutor {
             Err(anyhow::anyhow!("failed to persist database changes; see the ERROR output above"))
         } else {
             Ok(())
+        }
+    }
+
+    /// Auto-save after a modification statement, if a database path was
+    /// provided — called after BOTH a successful and a failed
+    /// `self.executor.execute(stmt)`, since the in-memory `Database` is the
+    /// authoritative final state either way (see the call sites for why an
+    /// erroring statement can still need this, e.g. `OR FAIL`).
+    ///
+    /// CRITICAL: Skip auto-save while a transaction is open. Persisting
+    /// uncommitted changes turns ROLLBACK into a no-op across CLI
+    /// invocations — the .vbsql dump captures the mid-transaction state
+    /// and the next process loads it as committed. This silently broke
+    /// deferred-FK semantics in the batched TCL shim path (every fkey6
+    /// test that ran ROLLBACK after an INSERT/UPDATE/DELETE was
+    /// observed to have lost data despite the rollback succeeding
+    /// in memory). The next save naturally happens at COMMIT or
+    /// ROLLBACK statement boundary, both of which match
+    /// `is_modification_statement` only if we add them — instead, we
+    /// also force a save when the transaction state transitions back
+    /// to "no active transaction" after this statement.
+    fn maybe_save_after_statement(&mut self, stmt: &str, persist_failed: &mut bool) {
+        let Some(path) = self.database_path.clone() else {
+            return;
+        };
+        let in_txn = self.executor.in_transaction();
+        let should_save = is_modification_statement(stmt) && !in_txn;
+        // Also save on the COMMIT/ROLLBACK boundary so the
+        // post-commit (or post-rollback) state is durable.
+        let upper = stmt.trim().to_uppercase();
+        let is_txn_end = !in_txn
+            && (upper.starts_with("COMMIT")
+                || upper.starts_with("ROLLBACK")
+                || upper.starts_with("END"));
+        if should_save || is_txn_end {
+            match self.executor.save_database(&path) {
+                Ok(()) => *persist_failed = false,
+                Err(e) => {
+                    // Loud + fail-closed (issue #5832): the WAL
+                    // is never truncated on a failed checkpoint,
+                    // and the process must exit non-zero.
+                    *persist_failed = true;
+                    crate::util::report_save_failure(&path, self.executor.wal_active(), &e);
+                }
+            }
         }
     }
 

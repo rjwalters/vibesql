@@ -23,7 +23,7 @@ use super::{
     foreign_keys::ForeignKeyValidator,
     from_clause::{apply_update_from_matches, execute_update_from_join},
     index_sync::{
-        detect_surviving_replace_conflict, find_conflicting_rows_for_update,
+        self, detect_surviving_replace_conflict, find_conflicting_rows_for_update,
         resolve_cross_update_conflicts_for_replace, validate_cross_update_uniqueness,
         validate_post_statement_uniqueness, validate_rowid_relocation, validate_unique_relocation,
     },
@@ -365,6 +365,31 @@ pub(super) fn execute_internal(
     // Check conflict resolution clause
     let use_ignore = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Ignore));
     let use_replace = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Replace));
+    let use_fail = matches!(stmt.conflict_clause, Some(vibesql_ast::ConflictClause::Fail));
+
+    // `UPDATE OR FAIL` (SQLite conflict-resolution algorithm): a constraint
+    // violation stops the statement at the offending row, but — unlike the
+    // default ABORT — the rows already collected/applied before that row are
+    // KEPT rather than rolled back (e_update-1.8.3/1.8.9). This mirrors the
+    // already-correct `INSERT OR FAIL` behavior (#6275).
+    //
+    // The general UPDATE path defers PK/UNIQUE checking to a post-statement
+    // pass so permutation-style statements like `UPDATE p SET a = a - 1`
+    // succeed even with transient intermediate duplicates (#5137). That
+    // deferred, all-or-nothing model is incompatible with OR FAIL's
+    // keep-the-prefix semantics, so OR FAIL uses a separate, truncating
+    // uniqueness check (`truncate_updates_for_or_fail`) instead.
+    //
+    // Scoped to the simple, unambiguous case — no triggers (so there is no
+    // interleaved BEFORE/AFTER row-trigger mutation to reconcile with a
+    // truncated update list) and no foreign keys on this table (so there are
+    // no deferred-FK-violation entries that would need to be un-queued for a
+    // truncated-away row). Rowid relocation conflicts still use the existing
+    // all-or-nothing check below (a narrower, documented gap not exercised by
+    // e_update.test). OR FAIL statements outside this scope keep the existing
+    // (safe) all-or-nothing behavior, matching pre-#6193 semantics.
+    let use_fail_partial = use_fail && !has_triggers && schema.foreign_keys.is_empty();
+    let mut fail_error: Option<ExecutorError> = None;
 
     // Step 6: Build list of updates (two-phase execution for SQL semantics)
     // Each `PendingUpdate` carries: row_index, old_row, new_row, changed_columns, updates_pk.
@@ -518,6 +543,32 @@ pub(super) fn execute_internal(
                 )?;
                 pending_deferred_violations.extend(deferred);
             }
+        } else if use_fail_partial {
+            // OR FAIL (no triggers, no FKs on this table — see `use_fail_partial`
+            // above): stop collecting at the first NOT NULL / CHECK violation but
+            // KEEP the rows already collected, instead of propagating the error
+            // and discarding everything via `?`. PK/UNIQUE conflicts are handled
+            // afterward by `truncate_updates_for_or_fail`, which can also cut the
+            // list shorter than this loop does.
+            if let Err(e) = constraint_validator.validate_row_skip_uniqueness(table_name, &new_row)
+            {
+                fail_error = Some(e);
+                break;
+            }
+
+            // Non-deterministic date/time uses in index expressions / partial-
+            // index predicates are NOT a resolvable conflict — SQLite aborts the
+            // whole statement even under OR FAIL (mirrors OR IGNORE/OR REPLACE
+            // above, issue #5324).
+            crate::insert::constraints::enforce_index_expression_determinism(
+                database,
+                schema,
+                table_name,
+                &new_row.values,
+            )?;
+
+            // `use_fail_partial` guarantees `schema.foreign_keys.is_empty()`, so
+            // there is nothing to validate/queue here.
         } else {
             // Default: validate NOT NULL and CHECK per-row.
             // PRIMARY KEY / UNIQUE checks are deferred to a post-statement pass
@@ -558,49 +609,88 @@ pub(super) fn execute_internal(
         });
     }
 
-    // Cross-update uniqueness validation: check if multiple updates would produce
-    // the same PK or UNIQUE constraint values. This must be done after collecting
-    // all updates but before applying them to ensure SQL's two-phase semantics.
-    // Skip for REPLACE mode since conflicts will be resolved by deletion.
-    if !use_replace && !use_ignore && updates.len() > 1 {
-        validate_cross_update_uniqueness(&updates, schema)?;
-    }
+    if use_fail_partial {
+        // OR FAIL: replace the deferred, all-or-nothing PK/UNIQUE checks with an
+        // immediate, truncating check — a conflict on a later row keeps the
+        // earlier rows' changes (and the ones already collected up to it)
+        // instead of rolling back the whole statement (e_update-1.8.3/1.8.9).
+        if !updates.is_empty() {
+            let table_for_check = database
+                .get_table(table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-    // Deferred uniqueness check (issue #5137): validate PK / UNIQUE / user-defined unique
-    // indexes against the post-statement table state. Rows that are themselves being
-    // updated to a different key are excluded from "existing" entries, allowing
-    // statements like `UPDATE p SET a = a - 1` to succeed even when intermediate
-    // states transiently duplicate keys.
-    //
-    // Skipped for IGNORE/REPLACE since those modes use per-row validation/resolution.
-    if !use_replace && !use_ignore && !updates.is_empty() {
-        // Re-borrow the table — `database` may have been mutated above for REPLACE,
-        // and we need an immutable read of the current PK/UNIQUE indexes.
-        let table_for_check = database
-            .get_table(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
-        validate_post_statement_uniqueness(
-            &updates,
-            schema,
-            table_for_check,
-            database,
-            table_name,
-        )?;
+            // `fail_error` may already hold a NOT NULL / CHECK violation stashed
+            // by the collect loop when it `break`ed at the offending row (rows
+            // before it are kept in `updates`). `truncate_updates_for_or_fail`
+            // must still run — a PK/UNIQUE conflict among that already-collected
+            // prefix happens at an EARLIER row than the NOT NULL/CHECK stop and
+            // so takes precedence, cutting `updates` even shorter. But when it
+            // finds no such conflict it returns `None`, and that `None` must NOT
+            // clobber the pre-existing NOT NULL/CHECK error — otherwise the whole
+            // statement silently reports success (the #6193 doctor bug). So only
+            // let a Some(err) result replace `fail_error`; keep the original
+            // otherwise.
+            if let Some(err) = index_sync::truncate_updates_for_or_fail(
+                &mut updates,
+                schema,
+                table_for_check,
+                database,
+                table_name,
+            ) {
+                fail_error = Some(err);
+            }
 
-        // Explicit `UPDATE ... SET rowid = <expr>` on a virtual-rowid table
-        // (no INTEGER PRIMARY KEY): relocating onto a rowid another live row
-        // already occupies is `UNIQUE constraint failed: <table>.rowid` in
-        // sqlite3 (triggerC-7.x). IPK tables write the real PK column and are
-        // covered by the PK check above.
-        validate_rowid_relocation(&updates, schema, table_for_check)?;
+            // Rowid relocation conflicts keep the existing all-or-nothing check
+            // (a narrower, documented gap — not exercised by e_update.test): if
+            // no PK/UNIQUE truncation already happened, a rowid-relocation
+            // conflict still aborts the whole statement rather than partially
+            // applying.
+            if fail_error.is_none() {
+                validate_rowid_relocation(&updates, schema, table_for_check)?;
+            }
+        }
+    } else if !use_replace && !use_ignore {
+        // Cross-update uniqueness validation: check if multiple updates would produce
+        // the same PK or UNIQUE constraint values. This must be done after collecting
+        // all updates but before applying them to ensure SQL's two-phase semantics.
+        if updates.len() > 1 {
+            validate_cross_update_uniqueness(&updates, schema)?;
+        }
 
-        // Regular (non-rowid) UNIQUE / PRIMARY KEY columns also get sqlite3's
-        // IMMEDIATE row-by-row intermediate-collision check (issue #5588): a
-        // single-statement swap / ascending-shift on a UNIQUE column errors even
-        // though its FINAL state is duplicate-free. The deferred validator above
-        // still permits #5137 descending-shift / negation cases that sqlite3
-        // accepts; this additive check only rejects what sqlite3 rejects.
-        validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
+        // Deferred uniqueness check (issue #5137): validate PK / UNIQUE / user-defined unique
+        // indexes against the post-statement table state. Rows that are themselves being
+        // updated to a different key are excluded from "existing" entries, allowing
+        // statements like `UPDATE p SET a = a - 1` to succeed even when intermediate
+        // states transiently duplicate keys.
+        if !updates.is_empty() {
+            // Re-borrow the table — `database` may have been mutated above for REPLACE,
+            // and we need an immutable read of the current PK/UNIQUE indexes.
+            let table_for_check = database
+                .get_table(table_name)
+                .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+            validate_post_statement_uniqueness(
+                &updates,
+                schema,
+                table_for_check,
+                database,
+                table_name,
+            )?;
+
+            // Explicit `UPDATE ... SET rowid = <expr>` on a virtual-rowid table
+            // (no INTEGER PRIMARY KEY): relocating onto a rowid another live row
+            // already occupies is `UNIQUE constraint failed: <table>.rowid` in
+            // sqlite3 (triggerC-7.x). IPK tables write the real PK column and are
+            // covered by the PK check above.
+            validate_rowid_relocation(&updates, schema, table_for_check)?;
+
+            // Regular (non-rowid) UNIQUE / PRIMARY KEY columns also get sqlite3's
+            // IMMEDIATE row-by-row intermediate-collision check (issue #5588): a
+            // single-statement swap / ascending-shift on a UNIQUE column errors even
+            // though its FINAL state is duplicate-free. The deferred validator above
+            // still permits #5137 descending-shift / negation cases that sqlite3
+            // accepts; this additive check only rejects what sqlite3 rejects.
+            validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
+        }
     }
 
     // For REPLACE: handle cross-update conflicts by keeping only the last update
@@ -1135,6 +1225,14 @@ pub(super) fn execute_internal(
     } else {
         None
     };
+
+    // OR FAIL: the rows collected before the offending row (if any) have
+    // already been applied by the write path above, matching SQLite's "keep
+    // prior changes" semantics; surface the stashed violation now instead of
+    // reporting success (mirrors `INSERT OR FAIL`, #6275).
+    if let Some(e) = fail_error {
+        return Err(e);
+    }
 
     Ok((update_count, returning))
 }

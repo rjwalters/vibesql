@@ -278,6 +278,174 @@ pub(super) fn detect_surviving_replace_conflict(
     Ok(())
 }
 
+/// For `UPDATE OR FAIL`: truncate `updates` to the longest prefix (in the
+/// given order) whose PRIMARY KEY / table-level UNIQUE / user-defined UNIQUE
+/// index values can all be applied without an immediate conflict, and return
+/// the constraint-violation error for the first row that could not be
+/// applied (if any).
+///
+/// Unlike [`validate_post_statement_uniqueness`] / [`validate_unique_relocation`]
+/// (which check the whole batch and either accept it all or reject it all),
+/// this implements sqlite3's real per-row, immediate (non-deferred) semantics
+/// for `OR FAIL`: rows are conceptually applied one at a time, each vacating
+/// its OLD key and occupying its NEW key, and the first row whose NEW key is
+/// still occupied at that moment stops the statement — but every row *before*
+/// it keeps its change (R-28518-13457's "OR FAIL" behavior, e_update-1.8.3 /
+/// e_update-1.8.9).
+///
+/// Assumes `updates` is already in the table's natural (ascending physical /
+/// rowid) scan order, matching how the caller collected it and how sqlite3
+/// itself visits rows for an UPDATE with no explicit ORDER BY.
+///
+/// The rowid / INTEGER PRIMARY KEY alias is intentionally NOT covered here —
+/// callers should still run [`validate_rowid_relocation`] (all-or-nothing)
+/// afterward for that narrower case, not exercised by `e_update.test`.
+pub(super) fn truncate_updates_for_or_fail(
+    updates: &mut Vec<PendingUpdate>,
+    schema: &TableSchema,
+    table: &Table,
+    database: &Database,
+    table_name: &str,
+) -> Option<ExecutorError> {
+    if updates.is_empty() {
+        return None;
+    }
+
+    // Key spaces to check, mirroring `validate_unique_relocation`: PRIMARY KEY
+    // (skipped when it is the rowid alias — that is `validate_rowid_relocation`'s
+    // job), table-level UNIQUE(...) constraints, and CREATE UNIQUE INDEX
+    // indexes with no expression columns. Each entry is (column indices,
+    // already-qualified conflict label for the error message).
+    let mut key_spaces: Vec<(Vec<usize>, String)> = Vec::new();
+
+    if schema.rowid_alias_column.is_none() {
+        if let (Some(pk_indices), Some(pk_cols)) =
+            (schema.get_primary_key_indices(), schema.primary_key.as_ref())
+        {
+            let label = pk_cols
+                .iter()
+                .map(|c| format!("{}.{}", schema.name, c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            key_spaces.push((pk_indices, label));
+        }
+    }
+
+    let unique_constraint_indices = schema.get_unique_constraint_indices();
+    for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
+        let label = schema.unique_constraints[constraint_idx]
+            .iter()
+            .map(|c| format!("{}.{}", schema.name, c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        key_spaces.push((unique_indices.clone(), label));
+    }
+
+    for index_name in database.list_indexes_for_table(table_name) {
+        let index_metadata = match database.get_index(&index_name) {
+            Some(m) => m,
+            None => continue,
+        };
+        if !index_metadata.unique {
+            continue;
+        }
+        let mut col_idxs: Vec<usize> = Vec::with_capacity(index_metadata.columns.len());
+        let mut is_expression_index = false;
+        for ic in &index_metadata.columns {
+            if ic.get_expression().is_some() {
+                is_expression_index = true;
+                break;
+            }
+            match ic.column_name().and_then(|cn| schema.get_column_index(cn)) {
+                Some(ci) => col_idxs.push(ci),
+                None => {
+                    is_expression_index = true;
+                    break;
+                }
+            }
+        }
+        if is_expression_index {
+            continue;
+        }
+        let label = index_metadata
+            .columns
+            .iter()
+            .map(|col| format!("{}.{}", table_name, col.column_name().unwrap_or("?")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        key_spaces.push((col_idxs, label));
+    }
+
+    if key_spaces.is_empty() {
+        return None;
+    }
+
+    // Seed each key space's "occupied" set from the current live table (the
+    // pre-statement baseline — nothing has been applied yet at this point).
+    let mut occupied: Vec<HashSet<Vec<SqlValue>>> = key_spaces
+        .iter()
+        .map(|(col_idxs, _)| {
+            table
+                .scan_live()
+                .map(|(_, row)| {
+                    col_idxs.iter().map(|&i| row.values[i].clone()).collect::<Vec<SqlValue>>()
+                })
+                .filter(|k: &Vec<SqlValue>| !k.contains(&SqlValue::Null))
+                .collect::<HashSet<_>>()
+        })
+        .collect();
+
+    let mut cut_at: Option<(usize, ExecutorError)> = None;
+    let key_of = |col_idxs: &[usize], row: &Row| -> Vec<SqlValue> {
+        col_idxs.iter().map(|&c| row.values[c].clone()).collect()
+    };
+
+    'rows: for (i, u) in updates.iter().enumerate() {
+        // Check every key space before committing any of them, so a row that
+        // conflicts in one key space isn't half-applied to the others.
+        for (ks_idx, (col_idxs, label)) in key_spaces.iter().enumerate() {
+            let new_key = key_of(col_idxs, &u.new_row);
+            let old_key = key_of(col_idxs, &u.old_row);
+            if new_key == old_key || new_key.contains(&SqlValue::Null) {
+                continue;
+            }
+            if occupied[ks_idx].contains(&new_key) {
+                cut_at = Some((
+                    i,
+                    ExecutorError::ConstraintViolation(format!(
+                        "UNIQUE constraint failed: {}",
+                        label
+                    )),
+                ));
+                break 'rows;
+            }
+        }
+
+        // No conflict: commit this row's vacate-then-occupy for every key
+        // space it actually changes.
+        for (ks_idx, (col_idxs, _)) in key_spaces.iter().enumerate() {
+            let new_key = key_of(col_idxs, &u.new_row);
+            let old_key = key_of(col_idxs, &u.old_row);
+            if new_key == old_key {
+                continue;
+            }
+            if !old_key.contains(&SqlValue::Null) {
+                occupied[ks_idx].remove(&old_key);
+            }
+            if !new_key.contains(&SqlValue::Null) {
+                occupied[ks_idx].insert(new_key);
+            }
+        }
+    }
+
+    if let Some((pos, err)) = cut_at {
+        updates.truncate(pos);
+        Some(err)
+    } else {
+        None
+    }
+}
+
 /// Format a constraint's columns as sqlite3's `table.col1, table.col2` list for
 /// a "UNIQUE constraint failed" message (e.g. `t1.a` or `t1.c, t1.d`).
 fn qualify_constraint_columns(table_name: &str, columns: &[String]) -> String {
