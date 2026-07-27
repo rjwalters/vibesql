@@ -51,6 +51,8 @@ rstar = "0.13"
 lru = "0.18"
 log = "0.4"
 rand = "0.10"  # For statistical sampling (Phase 5.2)
+indexmap = "2.7"  # Order-preserving index-name map so PRAGMA index_list / sqlite_master
+                   # report indexes in creation order across process boundaries (#6175)
 instant = { version = "0.1", features = ["wasm-bindgen"] }  # WASM-compatible time primitives
 # uuid is specified per-target below to add "js" feature for WASM
 bytes = "1.5"

@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use indexmap::IndexMap;
 use vibesql_types::{DataType, SqlValue};
 
 use super::index_metadata::{
@@ -36,8 +37,16 @@ use crate::{
 /// (abundant memory) environments.
 #[derive(Clone)]
 pub struct IndexManager {
-    /// Index metadata storage (normalized_index_name -> metadata)
-    pub(super) indexes: HashMap<String, IndexMetadata>,
+    /// Index metadata storage (normalized_index_name -> metadata).
+    ///
+    /// Order-preserving (creation order, oldest first): `list_indexes()` feeds
+    /// the binary-snapshot writer, and `PRAGMA index_list` / `sqlite_master`
+    /// must report indexes in a stable, SQLite-compatible order across process
+    /// boundaries (a fresh CLI process reloading from the snapshot). A plain
+    /// `HashMap` iterates in a randomized, per-process order (Rust's default
+    /// SipHash seed), so a second connection against the same on-disk database
+    /// previously saw a scrambled index order (pragma.test 23.3, #6175).
+    pub(super) indexes: IndexMap<String, IndexMetadata>,
     /// Actual index data (normalized_index_name -> data)
     pub(super) index_data: HashMap<String, IndexData>,
     /// Resource budget configuration
@@ -80,7 +89,7 @@ impl IndexManager {
         let storage = Arc::new(MemoryStorage::new());
 
         IndexManager {
-            indexes: HashMap::new(),
+            indexes: IndexMap::new(),
             index_data: HashMap::new(),
             config: DatabaseConfig::default(),
             resource_tracker: ResourceTracker::new(),
@@ -98,7 +107,7 @@ impl IndexManager {
         let storage = Arc::new(MemoryStorage::new());
 
         IndexManager {
-            indexes: HashMap::new(),
+            indexes: IndexMap::new(),
             index_data: HashMap::new(),
             config,
             resource_tracker: ResourceTracker::new(),

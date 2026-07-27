@@ -848,7 +848,7 @@ impl IndexManager {
             .resolve_index_key(index_name)
             .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
-        if self.indexes.remove(&normalized).is_none() {
+        if self.indexes.shift_remove(&normalized).is_none() {
             return Err(StorageError::IndexNotFound(index_name.to_string()));
         }
         // Also remove the index data
@@ -902,7 +902,7 @@ impl IndexManager {
 
         // Drop each index
         for index_name in &indexes_to_drop {
-            self.indexes.remove(index_name);
+            self.indexes.shift_remove(index_name);
             self.index_data.remove(index_name);
             self.pending_expression_rebuilds.remove(index_name);
 
