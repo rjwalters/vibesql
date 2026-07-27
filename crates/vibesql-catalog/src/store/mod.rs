@@ -97,10 +97,13 @@ pub struct Catalog {
     /// table's indexes appearing right after the table when they were created
     /// next (see pragma.test 23.1). VibeSQL stores tables and indexes in
     /// separate collections, so this side-map records a global creation ordinal
-    /// used only to order `sqlite_master`/`sqlite_schema` output. It is NOT
-    /// persisted: after a reload objects are re-registered in load order, which
-    /// reproduces the previous "tables first, then indexes" ordering — the
-    /// stable fallback the generator already used before this map existed.
+    /// used only to order `sqlite_master`/`sqlite_schema` output. It IS
+    /// persisted (binary catalog format v17+, see
+    /// `vibesql_storage::persistence::binary::catalog`) so the ordering survives
+    /// a reload; an object with no recorded ordinal (e.g. a v16-and-earlier file,
+    /// or an object created via a path that doesn't record one) falls back to
+    /// the historical "tables first, then indexes" emission order, so nothing
+    /// regresses.
     pub(crate) creation_seq: HashMap<String, u64>,
     /// Next value to hand out from [`Catalog::record_creation_seq`].
     pub(crate) next_creation_seq: u64,
