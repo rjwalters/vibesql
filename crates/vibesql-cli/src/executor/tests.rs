@@ -661,6 +661,43 @@ fn test_pragma_integrity_check_with_table_argument() {
 }
 
 #[test]
+fn test_pragma_integrity_check_argument_taxonomy() {
+    // SQLite distinguishes a numeric error-count *limit* from a table/schema
+    // *name* argument (pragma-3.5.2 / pragma-3.6):
+    //   PRAGMA integrity_check=4    -- limit 4 errors, whole db -> "ok"
+    //   PRAGMA integrity_check='4'  -- table named "4" -> "no such table: 4"
+    //   PRAGMA integrity_check=xyz  -- table named "xyz" -> "no such table: xyz"
+    // An existing table (or a schema table such as sqlite_schema) is a valid
+    // target and reports "ok".
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t2(a INT)").unwrap();
+
+    // Numeric argument is an error-count limit, not a table name.
+    let result = executor.execute("PRAGMA integrity_check=4").unwrap();
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+
+    // Existing table -> ok.
+    let result = executor.execute("PRAGMA integrity_check=t2").unwrap();
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+
+    // Schema table is always a valid target.
+    let result = executor.execute("PRAGMA integrity_check=sqlite_schema").unwrap();
+    assert_eq!(result.rows[0][0].as_deref(), Some("ok"));
+
+    // Quoted string that is not a table -> "no such table: 4".
+    let err = executor.execute("PRAGMA integrity_check='4'").unwrap_err();
+    assert_eq!(err.to_string(), "no such table: 4");
+
+    // Bare identifier that is not a table -> "no such table: xyz".
+    let err = executor.execute("PRAGMA integrity_check=xyz").unwrap_err();
+    assert_eq!(err.to_string(), "no such table: xyz");
+
+    // quick_check shares the same argument handling.
+    let err = executor.execute("PRAGMA quick_check=nope").unwrap_err();
+    assert_eq!(err.to_string(), "no such table: nope");
+}
+
+#[test]
 fn test_pragma_table_info_verbatim_type_and_default() {
     // PRAGMA table_info echoes the declared type verbatim (only bracket/quote
     // delimiters stripped) and the verbatim DEFAULT source text, matching
@@ -706,9 +743,7 @@ fn test_pragma_table_info_strips_type_delimiters() {
     // (pragma-6.2): `[TYPE_Y]` -> `TYPE_Y`, `"TYPE_Z"` -> `TYPE_Z`. A plain
     // user type is echoed unchanged.
     let mut executor = SqlExecutor::new(None).unwrap();
-    executor
-        .execute("CREATE TABLE t2(a TYPE_X, b [TYPE_Y], c \"TYPE_Z\")")
-        .unwrap();
+    executor.execute("CREATE TABLE t2(a TYPE_X, b [TYPE_Y], c \"TYPE_Z\")").unwrap();
     let result = executor.execute("PRAGMA table_info(t2)").unwrap();
     assert_eq!(result.rows[0][2].as_deref(), Some("TYPE_X"));
     assert_eq!(result.rows[1][2].as_deref(), Some("TYPE_Y"));
@@ -1008,8 +1043,8 @@ fn test_pragma_auto_vacuum_default_and_normalization() {
         ("0", "0"),
         ("1", "1"),
         ("2", "2"),
-        ("3", "0"),            // out-of-range -> NONE
-        ("-1", "0"),           // negative -> NONE
+        ("3", "0"),  // out-of-range -> NONE
+        ("-1", "0"), // negative -> NONE
         ("1234", "0"),
         ("-1234", "0"),
         ("none", "0"),
@@ -1043,8 +1078,8 @@ fn test_pragma_temp_store_default_and_normalization() {
         ("0", "0"),
         ("1", "1"),
         ("2", "2"),
-        ("3", "0"),   // out-of-range -> DEFAULT
-        ("-1", "0"),  // negative -> DEFAULT
+        ("3", "0"),  // out-of-range -> DEFAULT
+        ("-1", "0"), // negative -> DEFAULT
         ("file", "1"),
         ("FILE", "1"),
         ("fIlE", "1"),
