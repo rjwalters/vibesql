@@ -115,6 +115,19 @@ impl Parser {
         // (`schema . name` consumes three tokens; `name` consumes one.)
         let name_token_pos = self.current_position().saturating_sub(1).max(name_start_pos);
         let name_source = self.token_source_at(name_token_pos).map(str::to_string);
+        // For a `schema.name` reference the schema token sits two tokens before
+        // the name token (`schema`, `.`, `name`). Capture its verbatim source so
+        // an "unknown database" error echoes the spelling as written — SQLite
+        // preserves the original case (`temporary`, not the normalized keyword
+        // spelling `TEMPORARY`) in this message.
+        let schema_source = if name_ref.schema_name.is_some() {
+            name_token_pos
+                .checked_sub(2)
+                .and_then(|pos| self.token_source_at(pos))
+                .map(str::to_string)
+        } else {
+            None
+        };
 
         // Resolve the trigger's schema. An explicit `schema.` prefix wins; if
         // absent, the `TEMP`/`TEMPORARY` modifier implies the `temp` schema.
@@ -132,13 +145,18 @@ impl Parser {
                 // VibeSQL exposes only the `main` and `temp` schemas (no ATTACH),
                 // so a trigger name qualified with any other database is an
                 // "unknown database <name>" prepare-time error, matching SQLite
-                // (trigger7-1.2). `temporary` is accepted as an alias of `temp`.
+                // (trigger7-1.2). `TEMPORARY` is only a keyword synonym for `TEMP`
+                // in `CREATE TEMPORARY TRIGGER` syntax — it is not a valid
+                // `schema.object` qualifier, so `temporary.r1` is an unknown
+                // database exactly like any other unrecognized name.
                 if !schema_name.eq_ignore_ascii_case("main")
                     && !schema_name.eq_ignore_ascii_case("temp")
-                    && !schema_name.eq_ignore_ascii_case("temporary")
                 {
+                    // Echo the verbatim source spelling (case preserved) rather
+                    // than the normalized identifier, matching SQLite.
+                    let reported = schema_source.as_deref().unwrap_or(&schema_name);
                     return Err(ParseError {
-                        message: format!("unknown database {}", schema_name),
+                        message: format!("unknown database {}", reported),
                     });
                 }
                 Some(schema_name)
