@@ -6556,6 +6556,17 @@ proc do_select_tests {prefix args} {
 
 }
 
+# explain_i (from SQLite's tester.tcl): a purely diagnostic helper that dumps
+# the EXPLAIN VDBE bytecode listing for a statement so a human can eyeball it.
+# It makes no assertions and has no bearing on conformance pass/fail. VibeSQL
+# does not emit SQLite VDBE bytecode, so we define it as a no-op that swallows
+# its arguments. Without this, file-scope calls (e.g. values.test line 24)
+# raise `invalid command name "explain_i"` and produce a spurious
+# file-scope-error marker. (Issue #6190.)
+proc explain_i {sql {db db}} {
+    # Intentionally a no-op: diagnostic bytecode dump, not a test assertion.
+}
+
 proc do_eqp_test {name sql expected} {
     # EXPLAIN QUERY PLAN test
     # Runs the query with EXPLAIN QUERY PLAN and matches against expected pattern
