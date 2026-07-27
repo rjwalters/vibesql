@@ -11,6 +11,7 @@
 # Commands:
 #   test <file>              Test a single TCL file
 #   run [options]            Run the full test suite
+#   parse <file>             Parse a test file and list extracted tests
 #   analyze                  Analyze failure patterns
 #   status                   Show quick summary
 #

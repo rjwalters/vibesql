@@ -19,7 +19,14 @@ npm-debug.log*
 # OS files
 .DS_Store
 
-# Debug/test scripts (local development only)
+# Ad-hoc debug/scratch scripts at the web-demo root — local development only,
+# never commit these. (A batch of stale Playwright one-offs was committed here
+# and rotted for ~9 months before being removed; .mjs was missing from the list
+# below, which is how two of them slipped through.)
+#
+# NOTE: this does NOT shadow the real test suite. Vitest specs are named
+# `*.test.ts` and live under src/**/__tests__/, so the `test-*` prefix patterns
+# below cannot match them.
 debug-*.ts
 inspect-*.ts
 test-*.ts
@@ -29,7 +36,7 @@ perf-*.ts
 debug-screenshot*.png
 test-*-screenshot.png
 
-# Compiled debug/test scripts (should not be committed)
+# Same, compiled/plain-JS and ESM variants
 debug-*.js
 inspect-*.js
 test-*.js
@@ -38,3 +45,10 @@ find-*.js
 check-*.js
 perf-*.js
 perf-*.cjs
+debug-*.mjs
+inspect-*.mjs
+test-*.mjs
+check-*.mjs
+
+# Playwright run artifacts
+test-results/

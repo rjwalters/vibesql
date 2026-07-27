@@ -109,7 +109,7 @@ The curated suites (SQLLogicTest, SQL:1999, TPC-H/DS/C) are at 100%. Open areas:
 
 ## Contributing
 
-The project uses [Loom orchestration](https://github.com/loomhq/loom):
+The project uses [Loom orchestration](https://github.com/rjwalters/loom):
 
 - Check issues labeled `loom:issue` for ready work
 - PRs labeled `loom:review-requested` need review

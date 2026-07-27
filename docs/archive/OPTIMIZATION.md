@@ -14,8 +14,8 @@
 
 ## Quick Links
 
-- **[Detailed Optimization Roadmap](docs/performance/OPTIMIZATION_ROADMAP.md)** - Complete path from 35.2ms to 180µs
-- **[Q6 Profiling Analysis](docs/profiling/q6-analysis.md)** - Root cause analysis and bottleneck identification
+- **[Detailed Optimization Roadmap](../performance/OPTIMIZATION_ROADMAP.md)** - Complete path from 35.2ms to 180µs
+- **[Q6 Profiling Analysis](./q6-analysis.md)** - Root cause analysis and bottleneck identification
 - **[GitHub Issues](#github-issues)** - Tracking issues for each optimization phase
 
 ## Optimization Phases
@@ -102,9 +102,9 @@ cargo bench -p vibesql-executor --bench tpch_benchmark --features sqlite,in-memo
 
 ## Documentation
 
-- **Detailed Roadmap**: [docs/performance/OPTIMIZATION_ROADMAP.md](docs/performance/OPTIMIZATION_ROADMAP.md)
-- **Profiling Analysis**: [docs/profiling/q6-analysis.md](docs/profiling/q6-analysis.md)
-- **Phase 3 Design**: [PHASE3_VECTORIZATION.md](PHASE3_VECTORIZATION.md)
+- **Detailed Roadmap**: [docs/performance/OPTIMIZATION_ROADMAP.md](../performance/OPTIMIZATION_ROADMAP.md)
+- **Profiling Analysis**: [docs/profiling/q6-analysis.md](./q6-analysis.md)
+- **Phase 3 Design**: [PHASE3_VECTORIZATION.md](../../crates/vibesql-executor/PHASE3_VECTORIZATION.md)
 
 ## Success Criteria
 

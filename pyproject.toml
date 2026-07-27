@@ -23,3 +23,12 @@ classifiers = [
 bindings = "pyo3"
 module-name = "vibesql"
 manifest-path = "crates/vibesql-python-bindings/Cargo.toml"
+
+[tool.pytest.ini_options]
+# The helper-script test suite (scripts/test_*.py). These are unittest-style and
+# insert their own sys.path entry, so they need no extra path config.
+testpaths = ["scripts"]
+# scripts/test_results_config.py matches the default `test_*.py` glob but is a
+# shared CONFIG MODULE imported by process_test_results.py and friends — not a
+# test file. Collecting it is pure noise, so it is excluded explicitly.
+addopts = "--ignore=scripts/test_results_config.py"

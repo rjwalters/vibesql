@@ -405,7 +405,7 @@ gh issue edit 42 --remove-label "loom:building"
 
 - **Main Documentation**: `.loom/CLAUDE.md` (comprehensive usage guide)
 - **Role Definitions**: `.loom/roles/*.md` (detailed role guidelines)
-- **Loom Repository**: https://github.com/loomhq/loom
+- **Loom Repository**: https://github.com/rjwalters/loom
 
 ---
 

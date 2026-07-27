@@ -343,9 +343,9 @@ All scripts maintain backward compatibility with JSON:
 
 ## Related Documentation
 
-- [Database Schema](../scripts/schema/test_results.sql) - Full schema with comments
-- [Persistence Plan](planning/PERSISTENCE_AND_DOGFOODING.md) - Original design doc
-- [SQLLogicTest Guide](../scripts/sqllogictest) - Main testing tool
+- [Database Schema](../../scripts/schema/test_results.sql) - Full schema with comments
+- [Persistence Plan](./PERSISTENCE_AND_DOGFOODING.md) - Original design doc
+- [SQLLogicTest Guide](../../scripts/sqllogictest) - Main testing tool
 
 ## Questions?
 

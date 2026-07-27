@@ -1,8 +1,8 @@
-# NIST MemSQL Web Studio
+# VibeSQL Web Studio
 
 Interactive SQL database demo running entirely in your browser using WebAssembly.
 
-**[🚀 Live Demo](https://rjwalters.github.io/nistmemsql/)**
+**[🚀 Live Demo](https://vibesql.org/)**
 
 ---
 
@@ -261,15 +261,16 @@ Displays query results with:
 
 ## Deployment
 
-### Automatic Deployment (CI)
+### Manual Deployment (Cloudflare Pages)
 
-The web demo is automatically deployed to GitHub Pages on push to `main`:
+The web demo is deployed manually — there is no automatic deploy workflow. From
+the `main` branch:
 
-1. Builds WASM module using Rust + wasm-pack
-2. Builds Vite app with `pnpm build`
-3. Deploys to GitHub Pages
+1. Build the WASM module using Rust + wasm-pack
+2. Build the Vite app with `pnpm build`
+3. Publish with `wrangler deploy` (config: `wrangler.toml`)
 
-**Live URL:** https://rjwalters.github.io/vibesql/
+**Live URL:** https://vibesql.org/
 
 ### Updating Benchmark Data
 

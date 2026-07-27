@@ -15,7 +15,7 @@ cd benchmarks/suite
 
 Results saved to `../../target/benchmarks/comparison_YYYYMMDD_HHMMSS.json`
 
-### Run Head-to-Head Comparison (Coming Soon)
+### Run Head-to-Head Comparison
 
 Compare VibeSQL vs SQLite with interleaved execution:
 

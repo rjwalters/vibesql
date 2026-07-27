@@ -82,7 +82,7 @@ The CI pipeline automatically runs conformance tests and generates compliance ar
    ```
 
 3. **Deployment**: Badge and results deployed to GitHub Pages
-   - **Badge Endpoint**: https://rjwalters.github.io/vibesql/badges/sql1999-conformance.json
+   - **Badge Endpoint**: https://vibesql.org/badges/sql1999-conformance.json
    - **README Badge**: Displays live conformance percentage (README.md:7)
 
 **Compliance Report Generation**: `scripts/generate_compliance_report.sh`

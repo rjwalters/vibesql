@@ -109,8 +109,6 @@ Client → TCP Connection → SSL Negotiation (optional)
 - Error handling and responses
 
 **TODO:**
-- Extended query protocol (prepared statements)
-- SSL/TLS encryption
 - Advanced authentication (SCRAM-SHA-256)
 - COPY protocol
 - NOTIFY/LISTEN

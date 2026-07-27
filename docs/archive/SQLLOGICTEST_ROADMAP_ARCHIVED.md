@@ -6,7 +6,7 @@
 
 ## Quick Links
 
-- **Main Strategy**: [`TESTING.md`](./TESTING.md) - Comprehensive testing strategy and workflow
+- **Main Strategy**: [`TESTING.md`](../testing/TESTING_STRATEGY.md) - Comprehensive testing strategy and workflow
 - **Current Analysis**: [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md) - Detailed breakdown of all 500 failures
 - **GitHub Issues**: [#956-#963](https://github.com/rjwalters/vibesql/issues?q=is%3Aissue+is%3Aopen+956..963) - 8 high-impact fixes to implement
 
@@ -206,7 +206,7 @@ Schedule after implementing #956 and #957 (Quick Wins).
 
 ### Documentation
 
-- [`TESTING.md`](./TESTING.md) - Detailed testing strategy
+- [`TESTING.md`](../testing/TESTING_STRATEGY.md) - Detailed testing strategy
 - [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md) - Current failure analysis
 - This file - High-level roadmap and plan
 
@@ -242,7 +242,7 @@ All issues tagged with SQLLogicTest conformance work:
 
 **To begin work on conformance:**
 
-1. Read [`TESTING.md`](./TESTING.md) for detailed strategy
+1. Read [`TESTING.md`](../testing/TESTING_STRATEGY.md) for detailed strategy
 2. Review [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md)
 3. Start with [#956](https://github.com/rjwalters/vibesql/issues/956) (Decimal formatting - easiest fix)
 4. Test and validate improvement
@@ -251,7 +251,7 @@ All issues tagged with SQLLogicTest conformance work:
 
 **Questions?**
 
-Refer to [`TESTING.md`](./TESTING.md) for detailed information about:
+Refer to [`TESTING.md`](../testing/TESTING_STRATEGY.md) for detailed information about:
 - Testing infrastructure
 - Root cause analysis methodology
 - Batch testing strategy

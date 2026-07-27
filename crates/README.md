@@ -67,12 +67,24 @@ This directory contains all the individual crates that make up the VibeSQL datab
 - **`vibesql-wasm-bindings/`** - WebAssembly bindings
   - WASM-compatible API for browser execution
   - JavaScript interop layer
-  - Powers the live web demo at https://rjwalters.github.io/vibesql/
+  - Powers the live web demo at https://vibesql.org/
 
 - **`vibesql-python-bindings/`** - Python bindings
   - Python API for embedding VibeSQL
   - DB-API 2.0 compatible interface
   - PyO3-based implementation
+
+### Replication
+
+- **`vibesql-consensus/`** - Raft-based replication
+  - Single-group whole-database replication built on `openraft`
+  - Replicated state machine applies committed transactions from the Raft log
+  - See [docs/decisions/0004-consensus-library.md](../docs/decisions/0004-consensus-library.md)
+
+### Supporting Crates
+
+- **`vibesql-l10n/`** - Localization and message catalogs
+- **`vibesql-bench-common/`** - Shared benchmark harness utilities
 
 ### Testing Infrastructure
 
@@ -178,6 +190,9 @@ Due to path dependencies, crates must be published sequentially in this order:
    - `vibesql-executor`
 
 5. **Interface Layer**:
+   - `vibesql-consensus`
+   - `vibesql-l10n`
+   - `vibesql-bench-common`
    - `vibesql-cli`
    - `vibesql-wasm-bindings`
    - `vibesql-python-bindings`
