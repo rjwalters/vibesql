@@ -1157,3 +1157,58 @@ fn test_pragma_cache_spill_default_and_toggle() {
     let result = executor.execute("PRAGMA cache_spill").unwrap();
     assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
 }
+
+#[test]
+fn test_pragma_user_version_default_set_and_negative() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 0 (pragma.test pragma-8.2.1, #6175).
+    let result = executor.execute("PRAGMA user_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // `= N` form.
+    executor.execute("PRAGMA user_version = 2").unwrap();
+    let result = executor.execute("PRAGMA user_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+
+    // Negative values round-trip (pragma-8.2.14/8.2.15).
+    executor.execute("PRAGMA user_version = -450").unwrap();
+    let result = executor.execute("PRAGMA user_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-450".to_string())]]);
+}
+
+#[test]
+fn test_pragma_application_id_default_and_function_style_set() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 0 (pragma.test pragma-8.3.1, #6175).
+    let result = executor.execute("PRAGMA application_id").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // Function-style `(N)` argument (pragma-8.3.2: `PRAGMA Application_ID(12345)`).
+    executor.execute("PRAGMA application_id(12345)").unwrap();
+    let result = executor.execute("PRAGMA application_id").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("12345".to_string())]]);
+}
+
+#[test]
+fn test_pragma_index_xinfo_expression_column_cid_and_explicit_collation() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c, d)").unwrap();
+    executor.execute("CREATE INDEX i2x ON t1(d COLLATE nocase, c DESC)").unwrap();
+    executor.execute("CREATE INDEX i3 ON t1(d, b+c, c)").unwrap();
+
+    // Explicit COLLATE on an index column is echoed verbatim, not hardcoded
+    // BINARY (pragma.test 23.2d, #6175).
+    let result = executor.execute("PRAGMA index_xinfo(i2x)").unwrap();
+    // Columns: seqno, cid, name, desc, coll, key
+    assert_eq!(result.rows[0][4], Some("nocase".to_string()));
+    // The second (non-collated) key column still defaults to BINARY.
+    assert_eq!(result.rows[1][4], Some("BINARY".to_string()));
+
+    // An expression index column reports cid -2 (not -1, which is reserved
+    // for a rowid reference) (pragma.test 23.2e, #6175).
+    let result = executor.execute("PRAGMA index_xinfo(i3)").unwrap();
+    assert_eq!(result.rows[1][1], Some("-2".to_string()));
+    assert_eq!(result.rows[1][2], None);
+}

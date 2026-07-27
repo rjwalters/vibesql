@@ -74,6 +74,19 @@ pub struct SqlExecutor {
     /// current `cache_size`.
     cache_spill_enabled: bool,
     cache_spill_explicit_size: Option<i64>,
+    /// PRAGMA user_version session setting (SQLite-compatible, default 0).
+    /// SQLite persists this as a raw signed 32-bit cookie in the database
+    /// file header, available for application use; VibeSQL has no such
+    /// on-disk cookie storage yet, so this is session-only and resets to 0
+    /// on every reconnect (the TCL shim replays the last-set value across
+    /// its per-batch CLI processes so it survives a `db close` / reopen
+    /// against the same file within one logical connection — see
+    /// `tester_vibesql.tcl`'s `pragma_user_version_cookie`, issue #6175).
+    user_version: i64,
+    /// PRAGMA application_id session setting (SQLite-compatible, default 0).
+    /// Same persistence model as `user_version` above (a raw signed 32-bit
+    /// header cookie in real SQLite; session-only + shim-replayed here).
+    application_id: i64,
     /// Active WAL persistence state, present only when the opt-in
     /// `[database] wal = true` flag is set AND a file-backed database is in use.
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
@@ -501,6 +514,8 @@ impl SqlExecutor {
                     default_cache_size_cookie: 0,
                     cache_spill_enabled: true,
                     cache_spill_explicit_size: None,
+                    user_version: 0,
+                    application_id: 0,
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
@@ -549,6 +564,8 @@ impl SqlExecutor {
             default_cache_size_cookie: 0,
             cache_spill_enabled: true,
             cache_spill_explicit_size: None,
+            user_version: 0,
+            application_id: 0,
             wal_state: None,
             db_path,
             _db_lock: db_lock,
@@ -1715,6 +1732,39 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "USER_VERSION" => {
+                    // SQLite-compatible PRAGMA user_version set (pragma.test
+                    // pragma-8.2.*, #6175). Accepts both `= N` and the
+                    // function-style `(N)` syntax (both parse to the same
+                    // `stmt.value`). A non-integral argument is a silent no-op,
+                    // matching SQLite's `getSafetyLevel`-style tolerance for
+                    // unparsable pragma arguments.
+                    if let Some(n) = pragma_value_to_i64(value) {
+                        self.user_version = n;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "APPLICATION_ID" => {
+                    // SQLite-compatible PRAGMA application_id set (pragma.test
+                    // pragma-8.3.2, #6175). Same argument handling as
+                    // user_version above.
+                    if let Some(n) = pragma_value_to_i64(value) {
+                        self.application_id = n;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -1947,6 +1997,28 @@ impl SqlExecutor {
                     Ok(QueryResult {
                         columns: vec!["cache_spill".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "USER_VERSION" => {
+                    // SQLite-compatible PRAGMA user_version read (pragma.test
+                    // pragma-8.2.*, #6175). Default 0.
+                    Ok(QueryResult {
+                        columns: vec!["user_version".to_string()],
+                        rows: vec![vec![Some(self.user_version.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "APPLICATION_ID" => {
+                    // SQLite-compatible PRAGMA application_id read (pragma.test
+                    // pragma-8.3.*, #6175). Default 0.
+                    Ok(QueryResult {
+                        columns: vec!["application_id".to_string()],
+                        rows: vec![vec![Some(self.application_id.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,
@@ -2745,8 +2817,10 @@ impl SqlExecutor {
                         .unwrap_or(-1);
                     (cid, Some(col_name.to_string()))
                 }
-                // Expression column: SQLite reports cid -1 and a NULL name.
-                None => (-1, None),
+                // Expression column: SQLite reports cid -2 (not -1, which is
+                // reserved for a rowid reference) and a NULL name (pragma.test
+                // 23.2e, #6175).
+                None => (-2, None),
             };
 
             if extended {
@@ -2755,12 +2829,28 @@ impl SqlExecutor {
                 } else {
                     0
                 };
+                // Collation echoed by `coll`: an explicit `COLLATE` on this
+                // index-column wins; otherwise fall back to the underlying
+                // table column's declared collation; otherwise BINARY
+                // (SQLite's implicit default). Matches pragma.test 23.2d/2e
+                // (#6175).
+                let coll = column
+                    .explicit_collation()
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        column.column_name().and_then(|col_name| {
+                            table
+                                .and_then(|t| t.get_column(col_name))
+                                .and_then(|c| c.collation.clone())
+                        })
+                    })
+                    .unwrap_or_else(|| "BINARY".to_string());
                 rows.push(vec![
                     Some(seqno.to_string()),
                     Some(cid.to_string()),
                     name,
                     Some(desc.to_string()),
-                    Some("BINARY".to_string()),
+                    Some(coll),
                     Some("1".to_string()),
                 ]);
             } else {

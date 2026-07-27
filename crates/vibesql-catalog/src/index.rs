@@ -91,6 +91,13 @@ pub enum IndexedColumn {
         /// When present, only the first N characters/bytes of the column value are indexed
         /// Example: UNIQUE (email(50)) indexes only first 50 characters
         prefix_length: Option<u64>,
+        /// Explicit `COLLATE <name>` on this index-column, if the `CREATE
+        /// INDEX` statement specified one (e.g. `CREATE INDEX i ON
+        /// t(d COLLATE nocase)`). `None` means the index column uses its
+        /// underlying table column's declared collation (defaulting further
+        /// to `BINARY`). Reported verbatim (case-preserving, matching
+        /// SQLite) by `PRAGMA index_xinfo`'s `coll` column — see issue #6175.
+        collation: Option<String>,
     },
     /// Expression index (functional index)
     /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
@@ -105,7 +112,7 @@ pub enum IndexedColumn {
 impl IndexedColumn {
     /// Create a new simple column index
     pub fn new_column(column_name: String, order: SortOrder) -> Self {
-        IndexedColumn::Column { column_name, order, prefix_length: None }
+        IndexedColumn::Column { column_name, order, prefix_length: None, collation: None }
     }
 
     /// Create a new column index with prefix length
@@ -114,7 +121,21 @@ impl IndexedColumn {
         order: SortOrder,
         prefix_length: u64,
     ) -> Self {
-        IndexedColumn::Column { column_name, order, prefix_length: Some(prefix_length) }
+        IndexedColumn::Column {
+            column_name,
+            order,
+            prefix_length: Some(prefix_length),
+            collation: None,
+        }
+    }
+
+    /// Attach an explicit `COLLATE <name>` to this index column (builder-style
+    /// chaining). A no-op on an `Expression` column. See issue #6175.
+    pub fn with_collation(mut self, collation: Option<String>) -> Self {
+        if let IndexedColumn::Column { collation: c, .. } = &mut self {
+            *c = collation;
+        }
+        self
     }
 
     /// Create a new expression index
@@ -142,6 +163,16 @@ impl IndexedColumn {
     pub fn prefix_length(&self) -> Option<u64> {
         match self {
             IndexedColumn::Column { prefix_length, .. } => *prefix_length,
+            IndexedColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Get the explicit `COLLATE` name, if this index column declared one.
+    /// `None` for an `Expression` column, or a `Column` with no explicit
+    /// `COLLATE` clause (see issue #6175).
+    pub fn explicit_collation(&self) -> Option<&str> {
+        match self {
+            IndexedColumn::Column { collation, .. } => collation.as_deref(),
             IndexedColumn::Expression { .. } => None,
         }
     }
