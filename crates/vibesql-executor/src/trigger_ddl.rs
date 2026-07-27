@@ -38,11 +38,36 @@ impl TriggerExecutor {
         stmt: &CreateTriggerStmt,
         original_sql: Option<&str>,
     ) -> Result<String, ExecutorError> {
+        // SQLite scopes trigger names *per schema* (like tables), so the
+        // "already exists" check must be scoped to the schema the new trigger
+        // will live in — not global. `CREATE TRIGGER temp.tr1` must succeed even
+        // when a `main.tr1` exists (e_update-2.3.1 / e_delete-2.3.2). The target
+        // schema is the explicit `schema.`/`TEMP` qualifier when present; with no
+        // qualifier it follows the target table (a temp-table target promotes the
+        // trigger to the temp schema, trigger1-1.8). `resolve_table_schema_name`
+        // is side-effect free, so computing this before target validation is safe.
+        let check_schema: Option<String> = match &stmt.schema {
+            Some(schema) => Some(schema.clone()),
+            None => {
+                let target_in_temp_schema = db
+                    .catalog
+                    .resolve_table_schema_name(&stmt.table_name)
+                    .as_deref()
+                    .is_some_and(vibesql_catalog::Catalog::is_temp_schema);
+                if target_in_temp_schema {
+                    Some("temp".to_string())
+                } else {
+                    None
+                }
+            }
+        };
+
         // `CREATE TRIGGER IF NOT EXISTS <name>` is a no-op success when a
-        // trigger with that name already exists (SQLite semantics, trigger1-1.2.0).
-        // SQLite resolves the existing-trigger check before validating the target
-        // object, so an already-present trigger short-circuits here.
-        if db.catalog.get_trigger(&stmt.trigger_name).is_some() {
+        // trigger with that name already exists *in the target schema* (SQLite
+        // semantics, trigger1-1.2.0). SQLite resolves the existing-trigger check
+        // before validating the target object, so an already-present trigger
+        // short-circuits here.
+        if db.catalog.trigger_exists_in_schema(&stmt.trigger_name, check_schema.as_deref()) {
             if stmt.if_not_exists {
                 return Ok(format!("Trigger '{}' already exists", stmt.trigger_name));
             }

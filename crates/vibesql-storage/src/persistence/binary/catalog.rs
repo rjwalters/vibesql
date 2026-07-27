@@ -307,16 +307,16 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // reappears in the next session's catalog (issue #5940, Cluster A). The
     // count and the write loop iterate the same filtered list so they stay in
     // lockstep.
-    let trigger_names: Vec<String> = db
-        .catalog
-        .list_triggers()
-        .into_iter()
-        .filter(|name| db.catalog.get_trigger(name).is_some_and(|t| !t.is_temp()))
-        .collect();
-    write_u32(writer, trigger_names.len() as u32)?;
+    // Iterate trigger definitions directly. Triggers are keyed per schema, so a
+    // name-only `get_trigger` could return the temp namesake of a main trigger;
+    // collecting definitions keeps every non-temp trigger and keeps the count in
+    // lockstep with the write loop below.
+    let triggers: Vec<&vibesql_catalog::TriggerDefinition> =
+        db.catalog.iter_triggers().filter(|t| !t.is_temp()).collect();
+    write_u32(writer, triggers.len() as u32)?;
 
-    for trigger_name in trigger_names {
-        if let Some(trigger) = db.catalog.get_trigger(&trigger_name) {
+    for trigger in triggers {
+        {
             write_string(writer, &trigger.name)?;
             write_string(writer, &trigger.table_name)?;
 

@@ -410,10 +410,13 @@ impl super::Catalog {
         // dropped Note: We need to normalize trigger table_name for comparison in
         // case-insensitive mode
         let case_sensitive = self.case_sensitive_identifiers;
-        let trigger_names: Vec<String> = self
+        // Collect the schema-scoped storage keys (not the bare trigger names):
+        // triggers are keyed per schema, so a bare name no longer identifies a
+        // single map entry.
+        let trigger_keys: Vec<String> = self
             .triggers
-            .values()
-            .filter(|trigger| {
+            .iter()
+            .filter(|(_, trigger)| {
                 let trigger_table = if case_sensitive {
                     trigger.table_name.clone()
                 } else {
@@ -421,11 +424,11 @@ impl super::Catalog {
                 };
                 trigger_table == normalized_table
             })
-            .map(|trigger| trigger.name.clone())
+            .map(|(key, _)| key.clone())
             .collect();
 
-        for trigger_name in trigger_names {
-            self.triggers.remove(&trigger_name);
+        for trigger_key in trigger_keys {
+            self.triggers.remove(&trigger_key);
         }
 
         let schema = self
