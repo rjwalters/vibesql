@@ -2148,25 +2148,22 @@ impl SqlExecutor {
             }
         };
 
-        // Schema-qualified pragma handling. Only "main" or the current schema
-        // refer to the available schema; anything else returns an empty result
-        // (SQLite returns no rows for a missing table in table_info, no error).
-        let current_schema = self.db.catalog.get_current_schema().to_string();
-        if let Some(ref schema) = stmt.database {
-            let is_current =
-                schema.eq_ignore_ascii_case(&current_schema) || schema.eq_ignore_ascii_case("main");
-            if !is_current {
-                return Ok(QueryResult {
-                    columns,
-                    rows: Vec::new(),
-                    row_count: 0,
-                    execution_time_ms: None,
-                    message: None,
-                });
-            }
-        }
-
-        let schema = match self.db.catalog.get_table(&table_name) {
+        // Schema-qualified table resolution. A bare `PRAGMA table_info(t)` follows
+        // SQLite's shadowing rule — a TEMP table hides a main-schema table of the
+        // same name — via the catalog's temp-first `get_table`. A schema-qualified
+        // form instead pins the lookup to that schema: `PRAGMA temp.table_info(t)`
+        // reads the TEMP table and `PRAGMA main.table_info(t)` reads the
+        // main-schema table even when a TEMP table of the same name shadows it
+        // (ticket #3320; pragma-6.6.3 / pragma-6.6.4). Routing the qualifier
+        // straight through `get_table` (which resolves `temp` to this session's
+        // temp schema and `main` to the default schema) yields the correct table
+        // for each; an unknown schema resolves to nothing and produces an empty
+        // result — SQLite reports no rows, not an error, for a missing table.
+        let lookup = match &stmt.database {
+            Some(db) => format!("{}.{}", db, table_name),
+            None => table_name.clone(),
+        };
+        let schema = match self.db.catalog.get_table(&lookup) {
             Some(s) => s,
             None => {
                 // SQLite returns empty result for table_info on a missing table.

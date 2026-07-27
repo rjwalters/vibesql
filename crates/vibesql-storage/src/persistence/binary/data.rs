@@ -79,8 +79,14 @@ fn read_row_version_prefix<R: Read>(
 pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), StorageError> {
     let table_names = db.catalog.list_tables();
 
+    // Qualify with the current schema so temp-shadowing does not substitute an
+    // ephemeral TEMP table's rows for the same-named main-schema table's rows
+    // (mirrors the schema-write fix for pragma-6.6.4; a TEMP table is never
+    // persisted). `list_tables()` yields only current-schema names.
+    let current_schema = db.catalog.get_current_schema().to_string();
     for table_name in table_names {
-        if let Some(table) = db.get_table(&table_name) {
+        let qualified_name = format!("{}.{}", current_schema, table_name);
+        if let Some(table) = db.get_table(&qualified_name) {
             // Write table name
             write_string(writer, &table_name)?;
 

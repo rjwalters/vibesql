@@ -62,8 +62,17 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     let table_names = db.catalog.list_tables();
     write_u32(writer, table_names.len() as u32)?;
 
+    // `list_tables()` returns only the current (main) schema's tables, but the
+    // bare-name `db.get_table` applies SQLite temp-shadowing — a same-named TEMP
+    // table wins. Persisting through the bare lookup therefore serialized an
+    // ephemeral TEMP table's schema under the main table's name, clobbering the
+    // real main-schema table in the checkpoint (pragma-6.6.4; a TEMP table must
+    // never be persisted). Qualify the lookup with the current schema so the
+    // main-schema table is always the one written.
+    let current_schema = db.catalog.get_current_schema().to_string();
     for table_name in &table_names {
-        if let Some(table) = db.get_table(table_name) {
+        let qualified_name = format!("{}.{}", current_schema, table_name);
+        if let Some(table) = db.get_table(&qualified_name) {
             write_string(writer, table_name)?;
 
             // Write column count
