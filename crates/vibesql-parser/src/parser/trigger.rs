@@ -123,11 +123,22 @@ impl Parser {
         let schema = match (is_temp, name_ref.schema_name) {
             (_, Some(schema_name)) => {
                 if is_temp && !schema_name.eq_ignore_ascii_case("temp") {
+                    // SQLite emits this exact message (no name suffix) for
+                    // `CREATE TEMP TRIGGER main.r1 ...` (trigger7-1.1).
                     return Err(ParseError {
-                        message: format!(
-                            "temporary trigger may not have qualified name: \"{}.{}\"",
-                            schema_name, trigger_name
-                        ),
+                        message: "temporary trigger may not have qualified name".to_string(),
+                    });
+                }
+                // VibeSQL exposes only the `main` and `temp` schemas (no ATTACH),
+                // so a trigger name qualified with any other database is an
+                // "unknown database <name>" prepare-time error, matching SQLite
+                // (trigger7-1.2). `temporary` is accepted as an alias of `temp`.
+                if !schema_name.eq_ignore_ascii_case("main")
+                    && !schema_name.eq_ignore_ascii_case("temp")
+                    && !schema_name.eq_ignore_ascii_case("temporary")
+                {
+                    return Err(ParseError {
+                        message: format!("unknown database {}", schema_name),
                     });
                 }
                 Some(schema_name)

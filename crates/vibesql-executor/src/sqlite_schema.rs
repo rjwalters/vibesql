@@ -23,10 +23,19 @@ use vibesql_types::{DataType, SqlValue};
 
 use crate::{errors::ExecutorError, select::SelectResult};
 
-/// Check if a table reference is sqlite_master or sqlite_schema
+/// Check if a table reference is sqlite_master or sqlite_schema.
+///
+/// The `main.`-qualified forms (`main.sqlite_master` / `main.sqlite_schema`) name
+/// the same schema table — SQLite lets the schema table be referenced with an
+/// explicit `main.` database qualifier, and the evidence suites do so heavily
+/// (e.g. `list_all_views` in e_dropview.test queries `main.sqlite_master`). They
+/// resolve identically to the unqualified names here (#6176).
 pub fn is_sqlite_schema_table(table_name: &str) -> bool {
     let normalized = table_name.to_lowercase();
-    matches!(normalized.as_str(), "sqlite_master" | "sqlite_schema")
+    matches!(
+        normalized.as_str(),
+        "sqlite_master" | "sqlite_schema" | "main.sqlite_master" | "main.sqlite_schema"
+    )
 }
 
 /// Check whether an object name is reserved for internal use.
@@ -58,7 +67,19 @@ pub fn is_reserved_object_name(name: &str) -> bool {
 /// are the temp-schema counterpart to `sqlite_master`. See issue #5513.
 pub fn is_sqlite_temp_schema_table(table_name: &str) -> bool {
     let normalized = table_name.to_lowercase();
-    matches!(normalized.as_str(), "sqlite_temp_master" | "sqlite_temp_schema")
+    matches!(
+        normalized.as_str(),
+        // The `temp.`-qualified forms name the temp schema's schema table, which
+        // in SQLite is the temp-schema counterpart of sqlite_master (i.e.
+        // sqlite_temp_master). e_dropview.test's `list_all_views` reads
+        // `temp.sqlite_master` for the temp database (#6176).
+        "sqlite_temp_master"
+            | "sqlite_temp_schema"
+            | "temp.sqlite_master"
+            | "temp.sqlite_schema"
+            | "temp.sqlite_temp_master"
+            | "temp.sqlite_temp_schema"
+    )
 }
 
 /// Get the schema for sqlite_master/sqlite_schema
@@ -709,11 +730,17 @@ mod tests {
         assert!(is_sqlite_schema_table("SQLITE_MASTER"));
         assert!(is_sqlite_schema_table("SQLITE_SCHEMA"));
         assert!(is_sqlite_schema_table("Sqlite_Master"));
+        // #6176: main-qualified forms name the same schema table.
+        assert!(is_sqlite_schema_table("main.sqlite_master"));
+        assert!(is_sqlite_schema_table("main.sqlite_schema"));
+        assert!(is_sqlite_schema_table("MAIN.SQLITE_MASTER"));
         assert!(!is_sqlite_schema_table("users"));
         assert!(!is_sqlite_schema_table("sqlite_stat1"));
         assert!(!is_sqlite_schema_table("information_schema.tables"));
         // sqlite_temp_master is a distinct view, not sqlite_master.
         assert!(!is_sqlite_schema_table("sqlite_temp_master"));
+        // temp-qualified master belongs to the temp schema, not main.
+        assert!(!is_sqlite_schema_table("temp.sqlite_master"));
     }
 
     #[test]
@@ -722,7 +749,12 @@ mod tests {
         assert!(is_sqlite_temp_schema_table("sqlite_temp_schema"));
         assert!(is_sqlite_temp_schema_table("SQLITE_TEMP_MASTER"));
         assert!(is_sqlite_temp_schema_table("Sqlite_Temp_Schema"));
+        // #6176: temp-qualified master/schema name the temp schema table.
+        assert!(is_sqlite_temp_schema_table("temp.sqlite_master"));
+        assert!(is_sqlite_temp_schema_table("temp.sqlite_schema"));
+        assert!(is_sqlite_temp_schema_table("TEMP.SQLITE_MASTER"));
         assert!(!is_sqlite_temp_schema_table("sqlite_master"));
+        assert!(!is_sqlite_temp_schema_table("main.sqlite_master"));
         assert!(!is_sqlite_temp_schema_table("users"));
     }
 
