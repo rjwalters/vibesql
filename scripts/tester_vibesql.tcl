@@ -247,6 +247,8 @@ set ::pragma_encoding ""                 ;# "" = default (UTF-8); otherwise the 
 set ::pragma_synchronous_raw ""          ;# "" = default (FULL); otherwise the last raw text set via PRAGMA synchronous=... (#6175)
 set ::pragma_cache_size_raw ""           ;# "" = default (-2000); otherwise the last raw text set via PRAGMA cache_size=... (#6175)
 array set ::pragma_default_cache_size_cookie {} ;# db-file-path -> last raw text set via PRAGMA default_cache_size=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
+array set ::pragma_user_version_cookie {}   ;# db-file-path -> last raw text set via PRAGMA user_version=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
+array set ::pragma_application_id_cookie {} ;# db-file-path -> last raw text set via PRAGMA application_id=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -1651,6 +1653,16 @@ proc build_pragma_prefix {} {
     if {$::pragma_synchronous_raw ne ""} {
         append prefix "PRAGMA synchronous=$::pragma_synchronous_raw;\n"
     }
+    # Replay PRAGMA user_version / application_id so a value set in an earlier
+    # batch is still visible to a later, freshly-spawned CLI process on the
+    # SAME logical connection AND survives a `db close` / reopen against the
+    # same file (both are real SQLite file-header cookies; #6175).
+    if {[info exists ::pragma_user_version_cookie($::db_file)]} {
+        append prefix "PRAGMA user_version=$::pragma_user_version_cookie($::db_file);\n"
+    }
+    if {[info exists ::pragma_application_id_cookie($::db_file)]} {
+        append prefix "PRAGMA application_id=$::pragma_application_id_cookie($::db_file);\n"
+    }
     # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
     # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
     # current batch (avoids a redundant create). IF NOT EXISTS keeps replay safe.
@@ -1845,6 +1857,22 @@ proc track_pragma_setting {sql} {
     set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?default_cache_size\s*=\s*(-?\d+)} $sql]
     foreach {match value} $matches {
         set ::pragma_default_cache_size_cookie($::db_file) $value
+        set found 1
+    }
+
+    # Look for user_version / application_id settings (find all occurrences,
+    # use last one). Real SQLite file-header cookies (#6175): both `= N` and
+    # the function-style `(N)` syntax are accepted, mirroring the CLI parser.
+    # Tracked per-file (like default_cache_size above) so they survive a
+    # `db close` / reopen against the SAME file.
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?user_version\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set ::pragma_user_version_cookie($::db_file) $value
+        set found 1
+    }
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?application_id\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        set ::pragma_application_id_cookie($::db_file) $value
         set found 1
     }
 
@@ -2814,7 +2842,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill|user_version|application_id)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -3624,7 +3652,7 @@ proc execsql2 {sql {db ""}} {
     set sql_upper [string toupper [string trim $sql]]
     if {[string match "PRAGMA*" $sql_upper]} {
         # Allow supported PRAGMAs through
-        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|data_version|collation_list|index_list|index_xinfo|index_info)} [string trim $sql]]} {
+        if {[regexp -nocase {^PRAGMA\s+(?:database\.)?(full_column_names|short_column_names|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|data_version|collation_list|index_list|index_xinfo|index_info|user_version|application_id)} [string trim $sql]]} {
             # Pass through to VibeSQL - these are supported
         } else {
             return {}  ;# Skip unsupported PRAGMA statements
@@ -7415,10 +7443,13 @@ proc sqlite3 {db args} {
         # orphaned siblings that would still be replayed on open.
         forcedelete $new_file
         lappend ::opened_dbs $new_file
-        # A genuinely fresh file has no `default_cache_size` header cookie
-        # (SQLite: cookie 0 = never set). Clear any stale tracked value from a
-        # PAST test that happened to reuse this same path (#6175).
+        # A genuinely fresh file has no `default_cache_size` / `user_version` /
+        # `application_id` header cookie (SQLite: cookie 0 = never set). Clear
+        # any stale tracked value from a PAST test that happened to reuse this
+        # same path (#6175).
         unset -nocomplain ::pragma_default_cache_size_cookie($new_file)
+        unset -nocomplain ::pragma_user_version_cookie($new_file)
+        unset -nocomplain ::pragma_application_id_cookie($new_file)
     }
 
     set ::db_file $new_file
@@ -7844,9 +7875,12 @@ proc reset_db {} {
     set ::pragma_synchronous_raw ""  ;# reset_db: synchronous resets to default FULL (#6175)
     set ::pragma_cache_size_raw ""   ;# reset_db: cache_size resets to default -2000 (#6175)
     # reset_db wipes the database file (via delete_db_with_wal above), so any
-    # tracked default_cache_size cookie for this path is stale — a fresh file
-    # has no header cookie, matching the "first open" clear in `proc sqlite3`.
+    # tracked default_cache_size/user_version/application_id cookie for this
+    # path is stale — a fresh file has no header cookie, matching the "first
+    # open" clear in `proc sqlite3`.
     unset -nocomplain ::pragma_default_cache_size_cookie($::db_file)
+    unset -nocomplain ::pragma_user_version_cookie($::db_file)
+    unset -nocomplain ::pragma_application_id_cookie($::db_file)
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
     # Drop all temp view/trigger replay state — reset_db wipes the database, so
     # replaying stale temp-object DDL into the fresh db would resurrect objects

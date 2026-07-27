@@ -210,11 +210,13 @@ fn convert_to_catalog_columns(columns: &[IndexColumn]) -> Vec<vibesql_catalog::I
                     order,
                     prefix_len,
                 )
+                .with_collation(col.collation().map(|c| c.to_string()))
             } else {
                 vibesql_catalog::IndexedColumn::new_column(
                     col.column_name().unwrap().to_string(),
                     order,
                 )
+                .with_collation(col.collation().map(|c| c.to_string()))
             }
         })
         .collect()

@@ -1139,6 +1139,7 @@ mod tests {
                     column_name: "first_name".to_string(),
                     order: SortOrder::Descending,
                     prefix_length: None,
+                    collation: None,
                 },
             ],
             false, // not unique

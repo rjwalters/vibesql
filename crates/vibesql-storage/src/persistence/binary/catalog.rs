@@ -1068,15 +1068,19 @@ fn convert_ast_columns_to_catalog(
                 vibesql_ast::IndexColumn::Expression { expr, .. } => {
                     vibesql_catalog::IndexedColumn::new_expression((**expr).clone(), order)
                 }
-                vibesql_ast::IndexColumn::Column { column_name, prefix_length, .. } => {
+                vibesql_ast::IndexColumn::Column {
+                    column_name, prefix_length, collation, ..
+                } => {
                     if let Some(prefix) = prefix_length {
                         vibesql_catalog::IndexedColumn::new_column_with_prefix(
                             column_name.clone(),
                             order,
                             *prefix,
                         )
+                        .with_collation(collation.clone())
                     } else {
                         vibesql_catalog::IndexedColumn::new_column(column_name.clone(), order)
+                            .with_collation(collation.clone())
                     }
                 }
             }
