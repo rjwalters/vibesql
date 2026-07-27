@@ -36,6 +36,44 @@ pub struct SqlExecutor {
     /// (numcast.test numcast-utf8.0/utf16le.0/utf16be.0) even though the
     /// UTF-16 encodings themselves are not actually implemented.
     encoding: String,
+    /// PRAGMA synchronous session setting (SQLite-compatible, default 2=FULL).
+    /// VibeSQL has no pager to actually fsync at different safety levels, but
+    /// it reproduces SQLite's exact get/set arithmetic (pragma.test pragma-1.*,
+    /// pragma-5.*) including the quirky `((raw+1) & PAGER_SYNCHRONOUS_MASK)`
+    /// wraparound for out-of-range numeric values and the "changed inside a
+    /// transaction" error. Canonical values: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA.
+    synchronous: i64,
+    /// PRAGMA cache_size session setting (SQLite-compatible, default -2000 —
+    /// SQLITE_DEFAULT_CACHE_SIZE, meaning "2000 KiB" by SQLite's negative-size
+    /// convention). VibeSQL has no page cache to actually resize, but it
+    /// echoes the raw signed value exactly like SQLite (pragma.test
+    /// pragma-1.*): unlike `default_cache_size` below, the value set here is
+    /// stored and read back verbatim (not normalized to a positive count) and
+    /// is session-only — it resets to the default on every reconnect.
+    cache_size: i64,
+    /// PRAGMA default_cache_size session setting (SQLite-compatible; default
+    /// 0, meaning "never set" — reads back as -2000 via `resolve_cache_size_cookie`,
+    /// matching SQLite's `SQLITE_DEFAULT_CACHE_SIZE`). SQLite tracks this as a
+    /// separate on-disk header cookie from the in-memory `cache_size` field:
+    /// `PRAGMA default_cache_size=N` normalizes to `abs(N)`, stores it here,
+    /// AND immediately updates `cache_size` too; but `PRAGMA cache_size=N`
+    /// does NOT touch this cookie (pragma.test pragma-1.2/1.5 vs. pragma-1.8).
+    /// Known gap vs. real SQLite: SQLite persists this cookie into the
+    /// database file header so it survives a `db close` / reopen; VibeSQL has
+    /// no such on-disk cookie storage yet, so this is session-only and resets
+    /// to 0 on every reconnect (tracked as follow-up work under #6175, not a
+    /// Bucket-A pager internal — it is a genuine SQL-visible value, just
+    /// missing durable storage).
+    default_cache_size_cookie: i64,
+    /// PRAGMA cache_spill session setting (SQLite-compatible; default ON with
+    /// no explicit size, meaning the spill threshold mirrors `cache_size`).
+    /// VibeSQL has no pager to actually spill dirty pages, but it echoes the
+    /// get/set values like SQLite (pragma2.test pragma2-4.1/4.2):
+    /// `(enabled, explicit_size)` — when disabled, reads as 0 regardless of
+    /// `explicit_size`; when enabled with no explicit size, reads as the
+    /// current `cache_size`.
+    cache_spill_enabled: bool,
+    cache_spill_explicit_size: Option<i64>,
     /// Active WAL persistence state, present only when the opt-in
     /// `[database] wal = true` flag is set AND a file-backed database is in use.
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
@@ -458,6 +496,11 @@ impl SqlExecutor {
                     auto_vacuum: 0,
                     temp_store: 0,
                     encoding: default_encoding(),
+                    synchronous: SQLITE_DEFAULT_SYNCHRONOUS,
+                    cache_size: SQLITE_DEFAULT_CACHE_SIZE,
+                    default_cache_size_cookie: 0,
+                    cache_spill_enabled: true,
+                    cache_spill_explicit_size: None,
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
@@ -501,6 +544,11 @@ impl SqlExecutor {
             auto_vacuum: 0,
             temp_store: 0,
             encoding: default_encoding(),
+            synchronous: SQLITE_DEFAULT_SYNCHRONOUS,
+            cache_size: SQLITE_DEFAULT_CACHE_SIZE,
+            default_cache_size_cookie: 0,
+            cache_spill_enabled: true,
+            cache_spill_explicit_size: None,
             wal_state: None,
             db_path,
             _db_lock: db_lock,
@@ -1587,6 +1635,86 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "SYNCHRONOUS" => {
+                    // SQLite-compatible PRAGMA synchronous set (pragma.test
+                    // pragma-1.*, pragma-5.1). VibeSQL has no pager to actually
+                    // fsync at different safety levels, but it reproduces
+                    // SQLite's exact `getSafetyLevel()` + `((raw+1) &
+                    // PAGER_SYNCHRONOUS_MASK)` arithmetic so get/set round-trips
+                    // match, including the "changed inside a transaction" guard
+                    // (real SQLite: `if (!db->autoCommit) error`).
+                    if self.db.in_transaction() {
+                        return Err(anyhow::anyhow!(
+                            "Safety level may not be changed inside a transaction"
+                        ));
+                    }
+                    self.synchronous = synchronous_read_value(parse_synchronous_raw(value));
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CACHE_SIZE" => {
+                    // SQLite-compatible PRAGMA cache_size set (pragma.test
+                    // pragma-1.*). Session-only (SQLite's `pSchema->cache_size`
+                    // is in-memory too and would be reloaded from the file
+                    // header's `default_cache_size` cookie on reconnect —
+                    // VibeSQL has no such cookie storage yet, see
+                    // `default_cache_size_cookie`'s doc comment). Stores the
+                    // raw signed value verbatim, unlike `default_cache_size`.
+                    self.cache_size = pragma_value_atoi(value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "DEFAULT_CACHE_SIZE" => {
+                    // SQLite-compatible PRAGMA default_cache_size set
+                    // (pragma.test pragma-1.8+, deprecated but still tested).
+                    // Normalizes to `abs(N)` and updates both the (session-only)
+                    // persisted-cookie stand-in and `cache_size` immediately,
+                    // matching SQLite's dual write to the header cookie and
+                    // `pSchema->cache_size`.
+                    let size = pragma_value_atoi(value).abs();
+                    self.default_cache_size_cookie = size;
+                    self.cache_size = size;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CACHE_SPILL" => {
+                    // SQLite-compatible PRAGMA cache_spill set (pragma2.test
+                    // pragma2-4.1/4.2). VibeSQL has no pager to actually spill
+                    // dirty pages, but it echoes the enabled/size state like
+                    // SQLite: a numeric argument sets an explicit spill-size
+                    // threshold (and toggles enabled off only for `0`); a
+                    // keyword argument (ON/OFF/...) toggles enabled without
+                    // touching any previously-set explicit size.
+                    let text = pragma_value_text(value).trim();
+                    if let Ok(size) = text.parse::<i64>() {
+                        self.cache_spill_explicit_size = Some(size);
+                        self.cache_spill_enabled = size != 0;
+                    } else {
+                        self.cache_spill_enabled = pragma_value_to_bool(value);
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -1762,6 +1890,63 @@ impl SqlExecutor {
                     Ok(QueryResult {
                         columns: vec!["encoding".to_string()],
                         rows: vec![vec![Some(self.encoding.clone())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "SYNCHRONOUS" => {
+                    // SQLite-compatible PRAGMA synchronous read (pragma.test
+                    // pragma-1.*, pragma-5.0/5.2). Default 2 (FULL).
+                    Ok(QueryResult {
+                        columns: vec!["synchronous".to_string()],
+                        rows: vec![vec![Some(self.synchronous.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CACHE_SIZE" => {
+                    // SQLite-compatible PRAGMA cache_size read (pragma.test
+                    // pragma-1.*). Returns the raw signed session value;
+                    // default -2000 (SQLITE_DEFAULT_CACHE_SIZE).
+                    Ok(QueryResult {
+                        columns: vec!["cache_size".to_string()],
+                        rows: vec![vec![Some(self.cache_size.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "DEFAULT_CACHE_SIZE" => {
+                    // SQLite-compatible PRAGMA default_cache_size read
+                    // (pragma.test pragma-1.*). Resolves the (session-only)
+                    // persisted-cookie stand-in: an unset/zero cookie reads
+                    // back as -2000 (SQLITE_DEFAULT_CACHE_SIZE), matching
+                    // SQLite's `OP_ReadCookie` + fallback arithmetic.
+                    let value = resolve_cache_size_cookie(self.default_cache_size_cookie);
+                    Ok(QueryResult {
+                        columns: vec!["default_cache_size".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CACHE_SPILL" => {
+                    // SQLite-compatible PRAGMA cache_spill read (pragma2.test
+                    // pragma2-4.1/4.2). Disabled reads as 0 regardless of any
+                    // stored explicit size; enabled with no explicit size
+                    // mirrors the current `cache_size` (SQLite's spill
+                    // threshold defaults to the cache size until set).
+                    let value = if !self.cache_spill_enabled {
+                        0
+                    } else {
+                        self.cache_spill_explicit_size.unwrap_or(self.cache_size)
+                    };
+                    Ok(QueryResult {
+                        columns: vec!["cache_spill".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,
@@ -2693,6 +2878,94 @@ fn normalize_temp_store(value: &vibesql_ast::PragmaValue) -> i64 {
 /// default text encoding.
 fn default_encoding() -> String {
     "UTF-8".to_string()
+}
+
+/// SQLite's default `PRAGMA synchronous` level (2 = FULL).
+const SQLITE_DEFAULT_SYNCHRONOUS: i64 = 2;
+
+/// SQLite's `SQLITE_DEFAULT_CACHE_SIZE` compile-time constant: the value
+/// `PRAGMA cache_size` / `PRAGMA default_cache_size` report when no explicit
+/// size has ever been set.
+const SQLITE_DEFAULT_CACHE_SIZE: i64 = -2000;
+
+/// Mirrors SQLite's `getSafetyLevel()` (pragma.c) used by `PRAGMA
+/// synchronous = <value>`: a numeric string is parsed via a C-style
+/// leading-digit `atoi` (a non-digit first character, including a leading
+/// `-`, is NOT treated as numeric — matching `sqlite3Isdigit(*z)`); a
+/// recognized keyword maps to its table value; anything else (including the
+/// unlisted `NORMAL` spelling) falls back to 1. This is the *raw*
+/// pre-adjustment value — `synchronous_read_value` below applies SQLite's
+/// `((raw+1) & PAGER_SYNCHRONOUS_MASK)` wraparound to get the value actually
+/// stored/reported.
+fn parse_synchronous_raw(value: &vibesql_ast::PragmaValue) -> i64 {
+    let text = pragma_value_text(value);
+    let trimmed = text.trim();
+    if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        // C `atoi`-style: parse the leading run of digits, ignore the rest.
+        let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+        return digits.parse::<i64>().unwrap_or(0);
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "on" => 1,
+        "no" => 0,
+        "off" => 0,
+        "false" => 0,
+        "yes" => 1,
+        "true" => 1,
+        "extra" => 3,
+        "full" => 2,
+        // SQLite's keyword table has no "normal" entry — it (like any other
+        // unrecognized spelling) falls through to the default of 1, which
+        // happens to be exactly NORMAL's value.
+        _ => 1,
+    }
+}
+
+/// Applies SQLite's `((raw+1) & PAGER_SYNCHRONOUS_MASK)` wraparound (with the
+/// "never let the stored level be 0" correction) and returns the value that
+/// `PRAGMA synchronous` reports back afterward — matching SQLite's exact
+/// arithmetic, including its quirky handling of out-of-range numeric input
+/// (pragma.test pragma-1.13/1.14.x: `synchronous=8` reads back as `0`,
+/// `=10` reads back as `2`).
+fn synchronous_read_value(raw: i64) -> i64 {
+    const PAGER_SYNCHRONOUS_MASK: i64 = 0x07;
+    let mut level = (raw + 1) & PAGER_SYNCHRONOUS_MASK;
+    if level == 0 {
+        level = 1;
+    }
+    level - 1
+}
+
+/// C-`atoi`-style integer parse used by `cache_size` / `default_cache_size`:
+/// parses an optional leading sign followed by a run of digits and ignores
+/// any trailing non-digit content; returns 0 if there are no usable leading
+/// digits (matching SQLite's `sqlite3Atoi`).
+fn pragma_value_atoi(value: &vibesql_ast::PragmaValue) -> i64 {
+    let text = pragma_value_text(value).trim();
+    let mut chars = text.chars().peekable();
+    let mut sign = 1i64;
+    if let Some(&c) = chars.peek() {
+        if c == '-' {
+            sign = -1;
+            chars.next();
+        } else if c == '+' {
+            chars.next();
+        }
+    }
+    let digits: String = chars.take_while(|c| c.is_ascii_digit()).collect();
+    sign * digits.parse::<i64>().unwrap_or(0)
+}
+
+/// Resolves the `default_cache_size` persisted-cookie stand-in to the value
+/// `PRAGMA default_cache_size` reports: a nonzero cookie reports its
+/// absolute value, an unset (zero) cookie reports `SQLITE_DEFAULT_CACHE_SIZE`
+/// (mirrors SQLite's `OP_ReadCookie` + `IfPos`/`Subtract` VDBE program).
+fn resolve_cache_size_cookie(cookie: i64) -> i64 {
+    if cookie != 0 {
+        cookie.abs()
+    } else {
+        SQLITE_DEFAULT_CACHE_SIZE
+    }
 }
 
 /// Normalize a `PRAGMA encoding = <value>` argument to SQLite's canonical

@@ -244,6 +244,9 @@ set ::pragma_defer_foreign_keys 0        ;# Default: OFF; auto-resets at COMMIT/
 set ::pragma_recursive_triggers 0        ;# Default: OFF (VibeSQL/SQLite default; #5535, #5840)
 set ::pragma_trigger_depth_limit 0       ;# 0 = default cap; >0 = per-connection SQLITE_LIMIT_TRIGGER_DEPTH (#5536)
 set ::pragma_encoding ""                 ;# "" = default (UTF-8); otherwise the last value set via PRAGMA encoding=... (#6172)
+set ::pragma_synchronous_raw ""          ;# "" = default (FULL); otherwise the last raw text set via PRAGMA synchronous=... (#6175)
+set ::pragma_cache_size_raw ""           ;# "" = default (-2000); otherwise the last raw text set via PRAGMA cache_size=... (#6175)
+array set ::pragma_default_cache_size_cookie {} ;# db-file-path -> last raw text set via PRAGMA default_cache_size=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers
@@ -1622,6 +1625,23 @@ proc build_pragma_prefix {} {
     if {$::pragma_encoding ne ""} {
         append prefix "PRAGMA encoding='$::pragma_encoding';\n"
     }
+    # Replay PRAGMA synchronous / cache_size / default_cache_size so state set
+    # in an earlier batch is still visible to a later, freshly-spawned CLI
+    # process on the SAME logical connection (pragma.test pragma-1.*, #6175).
+    # Replay order matters: the (per-file, reconnect-persistent) cookie goes
+    # first so a still-pending same-connection `cache_size=N` override (set
+    # more recently, tracked separately below) applies on top of it — matching
+    # SQLite's real chronological "last write wins" semantics for the common
+    # case where `default_cache_size` is set once and not overridden again.
+    if {[info exists ::pragma_default_cache_size_cookie($::db_file)]} {
+        append prefix "PRAGMA default_cache_size=$::pragma_default_cache_size_cookie($::db_file);\n"
+    }
+    if {$::pragma_cache_size_raw ne ""} {
+        append prefix "PRAGMA cache_size=$::pragma_cache_size_raw;\n"
+    }
+    if {$::pragma_synchronous_raw ne ""} {
+        append prefix "PRAGMA synchronous=$::pragma_synchronous_raw;\n"
+    }
     # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
     # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
     # current batch (avoids a redundant create). IF NOT EXISTS keeps replay safe.
@@ -1772,6 +1792,50 @@ proc track_pragma_setting {sql} {
     set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?encoding\s*=\s*'?([A-Za-z0-9-]+)'?} $sql]
     foreach {match value} $matches {
         set ::pragma_encoding $value
+        set found 1
+    }
+
+    # Look for synchronous settings (find all occurrences, use last one).
+    # Value can be a bare keyword (OFF/NORMAL/FULL/EXTRA/ON) or a number, so
+    # capture the raw text and replay it verbatim in build_pragma_prefix — the
+    # CLI applies SQLite's exact getSafetyLevel()/mask arithmetic itself.
+    # Connection-scoped (#6175): reset to "" on every fresh `sqlite3 db ...`.
+    #
+    # SQLite (and VibeSQL) reject `PRAGMA synchronous=...` inside an open
+    # transaction (pragma.test pragma-5.1) — the SET has NO effect in that
+    # case. Approximate that guard here so a rejected same-batch SET (e.g.
+    # `BEGIN; PRAGMA synchronous=OFF;`) is not mistakenly carried forward into
+    # later batches: skip tracking when either a transaction was already open
+    # from a prior unflushed batch, or this batch's own SQL opens one with an
+    # explicit BEGIN before the pragma is reached.
+    if {!$::in_transaction && ![regexp -nocase {(^|;)\s*BEGIN\M} $sql]} {
+        set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?synchronous\s*=\s*'?([A-Za-z0-9_-]+)'?} $sql]
+        foreach {match value} $matches {
+            set ::pragma_synchronous_raw $value
+            set found 1
+        }
+    }
+
+    # Look for cache_size settings (find all occurrences, use last one). Raw
+    # signed integer, replayed verbatim. Connection-scoped (#6175): reset to
+    # "" on every fresh `sqlite3 db ...` (SQLite's `cache_size` is in-memory
+    # only, not persisted to the file).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?cache_size\s*=\s*(-?\d+)} $sql]
+    foreach {match value} $matches {
+        set ::pragma_cache_size_raw $value
+        set found 1
+    }
+
+    # Look for default_cache_size settings (find all occurrences, use last
+    # one). Unlike cache_size above, real SQLite persists this into the
+    # database file header, so it must survive a `db close` / reopen against
+    # the SAME file. Tracked per-file in `::pragma_default_cache_size_cookie`
+    # (array keyed by db file path), NOT reset by the per-connection reset
+    # block in `proc sqlite3` — only cleared when the file itself is
+    # genuinely fresh (see the `forcedelete $new_file` "first open" branch).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?default_cache_size\s*=\s*(-?\d+)} $sql]
+    foreach {match value} $matches {
+        set ::pragma_default_cache_size_cookie($::db_file) $value
         set found 1
     }
 
@@ -2741,7 +2805,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -7342,6 +7406,10 @@ proc sqlite3 {db args} {
         # orphaned siblings that would still be replayed on open.
         forcedelete $new_file
         lappend ::opened_dbs $new_file
+        # A genuinely fresh file has no `default_cache_size` header cookie
+        # (SQLite: cookie 0 = never set). Clear any stale tracked value from a
+        # PAST test that happened to reuse this same path (#6175).
+        unset -nocomplain ::pragma_default_cache_size_cookie($new_file)
     }
 
     set ::db_file $new_file
@@ -7367,6 +7435,14 @@ proc sqlite3 {db args} {
     # open must not inherit the previous connection's setting (#5909).
     set ::pragma_recursive_triggers 0
     set ::pragma_encoding ""  ;# Fresh connection: encoding resets to default UTF-8 (#6172)
+    # synchronous and cache_size are session-scoped in real SQLite too (never
+    # persisted to the file) — reset on every fresh connection. Unlike those,
+    # default_cache_size_cookie is intentionally NOT reset here: SQLite
+    # persists it into the file header, so it must survive a `db close` /
+    # reopen against the SAME file (pragma.test pragma-1.9.1+, #6175). It is
+    # only cleared below, in the "first time opening this file" branch.
+    set ::pragma_synchronous_raw ""
+    set ::pragma_cache_size_raw ""
     set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
     set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
 
@@ -7756,6 +7832,12 @@ proc reset_db {} {
     # recursive_triggers is per-connection in SQLite (OFF by default; #5909).
     set ::pragma_recursive_triggers 0
     set ::pragma_encoding ""  ;# reset_db: encoding resets to default UTF-8 (#6172)
+    set ::pragma_synchronous_raw ""  ;# reset_db: synchronous resets to default FULL (#6175)
+    set ::pragma_cache_size_raw ""   ;# reset_db: cache_size resets to default -2000 (#6175)
+    # reset_db wipes the database file (via delete_db_with_wal above), so any
+    # tracked default_cache_size cookie for this path is stale — a fresh file
+    # has no header cookie, matching the "first open" clear in `proc sqlite3`.
+    unset -nocomplain ::pragma_default_cache_size_cookie($::db_file)
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
     # Drop all temp view/trigger replay state — reset_db wipes the database, so
     # replaying stale temp-object DDL into the fresh db would resurrect objects
