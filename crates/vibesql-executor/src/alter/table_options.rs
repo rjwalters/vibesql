@@ -173,12 +173,13 @@ fn rebind_child_foreign_keys(database: &mut Database, old_name: &str, new_name: 
 /// - `sql_definition` (the verbatim `CREATE TRIGGER` text shown in
 ///   `sqlite_master`/`sqlite_schema`).
 fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name: &str) {
-    let trigger_names = database.catalog.list_triggers();
-    for name in trigger_names {
-        let Some(existing) = database.catalog.get_trigger(&name) else {
-            continue;
-        };
-
+    // Snapshot trigger definitions up front. Triggers are keyed per schema, so a
+    // name-only `get_trigger` resolves temp-first and would rewrite a `temp`
+    // trigger twice while leaving its `main` namesake untouched (issue #6296).
+    // Cloning also frees the immutable catalog borrow so `update_trigger` can
+    // mutate below.
+    let existing_triggers: Vec<_> = database.catalog.iter_triggers().cloned().collect();
+    for existing in existing_triggers {
         // Does this trigger reference the renamed table anywhere?
         let on_target_match = existing.table_name.eq_ignore_ascii_case(old_name);
         let body_text = match &existing.triggered_action {
@@ -266,12 +267,13 @@ pub(super) fn rewrite_triggers_for_column_rename(
     // in any trigger aborts the whole ALTER *before* any catalog mutation. This
     // mirrors SQLite, which leaves the schema entirely unchanged on a genuine
     // ambiguity rather than partially rewriting earlier triggers.
-    let trigger_names = database.catalog.list_triggers();
+    // Snapshot trigger definitions up front. Triggers are keyed per schema, so a
+    // name-only `get_trigger` resolves temp-first and would rewrite a `temp`
+    // trigger twice while leaving its `main` namesake untouched (issue #6296).
+    let existing_triggers: Vec<_> = database.catalog.iter_triggers().cloned().collect();
     let mut pending_updates = Vec::new();
-    for name in trigger_names {
-        let Some(existing) = database.catalog.get_trigger(&name) else {
-            continue;
-        };
+    for existing in existing_triggers {
+        let name = existing.name.clone();
 
         let body_text = match &existing.triggered_action {
             TriggerAction::RawSql(sql) => sql.clone(),

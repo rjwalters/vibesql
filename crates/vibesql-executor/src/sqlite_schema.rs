@@ -195,15 +195,17 @@ pub fn execute_sqlite_schema_query(
     }
 
     // Add triggers. Temp triggers are tagged with the `temp` schema (#5532)
-    // and surface only via sqlite_temp_master, so skip them here.
-    for trigger_name in catalog.list_triggers() {
-        if let Some(trigger) = catalog.get_trigger(&trigger_name) {
-            if trigger.is_temp() {
-                continue;
-            }
-            let sql = generate_create_trigger_sql(trigger);
-            rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
+    // and surface only via sqlite_temp_master, so skip them here. Iterate trigger
+    // definitions directly rather than via `list_triggers()` + `get_trigger()`:
+    // triggers are keyed per schema, so a name-only `get_trigger` resolves
+    // temp-first and would drop a `main` trigger that shares a name with a `temp`
+    // trigger (issue #6296).
+    for trigger in catalog.iter_triggers() {
+        if trigger.is_temp() {
+            continue;
         }
+        let sql = generate_create_trigger_sql(trigger);
+        rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
     }
 
     Ok(SelectResult { columns: column_names, rows })
@@ -395,16 +397,17 @@ pub fn execute_sqlite_temp_schema_query(
         }
     }
 
-    // Add temp triggers. Triggers are also stored flat; filter on the `temp`
-    // schema tag from CREATE TEMP TRIGGER (#5532).
-    for trigger_name in catalog.list_triggers() {
-        if let Some(trigger) = catalog.get_trigger(&trigger_name) {
-            if !trigger.is_temp() {
-                continue;
-            }
-            let sql = generate_create_trigger_sql(trigger);
-            rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
+    // Add temp triggers. Filter on the `temp` schema tag from CREATE TEMP
+    // TRIGGER (#5532). Iterate trigger definitions directly rather than via
+    // `list_triggers()` + `get_trigger()`: triggers are keyed per schema, and a
+    // name-only `get_trigger` resolves temp-first, so a `temp` trigger sharing a
+    // name with a `main` trigger would be emitted twice (issue #6296).
+    for trigger in catalog.iter_triggers() {
+        if !trigger.is_temp() {
+            continue;
         }
+        let sql = generate_create_trigger_sql(trigger);
+        rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
     }
 
     Ok(SelectResult { columns: column_names, rows })
@@ -877,6 +880,81 @@ mod tests {
         assert!(
             !temp_names.contains(&"main_tr".to_string()),
             "temp_master must exclude main trigger"
+        );
+    }
+
+    #[test]
+    fn test_same_name_main_and_temp_triggers_each_appear_once_in_schema_views() {
+        // #6296 regression: a `main` trigger and a `temp` trigger sharing a name
+        // must each surface exactly once in their own schema view. The old
+        // `list_triggers()` + `get_trigger()` enumeration returned duplicate bare
+        // names and resolved every one temp-first, so the main trigger vanished
+        // from sqlite_master and the temp trigger was listed twice in
+        // sqlite_temp_master. Iterating `iter_triggers()` keys each definition by
+        // schema so both are distinguishable.
+        use vibesql_ast::{TriggerAction, TriggerEvent, TriggerGranularity, TriggerTiming};
+        use vibesql_catalog::TriggerDefinition;
+
+        let mut catalog = Catalog::new();
+
+        // Two base tables (one main, one conceptually the temp target); the
+        // trigger definitions only need a table name to reference.
+        let t = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table(t).unwrap();
+        let t2 = TableSchema::new(
+            "t2".to_string(),
+            vec![ColumnSchema::new("b".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table(t2).unwrap();
+
+        // A `main` trigger and a `temp` trigger that share the bare name `tr`.
+        let mk_trigger = |name: &str, table: &str| {
+            TriggerDefinition::new(
+                name.to_string(),
+                TriggerTiming::After,
+                TriggerEvent::Insert,
+                table.to_string(),
+                TriggerGranularity::Row,
+                None,
+                TriggerAction::RawSql("SELECT 1".to_string()),
+            )
+        };
+        catalog.create_trigger(mk_trigger("tr", "t")).unwrap();
+        catalog
+            .create_trigger(mk_trigger("tr", "t2").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        let trigger_names = |result: &SelectResult| -> Vec<String> {
+            result
+                .rows
+                .iter()
+                .filter(|r| matches!(&r.values[0], SqlValue::Varchar(s) if s == "trigger"))
+                .map(|r| match &r.values[1] {
+                    SqlValue::Varchar(s) => s.to_string(),
+                    _ => String::new(),
+                })
+                .collect()
+        };
+
+        // sqlite_master: the main `tr` appears exactly once; no temp namesake.
+        let master = execute_sqlite_schema_query(&catalog).unwrap();
+        let master_triggers = trigger_names(&master);
+        assert_eq!(
+            master_triggers,
+            vec!["tr".to_string()],
+            "sqlite_master must list the main trigger `tr` exactly once (not 0 rows)"
+        );
+
+        // sqlite_temp_master: the temp `tr` appears exactly once (not twice).
+        let temp_master = execute_sqlite_temp_schema_query(&catalog).unwrap();
+        let temp_triggers = trigger_names(&temp_master);
+        assert_eq!(
+            temp_triggers,
+            vec!["tr".to_string()],
+            "sqlite_temp_master must list the temp trigger `tr` exactly once (not twice)"
         );
     }
 
