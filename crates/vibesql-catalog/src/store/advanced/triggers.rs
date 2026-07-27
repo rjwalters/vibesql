@@ -2,40 +2,122 @@
 
 use crate::{errors::CatalogError, trigger::TriggerDefinition};
 
+/// Compute the schema-scoped storage key for a trigger.
+///
+/// SQLite scopes trigger names *per schema*, exactly like tables: `main.tr` and
+/// `temp.tr` are two distinct triggers that may coexist. The catalog therefore
+/// keys triggers by `(schema, name)` rather than by bare `name`, so a `main`
+/// trigger and a `temp`/`aux` trigger sharing a name no longer collide
+/// (e_update-2.3.1 / e_delete-2.3.2).
+///
+/// The schema component is normalized case-insensitively, with `None` and
+/// `main` collapsing to the default (`main`) schema. The name component
+/// preserves the (already parser-normalized) identifier spelling so this keeps
+/// the previous exact-name collision semantics *within* a schema. A control
+/// character separates the two parts so a schema/name that happens to contain a
+/// `.` cannot forge a different key.
+fn trigger_storage_key(schema: Option<&str>, name: &str) -> String {
+    let schema = schema
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
+    format!("{schema}\u{1f}{name}")
+}
+
 impl super::super::Catalog {
     // ============================================================================
     // Trigger Management Methods
     // ============================================================================
 
-    /// Create a TRIGGER
+    /// Create a TRIGGER.
+    ///
+    /// The collision check is scoped to the trigger's own schema (see
+    /// [`trigger_storage_key`]): creating `temp.tr1` when a `main.tr1` already
+    /// exists succeeds, matching SQLite's per-schema trigger namespace.
     pub fn create_trigger(&mut self, trigger: TriggerDefinition) -> Result<(), CatalogError> {
-        let name = trigger.name.clone();
-        if self.triggers.contains_key(&name) {
-            return Err(CatalogError::TriggerAlreadyExists(name));
+        let key = trigger_storage_key(trigger.schema.as_deref(), &trigger.name);
+        if self.triggers.contains_key(&key) {
+            return Err(CatalogError::TriggerAlreadyExists(trigger.name));
         }
-        self.triggers.insert(name, trigger);
+        self.triggers.insert(key, trigger);
         Ok(())
     }
 
-    /// Get a TRIGGER definition by name
+    /// Get a TRIGGER definition by (unqualified) name.
+    ///
+    /// Triggers are stored per schema, so an unqualified name can match more than
+    /// one entry. This resolves them in SQLite's unqualified search order —
+    /// `temp` first, then `main`, then any other (attached) schema — returning
+    /// the first match. Callers that know the schema should prefer
+    /// [`Catalog::get_trigger_in_schema`].
     pub fn get_trigger(&self, name: &str) -> Option<&TriggerDefinition> {
-        self.triggers.get(name)
+        if let Some(trigger) = self.triggers.get(&trigger_storage_key(Some("temp"), name)) {
+            return Some(trigger);
+        }
+        if let Some(trigger) = self.triggers.get(&trigger_storage_key(None, name)) {
+            return Some(trigger);
+        }
+        self.triggers.values().find(|t| t.name == name)
+    }
+
+    /// Get a TRIGGER definition scoped to a specific schema.
+    ///
+    /// `schema` is the logical schema label a trigger carries
+    /// ([`TriggerDefinition::schema`]): `None`/`Some("main")` for the main schema,
+    /// `Some("temp")` for the temp schema, or an attached schema name. This never
+    /// falls through to another schema, so `main.tr` and `temp.tr` are
+    /// distinguishable.
+    pub fn get_trigger_in_schema(
+        &self,
+        name: &str,
+        schema: Option<&str>,
+    ) -> Option<&TriggerDefinition> {
+        self.triggers.get(&trigger_storage_key(schema, name))
+    }
+
+    /// Returns true if a trigger of `name` exists in the given schema.
+    ///
+    /// Used by the executor's `CREATE TRIGGER` path to enforce SQLite's
+    /// per-schema "trigger already exists" rule without colliding across schemas.
+    pub fn trigger_exists_in_schema(&self, name: &str, schema: Option<&str>) -> bool {
+        self.triggers.contains_key(&trigger_storage_key(schema, name))
+    }
+
+    /// Iterate over every trigger definition in the catalog, regardless of
+    /// schema. Preferred over `list_triggers()` + `get_trigger()` by callers
+    /// (e.g. persistence) that must see *every* trigger unambiguously, since a
+    /// name-only `get_trigger` can only return one of several same-named triggers
+    /// living in different schemas.
+    pub fn iter_triggers(&self) -> impl Iterator<Item = &TriggerDefinition> {
+        self.triggers.values()
     }
 
     /// Update a TRIGGER (for ALTER TRIGGER operations)
     pub fn update_trigger(&mut self, trigger: TriggerDefinition) -> Result<(), CatalogError> {
-        let name = trigger.name.clone();
-        if !self.triggers.contains_key(&name) {
-            return Err(CatalogError::TriggerNotFound(name));
+        let key = trigger_storage_key(trigger.schema.as_deref(), &trigger.name);
+        if !self.triggers.contains_key(&key) {
+            return Err(CatalogError::TriggerNotFound(trigger.name));
         }
-        self.triggers.insert(name, trigger);
+        self.triggers.insert(key, trigger);
         Ok(())
     }
 
-    /// Drop a TRIGGER
+    /// Drop a TRIGGER by (unqualified) name.
+    ///
+    /// Resolves the target in SQLite's unqualified search order (`temp`, then
+    /// `main`, then any other schema) and removes the first match.
     pub fn drop_trigger(&mut self, name: &str) -> Result<(), CatalogError> {
+        let key = if self.triggers.contains_key(&trigger_storage_key(Some("temp"), name)) {
+            trigger_storage_key(Some("temp"), name)
+        } else if self.triggers.contains_key(&trigger_storage_key(None, name)) {
+            trigger_storage_key(None, name)
+        } else {
+            match self.triggers.iter().find(|(_, t)| t.name == name) {
+                Some((k, _)) => k.clone(),
+                None => return Err(CatalogError::TriggerNotFound(name.to_string())),
+            }
+        };
         self.triggers
-            .remove(name)
+            .remove(&key)
             .map(|_| ())
             .ok_or_else(|| CatalogError::TriggerNotFound(name.to_string()))
     }
@@ -183,10 +265,10 @@ impl super::super::Catalog {
                 (table_name.to_string(), resolved_schema)
             };
 
-        let triggers_to_remove: Vec<String> = self
+        let keys_to_remove: Vec<String> = self
             .triggers
-            .values()
-            .filter(|trigger| {
+            .iter()
+            .filter(|(_, trigger)| {
                 // Only triggers defined ON the dropped table (case-insensitive,
                 // SQLite-compatible).
                 if !trigger.table_name.eq_ignore_ascii_case(&bare_table_name) {
@@ -205,12 +287,12 @@ impl super::super::Catalog {
                     None => true,
                 }
             })
-            .map(|trigger| trigger.name.clone())
+            .map(|(key, _)| key.clone())
             .collect();
 
-        triggers_to_remove
+        keys_to_remove
             .into_iter()
-            .filter_map(|name| self.triggers.remove(&name).map(|_| name))
+            .filter_map(|key| self.triggers.remove(&key).map(|trigger| trigger.name))
             .collect()
     }
 
@@ -248,10 +330,10 @@ impl super::super::Catalog {
         // stores views by bare name).
         let bare_view_name = view_name.rsplit_once('.').map_or(view_name, |(_, n)| n);
 
-        let triggers_to_remove: Vec<String> = self
+        let keys_to_remove: Vec<String> = self
             .triggers
-            .values()
-            .filter(|trigger| {
+            .iter()
+            .filter(|(_, trigger)| {
                 // Only INSTEAD OF triggers defined ON the dropped view
                 // (case-insensitive, SQLite-compatible). INSTEAD OF is the only
                 // timing valid on a view, but checking it keeps this strictly
@@ -263,18 +345,23 @@ impl super::super::Catalog {
                     // main trigger <-> main view).
                     && trigger.is_temp() == view_is_temp
             })
-            .map(|trigger| trigger.name.clone())
+            .map(|(key, _)| key.clone())
             .collect();
 
-        triggers_to_remove
+        keys_to_remove
             .into_iter()
-            .filter_map(|name| self.triggers.remove(&name).map(|_| name))
+            .filter_map(|key| self.triggers.remove(&key).map(|trigger| trigger.name))
             .collect()
     }
 
-    /// List all trigger names
+    /// List all trigger names.
+    ///
+    /// Returns the trigger identifiers (not the internal schema-scoped storage
+    /// keys). With per-schema keying a name may appear more than once (same name
+    /// in `main` and `temp`); callers that need to disambiguate should use
+    /// [`Catalog::iter_triggers`] or [`Catalog::get_trigger_in_schema`].
     pub fn list_triggers(&self) -> Vec<String> {
-        self.triggers.keys().cloned().collect()
+        self.triggers.values().map(|t| t.name.clone()).collect()
     }
 
     /// Cheap O(1) check: does the catalog hold *any* trigger at all?
@@ -308,7 +395,8 @@ mod tests {
     use vibesql_types::DataType;
 
     use crate::{
-        column::ColumnSchema, store::Catalog, table::TableSchema, trigger::TriggerDefinition,
+        column::ColumnSchema, errors::CatalogError, store::Catalog, table::TableSchema,
+        trigger::TriggerDefinition,
     };
 
     fn sample_trigger(name: &str, table: &str) -> TriggerDefinition {
@@ -356,6 +444,63 @@ mod tests {
         catalog.drop_trigger("t1").unwrap();
         catalog.drop_trigger("t2").unwrap();
         assert!(!catalog.has_any_triggers());
+    }
+
+    /// A `main` trigger and a `temp` trigger sharing a name coexist without a
+    /// spurious "already exists" collision — triggers are keyed per schema
+    /// (e_update-2.3.1 / e_delete-2.3.2).
+    #[test]
+    fn triggers_are_scoped_per_schema() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        // main.tr1 first, then temp.tr1 — no collision across schemas.
+        catalog
+            .create_trigger(sample_trigger("tr1", "t").with_schema(Some("main".to_string())))
+            .unwrap();
+        catalog
+            .create_trigger(sample_trigger("tr1", "t").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        // Both are retrievable by their own schema.
+        assert!(catalog.get_trigger_in_schema("tr1", Some("main")).is_some());
+        assert!(catalog.get_trigger_in_schema("tr1", Some("temp")).is_some());
+        assert!(catalog.trigger_exists_in_schema("tr1", Some("temp")));
+
+        // A same-schema duplicate still collides.
+        assert!(matches!(
+            catalog.create_trigger(sample_trigger("tr1", "t").with_schema(Some("main".to_string()))),
+            Err(CatalogError::TriggerAlreadyExists(_))
+        ));
+
+        // None (default) and Some("main") address the same schema slot.
+        assert!(catalog.trigger_exists_in_schema("tr1", None));
+
+        // Unqualified DROP resolves temp-first (SQLite search order): drops
+        // temp.tr1, leaving main.tr1.
+        catalog.drop_trigger("tr1").unwrap();
+        assert!(catalog.get_trigger_in_schema("tr1", Some("temp")).is_none());
+        assert!(catalog.get_trigger_in_schema("tr1", Some("main")).is_some());
+        catalog.drop_trigger("tr1").unwrap();
+        assert!(!catalog.has_any_triggers());
+    }
+
+    /// A default-schema trigger (`schema = None`) is addressable as `main` and
+    /// does not collide with a `temp` namesake — the `None`/`main` collapse.
+    #[test]
+    fn default_schema_trigger_collapses_to_main() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        catalog.create_trigger(sample_trigger("tr", "t")).unwrap(); // schema None
+        catalog
+            .create_trigger(sample_trigger("tr", "t").with_schema(Some("temp".to_string())))
+            .unwrap();
+
+        // list/iter see both entries.
+        assert_eq!(catalog.iter_triggers().count(), 2);
+        // A None-schema create now collides (same slot as the first).
+        assert!(catalog.create_trigger(sample_trigger("tr", "t")).is_err());
     }
 
     fn names_in_schema(

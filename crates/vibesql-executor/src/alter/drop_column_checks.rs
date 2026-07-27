@@ -95,14 +95,16 @@ fn check_schema_objects(
         }
     }
 
-    for name in database.catalog.list_triggers() {
-        if let Some(trigger) = database.catalog.get_trigger(&name) {
-            if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
-                return Err(ExecutorError::Other(format!(
-                    "error in trigger {}{}: {}",
-                    trigger.name, suffix, inner
-                )));
-            }
+    // Iterate trigger definitions directly rather than via `list_triggers()` +
+    // `get_trigger()`: triggers are keyed per schema, so a name-only `get_trigger`
+    // resolves temp-first and would skip a `main` trigger that shares a name with
+    // a `temp` trigger (issue #6296).
+    for trigger in database.catalog.iter_triggers() {
+        if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
+            return Err(ExecutorError::Other(format!(
+                "error in trigger {}{}: {}",
+                trigger.name, suffix, inner
+            )));
         }
     }
 
