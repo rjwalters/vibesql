@@ -527,6 +527,63 @@ where
                         declared.len()
                     )));
                 }
+            } else if cte.query.from.is_none() {
+                // `collect_select_list_columns` only returns `None` when a
+                // wildcard item's column count could not be resolved, and the
+                // sole reason a wildcard is unresolvable with no FROM clause
+                // at all is that there is nothing to expand it against
+                // (`expand_wildcard_names` bails on `stmt.from.as_ref()?`).
+                //
+                // SQLite still validates the declared arity in this case: a
+                // `*`/`qualifier.*` term with no FROM clause contributes
+                // exactly ZERO columns to the nominal width (never "unknown"),
+                // while ordinary expressions each contribute one. If that
+                // nominal width mismatches the declared column list, the
+                // mismatch error fires *before* the query ever tries to
+                // execute the wildcard — taking priority over the "no tables
+                // specified" error that would otherwise surface once actual
+                // execution attempts to expand it (with1.test 13.3:
+                // `c(i,j) AS (SELECT 5,* UNION ALL ...)` — nominal width is 1
+                // (just `5`), declared is 2, so the mismatch error fires).
+                // When the nominal width happens to match the declared count
+                // (with1.test 13.2), no error is raised here and the real
+                // "no tables specified" error surfaces later during
+                // execution, exactly matching SQLite (confirmed against
+                // sqlite3 3.51). SQLite also never applies this mismatch
+                // check at all when the select list is *entirely* wildcards
+                // (nominal width 0, e.g. plain `SELECT *` — with1.test 13.1):
+                // it always reports "no tables specified" there regardless of
+                // the declared arity, so the `nominal_width > 0` guard below
+                // preserves that case.
+                let has_wildcard = cte.query.select_list.iter().any(|item| {
+                    matches!(
+                        item,
+                        vibesql_ast::SelectItem::Wildcard { .. }
+                            | vibesql_ast::SelectItem::QualifiedWildcard { .. }
+                    )
+                });
+                if has_wildcard {
+                    let nominal_width = cte
+                        .query
+                        .select_list
+                        .iter()
+                        .filter(|item| {
+                            !matches!(
+                                item,
+                                vibesql_ast::SelectItem::Wildcard { .. }
+                                    | vibesql_ast::SelectItem::QualifiedWildcard { .. }
+                            )
+                        })
+                        .count();
+                    if nominal_width > 0 && nominal_width != declared.len() {
+                        return Err(ExecutorError::SqliteCompatError(format!(
+                            "table {} has {} values for {} columns",
+                            cte.name,
+                            nominal_width,
+                            declared.len()
+                        )));
+                    }
+                }
             }
         }
     }
@@ -1517,6 +1574,25 @@ where
     if crate::select::window::has_window_functions(&recursive_query.select_list) {
         return Err(ExecutorError::SqliteCompatError(
             "cannot use window functions in recursive queries".to_string(),
+        ));
+    }
+
+    // SQLite compatibility: aggregate functions are not allowed in the
+    // recursive part of a recursive CTE (with1.test 16.1: `i(x) AS
+    // (VALUES(1) UNION SELECT count(*) FROM i)`). Each recursive step only
+    // ever sees the prior step's single working row, so an aggregate over
+    // "the recursive table" is meaningless — SQLite rejects it up front with
+    // "recursive aggregate queries not supported" rather than silently
+    // aggregating each single-row step.
+    if recursive_query.select_list.iter().any(|item| match item {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            crate::select::executor::validation::expression_contains_aggregate(expr)
+        }
+        vibesql_ast::SelectItem::Wildcard { .. }
+        | vibesql_ast::SelectItem::QualifiedWildcard { .. } => false,
+    }) {
+        return Err(ExecutorError::SqliteCompatError(
+            "recursive aggregate queries not supported".to_string(),
         ));
     }
 
