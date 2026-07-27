@@ -10,8 +10,9 @@ pub enum OutputFormat {
     Csv,
     Markdown,
     Html,
-    /// Raw output format: space-separated values, one row per line.
-    /// NULL values are represented as empty strings.
+    /// Raw output format: values framed with ASCII 31/30 control bytes (see
+    /// `print_raw`). NULL values are represented by a dedicated sentinel byte,
+    /// distinct from an actual empty-string value.
     /// Compatible with SQLite TCL test harness expectations.
     Raw,
 }
@@ -198,7 +199,9 @@ impl ResultFormatter {
     /// Print results in raw format for SQLite TCL test compatibility.
     /// - ASCII 31 (Unit Separator, `\x1f`) between values within each row
     /// - ASCII 30 (Record Separator, `\x1e`) terminating each row
-    /// - NULL values output as empty strings
+    /// - NULL values output as the ASCII 1 (`\x01`) sentinel (see
+    ///   [`Self::NULL_SENTINEL`]); an actual empty-string value is emitted as
+    ///   literal empty text, distinct from NULL
     /// - No headers, no borders, no row count
     ///
     /// We use ASCII 31 between values (instead of pipe) because pipe can appear
@@ -216,6 +219,20 @@ impl ResultFormatter {
         print!("{}", Self::format_raw(result));
     }
 
+    /// ASCII 1 (Start of Heading). Emitted in place of a value to mean "this
+    /// column is actually NULL" — distinct from an actual empty-string value,
+    /// which is emitted as literal empty text. Chosen for the same reason as
+    /// the `\x1e`/`\x1f` framing bytes: a control character that cannot occur
+    /// in ordinary SQL text, so it is unambiguous on the wire (#6175).
+    ///
+    /// Without this sentinel, `None` (SQL NULL) and `Some("")` (an empty
+    /// string) both serialize to the same empty slot between separators, so a
+    /// consumer with a customized NULL representation (SQLite TCL's `db
+    /// nullvalue`) cannot tell them apart — e.g. `PRAGMA table_info` reporting
+    /// a NULL `dflt_value` (no DEFAULT clause) vs. an empty-string
+    /// `dflt_value` (`DEFAULT ''`).
+    const NULL_SENTINEL: &'static str = "\x01";
+
     /// Build the raw-format payload for `result` (see `print_raw`).
     ///
     /// Columns are joined with ASCII 31 (`\x1f`) and each row is terminated with
@@ -227,9 +244,10 @@ impl ResultFormatter {
             let values: Vec<&str> = row
                 .iter()
                 .map(|val| {
-                    // SQLite TCL tests expect NULL to be empty string
-                    // None represents actual NULL, Some("") is an empty string value
-                    val.as_ref().map(|s| s.as_str()).unwrap_or("")
+                    // None represents actual SQL NULL -> the NULL sentinel.
+                    // Some(s) is a real value (including an empty string,
+                    // which must round-trip as empty text, not NULL).
+                    val.as_ref().map(|s| s.as_str()).unwrap_or(Self::NULL_SENTINEL)
                 })
                 .collect();
             out.push_str(&values.join("\x1f"));
@@ -327,7 +345,8 @@ mod tests {
         };
 
         // Just verify it doesn't panic - output goes to stdout
-        // NULL values (None) should be converted to empty strings
+        // NULL values (None) should be converted to the NULL_SENTINEL byte,
+        // distinct from an actual empty-string value.
         formatter.print_raw(&result);
     }
 
@@ -346,7 +365,8 @@ mod tests {
             message: None,
         };
 
-        // NULL (None) should become empty, but "NULL" string (Some("NULL")) should stay "NULL"
+        // NULL (None) should become the sentinel, but "NULL" string
+        // (Some("NULL")) should stay "NULL"
         formatter.print_raw(&result);
     }
 
@@ -371,12 +391,9 @@ mod tests {
         // Rows are terminated with \x1e (Record Separator) and columns are
         // joined with \x1f (Unit Separator). Zero rows yields empty output.
         let result = create_test_result();
-        assert_eq!(
-            ResultFormatter::format_raw(&result),
-            "1\x1fAlice\x1e2\x1fBob\x1e"
-        );
+        assert_eq!(ResultFormatter::format_raw(&result), "1\x1fAlice\x1e2\x1fBob\x1e");
 
-        // NULL (None) renders as an empty string; a real "NULL" string stays.
+        // NULL (None) renders as the NULL_SENTINEL byte; a real "NULL" string stays.
         let nulls = QueryResult {
             columns: vec!["a".to_string(), "b".to_string()],
             rows: vec![vec![None, Some("NULL".to_string())]],
@@ -384,7 +401,18 @@ mod tests {
             execution_time_ms: None,
             message: None,
         };
-        assert_eq!(ResultFormatter::format_raw(&nulls), "\x1fNULL\x1e");
+        assert_eq!(ResultFormatter::format_raw(&nulls), "\x01\x1fNULL\x1e");
+
+        // An actual empty-string value (Some("")) is distinct from NULL: it
+        // renders as literal empty text, not the sentinel.
+        let empty_string_value = QueryResult {
+            columns: vec!["a".to_string(), "b".to_string()],
+            rows: vec![vec![Some(String::new()), None]],
+            row_count: 1,
+            execution_time_ms: None,
+            message: None,
+        };
+        assert_eq!(ResultFormatter::format_raw(&empty_string_value), "\x1f\x01\x1e");
 
         // Zero rows => empty string.
         let empty = QueryResult {

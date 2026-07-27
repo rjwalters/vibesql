@@ -3392,6 +3392,8 @@ proc parse_raw_result {output} {
     # Raw format framing (see crates/vibesql-cli/src/formatter.rs print_raw):
     #   - ASCII 31 (Unit Separator, \x1f) between values within a row
     #   - ASCII 30 (Record Separator, \x1e) terminating each row
+    #   - ASCII 1 (NULL_SENTINEL, \x01) in place of a value that is actually
+    #     SQL NULL, distinguishing it from an actual empty-string value (#6175)
     #
     # We deliberately split ROWS on \x1e rather than on a plain newline: a
     # single column VALUE may itself contain embedded newlines (e.g. the
@@ -3401,8 +3403,13 @@ proc parse_raw_result {output} {
     # are control characters that cannot appear in ordinary SQL values, so an
     # embedded newline is preserved verbatim inside its column.
     #
-    # NULL values are emitted as empty strings; the literal string 'NULL' stays
-    # as "NULL". This matches SQLite's TCL interface NULL representation.
+    # NULL values are emitted as the \x01 sentinel; the literal string 'NULL'
+    # stays as "NULL", and an actual empty-string value stays as "". This
+    # matters when a test customizes `db nullvalue` (e.g. pragma-6.2.2): before
+    # the sentinel, both NULL and "" collapsed to the same empty wire slot, so
+    # a customized nullvalue could not distinguish "no DEFAULT clause" (NULL)
+    # from "DEFAULT ''" (empty string).
+    set null_sentinel "\x01"
     set data {}
 
     # Special case: completely empty output means zero rows.
@@ -3411,13 +3418,14 @@ proc parse_raw_result {output} {
         return {}
     }
 
-    # Special case: a single record separator means one row whose single column
-    # is NULL (VibeSQL emits an empty value followed by \x1e). Check this BEFORE
-    # stripping the trailing separator.
+    # Special case: a single record separator means one row whose single
+    # column is an actual empty string (VibeSQL emits an empty value followed
+    # by \x1e; NULL would instead emit the sentinel followed by \x1e, which
+    # falls through to the general path below). Check this BEFORE stripping
+    # the trailing separator, since stripping would leave "" and Tcl's `split`
+    # of an empty string yields zero elements, losing the row.
     if {$output eq "\x1e"} {
-        # Return null_string if set, otherwise empty string
-        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
-        return [list $null_rep]
+        return [list ""]
     }
 
     # Strip exactly one trailing record separator if present.
@@ -3437,21 +3445,23 @@ proc parse_raw_result {output} {
             error [translate_error_to_sqlite $row]
         }
 
-        # Handle empty rows (represent a row whose single column is NULL).
-        # For a single-column query returning NULL, the row will be empty.
+        # Handle empty rows: for a single-column row, an actual empty-string
+        # value serializes as "" and Tcl's `split "" "\x1f"` yields zero
+        # elements (rather than one empty element), so it must be restored
+        # explicitly. A single-column NULL instead serializes as the sentinel
+        # alone, which splits to one element and falls through to the loop
+        # below — so this branch is only for the actual-empty-string case.
         if {$row eq ""} {
-            # Empty row = row with single NULL value
-            # Use null_string if set, otherwise empty string
-            set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
-            lappend data $null_rep
+            lappend data ""
             continue
         }
 
         # Split by Unit Separator (ASCII 31) and add each value to the result.
-        # Empty values represent NULL - use null_string if set.
+        # The NULL sentinel represents SQL NULL - use null_string if set,
+        # otherwise empty string (SQLite TCL interface default).
         set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
         foreach val [split $row "\x1f"] {
-            if {$val eq ""} {
+            if {$val eq $null_sentinel} {
                 lappend data $null_rep
             } else {
                 lappend data $val
