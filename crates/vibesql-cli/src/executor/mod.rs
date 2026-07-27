@@ -1490,7 +1490,46 @@ impl SqlExecutor {
                 // arrives as `stmt.value = Some(...)`, which would otherwise be
                 // misrouted to the SET branch and silently ignored (returning an
                 // empty result). Handle both forms here, before the set/query
-                // split, so any argument is accepted and "ok" is returned.
+                // split, so any argument is accepted.
+                //
+                // Argument taxonomy (SQLite):
+                //   PRAGMA integrity_check;            -- check whole database
+                //   PRAGMA integrity_check=N;          -- whole database, cap at N errors
+                //   PRAGMA integrity_check(N);         -- same, function form
+                //   PRAGMA integrity_check=NAME;       -- check only table/schema NAME
+                //   PRAGMA integrity_check='NAME';     -- quoted -> table NAME
+                // A numeric argument is an error-count *limit*; a string or bare
+                // identifier names a specific table to check and, if that name is
+                // not an existing table (nor one of the schema tables), SQLite
+                // errors with "no such table: NAME" (pragma-3.5.2 / pragma-3.6).
+                // VibeSQL never finds corruption in a healthy table, so every
+                // valid target still resolves to "ok"; we only add the missing
+                // no-such-table validation for the name-argument form.
+                if let Some(name) = match &stmt.value {
+                    Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
+                    Some(vibesql_ast::PragmaValue::String(name)) => Some(name.clone()),
+                    // Number / SignedNumber / None are the whole-database forms
+                    // (optionally with an error-count limit) — always "ok".
+                    _ => None,
+                } {
+                    // The schema tables (sqlite_master and its aliases) are always
+                    // valid integrity-check targets, even though they are not
+                    // ordinary user tables in the catalog (pragma-3.6c).
+                    let lower = name.to_ascii_lowercase();
+                    let is_schema_table = matches!(
+                        lower.as_str(),
+                        "sqlite_master" | "sqlite_schema" | "sqlite_temp_schema"
+                    );
+                    if !is_schema_table {
+                        let lookup = match &stmt.database {
+                            Some(db) => format!("{}.{}", db, name),
+                            None => name.clone(),
+                        };
+                        if self.db.catalog.get_table(&lookup).is_none() {
+                            anyhow::bail!("no such table: {}", name);
+                        }
+                    }
+                }
                 return Ok(QueryResult {
                     columns: vec![pragma_name.to_lowercase()],
                     rows: vec![vec![Some("ok".to_string())]],
