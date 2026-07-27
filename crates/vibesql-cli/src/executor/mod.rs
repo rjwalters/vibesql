@@ -87,6 +87,14 @@ pub struct SqlExecutor {
     /// Same persistence model as `user_version` above (a raw signed 32-bit
     /// header cookie in real SQLite; session-only + shim-replayed here).
     application_id: i64,
+    /// PRAGMA schema_version session setting (SQLite-compatible, default 0).
+    /// Unlike `user_version`/`application_id`, SQLite auto-increments this
+    /// cookie every time the schema changes (CREATE/DROP/ALTER TABLE/INDEX/
+    /// VIEW/TRIGGER, and VACUUM) — see the explicit bump at each successful
+    /// DDL statement's dispatch site below (pragma.test pragma-8.1.*/8.2.4.*,
+    /// #6175). Same session-only + shim-replayed persistence model as
+    /// `user_version` (no on-disk cookie storage yet).
+    schema_version: i64,
     /// Active WAL persistence state, present only when the opt-in
     /// `[database] wal = true` flag is set AND a file-backed database is in use.
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
@@ -516,6 +524,7 @@ impl SqlExecutor {
                     cache_spill_explicit_size: None,
                     user_version: 0,
                     application_id: 0,
+                    schema_version: 0,
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
@@ -566,6 +575,7 @@ impl SqlExecutor {
             cache_spill_explicit_size: None,
             user_version: 0,
             application_id: 0,
+            schema_version: 0,
             wal_state: None,
             db_path,
             _db_lock: db_lock,
@@ -582,6 +592,17 @@ impl SqlExecutor {
     /// Returns true if the current session is inside an active transaction.
     pub fn in_transaction(&self) -> bool {
         self.db.in_transaction()
+    }
+
+    /// Bump the session's `PRAGMA schema_version` cookie after a successful
+    /// schema-changing statement (CREATE/DROP/ALTER TABLE/INDEX/VIEW/TRIGGER,
+    /// or VACUUM) — mirrors SQLite's on-disk schema-cookie increment
+    /// (pragma.test pragma-8.1.5/8.1.6, #6175). Wrapping add: SQLite's cookie
+    /// is a 32-bit signed int that can in principle wrap; matching that is
+    /// simpler than special-casing overflow for a value no real test drives
+    /// anywhere near i64::MAX.
+    fn bump_schema_version(&mut self) {
+        self.schema_version = self.schema_version.wrapping_add(1);
     }
 
     pub fn execute(&mut self, sql: &str) -> anyhow::Result<QueryResult> {
@@ -640,6 +661,7 @@ impl SqlExecutor {
                 ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -781,6 +803,7 @@ impl SqlExecutor {
                 ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -792,6 +815,7 @@ impl SqlExecutor {
                 ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -800,6 +824,7 @@ impl SqlExecutor {
                 match vibesql_executor::DropTableExecutor::execute(&drop_stmt, &mut self.db) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -823,6 +848,7 @@ impl SqlExecutor {
                 ) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -831,6 +857,7 @@ impl SqlExecutor {
                 match vibesql_executor::TriggerExecutor::alter_trigger(&mut self.db, &alter_stmt) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -839,6 +866,7 @@ impl SqlExecutor {
                 match vibesql_executor::TriggerExecutor::drop_trigger(&mut self.db, &drop_stmt) {
                     Ok(_) => {
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -882,6 +910,9 @@ impl SqlExecutor {
                     Ok(_reclaimed) => {
                         result.message = Some("VACUUM completed".to_string());
                         result.row_count = 0; // VACUUM doesn't return rows
+                                              // SQLite bumps the schema-version cookie on VACUUM too
+                                              // (pragma.test pragma-8.2.4.2/8.2.4.3, #6175).
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -920,6 +951,7 @@ impl SqlExecutor {
                     Ok(msg) => {
                         result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -929,6 +961,7 @@ impl SqlExecutor {
                     Ok(msg) => {
                         result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -945,6 +978,7 @@ impl SqlExecutor {
                     Ok(msg) => {
                         result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
+                        self.bump_schema_version();
                     }
                     Err(e) => return Err(anyhow::anyhow!("{}", e)),
                 }
@@ -1765,6 +1799,26 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "SCHEMA_VERSION" => {
+                    // SQLite-compatible PRAGMA schema_version set (pragma.test
+                    // pragma-8.1.1/8.1.4/8.1.8, #6175). Same argument handling
+                    // as user_version above. Note: real SQLite additionally
+                    // blocks this write when DEFENSIVE mode is enabled
+                    // (pragma-8.1.3) — VibeSQL has no DEFENSIVE mode (the
+                    // `sqlite3_db_config` C-API stub is a no-op), so that one
+                    // sub-case is a known, documented gap rather than
+                    // reclassified/masked.
+                    if let Some(n) = pragma_value_to_i64(value) {
+                        self.schema_version = n;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 _ => {
                     // Unknown pragma - silently ignore for SQLite compatibility
                     Ok(QueryResult {
@@ -2019,6 +2073,19 @@ impl SqlExecutor {
                     Ok(QueryResult {
                         columns: vec!["application_id".to_string()],
                         rows: vec![vec![Some(self.application_id.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "SCHEMA_VERSION" => {
+                    // SQLite-compatible PRAGMA schema_version read (pragma.test
+                    // pragma-8.1.*, #6175). Default 0; auto-incremented on
+                    // every successful DDL statement / VACUUM (see the bump
+                    // sites at each DDL statement's dispatch arm below).
+                    Ok(QueryResult {
+                        columns: vec!["schema_version".to_string()],
+                        rows: vec![vec![Some(self.schema_version.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
                         message: None,

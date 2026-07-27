@@ -1192,6 +1192,37 @@ fn test_pragma_application_id_default_and_function_style_set() {
 }
 
 #[test]
+fn test_pragma_schema_version_default_set_and_ddl_autoincrement() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 0.
+    let result = executor.execute("PRAGMA schema_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // Explicit `= N` set (pragma.test pragma-8.1.1/8.1.2).
+    executor.execute("PRAGMA schema_version = 105").unwrap();
+    let result = executor.execute("PRAGMA schema_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("105".to_string())]]);
+
+    // A successful DDL statement bumps the cookie by 1 (pragma-8.1.5/8.1.6:
+    // schema_version 106 -> CREATE TABLE -> 107).
+    executor.execute("PRAGMA schema_version = 106").unwrap();
+    executor.execute("CREATE TABLE t4(a, b, c)").unwrap();
+    let result = executor.execute("PRAGMA schema_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("107".to_string())]]);
+
+    // VACUUM also bumps the cookie (pragma-8.2.4.2/8.2.4.3: 108 -> VACUUM -> 109).
+    executor.execute("PRAGMA schema_version = 108").unwrap();
+    executor.execute("VACUUM").unwrap();
+    let result = executor.execute("PRAGMA schema_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("109".to_string())]]);
+
+    // A plain read (no DDL) leaves the cookie unchanged.
+    let result = executor.execute("PRAGMA schema_version").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("109".to_string())]]);
+}
+
+#[test]
 fn test_pragma_index_xinfo_expression_column_cid_and_explicit_collation() {
     let mut executor = SqlExecutor::new(None).unwrap();
     executor.execute("CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c, d)").unwrap();
