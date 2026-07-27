@@ -1062,3 +1062,98 @@ fn test_pragma_temp_store_default_and_normalization() {
         );
     }
 }
+
+#[test]
+fn test_pragma_synchronous_default_and_arithmetic() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is 2 (FULL).
+    let result = executor.execute("PRAGMA synchronous").unwrap();
+    assert_eq!(result.columns, vec!["synchronous".to_string()]);
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+
+    // SQLite's exact getSafetyLevel()+mask arithmetic (pragma.test
+    // pragma-1.6/1.10/1.11.x/1.13/1.14.x): keyword and numeric spellings,
+    // including out-of-range numbers that wrap via `(raw+1) & 0x07`.
+    for (set, want) in [
+        ("OFF", "0"),
+        ("ON", "1"),
+        ("NORMAL", "1"), // unlisted keyword falls through to NORMAL's value
+        ("FULL", "2"),
+        ("EXTRA", "3"),
+        ("0", "0"),
+        ("2", "2"),
+        ("4", "4"),
+        ("3", "3"),
+        ("8", "0"),  // wraps
+        ("10", "2"), // wraps
+    ] {
+        executor.execute(&format!("PRAGMA synchronous={set}")).unwrap();
+        let result = executor.execute("PRAGMA synchronous").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some(want.to_string())]],
+            "synchronous={set} should echo {want}"
+        );
+    }
+}
+
+#[test]
+fn test_pragma_synchronous_rejected_inside_transaction() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    executor.execute("BEGIN").unwrap();
+    let result = executor.execute("PRAGMA synchronous = OFF");
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Safety level may not be changed inside a transaction"));
+
+    // The rejected SET must not have taken effect.
+    executor.execute("ROLLBACK").unwrap();
+    let result = executor.execute("PRAGMA synchronous").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+}
+
+#[test]
+fn test_pragma_cache_size_and_default_cache_size() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Both default to -2000 (SQLITE_DEFAULT_CACHE_SIZE) before anything is set.
+    let result = executor.execute("PRAGMA cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-2000".to_string())]]);
+    let result = executor.execute("PRAGMA default_cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-2000".to_string())]]);
+
+    // `cache_size=N` stores the raw signed value verbatim and does NOT touch
+    // default_cache_size (pragma.test pragma-1.2/1.5).
+    executor.execute("PRAGMA cache_size=-4321").unwrap();
+    let result = executor.execute("PRAGMA cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-4321".to_string())]]);
+    let result = executor.execute("PRAGMA default_cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-2000".to_string())]]);
+
+    // `default_cache_size=N` normalizes to abs(N) and updates BOTH pragmas
+    // immediately (pragma.test pragma-1.8).
+    executor.execute("PRAGMA default_cache_size=-123").unwrap();
+    let result = executor.execute("PRAGMA cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("123".to_string())]]);
+    let result = executor.execute("PRAGMA default_cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("123".to_string())]]);
+}
+
+#[test]
+fn test_pragma_cache_spill_default_and_toggle() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default: enabled, no explicit size -> mirrors cache_size.
+    executor.execute("PRAGMA cache_size=2000").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2000".to_string())]]);
+
+    // Disabling reads back 0 regardless of cache_size.
+    executor.execute("PRAGMA cache_spill=OFF").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+}
