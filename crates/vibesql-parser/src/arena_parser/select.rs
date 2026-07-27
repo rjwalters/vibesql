@@ -329,6 +329,14 @@ impl<'arena> ArenaParser<'arena> {
 
         // Parse optional column list
         let columns = if self.try_consume(&Token::LParen) {
+            // An empty column list `t()` is a syntax error in SQLite. Reject it
+            // here so the whole WITH statement falls back to the standard parser,
+            // which reports the SQLite-compatible `near ")": syntax error`
+            // (with2.test 4.1). Without this, an empty list is silently accepted
+            // and the mismatch only surfaces later as a column-count error.
+            if matches!(self.peek(), Token::RParen) {
+                return Err(ParseError { message: self.peek().syntax_error() });
+            }
             let mut cols = BumpVec::new_in(self.arena);
             while let Token::Identifier(col) = self.peek() {
                 let col = col.clone();

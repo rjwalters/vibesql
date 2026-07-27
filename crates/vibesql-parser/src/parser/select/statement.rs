@@ -493,16 +493,21 @@ impl Parser {
                 self.advance();
                 name
             }
-            _ => return Err(ParseError { message: "Expected CTE name (identifier)".to_string() }),
+            // SQLite reports the offending token as `near "<tok>": syntax error`
+            // (e.g. a trailing comma in the WITH list, `WITH a AS (...), SELECT ...`,
+            // yields `near "SELECT": syntax error`) rather than an internal
+            // "Expected CTE name" phrasing (with1.test 3.6).
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
 
         // Parse optional column list: (col1, col2, ...)
         let columns = if matches!(self.peek(), Token::LParen) {
             self.advance(); // consume '('
 
-            // Check for empty column list
+            // An empty column list `t()` is a syntax error in SQLite, reported
+            // against the `)` token: `near ")": syntax error` (with2.test 4.1).
             if matches!(self.peek(), Token::RParen) {
-                return Err(ParseError { message: "CTE column list cannot be empty".to_string() });
+                return Err(ParseError { message: self.peek().syntax_error() });
             }
 
             // Parse comma-separated list of column identifiers
