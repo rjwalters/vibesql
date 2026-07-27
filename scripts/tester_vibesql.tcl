@@ -2508,6 +2508,20 @@ proc is_readonly_query {sql} {
     if {[regexp {^WITH([^A-Z_]|$)} $u] && ![is_dml_statement $u]} {
         return 1
     }
+    # A single, bare `PRAGMA name;` (optionally schema-qualified) with NO
+    # argument at all is unambiguously a getter — SQLite's grammar requires an
+    # explicit `= value` or `(value)` to set anything, so a bare form can never
+    # have a side effect. Answering it via query_in_transaction (rather than
+    # silently deferring it into the batch and returning {}) matters because a
+    # config PRAGMA like `synchronous` is tracked/replayed by this shim
+    # independent of the DB's transactional state and must be readable even
+    # while a batched transaction is open (pragma.test pragma-5.2, #6175).
+    # Restricted to a single statement (no embedded `;`) and no trailing `=`/
+    # `(...)` so an actual setter (which always takes a value) is never
+    # misclassified as read-only.
+    if {[regexp {^PRAGMA\s+(?:[A-Z_][A-Z0-9_]*\.)?[A-Z_][A-Z0-9_]*\s*;?\s*$} $u]} {
+        return 1
+    }
     return 0
 }
 
@@ -5686,6 +5700,8 @@ array set vibesql_skip_tests {
     rowvalue9-1.6.2 "SQLite-implementation-defined join iteration order (row-value Stage 4, #6048, part of #5779). VibeSQL returns the correct value set (3 14 15 92, each twice) but in a different nested-loop join order than SQLite for this unordered EXISTS join (no ORDER BY). Pre-existing nested-loop ordering artifact documented in PR #6064; values match, only row order differs. Skipped rather than chased since the query has no ORDER BY and the result set is correct."
     window6-2.0 "Custom UDF registration via 'db func window winproc' — a TCL-registered scalar function reachable only through the C-API sqlite3_create_function surface (harness limitation #5720). The test calls window('hello world') and expects the registered proc's output; VibeSQL's SQL CLI cannot bridge the db-func registration, so the function is genuinely absent ('no such function: window'). Bucket-A straddler enumerated in #6191; not a window-frame engine gap."
     window6-3.0 "Custom collation registration via 'db collate window wincmp' — a TCL-registered collating sequence reachable only through the C-API sqlite3_create_collation surface (harness limitation #5720). The test creates a table with COLLATE window and ORDER BY x COLLATE window expecting the registered comparator; VibeSQL's SQL CLI cannot bridge the db-collate registration ('no such collation sequence: WINDOW'). Bucket-A straddler enumerated in #6191; not a window-frame engine gap."
+    pragma-10.3 "Cascades from pragma-10.1/10.2 (auto-skipped: they use the SQLite test function randstr(10,10) to populate/update t1); with t1 left empty, DELETE FROM t1 deletes 0 rows instead of the expected 1 under count_changes. Not a PRAGMA engine gap (#6175)."
+    pragma-11.2 "Custom collation registration via 'db collate New_Collation blah...' — a TCL-registered collating sequence reachable only through the C-API sqlite3_create_collation surface (harness limitation #5720), same class as window6-3.0. PRAGMA collation_list itself is correct for every collation VibeSQL can actually register (pragma-11.1 passes); there is no SQL-level CREATE COLLATION surface to bridge the TCL-only registration. Not a PRAGMA introspection gap (#6175)."
 }
 
 # -----------------------------------------------------------------------------
@@ -6976,7 +6992,20 @@ proc check_single_capability {cap} {
     # matching a 64-bit-rowid build. Without this, autoinc-6.1 took the 32-bit
     # branch (INSERT 2147483647) and autoinc-6.2's follow-on NULL insert did not
     # overflow i64, so the expected "database or disk is full" never fired (#6173).
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16 rowid32}
+    # `debug` is the SQLITE_DEBUG compile-time option, which is OFF in a normal
+    # release build (and in VibeSQL, which has no VDBE to trace/list). Real
+    # SQLite gates debug-only introspection pragmas (`vdbe_listing`,
+    # `vdbe_trace`, `parser_trace` is separate/always-on) and debug-only test
+    # helpers behind `ifcapable debug`, so a non-debug build — matching
+    # VibeSQL — never runs them. Without this, `ifcapable debug { ... }`
+    # blocks were treated as capable and ran unconditionally: pragma.test's
+    # `PRAGMA vdbe_listing=YES; PRAGMA vdbe_listing;` (pragma-1.15/1.16) has no
+    # VDBE to report on and returned nothing instead of being skipped, and
+    # badutf2.test's `utf8_to_utf8` debug-only helper isn't implemented in this
+    # shim, so that block errored instead of skipping. Marking `debug`
+    # unsupported routes both to their skip branch, matching a real
+    # non-SQLITE_DEBUG build (#6175).
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16 rowid32 debug}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0

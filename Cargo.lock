@@ -6433,6 +6433,7 @@ dependencies = [
  "bytes",
  "chrono",
  "criterion",
+ "indexmap",
  "instant",
  "js-sys",
  "log",
