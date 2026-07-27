@@ -214,10 +214,13 @@ impl super::Catalog {
             })
         } else {
             // For unqualified identifiers, check session-specific temp schema first (SQLite semantics)
-            // Temp tables shadow tables in the main schema
-            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
-                if let Some(table) = temp_schema.get_table_by_identifier(identifier) {
-                    return Some(table);
+            // Temp tables shadow tables in the main schema — unless shadowing is
+            // suppressed for a non-temp trigger body (see `suppress_temp_shadowing`).
+            if !self.suppress_temp_shadowing {
+                if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+                    if let Some(table) = temp_schema.get_table_by_identifier(identifier) {
+                        return Some(table);
+                    }
                 }
             }
 
@@ -244,15 +247,18 @@ impl super::Catalog {
             })
         } else {
             // Unqualified name: check session-specific temp schema first (SQLite semantics)
-            // Temp tables shadow tables in the main schema
+            // Temp tables shadow tables in the main schema — unless shadowing is
+            // suppressed for a non-temp trigger body (see `suppress_temp_shadowing`).
             let normalized_table = self.normalize_identifier(name);
 
             // First check session's temp schema
-            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
-                if let Some(table) =
-                    temp_schema.get_table(&normalized_table, self.case_sensitive_identifiers)
-                {
-                    return Some(table);
+            if !self.suppress_temp_shadowing {
+                if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+                    if let Some(table) =
+                        temp_schema.get_table(&normalized_table, self.case_sensitive_identifiers)
+                    {
+                        return Some(table);
+                    }
                 }
             }
 
@@ -499,13 +505,16 @@ impl super::Catalog {
 
         let normalized_table = self.normalize_identifier(name);
 
-        // Temp schema shadows main for unqualified names (SQLite semantics).
-        if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
-            if temp_schema
-                .get_table(&normalized_table, self.case_sensitive_identifiers)
-                .is_some()
-            {
-                return Some(self.temp_schema_name.clone());
+        // Temp schema shadows main for unqualified names (SQLite semantics) —
+        // unless shadowing is suppressed for a non-temp trigger body.
+        if !self.suppress_temp_shadowing {
+            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+                if temp_schema
+                    .get_table(&normalized_table, self.case_sensitive_identifiers)
+                    .is_some()
+                {
+                    return Some(self.temp_schema_name.clone());
+                }
             }
         }
 
@@ -543,10 +552,13 @@ impl super::Catalog {
             }
             false
         } else {
-            // For unqualified identifiers, check session's temp schema first (SQLite semantics)
-            if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
-                if temp_schema.table_exists_by_identifier(identifier) {
-                    return true;
+            // For unqualified identifiers, check session's temp schema first (SQLite
+            // semantics) — unless shadowing is suppressed for a non-temp trigger body.
+            if !self.suppress_temp_shadowing {
+                if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
+                    if temp_schema.table_exists_by_identifier(identifier) {
+                        return true;
+                    }
                 }
             }
 

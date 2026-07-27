@@ -28,6 +28,7 @@ use types::{
     read_trim_position, read_truth_value, write_character_unit, write_fulltext_mode,
     write_interval_unit, write_pseudo_table, write_trim_position, write_truth_value,
 };
+use vibesql_ast::pretty_print::ToSql;
 use vibesql_ast::Expression;
 use window::{
     read_window_function_spec, read_window_spec, write_window_function_spec, write_window_spec,
@@ -259,15 +260,23 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
                 write_expression(writer, else_expr)?;
             }
         }
+        // Subquery-bearing expressions (ScalarSubquery / IN (SELECT ...) /
+        // EXISTS / quantified comparison) wrap a full SELECT AST. Rather than
+        // serialize the entire nested SELECT in the binary format, we round-trip
+        // them through their canonical SQL text (`ToSql`) and re-parse on load —
+        // the same strategy used for expression- and partial-index predicates.
+        // This lets a trigger whose WHEN clause contains a scalar subquery (e.g.
+        // `WHEN (SELECT count(*) FROM t) = 0`, trigger2-3.2) persist and reload
+        // instead of aborting the checkpoint (#6176). These tags previously only
+        // ever errored on write, so no pre-existing on-disk file contains them —
+        // adding a working text encoding is backward-compatible (no version bump).
         Expression::ScalarSubquery(_) => {
-            return Err(StorageError::NotImplemented(
-                "ScalarSubquery serialization not yet implemented".to_string(),
-            ));
+            write_tag!(writer, ExprTag::ScalarSubquery);
+            write_string(writer, &expr.to_sql())?;
         }
         Expression::In { .. } => {
-            return Err(StorageError::NotImplemented(
-                "IN with subquery serialization not yet implemented".to_string(),
-            ));
+            write_tag!(writer, ExprTag::In);
+            write_string(writer, &expr.to_sql())?;
         }
         Expression::InList { expr, values, negated } => {
             write_tag!(writer, ExprTag::InList);
@@ -334,14 +343,12 @@ pub fn write_expression<W: Write>(writer: &mut W, expr: &Expression) -> Result<(
             }
         }
         Expression::Exists { .. } => {
-            return Err(StorageError::NotImplemented(
-                "EXISTS serialization not yet implemented".to_string(),
-            ));
+            write_tag!(writer, ExprTag::Exists);
+            write_string(writer, &expr.to_sql())?;
         }
         Expression::QuantifiedComparison { .. } => {
-            return Err(StorageError::NotImplemented(
-                "Quantified comparison serialization not yet implemented".to_string(),
-            ));
+            write_tag!(writer, ExprTag::QuantifiedComparison);
+            write_string(writer, &expr.to_sql())?;
         }
         Expression::CurrentDate => {
             write_tag!(writer, ExprTag::CurrentDate);
@@ -602,12 +609,11 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
                 if has_else { Some(Box::new(read_expression(reader)?)) } else { None };
             Ok(Expression::Case { operand, when_clauses, else_result })
         }
-        ExprTag::ScalarSubquery => Err(StorageError::NotImplemented(
-            "ScalarSubquery deserialization not yet implemented".to_string(),
-        )),
-        ExprTag::In => Err(StorageError::NotImplemented(
-            "IN with subquery deserialization not yet implemented".to_string(),
-        )),
+        // Subquery-bearing expressions are stored as their canonical SQL text
+        // (see the write path) and reconstructed by re-parsing. The parser
+        // returns the exact variant (ScalarSubquery / In / Exists / quantified),
+        // so the tag is only used to route here.
+        ExprTag::ScalarSubquery | ExprTag::In => read_subquery_expr(reader),
         ExprTag::InList => {
             let expr = Box::new(read_expression(reader)?);
             let value_count = read_u32(reader)?;
@@ -664,12 +670,7 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
             let escape = if has_escape { Some(Box::new(read_expression(reader)?)) } else { None };
             Ok(Expression::Glob { expr, pattern, negated, escape })
         }
-        ExprTag::Exists => Err(StorageError::NotImplemented(
-            "EXISTS deserialization not yet implemented".to_string(),
-        )),
-        ExprTag::QuantifiedComparison => Err(StorageError::NotImplemented(
-            "Quantified comparison deserialization not yet implemented".to_string(),
-        )),
+        ExprTag::Exists | ExprTag::QuantifiedComparison => read_subquery_expr(reader),
         ExprTag::CurrentDate => Ok(Expression::CurrentDate),
         ExprTag::CurrentTime => {
             let has_precision = read_bool(reader)?;
@@ -780,6 +781,24 @@ pub fn read_expression<R: Read>(reader: &mut R) -> Result<Expression, StorageErr
     }
 }
 
+/// Reconstruct a subquery-bearing expression from its canonical SQL text.
+///
+/// The write path (see [`write_expression`]) stores `ScalarSubquery`, `In`
+/// (with subquery), `Exists`, and `QuantifiedComparison` expressions as their
+/// `ToSql` text rather than serializing the full nested `SELECT` AST — the same
+/// round-trip-through-SQL strategy expression/partial indexes use. On load we
+/// read that text back and re-parse it with the main parser's expression
+/// grammar, which returns the exact original variant. The `ExprTag` is only
+/// used to route here; the parser determines the concrete variant.
+fn read_subquery_expr<R: Read>(reader: &mut R) -> Result<Expression, StorageError> {
+    let sql = read_string(reader)?;
+    vibesql_parser::Parser::parse_expression_sql(&sql).map_err(|e| {
+        StorageError::NotImplemented(format!(
+            "Failed to parse persisted subquery expression '{sql}': {e}"
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{BinaryOperator, CaseWhen};
@@ -887,5 +906,56 @@ mod tests {
         let mut reader = &buf[..];
         let result = read_expression(&mut reader).unwrap();
         assert_eq!(result, expr);
+    }
+
+    /// Subquery-bearing expressions are persisted as canonical SQL text and
+    /// re-parsed on load (#6176). Previously these four variants (ScalarSubquery
+    /// / IN (SELECT) / EXISTS / quantified comparison) errored on write. We
+    /// assert the persisted form is a stable fixpoint: the first load may
+    /// normalize display casing via `ToSql`, but a second round-trip must
+    /// reproduce the loaded AST exactly and preserve the canonical SQL text.
+    fn assert_subquery_roundtrip(sql: &str) {
+        let expr = vibesql_parser::Parser::parse_expression_sql(sql)
+            .unwrap_or_else(|e| panic!("parse `{sql}` failed: {e}"));
+
+        let mut buf = Vec::new();
+        write_expression(&mut buf, &expr)
+            .unwrap_or_else(|e| panic!("write `{sql}` failed: {e}"));
+        let first = read_expression(&mut &buf[..])
+            .unwrap_or_else(|e| panic!("read `{sql}` failed: {e}"));
+
+        // Re-serializing the loaded AST and reading it back is a fixpoint.
+        let mut buf2 = Vec::new();
+        write_expression(&mut buf2, &first)
+            .unwrap_or_else(|e| panic!("re-write `{sql}` failed: {e}"));
+        let second = read_expression(&mut &buf2[..])
+            .unwrap_or_else(|e| panic!("re-read `{sql}` failed: {e}"));
+
+        assert_eq!(first, second, "persisted form is not a stable fixpoint for `{sql}`");
+        assert_eq!(
+            expr.to_sql(),
+            first.to_sql(),
+            "canonical SQL text not preserved across persistence for `{sql}`"
+        );
+    }
+
+    #[test]
+    fn test_scalar_subquery_roundtrip() {
+        assert_subquery_roundtrip("(SELECT count(*) FROM t) = 0");
+    }
+
+    #[test]
+    fn test_in_subquery_roundtrip() {
+        assert_subquery_roundtrip("x IN (SELECT a FROM t)");
+    }
+
+    #[test]
+    fn test_exists_roundtrip() {
+        assert_subquery_roundtrip("EXISTS (SELECT 1 FROM t WHERE t.a = x)");
+    }
+
+    #[test]
+    fn test_quantified_comparison_roundtrip() {
+        assert_subquery_roundtrip("x > ALL (SELECT a FROM t)");
     }
 }
