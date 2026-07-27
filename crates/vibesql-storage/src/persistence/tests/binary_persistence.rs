@@ -128,6 +128,62 @@ fn test_binary_file_roundtrip_preserves_verbatim_sql_source() {
     std::fs::remove_file(path).ok();
 }
 
+/// Regression (pragma-6.6.4): a session-scoped TEMP table must never be
+/// persisted, and in particular a TEMP table that shadows a same-named
+/// main-schema table must not clobber the main table in the binary snapshot
+/// (the format used by the WAL checkpoint). Before the fix, `write_catalog` and
+/// `write_data` enumerated the current schema's table names but fetched each
+/// through the temp-first `get_table`, so a shadowing TEMP table's schema and
+/// rows were serialized under the main table's name — silently corrupting the
+/// persisted main table on the next checkpoint.
+#[test]
+fn test_temp_table_does_not_clobber_shadowed_main_table_on_save() {
+    let mut db = Database::new();
+
+    // Main-schema table `trial(col_main)` with one row (insert before the temp
+    // table exists so the unqualified insert lands in the main table).
+    let main_schema = TableSchema::new(
+        "trial".to_string(),
+        vec![ColumnSchema::new("col_main".to_string(), DataType::Integer, true)],
+    );
+    db.create_table_with_identifier(main_schema, TableIdentifier::new("trial", false)).unwrap();
+    db.get_table_mut("trial").unwrap().insert(crate::Row::new(vec![SqlValue::Integer(1)])).unwrap();
+
+    // Same-named TEMP table `trial(col_temp)` in this session's temp schema.
+    let temp_schema_name = db.catalog.temp_schema_name().to_string();
+    let temp_schema = TableSchema::new(
+        "trial".to_string(),
+        vec![ColumnSchema::new("col_temp".to_string(), DataType::Integer, true)],
+    );
+    db.create_table_with_identifier(
+        temp_schema,
+        TableIdentifier::qualified(&temp_schema_name, false, "trial", false),
+    )
+    .unwrap();
+
+    // Precondition: the unqualified lookup now sees the TEMP table (shadowing).
+    assert_eq!(
+        db.get_table("trial").unwrap().schema.columns[0].name,
+        "col_temp",
+        "precondition: temp table shadows main for unqualified lookup"
+    );
+
+    let path = "/tmp/test_temp_shadow_no_clobber_roundtrip.vbsql";
+    db.save_binary(path).unwrap();
+    let loaded = Database::load_binary(path).unwrap();
+
+    // The persisted `trial` must be the MAIN table (col_main) with its row; the
+    // TEMP table must not have survived the save/reload at all.
+    let table = loaded.get_table("trial").expect("main trial must survive the round-trip");
+    assert_eq!(
+        table.schema.columns[0].name, "col_main",
+        "persisted table must be the main-schema table, not the shadowing temp table"
+    );
+    assert_eq!(table.row_count(), 1, "main table's row must survive, not the temp table's rows");
+
+    std::fs::remove_file(path).ok();
+}
+
 /// Test that unquoted tables remain unquoted through roundtrip
 #[test]
 fn test_unquoted_table_identifier_roundtrip() {
