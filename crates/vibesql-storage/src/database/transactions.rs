@@ -398,11 +398,7 @@ impl TransactionManager {
         // this is safe because there are no concurrent peers. Multi-
         // writer will need to model the "still-running peers" set in
         // `in_progress` instead.
-        TxnSnapshot::new(
-            txn_id.saturating_add(1),
-            txn_id,
-            std::collections::HashSet::new(),
-        )
+        TxnSnapshot::new(txn_id.saturating_add(1), txn_id, std::collections::HashSet::new())
     }
 
     /// Commit the current transaction
@@ -838,7 +834,10 @@ impl TransactionManager {
         match &mut self.transaction_state {
             TransactionState::None => false,
             TransactionState::Active {
-                statement_savepoint, changes, deferred_fk_violations, ..
+                statement_savepoint,
+                changes,
+                deferred_fk_violations,
+                ..
             } => {
                 *statement_savepoint = Some(Box::new(StatementSavepoint {
                     catalog: catalog.clone(),
@@ -871,7 +870,10 @@ impl TransactionManager {
     ) -> bool {
         match &mut self.transaction_state {
             TransactionState::Active {
-                statement_savepoint, changes, deferred_fk_violations, ..
+                statement_savepoint,
+                changes,
+                deferred_fk_violations,
+                ..
             } => match statement_savepoint.take() {
                 Some(sp) => {
                     // #5434: reverse this statement's disk-backed (spilled)

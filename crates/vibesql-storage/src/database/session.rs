@@ -200,10 +200,7 @@ impl Database {
     /// Stores the raw requested value; clamping into the stack-safe range is the
     /// executor's responsibility (see [`Self::trigger_depth_limit`]).
     pub fn set_trigger_depth_limit(&mut self, value: i64) {
-        self.set_session_variable(
-            "TRIGGER_DEPTH_LIMIT",
-            vibesql_types::SqlValue::Integer(value),
-        );
+        self.set_session_variable("TRIGGER_DEPTH_LIMIT", vibesql_types::SqlValue::Integer(value));
     }
 
     // ============================================================================

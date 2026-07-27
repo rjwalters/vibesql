@@ -260,7 +260,8 @@ where
             // `OR IGNORE`/`OR FAIL`/`OR ROLLBACK`/`OR REPLACE` on the statement
             // (fkey2-20.2.x/20.3.x). Route it through the default arm below
             // even when `conflict_clause` says otherwise.
-            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            let scoped_clause =
+                if other.is_foreign_key_violation() { None } else { conflict_clause };
             match scoped_clause {
                 Some(ConflictClause::Rollback) => {
                     // `OR ROLLBACK`: abort the entire enclosing transaction,
@@ -360,7 +361,8 @@ where
             // mirroring `RAISE(FAIL)` above — except a FOREIGN KEY violation,
             // which is exempt from the statement's own conflict clause and
             // always gets the default (rollback) scope (fkey2-20.2.x/20.3.x).
-            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            let scoped_clause =
+                if other.is_foreign_key_violation() { None } else { conflict_clause };
             match scoped_clause {
                 Some(ConflictClause::Fail) => commit_implicit_best_effort(db),
                 _ => rollback_implicit_best_effort(db),

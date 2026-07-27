@@ -864,8 +864,7 @@ fn test_load_binary_repopulates_catalog_for_all_indexes() {
     std::fs::remove_file(path).ok();
 
     // Both indexes must be findable in the catalog after load.
-    let m1 =
-        loaded.catalog.find_index_by_name("idx_a").expect("idx_a must repopulate after load");
+    let m1 = loaded.catalog.find_index_by_name("idx_a").expect("idx_a must repopulate after load");
     assert!(!m1.is_unique);
     assert!(!m1.is_partial());
     assert_eq!(m1.table_name, "t");
@@ -991,9 +990,7 @@ fn test_negative_ipk_alias_reload_keeps_next_rowid_sane() {
     db.create_table(schema).unwrap();
 
     let table = db.get_table_mut("neg_ipk").unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)]))
-        .unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)])).unwrap();
 
     let path = format!("/tmp/test_negative_ipk_reload_{}.vbsql", std::process::id());
     db.save_binary(&path).unwrap();
@@ -1033,12 +1030,8 @@ fn test_row_id_persists_ipk_alias_value() {
     db.create_table(schema).unwrap();
 
     let table = db.get_table_mut("ipk_alias").unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(50)]))
-        .unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(7), SqlValue::Integer(70)]))
-        .unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(50)])).unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(7), SqlValue::Integer(70)])).unwrap();
 
     let path = format!("/tmp/test_row_id_ipk_alias_{}.vbsql", std::process::id());
     db.save_binary(&path).unwrap();

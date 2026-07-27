@@ -429,6 +429,20 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         }
     }
 
+    // Write the schema-object creation-order section (v17+, issue #6175).
+    // `sqlite_master` must list objects in creation order, but the reader
+    // re-registers tables and indexes in separate passes, so without this the
+    // ordering degrades to "tables first, then indexes" after every reload.
+    // Persist each recorded ordinal as an opaque `(key, seq)` pair. Written last
+    // so v16-and-earlier readers, which stop after the triggers section, are
+    // unaffected; the read path gates on `version >= 17`.
+    let creation_seq_entries: Vec<(&str, u64)> = db.catalog.creation_seq_entries().collect();
+    write_u32(writer, creation_seq_entries.len() as u32)?;
+    for (key, seq) in creation_seq_entries {
+        write_string(writer, key)?;
+        write_u64(writer, seq)?;
+    }
+
     Ok(())
 }
 
@@ -1034,6 +1048,20 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
         db.catalog.create_trigger(trigger).map_err(|e| {
             StorageError::NotImplemented(format!("Failed to create trigger: {}", e))
         })?;
+    }
+
+    // Read the schema-object creation-order section (v17+, issue #6175). Each
+    // object was just re-registered above and given a load-order ordinal; restore
+    // the persisted ordinals so `sqlite_master` reproduces SQLite's creation
+    // order. Older files have no section — the read is gated on `version >= 17`
+    // and their objects keep the prior "tables first, then indexes" fallback.
+    if version >= 17 {
+        let creation_seq_count = read_u32(reader)?;
+        for _ in 0..creation_seq_count {
+            let key = read_string(reader)?;
+            let seq = read_u64(reader)?;
+            db.catalog.restore_creation_seq(key, seq);
+        }
     }
 
     Ok(db)

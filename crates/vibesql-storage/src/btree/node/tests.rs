@@ -1483,10 +1483,7 @@ fn undo_log_reverses_delete_batch_on_rollback() {
 
     index.begin_undo_logging();
     let deleted = index
-        .delete_batch(&[
-            (vec![SqlValue::Integer(10)], 1),
-            (vec![SqlValue::Integer(30)], 3),
-        ])
+        .delete_batch(&[(vec![SqlValue::Integer(10)], 1), (vec![SqlValue::Integer(30)], 3)])
         .unwrap();
     assert_eq!(deleted, 2);
     assert!(index.lookup(&vec![SqlValue::Integer(10)]).unwrap().is_empty());

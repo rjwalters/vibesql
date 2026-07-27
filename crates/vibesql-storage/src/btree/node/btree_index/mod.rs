@@ -510,5 +510,4 @@ impl BTreeIndex {
     pub(crate) fn read_leaf_node(&self, page_id: PageId) -> Result<LeafNode, StorageError> {
         super::super::serialize::read_leaf_node(&self.page_manager, page_id)
     }
-
 }

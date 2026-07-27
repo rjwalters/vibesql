@@ -58,9 +58,7 @@ fn write_row_version_prefix<W: Write>(writer: &mut W, row: &Row) -> Result<(), S
 /// Read a single row's MVCC version prefix from v7 format.
 ///
 /// Returns `(xmin, xmax)`. Errors on an unknown xmax tag.
-fn read_row_version_prefix<R: Read>(
-    reader: &mut R,
-) -> Result<(u64, Option<u64>), StorageError> {
+fn read_row_version_prefix<R: Read>(reader: &mut R) -> Result<(u64, Option<u64>), StorageError> {
     let xmin = read_u64(reader)?;
     let tag = read_u8(reader)?;
     let xmax = match tag {

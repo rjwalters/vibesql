@@ -360,8 +360,7 @@ impl IndexManager {
         let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
         let memory_bytes = self.estimate_index_memory(index_data_map.len(), key_size);
 
-        let index_data =
-            IndexData::InMemory { data: index_data_map };
+        let index_data = IndexData::InMemory { data: index_data_map };
 
         // Register the index with resource tracker
         self.resource_tracker.register_index(

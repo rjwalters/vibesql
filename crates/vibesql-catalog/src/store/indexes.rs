@@ -51,7 +51,10 @@ impl Catalog {
             // (they may reference multiple columns or use literals)
         }
 
+        let index_schema = index.schema.clone();
+        let index_name = index.name.clone();
         self.indexes.insert(qualified_name, index);
+        self.record_creation_seq(&index_schema, &index_name);
         Ok(())
     }
 
@@ -122,8 +125,7 @@ impl Catalog {
         self.indexes
             .iter()
             .find(|(_, idx)| {
-                idx.table_name.to_lowercase() == table_lc
-                    && idx.name.to_lowercase() == index_lc
+                idx.table_name.to_lowercase() == table_lc && idx.name.to_lowercase() == index_lc
             })
             .map(|(k, _)| k.clone())
     }
@@ -225,8 +227,7 @@ impl Catalog {
 
         let table_lc = table_name.to_lowercase();
         let mut updated = 0;
-        for index in self.indexes.values_mut().filter(|i| i.table_name.to_lowercase() == table_lc)
-        {
+        for index in self.indexes.values_mut().filter(|i| i.table_name.to_lowercase() == table_lc) {
             let mut changed = false;
             for col in index.columns.iter_mut() {
                 match col {

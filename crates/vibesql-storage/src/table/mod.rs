@@ -385,9 +385,9 @@ impl Table {
         // For native columnar tables, incrementally append to columnar data
         // This is O(m) per row instead of O(n*m) full rebuild
         if let Some(ref mut columnar) = self.native_columnar {
-            columnar.append_row(&normalized_row).map_err(|e| {
-                StorageError::Other(format!("Columnar append failed: {}", e))
-            })?;
+            columnar
+                .append_row(&normalized_row)
+                .map_err(|e| StorageError::Other(format!("Columnar append failed: {}", e)))?;
         }
 
         Ok(())
@@ -513,9 +513,9 @@ impl Table {
         // This is O(batch_size * m) instead of O(n * m) full rebuild
         if let Some(ref mut columnar) = self.native_columnar {
             for row in &self.rows[start_index..] {
-                columnar.append_row(row).map_err(|e| {
-                    StorageError::Other(format!("Columnar append failed: {}", e))
-                })?;
+                columnar
+                    .append_row(row)
+                    .map_err(|e| StorageError::Other(format!("Columnar append failed: {}", e)))?;
             }
         }
 
@@ -1072,9 +1072,9 @@ impl Table {
         // For native columnar tables, incrementally update the columnar row
         if let Some(ref mut columnar) = self.native_columnar {
             let columnar_idx = columnar_index_in(&self.deleted, index);
-            columnar.update_row_at(columnar_idx, &normalized_row).map_err(|e| {
-                StorageError::Other(format!("Columnar update failed: {}", e))
-            })?;
+            columnar
+                .update_row_at(columnar_idx, &normalized_row)
+                .map_err(|e| StorageError::Other(format!("Columnar update failed: {}", e)))?;
         }
 
         Ok(())
@@ -1133,9 +1133,9 @@ impl Table {
         // For native columnar tables, incrementally update the columnar row
         if let Some(ref mut columnar) = self.native_columnar {
             let columnar_idx = columnar_index_in(&self.deleted, index);
-            columnar.update_row_at(columnar_idx, &self.rows[index]).map_err(|e| {
-                StorageError::Other(format!("Columnar update failed: {}", e))
-            })?;
+            columnar
+                .update_row_at(columnar_idx, &self.rows[index])
+                .map_err(|e| StorageError::Other(format!("Columnar update failed: {}", e)))?;
         }
 
         Ok(())

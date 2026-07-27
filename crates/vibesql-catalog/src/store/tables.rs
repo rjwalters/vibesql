@@ -145,12 +145,15 @@ impl super::Catalog {
             (self.current_schema.clone(), identifier)
         };
 
+        let object_name = schema.name.clone();
         let target_schema = self
             .schemas
             .get_mut(&target_schema_name)
             .ok_or_else(|| CatalogError::SchemaNotFound(target_schema_name.clone()))?;
 
-        target_schema.create_table_with_identifier(schema, table_identifier)
+        target_schema.create_table_with_identifier(schema, table_identifier)?;
+        self.record_creation_seq(&target_schema_name, &object_name);
+        Ok(())
     }
 
     /// Create a table schema in the current schema.
@@ -160,12 +163,16 @@ impl super::Catalog {
         self.check_circular_foreign_keys(&schema)?;
 
         let case_sensitive = self.case_sensitive_identifiers;
+        let object_name = schema.name.clone();
+        let target_schema_name = self.current_schema.clone();
         let current_schema = self
             .schemas
             .get_mut(&self.current_schema)
             .ok_or_else(|| CatalogError::SchemaNotFound(self.current_schema.clone()))?;
 
-        current_schema.create_table_with_case_mode(schema, case_sensitive)
+        current_schema.create_table_with_case_mode(schema, case_sensitive)?;
+        self.record_creation_seq(&target_schema_name, &object_name);
+        Ok(())
     }
 
     /// Create a table schema in a specific schema.
@@ -178,12 +185,15 @@ impl super::Catalog {
         self.check_circular_foreign_keys(&schema)?;
 
         let case_sensitive = self.case_sensitive_identifiers;
+        let object_name = schema.name.clone();
         let target_schema = self
             .schemas
             .get_mut(schema_name)
             .ok_or_else(|| CatalogError::SchemaNotFound(schema_name.to_string()))?;
 
-        target_schema.create_table_with_case_mode(schema, case_sensitive)
+        target_schema.create_table_with_case_mode(schema, case_sensitive)?;
+        self.record_creation_seq(schema_name, &object_name);
+        Ok(())
     }
 
     /// Get a table schema using SQL:1999 identifier semantics.

@@ -4,9 +4,9 @@
 
 pub mod advanced_objects;
 mod alter;
-pub mod autoincrement;
 mod alter_rewrite;
 pub mod arena;
+pub mod autoincrement;
 pub mod cache;
 mod compaction_guard;
 mod constraint_validator;
@@ -36,9 +36,9 @@ mod optimizer;
 pub mod partial_index_maintenance;
 pub mod persistence;
 pub mod pipeline;
+pub mod pragma_compile_options;
 mod privilege_checker;
 pub mod procedural;
-pub mod pragma_compile_options;
 pub mod profiling;
 mod raise_scope;
 mod revoke;

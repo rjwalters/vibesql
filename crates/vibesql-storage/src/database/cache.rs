@@ -684,7 +684,8 @@ mod tests {
         // Parity 1: the incrementally-maintained columnar copy equals a fresh
         // from-scratch rebuild of the current table state.
         let incremental = values_of(&db.get_columnar("t").unwrap().unwrap().to_rows());
-        let full_rebuild = values_of(&db.get_table("t").unwrap().scan_columnar().unwrap().to_rows());
+        let full_rebuild =
+            values_of(&db.get_table("t").unwrap().scan_columnar().unwrap().to_rows());
         assert_eq!(incremental, full_rebuild, "incremental cache must equal a full rebuild");
 
         // Parity 2: it also equals the row path (the source of truth).

@@ -18,11 +18,8 @@ fn make_users_table(db: &mut Database) {
         ColumnSchema::new("id".to_string(), DataType::Integer, false),
         ColumnSchema::new("name".to_string(), DataType::Varchar { max_length: Some(50) }, true),
     ];
-    let schema = TableSchema::with_primary_key(
-        "users".to_string(),
-        columns,
-        vec!["id".to_string()],
-    );
+    let schema =
+        TableSchema::with_primary_key("users".to_string(), columns, vec!["id".to_string()]);
     db.create_table(schema).unwrap();
 }
 
@@ -66,10 +63,7 @@ fn vacuum_mvcc_refuses_to_run_inside_transaction() {
     db.begin_transaction().unwrap();
     let err = db.vacuum_mvcc().expect_err("vacuum must refuse mid-transaction");
     let msg = format!("{err}");
-    assert!(
-        msg.contains("vacuum_mvcc"),
-        "error message should mention vacuum_mvcc, got: {msg}"
-    );
+    assert!(msg.contains("vacuum_mvcc"), "error message should mention vacuum_mvcc, got: {msg}");
     // Clean up so we don't leak the active txn into subsequent tests.
     db.rollback_transaction().unwrap();
 }
@@ -156,8 +150,7 @@ fn vacuum_mvcc_preserves_subsequent_query_correctness() {
     assert_eq!(table.row_count(), 2);
 
     // Use the PK index to look up surviving rows.
-    let pk_index =
-        table.primary_key_index().expect("PK index must survive GC compaction");
+    let pk_index = table.primary_key_index().expect("PK index must survive GC compaction");
     assert!(pk_index.contains_key(&vec![SqlValue::Integer(2)]));
     assert!(pk_index.contains_key(&vec![SqlValue::Integer(4)]));
     assert!(

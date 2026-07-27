@@ -71,11 +71,7 @@ fn test_recursive_cte_in_in_subquery() {
     );
     assert_eq!(
         rows,
-        vec![
-            vec![SqlValue::Integer(14)],
-            vec![SqlValue::Integer(28)],
-            vec![SqlValue::Integer(42)],
-        ]
+        vec![vec![SqlValue::Integer(14)], vec![SqlValue::Integer(28)], vec![SqlValue::Integer(42)],]
     );
 }
 

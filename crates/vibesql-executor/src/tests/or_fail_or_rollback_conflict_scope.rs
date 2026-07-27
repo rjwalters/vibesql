@@ -102,10 +102,7 @@ fn update_or_fail_surfaces_not_null_violation_on_a_later_row() {
         "UPDATE OR FAIL t SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
     )
     .unwrap_err();
-    assert!(
-        err.contains("NOT NULL constraint failed"),
-        "expected a NOT NULL error, got: {err}"
-    );
+    assert!(err.contains("NOT NULL constraint failed"), "expected a NOT NULL error, got: {err}");
 
     // Row 1's update (b = 100) was applied before the offending row and is kept;
     // rows 2 and 3 are untouched (the statement stopped at row 2).
@@ -136,10 +133,7 @@ fn update_or_fail_surfaces_not_null_violation_without_a_primary_key() {
         "UPDATE OR FAIL t2 SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
     )
     .unwrap_err();
-    assert!(
-        err.contains("NOT NULL constraint failed"),
-        "expected a NOT NULL error, got: {err}"
-    );
+    assert!(err.contains("NOT NULL constraint failed"), "expected a NOT NULL error, got: {err}");
 
     assert_eq!(
         query_all(&db, "SELECT a, b FROM t2 ORDER BY a"),

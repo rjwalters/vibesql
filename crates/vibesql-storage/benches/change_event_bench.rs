@@ -60,26 +60,20 @@ fn bench_change_event_send(c: &mut Criterion) {
     group.bench_function("no_receivers", |b| {
         let (sender, _receiver) = change_events::channel(1024);
         // Drop the receiver so there are no active receivers
-        b.iter(|| {
-            sender.send(ChangeEvent::insert("users".to_string(), black_box(0)))
-        });
+        b.iter(|| sender.send(ChangeEvent::insert("users".to_string(), black_box(0))));
     });
 
     // Benchmark with one receiver (typical case)
     group.bench_function("one_receiver", |b| {
         let (sender, _receiver) = change_events::channel(1024);
-        b.iter(|| {
-            sender.send(ChangeEvent::insert("users".to_string(), black_box(0)))
-        });
+        b.iter(|| sender.send(ChangeEvent::insert("users".to_string(), black_box(0))));
     });
 
     // Benchmark with pre-allocated table name (avoid String allocation overhead)
     group.bench_function("one_receiver_preallocated", |b| {
         let (sender, _receiver) = change_events::channel(1024);
         let table_name = "users".to_string();
-        b.iter(|| {
-            sender.send(ChangeEvent::insert(table_name.clone(), black_box(0)))
-        });
+        b.iter(|| sender.send(ChangeEvent::insert(table_name.clone(), black_box(0))));
     });
 
     group.finish();
@@ -233,7 +227,8 @@ fn bench_change_event_fanout(c: &mut Criterion) {
 
                 b.iter(|| {
                     // Send a single event that fans out to all receivers
-                    let num_receivers = sender.send(ChangeEvent::insert("users".to_string(), black_box(0)));
+                    let num_receivers =
+                        sender.send(ChangeEvent::insert("users".to_string(), black_box(0)));
                     black_box(num_receivers)
                 });
             },

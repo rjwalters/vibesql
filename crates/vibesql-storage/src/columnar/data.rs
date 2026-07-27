@@ -355,10 +355,7 @@ impl ColumnData {
                     Arc::make_mut(nulls).push(true);
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Bool, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Bool, got {}", other.type_name()));
                 }
             },
             ColumnData::Date { values, nulls } => match value {
@@ -371,10 +368,7 @@ impl ColumnData {
                     Arc::make_mut(nulls).push(true);
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Date, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Date, got {}", other.type_name()));
                 }
             },
             ColumnData::Time { values, nulls } => match value {
@@ -387,10 +381,7 @@ impl ColumnData {
                     Arc::make_mut(nulls).push(true);
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Time, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Time, got {}", other.type_name()));
                 }
             },
             ColumnData::Timestamp { values, nulls } => match value {
@@ -453,10 +444,7 @@ impl ColumnData {
                     Arc::make_mut(nulls).push(true);
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Blob, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Blob, got {}", other.type_name()));
                 }
             },
         }
@@ -618,10 +606,7 @@ impl ColumnData {
                     Arc::make_mut(nulls)[index] = true;
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Bool, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Bool, got {}", other.type_name()));
                 }
             },
             ColumnData::Date { values, nulls } => match value {
@@ -634,10 +619,7 @@ impl ColumnData {
                     Arc::make_mut(nulls)[index] = true;
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Date, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Date, got {}", other.type_name()));
                 }
             },
             ColumnData::Time { values, nulls } => match value {
@@ -650,10 +632,7 @@ impl ColumnData {
                     Arc::make_mut(nulls)[index] = true;
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Time, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Time, got {}", other.type_name()));
                 }
             },
             ColumnData::Timestamp { values, nulls } => match value {
@@ -716,10 +695,7 @@ impl ColumnData {
                     Arc::make_mut(nulls)[index] = true;
                 }
                 other => {
-                    return Err(format!(
-                        "Type mismatch: expected Blob, got {}",
-                        other.type_name()
-                    ));
+                    return Err(format!("Type mismatch: expected Blob, got {}", other.type_name()));
                 }
             },
         }
