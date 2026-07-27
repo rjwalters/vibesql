@@ -158,3 +158,6 @@ tcl-baseline-*/
 .loom/*.sock
 .loom/logs/
 # <<< loom-managed <<<
+
+# Session handoff note (never commit — one-shot session state)
+.claude/handoff.md
