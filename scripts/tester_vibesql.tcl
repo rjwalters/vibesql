@@ -4108,7 +4108,7 @@ array set vibesql_skip_files {
 variable vibesql_partial_skip_files
 array set vibesql_partial_skip_files {
     atof1 "PARTIAL: the ~39,998 dynamically-named atof1-1.\$i.1/.2 loop tests are auto-skipped because they call real2hex()/hex2real() — SQLite C-test-harness functions (test_func.c) that expose raw IEEE-754 bit patterns and are unreachable from the SQL CLI. Same harness-artifact class as the intreal whole-file skip, but atof1 CANNOT be a whole-file skip: the ~7 non-loop atof1-2.x/atof-3.x tests are legitimate do_execsql_test coverage that must keep running. Enforced by the real2hex()/hex2real() regex detectors in vibesql_skip_test (search 'real2hex' below), NOT by a whole-file skip. Current non-loop status: atof1-2.40/atof-3.2/atof-3.3 pass; atof1-2.10/2.20/2.30 (UTF16be substr) and atof-3.1 (large-literal REAL precision) are REAL open engine bugs, tracked in #6065 — they must keep running and reporting 'failed', never reclassified as skipped."
-    istrue "PARTIAL (Part of #6172): the istrue-600.\$tn.3/.4 pairs (tn=1..6) are auto-skipped by the istrue-600.*.3 / istrue-600.*.4 patterns because their sibling istrue-600.\$tn.2 setup (a C-API sqlite3_bind_double NaN/Inf insert) is itself unreachable from the SQL CLI, leaving t1 empty for the downstream plain-SQL SELECTs. istrue CANNOT be a whole-file skip: istrue-1..istrue-590 (IS TRUE/IS FALSE/IS NOT TRUE/IS NOT FALSE core semantics), istrue-700/800/820/830/840/841 (TRUE/FALSE as non-reserved identifiers) are legitimate do_execsql_test/do_catchsql_test coverage that must keep running and does (see #6236). Enforced by the istrue-600.*.3 / istrue-600.*.4 regex detectors in vibesql_skip_patterns, NOT by a whole-file skip."
+    istrue "PARTIAL (Part of #6172): the istrue-600.\$tn.3/.4 pairs (tn=1..6) are auto-skipped by the istrue-600.*.3 / istrue-600.*.4 patterns because their sibling istrue-600.\$tn.2 setup (a C-API sqlite3_bind_double NaN/Inf insert) is itself unreachable from the SQL CLI, leaving t1 empty for the downstream plain-SQL SELECTs. istrue CANNOT be a whole-file skip: istrue-1..istrue-590 (IS TRUE/IS FALSE/IS NOT TRUE/IS NOT FALSE core semantics), istrue-700/800/820/830/840/841 (TRUE/FALSE as non-reserved identifiers) are legitimate do_execsql_test/do_catchsql_test coverage that must keep running and does (see #6236). Enforced by the istrue-600.*.3 / istrue-600.*.4 regex detectors in vibesql_skip_patterns, NOT by a whole-file skip. Note (#6172 follow-up): this PR adds a working sqlite3_prepare/sqlite3_bind_double/sqlite3_step emulation (see the C-API section below), but istrue-600.\$tn.2's do_test SCRIPT still literally contains the string 'sqlite3_prepare', so vibesql_should_skip's blanket per-test C-API regex detector (independent of whether the command is actually implemented) still auto-skips it before the new emulation ever runs — the .3/.4 cascade is therefore unchanged and this skip stays accurate. Teaching vibesql_should_skip to recognize the now-implemented subset is left to a follow-up increment, to avoid unblocking untested C-API call shapes across the rest of the suite in one PR."
 }
 
 # Tests to skip because they test SQLite-specific behavior that VibeSQL
@@ -5824,7 +5824,7 @@ array set vibesql_skip_tests {
 
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
-    {istrue-600.*.3 "harness cascade (Part of #6172): istrue-600.\$tn.2 binds a raw IEEE754 NaN/Inf double into t1 via sqlite3_prepare/sqlite3_bind_double (C-API, unimplemented shim command — SQL text has no literal that survives SQLite's NaN-to-NULL conversion the way a raw C bind does), so it is correctly auto-skipped by the per-test C-API detector. But that leaves t1 empty, so the plain `SELECT x IS TRUE FROM t1` in istrue-600.\$tn.3 returns zero rows instead of the expected one-row boolean result — not a SQL engine defect, a cascade from the skipped C-API setup (same shape as the nan.test/trigger6 cascades). Covers istrue-600.1.3..600.6.3."}
+    {istrue-600.*.3 "harness cascade (Part of #6172): istrue-600.\$tn.2 binds a raw IEEE754 NaN/Inf double into t1 via sqlite3_prepare/sqlite3_bind_double (C-API); vibesql_should_skip's blanket per-test regex detector auto-skips any do_test whose script literally names a sqlite3_prepare/bind/step/reset/finalize call, independent of whether that call is actually implemented, so it is correctly auto-skipped by the per-test C-API detector. But that leaves t1 empty, so the plain `SELECT x IS TRUE FROM t1` in istrue-600.\$tn.3 returns zero rows instead of the expected one-row boolean result — not a SQL engine defect, a cascade from the skipped C-API setup (same shape as the nan.test/trigger6 cascades). Covers istrue-600.1.3..600.6.3."}
     {istrue-600.*.4 "harness cascade (Part of #6172): same root cause as istrue-600.*.3 above — istrue-600.\$tn.2's C-API NaN/Inf bind is skipped, so t1 is empty when istrue-600.\$tn.4's `SELECT x IS FALSE FROM t1` runs. Covers istrue-600.1.4..600.6.4."}
     {select9-2.*.3 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). These compound-SELECT ORDER BY ... COLLATE reverse cases depend on the 'reverse' collation registered via 'db collate reverse reverse', which the TCL shim cannot bridge to the VibeSQL CLI subprocess (same class as the sqlite3_create_aggregate stub in #5712). Covers select9-2.x.3 and its .flipped and limit/offset variants for all index loops."}
     {select9-2.*.6 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). UNION ALL ... ORDER BY ... COLLATE reverse cases depending on the 'reverse' collation registered via 'db collate reverse reverse'. Covers select9-2.x.6 and its .flipped and limit/offset variants for all index loops."}
@@ -7612,6 +7612,414 @@ proc sqlite3_mprintf_str {args} {
 proc sqlite3_mprintf_double {args} {
     # Stub for SQLite printf with doubles
     return [format [lindex $args 0] {*}[lrange $args 1 end]]
+}
+
+#-----------------------------------------------------------------------------
+# sqlite3_prepare[_v2] / sqlite3_bind_* / sqlite3_step / sqlite3_column_* /
+# sqlite3_reset / sqlite3_finalize
+#
+# A lightweight emulation of SQLite's C-API prepared-statement handles for
+# TCL evidence tests (e_expr.test's `parameter_test` proc, istrue.test's
+# istrue-600 NaN/Inf-via-bind_double series) that bypass `db eval`/execsql
+# and drive statements directly through these low-level calls. VibeSQL's
+# shim has no real prepared-statement object (each SQL batch spawns a fresh
+# CLI process), so instead of binding a value, "preparing" a statement here
+# just records the SQL text and scans it for parameter placeholders
+# (`?`, `?NNN`, `:name`, `@name`, `$name`) using SQLite's own numbering
+# rules (R-33509-39458, R-33670-36097, R-11620-22743, R-49783-61279,
+# R-62610-51329). `sqlite3_step` then textually substitutes each bound
+# value (or NULL, if never bound) into the recorded SQL and runs it once
+# through the normal execsql path. This is intentionally narrow: it
+# supports exactly the single-step, single-row query shapes these evidence
+# tests use, not general multi-step iteration or real memory-safety C-API
+# semantics (#6172).
+#-----------------------------------------------------------------------------
+
+set ::stmt_counter 0
+array set ::stmt_sql {}
+array set ::stmt_db {}
+array set ::stmt_params {}
+array set ::stmt_param_names {}
+array set ::stmt_bind {}
+array set ::stmt_stepped {}
+array set ::stmt_result_row {}
+array set ::stmt_has_row {}
+array set ::stmt_result_types {}
+
+# Character allowed inside a SQLite parameter identifier: ASCII alnum, '_',
+# '$' (SQLite's IdChar() treats '$' as an identifier character too, matched
+# by e.g. e_expr-11.4.4's `$_$_` parameter name), or any codepoint > 127.
+proc ::tcltest_is_idchar {ch} {
+    if {[string is alnum -strict $ch]} { return 1 }
+    if {$ch eq "_" || $ch eq "\$"} { return 1 }
+    scan $ch %c cp
+    if {$cp > 127} { return 1 }
+    return 0
+}
+
+# Scan $sql for parameter placeholders, skipping over string/quoted-identifier
+# literals and comments so `?`/`:`/`@`/`$` inside them are never mistaken for
+# parameters. Returns {occurrences names} where occurrences is a list of
+# {start end number} (half-open [start,end) byte ranges into $sql, in
+# left-to-right order) and names is a dict mapping parameter number -> the
+# literal marker text sqlite3_bind_parameter_name should report ("" for an
+# anonymous bare `?`).
+proc ::tcltest_scan_params {sql} {
+    set len [string length $sql]
+    set i 0
+    set occ {}
+    set names [dict create]
+    set maxnum 0
+    array set namemap {}
+
+    while {$i < $len} {
+        set c [string index $sql $i]
+        if {$c eq "'" || $c eq "\""} {
+            set quote $c
+            set j [expr {$i + 1}]
+            while {$j < $len} {
+                if {[string index $sql $j] eq $quote} {
+                    if {$j + 1 < $len && [string index $sql [expr {$j + 1}]] eq $quote} {
+                        incr j 2
+                        continue
+                    }
+                    incr j
+                    break
+                }
+                incr j
+            }
+            set i $j
+            continue
+        }
+        if {$c eq "-" && $i + 1 < $len && [string index $sql [expr {$i + 1}]] eq "-"} {
+            set j [string first "\n" $sql $i]
+            if {$j < 0} { set i $len } else { set i $j }
+            continue
+        }
+        if {$c eq "/" && $i + 1 < $len && [string index $sql [expr {$i + 1}]] eq "*"} {
+            set j [string first "*/" $sql $i]
+            if {$j < 0} { set i $len } else { set i [expr {$j + 2}] }
+            continue
+        }
+        if {$c eq "?"} {
+            set start $i
+            set j [expr {$i + 1}]
+            set digits ""
+            while {$j < $len && [string is digit -strict [string index $sql $j]]} {
+                append digits [string index $sql $j]
+                incr j
+            }
+            if {$digits ne ""} {
+                set num [expr {int($digits)}]
+                if {$num > $maxnum} { set maxnum $num }
+                dict set names $num "?$digits"
+            } else {
+                incr maxnum
+                set num $maxnum
+                dict set names $num ""
+            }
+            lappend occ [list $start $j $num]
+            set i $j
+            continue
+        }
+        if {$c eq ":" || $c eq "@"} {
+            set marker $c
+            set start $i
+            set j [expr {$i + 1}]
+            set idtext ""
+            while {$j < $len && [::tcltest_is_idchar [string index $sql $j]]} {
+                append idtext [string index $sql $j]
+                incr j
+            }
+            if {$idtext eq ""} {
+                incr i
+                continue
+            }
+            set token "$marker$idtext"
+            if {[info exists namemap($token)]} {
+                set num $namemap($token)
+            } else {
+                incr maxnum
+                set num $maxnum
+                set namemap($token) $num
+                dict set names $num $token
+            }
+            lappend occ [list $start $j $num]
+            set i $j
+            continue
+        }
+        if {$c eq "\$"} {
+            set start $i
+            set j [expr {$i + 1}]
+            set idtext ""
+            while {$j < $len} {
+                set ch [string index $sql $j]
+                if {[::tcltest_is_idchar $ch] || $ch eq ":"} {
+                    append idtext $ch
+                    incr j
+                } else {
+                    break
+                }
+            }
+            # R-55025-21042: the $-form identifier may include a suffix
+            # enclosed in "(...)" containing any text at all.
+            if {$idtext ne "" && $j < $len && [string index $sql $j] eq "("} {
+                set close [string first ")" $sql $j]
+                if {$close >= 0} {
+                    append idtext [string range $sql $j $close]
+                    set j [expr {$close + 1}]
+                }
+            }
+            if {$idtext eq ""} {
+                incr i
+                continue
+            }
+            set token "\$$idtext"
+            if {[info exists namemap($token)]} {
+                set num $namemap($token)
+            } else {
+                incr maxnum
+                set num $maxnum
+                set namemap($token) $num
+                dict set names $num $token
+            }
+            lappend occ [list $start $j $num]
+            set i $j
+            continue
+        }
+        incr i
+    }
+    return [list $occ $names]
+}
+
+# Split $text on top-level occurrences of single-character $sep, ignoring
+# separators inside '...' string literals or (...) parens. Used only to
+# build a typeof()-wrapped variant of a statement's select-list for
+# sqlite3_column_type.
+proc ::tcltest_split_toplevel {text sep} {
+    set parts {}
+    set depth 0
+    set cur ""
+    set len [string length $text]
+    set i 0
+    while {$i < $len} {
+        set ch [string index $text $i]
+        if {$ch eq "'"} {
+            append cur $ch
+            incr i
+            while {$i < $len} {
+                set c2 [string index $text $i]
+                append cur $c2
+                incr i
+                if {$c2 eq "'"} {
+                    if {$i < $len && [string index $text $i] eq "'"} {
+                        append cur [string index $text $i]
+                        incr i
+                    } else {
+                        break
+                    }
+                }
+            }
+            continue
+        }
+        if {$ch eq "("} { incr depth; append cur $ch; incr i; continue }
+        if {$ch eq ")"} { incr depth -1; append cur $ch; incr i; continue }
+        if {$depth == 0 && $ch eq $sep} {
+            lappend parts $cur
+            set cur ""
+            incr i
+            continue
+        }
+        append cur $ch
+        incr i
+    }
+    lappend parts $cur
+    return $parts
+}
+
+proc ::tcltest_stmt_prepare {db sql tailvar} {
+    incr ::stmt_counter
+    set id "vstmt$::stmt_counter"
+    set ::stmt_sql($id) $sql
+    set ::stmt_db($id) $db
+    lassign [::tcltest_scan_params $sql] occ pnames
+    set ::stmt_params($id) $occ
+    set ::stmt_param_names($id) $pnames
+    array unset ::stmt_bind "$id,*"
+    if {$tailvar ne ""} {
+        upvar 1 $tailvar tv
+        set tv ""
+    }
+    return $id
+}
+
+proc sqlite3_prepare_v2 {db sql nbytes {tailvar ""}} {
+    return [::tcltest_stmt_prepare $db $sql $tailvar]
+}
+
+proc sqlite3_prepare {db sql nbytes {tailvar ""}} {
+    return [::tcltest_stmt_prepare $db $sql $tailvar]
+}
+
+proc sqlite3_bind_int {stmt idx val} {
+    set ::stmt_bind($stmt,$idx) $val
+    return SQLITE_OK
+}
+
+proc sqlite3_bind_int64 {stmt idx val} {
+    return [sqlite3_bind_int $stmt $idx $val]
+}
+
+proc sqlite3_bind_text {args} {
+    set stmt [lindex $args 0]
+    set idx [lindex $args 1]
+    set val [lindex $args 2]
+    set escaped [string map {' ''} $val]
+    set ::stmt_bind($stmt,$idx) "'$escaped'"
+    return SQLITE_OK
+}
+
+proc sqlite3_bind_double {stmt idx val} {
+    # SQLite silently converts a bound NaN into SQL NULL
+    # (sqlite3_bind_double()/sqlite3_result_double() never store NaN).
+    set lower [string tolower $val]
+    if {[string match "*nan*" $lower]} {
+        set ::stmt_bind($stmt,$idx) "NULL"
+    } elseif {$lower eq "inf" || $lower eq "+inf" || $lower eq "infinity"} {
+        set ::stmt_bind($stmt,$idx) "9e999"
+    } elseif {$lower eq "-inf" || $lower eq "-infinity"} {
+        set ::stmt_bind($stmt,$idx) "-9e999"
+    } else {
+        set ::stmt_bind($stmt,$idx) $val
+    }
+    return SQLITE_OK
+}
+
+proc sqlite3_bind_null {stmt idx} {
+    set ::stmt_bind($stmt,$idx) "NULL"
+    return SQLITE_OK
+}
+
+proc sqlite3_bind_parameter_name {stmt idx} {
+    if {![info exists ::stmt_param_names($stmt)]} { return "" }
+    if {[dict exists $::stmt_param_names($stmt) $idx]} {
+        return [dict get $::stmt_param_names($stmt) $idx]
+    }
+    return ""
+}
+
+proc ::tcltest_stmt_substituted_sql {stmt} {
+    # NOT memoized: a prepared statement is routinely reused across many
+    # bind -> step -> reset cycles with a fresh bound value each time (e.g.
+    # nan.test's nan-1.1.1..nan-2.1 rebind $::STMT and re-step it in a loop),
+    # so the substituted text must reflect the CURRENT bindings on every call.
+    set sql $::stmt_sql($stmt)
+    set occ [lsort -integer -decreasing -index 0 $::stmt_params($stmt)]
+    foreach o $occ {
+        lassign $o start end num
+        if {[info exists ::stmt_bind($stmt,$num)]} {
+            set lit $::stmt_bind($stmt,$num)
+        } else {
+            set lit "NULL"
+        }
+        set sql "[string range $sql 0 [expr {$start - 1}]]$lit[string range $sql $end end]"
+    }
+    return $sql
+}
+
+proc sqlite3_step {stmt} {
+    if {[info exists ::stmt_stepped($stmt)]} {
+        return SQLITE_DONE
+    }
+    set ::stmt_stepped($stmt) 1
+    set sql [::tcltest_stmt_substituted_sql $stmt]
+    set db $::stmt_db($stmt)
+    set trimmed [string trim $sql]
+    set is_select [string equal -nocase [string range $trimmed 0 5] "select"]
+    if {$is_select} {
+        set row [execsql $sql $db]
+        set ::stmt_result_row($stmt) $row
+        if {[llength $row] > 0} {
+            set ::stmt_has_row($stmt) 1
+            return SQLITE_ROW
+        }
+        set ::stmt_has_row($stmt) 0
+        return SQLITE_DONE
+    }
+    execsql $sql $db
+    set ::stmt_has_row($stmt) 0
+    return SQLITE_DONE
+}
+
+proc sqlite3_column_count {stmt} {
+    if {![info exists ::stmt_has_row($stmt)] || !$::stmt_has_row($stmt)} {
+        return 0
+    }
+    return [llength $::stmt_result_row($stmt)]
+}
+
+proc sqlite3_column_text {stmt idx} {
+    if {![info exists ::stmt_result_row($stmt)]} { return "" }
+    return [lindex $::stmt_result_row($stmt) $idx]
+}
+
+proc sqlite3_column_int {stmt idx} {
+    set v [sqlite3_column_text $stmt $idx]
+    if {$v eq ""} { return 0 }
+    return $v
+}
+
+proc ::tcltest_stmt_column_types {stmt} {
+    if {[info exists ::stmt_result_types($stmt)]} {
+        return $::stmt_result_types($stmt)
+    }
+    set sql [::tcltest_stmt_substituted_sql $stmt]
+    set trimmed [string trim $sql]
+    if {![string equal -nocase [string range $trimmed 0 5] "select"]} {
+        set ::stmt_result_types($stmt) {}
+        return {}
+    }
+    set body [string range $trimmed 6 end]
+    set items [::tcltest_split_toplevel $body ","]
+    set typeexprs {}
+    foreach it $items { lappend typeexprs "typeof($it)" }
+    set typesql "SELECT [join $typeexprs ", "]"
+    set row [execsql $typesql $::stmt_db($stmt)]
+    set ::stmt_result_types($stmt) $row
+    return $row
+}
+
+proc sqlite3_column_type {stmt idx} {
+    set types [::tcltest_stmt_column_types $stmt]
+    set t [string toupper [lindex $types $idx]]
+    switch -- $t {
+        INTEGER { return INTEGER }
+        REAL    { return REAL }
+        TEXT    { return TEXT }
+        BLOB    { return BLOB }
+        default { return NULL }
+    }
+}
+
+proc sqlite3_reset {stmt} {
+    unset -nocomplain ::stmt_stepped($stmt)
+    unset -nocomplain ::stmt_result_row($stmt)
+    unset -nocomplain ::stmt_has_row($stmt)
+    unset -nocomplain ::stmt_result_types($stmt)
+    return SQLITE_OK
+}
+
+proc sqlite3_finalize {stmt} {
+    array unset ::stmt_bind "$stmt,*"
+    unset -nocomplain ::stmt_sql($stmt)
+    unset -nocomplain ::stmt_db($stmt)
+    unset -nocomplain ::stmt_params($stmt)
+    unset -nocomplain ::stmt_param_names($stmt)
+    unset -nocomplain ::stmt_stepped($stmt)
+    unset -nocomplain ::stmt_result_row($stmt)
+    unset -nocomplain ::stmt_has_row($stmt)
+    unset -nocomplain ::stmt_result_types($stmt)
+    return SQLITE_OK
 }
 
 #-----------------------------------------------------------------------------
