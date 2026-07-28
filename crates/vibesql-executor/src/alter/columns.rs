@@ -548,6 +548,17 @@ pub(super) fn execute_rename_column(
     stmt: &RenameColumnStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
+    // Renaming a column of a VIEW is rejected with a dedicated message
+    // (`cannot rename columns of view "<name>"`), matching SQLite. Checked
+    // before the table lookup so a view does not fall through to the generic
+    // `no such table` path (altercol-12.2.2/12.2.3).
+    if let Some(view) = database.catalog.get_view(&stmt.table_name) {
+        return Err(ExecutorError::Other(format!(
+            "cannot rename columns of view \"{}\"",
+            view.name
+        )));
+    }
+
     // Resolve the table + column and check for a name conflict with an
     // immutable borrow so the whole-schema precheck below can also borrow the
     // database immutably. The mutable borrow for the actual rename is taken
@@ -557,14 +568,11 @@ pub(super) fn execute_rename_column(
             .get_table(&stmt.table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
-        // The old column must exist.
+        // The old column must exist. SQLite reports the SQL-standard
+        // `no such column: "<col>"` here (altercol-12.4.2), the same wording
+        // the DROP COLUMN path uses.
         let col_index = table.schema.get_column_index(&stmt.old_column_name).ok_or_else(|| {
-            ExecutorError::ColumnNotFound {
-                column_name: stmt.old_column_name.clone(),
-                table_name: stmt.table_name.clone(),
-                searched_tables: vec![stmt.table_name.clone()],
-                available_columns: table.schema.columns.iter().map(|c| c.name.clone()).collect(),
-            }
+            ExecutorError::Other(format!("no such column: \"{}\"", stmt.old_column_name))
         })?;
 
         // Renaming to an existing (different) column name is a conflict. Allow a
