@@ -46,6 +46,117 @@ pub fn detect_fk_mismatch(
     }
 }
 
+/// Full FK-definition validation for a single constraint: unlike
+/// [`detect_fk_mismatch`] (which only reports the "wrong key shape" case and
+/// silently returns `None` when the parent table itself is missing —
+/// existing callers separately raise `TableNotFound` once a row-existence
+/// scan actually needs the parent), this also catches the missing-parent-
+/// table case so callers get a single schema-level check.
+///
+/// EVIDENCE-OF R-35763-48267 / R-03108-63659: a foreign key DML error is
+/// reported when the parent table does not exist ("no such table") *or* when
+/// the parent key columns are not backed by a PK/UNIQUE/non-partial UNIQUE
+/// INDEX ("foreign key mismatch") — both are schema-level errors, detected
+/// regardless of the actual row values.
+pub(crate) fn check_fk_definition_error(
+    db: &Database,
+    child_table: &str,
+    fk: &ForeignKeyConstraint,
+) -> Option<crate::errors::ExecutorError> {
+    if db.catalog.get_table(&fk.parent_table).is_none() {
+        // A name that resolves to a VIEW (not a table) is a "foreign key
+        // mismatch", not "no such table" — SQLite's `sqlite3FkLocateIndex`
+        // only reports "no such table" when the name is entirely unknown to
+        // the schema (fkey2-10.1.2: `REFERENCES v(y)` where `v` is a VIEW).
+        // A view can never back an FK parent key (no PK/UNIQUE of its own).
+        if db.catalog.get_view(&fk.parent_table).is_some() {
+            return Some(crate::errors::ExecutorError::ForeignKeyMismatch {
+                child: child_table.to_string(),
+                parent: fk.parent_table.clone(),
+            });
+        }
+        return Some(
+            crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
+                .with_main_schema_qualifier(),
+        );
+    }
+    detect_fk_mismatch(db, child_table, fk)
+        .map(|(child, parent)| crate::errors::ExecutorError::ForeignKeyMismatch { child, parent })
+}
+
+/// Statement-prepare-time FK schema validation.
+///
+/// EVIDENCE-OF R-45488-08504 / R-48391-38472: when the database schema
+/// contains an FK definition error that spans more than one table
+/// definition (missing parent table, or a parent key not backed by a
+/// PK/UNIQUE/non-partial UNIQUE INDEX), the error is not detected at
+/// `CREATE TABLE` time — instead it surfaces the first time an application
+/// *prepares* a DML statement (`INSERT`/`UPDATE`/`DELETE`) against either the
+/// child or the parent table "in ways that use the foreign keys". Critically
+/// this happens **before any row is touched**, so it must fire even when the
+/// statement ultimately affects zero rows (e_fkey-20.*).
+///
+/// Row-driven validation elsewhere in this module (`check_fk_definition_error`
+/// called per-row from the INSERT/UPDATE paths) already catches this for any
+/// statement that processes at least one row. This entry point additionally
+/// covers:
+///   1. UPDATE/DELETE statements that end up touching zero rows (their
+///      per-row FK loops never run at all).
+///   2. DML against the *parent* side of a broken FK — SQLite reports the
+///      same error when preparing a statement against the referenced table,
+///      not just the referencing one.
+pub fn validate_fk_schema_for_dml(
+    db: &Database,
+    table_name: &str,
+) -> Result<(), crate::errors::ExecutorError> {
+    if !db.foreign_keys_enabled() {
+        return Ok(());
+    }
+
+    let Some(schema) = db.catalog.get_table(table_name) else {
+        return Ok(());
+    };
+
+    // 1. This table's own outgoing FKs.
+    for fk in &schema.foreign_keys {
+        if let Some(err) = check_fk_definition_error(db, table_name, fk) {
+            return Err(err);
+        }
+    }
+
+    // 2. Other tables' FKs that reference this table as their parent. Skip
+    //    the O(tables) scan entirely when nothing in the schema declares any
+    //    FK at all (the overwhelmingly common case).
+    let has_any_fks = db
+        .catalog
+        .list_tables()
+        .iter()
+        .any(|t| db.catalog.get_table(t).map(|s| !s.foreign_keys.is_empty()).unwrap_or(false));
+    if !has_any_fks {
+        return Ok(());
+    }
+
+    for other_name in db.catalog.list_tables() {
+        if other_name.eq_ignore_ascii_case(table_name) {
+            // Self-referential FKs are already covered by step 1.
+            continue;
+        }
+        let Some(other_schema) = db.catalog.get_table(&other_name) else {
+            continue;
+        };
+        for fk in &other_schema.foreign_keys {
+            if !fk.parent_table.eq_ignore_ascii_case(table_name) {
+                continue;
+            }
+            if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Resolve the FK's parent-side column indices, preferring `parent_column_names`
 /// over the cached `parent_column_indices` (which may carry placeholder zeros
 /// when the parent did not yet exist at FK creation time).
@@ -66,8 +177,14 @@ fn resolve_parent_indices(parent: &TableSchema, fk: &ForeignKeyConstraint) -> Ve
             return by_name.into_iter().map(|opt| opt.unwrap()).collect();
         }
 
-        // Names don't resolve — likely an empty-FK-list (REFERENCES p1)
-        // pointing at the parent's PK. Fall through to the cached indices.
+        // At least one explicitly-named parent column does not exist on the
+        // parent table at all (fkey2-10.1.1: `REFERENCES p(c)` where `p` has
+        // no column `c`). This can never be satisfied by any PK/UNIQUE/INDEX
+        // on the parent, so report it as unresolvable (empty) rather than
+        // falling through to the stale/placeholder `parent_column_indices` —
+        // that cached index can coincidentally alias a real key and silently
+        // mask a genuine "foreign key mismatch".
+        return Vec::new();
     }
 
     // Empty parent_column_names with a single placeholder index typically

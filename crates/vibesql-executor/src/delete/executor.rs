@@ -210,6 +210,15 @@ impl DeleteExecutor {
             crate::select::validate_predicate_subquery_arity(where_expr, database)?;
         }
 
+        // Prepare-time FK schema validation (EVIDENCE-OF R-45488-08504 /
+        // R-48391-38472, e_fkey-20.*): a broken FK schema (missing parent
+        // table, or a parent key not backed by a PK/UNIQUE/non-partial
+        // UNIQUE INDEX) must be reported even when this DELETE ends up
+        // affecting zero rows — before the TRUNCATE fast path below and
+        // before any row scan. Covers both this table's own outgoing FKs and
+        // any other table's FK that references this table as parent.
+        crate::foreign_key_check::validate_fk_schema_for_dml(database, &stmt.table_name)?;
+
         // Fast path: DELETE FROM table (no WHERE clause)
         // Use TRUNCATE-style optimization for 100-1000x performance improvement
         // Only use truncate if there's no ORDER BY or LIMIT (which would restrict which rows to

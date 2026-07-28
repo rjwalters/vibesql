@@ -114,6 +114,15 @@ pub(super) fn execute_internal(
         crate::select::validate_predicate_subquery_arity(where_expr, database)?;
     }
 
+    // Prepare-time FK schema validation (EVIDENCE-OF R-45488-08504 /
+    // R-48391-38472, e_fkey-20.*): a broken FK schema (missing parent table,
+    // or a parent key not backed by a PK/UNIQUE/non-partial UNIQUE INDEX)
+    // must be reported even when this UPDATE ends up matching zero rows —
+    // the per-row FK validation below never runs in that case. Covers both
+    // this table's own outgoing FKs and any other table's FK that
+    // references this table as parent.
+    crate::foreign_key_check::validate_fk_schema_for_dml(database, table_name)?;
+
     // Check if table has UPDATE triggers (check once, use multiple times).
     //
     // ROW-level triggers fire even when this UPDATE runs inside another

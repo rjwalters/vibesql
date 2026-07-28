@@ -323,6 +323,15 @@ fn execute_insert_internal(
     // Use the schema's table name for catalog operations (matches how table was created)
     let table_name = &schema.name;
 
+    // Prepare-time FK schema validation (EVIDENCE-OF R-45488-08504 /
+    // R-48391-38472, e_fkey-20.*): a broken FK schema (missing parent table,
+    // or a parent key not backed by a PK/UNIQUE/non-partial UNIQUE INDEX)
+    // must be reported even when this INSERT's source produces zero rows
+    // (`INSERT INTO t SELECT ... FROM empty`) — the per-row FK validation
+    // below never runs in that case. Also covers INSERT into the *parent*
+    // side of a broken FK declared by some other (child) table.
+    crate::foreign_key_check::validate_fk_schema_for_dml(db, table_name)?;
+
     // Schema-aware trigger firing (triggerD-3.1/3.2): resolve which schema this
     // INSERT's target table actually lives in (temp shadows main for unqualified
     // names; an explicit `main.`/`temp.` qualifier pins the schema). Only triggers

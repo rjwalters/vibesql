@@ -447,15 +447,17 @@ impl<'a> RowValidator<'a> {
         for (fk_idx, fk_values) in fk_keys.iter().enumerate() {
             let fk = &self.schema.foreign_keys[fk_idx];
 
-            // Step 2: mismatch check runs before any row-existence test so
-            // that bad FK targets are reported even when the parent table is
-            // empty (matches SQLite behaviour and fkey1-6.1 / fkey5-11.1).
-            // Mismatch is a schema-level error and is *never* deferred:
-            // SQLite reports it immediately even with INITIALLY DEFERRED.
-            if let Some((child, parent)) =
-                crate::foreign_key_check::detect_fk_mismatch(self.db, self.table_name, fk)
+            // Step 2: schema-level FK validation (missing parent table, or a
+            // parent key not backed by a PK/UNIQUE/non-partial UNIQUE INDEX)
+            // runs before any row-existence test, so bad FK targets are
+            // reported even when the parent table is empty (matches SQLite
+            // behaviour and fkey1-6.1 / fkey5-11.1) *or* every value in this
+            // row is NULL (e_fkey-20.*). Neither error is ever deferred:
+            // SQLite reports both immediately even with INITIALLY DEFERRED.
+            if let Some(err) =
+                crate::foreign_key_check::check_fk_definition_error(self.db, self.table_name, fk)
             {
-                return Err(ExecutorError::ForeignKeyMismatch { child, parent });
+                return Err(err);
             }
 
             // Step 3: skip row-existence check if any FK value is NULL

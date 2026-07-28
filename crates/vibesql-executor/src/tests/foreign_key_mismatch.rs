@@ -29,6 +29,12 @@ fn exec_sql(db: &mut Database, sql: &str) -> Result<String, String> {
         Statement::CreateIndex(s) => crate::CreateIndexExecutor::execute(&s, db)
             .map(|_| "ok".to_string())
             .map_err(|e| e.to_string()),
+        Statement::Update(s) => crate::UpdateExecutor::execute(&s, db)
+            .map(|count| format!("{} row(s) updated", count))
+            .map_err(|e| e.to_string()),
+        Statement::Delete(s) => crate::DeleteExecutor::execute(&s, db)
+            .map(|count| format!("{} row(s) deleted", count))
+            .map_err(|e| e.to_string()),
         _ => Err(format!("Unsupported statement type: {:?}", sql)),
     }
 }
@@ -173,4 +179,143 @@ fn fk_uses_nocase_collation_for_parent_match() {
     // Lowercase 'alpha' should match parent 'Alpha' under NOCASE.
     let r = exec_sql(&mut db, "INSERT INTO c_nc VALUES('alpha')");
     assert!(r.is_ok(), "NOCASE-aware FK should succeed; got: {:?}", r);
+}
+
+// -----------------------------------------------------------------------
+// Statement-prepare-time FK schema validation (e_fkey-20.*, e_fkey-60.*):
+// a broken FK schema definition (missing parent table, or a parent key not
+// backed by a PK/UNIQUE/non-partial UNIQUE INDEX) must be reported when
+// preparing *any* DML against either the child or the parent table — even
+// when the statement ends up touching zero rows. EVIDENCE-OF R-45488-08504 /
+// R-48391-38472.
+// -----------------------------------------------------------------------
+
+#[test]
+fn delete_from_child_with_missing_parent_table_errors_even_with_zero_rows() {
+    // c(x REFERENCES nosuchtable) — the table is empty, so DELETE FROM c
+    // matches zero rows. The per-row FK loop never runs, so only the
+    // statement-prepare-time check can catch this.
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES nosuchtable)").unwrap();
+
+    let err = exec_sql(&mut db, "DELETE FROM c").unwrap_err();
+    assert!(
+        err.contains("nosuchtable") || err.to_lowercase().contains("not found"),
+        "expected a missing-table error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn update_on_child_with_missing_parent_table_errors_even_with_zero_rows() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES nosuchtable, y)").unwrap();
+
+    let err = exec_sql(&mut db, "UPDATE c SET x = 1").unwrap_err();
+    assert!(
+        err.contains("nosuchtable") || err.to_lowercase().contains("not found"),
+        "expected a missing-table error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn delete_from_parent_with_mismatched_child_key_errors() {
+    // p(a PRIMARY KEY, b) — only `a` is a valid FK target. c references
+    // p(b), which is not backed by any PK/UNIQUE — a schema-level mismatch.
+    // DELETE FROM p must report it even before any row-existence scan runs.
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    // Seed `p` *before* creating the broken child `c` — once `c`'s FK
+    // definition exists, even an INSERT into `p` itself would (correctly)
+    // raise the same mismatch, per SQLite's statement-prepare-time check.
+    exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
+
+    let err = exec_sql(&mut db, "DELETE FROM p").unwrap_err();
+    assert!(
+        err.contains("foreign key mismatch") && err.contains("\"c\"") && err.contains("\"p\""),
+        "expected mismatch wording, got: {}",
+        err
+    );
+}
+
+#[test]
+fn update_on_parent_with_mismatched_child_key_errors() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    // Seed `p` before creating the broken child `c` (see comment in
+    // `delete_from_parent_with_mismatched_child_key_errors` above).
+    exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
+
+    let err = exec_sql(&mut db, "UPDATE p SET b = 3").unwrap_err();
+    assert!(
+        err.contains("foreign key mismatch") && err.contains("\"c\"") && err.contains("\"p\""),
+        "expected mismatch wording, got: {}",
+        err
+    );
+}
+
+#[test]
+fn insert_into_parent_with_mismatched_child_key_errors() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
+
+    let err = exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap_err();
+    assert!(
+        err.contains("foreign key mismatch") && err.contains("\"c\"") && err.contains("\"p\""),
+        "expected mismatch wording, got: {}",
+        err
+    );
+}
+
+#[test]
+fn dml_on_unrelated_table_is_unaffected_by_broken_fk_elsewhere() {
+    // A broken FK relationship between p/c must not affect DML against a
+    // completely unrelated table `t` — only statements that touch the
+    // specific child or parent table involved in the broken relationship.
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
+    exec_sql(&mut db, "CREATE TABLE t(v)").unwrap();
+
+    let r = exec_sql(&mut db, "INSERT INTO t VALUES(1)");
+    assert!(r.is_ok(), "unrelated table INSERT should be unaffected, got: {:?}", r);
+    let r = exec_sql(&mut db, "UPDATE t SET v = 2");
+    assert!(r.is_ok(), "unrelated table UPDATE should be unaffected, got: {:?}", r);
+    let r = exec_sql(&mut db, "DELETE FROM t");
+    assert!(r.is_ok(), "unrelated table DELETE should be unaffected, got: {:?}", r);
+}
+
+#[test]
+fn dml_on_valid_fk_schema_is_unaffected_by_prepare_time_check() {
+    // Sanity check: a *valid* FK schema (parent key backed by a real PK)
+    // must not be spuriously rejected by the new prepare-time validation.
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+
+    exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
+    exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(a))").unwrap();
+    exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
+
+    let r = exec_sql(&mut db, "INSERT INTO c VALUES(1)");
+    assert!(r.is_ok(), "valid FK should succeed, got: {:?}", r);
+    let r = exec_sql(&mut db, "UPDATE p SET b = 3");
+    assert!(r.is_ok(), "valid FK UPDATE on parent should succeed, got: {:?}", r);
+    let r = exec_sql(&mut db, "DELETE FROM c");
+    assert!(r.is_ok(), "valid FK DELETE on child should succeed, got: {:?}", r);
 }
