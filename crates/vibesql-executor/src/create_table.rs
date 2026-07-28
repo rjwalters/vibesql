@@ -177,13 +177,14 @@ impl CreateTableExecutor {
             (database.catalog.get_current_schema().to_string(), stmt.table_name.clone(), id)
         };
 
-        // Check CREATE privilege on the schema
-        PrivilegeChecker::check_create(database, &schema_name)?;
-
         // The reserved-name and duplicate-column guards are USER-facing
         // conformance checks (issue #5614). They are skipped on the trusted
         // load/replay path so the engine's own persisted dump always reloads —
-        // see `execute_for_load`.
+        // see `execute_for_load`. SQLite checks these BEFORE resolving the
+        // database qualifier (e_createtable-1.1.1.3/1.1.1.4:
+        // `CREATE TABLE auxa."sqlite__"(x, y)` reports the reserved-name error
+        // even though `auxa` is never attached), so this block runs ahead of
+        // the "unknown database" check below.
         if !trusted {
             // Reject user attempts to create a table with a reserved name. SQLite
             // reserves the `sqlite_` prefix for its own schema objects and errors
@@ -214,6 +215,24 @@ impl CreateTableExecutor {
                 }
             }
         }
+
+        // SQLite compatibility: a database-qualifier that has not been
+        // ATTACHed (or otherwise does not exist) fails with "unknown database
+        // <name>" (e.g. `CREATE TABLE george.t1(x)` when `george` was never
+        // attached) rather than the internal catalog error text. This mirrors
+        // sqlite3's wording for qualified DDL against an unknown database
+        // (e_createtable-1.2.1.x). ATTACH itself is not supported by VibeSQL
+        // (single-file engine), so any non-main/non-temp qualifier the user
+        // supplies reaches this path.
+        if !database.catalog.schema_exists(&schema_name) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "unknown database {}",
+                schema_name
+            )));
+        }
+
+        // Check CREATE privilege on the schema
+        PrivilegeChecker::check_create(database, &schema_name)?;
 
         // Handle CREATE TABLE AS SELECT syntax
         if let Some(query) = &stmt.as_query {

@@ -5,12 +5,24 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 /// Validator for table constraints
 pub struct ConstraintValidator<'a> {
     schema: &'a vibesql_catalog::TableSchema,
+    /// SQLite compatibility (Part of #6173, check.test check-4.8): when true
+    /// (mirrors `PRAGMA ignore_check_constraints=ON`), CHECK constraints are
+    /// not enforced. Defaults to `false`; set via
+    /// [`Self::with_check_constraints_ignored`].
+    ignore_check_constraints: bool,
 }
 
 impl<'a> ConstraintValidator<'a> {
     /// Create a new constraint validator
     pub fn new(schema: &'a vibesql_catalog::TableSchema) -> Self {
-        Self { schema }
+        Self { schema, ignore_check_constraints: false }
+    }
+
+    /// Set whether CHECK constraints should be bypassed, mirroring
+    /// `PRAGMA ignore_check_constraints` (Part of #6173).
+    pub fn with_check_constraints_ignored(mut self, ignore: bool) -> Self {
+        self.ignore_check_constraints = ignore;
+        self
     }
 
     /// Validate all constraints for an updated row
@@ -342,6 +354,9 @@ impl<'a> ConstraintValidator<'a> {
         &self,
         new_row: &vibesql_storage::Row,
     ) -> Result<(), ExecutorError> {
+        if self.ignore_check_constraints {
+            return Ok(());
+        }
         if !self.schema.check_constraints.is_empty() {
             // CHECK context: non-deterministic date/time uses are rejected
             // at evaluation time (SQLite semantics).

@@ -469,7 +469,8 @@ pub(super) fn execute_internal(
         // Validate all constraints (NOT NULL, PRIMARY KEY, UNIQUE, CHECK)
         // For IGNORE: catch constraint violations and skip the row
         // For REPLACE: we've already marked conflicts for deletion, so skip PK/UNIQUE validation
-        let constraint_validator = ConstraintValidator::new(schema);
+        let constraint_validator = ConstraintValidator::new(schema)
+            .with_check_constraints_ignored(database.ignore_check_constraints());
 
         if use_ignore {
             // Non-deterministic date/time uses in index expressions /
@@ -528,7 +529,12 @@ pub(super) fn execute_internal(
         } else if use_replace {
             // For REPLACE: validate NOT NULL and CHECK constraints, but skip PK/UNIQUE
             // since conflicting rows will be deleted
-            validate_non_uniqueness_constraints(schema, table_name, &new_row)?;
+            validate_non_uniqueness_constraints(
+                schema,
+                table_name,
+                &new_row,
+                database.ignore_check_constraints(),
+            )?;
 
             // Non-deterministic date/time uses in index expressions /
             // partial-index predicates abort the statement even under
@@ -1364,6 +1370,7 @@ fn validate_non_uniqueness_constraints(
     schema: &vibesql_catalog::TableSchema,
     table_name: &str,
     new_row: &Row,
+    ignore_check_constraints: bool,
 ) -> Result<(), ExecutorError> {
     // Check NOT NULL constraints
     for (col_idx, col) in schema.columns.iter().enumerate() {
@@ -1379,8 +1386,10 @@ fn validate_non_uniqueness_constraints(
         }
     }
 
-    // Check CHECK constraints
-    if !schema.check_constraints.is_empty() {
+    // Check CHECK constraints. SQLite compatibility (Part of #6173,
+    // check.test check-4.8): `PRAGMA ignore_check_constraints=ON` disables
+    // CHECK enforcement here too.
+    if !ignore_check_constraints && !schema.check_constraints.is_empty() {
         let evaluator = ExpressionEvaluator::new(schema);
 
         for (constraint_name, check_expr) in &schema.check_constraints {
@@ -2048,7 +2057,8 @@ fn execute_update_from(
     // Issue #5144: when `stmt.conflict_clause` is IGNORE or REPLACE, the per-row
     // skip / evict semantics replace the deferred-UNIQUE post-statement pass. The
     // logic mirrors the default UPDATE path at executor.rs:239-468.
-    let constraint_validator = ConstraintValidator::new(schema);
+    let constraint_validator = ConstraintValidator::new(schema)
+        .with_check_constraints_ignored(database.ignore_check_constraints());
 
     // Track rows to delete for REPLACE conflict resolution (before applying updates)
     let mut rows_to_delete_for_replace: Vec<usize> = Vec::new();
@@ -2151,7 +2161,12 @@ fn execute_update_from(
 
                 // NOT NULL + CHECK only (no PK/UNIQUE — those collisions get
                 // resolved by deletion).
-                validate_non_uniqueness_constraints(schema, table_name, &u.new_row)?;
+                validate_non_uniqueness_constraints(
+                    schema,
+                    table_name,
+                    &u.new_row,
+                    database.ignore_check_constraints(),
+                )?;
 
                 // Non-deterministic date/time uses in index expressions /
                 // partial-index predicates abort the statement even under

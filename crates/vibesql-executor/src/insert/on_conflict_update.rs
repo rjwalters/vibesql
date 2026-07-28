@@ -682,6 +682,7 @@ fn validate_do_update_row(
 ) -> Result<(), ExecutorError> {
     // NOT NULL and CHECK — the per-row half of normal UPDATE validation.
     crate::update::constraints::ConstraintValidator::new(schema)
+        .with_check_constraints_ignored(db.ignore_check_constraints())
         .validate_row_skip_uniqueness(table_name, new_row)?;
 
     // PRIMARY KEY, UNIQUE constraints, and unique indexes (including

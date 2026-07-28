@@ -376,6 +376,12 @@ impl<'a> RowValidator<'a> {
         &self,
         row_values: &[vibesql_types::SqlValue],
     ) -> Result<(), ExecutorError> {
+        // SQLite compatibility (Part of #6173, check.test check-4.8): `PRAGMA
+        // ignore_check_constraints=ON` disables CHECK enforcement on
+        // INSERT/UPDATE entirely.
+        if self.db.ignore_check_constraints() {
+            return Ok(());
+        }
         if !self.schema.check_constraints.is_empty() {
             let row = vibesql_storage::Row::new(row_values.to_vec());
             // CHECK context: non-deterministic date/time uses ('now', zero-arg

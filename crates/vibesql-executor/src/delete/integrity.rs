@@ -792,6 +792,7 @@ fn apply_cascade_child_updates(
         // update/foreign_keys.rs, fkey2-3.1.*).
         let child_schema_for_check = db.catalog.get_table(child_table_name).unwrap().clone();
         crate::update::constraints::ConstraintValidator::new(&child_schema_for_check)
+            .with_check_constraints_ignored(db.ignore_check_constraints())
             .validate_row_skip_uniqueness(child_table_name, &new_row)?;
 
         // SET DEFAULT in particular can rewrite the FK column(s) to a default

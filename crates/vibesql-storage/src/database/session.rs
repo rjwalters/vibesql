@@ -275,6 +275,29 @@ impl Database {
         );
     }
 
+    /// Get the ignore_check_constraints PRAGMA setting (SQLite compatibility).
+    ///
+    /// When ON, CHECK constraints are not enforced by INSERT/UPDATE (they are
+    /// silently skipped rather than raising "CHECK constraint failed"). This
+    /// is intended only for loading a schema/data set that is already known to
+    /// violate a CHECK constraint (e.g. to repair it afterwards) — SQLite's own
+    /// docs discourage general use. Defaults to OFF, matching SQLite (`check.test`
+    /// check-4.8/4.8.1).
+    pub fn ignore_check_constraints(&self) -> bool {
+        match self.get_session_variable("IGNORE_CHECK_CONSTRAINTS") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the ignore_check_constraints PRAGMA setting (SQLite compatibility).
+    pub fn set_ignore_check_constraints(&mut self, value: bool) {
+        self.set_session_variable(
+            "IGNORE_CHECK_CONSTRAINTS",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     // ============================================================================
     // SQLite stat1 Storage (SQLite Compatibility)
     // ============================================================================
