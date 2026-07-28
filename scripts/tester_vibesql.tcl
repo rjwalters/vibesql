@@ -5730,6 +5730,35 @@ array set vibesql_skip_tests {
     pragma-11.2 "Custom collation registration via 'db collate New_Collation blah...' — a TCL-registered collating sequence reachable only through the C-API sqlite3_create_collation surface (harness limitation #5720), same class as window6-3.0. PRAGMA collation_list itself is correct for every collation VibeSQL can actually register (pragma-11.1 passes); there is no SQL-level CREATE COLLATION surface to bridge the TCL-only registration. Not a PRAGMA introspection gap (#6175)."
 }
 
+# autoinc-4.2/4.3/4.5..4.10 (#6173): these test that TEMP-table AUTOINCREMENT
+# bookkeeping (temp.sqlite_sequence) stays separate from MAIN's
+# (main.sqlite_sequence). autoinc-4.2 (whose script literally references
+# `sqlite_temp_master`) is allow-listed through the blanket
+# uses_sqlite_internals check via vibesql_temp_master_ok (below) so it
+# actually RUNS instead of being skipped outright — its own
+# sqlite_master/sqlite_temp_master enumeration assertion still legitimately
+# reports FAILED (demotion means the "temp" table now shows up in the MAIN
+# enumeration), but running it means its CREATE TABLE/CREATE TEMP TABLE side
+# effects happen, so autoinc-4.4/4.4.1 (plain INSERT/SELECT, no temp-vs-main
+# introspection, and NOT themselves caught by this regex) correctly PASS
+# against the tables 4.2 created, rather than cascading "no such table".
+#
+# autoinc-4.3/4.5..4.10 are NOT caught by the `sqlite_temp_master` regex at
+# all — their scripts reference `temp.sqlite_sequence` directly, a distinct
+# string — so they run (never skipped) and correctly report FAILED with "no
+# such table: temp.sqlite_sequence". Root cause: strip_temp_table_keyword
+# demotes 'CREATE TEMP TABLE t3(...AUTOINCREMENT...)' to a plain persistent
+# 'CREATE TABLE t3' so the table survives this shim's
+# fresh-CLI-process-per-batch model (#5505/#5511/#5591); t3 therefore
+# physically lives in the MAIN schema, not a genuinely connection-scoped temp
+# schema, so 'temp.sqlite_sequence' never really exists. This is a shim
+# architecture limitation, not a VibeSQL AUTOINCREMENT engine gap: a direct
+# single-session repro (CREATE TABLE t1(...AUTOINCREMENT...); CREATE TEMP
+# TABLE t3(...AUTOINCREMENT...); SELECT ... FROM sqlite_master/sqlite_temp_master)
+# against the real vibesql CLI correctly produces separate main/temp
+# sqlite_sequence rows in creation order. Left running (and failing) rather
+# than force-skipped, per the "never turn a clean pass into a skip" rule.
+
 # -----------------------------------------------------------------------------
 # fuzz.test residual classification (#6041) — DO NOT SKIP-LIST THESE.
 #
@@ -5853,6 +5882,30 @@ array set vibesql_writable_schema_ok {
     alterdropcol-8.0 1
 }
 
+# Tests allowed through the blanket "uses sqlite_temp_master" skip in
+# uses_sqlite_internals (issue #6173).
+#
+# autoinc-4.2 is a SETUP block (`CREATE TABLE t1(...AUTOINCREMENT...);
+# CREATE TEMP TABLE t3(...AUTOINCREMENT...); SELECT ... FROM sqlite_master /
+# sqlite_temp_master`) — under this shim's TEMP-table demotion
+# (strip_temp_table_keyword) t3 becomes an ordinary persistent table, so its
+# own `sqlite_master`/`sqlite_temp_master` enumeration assertion no longer
+# matches real SQLite's temp/main split and 4.2 itself still reports FAILED
+# (not a forced pass — see uses_sqlite_internals's reason string for why this
+# is a harness limitation, not an engine gap). But 4.2's CREATE statements
+# are what matter for later tests: skipping the whole block outright (the
+# default behavior for anything matching this regex) would prevent t1/t3
+# from ever existing, cascading spurious "no such table" failures into
+# autoinc-4.4/4.4.1 (plain INSERT/SELECT, no temp-vs-main introspection —
+# they pass fine against the demoted tables). Allow-listing 4.2 lets its SQL
+# actually run so those side effects happen, same trade-off as the
+# ATTACH-setup rescue elsewhere in this file. Keyed by testprefix-qualified
+# test name.
+variable vibesql_temp_master_ok
+array set vibesql_temp_master_ok {
+    autoinc-4.2 1
+}
+
 # Check if a test should be skipped based on VibeSQL-specific exclusions
 # Returns a list: {should_skip reason} where should_skip is 0/1
 proc vibesql_should_skip {name} {
@@ -5904,7 +5957,13 @@ proc vibesql_should_skip {name} {
 # Check if a test script uses SQLite internal metrics that we don't implement.
 # These tests verify internal query execution behavior, not SQL correctness.
 # Returns a list: {uses_internals reason} where uses_internals is 0/1
-proc uses_sqlite_internals {script} {
+#
+# `name` is the raw test name (as do_test received it, i.e. without the
+# ::testprefix already joined on) — needed to allow-list specific tests by
+# their fully-qualified `<prefix>-<name>` form (see vibesql_temp_master_ok
+# below). Defaults to "" for callers that only care about the script-content
+# checks and have no meaningful test name to allow-list against.
+proc uses_sqlite_internals {script {name ""}} {
     # SQLite internal performance counters
     # These track VDBE operations that don't exist in VibeSQL's execution model
     #
@@ -6125,9 +6184,45 @@ proc uses_sqlite_internals {script} {
         return [list 1 "uses sqlite3_status() (SQLite C API)"]
     }
 
-    # SQLite internal catalog tables
+    # SQLite internal catalog tables.
+    #
+    # VibeSQL does implement `sqlite_temp_master` itself (an alias for
+    # temp.sqlite_master, same as sqlite_master for the main schema — see
+    # vibesql-executor/src/sqlite_schema.rs and friends), but this shim
+    # demotes every `CREATE TEMP TABLE` to a plain persistent `CREATE TABLE`
+    # (see strip_temp_table_keyword above) so it survives the shim's
+    # fresh-CLI-process-per-batch model. That demotion means a "temp" table
+    # physically lives in the MAIN schema, not a genuinely connection-scoped
+    # temp schema — so any test that inspects `sqlite_temp_master` (or
+    # `temp.sqlite_sequence`, or the exact `sql` text a temp object was
+    # registered under) to verify the temp/main *separation itself* is
+    # testing something this shim's architecture cannot represent, and is
+    # correctly left skipped here (issue #6173; do not narrow this check —
+    # widening it revealed a broad class of pre-existing, unrelated
+    # temp-vs-main-separation gaps across 15+ files, e.g. alter4.test, whose
+    # triage belongs to those files' own issues, not this one).
+    #
+    # A handful of specific tests merely use plain data operations (INSERT/
+    # SELECT, no temp-vs-main schema introspection) on a table that
+    # incidentally was declared TEMP elsewhere in the same script; those
+    # pass fine under demotion and are allow-listed by name below so the
+    # broad regex doesn't force a real pass into a spurious skip.
     if {[regexp {sqlite_temp_master} $script]} {
-        return [list 1 "uses sqlite_temp_master (SQLite internal catalog)"]
+        variable vibesql_temp_master_ok
+        # Test names may already be fully testprefix-qualified as written in
+        # the .test file (e.g. autoinc.test's `do_test autoinc-4.2 {...}`,
+        # where $name arrives as "autoinc-4.2") or may be bare and rely on
+        # ::testprefix for qualification (e.g. "4.1.3" -> "selectA-4.1.3").
+        # Check both forms, same two-step pattern as vibesql_should_skip
+        # above, so this doesn't silently double-prefix or fail to match.
+        set tm_ok [info exists vibesql_temp_master_ok($name)]
+        if {!$tm_ok && [info exists ::testprefix] && $::testprefix ne ""} {
+            set tm_prefixed_name "${::testprefix}-${name}"
+            set tm_ok [info exists vibesql_temp_master_ok($tm_prefixed_name)]
+        }
+        if {!$tm_ok} {
+            return [list 1 "uses sqlite_temp_master (SQLite internal catalog; temp-vs-main separation is untestable under this shim's TEMP-table demotion — #6173)"]
+        }
     }
 
     # C API statement handles - these depend on sqlite3_prepare
@@ -6421,7 +6516,7 @@ proc do_test {name script expected} {
 
     # Check if test uses SQLite internal metrics we don't implement
     # Do this BEFORE incrementing test count or printing test name
-    set internal_check [uses_sqlite_internals $script]
+    set internal_check [uses_sqlite_internals $script $name]
     if {[lindex $internal_check 0]} {
         # Setup-only blocks (no expected result to assert) that merely use an
         # OR REPLACE / OR IGNORE conflict clause must still RUN: VibeSQL now
