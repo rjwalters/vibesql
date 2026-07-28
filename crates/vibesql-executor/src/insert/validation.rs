@@ -329,6 +329,61 @@ pub fn coerce_value(
             }
         }
 
+        // REAL/FLOAT/DOUBLE → Integer types (SQLite type affinity). Same
+        // whole-number-preserving rule as the Numeric→Integer arms above: a
+        // real value with no fractional part converts to an integer of the
+        // target width, otherwise it keeps its real type. Without these arms,
+        // any real-affinity source column (`x REAL`) feeding an INTEGER
+        // target — including a generated column's `AS (x)` recomputation,
+        // gencol1-23.1.* / -filescope-err.1, issue #6173 — hit the fallback
+        // "Type mismatch" error instead of applying affinity like every other
+        // real-typed variant already does.
+        (SqlValue::Real(f) | SqlValue::Double(f), DataType::Integer) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(*f as i64))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Float(f), DataType::Integer) => {
+            let f64_val = *f as f64;
+            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                Ok(SqlValue::Integer(f64_val as i64))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Real(f) | SqlValue::Double(f), DataType::Smallint) => {
+            if f.fract() == 0.0 && *f >= i16::MIN as f64 && *f <= i16::MAX as f64 {
+                Ok(SqlValue::Smallint(*f as i16))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Float(f), DataType::Smallint) => {
+            let f64_val = *f as f64;
+            if f64_val.fract() == 0.0 && f64_val >= i16::MIN as f64 && f64_val <= i16::MAX as f64 {
+                Ok(SqlValue::Smallint(f64_val as i16))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Real(f) | SqlValue::Double(f), DataType::Bigint) => {
+            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                Ok(SqlValue::Bigint(*f as i64))
+            } else {
+                Ok(value)
+            }
+        }
+        (SqlValue::Float(f), DataType::Bigint) => {
+            let f64_val = *f as f64;
+            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+                Ok(SqlValue::Bigint(f64_val as i64))
+            } else {
+                Ok(value)
+            }
+        }
+
         // VARCHAR/CHARACTER → Integer types (SQLite type affinity)
         // Try to convert text to integer, otherwise keep as text
         (SqlValue::Varchar(s) | SqlValue::Character(s), DataType::Integer) => {

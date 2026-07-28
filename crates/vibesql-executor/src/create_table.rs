@@ -388,11 +388,23 @@ impl CreateTableExecutor {
             &table_schema.check_constraints,
         )?;
 
-        // WITHOUT ROWID tables must have a PRIMARY KEY (SQLite requirement, Issue #4953)
+        // Reject a circular dependency among generated columns (gencol1-8.20,
+        // issue #6173): `c1 AS(c0+c2), c2 AS(c1)`. Checked here too, before the
+        // table is inserted into the catalog, so a cyclic definition never
+        // creates a half-formed table that later blows up one row at a time.
+        crate::constraint_validator::validate_generated_column_cycles(
+            &table_schema.name,
+            &table_schema.columns,
+        )?;
+
+        // WITHOUT ROWID tables must have a PRIMARY KEY (SQLite requirement, Issue #4953).
+        // SQLite's exact wording is "PRIMARY KEY missing on table <name>" (verbatim,
+        // no prefix) — tableopts.test tableopt-1.1 (issue #6173).
         if stmt.without_rowid && table_schema.primary_key.is_none() {
-            return Err(ExecutorError::ConstraintViolation(
-                "WITHOUT ROWID tables must have a PRIMARY KEY".to_string(),
-            ));
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "PRIMARY KEY missing on table {}",
+                table_schema.name
+            )));
         }
 
         // AUTOINCREMENT is meaningless on a WITHOUT ROWID table (there is no
@@ -473,6 +485,20 @@ impl CreateTableExecutor {
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+
+                // A table-level FOREIGN KEY(...) clause's child and parent column
+                // lists must be the same length when a parent column list is given
+                // at all (an omitted parent list defaults to the parent's PRIMARY
+                // KEY and is checked elsewhere). SQLite rejects a mismatch at CREATE
+                // TABLE time (table.test table-10.9/table-10.10, issue #6173):
+                //   FOREIGN KEY(b,c) REFERENCES t4(x)     -- 2 vs 1
+                //   FOREIGN KEY(b,c) REFERENCES t4(x,y,z) -- 2 vs 3
+                if !references_columns.is_empty() && references_columns.len() != fk_columns.len() {
+                    return Err(ExecutorError::SqliteCompatError(
+                        "number of columns in foreign key does not match the number of columns in the referenced table"
+                            .to_string(),
+                    ));
+                }
 
                 // Lookup parent table to get parent column indices
                 // If the parent table doesn't exist yet, use placeholder indices.

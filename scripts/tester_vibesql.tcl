@@ -829,6 +829,19 @@ proc translate_error_to_sqlite {vibesql_error} {
     if {[regexp -nocase {^Parse error: (the (?:NOT INDEXED|INDEXED BY) clause is not allowed on UPDATE or DELETE statements within triggers)$} $error_msg -> parse_msg]} {
         return $parse_msg
     }
+    # Unrecognized CREATE TABLE trailing option after WITHOUT (tableopts.test
+    # tableopt-1.2) — SQLite reports this as a semantic message, not a syntax
+    # error: "unknown table option: unknown2".
+    if {[regexp -nocase {^Parse error: (unknown table option: .+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
+    # Inline column-constraint REFERENCES clause naming more than one parent
+    # column (table.test table-10.11) — SQLite parses the list grammatically
+    # and reports a semantic message, not a syntax error: "foreign key on c
+    # should reference only one column of table t4".
+    if {[regexp -nocase {^Parse error: (foreign key on .+ should reference only one column of table .+)$} $error_msg -> parse_msg]} {
+        return $parse_msg
+    }
     # Fallback for other parse errors (e.g., descriptive messages like "Expected identifier")
     if {[regexp -nocase {^Parse error: (.+)$} $error_msg -> parse_msg]} {
         return "near \"$parse_msg\": syntax error"
@@ -5808,7 +5821,6 @@ variable vibesql_skip_patterns {
     {utf16align- "UTF16 alignment test - encoding differs"}
     {subquery- "Subquery handling differs"}
     {resolver01- "Name resolution handling differs"}
-    {tableopts- "Table options differ"}
     {temptable- "Temp table tests require cross-test session state"}
     {temptable2- "Temp table tests require cross-test session state"}
     {fordelete- "Tests SQLite internal btree FORDELETE flag (VDBE-specific)"}
