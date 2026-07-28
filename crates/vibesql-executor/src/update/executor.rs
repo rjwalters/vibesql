@@ -946,13 +946,30 @@ pub(super) fn execute_internal(
         database.queue_deferred_fk_violation(v);
     }
 
-    // Step 7: Handle CASCADE updates for primary key changes (before triggers)
-    // This must happen after validation but before applying parent updates
-    for u in &updates {
-        if u.updates_pk {
-            ForeignKeyValidator::check_no_child_references(
-                database, table_name, &u.old_row, &u.new_row,
-            )?;
+    // Step 7: Handle CASCADE updates for parent-key changes (before triggers).
+    // This must happen after validation but before applying parent updates.
+    //
+    // Not just `u.updates_pk`: a child table's FK can target a UNIQUE
+    // constraint/index on this table instead of its PRIMARY KEY (e_fkey-18.*,
+    // fkey2-genfkey.2/3). Gating solely on the PK silently skipped every
+    // cascade/RESTRICT/NO ACTION check for such FKs whenever the UPDATE left
+    // the PK untouched. `changed_columns_touch_any_key` is a cheap superset
+    // filter (any candidate key, not "the exact key some FK targets"); the
+    // precise per-FK old/new comparison happens inside
+    // `check_no_child_references` itself.
+    if !updates.is_empty() {
+        for u in &updates {
+            let touches_key = u.updates_pk
+                || crate::foreign_key_check::changed_columns_touch_any_key(
+                    database,
+                    schema,
+                    &u.changed_columns.iter().copied().collect::<Vec<_>>(),
+                );
+            if touches_key {
+                ForeignKeyValidator::check_no_child_references(
+                    database, table_name, &u.old_row, &u.new_row,
+                )?;
+            }
         }
     }
 
@@ -2379,9 +2396,18 @@ fn execute_update_from(
         validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
     }
 
-    // Handle CASCADE updates for primary key changes
+    // Handle CASCADE updates for parent-key changes. Not just `u.updates_pk`
+    // — see the rationale at the equivalent gate in `execute_internal`
+    // (Step 7): a child FK can target a UNIQUE constraint/index on this
+    // table rather than its PRIMARY KEY.
     for u in &updates {
-        if u.updates_pk {
+        let touches_key = u.updates_pk
+            || crate::foreign_key_check::changed_columns_touch_any_key(
+                database,
+                schema,
+                &u.changed_columns.iter().copied().collect::<Vec<_>>(),
+            );
+        if touches_key {
             ForeignKeyValidator::check_no_child_references(
                 database, table_name, &u.old_row, &u.new_row,
             )?;

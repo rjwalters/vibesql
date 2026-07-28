@@ -1601,7 +1601,14 @@ impl SqlExecutor {
                     })
                 }
                 "FOREIGN_KEYS" => {
-                    self.db.set_foreign_keys_enabled(bool_value);
+                    // EVIDENCE-OF R-46649-58537: it is not possible to enable
+                    // or disable foreign key constraints in the middle of a
+                    // multi-statement transaction (when not in autocommit
+                    // mode). Attempting to do so does not return an error —
+                    // it simply has no effect (e_fkey-6.1..6.3).
+                    if !self.db.in_transaction() {
+                        self.db.set_foreign_keys_enabled(bool_value);
+                    }
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),

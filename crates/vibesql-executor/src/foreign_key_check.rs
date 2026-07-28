@@ -109,22 +109,43 @@ fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: 
     //    WHERE clause) are excluded — SQLite's `sqlite3FkLocateIndex` only
     //    accepts indexes that cover every parent row. Expression indexes can
     //    never back an FK either.
+    //
+    //    EVIDENCE-OF R-00376-39212: the UNIQUE index must use the collation
+    //    sequences specified in the CREATE TABLE statement for the parent
+    //    table — an index column with an *explicit* `COLLATE` clause that
+    //    differs from the underlying column's own declared collation (its
+    //    `CREATE TABLE`-time collation, defaulting to BINARY) cannot back an
+    //    FK (e_fkey-18.5).
     for index in db.catalog.get_table_indexes(&parent.name) {
         if !index.is_unique || index.has_expression_columns() || index.is_partial() {
             continue;
         }
         let mut index_col_indices: Vec<usize> = Vec::with_capacity(index.columns.len());
         let mut all_resolved = true;
+        let mut collation_mismatch = false;
         for col in &index.columns {
             match col.column_name().and_then(|n| parent.get_column_index(n)) {
-                Some(idx) => index_col_indices.push(idx),
+                Some(idx) => {
+                    if let Some(explicit) = col.explicit_collation() {
+                        let declared = parent
+                            .columns
+                            .get(idx)
+                            .and_then(|c| c.collation.as_deref())
+                            .unwrap_or("BINARY");
+                        if !explicit.eq_ignore_ascii_case(declared) {
+                            collation_mismatch = true;
+                            break;
+                        }
+                    }
+                    index_col_indices.push(idx)
+                }
                 None => {
                     all_resolved = false;
                     break;
                 }
             }
         }
-        if !all_resolved {
+        if !all_resolved || collation_mismatch {
             continue;
         }
         if column_set_eq(&index_col_indices, parent_indices) {
@@ -135,6 +156,54 @@ fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: 
     // 4. Fallback: a single-column FK against a column that is itself
     //    declared with column-level UNIQUE is represented in
     //    `unique_constraints`, so the match succeeds at step 2 above.
+    false
+}
+
+/// True when `changed_columns` overlaps any column that could plausibly back
+/// an FK parent key on `table_name`: the PRIMARY KEY, any UNIQUE constraint,
+/// or any non-partial, non-expression UNIQUE INDEX.
+///
+/// Used to decide whether an UPDATE needs to run the (relatively expensive)
+/// child-reference scan ([`crate::update::foreign_keys::ForeignKeyValidator::check_no_child_references`]).
+/// Historically that scan only fired when the update touched the table's
+/// PRIMARY KEY, silently skipping cascade/RESTRICT/NO ACTION enforcement for
+/// any FK whose parent key is a UNIQUE constraint/index instead (e_fkey-18.*,
+/// fkey2-genfkey.2/3 — `t3` references `t1(b, c)` where `t1`'s actual PK is
+/// `a`). This helper is intentionally permissive (any candidate key, not
+/// "the exact key some FK targets") — the per-FK old/new-value comparison
+/// inside `check_no_child_references` does the precise work; this is only a
+/// cheap up-front filter to avoid scanning every UPDATE unconditionally.
+pub fn changed_columns_touch_any_key(
+    db: &Database,
+    table: &TableSchema,
+    changed_columns: &[usize],
+) -> bool {
+    if changed_columns.is_empty() {
+        return false;
+    }
+    if let Some(pk_indices) = table.get_primary_key_indices() {
+        if pk_indices.iter().any(|i| changed_columns.contains(i)) {
+            return true;
+        }
+    }
+    for unique_idx_set in table.get_unique_constraint_indices() {
+        if unique_idx_set.iter().any(|i| changed_columns.contains(i)) {
+            return true;
+        }
+    }
+    for index in db.catalog.get_table_indexes(&table.name) {
+        if !index.is_unique || index.has_expression_columns() {
+            continue;
+        }
+        let touches = index.columns.iter().any(|col| {
+            col.column_name()
+                .and_then(|n| table.get_column_index(n))
+                .is_some_and(|idx| changed_columns.contains(&idx))
+        });
+        if touches {
+            return true;
+        }
+    }
     false
 }
 
