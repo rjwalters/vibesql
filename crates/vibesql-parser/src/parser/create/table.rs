@@ -79,6 +79,13 @@ impl Parser {
         self.expect_token(Token::LParen)?;
         let mut columns = Vec::new();
         let mut table_constraints = Vec::new();
+        // Column name (as written) carrying an AUTOINCREMENT designation via
+        // the table-level `PRIMARY KEY(col AUTOINCREMENT)` syntax (issue
+        // #6173, autoinc-7.1). Applied to the matching column's constraint
+        // list once the full column/constraint list has been parsed (see
+        // below), so this works regardless of whether the PRIMARY KEY
+        // constraint textually precedes or follows its column's definition.
+        let mut table_pk_autoincrement_column: Option<String> = None;
 
         loop {
             // Check if this is a table-level constraint (including CONSTRAINT keyword)
@@ -90,6 +97,9 @@ impl Parser {
                 || self.peek_keyword(Keyword::Fulltext)
             {
                 table_constraints.push(self.parse_table_constraint()?);
+                if let Some(name) = self.pending_table_pk_autoincrement_column.take() {
+                    table_pk_autoincrement_column = Some(name);
+                }
                 // Absorb any trailing, body-less `CONSTRAINT <name>` clauses that
                 // SQLite accepts and ignores after a table constraint (#6173).
                 self.skip_trailing_constraint_names();
@@ -299,6 +309,25 @@ impl Parser {
         }
 
         self.expect_token(Token::RParen)?;
+
+        // Fold a table-level `PRIMARY KEY(col AUTOINCREMENT)` designation
+        // (issue #6173, autoinc-7.1) into the target column's own constraint
+        // list, so downstream stages (rowid-alias detection and AUTOINCREMENT
+        // validation in vibesql-executor) see the same AST shape as the
+        // equivalent column-constraint spelling `col INTEGER PRIMARY KEY
+        // AUTOINCREMENT`. Matched case-insensitively against the column's
+        // declared name (SQLite identifiers are case-insensitive).
+        if let Some(pk_col_name) = table_pk_autoincrement_column {
+            if let Some(col) = columns
+                .iter_mut()
+                .find(|c: &&mut vibesql_ast::ColumnDef| c.name.eq_ignore_ascii_case(&pk_col_name))
+            {
+                col.constraints.push(vibesql_ast::ColumnConstraint {
+                    name: None,
+                    kind: vibesql_ast::ColumnConstraintKind::AutoIncrement,
+                });
+            }
+        }
 
         // Parse optional table options (MySQL extensions)
         let table_options = self.parse_table_options()?;

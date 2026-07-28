@@ -79,6 +79,22 @@ pub struct Parser {
     /// spelling — e.g. `X'abcdef'`, `'abcde'`, `-1` — rather than a lossy
     /// `ToSql` re-render (which uppercases blob hex and drops operator spacing).
     column_default_sources: Vec<(String, String)>,
+    /// Set by [`Parser::parse_table_constraint`] when it parses a table-level
+    /// `PRIMARY KEY (col-name [, ...] AUTOINCREMENT)` constraint whose column
+    /// list has exactly one column — SQLite's alternate syntax for declaring
+    /// AUTOINCREMENT "inside the parentheses on a separate PRIMARY KEY
+    /// designation" (autoinc-7.1), equivalent to `col-name INTEGER PRIMARY KEY
+    /// AUTOINCREMENT` as a column constraint. Consumed by the CREATE TABLE
+    /// column loop (issue #6173), which folds it into that column's
+    /// constraint list so the rest of the pipeline (rowid-alias detection,
+    /// AUTOINCREMENT validation in vibesql-executor) sees a single uniform
+    /// shape regardless of which syntax the user wrote. Cleared to `None`
+    /// after being read; left `None` when AUTOINCREMENT was absent or the
+    /// column list had more than one column (in which case the AUTOINCREMENT
+    /// keyword is simply not consumed here and parsing proceeds normally,
+    /// surfacing as a syntax error — a composite-key AUTOINCREMENT has no
+    /// documented meaning and no test exercises it).
+    pending_table_pk_autoincrement_column: Option<String>,
 }
 
 impl Parser {
@@ -96,6 +112,7 @@ impl Parser {
             source: String::new(),
             spans: Vec::new(),
             column_default_sources: Vec::new(),
+            pending_table_pk_autoincrement_column: None,
         }
     }
 
@@ -113,6 +130,7 @@ impl Parser {
             source,
             spans,
             column_default_sources: Vec::new(),
+            pending_table_pk_autoincrement_column: None,
         }
     }
 

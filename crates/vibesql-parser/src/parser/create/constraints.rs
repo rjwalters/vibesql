@@ -745,6 +745,24 @@ impl Parser {
                     }
                 }
 
+                // SQLite's alternate AUTOINCREMENT syntax: the keyword may
+                // appear directly inside the PRIMARY KEY parentheses, after
+                // the column list, e.g. `PRIMARY KEY(x AUTOINCREMENT)`
+                // (autoinc-7.1, issue #6173) — equivalent to declaring `x
+                // INTEGER PRIMARY KEY AUTOINCREMENT` as a column constraint.
+                // Only meaningful for a single-column PK; record the column
+                // name so the CREATE TABLE column loop (table.rs) can fold it
+                // into that column's own constraint list. A multi-column PK
+                // followed by AUTOINCREMENT has no documented meaning in
+                // SQLite and no test exercises it, so the keyword is simply
+                // left unconsumed in that case (surfacing as a syntax error,
+                // same as before this change).
+                if columns.len() == 1 && self.peek_keyword(Keyword::AutoIncrement) {
+                    self.advance(); // consume AUTOINCREMENT
+                    if let Some(name) = columns[0].column_name() {
+                        self.pending_table_pk_autoincrement_column = Some(name.to_string());
+                    }
+                }
                 self.expect_token(Token::RParen)?;
                 // Validate no expressions in PRIMARY KEY constraint
                 validate_no_expressions_in_constraint(&columns)?;
