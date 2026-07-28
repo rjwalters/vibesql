@@ -1,4 +1,4 @@
-use super::{Lexer, LexerError};
+use super::{Lexer, LexerError, PrevTokenKind};
 use crate::token::Token;
 
 impl<'a> Lexer<'a> {
@@ -198,6 +198,25 @@ impl<'a> Lexer<'a> {
                 // For very large hex values, try parsing as u64 first.
                 match u64::from_str_radix(&hex_str, 16) {
                     Ok(value) => {
+                        // SQLite interprets large hex values as signed (two's
+                        // complement): `0x8000000000000000` is the minimum i64
+                        // (-9223372036854775808) and is valid on its own. But a
+                        // *unary minus* applied to it (`-0x8000000000000000`)
+                        // negates i64::MIN, which overflows, and SQLite rejects
+                        // it at parse time with `hex literal too big: -<literal>`
+                        // (hexlit.test hexlist-402). Only this exact value is
+                        // affected; every other hex literal negates cleanly. We
+                        // detect the unary-minus context from the two preceding
+                        // tokens: a `-` that is not itself preceded by a value.
+                        if value == 0x8000_0000_0000_0000
+                            && self.prev_kind == PrevTokenKind::Minus
+                            && self.prev_prev_kind != PrevTokenKind::ValueTerminator
+                        {
+                            return Err(LexerError::preformatted(
+                                format!("hex literal too big: -{}", full),
+                                self.position(),
+                            ));
+                        }
                         // SQLite interprets large hex values as signed (two's complement).
                         Ok(Token::Number((value as i64).to_string()))
                     }
@@ -331,6 +350,41 @@ mod tests {
                 Token::Number(n) => assert_eq!(n, expected, "Input: {}", input),
                 other => panic!("Expected Number token for {}, got {:?}", input, other),
             }
+        }
+    }
+
+    #[test]
+    fn test_negated_min_hex_literal_rejected() {
+        // SQLite rejects a unary-minus applied to the minimum-i64 hex literal
+        // (negating i64::MIN overflows): `hex literal too big: -<literal>`.
+        // The original literal text (including leading zeros) is echoed back.
+        let reject_cases = vec![
+            ("SELECT -0x8000000000000000", "hex literal too big: -0x8000000000000000"),
+            ("SELECT -0x08000000000000000", "hex literal too big: -0x08000000000000000"),
+            ("SELECT abs(-0x8000000000000000)", "hex literal too big: -0x8000000000000000"),
+            ("SELECT -0x8000000000000000+0", "hex literal too big: -0x8000000000000000"),
+            ("SELECT x = -0x8000000000000000", "hex literal too big: -0x8000000000000000"),
+        ];
+        for (input, expected_msg) in reject_cases {
+            let mut lexer = Lexer::new(input);
+            let err = lexer.tokenize().expect_err(&format!("expected rejection for: {}", input));
+            assert_eq!(err.message, expected_msg, "Input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_min_hex_literal_valid_without_unary_minus() {
+        // The same literal is valid on its own (yields i64::MIN) and when the
+        // preceding `-` is *binary* subtraction rather than unary negation.
+        let ok_cases = vec![
+            "SELECT 0x8000000000000000",
+            "SELECT 5 - 0x8000000000000000",
+            "SELECT 0 - 0x8000000000000000",
+            "SELECT (0x8000000000000000)",
+        ];
+        for input in ok_cases {
+            let mut lexer = Lexer::new(input);
+            assert!(lexer.tokenize().is_ok(), "expected success for: {}", input);
         }
     }
 
