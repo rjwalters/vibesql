@@ -1888,8 +1888,29 @@ fn apply_generated_columns_for_update(
     let evaluator = ExpressionEvaluator::new(schema)
         .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
 
-    for (col_idx, col) in schema.columns.iter().enumerate() {
-        if let Some(generated_expr) = &col.generated_expr {
+    // Generated columns may reference other generated columns (e.g. `w INT
+    // GENERATED ALWAYS AS (m*5), m INT AS (a*2) STORED` — gencol1-2.6/2.7,
+    // issue #6173). A single pass in column-definition order only sees an
+    // up-to-date value for generated columns *earlier* in declaration order:
+    // `w` (index 0) depends on `m` (index 1), so a single top-to-bottom pass
+    // would compute `w` from `m`'s stale pre-UPDATE value. Iterate to a fixed
+    // point exactly as the INSERT path does (`apply_generated_columns`),
+    // folding each freshly computed value back into the row so later (and
+    // earlier, on subsequent passes) generated columns see it. Bounded by the
+    // number of generated columns, the longest possible acyclic dependency
+    // chain; SQLite rejects circular generated-column definitions at CREATE
+    // TABLE time, so this always converges.
+    let generated_indices: Vec<usize> = schema
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, col)| col.generated_expr.as_ref().map(|_| idx))
+        .collect();
+
+    for _pass in 0..generated_indices.len().max(1) {
+        for &col_idx in &generated_indices {
+            let col = &schema.columns[col_idx];
+            let generated_expr = col.generated_expr.as_ref().expect("filtered above");
             // Evaluate the generated expression against the current row
             let generated_value = evaluator.eval(generated_expr, row)?;
             // STRICT tables (issue #6173) enforce the rigid strict-datatype

@@ -368,6 +368,7 @@ impl Parser {
     #[allow(clippy::type_complexity)]
     pub(in crate::parser) fn parse_column_constraints(
         &mut self,
+        column_name: &str,
     ) -> Result<
         (
             Vec<vibesql_ast::ColumnConstraint>,
@@ -528,7 +529,32 @@ impl Parser {
                         let col_name = self.parse_column_name().map_err(|_| ParseError {
                             message: "Expected column name in REFERENCES".to_string(),
                         })?;
+                        // An inline column-constraint REFERENCES clause defines a
+                        // single-column foreign key, so the parent column list must
+                        // name exactly one column. SQLite still parses a longer list
+                        // grammatically but rejects it as a semantic error naming the
+                        // child column and parent table (table.test table-10.11):
+                        //   CREATE TABLE t6(a,b, c REFERENCES t4(x,y));
+                        //   -> "foreign key on c should reference only one column of table t4"
+                        // (issue #6173). Consume the rest of the list so the paren is
+                        // balanced before reporting the error.
+                        let mut extra = false;
+                        while matches!(self.peek(), Token::Comma) {
+                            self.advance();
+                            self.parse_column_name().map_err(|_| ParseError {
+                                message: "Expected column name in REFERENCES".to_string(),
+                            })?;
+                            extra = true;
+                        }
                         self.expect_token(Token::RParen)?;
+                        if extra {
+                            return Err(ParseError {
+                                message: format!(
+                                    "foreign key on {} should reference only one column of table {}",
+                                    column_name, table
+                                ),
+                            });
+                        }
                         Some(col_name)
                     } else {
                         None // Column not specified, defaults to PK

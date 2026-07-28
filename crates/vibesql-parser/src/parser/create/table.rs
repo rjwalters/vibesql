@@ -234,7 +234,7 @@ impl Parser {
             // interleaved DEFAULT, and — in any order — a generated-column
             // `[GENERATED ALWAYS] AS (expr)` clause).
             let (constraints, mid_default, mid_generated, mid_default_source) =
-                self.parse_column_constraints()?;
+                self.parse_column_constraints(&name)?;
             if let Some(d) = mid_default {
                 if default_value.is_some() {
                     return Err(ParseError {
@@ -324,8 +324,16 @@ impl Parser {
                     self.advance(); // consume ROWID (SQLite WITHOUT ROWID tables)
                     without_rowid = true;
                 } else {
+                    // SQLite accepts an arbitrary identifier after WITHOUT and
+                    // rejects anything other than ROWID/OIDS with a dedicated
+                    // semantic message (not a generic syntax error):
+                    //   CREATE TABLE t1(a,b) WITHOUT unknown2;
+                    //   -> "unknown table option: unknown2"
+                    // (tableopts.test tableopt-1.2). Report the option's own
+                    // spelling rather than a token-position syntax error.
+                    let option_name = self.peek().to_sql();
                     return Err(ParseError {
-                        message: "Expected OIDS or ROWID after WITHOUT".to_string(),
+                        message: format!("unknown table option: {}", option_name),
                     });
                 }
             } else if self.peek_keyword(Keyword::Strict) {

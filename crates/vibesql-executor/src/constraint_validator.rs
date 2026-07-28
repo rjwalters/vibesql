@@ -121,6 +121,109 @@ pub fn validate_check_constraint_columns(
     Ok(())
 }
 
+/// Visitor that collects the (canonical, lower-cased) names of every column of
+/// `table_canonical` referenced by an expression. Used to build the
+/// generated-column dependency graph below; unlike [`CheckColumnResolver`] this
+/// does not stop early — every reference is needed to detect a cycle.
+struct GeneratedColumnDependencyCollector<'a> {
+    table_canonical: &'a str,
+    refs: Vec<String>,
+}
+
+impl ExpressionVisitor for GeneratedColumnDependencyCollector<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if let Expression::ColumnRef(col_id) = expr {
+            if let Some(table) = col_id.table_canonical() {
+                if !table.eq_ignore_ascii_case(self.table_canonical) {
+                    return VisitResult::Continue;
+                }
+            }
+            self.refs.push(col_id.column_canonical().to_string());
+        }
+        VisitResult::Continue
+    }
+}
+
+/// Detect a circular dependency among a table's generated columns (`x AS
+/// (expr)` / `GENERATED ALWAYS AS (expr)`). SQLite rejects this with
+/// `generated column loop on "<col>"` — reported on the generated column whose
+/// own expression-resolution first re-encounters a column still being resolved
+/// higher up the same dependency chain (gencol1-8.20, issue #6173):
+///   `c1 AS(c0 + c2), c2 AS(c1)` — c1 depends on c2, c2 depends on c1.
+/// A single self-reference (`a AS(a)`) is also a (trivial) loop.
+///
+/// This walks the *static* dependency graph at CREATE TABLE time. SQLite's own
+/// cycle guard is a runtime "column busy" flag set while lazily resolving a
+/// generated column's value, but since only an actually-cyclic definition can
+/// ever trip it, detecting the same cycle statically and rejecting the CREATE
+/// up front is behavior-equivalent and — unlike the lazy guard — never leaves
+/// a broken table behind for INSERT/UPDATE to trip over one row at a time.
+pub fn validate_generated_column_cycles(
+    table_name: &str,
+    columns: &[ColumnSchema],
+) -> Result<(), ExecutorError> {
+    let table_canonical = table_name.to_ascii_lowercase();
+    let by_name: std::collections::HashMap<String, usize> =
+        columns.iter().enumerate().map(|(idx, c)| (c.name.to_ascii_lowercase(), idx)).collect();
+
+    // Dependencies of each generated column, restricted to OTHER generated
+    // columns of the same table (a reference to a plain stored column is a
+    // graph leaf and can never participate in a cycle).
+    let mut deps: Vec<Vec<usize>> = vec![Vec::new(); columns.len()];
+    for (idx, col) in columns.iter().enumerate() {
+        let Some(expr) = &col.generated_expr else { continue };
+        let mut collector = GeneratedColumnDependencyCollector {
+            table_canonical: &table_canonical,
+            refs: Vec::new(),
+        };
+        walk_expression(&mut collector, expr);
+        for r in collector.refs {
+            if let Some(&dep_idx) = by_name.get(&r) {
+                if columns[dep_idx].generated_expr.is_some() {
+                    deps[idx].push(dep_idx);
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum State {
+        Unvisited,
+        Visiting,
+        Done,
+    }
+    let mut state = vec![State::Unvisited; columns.len()];
+
+    fn visit(
+        idx: usize,
+        deps: &[Vec<usize>],
+        state: &mut [State],
+        columns: &[ColumnSchema],
+    ) -> Result<(), ExecutorError> {
+        state[idx] = State::Visiting;
+        for &dep in &deps[idx] {
+            if state[dep] == State::Visiting {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "generated column loop on \"{}\"",
+                    columns[idx].name
+                )));
+            }
+            if state[dep] == State::Unvisited {
+                visit(dep, deps, state, columns)?;
+            }
+        }
+        state[idx] = State::Done;
+        Ok(())
+    }
+
+    for idx in 0..columns.len() {
+        if columns[idx].generated_expr.is_some() && state[idx] == State::Unvisited {
+            visit(idx, &deps, &mut state, columns)?;
+        }
+    }
+    Ok(())
+}
+
 /// Validate that a CHECK constraint expression uses only forms SQLite permits.
 /// Subqueries and bind parameters are rejected at CREATE TABLE time with the
 /// exact SQLite messages so an invalid definition never creates a half-formed
