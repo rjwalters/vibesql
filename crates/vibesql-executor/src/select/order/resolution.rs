@@ -483,6 +483,32 @@ pub(crate) fn resolve_order_by_alias<'a>(
         }
     }
 
+    // ORDER BY bare TRUE/FALSE: SQLite's TRUE and FALSE keywords are normally
+    // boolean literals (parsed directly to Expression::Literal(SqlValue::Boolean)
+    // — there is no other syntax that produces that exact AST shape), but SQLite
+    // special-cases ORDER BY/GROUP BY: when the literal's spelling ("true"/
+    // "false") matches an actual column name reachable from the FROM clause —
+    // e.g. `CREATE TABLE t8(true INT, false INT, ...)` — the column reference
+    // wins over the literal (issue istrue-810, part of #6172; TRUE/FALSE became
+    // non-reserved identifiers in #6236, so a table can genuinely have columns
+    // named `true`/`false`). Without this, `ORDER BY false` degenerates into
+    // sorting by a constant (a no-op) instead of sorting by the `false` column.
+    if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(b)) = order_expr {
+        let synthetic_name = if *b { "true" } else { "false" };
+        let column_exists_in_schema = schema.is_some_and(|s| {
+            s.table_schemas
+                .values()
+                .any(|(_start_idx, table_schema)| {
+                    table_schema.get_column_index(synthetic_name).is_some()
+                })
+        });
+        if column_exists_in_schema {
+            return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(
+                vibesql_ast::ColumnIdentifier::simple(synthetic_name, false),
+            )));
+        }
+    }
+
     // Check if ORDER BY expression is a simple column reference (no table qualifier)
     if let vibesql_ast::Expression::ColumnRef(col_id) = order_expr {
         if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() {

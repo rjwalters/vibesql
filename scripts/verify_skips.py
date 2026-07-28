@@ -117,6 +117,13 @@ BUCKET_A_CLASSIFICATION = {
     "tableapi": "A1", "bind": "A1", "ptrchng": "A1", "delete_db": "A1",
     "intarray": "A1", "snapshot": "A1", "shared6": "A1", "symlink": "A1",
     "quota-glob": "A1", "varint": "A1",
+    # nan/types3: whole-file cascades from C-API-gated setup (#6172). nan.test's
+    # schema is created by a sqlite3_prepare/sqlite3_bind_double/sqlite3_step
+    # setup block (nan-1.1.1); types3.test needs tcl_variable_type introspection
+    # + sqlite3_create_function custom types for every assertion. Once the C-API
+    # setup is skipped, all downstream SQL-only assertions cascade to
+    # 'no such table' — same shape as trigger6 (#5470)/capi3.
+    "nan": "A1", "types3": "A1",
     # A2: VFS / pager internals
     "jrnlmode": "A2", "jrnlmode3": "A2", "pagesize": "A2", "filefmt": "A2",
     "corruptL": "A2", "lock": "A2", "lock5": "A2", "sort2": "A2",
@@ -143,6 +150,12 @@ BUCKET_A_CLASSIFICATION = {
     "badutf": "A9", "badutf2": "A9",
 
     # --- Bucket-A pattern skips (vibesql_skip_patterns) ---
+    # A1 (harness C-API-gated setup cascade in istrue.test, #6172): istrue-600.$tn.2
+    # binds a raw IEEE754 NaN/Inf double via sqlite3_prepare/sqlite3_bind_double
+    # (unimplemented shim command), so it is auto-skipped; that leaves t1 empty and
+    # the sibling istrue-600.$tn.3/.4 plain-SQL SELECTs cascade to zero rows. Same
+    # cascade shape as nan.test/trigger6. istrue.test as a whole keeps running.
+    "istrue-600.*.3": "A1", "istrue-600.*.4": "A1",
     # A2
     "e_wal-": "A2",
     "e_reindex-1.": "A2",  # writable_schema/B-tree-corruption REINDEX harness (#6195; precedent fkey1-8.3)
