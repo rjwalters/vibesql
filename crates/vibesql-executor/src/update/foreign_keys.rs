@@ -70,13 +70,16 @@ impl ForeignKeyValidator {
             .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
 
         for (fk_idx, fk) in schema.foreign_keys.iter().enumerate() {
-            // Mismatch check runs before any row-existence test so that bad
-            // FK targets are reported even when the parent table is empty.
-            // Mismatch is never deferred (matches SQLite behaviour).
-            if let Some((child, parent)) =
-                crate::foreign_key_check::detect_fk_mismatch(db, table_name, fk)
+            // Schema-level FK validation (missing parent table, or a parent
+            // key not backed by a PK/UNIQUE/non-partial UNIQUE INDEX) runs
+            // before any row-existence test, so bad FK targets are reported
+            // even when the parent table is empty *or* every value in this
+            // row is NULL (e_fkey-20.*). Neither error is ever deferred
+            // (matches SQLite behaviour).
+            if let Some(err) =
+                crate::foreign_key_check::check_fk_definition_error(db, table_name, fk)
             {
-                return Err(ExecutorError::ForeignKeyMismatch { child, parent });
+                return Err(err);
             }
 
             // Extract FK values from the new row
