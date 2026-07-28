@@ -296,6 +296,16 @@ impl Parser {
     ///
     /// For schema-qualified names, the schema and table parts are stored separately
     /// with their individual quoted flags preserved.
+    ///
+    /// An unquoted keyword is only accepted as a name component when
+    /// `can_be_identifier_in_table_position()` allows it — the same predicate the
+    /// FROM-clause parser already gates on. Genuinely reserved words (`ON`,
+    /// `SELECT`, `WHERE`, ...) must stay rejected here too: this helper backs
+    /// `INSERT INTO`, `DROP TABLE`, `UPDATE`, `DELETE FROM`, and the `ON <table>`
+    /// target of `CREATE TRIGGER`, none of which previously guarded the keyword
+    /// case at all, so e.g. `CREATE TRIGGER t ... ON ON ...` silently created a
+    /// trigger on a table named `on` instead of raising SQLite's `near "ON":
+    /// syntax error` (alter.test alter-3.2.8).
     pub(super) fn parse_table_ref(&mut self) -> Result<vibesql_ast::TableRef, ParseError> {
         // Parse first identifier and track if it was quoted
         // SQLite compatibility: single-quoted strings can be used as identifiers
@@ -317,12 +327,12 @@ impl Parser {
                 self.advance();
                 (identifier, true) // Treat as quoted for case preservation
             }
-            Token::Keyword { keyword, .. } => {
+            Token::Keyword { keyword, .. } if keyword.can_be_identifier_in_table_position() => {
                 let identifier = keyword.to_string();
                 self.advance();
                 (identifier, false) // Keywords are treated as unquoted
             }
-            _ => return Err(ParseError { message: "Expected identifier".to_string() }),
+            _ => return Err(ParseError { message: self.peek().syntax_error() }),
         };
 
         // Check if there's a dot followed by another identifier
@@ -345,14 +355,12 @@ impl Parser {
                     self.advance();
                     (identifier, true)
                 }
-                Token::Keyword { keyword, .. } => {
+                Token::Keyword { keyword, .. } if keyword.can_be_identifier_in_table_position() => {
                     let identifier = keyword.to_string();
                     self.advance();
                     (identifier, false)
                 }
-                _ => {
-                    return Err(ParseError { message: "Expected identifier after '.'".to_string() })
-                }
+                _ => return Err(ParseError { message: self.peek().syntax_error() }),
             };
             // For qualified names, store schema and table parts separately
             // This preserves the individual quoted status for proper case handling

@@ -69,6 +69,7 @@ mod aggregate_without_from;
 mod alter_add_column_restrictions;
 mod alter_rename_collision;
 mod alter_rename_column_triggers;
+mod alter_system_table_restrictions;
 mod alter_table_constraints;
 mod auto_increment_tests;
 mod between_predicates;

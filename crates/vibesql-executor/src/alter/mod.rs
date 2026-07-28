@@ -72,6 +72,29 @@ impl AlterTableExecutor {
             AlterTableStmt::ModifyColumn(s) => &s.table_name,
             AlterTableStmt::ChangeColumn(s) => &s.table_name,
         };
+
+        // SQLite refuses to ALTER any of its own schema/statistics tables
+        // (`sqlite_master`/`sqlite_schema`, and `sqlite_stat1..4`) with a single
+        // uniform message across *every* ALTER TABLE sub-command — RENAME TO,
+        // RENAME COLUMN, ADD COLUMN, DROP COLUMN, ADD/DROP CONSTRAINT, ALTER
+        // COLUMN — `table <name> may not be altered`, echoing the canonical
+        // lowercase name regardless of how the statement spelled it (e.g.
+        // `ALTER TABLE SqLiTe_master ...` still reports `sqlite_master`, not
+        // `SqLiTe_master`). These names are never real catalog entries, so
+        // without this upfront check every sub-command falls through to a
+        // generic (and wrong) `no such table` instead (alter-2.4, alter-15.*,
+        // altercol-6.1/12.1.2, alterdropcol.test). Checked before the privilege
+        // check and before dispatch, so it applies uniformly and atomically —
+        // no sub-command-specific handler needs its own copy of this guard.
+        if validation::is_sqlite_schema_table(table_name)
+            || crate::sqlite_stat::is_sqlite_stat_table(table_name)
+        {
+            return Err(ExecutorError::Other(format!(
+                "table {} may not be altered",
+                table_name.to_ascii_lowercase()
+            )));
+        }
+
         PrivilegeChecker::check_alter(database, table_name)?;
 
         let result = match stmt {
