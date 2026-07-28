@@ -30,6 +30,14 @@ pub struct SqlExecutor {
     /// demotes TEMP tables to persistent so the value is advisory only.
     /// Canonical codes: 0=DEFAULT, 1=FILE, 2=MEMORY.
     temp_store: i64,
+    /// PRAGMA temp_store_directory session setting (SQLite-compatible,
+    /// default "" — unset). Get/set round-trips like SQLite (pragma.test
+    /// pragma-9.4..9.8): setting a nonexistent path errors with "not a
+    /// writable directory"; setting `''` resets to the default. VibeSQL has
+    /// no separate temp-file directory to actually redirect (TEMP tables are
+    /// demoted to persistent, matching `temp_store` above), so the value is
+    /// advisory only.
+    temp_store_directory: String,
     /// PRAGMA encoding session setting (SQLite-compatible, default "UTF-8").
     /// VibeSQL only ever stores TEXT as UTF-8, but it parses, normalizes and
     /// echoes the setting exactly like SQLite so introspection round-trips
@@ -516,6 +524,7 @@ impl SqlExecutor {
                     count_changes: false,
                     auto_vacuum: 0,
                     temp_store: 0,
+                    temp_store_directory: String::new(),
                     encoding: default_encoding(),
                     synchronous: SQLITE_DEFAULT_SYNCHRONOUS,
                     cache_size: SQLITE_DEFAULT_CACHE_SIZE,
@@ -567,6 +576,7 @@ impl SqlExecutor {
             count_changes: false,
             auto_vacuum: 0,
             temp_store: 0,
+            temp_store_directory: String::new(),
             encoding: default_encoding(),
             synchronous: SQLITE_DEFAULT_SYNCHRONOUS,
             cache_size: SQLITE_DEFAULT_CACHE_SIZE,
@@ -1699,11 +1709,52 @@ impl SqlExecutor {
                 }
                 "TEMP_STORE" => {
                     // SQLite-compatible PRAGMA temp_store set (pragma.test
-                    // pragma-18). Parsed/normalized/echoed like SQLite; the
-                    // value is advisory (VibeSQL demotes TEMP tables to
-                    // persistent). Symbolic (file/memory) and numeric spellings
-                    // accepted; out-of-range/negative integers -> 0 (DEFAULT).
+                    // pragma-18, pragma-9.15/9.18). Parsed/normalized/echoed
+                    // like SQLite; the value is advisory (VibeSQL demotes TEMP
+                    // tables to persistent). Symbolic (file/memory) and
+                    // numeric spellings accepted; out-of-range/negative
+                    // integers -> 0 (DEFAULT). Mirrors the `synchronous`
+                    // "changed inside a transaction" guard above: real SQLite
+                    // refuses to change `temp_store` mid-transaction because
+                    // doing so would require closing/reopening the temp
+                    // database out from under any open TEMP-table cursors.
+                    if self.db.in_transaction() {
+                        return Err(anyhow::anyhow!(
+                            "temporary storage cannot be changed from within a transaction"
+                        ));
+                    }
                     self.temp_store = normalize_temp_store(value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "TEMP_STORE_DIRECTORY" => {
+                    // SQLite-compatible PRAGMA temp_store_directory set
+                    // (pragma.test pragma-9.5/9.7/9.8). VibeSQL has no
+                    // separate temp-file directory to actually redirect (TEMP
+                    // tables are demoted to persistent, matching `temp_store`
+                    // above), but it reproduces SQLite's validation: an empty
+                    // string resets to the default, any other value must name
+                    // an existing, writable directory or the statement errors
+                    // exactly like SQLite's `pager.c` check.
+                    let text = pragma_value_text(value);
+                    if text.is_empty() {
+                        self.temp_store_directory.clear();
+                    } else {
+                        let path = std::path::Path::new(text);
+                        let writable = path.is_dir()
+                            && std::fs::metadata(path)
+                                .map(|m| !m.permissions().readonly())
+                                .unwrap_or(false);
+                        if !writable {
+                            return Err(anyhow::anyhow!("not a writable directory"));
+                        }
+                        self.temp_store_directory = text.to_string();
+                    }
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -2032,6 +2083,35 @@ impl SqlExecutor {
                         execution_time_ms: None,
                         message: None,
                     })
+                }
+                "TEMP_STORE_DIRECTORY" => {
+                    // SQLite-compatible PRAGMA temp_store_directory read
+                    // (pragma.test pragma-9.4/9.6/9.9). Matches SQLite's
+                    // pragma.c: when unset, the read emits ZERO rows (not one
+                    // row with an empty string) — pragma-9.4/9.9 concatenate
+                    // this read into a larger execsql script and require it
+                    // to contribute nothing to the flattened Tcl result list,
+                    // which a one-row-empty-string reply would not (a
+                    // single-element Tcl list containing "" stringifies as
+                    // the two-character `{}`, not the zero-length empty
+                    // string). When set, reports the stored path as one row.
+                    if self.temp_store_directory.is_empty() {
+                        Ok(QueryResult {
+                            columns: vec!["temp_store_directory".to_string()],
+                            rows: Vec::new(),
+                            row_count: 0,
+                            execution_time_ms: None,
+                            message: None,
+                        })
+                    } else {
+                        Ok(QueryResult {
+                            columns: vec!["temp_store_directory".to_string()],
+                            rows: vec![vec![Some(self.temp_store_directory.clone())]],
+                            row_count: 1,
+                            execution_time_ms: None,
+                            message: None,
+                        })
+                    }
                 }
                 "ENCODING" => {
                     // SQLite-compatible PRAGMA encoding read (numcast.test

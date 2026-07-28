@@ -246,6 +246,7 @@ set ::pragma_trigger_depth_limit 0       ;# 0 = default cap; >0 = per-connection
 set ::pragma_encoding ""                 ;# "" = default (UTF-8); otherwise the last value set via PRAGMA encoding=... (#6172)
 set ::pragma_synchronous_raw ""          ;# "" = default (FULL); otherwise the last raw text set via PRAGMA synchronous=... (#6175)
 set ::pragma_cache_size_raw ""           ;# "" = default (-2000); otherwise the last raw text set via PRAGMA cache_size=... (#6175)
+set ::pragma_temp_store_directory ""     ;# "" = unset; otherwise the last value set via PRAGMA temp_store_directory=... . Real SQLite stores this as a single process-wide value (sqlite3_temp_directory), not per-database-file, so — unlike the cache_size/user_version cookies above — it is a plain global that survives every fresh CLI process AND every `db close`/reopen for the whole tclsh run (#6175).
 array set ::pragma_default_cache_size_cookie {} ;# db-file-path -> last raw text set via PRAGMA default_cache_size=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 array set ::pragma_user_version_cookie {}   ;# db-file-path -> last raw text set via PRAGMA user_version=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 array set ::pragma_application_id_cookie {} ;# db-file-path -> last raw text set via PRAGMA application_id=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
@@ -1664,6 +1665,12 @@ proc build_pragma_prefix {} {
     if {$::pragma_cache_size_raw ne ""} {
         append prefix "PRAGMA cache_size=$::pragma_cache_size_raw;\n"
     }
+    # Replay PRAGMA temp_store_directory (#6175): a process-wide value in real
+    # SQLite (sqlite3_temp_directory), so it must survive every fresh
+    # per-batch CLI process on this connection, same as the cookies below.
+    if {$::pragma_temp_store_directory ne ""} {
+        append prefix "PRAGMA temp_store_directory='[string map {' ''} $::pragma_temp_store_directory]';\n"
+    }
     if {$::pragma_synchronous_raw ne ""} {
         append prefix "PRAGMA synchronous=$::pragma_synchronous_raw;\n"
     }
@@ -1872,6 +1879,17 @@ proc track_pragma_setting {sql} {
     set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?cache_size\s*=\s*(-?\d+)} $sql]
     foreach {match value} $matches {
         set ::pragma_cache_size_raw $value
+        set found 1
+    }
+
+    # Look for temp_store_directory settings (find all occurrences, use last
+    # one). Accepts both a quoted string and the bare-empty-string reset form
+    # (#6175); process-wide like sqlite3_temp_directory in real SQLite, so
+    # tracked as a plain global rather than a per-file cookie (see the prefix
+    # replay above).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?temp_store_directory\s*=\s*'((?:[^']|'')*)'} $sql]
+    foreach {match value} $matches {
+        set ::pragma_temp_store_directory [string map {'' '} $value]
         set found 1
     }
 
@@ -7606,7 +7624,25 @@ proc sqlite3 {db args} {
         unset -nocomplain ::pragma_schema_version_cookie($new_file)
     }
 
-    set ::db_file $new_file
+    # Only the default "db" connection (and an empty/unspecified name) tracks
+    # the global ::db_file — matching `resolve_db_file`'s own documented
+    # contract just above (#5946) and the cookie-replay/prefix-building code
+    # that reads ::db_file directly for the primary connection. A named
+    # non-"db" connection (db2, db3, ...) is looked up via ::db_file_map
+    # below instead, so it never needed to touch this global — but the old
+    # unconditional assignment here did so anyway, and a NAMED connection
+    # whose open later fails (e.g. an absurdly long/unopenable filename inside
+    # a `catch`, misc7.test misc7-21.1's `sqlite3 db2 <520-char-name>.db`)
+    # still executed this line before the caller's `catch` ever saw an error,
+    # permanently clobbering ::db_file with the doomed filename. Every
+    # subsequent plain `sqlite3 db test.db` then reused that same poisoned
+    # path (the "reuse ::db_file for test.db" branch above), corrupting an
+    # otherwise-unrelated connection for the rest of the file (#6175, found
+    # while fixing `get_pwd`, which misc7-21.1 depends on to construct its
+    # long filename in the first place).
+    if {$db eq "" || $db eq "db"} {
+        set ::db_file $new_file
+    }
 
     # Record this connection -> file mapping so named connections (db2, db3, ...)
     # can be routed to the file they were opened against even after ::db_file is
@@ -8139,6 +8175,29 @@ proc forcecopy {from to} {
     # already clears stale destination siblings before copying).
     catch {file delete -force $to}
     copy_db_with_wal $from $to
+}
+
+proc get_pwd {} {
+    # SQLite test utility: return the current working directory (used by
+    # tests that round-trip a directory path through the engine, e.g.
+    # `PRAGMA temp_store_directory`). In the canonical harness this is a
+    # pure-Tcl proc in tester.tcl (non-Windows branch: plain `[pwd]`; the
+    # Windows branch normalizes via `cmd.exe /c CD`, irrelevant here) — NOT a
+    # C testfixture command, so defining it is straightforward parity with
+    # the real harness, not a stub for an unreachable engine primitive. The
+    # shim's `source $testdir/tester.tcl` replacement (see near the bottom of
+    # this file) means tester.tcl's own definition never loads, so every
+    # call previously aborted its file/test at "invalid command name
+    # \"get_pwd\"" (e.g. pragma-9.5..9.10, #6175).
+    if {$::tcl_platform(platform) eq "windows"} {
+        if {[info exists ::env(ComSpec)]} {
+            set comSpec $::env(ComSpec)
+        } else {
+            set comSpec {C:\Windows\system32\cmd.exe}
+        }
+        return [string map [list \\ /] [string trim [exec -- $comSpec /c CD]]]
+    }
+    return [pwd]
 }
 
 proc sqlite3_extended_result_codes {db onoff} {
