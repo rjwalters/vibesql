@@ -30,7 +30,9 @@ impl super::super::Catalog {
             return Err(CatalogError::ViewAlreadyExists(name));
         }
 
+        let view_schema = view.schema.clone().unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
         self.views.insert(key, view);
+        self.record_creation_seq(&view_schema, &name);
         Ok(())
     }
 

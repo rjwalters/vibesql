@@ -89,6 +89,24 @@ pub struct Catalog {
     /// for the duration of a non-temp trigger body's execution and restored
     /// afterward. Default `false` (temp shadows main) everywhere else.
     pub(crate) suppress_temp_shadowing: bool,
+    /// Monotonic creation-order sequence for schema objects (tables, indexes,
+    /// views, triggers), keyed by `"{schema}\u{1}{name}"` (both lowercased).
+    ///
+    /// SQLite lists objects in `sqlite_master` in the order their rows were
+    /// inserted into the schema table — i.e. object *creation* order, with a
+    /// table's indexes appearing right after the table when they were created
+    /// next (see pragma.test 23.1). VibeSQL stores tables and indexes in
+    /// separate collections, so this side-map records a global creation ordinal
+    /// used only to order `sqlite_master`/`sqlite_schema` output. It IS
+    /// persisted (binary catalog format v17+, see
+    /// `vibesql_storage::persistence::binary::catalog`) so the ordering survives
+    /// a reload; an object with no recorded ordinal (e.g. a v16-and-earlier file,
+    /// or an object created via a path that doesn't record one) falls back to
+    /// the historical "tables first, then indexes" emission order, so nothing
+    /// regresses.
+    pub(crate) creation_seq: HashMap<String, u64>,
+    /// Next value to hand out from [`Catalog::record_creation_seq`].
+    pub(crate) next_creation_seq: u64,
 }
 
 impl Catalog {
@@ -134,6 +152,8 @@ impl Catalog {
             // Temp shadowing is active by default; only a non-temp trigger body
             // suppresses it (see field docs).
             suppress_temp_shadowing: false,
+            creation_seq: HashMap::new(),
+            next_creation_seq: 0,
         };
 
         // Create the default schema (SQLite uses "main")
@@ -200,6 +220,57 @@ impl Catalog {
         schema_name.starts_with(crate::TEMP_SCHEMA)
             && schema_name.len() > crate::TEMP_SCHEMA.len()
             && schema_name.as_bytes().get(crate::TEMP_SCHEMA.len()) == Some(&b'_')
+    }
+
+    /// Build the `creation_seq` map key for a schema object.
+    fn creation_seq_key(schema: &str, name: &str) -> String {
+        format!("{}\u{1}{}", schema.to_lowercase(), name.to_lowercase())
+    }
+
+    /// Record (or refresh) the creation ordinal for a schema object.
+    ///
+    /// Called from the table/index/view/trigger create chokepoints so that
+    /// `sqlite_master` can list objects in creation order. Re-creating an object
+    /// with the same name overwrites its ordinal with a fresh (later) value,
+    /// matching SQLite where a dropped-and-recreated object moves to the end of
+    /// the schema table.
+    pub fn record_creation_seq(&mut self, schema: &str, name: &str) {
+        let seq = self.next_creation_seq;
+        self.next_creation_seq += 1;
+        self.creation_seq.insert(Self::creation_seq_key(schema, name), seq);
+    }
+
+    /// Look up the creation ordinal for a schema object, if one was recorded.
+    ///
+    /// Returns `None` for objects created via a path that did not record an
+    /// ordinal (e.g. a rename, or an old-format reload that predates the
+    /// persisted creation-order section); the `sqlite_master` generator falls
+    /// back to its historical "tables first, then indexes" emission order for
+    /// those.
+    pub fn creation_seq(&self, schema: &str, name: &str) -> Option<u64> {
+        self.creation_seq.get(&Self::creation_seq_key(schema, name)).copied()
+    }
+
+    /// Iterate the recorded creation ordinals as `(opaque_key, seq)` pairs.
+    ///
+    /// The key is the internal `creation_seq` map key and is opaque to callers;
+    /// it is only meaningful when handed back to [`Catalog::restore_creation_seq`].
+    /// Used by binary persistence to round-trip creation order across a reload so
+    /// `sqlite_master` keeps SQLite's object-creation ordering (pragma.test 23.1)
+    /// even though the reader re-registers tables and indexes in separate passes.
+    pub fn creation_seq_entries(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.creation_seq.iter().map(|(k, v)| (k.as_str(), *v))
+    }
+
+    /// Restore a creation ordinal from persistence, keeping `next_creation_seq`
+    /// past every restored value so objects created after the reload still sort
+    /// last. `key` must be one previously produced by
+    /// [`Catalog::creation_seq_entries`].
+    pub fn restore_creation_seq(&mut self, key: String, seq: u64) {
+        self.creation_seq.insert(key, seq);
+        if seq >= self.next_creation_seq {
+            self.next_creation_seq = seq + 1;
+        }
     }
 
     /// Set whether identifier lookups should be case-sensitive

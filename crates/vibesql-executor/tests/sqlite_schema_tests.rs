@@ -405,6 +405,45 @@ fn test_rename_column_edits_text_and_syncs_catalog() {
     assert_eq!(col_names, vec!["a", "bb"], "catalog schema must reflect the renamed column");
 }
 
+/// Issue #6175: `sqlite_master`/`sqlite_schema` must list objects in the order
+/// they were created (SQLite's schema-table rowid order), interleaving tables
+/// and indexes — not the historical "all tables first, then all indexes"
+/// emission order. Here indexes are created *between* table creations, so the
+/// creation order (`alpha, beta, idx_alpha, gamma, idx_beta`) differs from any
+/// tables-first grouping (`alpha, beta, gamma, idx_alpha, idx_beta`); only the
+/// creation-ordered result is correct (pragma.test 23.1).
+#[test]
+fn test_sqlite_schema_lists_objects_in_creation_order() {
+    let mut db = Database::new();
+
+    // Interleave table and index creation. Non-alphabetical, and with each
+    // index landing before a later table, so neither an alphabetical sort nor a
+    // "tables first, then indexes" grouping reproduces this order.
+    execute_create_table(&mut db, "CREATE TABLE alpha (x INTEGER)");
+    execute_create_table(&mut db, "CREATE TABLE beta (x INTEGER)");
+    execute_create_index(&mut db, "CREATE INDEX idx_alpha ON alpha(x)");
+    execute_create_table(&mut db, "CREATE TABLE gamma (x INTEGER)");
+    execute_create_index(&mut db, "CREATE INDEX idx_beta ON beta(x)");
+
+    // Default order (no ORDER BY) must be creation order.
+    let (_columns, rows) = execute_select(&db, "SELECT name FROM sqlite_schema");
+    let names: Vec<String> = rows
+        .iter()
+        .map(|r| match &r.values[0] {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                s.to_string()
+            }
+            other => panic!("expected text name value, got {:?}", other),
+        })
+        .collect();
+
+    assert_eq!(
+        names,
+        vec!["alpha", "beta", "idx_alpha", "gamma", "idx_beta"],
+        "sqlite_schema must list objects in interleaved creation order, not tables-first (#6175)"
+    );
+}
+
 /// Without captured source text (e.g. AST built programmatically), the engine
 /// falls back to reconstructing a valid CREATE TABLE statement.
 #[test]
