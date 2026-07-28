@@ -101,7 +101,19 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///        earlier files remain readable: the read path is gated on
 ///        `version >= 16` and treats absence as `sql_definition = None` (prior
 ///        AST-reconstruction behavior). Issue #6174.
-pub const VERSION: u8 = 16;
+/// - v17: Added the schema-object creation-order section (a trailing
+///        `count` + `(key, seq)` pairs written after the triggers section).
+///        SQLite lists `sqlite_master` rows in object-creation order — a table's
+///        indexes appear right after the table when created next — but VibeSQL
+///        stores tables and indexes in separate collections and the reader
+///        re-registers them in separate passes, which reproduced a "tables
+///        first, then indexes" ordering after every reload. Persisting each
+///        object's creation ordinal lets a reloaded database restore the true
+///        ordering (pragma.test 23.1, read across a second connection). v16 and
+///        earlier files remain readable: the read path is gated on
+///        `version >= 17`; absence leaves the ordinals unrecorded and the
+///        generator falls back to the prior emission order. Issue #6175.
+pub const VERSION: u8 = 17;
 
 /// Type tags for binary serialization
 #[repr(u8)]

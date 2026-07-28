@@ -343,6 +343,22 @@ fn try_super_fast_path(
             return Ok(None); // Unique constraint needs validation
         }
 
+        // Check column is not a FOREIGN KEY child-side column. This in-place
+        // path writes the new value directly without running
+        // `ForeignKeyValidator::collect_constraints_with_old`, so an FK
+        // column update landing here silently skipped referential-integrity
+        // enforcement whenever the column was not *also* independently
+        // indexed/unique/PK (fkey3-3.6.5: `UPDATE t SET parent_id=1000
+        // WHERE id=2` on a self-referential composite-key FK reached this
+        // path — `parent_id` alone carries no index — and wrote the
+        // dangling value with zero FK validation). Any assignment touching
+        // an FK column must fall back to the row-materializing path where
+        // the check actually runs.
+        let is_fk_col = schema.foreign_keys.iter().any(|fk| fk.column_indices.contains(&col_index));
+        if is_fk_col {
+            return Ok(None); // FK column update needs full validation
+        }
+
         // Apply type affinity coercion (SQLite compatibility)
         let column = &schema.columns[col_index];
         let coerced_value = coerce_value(new_value, &column.data_type)?;

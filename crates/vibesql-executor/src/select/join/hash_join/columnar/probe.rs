@@ -119,7 +119,10 @@ pub(crate) fn probe_columnar_left_outer(
     // in a separate phase produces a "matches-then-unmatched" ordering that
     // violates LEFT OUTER JOIN row order (issue #5696).
     match (left_key, right_key) {
-        (ColumnArray::Int64(left_values, left_nulls), ColumnArray::Int64(right_values, _)) => {
+        (
+            ColumnArray::Int64(left_values, left_nulls),
+            ColumnArray::Int64(right_values, right_nulls),
+        ) => {
             for (left_idx, &key) in left_values.iter().enumerate() {
                 // NULL keys never match in equi-joins, but the left row is still
                 // emitted NULL-padded on the right side.
@@ -130,6 +133,19 @@ pub(crate) fn probe_columnar_left_outer(
                     // BLOOM FILTER OPTIMIZATION: only probe when the key might be
                     // present on the build side.
                     for right_idx in hash_table.probe_i64(key, right_values) {
+                        // The hash table indexes ALL build-side rows, including
+                        // ones whose join-key column is NULL (stored as a
+                        // placeholder value, e.g. 0) — the same raw-value
+                        // equality gap that `probe_columnar`'s inner-join path
+                        // guards against below. Without this check, a NULL
+                        // build-side key whose placeholder happens to equal a
+                        // real probe key was reported as a match instead of
+                        // NULL-padded (gencol1-16.40, issue #6173: a generated
+                        // column's *real* value from the NULL row leaked into
+                        // an unmatched LEFT JOIN row instead of NULL).
+                        if is_null(right_nulls, right_idx as usize) {
+                            continue;
+                        }
                         left_indices.push(left_idx as u32);
                         right_indices.push(right_idx);
                         found_match = true;
@@ -142,7 +158,10 @@ pub(crate) fn probe_columnar_left_outer(
                 }
             }
         }
-        (ColumnArray::String(left_values, left_nulls), ColumnArray::String(right_values, _)) => {
+        (
+            ColumnArray::String(left_values, left_nulls),
+            ColumnArray::String(right_values, right_nulls),
+        ) => {
             for (left_idx, key) in left_values.iter().enumerate() {
                 let key_is_null = left_nulls.as_ref().map(|n| n[left_idx]).unwrap_or(false);
 
@@ -151,6 +170,11 @@ pub(crate) fn probe_columnar_left_outer(
                     // BLOOM FILTER OPTIMIZATION: only probe when the key might be
                     // present on the build side.
                     for right_idx in hash_table.probe_string(key, right_values) {
+                        // See the Int64 arm above: skip build-side rows whose
+                        // key is actually NULL (placeholder-value false match).
+                        if is_null(right_nulls, right_idx as usize) {
+                            continue;
+                        }
                         left_indices.push(left_idx as u32);
                         right_indices.push(right_idx);
                         found_match = true;
@@ -195,10 +219,13 @@ pub(crate) fn probe_columnar_right_outer(
     let mut right_matched = vec![false; right_row_count];
 
     match (right_key, left_key) {
-        (ColumnArray::Int64(right_values, right_nulls), ColumnArray::Int64(left_values, _)) => {
+        (
+            ColumnArray::Int64(right_values, right_nulls),
+            ColumnArray::Int64(left_values, left_nulls),
+        ) => {
             for (right_idx, &key) in right_values.iter().enumerate() {
-                let is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
-                if is_null {
+                let right_key_is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
+                if right_key_is_null {
                     continue;
                 }
 
@@ -209,6 +236,14 @@ pub(crate) fn probe_columnar_right_outer(
 
                 let mut found_match = false;
                 for left_idx in hash_table.probe_i64(key, left_values) {
+                    // Skip build-side (left) rows whose key column is actually
+                    // NULL: the hash table indexes every row's raw placeholder
+                    // value, so a NULL left key can otherwise false-match a
+                    // real right key equal to that placeholder (mirrors the
+                    // LEFT OUTER fix above, issue #6173).
+                    if is_null(left_nulls, left_idx as usize) {
+                        continue;
+                    }
                     left_indices.push(left_idx);
                     right_indices.push(right_idx as u32);
                     found_match = true;
@@ -218,10 +253,13 @@ pub(crate) fn probe_columnar_right_outer(
                 }
             }
         }
-        (ColumnArray::String(right_values, right_nulls), ColumnArray::String(left_values, _)) => {
+        (
+            ColumnArray::String(right_values, right_nulls),
+            ColumnArray::String(left_values, left_nulls),
+        ) => {
             for (right_idx, key) in right_values.iter().enumerate() {
-                let is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
-                if is_null {
+                let right_key_is_null = right_nulls.as_ref().map(|n| n[right_idx]).unwrap_or(false);
+                if right_key_is_null {
                     continue;
                 }
 
@@ -232,6 +270,10 @@ pub(crate) fn probe_columnar_right_outer(
 
                 let mut found_match = false;
                 for left_idx in hash_table.probe_string(key, left_values) {
+                    // See the Int64 arm above.
+                    if is_null(left_nulls, left_idx as usize) {
+                        continue;
+                    }
                     left_indices.push(left_idx);
                     right_indices.push(right_idx as u32);
                     found_match = true;

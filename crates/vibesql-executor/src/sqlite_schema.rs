@@ -174,7 +174,12 @@ pub fn execute_sqlite_schema_query(
 ) -> Result<SelectResult, ExecutorError> {
     let schema = get_sqlite_schema_table_schema();
     let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
-    let mut rows = Vec::new();
+    // Collect each row with the creation ordinal of the object it describes, so
+    // the output can be ordered to match SQLite, which lists sqlite_master rows
+    // in object-creation order (a table's indexes appear right after the table
+    // when created next — see pragma.test 23.1). See `SchemaRowCollector`.
+    let mut collector = SchemaRowCollector::new(catalog);
+    let main = vibesql_catalog::DEFAULT_SCHEMA;
 
     // Add tables. `list_tables()` returns the current (main) schema only, so
     // temp tables are already excluded here.
@@ -184,7 +189,7 @@ pub fn execute_sqlite_schema_query(
             // SQLite echoes the *original* declared case in sqlite_master, even
             // though lookups are case-folded (issue #5553). `table.name` retains
             // the original spelling; `table_name` is the lowercase catalog key.
-            rows.push(schema_row("table", &table.name, &table.name, sql));
+            collector.push(main, &table.name, schema_row("table", &table.name, &table.name, sql));
         }
     }
 
@@ -194,12 +199,13 @@ pub fn execute_sqlite_schema_query(
         if is_without_rowid_pk_autoindex(catalog, index) {
             continue;
         }
-        if is_sqlite_autoindex(&index.name) {
-            rows.push(schema_row_autoindex(&index.name, &index.table_name));
+        let row = if is_sqlite_autoindex(&index.name) {
+            schema_row_autoindex(&index.name, &index.table_name)
         } else {
             let sql = generate_create_index_sql(index);
-            rows.push(schema_row("index", &index.name, &index.table_name, sql));
-        }
+            schema_row("index", &index.name, &index.table_name, sql)
+        };
+        collector.push(&index.schema, &index.name, row);
     }
 
     // Add views. Temp views are tagged with the `temp` schema (#5541) and
@@ -211,7 +217,7 @@ pub fn execute_sqlite_schema_query(
             }
             let sql = generate_create_view_sql(view);
             // tbl_name is same as name for views
-            rows.push(schema_row("view", &view.name, &view.name, sql));
+            collector.push(main, &view.name, schema_row("view", &view.name, &view.name, sql));
         }
     }
 
@@ -226,10 +232,58 @@ pub fn execute_sqlite_schema_query(
             continue;
         }
         let sql = generate_create_trigger_sql(trigger);
-        rows.push(schema_row("trigger", &trigger.name, &trigger.table_name, sql));
+        collector.push(
+            main,
+            &trigger.name,
+            schema_row("trigger", &trigger.name, &trigger.table_name, sql),
+        );
     }
 
-    Ok(SelectResult { columns: column_names, rows })
+    Ok(SelectResult { columns: column_names, rows: collector.into_ordered_rows() })
+}
+
+/// Collects `sqlite_master` rows tagged with each object's creation ordinal and
+/// emits them in SQLite's creation order.
+///
+/// SQLite returns `sqlite_master` rows in the order their objects were created
+/// (the schema table's rowid order). VibeSQL stores tables and indexes in
+/// separate collections, so the catalog records a global creation ordinal per
+/// object ([`Catalog::creation_seq`](vibesql_catalog::Catalog::creation_seq))
+/// that this collector uses to re-interleave them.
+///
+/// Objects without a recorded ordinal (e.g. after a reload, when objects are
+/// re-registered in load order, or a renamed object) fall back to the order in
+/// which they were pushed here — which is the historical "tables, then indexes,
+/// then views, then triggers" emission order. The fallback keys sort *after*
+/// every recorded ordinal, so a reload reproduces the previous ordering exactly
+/// and never regresses.
+struct SchemaRowCollector<'a> {
+    catalog: &'a vibesql_catalog::Catalog,
+    rows: Vec<(u64, Row)>,
+    pushed: u64,
+}
+
+impl<'a> SchemaRowCollector<'a> {
+    /// Fallback ordinals start here so they always sort after recorded ordinals.
+    const FALLBACK_BASE: u64 = 1 << 62;
+
+    fn new(catalog: &'a vibesql_catalog::Catalog) -> Self {
+        SchemaRowCollector { catalog, rows: Vec::new(), pushed: 0 }
+    }
+
+    fn push(&mut self, schema: &str, name: &str, row: Row) {
+        let seq =
+            self.catalog.creation_seq(schema, name).unwrap_or(Self::FALLBACK_BASE + self.pushed);
+        self.pushed += 1;
+        self.rows.push((seq, row));
+    }
+
+    fn into_ordered_rows(mut self) -> Vec<Row> {
+        // Stable sort keeps the push order among equal keys (only possible in the
+        // fallback range, which already encodes push order).
+        self.rows.sort_by_key(|(seq, _)| *seq);
+        self.rows.into_iter().map(|(_, row)| row).collect()
+    }
 }
 
 /// SQLite WHERE-clause truthiness for schema-row selection: booleans as-is,

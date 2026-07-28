@@ -87,6 +87,100 @@ fn test_binary_roundtrip_preserves_table_creation_order() {
     std::fs::remove_file(path).ok();
 }
 
+/// Issue #6175 (binary format v17): the catalog's per-object creation ordinals
+/// (`creation_seq`) must survive a binary save/load round-trip, so a
+/// cross-process reload reproduces SQLite's object-creation order in
+/// `sqlite_master`/`sqlite_schema`. The reader re-registers tables and indexes
+/// in separate passes; before v17 that degraded the order to "tables first,
+/// then indexes" after every reload. v17 persists each ordinal as an opaque
+/// `(key, seq)` pair and `restore_creation_seq` rehydrates it. This mirrors the
+/// #5826 table-order round-trip, but for the interleaved table/index ordinals.
+#[test]
+fn test_binary_roundtrip_preserves_creation_seq() {
+    use vibesql_ast::{IndexColumn, OrderDirection};
+    use vibesql_catalog::{IndexMetadata, IndexType, IndexedColumn, SortOrder};
+
+    let mut db = Database::new();
+
+    let mk_table = |name: &str| {
+        TableSchema::new(
+            name.to_string(),
+            vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+        )
+    };
+
+    // Create the storage-side index body AND the catalog metadata for an index,
+    // exactly as the binary reader does (catalog.rs create_index + add_index).
+    // `add_index` is what records the object's creation ordinal.
+    let add_index = |db: &mut Database, index: &str, table: &str| {
+        db.create_index(
+            index.to_string(),
+            table.to_string(),
+            false,
+            vec![IndexColumn::Column {
+                column_name: "x".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+                collation: None,
+            }],
+        )
+        .unwrap();
+        db.catalog
+            .add_index(IndexMetadata::new(
+                index.to_string(),
+                table.to_string(),
+                IndexType::BTree,
+                vec![IndexedColumn::new_column("x".to_string(), SortOrder::Ascending)],
+                false,
+            ))
+            .unwrap();
+    };
+
+    // Interleave table and index creation so the creation order differs from any
+    // "tables first, then indexes" grouping: alpha, beta, idx_alpha, gamma, idx_beta.
+    db.create_table_with_identifier(mk_table("alpha"), TableIdentifier::new("alpha", false))
+        .unwrap();
+    db.create_table_with_identifier(mk_table("beta"), TableIdentifier::new("beta", false)).unwrap();
+    add_index(&mut db, "idx_alpha", "alpha");
+    db.create_table_with_identifier(mk_table("gamma"), TableIdentifier::new("gamma", false))
+        .unwrap();
+    add_index(&mut db, "idx_beta", "beta");
+
+    // Precondition: every object recorded an ordinal, strictly increasing in
+    // creation order (so the ordinals genuinely encode the interleaving).
+    let main = vibesql_catalog::DEFAULT_SCHEMA;
+    let objects = ["alpha", "beta", "idx_alpha", "gamma", "idx_beta"];
+    let original: Vec<u64> = objects
+        .iter()
+        .map(|n| db.catalog.creation_seq(main, n).expect("each object must record a creation ordinal"))
+        .collect();
+    assert!(
+        original.windows(2).all(|w| w[0] < w[1]),
+        "creation ordinals must increase in creation order: {:?}",
+        original
+    );
+
+    let path = "/tmp/test_creation_seq_roundtrip.vbsql";
+    db.save_binary(path).unwrap();
+    let loaded_db = Database::load_binary(path).unwrap();
+
+    let reloaded: Vec<u64> = objects
+        .iter()
+        .map(|n| {
+            loaded_db
+                .catalog
+                .creation_seq(main, n)
+                .expect("each object's creation ordinal must survive the round-trip")
+        })
+        .collect();
+    assert_eq!(
+        reloaded, original,
+        "creation_seq ordinals must survive the binary save/load round-trip (format v17, #6175)"
+    );
+
+    std::fs::remove_file(path).ok();
+}
+
 /// Issue #5619: the verbatim original `CREATE TABLE` source text must survive a
 /// full file-level `save_binary` → `load_binary` round-trip (header + catalog +
 /// data sections), not just the in-memory catalog encoder. This is the actual
@@ -864,8 +958,7 @@ fn test_load_binary_repopulates_catalog_for_all_indexes() {
     std::fs::remove_file(path).ok();
 
     // Both indexes must be findable in the catalog after load.
-    let m1 =
-        loaded.catalog.find_index_by_name("idx_a").expect("idx_a must repopulate after load");
+    let m1 = loaded.catalog.find_index_by_name("idx_a").expect("idx_a must repopulate after load");
     assert!(!m1.is_unique);
     assert!(!m1.is_partial());
     assert_eq!(m1.table_name, "t");
@@ -991,9 +1084,7 @@ fn test_negative_ipk_alias_reload_keeps_next_rowid_sane() {
     db.create_table(schema).unwrap();
 
     let table = db.get_table_mut("neg_ipk").unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)]))
-        .unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(-5), SqlValue::Integer(50)])).unwrap();
 
     let path = format!("/tmp/test_negative_ipk_reload_{}.vbsql", std::process::id());
     db.save_binary(&path).unwrap();
@@ -1033,12 +1124,8 @@ fn test_row_id_persists_ipk_alias_value() {
     db.create_table(schema).unwrap();
 
     let table = db.get_table_mut("ipk_alias").unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(50)]))
-        .unwrap();
-    table
-        .insert(crate::Row::new(vec![SqlValue::Integer(7), SqlValue::Integer(70)]))
-        .unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(5), SqlValue::Integer(50)])).unwrap();
+    table.insert(crate::Row::new(vec![SqlValue::Integer(7), SqlValue::Integer(70)])).unwrap();
 
     let path = format!("/tmp/test_row_id_ipk_alias_{}.vbsql", std::process::id());
     db.save_binary(&path).unwrap();

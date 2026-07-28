@@ -205,39 +205,24 @@ impl ForeignKeyValidator {
             return Ok(());
         }
 
-        let parent_schema = db
+        let _parent_schema = db
             .catalog
             .get_table(parent_table_name)
             .ok_or_else(|| ExecutorError::TableNotFound(parent_table_name.to_string()))?;
 
-        // This check is only meaningful if the parent table has a primary key.
-        let pk_indices = match parent_schema.get_primary_key_indices() {
-            Some(indices) => indices,
-            None => return Ok(()),
-        };
-
-        let old_parent_key_values: Vec<vibesql_types::SqlValue> =
-            pk_indices.iter().map(|&idx| parent_row.values[idx].clone()).collect();
-
-        let new_parent_key_values: Vec<vibesql_types::SqlValue> =
-            pk_indices.iter().map(|&idx| new_parent_row.values[idx].clone()).collect();
-
-        // SQLite fires no referential action and raises no violation when an
-        // UPDATE does not actually change the parent key. Re-assigning a
-        // parent-key column to the value it already holds (e.g.
-        // `UPDATE t1 SET a = 1` when `a` is already 1, or `UPDATE t1 SET a = a`)
-        // leaves every existing child reference valid, so there is nothing to
-        // cascade, set-null/default, or restrict. Without this early-out the
-        // NO ACTION / RESTRICT paths below see child rows still matching the
-        // (unchanged) old key and raise a spurious "cannot update a parent
-        // row" violation (fkey2-1.*.13: `UPDATE t1 SET a = 1` /
-        // `UPDATE t7 SET b = 1` expect success). Plain equality is a
-        // conservative test: when the stored representations differ (e.g.
-        // 1 vs 1.0) we fall through to the full affinity-aware check below,
-        // preserving prior behaviour.
-        if old_parent_key_values == new_parent_key_values {
-            return Ok(());
-        }
+        // NOTE: the parent-key values that matter here are *per-FK*, not a
+        // single table-wide value. A parent table can be referenced by one
+        // FK on its PRIMARY KEY and another FK on a completely different
+        // UNIQUE constraint/index (e_fkey-18.1..18.9, fkey2-genfkey.2/3 —
+        // `t3` references `t1(b, c)` where `t1`'s actual PK is `a`). Hard-
+        // coding the table's PRIMARY KEY here (as earlier code did) computed
+        // the wrong "did the key change?" answer for any FK targeting a
+        // non-PK key: an UPDATE that changed only `b`/`c` left the PK-based
+        // old/new values equal, so the whole function early-out'ed and
+        // silently skipped every cascade/RESTRICT/NO ACTION check for that
+        // FK. Each FK's parent-side old/new values are now computed inside
+        // the loop below via `resolved_parent_indices_for_fk`, mirroring the
+        // resolution INSERT/DELETE already use (`foreign_key_check.rs`).
 
         // Optimization: Check if any table in the database has foreign keys at all
         // If not, skip the expensive scan of all tables
@@ -293,6 +278,43 @@ impl ForeignKeyValidator {
             for (fk_idx, fk) in child_schema.foreign_keys.iter().enumerate() {
                 // Use case-insensitive comparison for SQL identifier matching
                 if !fk.parent_table.eq_ignore_ascii_case(parent_table_name) {
+                    continue;
+                }
+
+                // Resolve THIS FK's own parent-side column indices — not the
+                // parent table's PRIMARY KEY, which may be a different
+                // column set entirely when the FK targets a UNIQUE
+                // constraint/index instead (e_fkey-18.*, fkey2-genfkey.2/3).
+                let fk_parent_indices =
+                    crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
+                let old_parent_key_values: Vec<vibesql_types::SqlValue> =
+                    fk_parent_indices.iter().map(|&idx| parent_row.values[idx].clone()).collect();
+                let new_parent_key_values: Vec<vibesql_types::SqlValue> = fk_parent_indices
+                    .iter()
+                    .map(|&idx| new_parent_row.values[idx].clone())
+                    .collect();
+
+                // SQLite fires no referential action and raises no violation
+                // when an UPDATE does not actually change the parent key
+                // that THIS FK targets. Re-assigning a parent-key column to
+                // the value it already holds (e.g. `UPDATE t1 SET a = 1`
+                // when `a` is already 1, or `UPDATE t1 SET a = a`) leaves
+                // this FK's existing child references valid, so there is
+                // nothing to cascade, set-null/default, or restrict for it.
+                // Without this early-out the NO ACTION / RESTRICT paths
+                // below would see child rows still matching the (unchanged)
+                // old key and raise a spurious "cannot update a parent row"
+                // violation (fkey2-1.*.13: `UPDATE t1 SET a = 1` /
+                // `UPDATE t7 SET b = 1` expect success). Plain equality is a
+                // conservative test: when the stored representations differ
+                // (e.g. 1 vs 1.0) we fall through to the full affinity-aware
+                // check below, preserving prior behaviour. This check must
+                // be per-FK (not per-table) so an UPDATE that changes column
+                // `x` (part of one FK's parent key) but not column `y` (part
+                // of a different FK's parent key on the same table) still
+                // fires the `x`-keyed FK's action while correctly skipping
+                // the `y`-keyed FK's.
+                if old_parent_key_values == new_parent_key_values {
                     continue;
                 }
 

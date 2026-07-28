@@ -946,13 +946,30 @@ pub(super) fn execute_internal(
         database.queue_deferred_fk_violation(v);
     }
 
-    // Step 7: Handle CASCADE updates for primary key changes (before triggers)
-    // This must happen after validation but before applying parent updates
-    for u in &updates {
-        if u.updates_pk {
-            ForeignKeyValidator::check_no_child_references(
-                database, table_name, &u.old_row, &u.new_row,
-            )?;
+    // Step 7: Handle CASCADE updates for parent-key changes (before triggers).
+    // This must happen after validation but before applying parent updates.
+    //
+    // Not just `u.updates_pk`: a child table's FK can target a UNIQUE
+    // constraint/index on this table instead of its PRIMARY KEY (e_fkey-18.*,
+    // fkey2-genfkey.2/3). Gating solely on the PK silently skipped every
+    // cascade/RESTRICT/NO ACTION check for such FKs whenever the UPDATE left
+    // the PK untouched. `changed_columns_touch_any_key` is a cheap superset
+    // filter (any candidate key, not "the exact key some FK targets"); the
+    // precise per-FK old/new comparison happens inside
+    // `check_no_child_references` itself.
+    if !updates.is_empty() {
+        for u in &updates {
+            let touches_key = u.updates_pk
+                || crate::foreign_key_check::changed_columns_touch_any_key(
+                    database,
+                    schema,
+                    &u.changed_columns.iter().copied().collect::<Vec<_>>(),
+                );
+            if touches_key {
+                ForeignKeyValidator::check_no_child_references(
+                    database, table_name, &u.old_row, &u.new_row,
+                )?;
+            }
         }
     }
 
@@ -1888,8 +1905,29 @@ fn apply_generated_columns_for_update(
     let evaluator = ExpressionEvaluator::new(schema)
         .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
 
-    for (col_idx, col) in schema.columns.iter().enumerate() {
-        if let Some(generated_expr) = &col.generated_expr {
+    // Generated columns may reference other generated columns (e.g. `w INT
+    // GENERATED ALWAYS AS (m*5), m INT AS (a*2) STORED` — gencol1-2.6/2.7,
+    // issue #6173). A single pass in column-definition order only sees an
+    // up-to-date value for generated columns *earlier* in declaration order:
+    // `w` (index 0) depends on `m` (index 1), so a single top-to-bottom pass
+    // would compute `w` from `m`'s stale pre-UPDATE value. Iterate to a fixed
+    // point exactly as the INSERT path does (`apply_generated_columns`),
+    // folding each freshly computed value back into the row so later (and
+    // earlier, on subsequent passes) generated columns see it. Bounded by the
+    // number of generated columns, the longest possible acyclic dependency
+    // chain; SQLite rejects circular generated-column definitions at CREATE
+    // TABLE time, so this always converges.
+    let generated_indices: Vec<usize> = schema
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, col)| col.generated_expr.as_ref().map(|_| idx))
+        .collect();
+
+    for _pass in 0..generated_indices.len().max(1) {
+        for &col_idx in &generated_indices {
+            let col = &schema.columns[col_idx];
+            let generated_expr = col.generated_expr.as_ref().expect("filtered above");
             // Evaluate the generated expression against the current row
             let generated_value = evaluator.eval(generated_expr, row)?;
             // STRICT tables (issue #6173) enforce the rigid strict-datatype
@@ -2379,9 +2417,18 @@ fn execute_update_from(
         validate_unique_relocation(&updates, schema, table_for_check, database, table_name)?;
     }
 
-    // Handle CASCADE updates for primary key changes
+    // Handle CASCADE updates for parent-key changes. Not just `u.updates_pk`
+    // — see the rationale at the equivalent gate in `execute_internal`
+    // (Step 7): a child FK can target a UNIQUE constraint/index on this
+    // table rather than its PRIMARY KEY.
     for u in &updates {
-        if u.updates_pk {
+        let touches_key = u.updates_pk
+            || crate::foreign_key_check::changed_columns_touch_any_key(
+                database,
+                schema,
+                &u.changed_columns.iter().copied().collect::<Vec<_>>(),
+            );
+        if touches_key {
             ForeignKeyValidator::check_no_child_references(
                 database, table_name, &u.old_row, &u.new_row,
             )?;

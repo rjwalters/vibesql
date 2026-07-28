@@ -17,9 +17,8 @@ use crate::{errors::CatalogError, trigger::TriggerDefinition};
 /// character separates the two parts so a schema/name that happens to contain a
 /// `.` cannot forge a different key.
 fn trigger_storage_key(schema: Option<&str>, name: &str) -> String {
-    let schema = schema
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
+    let schema =
+        schema.map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
     format!("{schema}\u{1f}{name}")
 }
 
@@ -38,7 +37,11 @@ impl super::super::Catalog {
         if self.triggers.contains_key(&key) {
             return Err(CatalogError::TriggerAlreadyExists(trigger.name));
         }
+        let trigger_schema =
+            trigger.schema.clone().unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
+        let trigger_name = trigger.name.clone();
         self.triggers.insert(key, trigger);
+        self.record_creation_seq(&trigger_schema, &trigger_name);
         Ok(())
     }
 
@@ -383,10 +386,7 @@ impl super::super::Catalog {
 /// enforced separately by the executor's `should_fire_update_of`.
 fn event_kind_matches(a: &vibesql_ast::TriggerEvent, b: &vibesql_ast::TriggerEvent) -> bool {
     use vibesql_ast::TriggerEvent::*;
-    matches!(
-        (a, b),
-        (Insert, Insert) | (Update(_), Update(_)) | (Delete, Delete)
-    )
+    matches!((a, b), (Insert, Insert) | (Update(_), Update(_)) | (Delete, Delete))
 }
 
 #[cfg(test)]
@@ -435,9 +435,7 @@ mod tests {
         assert!(catalog.has_any_triggers());
 
         // Still true with multiple triggers on different tables.
-        catalog
-            .create_trigger(sample_trigger("t2", "orders"))
-            .unwrap();
+        catalog.create_trigger(sample_trigger("t2", "orders")).unwrap();
         assert!(catalog.has_any_triggers());
 
         // Dropping all triggers returns to the O(1) false fast path.
@@ -469,7 +467,8 @@ mod tests {
 
         // A same-schema duplicate still collides.
         assert!(matches!(
-            catalog.create_trigger(sample_trigger("tr1", "t").with_schema(Some("main".to_string()))),
+            catalog
+                .create_trigger(sample_trigger("tr1", "t").with_schema(Some("main".to_string()))),
             Err(CatalogError::TriggerAlreadyExists(_))
         ));
 
@@ -503,11 +502,7 @@ mod tests {
         assert!(catalog.create_trigger(sample_trigger("tr", "t")).is_err());
     }
 
-    fn names_in_schema(
-        catalog: &Catalog,
-        table: &str,
-        dml_schema: Option<&str>,
-    ) -> Vec<String> {
+    fn names_in_schema(catalog: &Catalog, table: &str, dml_schema: Option<&str>) -> Vec<String> {
         catalog
             .get_triggers_for_table_in_schema(table, Some(TriggerEvent::Insert), dml_schema)
             .map(|t| t.name.clone())

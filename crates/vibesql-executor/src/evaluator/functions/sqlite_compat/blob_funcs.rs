@@ -202,13 +202,14 @@ pub(crate) fn zeroblob(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         }
     };
 
-    // SQLite limits blob size, we'll use a reasonable limit
+    // SQLite limits blob size to SQLITE_MAX_LENGTH (default 1,000,000,000
+    // bytes) and reports an over-limit ZEROBLOB with the same message as any
+    // other over-limit string/blob construction: "string or blob too big"
+    // (SQLITE_TOOBIG), not a VibeSQL-specific diagnostic (table.test
+    // table-18.1, issue #6173).
     const MAX_BLOB_SIZE: usize = 1_000_000_000; // 1GB
     if n > MAX_BLOB_SIZE {
-        return Err(ExecutorError::UnsupportedFeature(format!(
-            "ZEROBLOB size {} exceeds maximum {}",
-            n, MAX_BLOB_SIZE
-        )));
+        return Err(ExecutorError::SqliteCompatError("string or blob too big".to_string()));
     }
 
     Ok(SqlValue::Blob(vec![0u8; n]))

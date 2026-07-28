@@ -380,22 +380,33 @@ fn parse_statements(script: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current_statement = String::new();
     let mut in_string = false;
+    // Track SQLite delimited-identifier quoting so a `'` or `;` embedded in a
+    // quoted identifier's name doesn't get mistaken for a string-literal
+    // delimiter or statement terminator (issue #6173, table.test table-8.4:
+    // `SELECT count(*) AS [y'all] FROM t3` — without this, the splitter
+    // treated the `'` inside `[y'all]` as opening an unterminated string
+    // literal and silently swallowed every remaining statement in the script
+    // into it).
+    let mut in_double_quote = false;
+    let mut in_bracket = false;
     let mut in_multiline_comment = false;
     let mut begin_depth = 0; // Track BEGIN...END nesting for trigger bodies
-    // Track CASE...END nesting *within* a trigger body. A `CASE ... END`
-    // expression in a trigger action (e.g. `SELECT CASE WHEN ... THEN
-    // RAISE(IGNORE) END`) introduces an inner `END` that must NOT be counted
-    // as the trigger's terminating `END`. Without this, the splitter closes
-    // the `CREATE TRIGGER` at the CASE's `END`, slicing one statement into
-    // several malformed fragments (issue #5468). We only track CASE depth when
-    // already inside a trigger body (`begin_depth > 0`); top-level CASE
-    // expressions split correctly on their trailing `;` and need no tracking.
+                             // Track CASE...END nesting *within* a trigger body. A `CASE ... END`
+                             // expression in a trigger action (e.g. `SELECT CASE WHEN ... THEN
+                             // RAISE(IGNORE) END`) introduces an inner `END` that must NOT be counted
+                             // as the trigger's terminating `END`. Without this, the splitter closes
+                             // the `CREATE TRIGGER` at the CASE's `END`, slicing one statement into
+                             // several malformed fragments (issue #5468). We only track CASE depth when
+                             // already inside a trigger body (`begin_depth > 0`); top-level CASE
+                             // expressions split correctly on their trailing `;` and need no tracking.
     let mut case_depth = 0;
     let mut chars = script.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        let in_quoted_ident = in_double_quote || in_bracket;
+
         // Handle multi-line comments
-        if !in_string && ch == '/' && chars.peek() == Some(&'*') {
+        if !in_string && !in_quoted_ident && ch == '/' && chars.peek() == Some(&'*') {
             chars.next(); // consume '*'
             in_multiline_comment = true;
             continue;
@@ -410,7 +421,7 @@ fn parse_statements(script: &str) -> Vec<String> {
         }
 
         // Handle single-line comments
-        if !in_string && ch == '-' && chars.peek() == Some(&'-') {
+        if !in_string && !in_quoted_ident && ch == '-' && chars.peek() == Some(&'-') {
             // Skip until end of line
             for c in chars.by_ref() {
                 if c == '\n' {
@@ -421,8 +432,38 @@ fn parse_statements(script: &str) -> Vec<String> {
             continue;
         }
 
+        // Handle double-quoted delimited identifiers (`"col name"`). SQLite
+        // doubles an embedded `"` to escape it, mirroring the single-quote
+        // string-literal escape below. Tracked separately from in_string so
+        // a `'` inside a double-quoted identifier is not mistaken for a
+        // string-literal delimiter.
+        if !in_string && !in_bracket && ch == '"' {
+            current_statement.push(ch);
+            if in_double_quote && chars.peek() == Some(&'"') {
+                chars.next(); // consume the second quote
+                current_statement.push('"');
+                continue;
+            }
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+
+        // Handle SQLite bracket-quoted identifiers (`[col name]`). Bracket
+        // identifiers have no internal escape convention for `]`, so a
+        // matching close bracket always ends them.
+        if !in_string && !in_double_quote && ch == '[' && !in_bracket {
+            in_bracket = true;
+            current_statement.push(ch);
+            continue;
+        }
+        if in_bracket && ch == ']' {
+            in_bracket = false;
+            current_statement.push(ch);
+            continue;
+        }
+
         // Handle string literals
-        if ch == '\'' {
+        if ch == '\'' && !in_double_quote && !in_bracket {
             current_statement.push(ch);
             // Check for escaped quote ('' in SQL)
             if in_string && chars.peek() == Some(&'\'') {
@@ -435,7 +476,7 @@ fn parse_statements(script: &str) -> Vec<String> {
         }
 
         // Track BEGIN/END keywords for trigger body nesting (case-insensitive)
-        if !in_string && ch.is_ascii_alphabetic() {
+        if !in_string && !in_double_quote && !in_bracket && ch.is_ascii_alphabetic() {
             current_statement.push(ch);
             // Peek ahead to check for BEGIN or END keyword
             let rest: String = chars.clone().take_while(|c| c.is_ascii_alphabetic()).collect();
@@ -517,7 +558,7 @@ fn parse_statements(script: &str) -> Vec<String> {
         // Handle statement delimiter (semicolon)
         // Include the semicolon in the statement so the parser can see it.
         // But don't split if we're inside a BEGIN...END block (trigger body)
-        if !in_string && ch == ';' {
+        if !in_string && !in_double_quote && !in_bracket && ch == ';' {
             current_statement.push(ch); // Include the semicolon
             if begin_depth == 0 {
                 // Only split if we're not inside a BEGIN...END block.
@@ -535,7 +576,7 @@ fn parse_statements(script: &str) -> Vec<String> {
 
         // Handle newlines as delimiters for dot-commands (SQLite compatibility)
         // Dot-commands don't require semicolons - a newline ends them
-        if !in_string && ch == '\n' {
+        if !in_string && !in_double_quote && !in_bracket && ch == '\n' {
             let trimmed = current_statement.trim();
             if !trimmed.is_empty() && (trimmed.starts_with('.') || trimmed.starts_with('\\')) {
                 statements.push(trimmed.to_string());
@@ -641,6 +682,42 @@ mod tests {
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO test VALUES ('It''s a test');");
+    }
+
+    #[test]
+    fn test_parse_apostrophe_in_bracket_identifier_does_not_glue_statements() {
+        // SQLite bracket-quoted identifiers (`[...]`) can contain an
+        // apostrophe with no escaping convention (table.test table-8.4:
+        // `SELECT count(*) AS [y'all] FROM t3`). Without dedicated bracket
+        // tracking, the splitter mistook the `'` for a string-literal
+        // delimiter and glued every remaining statement into one unterminated
+        // "string" (issue #6173).
+        let script = "CREATE TABLE t5 AS SELECT count(*) AS [y'all] FROM t3; SELECT * FROM t5;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "CREATE TABLE t5 AS SELECT count(*) AS [y'all] FROM t3;");
+        assert_eq!(stmts[1], "SELECT * FROM t5;");
+    }
+
+    #[test]
+    fn test_parse_apostrophe_in_double_quoted_identifier_does_not_glue_statements() {
+        // Same hazard for a double-quoted identifier containing an
+        // apostrophe.
+        let script = "SELECT 1 AS \"y'all\"; SELECT 2;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1 AS \"y'all\";");
+        assert_eq!(stmts[1], "SELECT 2;");
+    }
+
+    #[test]
+    fn test_parse_escaped_double_quote_in_identifier() {
+        // Doubled `"` inside a double-quoted identifier is SQL's escape for
+        // an embedded literal `"`, mirroring the single-quote string escape.
+        let script = "SELECT 1 AS \"a\"\"b\";";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1 AS \"a\"\"b\";");
     }
 
     #[test]
