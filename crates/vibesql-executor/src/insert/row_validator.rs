@@ -136,11 +136,19 @@ impl<'a> RowValidator<'a> {
             .iter()
             .map(|indices| Vec::with_capacity(indices.len()))
             .collect();
-        let mut fk_values: Vec<Vec<vibesql_types::SqlValue>> = self
+        // Extract FK child-key values in the FK's *declared* column order
+        // (`fk.column_indices`), NOT ascending table-column order. For a
+        // composite FK such as `FOREIGN KEY(f, d) REFERENCES pp(b, c)` where
+        // `f` has a higher column index than `d`, a column-order scan would
+        // build the key as `[d, f]` and mis-align it against the parent's
+        // `(b, c)` columns, causing a spurious "constraint failed" / wrong
+        // parent match (fkey2-9.2.*). Building directly from
+        // `fk.column_indices` preserves the positional child->parent mapping.
+        let fk_values: Vec<Vec<vibesql_types::SqlValue>> = self
             .schema
             .foreign_keys
             .iter()
-            .map(|fk| Vec::with_capacity(fk.column_indices.len()))
+            .map(|fk| fk.column_indices.iter().map(|&idx| row_values[idx].clone()).collect())
             .collect();
 
         // Single pass through columns
@@ -172,12 +180,8 @@ impl<'a> RowValidator<'a> {
                 }
             }
 
-            // 4. Extract FK values if this column is part of any foreign key
-            for (fk_idx, fk) in self.schema.foreign_keys.iter().enumerate() {
-                if fk.column_indices.contains(&col_idx) {
-                    fk_values[fk_idx].push(value.clone());
-                }
-            }
+            // (FK child-key values are extracted above in FK-declared column
+            // order, so nothing to do here.)
         }
 
         // Store extracted keys in result
