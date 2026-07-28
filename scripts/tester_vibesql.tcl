@@ -231,6 +231,14 @@ set ::txn_trial_db ""
 # every flush and whenever a fresh transaction opens.
 set ::txn_had_tolerated_error 0
 
+# Set by trial_check_in_transaction's success path when `PRAGMA
+# count_changes=ON` is active and the statement being trial-checked is a DML
+# statement: the affected-row count SQLite would report for THAT statement's
+# execution, even though the shim defers its real execution to the eventual
+# COMMIT/ROLLBACK flush. `{}` (no row) otherwise. See trial_check_in_transaction
+# and its caller in execsql's `$::in_transaction` branch (Part of #6170).
+set ::txn_dml_count_result {}
+
 # PRAGMA state tracking - persists across process invocations
 # These are prepended to every SQL execution to maintain consistent state
 set ::pragma_full_column_names 0   ;# Default: OFF
@@ -2310,7 +2318,11 @@ proc trial_check_in_transaction {new_sql} {
     # eventual COMMIT/ROLLBACK (the normal flush_batch path).
     #
     # Returns: a TCL error (via `error ...`) if the trial reports an error,
-    # otherwise returns silently.
+    # otherwise returns silently. On success, also sets
+    # $::txn_dml_count_result (see below) so the caller can surface a
+    # SQLite-accurate `PRAGMA count_changes=ON` row for THIS statement even
+    # though its real execution is deferred to the eventual COMMIT/ROLLBACK
+    # flush.
     #
     # PERFORMANCE GUARD: re-executing the whole accumulated batch on every
     # statement is O(n^2) over the transaction length. For large transactions
@@ -2321,6 +2333,11 @@ proc trial_check_in_transaction {new_sql} {
     # statement (O(n) total). Before #5820 above-cap statements were not
     # checked at all, silently auto-passing ~9,900 fuzz.test statements. See
     # $::trial_check_max_batch and trial_check_incremental for the rationale.
+    #
+    # Reset up front so a stale value from a previous call can never leak
+    # into this statement's result (including the large-batch early return
+    # below, which does not compute a count_changes row at all).
+    set ::txn_dml_count_result {}
     if {[llength $::sql_batch] >= $::trial_check_max_batch} {
         trial_check_incremental $new_sql
         return
@@ -2442,6 +2459,32 @@ proc trial_check_in_transaction {new_sql} {
         set ::txn_survived_trial_error \
             [regexp {(?m)^Transaction rolled back} $result]
         error [translate_error_to_sqlite $new_err]
+    }
+
+    # Success: the trial (batch + $new_sql + ROLLBACK) ran cleanly. When
+    # `PRAGMA count_changes=ON` is active, real SQLite returns a one-row
+    # result carrying the affected-row count from THIS statement's own
+    # execution — even mid-transaction, since SQLite executes statement by
+    # statement over one persistent connection. The shim's per-batch process
+    # model instead defers $new_sql's real execution to the eventual
+    # COMMIT/ROLLBACK flush, so without this the caller can only report `{}`
+    # for a mid-transaction DML statement (fkey2-1.4.* expects `{0 1}`, e.g.
+    # a bare `INSERT`/`UPDATE`/`DELETE` result of "1 row changed").
+    #
+    # `build_pragma_prefix` already replayed `PRAGMA count_changes=N;` into
+    # this trial's prefix (see the call above), so the CLI emitted its own
+    # native count_changes row for every DML statement in the trial,
+    # including $new_sql — which is the LAST statement before the trailing
+    # ROLLBACK (batch order is preserved, and ROLLBACK itself never emits a
+    # data row). `parse_result` flattens every emitted row across the whole
+    # trial script into one list in execution order, so the new statement's
+    # own count is simply the tail of that list.
+    if {$::pragma_count_changes != 0
+            && [is_dml_statement [string toupper [string trim $new_sql]]]} {
+        set trial_parsed [parse_result $result]
+        if {[llength $trial_parsed] > 0} {
+            set ::txn_dml_count_result [list [lindex $trial_parsed end]]
+        }
     }
 }
 
@@ -3241,6 +3284,7 @@ proc execsql {sql {db ""}} {
         # RAISE(ROLLBACK) closes the transaction, so we drop the statement and
         # end the batched transaction (its prior statements were undone too).
         set ::txn_survived_trial_error 0
+        set ::txn_dml_count_result {}
         if {[catch {trial_check_in_transaction $sql} trial_err]} {
             if {$::txn_survived_trial_error} {
                 set ::txn_had_tolerated_error 1
@@ -3254,7 +3298,11 @@ proc execsql {sql {db ""}} {
             error $trial_err
         }
         lappend ::sql_batch $sql
-        return {}
+        # PRAGMA count_changes=ON: surface the affected-row count computed by
+        # trial_check_in_transaction's success path (see its doc comment)
+        # instead of the empty result SQLite's real per-statement execution
+        # would never produce for a DML statement.
+        return $::txn_dml_count_result
     }
 
     # Direct execution for non-transaction SQL
