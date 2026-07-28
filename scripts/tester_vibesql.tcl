@@ -3849,6 +3849,8 @@ array set vibesql_skip_files {
     tkt2409 "Pure C-API statement-handle test: read_lock_db acquires a read lock via sqlite3_prepare db2 {...} / sqlite3_step / sqlite3_finalize — shim commands VibeSQL does not implement. The tkt2409-2.1.* case sits inside a generative `for {set iCache 10} {\$::rc} {incr iCache}` loop whose termination variable \$::rc is only updated AFTER read_lock_db succeeds; because sqlite3_prepare raises 'invalid command name', \$::rc never changes and the loop ran ~4.5 MILLION iterations post-#6157 (the resilient per-command catch no longer lets the first failure abort the file), every iteration failing identically on sqlite3_prepare and bloating the results DB. Same Bucket-A C-API class as the capi*/bind/colmeta skips: no SQL-CLI-reachable coverage. (Audit #6158, follow-on to #6157/#6153, Part of #5779.)"
     malloc4 "Malloc-fault-injection test: drives SQLite's simulated out-of-memory paths (sqlite3_memdebug_fail / OOM retry loops) that VibeSQL has no equivalent for. Its fault-injection setup cannot run under the shim, so `$::name8` (a variable that setup would populate) is never set, and a large generative loop that references it ran ~1.44 MILLION iterations post-#6157, every one failing identically on `can't read \"::name8\": no such variable` and flooding the results DB (the exact degenerate-loop pathology of tkt2409, but a variable-read error rather than an unimplemented-command error — which is why the generalized #6160 breaker now also catches it). Same Bucket-A resource/VFS-internal class as the other malloc/OOM and pager-internals skips: no SQL-CLI-reachable coverage. This whole-file skip is immediate insurance; the generalized circuit-breaker is the durable backstop. (Audit #6160, follow-on to #6159/#6158/#6157, Part of #5779.)"
     delete_db "Tests the sqlite3_delete_database() C-API (cleans up WAL/journal files) - not a SQL feature"
+    nan "Verifies IEEE754 NaN/Inf handling, but the harness reaches it entirely through the C API: nan-1.1.1 does `set ::STMT [sqlite3_prepare db ...]` / sqlite3_bind_double / sqlite3_step to CREATE TABLE t1 and insert its first row, and every later block (nan-1.1.2..1.2.7, nan-2.1, nan-3.*) reuses that same $::STMT handle or hexio_write's the raw database file. Because sqlite3_prepare/hexio_write are unimplemented shim commands, the per-test C-API detector correctly skips nan-1.1.1 before it runs — but that also means table t1 is never created, so every ostensibly SQL-only assertion downstream (nan-1.1.7, nan-3.1/3.2, nan-4.1..nan-4.35, all plain `db eval {INSERT INTO t1 ...}` / `SELECT ... FROM t1`) cascades to 'no such table: t1'. Same cascade shape as trigger6 (#5470): a C-API-gated setup test is the sole source of schema for the rest of the file. Not a SQL-CLI-reachable file once its setup is skipped. (Part of #6172/#5779.)"
+    types3 "Verifies SQLite manifest-type / Tcl dual-representation interaction, but every assertion needs either `tcl_variable_type` (introspects a Tcl_Obj's internal type representation — a Tcl-C-API concept the shim cannot emulate; types3-1.1..2.6) or add_text_type()/add_int_type()/add_real_type() (custom functions registered via `sqlite3_create_function db`, unreachable from the SQL CLI; types3-3.2..3.5). The lone exception, types3-3.1 (`SELECT ... WHERE NOT x=upper(1)`), already passes standalone and needs no C-API scaffolding, but it is not enough SQL-CLI-reachable coverage to justify running the file (same shape as the already-skipped capi3's lone do_execsql_test). (Part of #6172/#5779.)"
     window5 "Entire file tests the sqlite3_create_window_function() C-API (file header: 'it tests the sqlite3_create_window_function() API'). At file scope it registers custom C/TCL window functions and aggregates — sqlite3_create_window_function, test_create_window_function_misuse, test_create_sumint (win/sumint), test_override_sum — none reachable from the SQL CLI (harness limitation #5720). Every do_execsql_test then invokes win()/sumint()/the overridden sum() as window functions, so all tests fail purely because the custom functions cannot be registered; the file also aborts at file scope on 'invalid command name sqlite3_create_window_function'. Same C-API harness class as the intreal/func4 whole-file skips. (Part of #6191/#5779; routed to Bucket-A per #6154.)"
     windowfault "SQLite fault-injection file: uses the tvfs test VFS (`testvfs tvfs`) and OOM/IO fault-injection scaffolding at file scope to verify window-function query behavior under simulated malloc/IO failure. The tvfs command and fault-injection harness are unreachable from the SQL CLI, so the file aborts at file scope on 'invalid command name tvfs' and every test is recorded as a filescope-err cascade marker — none is a SQL-CLI-reachable window-function assertion. Same fault-injection harness class as fkey_malloc/malloc4. Supersedes the per-test windowfault- pattern skip (a file-scope abort bypasses per-test skipping). (Part of #6191/#5779; routed to Bucket-A per #6154.)"
     incrblobfault "Uses incrblob - SQLite incremental blob I/O API"
@@ -4075,6 +4077,7 @@ array set vibesql_skip_files {
 variable vibesql_partial_skip_files
 array set vibesql_partial_skip_files {
     atof1 "PARTIAL: the ~39,998 dynamically-named atof1-1.\$i.1/.2 loop tests are auto-skipped because they call real2hex()/hex2real() — SQLite C-test-harness functions (test_func.c) that expose raw IEEE-754 bit patterns and are unreachable from the SQL CLI. Same harness-artifact class as the intreal whole-file skip, but atof1 CANNOT be a whole-file skip: the ~7 non-loop atof1-2.x/atof-3.x tests are legitimate do_execsql_test coverage that must keep running. Enforced by the real2hex()/hex2real() regex detectors in vibesql_skip_test (search 'real2hex' below), NOT by a whole-file skip. Current non-loop status: atof1-2.40/atof-3.2/atof-3.3 pass; atof1-2.10/2.20/2.30 (UTF16be substr) and atof-3.1 (large-literal REAL precision) are REAL open engine bugs, tracked in #6065 — they must keep running and reporting 'failed', never reclassified as skipped."
+    istrue "PARTIAL (Part of #6172): the istrue-600.\$tn.3/.4 pairs (tn=1..6) are auto-skipped by the istrue-600.*.3 / istrue-600.*.4 patterns because their sibling istrue-600.\$tn.2 setup (a C-API sqlite3_bind_double NaN/Inf insert) is itself unreachable from the SQL CLI, leaving t1 empty for the downstream plain-SQL SELECTs. istrue CANNOT be a whole-file skip: istrue-1..istrue-590 (IS TRUE/IS FALSE/IS NOT TRUE/IS NOT FALSE core semantics), istrue-700/800/820/830/840/841 (TRUE/FALSE as non-reserved identifiers) are legitimate do_execsql_test/do_catchsql_test coverage that must keep running and does (see #6236). Enforced by the istrue-600.*.3 / istrue-600.*.4 regex detectors in vibesql_skip_patterns, NOT by a whole-file skip."
 }
 
 # Tests to skip because they test SQLite-specific behavior that VibeSQL
@@ -5761,6 +5764,8 @@ array set vibesql_skip_tests {
 
 # Pattern-based skip list for tests with many numbered variants
 variable vibesql_skip_patterns {
+    {istrue-600.*.3 "harness cascade (Part of #6172): istrue-600.\$tn.2 binds a raw IEEE754 NaN/Inf double into t1 via sqlite3_prepare/sqlite3_bind_double (C-API, unimplemented shim command — SQL text has no literal that survives SQLite's NaN-to-NULL conversion the way a raw C bind does), so it is correctly auto-skipped by the per-test C-API detector. But that leaves t1 empty, so the plain `SELECT x IS TRUE FROM t1` in istrue-600.\$tn.3 returns zero rows instead of the expected one-row boolean result — not a SQL engine defect, a cascade from the skipped C-API setup (same shape as the nan.test/trigger6 cascades). Covers istrue-600.1.3..600.6.3."}
+    {istrue-600.*.4 "harness cascade (Part of #6172): same root cause as istrue-600.*.3 above — istrue-600.\$tn.2's C-API NaN/Inf bind is skipped, so t1 is empty when istrue-600.\$tn.4's `SELECT x IS FALSE FROM t1` runs. Covers istrue-600.1.4..600.6.4."}
     {select9-2.*.3 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). These compound-SELECT ORDER BY ... COLLATE reverse cases depend on the 'reverse' collation registered via 'db collate reverse reverse', which the TCL shim cannot bridge to the VibeSQL CLI subprocess (same class as the sqlite3_create_aggregate stub in #5712). Covers select9-2.x.3 and its .flipped and limit/offset variants for all index loops."}
     {select9-2.*.6 "user-defined COLLATE (C-API) not reachable from SQL CLI - harness limitation (issue #5720). UNION ALL ... ORDER BY ... COLLATE reverse cases depending on the 'reverse' collation registered via 'db collate reverse reverse'. Covers select9-2.x.6 and its .flipped and limit/offset variants for all index loops."}
     {e_reindex-2. "A5 harness limitation (issue #5720): user-defined COLLATE (C-API) not reachable from the SQL CLI subprocess. The entire e_reindex-2.* block registers custom Tcl collations via 'db collate collA sort_by_length' / 'db collate collB sort_by_value' and asserts that REINDEX rebuilds indexes when a collation function's behavior changes; the TCL shim cannot bridge these C-API collations to the VibeSQL CLI (same class as the select9-2.*.3 COLLATE reverse cases). Bare-REINDEX + built-in-collation coverage stays visible via e_reindex-0.* (unaffected by this glob). Part of #5779; classified via #6195."}
@@ -6855,10 +6860,27 @@ proc do_eqp_test {name sql expected} {
     puts "  EQP Got:      '$result_norm'"
 }
 
+proc realnum_normalize {r} {
+    # Mirrors upstream SQLite's tester.tcl realnum_normalize: different Tcl
+    # versions/platforms render floating point infinity/exponents
+    # differently ("Inf" vs "inf", "1.#INF" on some Windows Tcl builds,
+    # ".0e+05" vs "e+5"). do_realnum_test compares BOTH the actual and
+    # expected values through this normalizer so those cosmetic Tcl-level
+    # differences don't fail a test whose underlying SQL value is correct.
+    # Previously this shim's do_realnum_test skipped normalization
+    # entirely, so any test relying on it (nan.test, cast.test, expr.test,
+    # alter.test, enc4.test, tkt3838.test, tkt3922.test) spuriously failed
+    # on a mismatch like "-inf" (VibeSQL/Tcl `expected`) vs "-Inf" (VibeSQL
+    # SQL-level rendering) — a Tcl-format artifact, not an engine bug.
+    string map {1.#INF inf Inf inf .0e e} [regsub -all {(e[+-])0+} $r {\1}]
+}
+
 proc do_realnum_test {name script expected} {
     # Test that expects floating-point results
-    # Uses approximate comparison for floating point numbers
-    do_test $name $script $expected
+    # Uses approximate comparison for floating point numbers by normalizing
+    # both the actual (post-evaluation) and expected values the same way
+    # upstream SQLite's tester.tcl do_realnum_test does.
+    uplevel 1 [list do_test $name [subst -nocommands { realnum_normalize [ $script ] }] [realnum_normalize $expected]]
 }
 
 proc do_vmstep_test {name sql limit expected} {
