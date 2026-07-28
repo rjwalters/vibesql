@@ -155,7 +155,10 @@ fn rename_column_missing_column_errors() {
     setup(&mut db);
 
     let err = exec(&mut db, "ALTER TABLE t2 RENAME nosuch TO x").unwrap_err();
-    assert!(matches!(err, ExecutorError::ColumnNotFound { .. }), "got: {err:?}");
+    assert!(
+        matches!(&err, ExecutorError::Other(m) if m == "no such column: \"nosuch\""),
+        "got: {err:?}"
+    );
 }
 
 #[test]

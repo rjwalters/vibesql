@@ -122,6 +122,37 @@ fn rename_succeeds_when_dependents_are_valid() {
     assert!(!db.get_table("t1").unwrap().schema.has_column("c"));
 }
 
+/// altercol.test 12.2.2 / 12.2.3: renaming a column of a VIEW is rejected with
+/// SQLite's dedicated `cannot rename columns of view "<name>"` message rather
+/// than falling through to the generic `no such table` path.
+#[test]
+fn rename_column_of_view_is_rejected() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a, b)");
+    create_view(&mut db, "CREATE VIEW v1 AS SELECT * FROM t1");
+    assert_eq!(
+        rename_column_err(&mut db, "ALTER TABLE v1 RENAME a TO z"),
+        "cannot rename columns of view \"v1\""
+    );
+    // The base table is untouched.
+    assert!(db.get_table("t1").unwrap().schema.has_column("a"));
+}
+
+/// altercol.test 12.4.2: renaming a column that does not exist reports SQLite's
+/// `no such column: "<col>"` (quoted), matching the DROP COLUMN wording.
+#[test]
+fn rename_missing_column_reports_no_such_column() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t2(x, y, z)");
+    assert_eq!(
+        rename_column_err(&mut db, "ALTER TABLE t2 RENAME COLUMN a TO b"),
+        "no such column: \"a\""
+    );
+    // The table's columns are unchanged.
+    assert!(db.get_table("t2").unwrap().schema.has_column("x"));
+    assert!(!db.get_table("t2").unwrap().schema.has_column("b"));
+}
+
 /// A CTE name referenced in a trigger body is not a base table and must not be
 /// mistaken for a missing table: the rename still succeeds.
 #[test]
