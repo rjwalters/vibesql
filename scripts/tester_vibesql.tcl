@@ -2945,7 +2945,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill|user_version|application_id|schema_version)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill|user_version|application_id|schema_version|lock_status|filename)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -7539,6 +7539,17 @@ proc database_may_be_corrupt {} {
     return
 }
 
+proc database_never_corrupt {} {
+    # Stub for SQLite's database_never_corrupt assertion (the inverse of
+    # database_may_be_corrupt above) - re-enables the corruption-tolerant
+    # assertions database_may_be_corrupt suppressed. Both are no-ops in
+    # VibeSQL: no C-level assertions to toggle either way (pragma.test calls
+    # this at file scope after its hexio_write corruption-injection section;
+    # without this stub, the missing proc aborted every remaining test in
+    # the file as a filescope-err cascade, part of #6175).
+    return
+}
+
 proc db_enter {db} {
     # Stub for entering database context
     return
@@ -8158,26 +8169,42 @@ proc sqlite3 {db args} {
 
     # Reset PRAGMA state to defaults for new database
     # (session-only PRAGMAs like reverse_unordered_selects are reset on new connections)
-    set ::pragma_full_column_names 0
-    set ::pragma_short_column_names 1
-    set ::pragma_case_sensitive_like 0
-    set ::pragma_reverse_unordered_selects 0
-    set ::pragma_foreign_keys 0
-    set ::pragma_defer_foreign_keys 0
-    # recursive_triggers is per-connection in SQLite (OFF by default); a fresh
-    # open must not inherit the previous connection's setting (#5909).
-    set ::pragma_recursive_triggers 0
-    set ::pragma_encoding ""  ;# Fresh connection: encoding resets to default UTF-8 (#6172)
-    # synchronous and cache_size are session-scoped in real SQLite too (never
-    # persisted to the file) — reset on every fresh connection. Unlike those,
-    # default_cache_size_cookie is intentionally NOT reset here: SQLite
-    # persists it into the file header, so it must survive a `db close` /
-    # reopen against the SAME file (pragma.test pragma-1.9.1+, #6175). It is
-    # only cleared below, in the "first time opening this file" branch.
-    set ::pragma_synchronous_raw ""
-    set ::pragma_cache_size_raw ""
-    set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
-    set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
+    #
+    # These globals are NOT connection-scoped — they track "the session pragma
+    # state build_pragma_prefix should replay", which in practice means the
+    # PRIMARY "db" connection (matching ::db_file's own scoping directly
+    # above). Only reset them when (re)opening that primary connection, same
+    # guard as the ::db_file assignment: opening a SECONDARY named connection
+    # (db2, db3, ...) alongside an already-configured "db" must not clobber
+    # db's tracked settings. Before this guard, `sqlite3 db2 ...` unconditionally
+    # zeroed ::pragma_cache_size_raw (and friends) out from under "db", so a
+    # later plain `execsql` against "db" silently lost a `PRAGMA cache_size=N`
+    # set earlier in the same test file (pragma.test pragma-15.1..15.3: cache_size
+    # is set to 59 on "db", db2 opens to create a table, and the ORIGINAL "db"
+    # connection's tracked cache_size was wiped back to "" instead of surviving
+    # the schema-reload, part of #6175).
+    if {$db eq "" || $db eq "db"} {
+        set ::pragma_full_column_names 0
+        set ::pragma_short_column_names 1
+        set ::pragma_case_sensitive_like 0
+        set ::pragma_reverse_unordered_selects 0
+        set ::pragma_foreign_keys 0
+        set ::pragma_defer_foreign_keys 0
+        # recursive_triggers is per-connection in SQLite (OFF by default); a fresh
+        # open must not inherit the previous connection's setting (#5909).
+        set ::pragma_recursive_triggers 0
+        set ::pragma_encoding ""  ;# Fresh connection: encoding resets to default UTF-8 (#6172)
+        # synchronous and cache_size are session-scoped in real SQLite too (never
+        # persisted to the file) — reset on every fresh connection. Unlike those,
+        # default_cache_size_cookie is intentionally NOT reset here: SQLite
+        # persists it into the file header, so it must survive a `db close` /
+        # reopen against the SAME file (pragma.test pragma-1.9.1+, #6175). It is
+        # only cleared below, in the "first time opening this file" branch.
+        set ::pragma_synchronous_raw ""
+        set ::pragma_cache_size_raw ""
+        set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
+        set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
+    }
 
     # Create/refresh the "$db" command as an alias to the shared master
     # dispatcher. Only create it if the name doesn't already resolve to a
@@ -8867,6 +8894,19 @@ proc sqlite3_config_cis {args} { return "" }
 proc sqlite3_config_error {args} { return "" }
 proc sqlite3_config_sqllog {args} { return "" }
 proc sqlite3_db_config_lookaside {args} { return "" }
+
+# test_set_config_pagecache / test_restore_config_pagecache: TCL-level test
+# harness helpers (tester.tcl / malloc_common.tcl) that swap SQLITE_CONFIG_PAGECACHE
+# to a fixed-size buffer for the duration of a file (typically to make
+# malloc-fault-injection page-cache behavior deterministic), then restore the
+# default allocator at end of file. Same "no SQL-reachable effect" class as the
+# sqlite3_config_* stubs above: VibeSQL has no page-cache allocator to swap.
+# Before these stubs existed, pragma2.test's plain `test_set_config_pagecache 0
+# 0` file-scope call aborted with "invalid command name", which recorded a
+# filescope-err marker and cascaded empty results into every later do_test in
+# the file (part of #6175).
+proc test_set_config_pagecache {args} { return "" }
+proc test_restore_config_pagecache {args} { return "" }
 proc sqlite3_hard_heap_limit {args} { return 0 }
 proc sqlite3_hard_heap_limit64 {args} { return 0 }
 proc sqlite3_enable_shared_cache {args} { return "" }
