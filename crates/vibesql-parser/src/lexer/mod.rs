@@ -78,6 +78,28 @@ impl fmt::Display for LexerError {
     }
 }
 
+/// Lightweight classification of a previously-emitted token.
+///
+/// Only enough information is retained to decide whether a following `-` is a
+/// *unary* minus (negation) or a *binary* subtraction operator. This is needed
+/// solely to reproduce SQLite's "hex literal too big" error for a negated hex
+/// literal equal to the minimum signed 64-bit integer (see
+/// [`Lexer::tokenize_hex_literal`]); it deliberately does not attempt full
+/// expression parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PrevTokenKind {
+    /// Start of input (no previous token yet).
+    Start,
+    /// A bare `-` symbol.
+    Minus,
+    /// A token that terminates a value/operand, so a following `-` is binary
+    /// subtraction (numbers, strings, identifiers, `)`, placeholders, and the
+    /// value-producing keywords NULL/TRUE/FALSE/CURRENT_*).
+    ValueTerminator,
+    /// Anything else — a following `-` is a unary minus.
+    Other,
+}
+
 /// SQL Lexer - converts SQL text into tokens.
 ///
 /// Uses direct &str access for zero-copy tokenization.
@@ -85,13 +107,58 @@ impl fmt::Display for LexerError {
 pub struct Lexer<'a> {
     input: &'a str,
     byte_pos: usize,
+    /// Classification of the most recently emitted token.
+    prev_kind: PrevTokenKind,
+    /// Classification of the token emitted before [`Self::prev_kind`].
+    prev_prev_kind: PrevTokenKind,
 }
 
 impl<'a> Lexer<'a> {
     /// Create a new lexer from SQL input.
     #[inline]
     pub fn new(input: &'a str) -> Self {
-        Lexer { input, byte_pos: 0 }
+        Lexer {
+            input,
+            byte_pos: 0,
+            prev_kind: PrevTokenKind::Start,
+            prev_prev_kind: PrevTokenKind::Start,
+        }
+    }
+
+    /// Classify a just-emitted token for unary/binary `-` disambiguation.
+    pub(super) fn classify_prev_token(token: &Token) -> PrevTokenKind {
+        use crate::keywords::Keyword;
+        match token {
+            Token::Symbol('-') => PrevTokenKind::Minus,
+            Token::Number(_)
+            | Token::String(_)
+            | Token::BlobLiteral(_)
+            | Token::Identifier(_)
+            | Token::DelimitedIdentifier(_)
+            | Token::RParen
+            | Token::Placeholder
+            | Token::NumberedPlaceholder(_)
+            | Token::NamedPlaceholder(_)
+            | Token::SessionVariable(_)
+            | Token::UserVariable(_) => PrevTokenKind::ValueTerminator,
+            Token::Keyword { keyword, .. } => match keyword {
+                Keyword::Null
+                | Keyword::True
+                | Keyword::False
+                | Keyword::CurrentDate
+                | Keyword::CurrentTime
+                | Keyword::CurrentTimestamp => PrevTokenKind::ValueTerminator,
+                _ => PrevTokenKind::Other,
+            },
+            _ => PrevTokenKind::Other,
+        }
+    }
+
+    /// Record a just-emitted token in the two-slot previous-token history.
+    #[inline]
+    pub(super) fn record_prev_token(&mut self, token: &Token) {
+        self.prev_prev_kind = self.prev_kind;
+        self.prev_kind = Self::classify_prev_token(token);
     }
 
     /// Returns the original source input.
@@ -114,6 +181,7 @@ impl<'a> Lexer<'a> {
             }
 
             let token = self.next_token()?;
+            self.record_prev_token(&token);
             tokens.push(token);
         }
 
@@ -139,6 +207,7 @@ impl<'a> Lexer<'a> {
             }
 
             let token = self.next_token()?;
+            self.record_prev_token(&token);
             let end = self.byte_pos;
             tokens.push((token, Span::new(start, end)));
         }
