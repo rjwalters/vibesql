@@ -1289,7 +1289,7 @@ fn execute_insert_internal(
         }
     } else {
         // Slow path: Insert rows one by one (needed for triggers, special clauses)
-        for (mut full_row_values, mut explicit_rowid, rowid_auto_assigned, candidate_last_id) in
+        for (mut full_row_values, mut explicit_rowid, rowid_auto_assigned, mut candidate_last_id) in
             validated_rows
         {
             // Set when a REPLACE conflict resolution fixes this row's rowid
@@ -1439,6 +1439,45 @@ fn execute_insert_internal(
                 )? == crate::trigger_execution::TriggerOutcome::SkipRow
                 {
                     continue;
+                }
+            }
+
+            // SQLite allocates the real rowid for an auto-assigned INTEGER
+            // PRIMARY KEY (or `rowid` pseudo-column) only AFTER the BEFORE
+            // INSERT trigger has run. A BEFORE INSERT trigger body may itself
+            // insert rows into this same table — directly, or via recursive
+            // triggers — advancing the table's max rowid and, for AUTOINCREMENT,
+            // the `sqlite_sequence` high-water mark. The pre-trigger value fixed
+            // in the validation loop above would then collide with a rowid the
+            // trigger just consumed, producing duplicate rowids (autoinc-3928,
+            // recursive trigger inserts into an AUTOINCREMENT table). Recompute
+            // the auto-assigned rowid here against the now-current table state.
+            if has_insert_triggers && rowid_auto_assigned && !replace_fixed_rowid {
+                let recomputed = if schema.is_autoincrement {
+                    crate::autoincrement::compute_next_autoincrement_rowid(
+                        db,
+                        &storage_table_name,
+                        &schema.name,
+                    )?
+                } else {
+                    db.get_table(&storage_table_name)
+                        .map(|t| t.allocate_rowid())
+                        .unwrap_or(Ok(1))
+                        .map_err(|e| ExecutorError::StorageError(e.to_string()))?
+                };
+                if let Some(idx) = ipk_col_idx {
+                    full_row_values[idx] = vibesql_types::SqlValue::Integer(recomputed);
+                    // last_insert_rowid() and the end-of-statement sequence bump
+                    // must both observe the recomputed (post-trigger) rowid, not
+                    // the stale value assigned before the trigger ran.
+                    candidate_last_id = Some(recomputed);
+                    batch_max_ipk =
+                        Some(batch_max_ipk.map_or(recomputed, |m| m.max(recomputed)));
+                } else {
+                    // `rowid` pseudo-column table (no INTEGER PRIMARY KEY): the
+                    // auto rowid is carried in `explicit_rowid`, which flows into
+                    // the stored row and last_insert_rowid() below.
+                    explicit_rowid = Some(recomputed as u64);
                 }
             }
 
