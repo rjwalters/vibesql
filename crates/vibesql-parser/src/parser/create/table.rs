@@ -121,12 +121,28 @@ impl Parser {
                 // SQLite compatibility: at the start of a column definition, a keyword
                 // can only be a column name. Table-level constraint keywords (CONSTRAINT,
                 // PRIMARY, FOREIGN, UNIQUE, CHECK, FULLTEXT) are already consumed above,
-                // so any remaining keyword here is an unquoted column name. SQLite reserves
-                // very few words and accepts the rest as identifiers in this position,
-                // including DESC, ASC, KEY, BEGIN, END (see table.test table-7.x).
+                // so any remaining keyword here is an unquoted column name candidate.
+                // SQLite reserves very few words and accepts the rest as identifiers in
+                // this position, including DESC, ASC, KEY, BEGIN, END (see table.test
+                // table-7.x) — but truly reserved words (ON, SELECT, WHERE, ...) are NOT
+                // valid column names, matching SQLite's `nm` grammar production (which
+                // only demotes its `%fallback ID` keyword set to identifiers here).
+                // Without this guard `CREATE TABLE t10(a, ON, c)` silently created a
+                // column literally named `on` instead of raising SQLite's `near "ON":
+                // syntax error` (alter.test alter-3.2.6).
+                //
+                // Uses `can_be_identifier_in_table_position()` rather than the narrower
+                // `can_be_identifier() || is_sqlite_fallback_keyword()` pair: VibeSQL has
+                // its own extra keywords (e.g. `Pad`) that are not part of SQLite's real
+                // reserved/fallback vocabulary at all, and a stricter allow-list rejected
+                // them as column names (regression: `CREATE TABLE parent(pad INTEGER, ...)`
+                // in constraint_rehydration_reload_tests.rs). The table-position predicate
+                // is a denylist of the genuinely-reserved SQL keywords (mirroring
+                // `parse_table_ref`'s use of the same predicate below), so any keyword
+                // outside that denylist — including VibeSQL-only ones — stays accepted.
                 //
                 // SQL:1999: normalize to lowercase when used as an unquoted identifier.
-                Token::Keyword { keyword: kw, .. } => {
+                Token::Keyword { keyword: kw, .. } if kw.can_be_identifier_in_table_position() => {
                     let col_name = format!("{}", kw).to_lowercase();
                     self.advance();
                     col_name
@@ -140,6 +156,12 @@ impl Parser {
                     let c = col.clone();
                     self.advance();
                     c
+                }
+                // A genuinely reserved keyword here (ON, SELECT, WHERE, ...) is a
+                // syntax error, matching SQLite's `near "<TOKEN>": syntax error`
+                // wording rather than a generic "Expected column name" message.
+                Token::Keyword { .. } => {
+                    return Err(ParseError { message: self.peek().syntax_error() })
                 }
                 _ => return Err(ParseError { message: "Expected column name".to_string() }),
             };

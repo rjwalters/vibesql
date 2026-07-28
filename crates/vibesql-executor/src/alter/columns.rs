@@ -318,10 +318,10 @@ pub(super) fn execute_drop_column(
         )));
     }
 
-    // The schema table itself may not be altered.
-    if super::validation::is_sqlite_schema_table(table_name) {
-        return Err(ExecutorError::Other("table sqlite_master may not be altered".to_string()));
-    }
+    // (The schema/statistics-table guard — `table <name> may not be altered` —
+    // is now checked centrally in `alter::mod::execute_with_source` before
+    // dispatch, uniformly across every ALTER sub-command; see that check for
+    // rationale. Unreachable here.)
 
     // Resolve the table. A missing table keeps `TableNotFound`, which the
     // harness normalizes to SQLite's `no such table: <name>`.

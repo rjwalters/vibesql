@@ -589,3 +589,72 @@ fn test_parse_add_column_with_check_constraint() {
         _ => panic!("Expected ALTER TABLE ADD COLUMN statement"),
     }
 }
+
+// ========================================================================
+// `ON` must stay reserved as an unquoted identifier (alter.test alter-3.2.*,
+// part of #6174).
+// ========================================================================
+//
+// SQLite's grammar never demotes `ON` to a plain identifier (it is absent
+// from parse.y's `%fallback ID` list), so it cannot be used unquoted as a
+// database/table/column name anywhere. `CREATE TRIGGER ... ON ON ...` and
+// `CREATE TABLE t(a, ON, c)` must both raise a syntax error rather than
+// silently accepting `on` as a name.
+
+#[test]
+fn test_create_table_rejects_on_as_column_name() {
+    // alter.test alter-3.2.6: `CREATE TABLE t10(a, ON, c);` -> syntax error.
+    let result = Parser::parse_sql("CREATE TABLE t10(a, ON, c);");
+    assert!(result.is_err(), "unquoted ON must be rejected as a column name: {:?}", result);
+}
+
+#[test]
+fn test_create_table_accepts_quoted_on_as_column_name() {
+    // alter.test alter-3.2.7: quoting escapes the reservation.
+    let result = Parser::parse_sql("CREATE TABLE t10(a, 'ON', c);");
+    assert!(result.is_ok(), "quoted 'ON' should parse as a column name: {:?}", result.err());
+}
+
+#[test]
+fn test_create_trigger_rejects_on_as_table_name() {
+    // alter.test alter-3.2.8: the trigger's own `ON <table>` target cannot be
+    // the unquoted keyword `ON` itself.
+    let result = Parser::parse_sql("CREATE TRIGGER trig4 AFTER INSERT ON ON BEGIN SELECT 1; END;");
+    assert!(
+        result.is_err(),
+        "unquoted ON must be rejected as a trigger's table name: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_insert_into_rejects_on_as_table_name() {
+    let result = Parser::parse_sql("INSERT INTO ON VALUES(1);");
+    assert!(result.is_err(), "unquoted ON must be rejected as an INSERT INTO table name");
+}
+
+#[test]
+fn test_drop_table_rejects_on_as_table_name() {
+    let result = Parser::parse_sql("DROP TABLE ON;");
+    assert!(result.is_err(), "unquoted ON must be rejected as a DROP TABLE table name");
+}
+
+#[test]
+fn test_fallback_keywords_still_accepted_as_table_and_trigger_targets() {
+    // Regression guard: the reservation is specific to genuinely-reserved
+    // words. SQLite's %fallback ID keywords (e.g. `savepoint`, `view`) must
+    // remain usable unquoted as table names in these same positions.
+    assert!(
+        Parser::parse_sql("CREATE TRIGGER trig4 AFTER INSERT ON savepoint BEGIN SELECT 1; END;")
+            .is_ok(),
+        "fallback keyword `savepoint` should still parse as a trigger's table name"
+    );
+    assert!(
+        Parser::parse_sql("INSERT INTO savepoint VALUES(1);").is_ok(),
+        "fallback keyword `savepoint` should still parse as an INSERT INTO table name"
+    );
+    assert!(
+        Parser::parse_sql("DROP TABLE savepoint;").is_ok(),
+        "fallback keyword `savepoint` should still parse as a DROP TABLE table name"
+    );
+}

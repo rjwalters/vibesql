@@ -13,6 +13,16 @@ pub(super) fn execute_rename_table(
     stmt: &RenameTableStmt,
     database: &mut Database,
 ) -> Result<String, ExecutorError> {
+    // A view is not a table: SQLite rejects `ALTER TABLE <view> RENAME TO ...`
+    // with a view-specific message (`view <name> may not be altered`), before
+    // any table-name resolution — otherwise it falls through to the generic
+    // (and wrong) `no such table` (alter-12.2). Uses the view's stored name for
+    // case-preserving output, matching how RENAME COLUMN's equivalent check
+    // (below in `columns::execute_rename_column`) reports it.
+    if let Some(view) = database.catalog.get_view(&stmt.table_name) {
+        return Err(ExecutorError::Other(format!("view {} may not be altered", view.name)));
+    }
+
     // Reject renaming a table to a reserved `sqlite_`-prefixed name. SQLite
     // reserves that prefix for its own schema objects and errors
     // `object name reserved for internal use: <name>` (sqlite3 3.51.0,

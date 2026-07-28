@@ -72,6 +72,41 @@ impl AlterTableExecutor {
             AlterTableStmt::ModifyColumn(s) => &s.table_name,
             AlterTableStmt::ChangeColumn(s) => &s.table_name,
         };
+
+        // SQLite refuses to ALTER any of its own schema/statistics tables
+        // (`sqlite_master`/`sqlite_schema`, and `sqlite_stat1..4`) with a single
+        // uniform message across *every* ALTER TABLE sub-command — RENAME TO,
+        // RENAME COLUMN, ADD COLUMN, DROP COLUMN, ADD/DROP CONSTRAINT, ALTER
+        // COLUMN — `table <name> may not be altered`. The schema table is a
+        // special case: SQLite canonicalizes it to `sqlite_master` regardless of
+        // which alias (`sqlite_schema`, temp variants) or case the statement used
+        // (verified against sqlite3 3.51.0 — `ALTER TABLE sqlite_schema ...` and
+        // `ALTER TABLE SqLiTe_master ...` both report `sqlite_master`). The
+        // statistics tables instead echo the name exactly as spelled. These
+        // names are never real catalog entries, so without this upfront check
+        // every sub-command falls through to a generic (and wrong) `no such
+        // table` instead (alter-2.4, alter-15.*, altercol-6.1/12.1.2,
+        // alterdropcol.test). Checked before the privilege check and before
+        // dispatch, so it applies uniformly and atomically — no sub-command-
+        // specific handler needs its own copy of this guard.
+        if validation::is_sqlite_schema_table(table_name) {
+            // The schema table always reports the canonical `sqlite_master` name,
+            // regardless of which alias (`sqlite_master`/`sqlite_schema`, temp
+            // variants) or case the statement used — SQLite canonicalizes this
+            // specific message (verified against sqlite3 3.51.0).
+            return Err(ExecutorError::Other(
+                "table sqlite_master may not be altered".to_string(),
+            ));
+        }
+        if crate::sqlite_stat::is_sqlite_stat_table(table_name) {
+            // The statistics tables (`sqlite_stat1..4`) echo the actual name as
+            // spelled in the statement.
+            return Err(ExecutorError::Other(format!(
+                "table {} may not be altered",
+                table_name
+            )));
+        }
+
         PrivilegeChecker::check_alter(database, table_name)?;
 
         let result = match stmt {
