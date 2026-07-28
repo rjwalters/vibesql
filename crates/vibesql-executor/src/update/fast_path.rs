@@ -212,6 +212,7 @@ pub(super) fn try_fast_path_update(
     // references untouched columns or the rowid evaluates correctly here.
     if !schema.check_constraints.is_empty() {
         super::constraints::ConstraintValidator::new(schema)
+            .with_check_constraints_ignored(database.ignore_check_constraints())
             .validate_check_constraints(&new_row)?;
     }
 

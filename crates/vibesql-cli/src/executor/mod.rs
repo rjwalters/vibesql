@@ -1521,6 +1521,7 @@ impl SqlExecutor {
                 // VibeSQL never finds corruption in a healthy table, so every
                 // valid target still resolves to "ok"; we only add the missing
                 // no-such-table validation for the name-argument form.
+                let mut target_table: Option<String> = None;
                 if let Some(name) = match &stmt.value {
                     Some(vibesql_ast::PragmaValue::Identifier(name)) => Some(name.clone()),
                     Some(vibesql_ast::PragmaValue::String(name)) => Some(name.clone()),
@@ -1544,12 +1545,60 @@ impl SqlExecutor {
                         if self.db.catalog.get_table(&lookup).is_none() {
                             anyhow::bail!("no such table: {}", name);
                         }
+                        target_table = Some(name);
                     }
                 }
+
+                // SQLite compatibility (Part of #6173, check.test check-4.8/
+                // 4.8.1): `PRAGMA integrity_check` validates every row against
+                // its table's CHECK constraints and reports one
+                // "CHECK constraint failed in <table>" diagnostic per row that
+                // violates any constraint, UNLESS `ignore_check_constraints`
+                // is ON (in which case CHECK validation is skipped here too,
+                // mirroring SQLite's coupling of the two settings — the same
+                // pragma that disables CHECK enforcement on DML also disables
+                // it during integrity_check).
+                let mut diagnostics: Vec<String> = Vec::new();
+                if !self.db.ignore_check_constraints() {
+                    let tables_to_check: Vec<String> = match &target_table {
+                        Some(name) => vec![name.clone()],
+                        None => self.db.catalog.list_tables(),
+                    };
+                    let current_schema = self.db.catalog.get_current_schema().to_string();
+                    for tbl_name in &tables_to_check {
+                        let schema = match self.db.catalog.get_table(tbl_name) {
+                            Some(schema) if !schema.check_constraints.is_empty() => schema,
+                            _ => continue,
+                        };
+                        let qualified_name = format!("{}.{}", current_schema, tbl_name);
+                        let rows: Vec<_> = if let Some(table) = self.db.tables.get(&qualified_name)
+                        {
+                            table.scan_live().map(|(_, row)| row.clone()).collect()
+                        } else if let Some(table) = self.db.tables.get(tbl_name.as_str()) {
+                            table.scan_live().map(|(_, row)| row.clone()).collect()
+                        } else {
+                            continue;
+                        };
+                        for row in &rows {
+                            if vibesql_executor::enforce_check_constraints(schema, &row.values)
+                                .is_err()
+                            {
+                                diagnostics
+                                    .push(format!("CHECK constraint failed in {}", tbl_name));
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if diagnostics.is_empty() {
+                    diagnostics.push("ok".to_string());
+                }
+                let row_count = diagnostics.len();
                 return Ok(QueryResult {
                     columns: vec![pragma_name.to_lowercase()],
-                    rows: vec![vec![Some("ok".to_string())]],
-                    row_count: 1,
+                    rows: diagnostics.into_iter().map(|d| vec![Some(d)]).collect(),
+                    row_count,
                     execution_time_ms: None,
                     message: None,
                 });
@@ -1689,6 +1738,22 @@ impl SqlExecutor {
                     // at COMMIT/ROLLBACK. Runtime semantic change (deferring
                     // FK violations until COMMIT) ships in Phase C2.
                     self.db.set_defer_foreign_keys(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "IGNORE_CHECK_CONSTRAINTS" => {
+                    // SQLite-compatible PRAGMA ignore_check_constraints
+                    // (Part of #6173, check.test check-4.8/4.8.1): when ON,
+                    // CHECK constraints are not enforced by INSERT/UPDATE, and
+                    // `PRAGMA integrity_check` also skips CHECK validation
+                    // (matching SQLite's coupling of the two). Session-scoped,
+                    // default OFF.
+                    self.db.set_ignore_check_constraints(bool_value);
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -2039,6 +2104,18 @@ impl SqlExecutor {
                     let value = if self.db.defer_foreign_keys() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["defer_foreign_keys".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "IGNORE_CHECK_CONSTRAINTS" => {
+                    // SQLite-compatible PRAGMA ignore_check_constraints read
+                    // (Part of #6173). Defaults to 0 (OFF).
+                    let value = if self.db.ignore_check_constraints() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["ignore_check_constraints".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

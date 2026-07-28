@@ -95,6 +95,11 @@ pub use index_ddl::{
 // non-deterministic column DEFAULT at propose time with **exactly** the
 // semantics the apply-time executor would use when the DEFAULT fires.
 pub use insert::defaults::evaluate_default_expression;
+// `enforce_check_constraints` is re-exported so `PRAGMA integrity_check`
+// (vibesql-cli) can run the SAME CHECK-constraint evaluation the INSERT/UPDATE
+// paths use, gated by `ignore_check_constraints` (Part of #6173, check.test
+// check-4.8/4.8.1), without duplicating the CHECK evaluation logic.
+pub use insert::constraints::enforce_check_constraints;
 pub use insert::{InsertExecutor, InsertOutcome};
 pub use introspection::IntrospectionExecutor;
 pub use memory::QueryArena;
