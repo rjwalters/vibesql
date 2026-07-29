@@ -37,7 +37,7 @@ pub fn reset_auto_increment_sequences(
     // to 1, mirrored by removing the `sqlite_sequence` row for this table (an
     // empty table with no `seq` row makes the next NULL insert restart at 1);
     // `bump_sequence_after_insert` lazily recreates the row on the next insert.
-    let autoincrement_display_name = if table_schema.is_autoincrement {
+    let autoincrement_cleanup = if table_schema.is_autoincrement {
         Some(table_schema.name.clone())
     } else {
         None
@@ -54,8 +54,15 @@ pub fn reset_auto_increment_sequences(
     }
 
     // Reset the real `sqlite_sequence` high-water mark for AUTOINCREMENT tables.
-    if let Some(display_name) = autoincrement_display_name {
-        crate::autoincrement::remove_sequence_entry(database, &display_name)?;
+    // The table still exists here (TRUNCATE clears rows, it does not drop it),
+    // so its owning schema — selecting the correct database's `sqlite_sequence`
+    // — resolves directly (autoinc-4.x, issue #6173).
+    if let Some(display_name) = autoincrement_cleanup {
+        let owning_schema = database
+            .catalog
+            .resolve_table_schema_name(table_name)
+            .unwrap_or_else(|| database.catalog.get_current_schema().to_string());
+        crate::autoincrement::remove_sequence_entry(database, &display_name, &owning_schema)?;
     }
 
     Ok(())
