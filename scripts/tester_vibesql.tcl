@@ -3284,6 +3284,13 @@ proc execsql {sql {db ""}} {
                         # statements (including a retried close) replay
                         # correctly from scratch at the next flush.
                         set ::in_transaction 1
+                        # `error` unwinds straight out of execsql, past the
+                        # cleanup a few lines below, so free the pre-flush
+                        # snapshot here or it leaks on this survival path
+                        # (the common deferred-FK fkey2/e_fkey/zzfk case).
+                        if {$pre_flush_snapshot ne ""} {
+                            delete_db_with_wal $pre_flush_snapshot
+                        }
                         error $trial_err
                     }
                 }
@@ -3353,6 +3360,13 @@ proc execsql {sql {db ""}} {
                             # must keep tolerating its re-fired error too.
                             set ::in_transaction 1
                             set ::txn_had_tolerated_error 1
+                            # `error` unwinds straight out of execsql, past the
+                            # cleanup a few lines below, so free the pre-flush
+                            # snapshot here or it leaks on this survival path
+                            # (the common deferred-FK fkey2/e_fkey/zzfk case).
+                            if {$pre_flush_snapshot ne ""} {
+                                delete_db_with_wal $pre_flush_snapshot
+                            }
                             error $trial_err
                         }
                     }
