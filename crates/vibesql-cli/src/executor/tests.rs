@@ -698,6 +698,49 @@ fn test_pragma_integrity_check_argument_taxonomy() {
 }
 
 #[test]
+fn test_pragma_foreign_key_check_missing_table_errors() {
+    // SQLite: `PRAGMA foreign_key_check(NAME)` on a table that does not exist
+    // raises "no such table: NAME" (pragma4-4.6.5, fkey5). This differs from
+    // foreign_key_list / table_info, which return an empty result for a
+    // missing table.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t1(a)").unwrap();
+    executor.execute("CREATE UNIQUE INDEX i1 ON t1(a)").unwrap();
+    executor.execute("CREATE TABLE c1(a, b, c REFERENCES t1(a))").unwrap();
+    executor.execute("INSERT INTO c1 VALUES(1, 2, 3)").unwrap();
+
+    // Named argument that is not a table -> "no such table: NAME" (both the
+    // quoted-string and bare-identifier spellings).
+    let err = executor.execute("PRAGMA foreign_key_check('c2')").unwrap_err();
+    assert_eq!(err.to_string(), "no such table: c2");
+    let err = executor.execute("PRAGMA foreign_key_check(nope)").unwrap_err();
+    assert_eq!(err.to_string(), "no such table: nope");
+
+    // An existing table with a violated FK still reports the violation row
+    // (row 1 of c1 references t1(a)=3, which does not exist): table, rowid,
+    // parent, fkid.
+    let result = executor.execute("PRAGMA foreign_key_check('c1')").unwrap();
+    assert_eq!(result.row_count, 1);
+    assert_eq!(result.rows[0][0].as_deref(), Some("c1"));
+    assert_eq!(result.rows[0][1].as_deref(), Some("1"));
+    assert_eq!(result.rows[0][2].as_deref(), Some("t1"));
+    assert_eq!(result.rows[0][3].as_deref(), Some("0"));
+
+    // An existing table with no violations returns an empty result (no error).
+    executor.execute("CREATE TABLE t2(a)").unwrap();
+    let result = executor.execute("PRAGMA foreign_key_check('t2')").unwrap();
+    assert_eq!(result.row_count, 0);
+
+    // The whole-database form (no argument) never errors on a missing table.
+    let result = executor.execute("PRAGMA foreign_key_check").unwrap();
+    assert_eq!(result.rows[0][0].as_deref(), Some("c1"));
+
+    // Schema tables are always valid targets and never error.
+    let result = executor.execute("PRAGMA foreign_key_check('sqlite_master')").unwrap();
+    assert_eq!(result.row_count, 0);
+}
+
+#[test]
 fn test_pragma_table_info_verbatim_type_and_default() {
     // PRAGMA table_info echoes the declared type verbatim (only bracket/quote
     // delimiters stripped) and the verbatim DEFAULT source text, matching
