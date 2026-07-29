@@ -112,11 +112,24 @@ impl DropTableExecutor {
         // SQLite: dropping an AUTOINCREMENT table removes its entry from
         // `sqlite_sequence`, but `sqlite_sequence` itself stays behind
         // (autoinc-3.2/3.3/3.4, issue #6173).
-        let autoincrement_display_name = database
+        // Capture the AUTOINCREMENT display name AND the schema that owns the
+        // table (`main` or a `temp_*` schema) while it still exists in the
+        // catalog. The owning schema selects the correct database's
+        // `sqlite_sequence` for the post-drop row cleanup — resolving it after
+        // the drop would fail (the table is gone) and wrongly fall back to the
+        // current schema (autoinc-4.x, issue #6173).
+        let autoincrement_cleanup = database
             .catalog
             .get_table(&stmt.table_name)
             .filter(|schema| schema.is_autoincrement)
-            .map(|schema| schema.name.clone());
+            .map(|schema| schema.name.clone())
+            .map(|display_name| {
+                let owning_schema = database
+                    .catalog
+                    .resolve_table_schema_name(&stmt.table_name)
+                    .unwrap_or_else(|| database.catalog.get_current_schema().to_string());
+                (display_name, owning_schema)
+            });
 
         // Drop all indexes associated with this table first
         let dropped_indexes = database.catalog.drop_table_indexes(&stmt.table_name);
@@ -153,8 +166,8 @@ impl DropTableExecutor {
             .drop_table(&stmt.table_name)
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
-        if let Some(display_name) = autoincrement_display_name {
-            crate::autoincrement::remove_sequence_entry(database, &display_name)?;
+        if let Some((display_name, owning_schema)) = autoincrement_cleanup {
+            crate::autoincrement::remove_sequence_entry(database, &display_name, &owning_schema)?;
         }
 
         // Return success message

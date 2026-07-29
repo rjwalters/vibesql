@@ -722,7 +722,12 @@ impl CreateTableExecutor {
         // sqlite3 3.51.0 autoinc-1.2) — `sqlite_sequence` gets no row for
         // this table yet; that happens lazily on the table's first INSERT.
         if table_schema.is_autoincrement {
-            crate::autoincrement::ensure_sqlite_sequence_table(database)?;
+            // The current schema was switched to the target schema above (for a
+            // TEMP table it is this session's temp schema), so resolving the
+            // just-created table's owning schema yields the right database —
+            // its `sqlite_sequence` is created there, not always in `main`
+            // (autoinc-4.x, issue #6173).
+            crate::autoincrement::ensure_sqlite_sequence_table(database, &table_name)?;
         }
 
         // Restore original schema if we switched
