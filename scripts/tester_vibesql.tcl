@@ -261,9 +261,16 @@ array set ::pragma_application_id_cookie {} ;# db-file-path -> last raw text set
 array set ::pragma_schema_version_cookie {} ;# db-file-path -> running schema_version cookie: last explicit set PLUS every DDL/VACUUM auto-increment seen since (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 
 # DQS (Double-Quoted Strings) mode tracking
-# When enabled, double-quoted strings are treated as string literals instead of identifiers
-# This emulates SQLite's deprecated DQS_DML mode (SQLITE_DBCONFIG_DQS_DML)
+# When enabled, double-quoted strings are treated as string literals instead of identifiers.
+# SQLite exposes TWO independent legacy toggles that must be tracked separately:
+#   SQLITE_DBCONFIG_DQS_DDL - governs CREATE TABLE/INDEX/VIEW/TRIGGER (DDL) statements
+#   SQLITE_DBCONFIG_DQS_DML - governs SELECT/INSERT/UPDATE/DELETE (DML) statements
+# A single batch can legitimately set these to different values (quote.test sets
+# DDL=0/DML=1 in the same block), so conversion must be applied per-statement,
+# not as a single blanket pass over the whole SQL blob — see
+# apply_dqs_mode_conversion below (#6172).
 set ::dqs_dml_mode 0  ;# Default: OFF (double quotes are identifiers)
+set ::dqs_ddl_mode 0  ;# Default: OFF (double quotes are identifiers)
 
 # TEMP TABLE emulation — see strip_temp_table_keyword (below) for the rationale.
 # SQLite keeps a single connection open for the whole test file, so a TEMP table
@@ -1587,6 +1594,52 @@ proc convert_dqs_to_single_quotes {sql} {
     }
 
     return $result
+}
+
+# Apply DQS (Double-Quoted Strings) mode conversion on a PER-STATEMENT basis.
+#
+# SQLite exposes two independent legacy toggles - SQLITE_DBCONFIG_DQS_DDL
+# (governs CREATE TABLE/INDEX/VIEW/TRIGGER statements) and
+# SQLITE_DBCONFIG_DQS_DML (governs SELECT/INSERT/UPDATE/DELETE statements).
+# A single `db eval`/`execsql` batch can legitimately mix DDL and DML
+# statements with the two toggles set to DIFFERENT values (quote.test 2.x
+# sets DDL=0/DML=1 in the same block, then runs a CREATE TABLE ... CHECK
+# statement expecting the double-quoted string inside it to still be
+# resolved strictly as a column reference). A blanket "convert the whole SQL
+# blob if dqs_dml_mode" pass — the previous behavior — incorrectly applies
+# DML-mode conversion to DDL statements whenever DML mode happens to be on,
+# which silently turns an expected `no such column: "X"` parse-time failure
+# into a no-op success (#6172).
+#
+# Classifies each top-level statement (via split_sql_statements, which is
+# already trigger-body aware) as DDL (starts with CREATE/ALTER/DROP) or
+# non-DDL, and only converts a statement's double-quoted strings when the
+# toggle matching ITS OWN kind is enabled.
+proc apply_dqs_mode_conversion {sql} {
+    if {!$::dqs_ddl_mode && !$::dqs_dml_mode} {
+        # Fast path: neither toggle enabled (the overwhelming common case) -
+        # nothing to do, and no need to split/rejoin the SQL text at all.
+        return $sql
+    }
+    set out {}
+    foreach stmt [split_sql_statements $sql] {
+        set trimmed [string trimleft $stmt]
+        set is_ddl [regexp -nocase {^(CREATE|ALTER|DROP)\y} $trimmed]
+        if {$is_ddl} {
+            if {$::dqs_ddl_mode} {
+                lappend out [convert_dqs_to_single_quotes $stmt]
+            } else {
+                lappend out $stmt
+            }
+        } else {
+            if {$::dqs_dml_mode} {
+                lappend out [convert_dqs_to_single_quotes $stmt]
+            } else {
+                lappend out $stmt
+            }
+        }
+    }
+    return [join $out ";\n"]
 }
 
 # Build PRAGMA prefix to prepend to SQL for consistent session state
@@ -2952,11 +3005,9 @@ proc execsql {sql {db ""}} {
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
 
-    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
-    # When DQS mode is on, double-quoted strings are treated as string literals
-    if {$::dqs_dml_mode} {
-        set sql [convert_dqs_to_single_quotes $sql]
-    }
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled, per-statement
+    # (DDL vs DML use independent toggles — see apply_dqs_mode_conversion, #6172)
+    set sql [apply_dqs_mode_conversion $sql]
 
     # Demote CREATE TEMP TABLE -> CREATE TABLE so temp tables persist across the
     # shim's per-batch process model (see strip_temp_table_keyword, #5512).
@@ -3744,10 +3795,9 @@ proc execsql_with_headers {sql {db ""}} {
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
 
-    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
-    if {$::dqs_dml_mode} {
-        set sql [convert_dqs_to_single_quotes $sql]
-    }
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled, per-statement
+    # (DDL vs DML use independent toggles — see apply_dqs_mode_conversion, #6172)
+    set sql [apply_dqs_mode_conversion $sql]
 
     # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
     set sql [strip_temp_table_keyword $sql]
@@ -3793,10 +3843,9 @@ proc execsql2 {sql {db ""}} {
     # We use stack-walking substitution to find variables in outer scopes (for loops, etc.)
     set sql [substitute_tcl_vars $sql]
 
-    # Apply DQS (Double-Quoted Strings) mode conversion if enabled
-    if {$::dqs_dml_mode} {
-        set sql [convert_dqs_to_single_quotes $sql]
-    }
+    # Apply DQS (Double-Quoted Strings) mode conversion if enabled, per-statement
+    # (DDL vs DML use independent toggles — see apply_dqs_mode_conversion, #6172)
+    set sql [apply_dqs_mode_conversion $sql]
 
     # Demote CREATE TEMP TABLE -> CREATE TABLE (see strip_temp_table_keyword, #5512).
     set sql [strip_temp_table_keyword $sql]
@@ -8251,6 +8300,7 @@ proc sqlite3 {db args} {
         set ::pragma_synchronous_raw ""
         set ::pragma_cache_size_raw ""
         set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
+        set ::dqs_ddl_mode 0  ;# Reset DQS mode for new database
         set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
     }
 
@@ -8865,19 +8915,26 @@ proc permutation {} {
 proc sqlite3_db_config {args} {
     # SQLite database configuration
     # This is used to set/get various database configuration options
-    # We specifically handle SQLITE_DBCONFIG_DQS_DML for double-quoted string mode
+    # We specifically handle SQLITE_DBCONFIG_DQS_DDL/DQS_DML for double-quoted
+    # string mode. These are independent toggles: DDL governs CREATE
+    # TABLE/INDEX/VIEW/TRIGGER statements, DML governs everything else
+    # (SELECT/INSERT/UPDATE/DELETE) — see apply_dqs_mode_conversion (#6172).
     #
-    # Usage: sqlite3_db_config db SQLITE_DBCONFIG_DQS_DML value
+    # Usage: sqlite3_db_config db SQLITE_DBCONFIG_DQS_DDL value
+    #        sqlite3_db_config db SQLITE_DBCONFIG_DQS_DML value
     # When value is 1: double-quoted strings are treated as string literals
     # When value is 0: double-quoted strings are treated as identifiers (default)
 
-    # Check if this is a DQS_DML configuration
     if {[llength $args] >= 3} {
         set config_name [lindex $args 1]
         set config_value [lindex $args 2]
 
         if {$config_name eq "SQLITE_DBCONFIG_DQS_DML"} {
             set ::dqs_dml_mode $config_value
+            return 0
+        }
+        if {$config_name eq "SQLITE_DBCONFIG_DQS_DDL"} {
+            set ::dqs_ddl_mode $config_value
             return 0
         }
     }
