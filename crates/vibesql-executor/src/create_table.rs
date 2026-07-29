@@ -496,6 +496,29 @@ impl CreateTableExecutor {
                 deferral,
             } = &constraint.kind
             {
+                // A table-level FOREIGN KEY(...) clause's child and parent column
+                // lists must be the same length when a parent column list is given
+                // at all (an omitted parent list defaults to the parent's PRIMARY
+                // KEY and is checked elsewhere). SQLite rejects a mismatch at CREATE
+                // TABLE time (table.test table-10.9/table-10.10, issue #6173):
+                //   FOREIGN KEY(b,c) REFERENCES t4(x)     -- 2 vs 1
+                //   FOREIGN KEY(b,c) REFERENCES t4(x,y,z) -- 2 vs 3
+                //
+                // This count check runs BEFORE resolving the child column names
+                // to indices: SQLite reports the column-count mismatch even when
+                // one of the child columns does not exist in this table (e_fkey-
+                // 54.B: `FOREIGN KEY(c,b) REFERENCES t2(d)` on a table with no
+                // column `c` still reports the count mismatch, not "unknown
+                // column c"). Only when the parent column list is entirely
+                // omitted (no count to compare against) does the unknown-child-
+                // column check below get to run first (e_fkey-54.A).
+                if !references_columns.is_empty() && references_columns.len() != fk_columns.len() {
+                    return Err(ExecutorError::SqliteCompatError(
+                        "number of columns in foreign key does not match the number of columns in the referenced table"
+                            .to_string(),
+                    ));
+                }
+
                 // Resolve column indices for FK columns. SQLite reports a
                 // dedicated "unknown column ... in foreign key definition"
                 // message here (distinct from the generic "no such column"
@@ -512,20 +535,6 @@ impl CreateTableExecutor {
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-
-                // A table-level FOREIGN KEY(...) clause's child and parent column
-                // lists must be the same length when a parent column list is given
-                // at all (an omitted parent list defaults to the parent's PRIMARY
-                // KEY and is checked elsewhere). SQLite rejects a mismatch at CREATE
-                // TABLE time (table.test table-10.9/table-10.10, issue #6173):
-                //   FOREIGN KEY(b,c) REFERENCES t4(x)     -- 2 vs 1
-                //   FOREIGN KEY(b,c) REFERENCES t4(x,y,z) -- 2 vs 3
-                if !references_columns.is_empty() && references_columns.len() != fk_columns.len() {
-                    return Err(ExecutorError::SqliteCompatError(
-                        "number of columns in foreign key does not match the number of columns in the referenced table"
-                            .to_string(),
-                    ));
-                }
 
                 // Lookup parent table to get parent column indices
                 // If the parent table doesn't exist yet, use placeholder indices.
