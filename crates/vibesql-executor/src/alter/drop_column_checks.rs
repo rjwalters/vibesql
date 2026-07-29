@@ -51,17 +51,17 @@ pub(super) fn postcheck_schema_objects(
     table_name: &str,
     column: &str,
 ) -> Result<(), ExecutorError> {
-    // Table-level CHECK constraints (and column-level CHECKs owned by *other*
-    // columns) on the altered table must still resolve after the drop. The
-    // in-memory `check_constraints` list has no column/table origin, so the
-    // origin is recovered from the verbatim CREATE TABLE text (`sql_source`),
-    // exactly the text SQLite itself re-parses. A CHECK attached to the
+    // Constraints and generated-column expressions on the altered table itself
+    // must still resolve after the drop. The in-memory schema does not track a
+    // constraint's column/table origin, so the origin is recovered from the
+    // verbatim CREATE TABLE text (`sql_source`), exactly the text SQLite itself
+    // re-parses. A constraint or generated expression that belongs to the
     // dropped column is removed together with the column and is exempt.
     if let Some(table) = database.get_table(table_name) {
-        if let Some(missing) = check_constraint_missing_column(&table.schema, column) {
+        if let Some(inner) = table_self_reference_error(&table.schema, column) {
             return Err(ExecutorError::Other(format!(
-                "error in table {} after drop column: no such column: {}",
-                table_name, missing
+                "error in table {} after drop column: {}",
+                table_name, inner
             )));
         }
     }
@@ -640,38 +640,59 @@ fn collect_pseudo_refs_in_statement(stmt: &Statement, refs: &mut Vec<(PseudoTabl
 }
 
 // ============================================================================
-// Table-level CHECK validation (origin recovered from the CREATE TABLE text)
+// Table self-reference validation (origin recovered from the CREATE TABLE text)
 // ============================================================================
 
-/// Display name of the first reference to `dropped` inside a CHECK constraint
-/// that would *survive* the drop: a table-level CHECK, or a column-level CHECK
-/// attached to a column other than the dropped one. A CHECK attached to the
-/// dropped column itself is removed with the column (SQLite semantics,
-/// alterdropcol.test 3.2) and never reported.
+/// Full inner error text for the first surviving part of the altered table's
+/// own definition that references `dropped` — a table-level CHECK / FOREIGN KEY,
+/// a column-level CHECK on another column, or another column's generated
+/// expression. Definitions attached to the dropped column itself are removed
+/// with the column (SQLite semantics, alterdropcol.test 3.2) and never reported.
 ///
-/// Column-vs-table origin is not tracked in `TableSchema::check_constraints`,
-/// so it is recovered by re-parsing the verbatim `CREATE TABLE` text — the
-/// same text SQLite's own re-parse reads. Without `sql_source` (schema built
+/// The returned string is SQLite's inner wording (`no such column: <c>`, or
+/// `unknown column "<c>" in foreign key definition`); the caller prefixes it
+/// with `error in table <name> after drop column: `.
+///
+/// Column-vs-table origin is not tracked on the in-memory schema, so it is
+/// recovered by re-parsing the verbatim `CREATE TABLE` text — the same text
+/// SQLite's own re-parse reads. Without `sql_source` (schema built
 /// programmatically) the origin is unknown and the legacy behavior (silently
-/// dropping CHECKs that reference the column) is kept.
-fn check_constraint_missing_column(schema: &TableSchema, dropped: &str) -> Option<String> {
+/// dropping definitions that reference the column) is kept.
+fn table_self_reference_error(schema: &TableSchema, dropped: &str) -> Option<String> {
     let source = schema.sql_source.as_deref()?;
     let stmt = vibesql_parser::Parser::parse_sql(source).ok()?;
     let Statement::CreateTable(create) = stmt else {
         return None;
     };
 
-    // Table-level CHECK constraints always survive the drop.
+    // Table-level constraints always survive the drop, so any reference to the
+    // dropped column from one of them breaks the re-parsed schema.
     for constraint in &create.table_constraints {
-        if let TableConstraintKind::Check { expr, .. } = &constraint.kind {
-            if let Some(display) = find_column_ref_display(expr, dropped) {
-                return Some(display);
+        match &constraint.kind {
+            TableConstraintKind::Check { expr, .. } => {
+                if let Some(display) = find_column_ref_display(expr, dropped) {
+                    return Some(format!("no such column: {}", display));
+                }
             }
+            // A FOREIGN KEY whose local column list names the dropped column is
+            // reported with SQLite's dedicated FK wording rather than the generic
+            // "no such column" text (alterdropcol2 2.6.1). Matched on the bare
+            // local-column list — the referenced-parent columns belong to the
+            // other table and are untouched here.
+            TableConstraintKind::ForeignKey { columns, .. } => {
+                if let Some(display) = columns.iter().find(|c| c.eq_ignore_ascii_case(dropped)) {
+                    return Some(format!(
+                        "unknown column \"{}\" in foreign key definition",
+                        display
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 
-    // Column-level CHECKs on *other* columns also survive; only the dropped
-    // column's own CHECKs vanish with it.
+    // Column-level constraints/expressions on *other* columns also survive; only
+    // the dropped column's own definitions vanish with it.
     for column in &create.columns {
         if column.name.eq_ignore_ascii_case(dropped) {
             continue;
@@ -679,8 +700,16 @@ fn check_constraint_missing_column(schema: &TableSchema, dropped: &str) -> Optio
         for constraint in &column.constraints {
             if let ColumnConstraintKind::Check { expr, .. } = &constraint.kind {
                 if let Some(display) = find_column_ref_display(expr, dropped) {
-                    return Some(display);
+                    return Some(format!("no such column: {}", display));
                 }
+            }
+        }
+        // A generated column (`x AS (<expr>)` / `... STORED`) that references the
+        // dropped column leaves a dangling reference after the drop
+        // (alterdropcol2 2.7.1/2.7.2).
+        if let Some(gen_expr) = &column.generated_expr {
+            if let Some(display) = find_column_ref_display(gen_expr, dropped) {
+                return Some(format!("no such column: {}", display));
             }
         }
     }
