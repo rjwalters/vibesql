@@ -40,6 +40,28 @@ impl ExpressionVisitor for ParameterFinder {
     }
 }
 
+/// Builds the display text for a failed column-reference resolution,
+/// appending SQLite's own hint when the reference is an *unqualified*,
+/// quoted (double-quoted/backtick/bracket-delimited) identifier:
+/// `"X" - should this be a string literal in single-quotes?`.
+///
+/// SQLite emits this exact hint (R-... evidence in quote.test) because a
+/// delimited identifier that fails to resolve as a column may have been
+/// intended as a single-quoted string literal instead — e.g.
+/// `CHECK (c != "null")` with legacy double-quoted-string handling disabled
+/// (`SQLITE_DBCONFIG_DQS_DDL = 0`) raises `no such column: "null" - should
+/// this be a string literal in single-quotes?` rather than silently treating
+/// `"null"` as the string `'null'`. Only applied to unqualified references:
+/// a table-qualified miss (`t2.x` naming a foreign table) is a different
+/// failure class with no such hint in SQLite (check-3.5).
+fn quoted_column_display(col_id: &vibesql_ast::ColumnIdentifier) -> String {
+    if col_id.table_canonical().is_none() && col_id.is_column_quoted() {
+        format!("\"{}\" - should this be a string literal in single-quotes?", col_id.display())
+    } else {
+        col_id.display().to_string()
+    }
+}
+
 /// True if `expr` contains any bind parameter. Used to reject
 /// `CHECK( x < :abc )` / `CHECK( x < ? )` at CREATE TABLE time.
 fn expression_has_parameter(expr: &Expression) -> bool {
@@ -83,7 +105,7 @@ impl ExpressionVisitor for CheckColumnResolver<'_> {
                 || col == "_rowid_"
                 || col.eq_ignore_ascii_case("oid");
             if !is_rowid_alias && !self.columns.contains(col) {
-                self.unresolved = Some(col_id.display().to_string());
+                self.unresolved = Some(quoted_column_display(col_id));
                 return VisitResult::Stop;
             }
         }
@@ -629,6 +651,32 @@ mod tests {
         let err = validate_check_constraint_columns("t3", &cols, &checks).unwrap_err();
         match err {
             ExecutorError::NoSuchColumn { column_ref } => assert_eq!(column_ref, "q"),
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_check_columns_quoted_unknown_column_gets_sqlite_hint() {
+        // quote-2.1.1: CHECK(c != "null") with "null" resolving to neither a
+        // column nor a rowid alias -> SQLite appends its "should this be a
+        // string literal" hint because the reference was double-quoted.
+        let cols = vec![col("a"), col("b"), col("c")];
+        let checks = vec![(
+            String::new(),
+            Expression::BinaryOp {
+                left: Box::new(col_ref("c")),
+                op: vibesql_ast::BinaryOperator::NotEqual,
+                right: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::quoted(
+                    "null",
+                ))),
+            },
+        )];
+        let err = validate_check_constraint_columns("xyz", &cols, &checks).unwrap_err();
+        match err {
+            ExecutorError::NoSuchColumn { column_ref } => assert_eq!(
+                column_ref,
+                "\"null\" - should this be a string literal in single-quotes?"
+            ),
             other => panic!("expected NoSuchColumn, got {other:?}"),
         }
     }
