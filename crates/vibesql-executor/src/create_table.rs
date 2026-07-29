@@ -375,8 +375,16 @@ impl CreateTableExecutor {
         // Preserve the verbatim original CREATE TABLE text for sqlite_master.sql
         // (SQLite stores it byte-for-byte; see issue #5619). The trailing
         // semicolon is stripped by set_sql_source to match SQLite.
+        //
+        // One deviation from byte-for-byte: SQLite never records the database
+        // qualifier, so `CREATE TABLE main.t1(a, b)` is stored as
+        // `CREATE TABLE t1(a, b)` (alter3-1.4/1.5). Strip any `<schema>.` prefix
+        // from the table name before recording the source.
         if let Some(src) = sql_source {
-            table_schema.set_sql_source(src);
+            match crate::alter_rewrite::strip_schema_qualifier(src) {
+                Some(stripped) => table_schema.set_sql_source(&stripped),
+                None => table_schema.set_sql_source(src),
+            }
         }
 
         // Apply WITHOUT ROWID flag from AST (SQLite compatibility)

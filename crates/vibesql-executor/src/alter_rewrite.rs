@@ -251,6 +251,33 @@ fn table_name_index(tokens: &[(Token, Span)]) -> Option<usize> {
     Some(i)
 }
 
+/// Remove the `<schema>.` database qualifier from the table name in a verbatim
+/// `CREATE TABLE` statement. SQLite never stores the database qualifier in
+/// `sqlite_master.sql`: `CREATE TABLE main.t1(a, b)` is stored (and later
+/// rewritten by ALTER TABLE) as `CREATE TABLE t1(a, b)`. Everything else in the
+/// statement — whitespace, quoting, the column list — is preserved byte-for-byte.
+///
+/// Returns `None` when the statement carries no schema qualifier (or cannot be
+/// tokenized), so the caller keeps the original text unchanged. Verified against
+/// sqlite3 3.51.0 (alter3-1.4/1.5).
+pub fn strip_schema_qualifier(create_sql: &str) -> Option<String> {
+    let tokens = tokenize(create_sql)?;
+    let name_idx = table_name_index(&tokens)?;
+    // A qualifier is present only when the token immediately before the resolved
+    // table-name token is the `.` separator (its predecessor being the schema
+    // identifier). Without one, `table_name_index` lands directly on the bare
+    // name and there is nothing to strip.
+    if name_idx < 2 || !matches!(tokens.get(name_idx - 1), Some((Token::Symbol('.'), _))) {
+        return None;
+    }
+    let schema_start = tokens[name_idx - 2].1.start;
+    let name_start = tokens[name_idx].1.start;
+    let mut out = String::with_capacity(create_sql.len());
+    out.push_str(&create_sql[..schema_start]);
+    out.push_str(&create_sql[name_start..]);
+    Some(out)
+}
+
 /// Rewrite every `REFERENCES <old_parent>` clause in the verbatim `CREATE TABLE`
 /// text of a *child* table to `REFERENCES "<new_parent>"`, matching SQLite's
 /// `sqlite_rename_parent` (invoked when the referenced parent table is renamed
@@ -802,6 +829,29 @@ mod tests {
     fn append_column_no_column_list_returns_none() {
         // CREATE TABLE ... AS SELECT has no editable column list.
         assert!(append_column("CREATE TABLE t AS SELECT 1", "c INTEGER").is_none());
+    }
+
+    #[test]
+    fn strip_schema_qualifier_removes_database_prefix() {
+        // SQLite never stores the database qualifier (alter3-1.4/1.5).
+        assert_eq!(
+            strip_schema_qualifier("CREATE TABLE main.t1(a, b)").as_deref(),
+            Some("CREATE TABLE t1(a, b)")
+        );
+    }
+
+    #[test]
+    fn strip_schema_qualifier_preserves_surrounding_text() {
+        // Only the `<schema>.` run is removed; column list and spacing are kept.
+        assert_eq!(
+            strip_schema_qualifier("CREATE TABLE  main.\"My Tbl\" (x INT)").as_deref(),
+            Some("CREATE TABLE  \"My Tbl\" (x INT)")
+        );
+    }
+
+    #[test]
+    fn strip_schema_qualifier_none_when_unqualified() {
+        assert!(strip_schema_qualifier("CREATE TABLE t1(a, b)").is_none());
     }
 
     #[test]
