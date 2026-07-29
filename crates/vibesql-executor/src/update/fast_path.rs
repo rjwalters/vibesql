@@ -129,6 +129,46 @@ pub(super) fn try_fast_path_update(
         }
     }
 
+    // The PK-only check above misses a real referential-integrity hazard:
+    // another table's FOREIGN KEY can target THIS table's parent key on a
+    // column set that is NOT this table's own PRIMARY KEY -- e.g.
+    // `FOREIGN KEY(x,y) REFERENCES tce71(a,b)` where tce71's actual PRIMARY
+    // KEY is only `a` and the composite parent key `(a,b)` is backed by a
+    // separate UNIQUE INDEX or table-level UNIQUE constraint (fkey2-
+    // ce7c13.1.2/1.3/1.5/1.6). Without this check, `UPDATE tce71 SET b=201`
+    // touches no PK column, `updates_pk` is false, and the fast path applied
+    // the write directly with ZERO foreign-key enforcement -- silently
+    // orphaning `tce72`'s reference. Fall back to the normal path whenever
+    // an assigned column is part of any OTHER table's FK parent key that
+    // references this table, using the same lazy parent-index resolution
+    // the normal path already relies on (`resolved_parent_indices_for_fk`)
+    // so a FK declared before its parent table existed still resolves
+    // correctly here.
+    {
+        let assigned_indices: HashSet<usize> =
+            stmt.assignments.iter().filter_map(|a| schema.get_column_index(&a.column)).collect();
+        let touches_incoming_fk_parent_key = !assigned_indices.is_empty()
+            && database.catalog.list_tables().iter().any(|other_table_name| {
+                database
+                    .catalog
+                    .get_table(other_table_name)
+                    .map(|other_schema| {
+                        other_schema.foreign_keys.iter().any(|fk| {
+                            fk.parent_table.eq_ignore_ascii_case(table_name)
+                                && crate::foreign_key_check::resolved_parent_indices_for_fk(
+                                    database, fk,
+                                )
+                                .iter()
+                                .any(|idx| assigned_indices.contains(idx))
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+        if touches_incoming_fk_parent_key {
+            return Ok(None); // Use normal path for FK enforcement
+        }
+    }
+
     // Re-borrow table to get the old row
     let table = database
         .get_table(table_name)
