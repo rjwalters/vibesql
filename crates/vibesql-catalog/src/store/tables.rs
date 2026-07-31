@@ -3,9 +3,7 @@
 //! This module handles all table-related operations including creation,
 //! modification, deletion, and queries.
 
-#![allow(clippy::only_used_in_recursion)]
-
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{errors::CatalogError, table::TableSchema, TableIdentifier};
 
@@ -15,62 +13,44 @@ impl super::Catalog {
     /// Uses depth-first search to detect cycles in the foreign key dependency graph.
     /// Note: Self-referential tables (table references itself) are allowed.
     /// Returns an error if a circular dependency involving multiple tables is detected.
+    ///
+    /// Performance (#6344): a new cycle must pass through the new table, so the
+    /// DFS starts there and resolves each visited table's FK edges lazily via
+    /// `get_table`. FK-free tables early-exit without touching the catalog at
+    /// all. This replaces the previous implementation, which materialized the
+    /// full FK graph over every table in the catalog on each CREATE TABLE,
+    /// making N consecutive creates O(N^2).
     fn check_circular_foreign_keys(&self, new_table: &TableSchema) -> Result<(), CatalogError> {
-        // Build a dependency graph: table_name -> set of tables it depends on (via FK)
-        // Excludes self-references (table referencing itself is allowed)
-        let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
+        let new_table_name = self.normalize_identifier(&new_table.name);
 
-        // Add existing tables and their FK dependencies
-        for table_name in self.list_all_tables() {
-            if let Some(table_schema) = self.get_table(&table_name) {
-                let normalized_name = if self.case_sensitive_identifiers {
-                    table_schema.name.clone()
-                } else {
-                    table_schema.name.to_lowercase()
-                };
-
-                let mut dependencies = HashSet::new();
-                for fk in &table_schema.foreign_keys {
-                    let parent_table = if self.case_sensitive_identifiers {
-                        fk.parent_table.clone()
-                    } else {
-                        fk.parent_table.to_lowercase()
-                    };
-                    // Skip self-references - they're allowed
-                    if parent_table != normalized_name {
-                        dependencies.insert(parent_table);
-                    }
-                }
-                graph.insert(normalized_name, dependencies);
-            }
-        }
-
-        // Add the new table's dependencies
-        let new_table_name = if self.case_sensitive_identifiers {
-            new_table.name.clone()
-        } else {
-            new_table.name.to_lowercase()
-        };
-
-        let mut new_dependencies = HashSet::new();
+        // The new table's FK dependencies, excluding self-references (a table
+        // referencing itself is allowed).
+        let mut new_dependencies: HashSet<String> = HashSet::new();
         for fk in &new_table.foreign_keys {
-            let parent_table = if self.case_sensitive_identifiers {
-                fk.parent_table.clone()
-            } else {
-                fk.parent_table.to_lowercase()
-            };
-            // Skip self-references - they're allowed
+            let parent_table = self.normalize_identifier(&fk.parent_table);
             if parent_table != new_table_name {
                 new_dependencies.insert(parent_table);
             }
         }
-        graph.insert(new_table_name.clone(), new_dependencies);
 
-        // Perform DFS from the new table to detect cycles (excluding self-references)
+        // Early exit: any new cycle must include the new table, which requires
+        // at least one outgoing (non-self) FK edge from it. Without one, no
+        // cycle involving this table is possible.
+        if new_dependencies.is_empty() {
+            return Ok(());
+        }
+
+        // Lazy DFS from the new table over its reachable FK closure.
         let mut visited = HashSet::new();
         let mut rec_stack = HashSet::new();
 
-        if self.has_cycle_dfs(&new_table_name, &graph, &mut visited, &mut rec_stack) {
+        if self.has_cycle_dfs(
+            &new_table_name,
+            &new_table_name,
+            &new_dependencies,
+            &mut visited,
+            &mut rec_stack,
+        ) {
             return Err(CatalogError::CircularForeignKey {
                 table_name: new_table.name.clone(),
                 message: "Circular foreign key dependency detected between multiple tables. \
@@ -84,11 +64,19 @@ impl super::Catalog {
         Ok(())
     }
 
-    /// Helper function for cycle detection using depth-first search
+    /// Helper function for cycle detection using depth-first search.
+    ///
+    /// FK edges are resolved lazily: each visited node's `TableSchema` is
+    /// looked up via `get_table` only when the DFS reaches it, so the cost is
+    /// bounded by the FK closure reachable from the new table rather than the
+    /// total number of tables in the catalog. The new table (which is not in
+    /// the catalog yet) supplies its dependencies via `new_dependencies` and
+    /// shadows any existing catalog entry with the same normalized name.
     fn has_cycle_dfs(
         &self,
         node: &str,
-        graph: &HashMap<String, HashSet<String>>,
+        new_table_name: &str,
+        new_dependencies: &HashSet<String>,
         visited: &mut HashSet<String>,
         rec_stack: &mut HashSet<String>,
     ) -> bool {
@@ -105,12 +93,27 @@ impl super::Catalog {
         visited.insert(node.to_string());
         rec_stack.insert(node.to_string());
 
+        // Resolve this node's outgoing FK edges lazily, excluding
+        // self-references (they're allowed). A table name that doesn't resolve
+        // (FK to a not-yet-existing table) is a leaf, as before.
+        let dependencies: Vec<String> = if node == new_table_name {
+            new_dependencies.iter().cloned().collect()
+        } else if let Some(table_schema) = self.get_table(node) {
+            let normalized_name = self.normalize_identifier(&table_schema.name);
+            table_schema
+                .foreign_keys
+                .iter()
+                .map(|fk| self.normalize_identifier(&fk.parent_table))
+                .filter(|parent_table| *parent_table != normalized_name)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         // Visit all dependencies
-        if let Some(dependencies) = graph.get(node) {
-            for dep in dependencies {
-                if self.has_cycle_dfs(dep, graph, visited, rec_stack) {
-                    return true;
-                }
+        for dep in &dependencies {
+            if self.has_cycle_dfs(dep, new_table_name, new_dependencies, visited, rec_stack) {
+                return true;
             }
         }
 
@@ -805,5 +808,154 @@ mod tests {
         // Verify only t1's trigger was deleted
         assert!(catalog.get_trigger("tr1").is_none());
         assert!(catalog.get_trigger("tr2").is_some());
+    }
+
+    // ---- Circular foreign key detection (#6344 lazy DFS rewrite) ----
+
+    /// Build a foreign key constraint referencing `parent` (structure beyond
+    /// `parent_table` is irrelevant to cycle detection).
+    fn fk_to(parent: &str) -> crate::ForeignKeyConstraint {
+        crate::ForeignKeyConstraint {
+            name: None,
+            column_names: vec!["a".to_string()],
+            column_indices: vec![0],
+            parent_table: parent.to_string(),
+            parent_column_names: vec!["a".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: crate::ReferentialAction::NoAction,
+            on_update: crate::ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        }
+    }
+
+    /// Build a single-column table schema with FKs to each listed parent.
+    fn table_with_fks(name: &str, parents: &[&str]) -> TableSchema {
+        let column = ColumnSchema::new("a".to_string(), DataType::Integer, true);
+        let mut schema = TableSchema::new(name.to_string(), vec![column]);
+        for parent in parents {
+            schema.foreign_keys.push(fk_to(parent));
+        }
+        schema
+    }
+
+    #[test]
+    fn test_fk_cycle_two_tables_rejected() {
+        let mut catalog = crate::Catalog::new();
+
+        // t1 -> t2 (t2 doesn't exist yet; forward reference is allowed)
+        catalog.create_table(table_with_fks("t1", &["t2"])).unwrap();
+
+        // t2 -> t1 completes the cycle and must be rejected
+        let err = catalog.create_table(table_with_fks("t2", &["t1"])).unwrap_err();
+        assert!(
+            matches!(err, CatalogError::CircularForeignKey { ref table_name, .. } if table_name == "t2"),
+            "expected CircularForeignKey for t2, got: {err:?}"
+        );
+        // The rejected table must not have been created
+        assert!(catalog.get_table("t2").is_none());
+    }
+
+    #[test]
+    fn test_fk_cycle_three_tables_rejected() {
+        let mut catalog = crate::Catalog::new();
+
+        catalog.create_table(table_with_fks("t1", &["t2"])).unwrap();
+        catalog.create_table(table_with_fks("t2", &["t3"])).unwrap();
+
+        // t3 -> t1 closes the 3-table cycle t1 -> t2 -> t3 -> t1
+        let err = catalog.create_table(table_with_fks("t3", &["t1"])).unwrap_err();
+        assert!(
+            matches!(err, CatalogError::CircularForeignKey { ref table_name, .. } if table_name == "t3"),
+            "expected CircularForeignKey for t3, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_fk_self_reference_allowed() {
+        let mut catalog = crate::Catalog::new();
+
+        // employees.manager_id -> employees.id style self-reference is allowed
+        catalog.create_table(table_with_fks("employees", &["employees"])).unwrap();
+        assert!(catalog.get_table("employees").is_some());
+    }
+
+    #[test]
+    fn test_fk_diamond_dependency_allowed() {
+        let mut catalog = crate::Catalog::new();
+
+        // Diamond: a -> b, a -> c, b -> d, c -> d (a DAG, not a cycle)
+        catalog.create_table(table_with_fks("d", &[])).unwrap();
+        catalog.create_table(table_with_fks("b", &["d"])).unwrap();
+        catalog.create_table(table_with_fks("c", &["d"])).unwrap();
+        catalog.create_table(table_with_fks("a", &["b", "c"])).unwrap();
+        assert!(catalog.get_table("a").is_some());
+    }
+
+    #[test]
+    fn test_fk_to_nonexistent_table_allowed() {
+        let mut catalog = crate::Catalog::new();
+
+        // FK to a table that doesn't exist yet: treated as a leaf (unchanged
+        // pre-existing behavior; FK existence is enforced elsewhere).
+        catalog.create_table(table_with_fks("child", &["missing_parent"])).unwrap();
+        assert!(catalog.get_table("child").is_some());
+    }
+
+    #[test]
+    fn test_fk_cycle_case_insensitive_rejected() {
+        let mut catalog = crate::Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        // Mixed-case references must still normalize onto the same nodes
+        catalog.create_table(table_with_fks("t1", &["T2"])).unwrap();
+        let err = catalog.create_table(table_with_fks("T2", &["t1"])).unwrap_err();
+        assert!(
+            matches!(err, CatalogError::CircularForeignKey { .. }),
+            "expected CircularForeignKey, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_fk_case_sensitive_no_false_cycle() {
+        let mut catalog = crate::Catalog::new();
+        catalog.case_sensitive_identifiers = true;
+
+        // In case-sensitive mode "T1" and "t1" are distinct names, so this is
+        // not a cycle (the "T1" reference doesn't resolve to table t1).
+        catalog.create_table(table_with_fks("t1", &["T2"])).unwrap();
+        catalog.create_table(table_with_fks("t2", &["T1"])).unwrap();
+        assert!(catalog.get_table("t2").is_some());
+    }
+
+    #[test]
+    fn test_fk_free_bulk_creates_after_fk_tables_exist() {
+        // Regression guard for #6344: FK-free CREATE TABLE takes the early
+        // exit and never scans the catalog, even when FK-bearing tables exist.
+        let mut catalog = crate::Catalog::new();
+        catalog.create_table(table_with_fks("parent", &[])).unwrap();
+        catalog.create_table(table_with_fks("child", &["parent"])).unwrap();
+
+        for i in 0..2000 {
+            catalog.create_table(table_with_fks(&format!("tbl{i}"), &[])).unwrap();
+        }
+        assert!(catalog.get_table("tbl1999").is_some());
+    }
+
+    #[test]
+    fn test_fk_cycle_still_detected_after_many_unrelated_tables() {
+        // The lazy DFS must still find cycles when the catalog is large:
+        // correctness must not have been traded for the early exit.
+        let mut catalog = crate::Catalog::new();
+        for i in 0..500 {
+            catalog.create_table(table_with_fks(&format!("noise{i}"), &[])).unwrap();
+        }
+
+        catalog.create_table(table_with_fks("x", &["y"])).unwrap();
+        let err = catalog.create_table(table_with_fks("y", &["x"])).unwrap_err();
+        assert!(
+            matches!(err, CatalogError::CircularForeignKey { .. }),
+            "expected CircularForeignKey, got: {err:?}"
+        );
     }
 }

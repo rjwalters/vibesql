@@ -340,6 +340,16 @@ fn execute_insert_internal(
     // which case firing falls back to the legacy schema-unaware match.
     let dml_schema: Option<String> = db.catalog.resolve_table_schema_name(&full_table_name);
 
+    // AUTOINCREMENT bookkeeping (issues #6173/#6350) must target the schema
+    // this INSERT actually resolved to — honoring an explicit `main.`/`temp.`
+    // qualifier — so a qualified `INSERT INTO main.t1` never reads or bumps
+    // `temp.sqlite_sequence` when a same-named table exists in the temp
+    // schema. `dml_schema` already carries exactly that resolution (temp
+    // shadows main only for unqualified names); fall back to the current
+    // schema when unresolvable, mirroring the drop/truncate paths.
+    let autoinc_owner_schema: String =
+        dml_schema.clone().unwrap_or_else(|| db.catalog.get_current_schema().to_string());
+
     // Validate INSERT trigger body statements at prepare time (mirrors the
     // DELETE path). SQLite resolves a trigger's body when the firing INSERT is
     // prepared, so a body with an unresolvable column reference (triggerB-2.1's
@@ -658,7 +668,8 @@ fn execute_insert_internal(
     // high-water mark (what future allocations in this table read from) would
     // silently diverge.
     let table_max_rowid: Option<i64> = if schema.is_autoincrement {
-        let seq = crate::autoincrement::sequence_high_water_mark(db, &schema.name);
+        let seq =
+            crate::autoincrement::sequence_high_water_mark(db, &schema.name, &autoinc_owner_schema);
         match (table_max_rowid, seq) {
             (Some(a), Some(b)) => Some(a.max(b)),
             (Some(a), None) => Some(a),
@@ -911,6 +922,7 @@ fn execute_insert_internal(
             &mut full_row_values,
             db,
             &storage_table_name,
+            &autoinc_owner_schema,
             batch_max_ipk,
             &assigned_columns,
         )?;
@@ -1487,6 +1499,7 @@ fn execute_insert_internal(
                         db,
                         &storage_table_name,
                         &schema.name,
+                        &autoinc_owner_schema,
                     )?
                 } else {
                     db.get_table(&storage_table_name)
@@ -1801,6 +1814,7 @@ fn execute_insert_internal(
         crate::autoincrement::bump_sequence_after_insert(
             db,
             &schema.name,
+            &autoinc_owner_schema,
             batch_max_ipk.unwrap_or(0),
         )?;
     }
