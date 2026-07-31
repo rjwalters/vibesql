@@ -20,7 +20,9 @@
 //! so it cannot observe the main-vs-temp `sqlite_sequence` split. These
 //! in-process engine tests verify the behavior directly instead.
 
-use vibesql_executor::{CreateTableExecutor, DropTableExecutor, InsertExecutor, SelectExecutor};
+use vibesql_executor::{
+    CreateTableExecutor, DropTableExecutor, InsertExecutor, SelectExecutor, TriggerExecutor,
+};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
@@ -156,5 +158,188 @@ fn dropping_main_table_leaves_temp_sequence_intact() {
         sequence_rows(&db, "temp"),
         vec![("t3".to_string(), 20)],
         "the temp table's sqlite_sequence row must survive the main DROP"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Same-name collision: a table named `t1` in BOTH main and temp (issue #6350).
+// An explicitly-qualified INSERT must route its sqlite_sequence bookkeeping to
+// the qualified schema, not re-resolve the bare name via temp-shadows-main.
+// ---------------------------------------------------------------------------
+
+/// Helper: read the `x` (INTEGER PRIMARY KEY) column of `schema.t1`, sorted.
+fn t1_rowids(db: &Database, schema: &str) -> Vec<i64> {
+    let sql = format!("SELECT x FROM {schema}.t1 ORDER BY x");
+    let stmt = Parser::parse_sql(&sql).expect("parse SELECT t1");
+    let rows = match stmt {
+        vibesql_ast::Statement::Select(s) => {
+            SelectExecutor::new(db).execute_with_columns(&s).expect("SELECT t1").rows
+        }
+        other => panic!("expected SELECT, got {other:?}"),
+    };
+    rows.iter()
+        .map(|r| match &r.values[0] {
+            SqlValue::Integer(v) | SqlValue::Bigint(v) => *v,
+            other => panic!("expected integer rowid, got {other:?}"),
+        })
+        .collect()
+}
+
+/// The issue #6350 repro: with same-named AUTOINCREMENT tables in main and
+/// temp, `INSERT INTO main.t1` bumps `main.sqlite_sequence` and
+/// `INSERT INTO temp.t1` bumps `temp.sqlite_sequence` — the main insert's
+/// high-water mark is never absorbed into (or overwritten by) the temp one.
+#[test]
+fn qualified_inserts_with_same_named_tables_route_to_own_schema() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(10, 1)");
+    exec_insert(&mut db, "INSERT INTO temp.t1 VALUES(20, 2)");
+
+    assert_eq!(
+        sequence_rows(&db, "main"),
+        vec![("t1".to_string(), 10)],
+        "main.sqlite_sequence must hold the qualified main insert's high-water mark"
+    );
+    assert_eq!(
+        sequence_rows(&db, "temp"),
+        vec![("t1".to_string(), 20)],
+        "temp.sqlite_sequence must hold ONLY the qualified temp insert's high-water mark"
+    );
+}
+
+/// The READ path: a NULL-IPK insert into `main.t1` must consult
+/// `main.sqlite_sequence`, not the same-named temp table's (higher) counter —
+/// and vice versa (issue #6350).
+#[test]
+fn qualified_null_ipk_insert_reads_own_schema_counter() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(10, 1)");
+    exec_insert(&mut db, "INSERT INTO temp.t1 VALUES(100, 2)");
+
+    // Must allocate 11 (main's counter + 1), NOT 101 (temp's counter + 1).
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(NULL, 3)");
+    assert_eq!(
+        t1_rowids(&db, "main"),
+        vec![10, 11],
+        "NULL IPK into main.t1 must continue main's own sequence, not temp's"
+    );
+
+    // And the temp side continues from its own counter.
+    exec_insert(&mut db, "INSERT INTO temp.t1 VALUES(NULL, 4)");
+    assert_eq!(t1_rowids(&db, "temp"), vec![100, 101]);
+
+    assert_eq!(sequence_rows(&db, "main"), vec![("t1".to_string(), 11)]);
+    assert_eq!(sequence_rows(&db, "temp"), vec![("t1".to_string(), 101)]);
+}
+
+/// Unqualified INSERT behavior is unchanged: with both tables present,
+/// temp still shadows main for a bare `t1`, so the bookkeeping lands in
+/// `temp.sqlite_sequence` (SQLite name-resolution order).
+#[test]
+fn unqualified_insert_still_temp_shadows_main() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+
+    exec_insert(&mut db, "INSERT INTO t1 VALUES(30, 1)");
+
+    assert_eq!(
+        sequence_rows(&db, "main"),
+        Vec::<(String, i64)>::new(),
+        "an unqualified insert resolves to the temp table; main's sequence stays empty"
+    );
+    assert_eq!(sequence_rows(&db, "temp"), vec![("t1".to_string(), 30)]);
+    assert_eq!(t1_rowids(&db, "temp"), vec![30]);
+    assert_eq!(t1_rowids(&db, "main"), Vec::<i64>::new());
+}
+
+/// A qualified `INSERT ... SELECT` whose source is empty still creates the
+/// `(t1, 0)` sqlite_sequence row (autoinc-9.1) — in the QUALIFIED schema, not
+/// the temp-shadowed one (issue #6350).
+#[test]
+fn qualified_empty_insert_select_creates_zero_row_in_own_schema() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TABLE src(x INTEGER, y)");
+
+    exec_insert(&mut db, "INSERT INTO main.t1 SELECT * FROM src");
+
+    assert_eq!(
+        sequence_rows(&db, "main"),
+        vec![("t1".to_string(), 0)],
+        "the (t1, 0) row for an empty qualified INSERT ... SELECT belongs to main"
+    );
+    assert_eq!(
+        sequence_rows(&db, "temp"),
+        Vec::<(String, i64)>::new(),
+        "temp.sqlite_sequence must not absorb main.t1's bookkeeping"
+    );
+}
+
+/// The post-BEFORE-trigger rowid recompute (`execution.rs`) must also consult
+/// the qualified schema's counter: a NULL-IPK insert into `main.t1` whose
+/// BEFORE INSERT trigger fires still allocates from main's sequence, not the
+/// same-named temp table's higher counter (issue #6350).
+#[test]
+fn before_insert_trigger_recompute_uses_qualified_schema_counter() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TABLE log(n INTEGER)");
+    // Bind the trigger to main.t1 BEFORE the same-named temp table exists.
+    let trigger_sql = "CREATE TRIGGER t1_before BEFORE INSERT ON t1 \
+                       BEGIN INSERT INTO log VALUES(1); END";
+    let stmt = Parser::parse_sql(trigger_sql).expect("parse CREATE TRIGGER");
+    match stmt {
+        vibesql_ast::Statement::CreateTrigger(s) => {
+            TriggerExecutor::create_trigger_with_sql(&mut db, &s, Some(trigger_sql))
+                .expect("CREATE TRIGGER");
+        }
+        other => panic!("expected CREATE TRIGGER, got {other:?}"),
+    }
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(10, 1)");
+    exec_insert(&mut db, "INSERT INTO temp.t1 VALUES(100, 2)");
+
+    // The trigger forces the post-trigger recompute path; the recomputed
+    // rowid must be 11 (main's counter + 1), NOT 101 (temp's counter + 1).
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(NULL, 3)");
+
+    assert_eq!(
+        t1_rowids(&db, "main"),
+        vec![10, 11],
+        "post-trigger recompute must continue main's own sequence, not temp's"
+    );
+    assert_eq!(sequence_rows(&db, "main"), vec![("t1".to_string(), 11)]);
+    assert_eq!(sequence_rows(&db, "temp"), vec![("t1".to_string(), 100)]);
+}
+
+/// Regression pin for the already-correct DROP path: `DROP TABLE main.t1`
+/// removes only main's sequence row; the same-named temp table's row survives.
+#[test]
+fn dropping_qualified_main_table_leaves_same_named_temp_sequence() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_create_table(&mut db, "CREATE TEMP TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y)");
+    exec_insert(&mut db, "INSERT INTO main.t1 VALUES(10, 1)");
+    exec_insert(&mut db, "INSERT INTO temp.t1 VALUES(20, 2)");
+
+    exec_drop_table(&mut db, "DROP TABLE main.t1");
+
+    assert_eq!(
+        sequence_rows(&db, "main"),
+        Vec::<(String, i64)>::new(),
+        "dropping main.t1 must clear only main's sequence row"
+    );
+    assert_eq!(
+        sequence_rows(&db, "temp"),
+        vec![("t1".to_string(), 20)],
+        "the same-named temp table's sequence row must survive DROP TABLE main.t1"
     );
 }

@@ -328,6 +328,13 @@ pub fn apply_default_values_with_table_name(
     database: &mut vibesql_storage::Database,
     storage_table_name: &str,
 ) -> Result<Option<i64>, ExecutorError> {
+    // Resolve the owning schema from the (possibly-qualified) storage table
+    // name, falling back to the current schema — this wrapper has no
+    // statement-level resolution to reuse (issue #6350).
+    let owning_schema = database
+        .catalog
+        .resolve_table_schema_name(storage_table_name)
+        .unwrap_or_else(|| database.catalog.get_current_schema().to_string());
     // No column was explicitly assigned by the caller, so every NULL slot is an
     // omitted column that should receive its default.
     apply_default_values_with_batch_context(
@@ -335,6 +342,7 @@ pub fn apply_default_values_with_table_name(
         row_values,
         database,
         storage_table_name,
+        &owning_schema,
         None,
         &std::collections::HashSet::new(),
     )
@@ -352,13 +360,20 @@ pub fn apply_default_values_with_table_name(
 /// can fire, rather than being silently swapped for the column default (#5893). Columns
 /// omitted from the INSERT are absent from this set and still receive their default.
 ///
+/// `owning_schema` is the schema the INSERT's target table actually resolved
+/// to (honoring an explicit `main.`/`temp.` qualifier), used to scope the
+/// AUTOINCREMENT `sqlite_sequence` lookup to the correct database's table
+/// (issue #6350).
+///
 /// Returns the first auto-generated sequence value (for LAST_INSERT_ROWID support),
 /// or None if no sequence values were generated.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_default_values_with_batch_context(
     schema: &vibesql_catalog::TableSchema,
     row_values: &mut [vibesql_types::SqlValue],
     database: &mut vibesql_storage::Database,
     storage_table_name: &str,
+    owning_schema: &str,
     batch_max_ipk: Option<i64>,
     explicitly_assigned: &std::collections::HashSet<usize>,
 ) -> Result<Option<i64>, ExecutorError> {
@@ -378,6 +393,7 @@ pub fn apply_default_values_with_batch_context(
                     database,
                     storage_table_name,
                     &schema.name,
+                    owning_schema,
                 )?
             } else {
                 compute_next_integer_pk_value(database, storage_table_name)?
