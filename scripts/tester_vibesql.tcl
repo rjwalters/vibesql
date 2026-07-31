@@ -1252,20 +1252,54 @@ proc forget_temp_dependents_on {name_key} {
 # Core SQL execution
 #-----------------------------------------------------------------------------
 
+# Resolve a TCL variable (scalar name or "arr(elem)" element) for SQL
+# substitution, searching the user call stack from INNERMOST scope outward and
+# falling back to the global scope. `caller_abs` is the ABSOLUTE stack level of
+# substitute_tcl_vars's caller (so this helper's own extra stack frame does not
+# shift the search). Returns a two-element list: {found value}.
+#
+# The innermost-to-outermost order matches how TCL normally resolves variables.
+# This ensures loop variables like $i in "for {set i 1} {$i<10} {incr i}" are
+# found in the loop's scope, not a stale global value from a previous loop.
+proc resolve_subst_var {varname caller_abs} {
+    # Absolute level caller_abs is the immediate caller of substitute_tcl_vars;
+    # walk inward-to-outward down to level 1, then try global (#0) last.
+    for {set abs $caller_abs} {$abs >= 1} {incr abs -1} {
+        if {[catch {set value [uplevel "#$abs" [list set $varname]]}] == 0} {
+            return [list 1 $value]
+        }
+    }
+    if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+        return [list 1 $value]
+    }
+    return [list 0 ""]
+}
+
 # SQL-aware TCL variable substitution
 # This emulates SQLite's parameter binding where $var in SQL refers to TCL variables.
 # Unlike simple `uplevel 1 subst`, this:
-# 1. Walks the call stack from OUTERMOST level inward to find user-defined variables
+# 1. Walks the call stack from INNERMOST level outward to find user-defined variables
 # 2. Properly quotes string values for SQL (adds single quotes, escapes internal quotes)
-# 3. Handles both $var and ${var} syntax
+# 3. Handles $var, ${var}, $::var, $arr(elem), and :var syntax
 #
 # This is critical for braced SQL strings like {INSERT INTO t VALUES($x, $msg)}
 # where TCL doesn't perform substitution and we must do it manually with proper SQL quoting.
 #
-# The search order is INNERMOST to OUTERMOST (caller's scope first), which matches
-# how TCL normally resolves variables. This ensures loop variables like $i in
-# "for {set i 1} {$i<10} {incr i}" are found in the loop's scope, not a stale
-# global value from a previous loop.
+# Semantics (#6307, matching SQLite's tclsqlite binding):
+# - The scan is a single left-to-right, index-based pass. Substituted text is
+#   never rescanned, so a value whose *contents* contain "$word" is not
+#   double-substituted.
+# - The scan is QUOTE-AWARE, emulating SQLite's SQL tokenizer: $word / :word
+#   inside single-quoted string literals (with '' escapes), double-quoted
+#   identifiers (with "" escapes), [bracketed] identifiers, -- line comments,
+#   and /* block */ comments are NOT parameter references and pass through
+#   verbatim (e.g. ATTACH ':memory:' AS aux is never touched).
+# - A reference whose TCL variable is unset in every enclosing scope binds SQL
+#   NULL (the documented sqlite3 tcl behavior behind the pervasive
+#   `unset -nocomplain x; ... db eval {... IS $x ...}` test idiom), and
+#   scanning CONTINUES so later references in the same statement still
+#   substitute. (Previously each pattern's loop `break`-ed on the first unset
+#   reference, leaving it AND every later reference as literal text.)
 proc substitute_tcl_vars {sql} {
     # Quick check: if no $ or : variables, return immediately
     # Match both $var, ${var}, $::var, and :var patterns
@@ -1273,211 +1307,137 @@ proc substitute_tcl_vars {sql} {
         return $sql
     }
 
-    # Get the maximum stack depth to search
-    set max_level [info level]
+    # Absolute stack level of our caller, for the scope walk in resolve_subst_var
+    set caller_abs [expr {[info level] - 1}]
 
-    # Find all variable references: $var, ${var}, $::var, and :var patterns
-    # We'll process each one individually for proper SQL quoting
-    set result $sql
+    set result ""
+    set len [string length $sql]
+    set i 0
+    while {$i < $len} {
+        set ch [string index $sql $i]
 
-    # First handle $::varname patterns (explicit global namespace references)
-    # These must be processed BEFORE regular $var patterns to avoid partial matches
-    # Pattern matches: $::varname where varname starts with letter/underscore
-    set global_var_pattern {\$::([a-zA-Z_][a-zA-Z0-9_]*)}
-
-    set prev_result ""
-    while {$result ne $prev_result} {
-        set prev_result $result
-
-        # Find the first $::variable reference
-        if {![regexp $global_var_pattern $result match varname]} {
-            break
+        # ---- Quoted spans: copy verbatim (no substitution inside) ----
+        # 'string literal' with '' escapes, and "quoted identifier" with ""
+        # escapes. Real SQLite's tokenizer consumes these as single tokens, so
+        # a $word or :word inside them is never a bindable parameter.
+        if {$ch eq "'" || $ch eq "\""} {
+            set quote $ch
+            append result $quote
+            incr i
+            while {$i < $len} {
+                set c [string index $sql $i]
+                append result $c
+                incr i
+                if {$c eq $quote} {
+                    if {$i < $len && [string index $sql $i] eq $quote} {
+                        # Doubled quote is an escape — still inside the span
+                        append result $quote
+                        incr i
+                    } else {
+                        break
+                    }
+                }
+            }
+            continue
         }
 
-        # Look up the variable in global scope ONLY (that's what :: means)
-        set found 0
-        set value ""
-
-        if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
-            set found 1
-        }
-
-        if {!$found} {
-            # Variable not found in global scope - leave it as-is (will cause error)
-            break
-        }
-
-        # Format the value as a SQL literal
-        set sql_value [format_sql_value $value]
-
-        # Replace the first occurrence of this variable reference
-        set result [string replace $result \
-            [string first $match $result] \
-            [expr {[string first $match $result] + [string length $match] - 1}] \
-            $sql_value]
-    }
-
-    # Handle TCL array-element references: $arr(elem)
-    #
-    # SQLite's TCL binding treats `$arr(elem)` as a single bound parameter whose
-    # value is the array element arr(elem) in the caller's scope. This is the
-    # idiom used by capture_pragma (pragma.test / index7.test), which iterates a
-    # PRAGMA with `db eval $sql x { ... }` (populating x(colname)) and then
-    # builds `INSERT INTO out VALUES($x(seq),$x(name),...)`. Without resolving the
-    # array element here we would forward the literal `$x(seq)` to VibeSQL, whose
-    # parser rejects it ("near \"(\": syntax error").
-    #
-    # This pass runs BEFORE the plain $var pass: otherwise the plain pattern would
-    # match the `$x` prefix, fail to read the array as a scalar, and leave the
-    # dangling `(seq)` behind. The element name is a bare identifier (optionally
-    # `*`, the column-name list key that db-eval sets).
-    set array_var_pattern {\$([a-zA-Z_][a-zA-Z0-9_]*)\(([a-zA-Z_*][a-zA-Z0-9_]*)\)}
-
-    set prev_result ""
-    while {$result ne $prev_result} {
-        set prev_result $result
-
-        # Find the first array-element reference
-        if {![regexp $array_var_pattern $result match arrname elemname]} {
-            break
-        }
-
-        # Resolve the array element, searching innermost scope outward, then
-        # global (mirroring the plain $var resolution order below).
-        set found 0
-        set value ""
-        for {set level 1} {$level <= $max_level} {incr level} {
-            if {[catch {set value [uplevel $level [list set "${arrname}($elemname)"]]}] == 0} {
-                set found 1
+        # ---- [bracketed identifier]: copy verbatim ----
+        if {$ch eq "\["} {
+            set close [string first "\]" $sql $i]
+            if {$close < 0} {
+                append result [string range $sql $i end]
                 break
             }
-        }
-        if {!$found} {
-            if {[catch {set value [uplevel #0 [list set "${arrname}($elemname)"]]}] == 0} {
-                set found 1
-            }
+            append result [string range $sql $i $close]
+            set i [expr {$close + 1}]
+            continue
         }
 
-        if {!$found} {
-            # Not found - leave as-is (will surface as a SQL error) and stop to
-            # avoid an infinite loop on this match.
-            break
-        }
-
-        set sql_value [format_sql_value $value]
-        set result [string replace $result \
-            [string first $match $result] \
-            [expr {[string first $match $result] + [string length $match] - 1}] \
-            $sql_value]
-    }
-
-    # Now handle regular $var patterns
-    # Pattern to match TCL variable references in SQL
-    # Matches: $varname or ${varname}
-    # Note: We need to be careful not to match things like $1 (positional params)
-    set var_pattern {\$(\{[a-zA-Z_][a-zA-Z0-9_]*\}|[a-zA-Z_][a-zA-Z0-9_]*)}
-
-    # Keep substituting until no more matches or no progress
-    set prev_result ""
-    while {$result ne $prev_result} {
-        set prev_result $result
-
-        # Find the first variable reference
-        if {![regexp $var_pattern $result match varname]} {
-            break
-        }
-
-        # Strip braces if present: ${foo} -> foo
-        if {[string index $varname 0] eq "\{"} {
-            set varname [string range $varname 1 end-1]
-        }
-
-        # Try to get the variable value - search from INNERMOST level outward
-        # This ensures loop variables are found in their defining scope, not
-        # stale global values from previous loop iterations.
-        # Search order: level 1 (direct caller) -> level 2 -> ... -> max_level -> global
-        set found 0
-        set value ""
-
-        # Search from innermost (level 1) to outermost (max_level)
-        # Level 1 is the immediate caller of this proc
-        for {set level 1} {$level <= $max_level} {incr level} {
-            if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
-                set found 1
+        # ---- -- line comment: copy verbatim through end of line ----
+        if {$ch eq "-" && [string index $sql [expr {$i + 1}]] eq "-"} {
+            set nl [string first "\n" $sql $i]
+            if {$nl < 0} {
+                append result [string range $sql $i end]
                 break
             }
+            append result [string range $sql $i $nl]
+            set i [expr {$nl + 1}]
+            continue
         }
 
-        # If not found in call stack, try global scope as last resort
-        if {!$found} {
-            if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
-                set found 1
-            }
-        }
-
-        if {!$found} {
-            # Variable not found - leave it as-is (will cause SQL error, but that's expected)
-            # Just skip this match to avoid infinite loop
-            break
-        }
-
-        # Format the value as a SQL literal
-        set sql_value [format_sql_value $value]
-
-        # Replace the first occurrence of this variable reference
-        # Use string map with the exact match to be safe
-        set result [string replace $result \
-            [string first $match $result] \
-            [expr {[string first $match $result] + [string length $match] - 1}] \
-            $sql_value]
-    }
-
-    # Now handle :varname patterns (SQLite named placeholder syntax)
-    # Pattern matches: :varname where varname starts with letter/underscore
-    set colon_pattern {:([a-zA-Z_][a-zA-Z0-9_]*)}
-
-    # Keep substituting until no more matches or no progress
-    set prev_result ""
-    while {$result ne $prev_result} {
-        set prev_result $result
-
-        # Find the first :variable reference
-        if {![regexp $colon_pattern $result match varname]} {
-            break
-        }
-
-        # Try to get the variable value - search from INNERMOST level outward
-        set found 0
-        set value ""
-
-        # Search from innermost (level 1) to outermost (max_level)
-        for {set level 1} {$level <= $max_level} {incr level} {
-            if {[catch {set value [uplevel $level [list set $varname]]}] == 0} {
-                set found 1
+        # ---- /* block comment */: copy verbatim ----
+        if {$ch eq "/" && [string index $sql [expr {$i + 1}]] eq "*"} {
+            set close [string first "*/" $sql [expr {$i + 2}]]
+            if {$close < 0} {
+                append result [string range $sql $i end]
                 break
             }
+            append result [string range $sql $i [expr {$close + 1}]]
+            set i [expr {$close + 2}]
+            continue
         }
 
-        # If not found in call stack, try global scope as last resort
-        if {!$found} {
-            if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
-                set found 1
+        # ---- $-form references ----
+        # Precedence (same as the old per-pattern pass order):
+        #   $::var  before  $arr(elem)  before  ${var}/$var
+        # $arr(elem) must be tried before plain $var: otherwise the plain
+        # pattern would match the `$arr` prefix, fail to read the array as a
+        # scalar, and leave the dangling `(elem)` behind. This is the idiom
+        # used by capture_pragma (pragma.test / index7.test). The element name
+        # is a bare identifier (optionally `*`, the column-name list key that
+        # db-eval sets). Digit-leading forms like $5 are NOT references.
+        if {$ch eq "\$"} {
+            set tail [string range $sql $i end]
+            if {[regexp {^\$::([a-zA-Z_][a-zA-Z0-9_]*)} $tail match varname]} {
+                # Explicit global namespace reference: global scope ONLY
+                set found 0
+                set value ""
+                if {[catch {set value [uplevel #0 [list set $varname]]}] == 0} {
+                    set found 1
+                }
+            } elseif {[regexp {^\$([a-zA-Z_][a-zA-Z0-9_]*)\(([a-zA-Z_*][a-zA-Z0-9_]*)\)} $tail match arrname elemname]} {
+                lassign [resolve_subst_var "${arrname}($elemname)" $caller_abs] found value
+            } elseif {[regexp {^\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}} $tail match varname]} {
+                lassign [resolve_subst_var $varname $caller_abs] found value
+            } elseif {[regexp {^\$([a-zA-Z_][a-zA-Z0-9_]*)} $tail match varname]} {
+                lassign [resolve_subst_var $varname $caller_abs] found value
+            } else {
+                # Not a variable reference (e.g. $5, lone $) — literal
+                append result $ch
+                incr i
+                continue
             }
+            if {$found} {
+                append result [format_sql_value $value]
+            } else {
+                # Unset TCL variable binds SQL NULL (sqlite3 tcl semantics);
+                # keep scanning so later references still substitute.
+                append result "NULL"
+            }
+            incr i [string length $match]
+            continue
         }
 
-        if {!$found} {
-            # Variable not found - leave it as-is (will cause SQL error, but that's expected)
-            break
+        # ---- :varname named-placeholder references ----
+        if {$ch eq ":"} {
+            if {[regexp {^:([a-zA-Z_][a-zA-Z0-9_]*)} [string range $sql $i end] match varname]} {
+                lassign [resolve_subst_var $varname $caller_abs] found value
+                if {$found} {
+                    append result [format_sql_value $value]
+                } else {
+                    append result "NULL"
+                }
+                incr i [string length $match]
+            } else {
+                # e.g. 12:34 or :: — not a reference
+                append result $ch
+                incr i
+            }
+            continue
         }
 
-        # Format the value as a SQL literal
-        set sql_value [format_sql_value $value]
-
-        # Replace the first occurrence of this variable reference
-        set result [string replace $result \
-            [string first $match $result] \
-            [expr {[string first $match $result] + [string length $match] - 1}] \
-            $sql_value]
+        append result $ch
+        incr i
     }
 
     return $result
@@ -9887,17 +9847,22 @@ proc run_test_file {filename} {
     finish_test
 }
 
-# Parse command line
-if {$argc > 0} {
-    set test_file [lindex $argv 0]
-    if {[lsearch $argv "--verbose"] >= 0 || [lsearch $argv "-v"] >= 0} {
-        set ::verbose 1
+# Parse command line — guarded so unit-test scripts can `source` this shim
+# (e.g. scripts/test_tcl_shim_substitution.tcl) without triggering the
+# auto-run / usage-exit tail (#6307). When run directly via
+# `tclsh tester_vibesql.tcl ...`, [info script] and $::argv0 are the same file.
+if {[file normalize [info script]] eq [file normalize $::argv0]} {
+    if {$argc > 0} {
+        set test_file [lindex $argv 0]
+        if {[lsearch $argv "--verbose"] >= 0 || [lsearch $argv "-v"] >= 0} {
+            set ::verbose 1
+        }
+        if {[lsearch $argv "--emit-detail"] >= 0} {
+            set ::emit_detail 1
+        }
+        run_test_file $test_file
+    } else {
+        puts "Usage: tclsh tester_vibesql.tcl <test_file.test> \[--verbose\]"
+        exit 1
     }
-    if {[lsearch $argv "--emit-detail"] >= 0} {
-        set ::emit_detail 1
-    }
-    run_test_file $test_file
-} else {
-    puts "Usage: tclsh tester_vibesql.tcl <test_file.test> \[--verbose\]"
-    exit 1
 }
