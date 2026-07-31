@@ -58,42 +58,33 @@ fn sqlite_sequence_table_schema() -> TableSchema {
     schema
 }
 
-/// Resolve the schema that owns `target_table`'s AUTOINCREMENT bookkeeping,
-/// following SQLite's temp-shadows-main name resolution so it agrees with the
-/// schema the INSERT/DROP itself targeted. Falls back to the current schema
-/// when the table can't be resolved (e.g. engine-internal unit tests that
-/// track a `sqlite_sequence` row without a backing user table).
-fn sequence_owner_schema(database: &Database, target_table: &str) -> String {
-    database
-        .catalog
-        .resolve_table_schema_name(target_table)
-        .unwrap_or_else(|| database.catalog.get_current_schema().to_string())
-}
-
-/// The schema-qualified physical name of the `sqlite_sequence` table that owns
-/// `target_table`'s bookkeeping (e.g. `main.sqlite_sequence` or
-/// `temp_7.sqlite_sequence`).
+/// The schema-qualified physical name of the `sqlite_sequence` table living in
+/// `owning_schema` (e.g. `main.sqlite_sequence` or `temp_7.sqlite_sequence`).
 ///
 /// Each database — `main` plus every session's temp schema — keeps its OWN
-/// `sqlite_sequence` table, exactly like SQLite (autoinc-4.x). Resolving the
-/// owning schema here (rather than using the bare, unqualified name, which
-/// resolves temp-shadows-main) is what keeps a main table's high-water mark in
-/// `main.sqlite_sequence` and a temp table's in `temp.sqlite_sequence` — the
-/// two never cross-contaminate even when both exist at once (issue #6173).
-fn sequence_table_name(database: &Database, target_table: &str) -> String {
-    format!("{}.{}", sequence_owner_schema(database, target_table), SQLITE_SEQUENCE_TABLE)
+/// `sqlite_sequence` table, exactly like SQLite (autoinc-4.x). The owning
+/// schema is supplied EXPLICITLY by the caller (resolved from the original,
+/// possibly-qualified statement text) rather than re-derived here from the
+/// bare table name: a bare-name re-resolution re-applies temp-shadows-main and
+/// therefore misroutes an explicitly-qualified `INSERT INTO main.t1` to
+/// `temp.sqlite_sequence` whenever a same-named table exists in the temp
+/// schema (issue #6350). This mirrors [`remove_sequence_entry`]'s API shape,
+/// which `drop_table.rs`/`truncate` already use correctly.
+fn sequence_table_in(owning_schema: &str) -> String {
+    format!("{}.{}", owning_schema, SQLITE_SEQUENCE_TABLE)
 }
 
-/// Lazily create the `sqlite_sequence` table in the schema that owns
-/// `target_table` if it does not already exist there. Safe to call
-/// unconditionally — a no-op when the table is already present (e.g. a second
-/// `CREATE TABLE ... AUTOINCREMENT` in the same schema, or a table reloaded
-/// from a snapshot that already created it).
+/// Lazily create the `sqlite_sequence` table in `owning_schema` if it does not
+/// already exist there. Safe to call unconditionally — a no-op when the table
+/// is already present (e.g. a second `CREATE TABLE ... AUTOINCREMENT` in the
+/// same schema, or a table reloaded from a snapshot that already created it).
 ///
-/// The table is created in `target_table`'s owning schema (main vs. a temp
-/// schema), NOT the current schema, so a `CREATE TEMP TABLE ... AUTOINCREMENT`
-/// issued while the current schema is `main` still gets its `sqlite_sequence`
-/// in the temp schema (autoinc-4.x).
+/// `owning_schema` is the schema (`main` or a `temp_*` schema) that owns the
+/// AUTOINCREMENT table, resolved by the caller from the original (possibly
+/// schema-qualified) statement — NOT re-derived from the bare table name here
+/// (issue #6350; see [`sequence_table_in`]). A `CREATE TEMP TABLE ...
+/// AUTOINCREMENT` issued while the current schema is `main` thus still gets
+/// its `sqlite_sequence` in the temp schema (autoinc-4.x).
 ///
 /// Uses [`Database::create_table_with_identifier`] directly, bypassing the
 /// user-facing `sqlite_`-prefix reservation guard (`is_reserved_object_name`)
@@ -103,17 +94,16 @@ fn sequence_table_name(database: &Database, target_table: &str) -> String {
 /// like any user table (issue #6173's core design point).
 pub fn ensure_sqlite_sequence_table(
     database: &mut Database,
-    target_table: &str,
+    owning_schema: &str,
 ) -> Result<(), ExecutorError> {
-    let owning_schema = sequence_owner_schema(database, target_table);
-    let qualified = format!("{}.{}", owning_schema, SQLITE_SEQUENCE_TABLE);
+    let qualified = sequence_table_in(owning_schema);
     if database.get_table(&qualified).is_some() {
         return Ok(());
     }
     database
         .create_table_with_identifier(
             sqlite_sequence_table_schema(),
-            TableIdentifier::qualified(&owning_schema, false, SQLITE_SEQUENCE_TABLE, false),
+            TableIdentifier::qualified(owning_schema, false, SQLITE_SEQUENCE_TABLE, false),
         )
         .map_err(|e| ExecutorError::StorageError(e.to_string()))
 }
@@ -167,6 +157,10 @@ fn lookup_sequence_row(
 /// out-of-range (see [`parse_seq_value`]) — either way, "nothing to combine
 /// with the table's own max rowid".
 ///
+/// `owning_schema` is the schema the statement's target table actually
+/// resolved to (honoring any explicit `main.`/`temp.` qualifier — issue
+/// #6350; see [`sequence_table_in`]).
+///
 /// Used both by [`compute_next_autoincrement_rowid`] (the INTEGER PRIMARY KEY
 /// -named-column NULL-fill path in `insert/defaults.rs`) and by the
 /// `rowid`/`_rowid_`/`oid` pseudo-column auto-allocation path in
@@ -174,8 +168,12 @@ fn lookup_sequence_row(
 /// (the IPK column value IS the rowid) and must agree, or the row's *stored*
 /// column value and its *tracked* high-water mark (`Table::max_rowid_signed`,
 /// which future allocations read from) silently diverge.
-pub fn sequence_high_water_mark(database: &Database, table_display_name: &str) -> Option<i64> {
-    let seq_table = sequence_table_name(database, table_display_name);
+pub fn sequence_high_water_mark(
+    database: &Database,
+    table_display_name: &str,
+    owning_schema: &str,
+) -> Option<i64> {
+    let seq_table = sequence_table_in(owning_schema);
     lookup_sequence_row(database, &seq_table, table_display_name).and_then(|v| v)
 }
 
@@ -190,13 +188,18 @@ pub fn sequence_high_water_mark(database: &Database, table_display_name: &str) -
 /// when the table's max is 124) IS honored. An invalid stored `seq` (NULL, a
 /// non-numeric string, or one that doesn't fit `i64`) is ignored — the
 /// computation falls back to the table's actual max rowid alone.
+///
+/// `owning_schema` is the schema the statement's target table actually
+/// resolved to (honoring any explicit `main.`/`temp.` qualifier — issue
+/// #6350; see [`sequence_table_in`]).
 pub fn compute_next_autoincrement_rowid(
     database: &Database,
     storage_table_name: &str,
     table_display_name: &str,
+    owning_schema: &str,
 ) -> Result<i64, ExecutorError> {
     let table_max = database.get_table(storage_table_name).and_then(|t| t.max_rowid_signed());
-    let seq_val = sequence_high_water_mark(database, table_display_name);
+    let seq_val = sequence_high_water_mark(database, table_display_name, owning_schema);
     let combined = match (table_max, seq_val) {
         (Some(a), Some(b)) => a.max(b),
         (Some(a), None) => a,
@@ -225,17 +228,22 @@ pub fn compute_next_autoincrement_rowid(
 ///
 /// The stored value is always `max(existing stored value, min_value)` — a
 /// smaller explicit/auto rowid never lowers the tracked high-water mark.
+///
+/// `owning_schema` is the schema the statement's target table actually
+/// resolved to (honoring any explicit `main.`/`temp.` qualifier — issue
+/// #6350; see [`sequence_table_in`]).
 pub fn bump_sequence_after_insert(
     database: &mut Database,
     table_display_name: &str,
+    owning_schema: &str,
     min_value: i64,
 ) -> Result<(), ExecutorError> {
-    ensure_sqlite_sequence_table(database, table_display_name)?;
+    ensure_sqlite_sequence_table(database, owning_schema)?;
 
     // Target the `sqlite_sequence` in the SAME database as the table being
     // inserted into, so a main table's counter never lands in
-    // `temp.sqlite_sequence` and vice-versa (autoinc-4.x, issue #6173).
-    let seq_table = sequence_table_name(database, table_display_name);
+    // `temp.sqlite_sequence` and vice-versa (autoinc-4.x, issues #6173/#6350).
+    let seq_table = sequence_table_in(owning_schema);
     let existing = lookup_sequence_row(database, &seq_table, table_display_name);
     let existing_valid = existing.and_then(|v| v);
     let new_val = existing_valid.unwrap_or(i64::MIN).max(min_value);
@@ -281,7 +289,7 @@ pub fn remove_sequence_entry(
     table_display_name: &str,
     owning_schema: &str,
 ) -> Result<(), ExecutorError> {
-    let seq_table = format!("{}.{}", owning_schema, SQLITE_SEQUENCE_TABLE);
+    let seq_table = sequence_table_in(owning_schema);
     if database.get_table(&seq_table).is_none() {
         return Ok(());
     }
@@ -327,10 +335,10 @@ mod tests {
         );
     }
 
-    /// Helper: read a `sqlite_sequence` row for `name`, resolving the owning
-    /// schema exactly as the production paths do.
-    fn lookup(db: &Database, name: &str) -> Option<Option<i64>> {
-        let seq_table = sequence_table_name(db, name);
+    /// Helper: read a `sqlite_sequence` row for `name` from `owning_schema`'s
+    /// `sqlite_sequence` table, exactly as the production paths do.
+    fn lookup_in(db: &Database, owning_schema: &str, name: &str) -> Option<Option<i64>> {
+        let seq_table = sequence_table_in(owning_schema);
         lookup_sequence_row(db, &seq_table, name)
     }
 
@@ -338,40 +346,59 @@ mod tests {
     fn test_ensure_sqlite_sequence_table_idempotent() {
         let mut db = Database::new();
         assert!(db.catalog.get_table(SQLITE_SEQUENCE_TABLE).is_none());
-        ensure_sqlite_sequence_table(&mut db, "t1").unwrap();
+        ensure_sqlite_sequence_table(&mut db, "main").unwrap();
         assert!(db.catalog.get_table(SQLITE_SEQUENCE_TABLE).is_some());
         // Calling again must not error (idempotent).
-        ensure_sqlite_sequence_table(&mut db, "t1").unwrap();
+        ensure_sqlite_sequence_table(&mut db, "main").unwrap();
     }
 
     #[test]
     fn test_bump_sequence_creates_and_upserts() {
         let mut db = Database::new();
-        bump_sequence_after_insert(&mut db, "t1", 12).unwrap();
-        assert_eq!(lookup(&db, "t1"), Some(Some(12)));
+        bump_sequence_after_insert(&mut db, "t1", "main", 12).unwrap();
+        assert_eq!(lookup_in(&db, "main", "t1"), Some(Some(12)));
 
         // A smaller explicit value never lowers the tracked max.
-        bump_sequence_after_insert(&mut db, "t1", 1).unwrap();
-        assert_eq!(lookup(&db, "t1"), Some(Some(12)));
+        bump_sequence_after_insert(&mut db, "t1", "main", 1).unwrap();
+        assert_eq!(lookup_in(&db, "main", "t1"), Some(Some(12)));
 
         // A larger value raises it.
-        bump_sequence_after_insert(&mut db, "t1", 123).unwrap();
-        assert_eq!(lookup(&db, "t1"), Some(Some(123)));
+        bump_sequence_after_insert(&mut db, "t1", "main", 123).unwrap();
+        assert_eq!(lookup_in(&db, "main", "t1"), Some(Some(123)));
 
         // A second table is tracked independently.
-        bump_sequence_after_insert(&mut db, "t2", 1).unwrap();
-        assert_eq!(lookup(&db, "t2"), Some(Some(1)));
-        assert_eq!(lookup(&db, "t1"), Some(Some(123)));
+        bump_sequence_after_insert(&mut db, "t2", "main", 1).unwrap();
+        assert_eq!(lookup_in(&db, "main", "t2"), Some(Some(1)));
+        assert_eq!(lookup_in(&db, "main", "t1"), Some(Some(123)));
     }
 
     #[test]
     fn test_remove_sequence_entry() {
         let mut db = Database::new();
-        bump_sequence_after_insert(&mut db, "t1", 5).unwrap();
-        bump_sequence_after_insert(&mut db, "t2", 7).unwrap();
-        // Fresh in-memory tables with no backing user table resolve to `main`.
+        bump_sequence_after_insert(&mut db, "t1", "main", 5).unwrap();
+        bump_sequence_after_insert(&mut db, "t2", "main", 7).unwrap();
         remove_sequence_entry(&mut db, "t1", "main").unwrap();
-        assert_eq!(lookup(&db, "t1"), None);
-        assert_eq!(lookup(&db, "t2"), Some(Some(7)));
+        assert_eq!(lookup_in(&db, "main", "t1"), None);
+        assert_eq!(lookup_in(&db, "main", "t2"), Some(Some(7)));
+    }
+
+    #[test]
+    fn test_bump_sequence_routes_to_explicit_owning_schema() {
+        // Same display name tracked independently per owning schema — the
+        // explicit `owning_schema` parameter, not any bare-name re-resolution,
+        // decides which `sqlite_sequence` receives the bookkeeping (#6350).
+        let mut db = Database::new();
+        // The session temp schema is created eagerly at connection open.
+        let temp_schema = db.catalog.temp_schema_name().to_string();
+
+        bump_sequence_after_insert(&mut db, "t1", "main", 10).unwrap();
+        bump_sequence_after_insert(&mut db, "t1", &temp_schema, 20).unwrap();
+
+        assert_eq!(lookup_in(&db, "main", "t1"), Some(Some(10)));
+        assert_eq!(lookup_in(&db, &temp_schema, "t1"), Some(Some(20)));
+
+        // Reads are schema-scoped too.
+        assert_eq!(sequence_high_water_mark(&db, "t1", "main"), Some(10));
+        assert_eq!(sequence_high_water_mark(&db, "t1", &temp_schema), Some(20));
     }
 }
