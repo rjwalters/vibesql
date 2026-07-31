@@ -33,11 +33,18 @@ pub struct RowValidator<'a> {
     /// `INSERT INTO t11 VALUES (1, NULL), (2, 1), (3, 2);` where t11.parent
     /// references t11.x — row (2, 1) must see the just-validated (1, NULL)).
     batch_full_rows: &'a [Vec<vibesql_types::SqlValue>],
+    /// Unique-index keys already claimed by earlier rows of this multi-row
+    /// INSERT (issue #6346). The stored index bodies cannot see rows that are
+    /// validated but not yet inserted, so index-backed uniqueness (CREATE
+    /// UNIQUE INDEX / the implicit autoindex of a reloaded UNIQUE column)
+    /// needs this working set to catch intra-statement duplicates.
+    batch_index_keys: &'a super::constraints::BatchUniqueIndexKeys,
     /// Skip PK/UNIQUE duplicate checks (for REPLACE conflict clause)
     skip_duplicate_checks: bool,
 }
 
 impl<'a> RowValidator<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: &'a vibesql_storage::Database,
         schema: &'a vibesql_catalog::TableSchema,
@@ -45,6 +52,7 @@ impl<'a> RowValidator<'a> {
         batch_pk_values: &'a [Vec<vibesql_types::SqlValue>],
         batch_unique_values: &'a [Vec<Vec<vibesql_types::SqlValue>>],
         batch_full_rows: &'a [Vec<vibesql_types::SqlValue>],
+        batch_index_keys: &'a super::constraints::BatchUniqueIndexKeys,
         skip_duplicate_checks: bool,
     ) -> Self {
         Self {
@@ -54,6 +62,7 @@ impl<'a> RowValidator<'a> {
             batch_pk_values,
             batch_unique_values,
             batch_full_rows,
+            batch_index_keys,
             skip_duplicate_checks,
         }
     }
@@ -419,6 +428,7 @@ impl<'a> RowValidator<'a> {
             self.schema,
             self.table_name,
             row_values,
+            self.batch_index_keys,
         )
     }
 

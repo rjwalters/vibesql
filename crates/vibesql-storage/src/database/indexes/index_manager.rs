@@ -442,6 +442,54 @@ impl IndexManager {
         table_schema: &vibesql_catalog::TableSchema,
         row: &Row,
     ) -> Result<(), StorageError> {
+        self.check_unique_constraints_for_insert_impl(table_name, table_schema, row, None)
+    }
+
+    /// Batch variant of [`check_unique_constraints_for_insert`]: validates
+    /// every row against the stored index bodies AND against the keys claimed
+    /// by earlier rows of the same batch (issue #6346). Without the in-batch
+    /// tracking, two colliding rows in one batch both pass the pre-insert
+    /// check (the index body is only rebuilt after the bulk append) and both
+    /// get written, silently corrupting UNIQUE-indexed data.
+    ///
+    /// This is defense-in-depth: the executor performs the same in-batch
+    /// tracking during validation (where OR IGNORE semantics require skipping
+    /// rather than erroring), so a violation here indicates a caller that
+    /// bypassed executor validation.
+    pub fn check_unique_constraints_for_insert_batch(
+        &self,
+        table_name: &str,
+        table_schema: &vibesql_catalog::TableSchema,
+        rows: &[Row],
+    ) -> Result<(), StorageError> {
+        let mut seen: std::collections::HashMap<
+            &str,
+            std::collections::HashSet<Vec<SqlValue>>,
+        > = std::collections::HashMap::new();
+        for row in rows {
+            self.check_unique_constraints_for_insert_impl(
+                table_name,
+                table_schema,
+                row,
+                Some(&mut seen),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Shared implementation. When `batch_seen` is provided, each validated
+    /// row's keys are recorded into it and later rows are checked against it
+    /// (in-batch duplicate detection); `None` preserves the single-row
+    /// behavior exactly.
+    fn check_unique_constraints_for_insert_impl<'k>(
+        &'k self,
+        table_name: &str,
+        table_schema: &vibesql_catalog::TableSchema,
+        row: &Row,
+        mut batch_seen: Option<
+            &mut std::collections::HashMap<&'k str, std::collections::HashSet<Vec<SqlValue>>>,
+        >,
+    ) -> Result<(), StorageError> {
         for (index_name, metadata) in &self.indexes {
             if metadata.table_name == table_name && metadata.unique && !metadata.is_partial() {
                 // Skip expression indexes: storage cannot evaluate expressions
@@ -486,6 +534,23 @@ impl IndexManager {
                             .collect::<Vec<_>>()
                             .join(", ");
 
+                        // In-batch duplicate: an earlier row of this same
+                        // batch already claimed this key (issue #6346). The
+                        // stored index body cannot catch it because the batch
+                        // is appended (and indexes rebuilt) only after this
+                        // pre-check passes for every row.
+                        if let Some(seen) = batch_seen.as_deref_mut() {
+                            if seen
+                                .get(index_name.as_str())
+                                .is_some_and(|keys| keys.contains(&key_values))
+                            {
+                                return Err(StorageError::UniqueConstraintViolation(format!(
+                                    "UNIQUE constraint failed: {}",
+                                    columns_str
+                                )));
+                            }
+                        }
+
                         match index_data {
                             IndexData::InMemory { data, .. } => {
                                 if data.contains_key(&key_values) {
@@ -516,6 +581,12 @@ impl IndexManager {
                                 // HNSW indexes don't support unique constraints
                                 // Vector indexes are for similarity search, not uniqueness
                             }
+                        }
+
+                        // Row passed: claim its key so later rows of the same
+                        // batch conflict against it (issue #6346).
+                        if let Some(seen) = batch_seen.as_deref_mut() {
+                            seen.entry(index_name.as_str()).or_default().insert(key_values);
                         }
                     }
                 }

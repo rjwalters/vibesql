@@ -304,11 +304,17 @@ impl Operations {
         let table_schema = catalog.get_table(table_name);
 
         // Check user-defined unique indexes BEFORE inserting any rows
-        // This is separate from the table-level constraint checks in Table::insert_batch
+        // This is separate from the table-level constraint checks in Table::insert_batch.
+        // The batch variant also tracks keys claimed by earlier rows of this
+        // same batch (issue #6346): the index bodies are only rebuilt after
+        // the bulk append, so without in-batch tracking two colliding rows
+        // in one batch would both pass and both be written.
         if let Some(schema) = table_schema {
-            for row in &rows {
-                self.index_manager.check_unique_constraints_for_insert(table_name, schema, row)?;
-            }
+            self.index_manager.check_unique_constraints_for_insert_batch(
+                table_name,
+                schema,
+                &rows,
+            )?;
         }
 
         // Record start index for return value

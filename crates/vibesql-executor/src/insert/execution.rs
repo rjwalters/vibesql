@@ -552,6 +552,13 @@ fn execute_insert_internal(
        // (fkey1-5.1: `INSERT INTO t VALUES (1,NULL),(2,1),(3,2)` where t.parent
        // references t.x — row N must find its parent among rows 0..N-1).
     let mut batch_full_rows: Vec<Vec<vibesql_types::SqlValue>> = Vec::new();
+    // Track unique-INDEX keys claimed by earlier rows of this statement
+    // (issue #6346). Schema-level UNIQUE constraints are covered by
+    // `unique_constraint_values` above, but uniqueness enforced solely
+    // through unique index metadata (CREATE UNIQUE INDEX, or the implicit
+    // autoindex of a reloaded UNIQUE column whose schema-level constraint
+    // was lost) checks index bodies that cannot see not-yet-inserted rows.
+    let mut batch_index_keys = super::constraints::BatchUniqueIndexKeys::default();
 
     // Check if IGNORE conflict clause is set - if so, skip rows with constraint violations
     // Also treat a single-clause ON CONFLICT ... DO NOTHING as equivalent to
@@ -952,6 +959,7 @@ fn execute_insert_internal(
             &primary_key_values,
             &unique_constraint_values,
             &batch_full_rows,
+            &batch_index_keys,
             skip_duplicate_checks,
         );
 
@@ -981,6 +989,7 @@ fn execute_insert_internal(
                     &full_row_values,
                     &primary_key_values,
                     &unique_constraint_values,
+                    &batch_index_keys,
                 )
             };
             if would_violate {
@@ -1033,6 +1042,17 @@ fn execute_insert_internal(
         // Track row for self-referential FK lookups by later rows in the
         // same batch (see fkey1-5.1 note above).
         batch_full_rows.push(full_row_values.clone());
+
+        // Claim this row's unique-INDEX keys so later rows of the same
+        // statement conflict against it (issue #6346); mirrors the
+        // `unique_constraint_values` tracking above for schema-level UNIQUE.
+        super::constraints::record_unique_index_keys(
+            db,
+            &schema,
+            &storage_table_name,
+            &full_row_values,
+            &mut batch_index_keys,
+        );
 
         // Compute the value this row would contribute to last_insert_rowid()
         // *if it is actually inserted*. We commit it to `last_generated_id` only
@@ -1914,7 +1934,15 @@ fn resolve_replace_conflicts_for_row(
         &[], // No batch values to check against
     )?;
 
-    super::constraints::enforce_unique_indexes(db, schema, table_name, full_row_values)?;
+    // Single-row re-validation against existing data only: no in-batch
+    // working set applies here (empty default).
+    super::constraints::enforce_unique_indexes(
+        db,
+        schema,
+        table_name,
+        full_row_values,
+        &super::constraints::BatchUniqueIndexKeys::default(),
+    )?;
 
     // Re-validate the new row's OWN foreign keys too (fkey1-5.2/5.4): the
     // conflict-clearing delete above may have run a CASCADE / SET NULL /
@@ -1948,6 +1976,7 @@ fn check_would_violate_constraints(
     row_values: &[vibesql_types::SqlValue],
     batch_pk_values: &[Vec<vibesql_types::SqlValue>],
     batch_unique_values: &[Vec<Vec<vibesql_types::SqlValue>>],
+    batch_index_keys: &super::constraints::BatchUniqueIndexKeys,
 ) -> bool {
     // Check NOT NULL constraints
     for (col_idx, col) in schema.columns.iter().enumerate() {
@@ -2055,6 +2084,13 @@ fn check_would_violate_constraints(
                 // Skip if any value is NULL
                 if key_values.contains(&vibesql_types::SqlValue::Null) {
                     continue;
+                }
+
+                // In-batch duplicate: an earlier row of this same statement
+                // already claimed this key (issue #6346) — OR IGNORE must
+                // skip the row, not insert a duplicate.
+                if batch_index_keys.contains(&index_name, &key_values) {
+                    return true;
                 }
 
                 // Check if key exists in index
