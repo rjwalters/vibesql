@@ -33,6 +33,29 @@ locally to drive the cloud CLI; they are **never** copied to the VM.
 First time in a repo? Run `/repo:remote --configure` to build the `.env` below,
 then `/repo:remote` to launch.
 
+The provisioning contract below is implemented **once**, as an executable
+script — `scripts/repo/repo-remote.sh`, installed to
+`.claude/skills/repo/scripts/repo-remote.sh`. The interactive flow here is a
+thin wrapper: it runs the wizard/cost-confirmation UX, and once you say yes it
+calls that script rather than re-issuing `aws`/`gcloud` calls from prose. The
+same script is the **headless entry point** a non-interactive caller (e.g.
+loom's `fleet add-worker`) invokes directly:
+
+```
+repo-remote up [aws|gcp]              # DRY RUN: print the resolved plan + estimated cost as JSON, create NOTHING
+repo-remote up --yes [--json]        # provision (or reuse) with no prompts; requires pre-supplied cost-relevant config
+repo-remote status [--json]          # list instances tagged repo-remote=<name>
+repo-remote down [--yes] [--delete]  # dry-run listing without --yes; stop (or --delete to terminate) with --yes
+```
+
+`--yes` **removes the prompt, not the consent.** A cost-relevant field missing
+from config — the provider, its credentials, or `REPO_REMOTE_INSTANCE_TYPE` —
+is a loud, non-zero-exit failure, never a silent default that could pick a
+billable size on its own. Plain `repo-remote up` (no `--yes`) is a dry run that
+prints the plan and estimated hourly cost and spends nothing, so a caller can
+implement a "plan shown before money is spent" check against the `--json`
+output (instance id, public IP, SSH alias, estimated hourly cost).
+
 ## Configuration — two layers
 
 Settings come from two files, loaded in order so the repo can override the
@@ -188,6 +211,15 @@ wants a repo-specific account/region.
 9. Offer to run `/repo:remote` right away.
 
 ## Steps
+
+Steps 1–4, plus `--status`/`--down`, describe the provisioning contract that
+`scripts/repo/repo-remote.sh` implements. The interactive flow **delegates** to
+that script: it performs the credential-hygiene checks and the wizard/cost
+confirmation here, then hands the resolved plan to `repo-remote up --yes`
+(passing the confirmed provider/instance-type through config) rather than
+issuing the `aws`/`gcloud` calls itself. This keeps a single implementation, so
+the headless path and the interactive path cannot drift. The cloud-CLI
+specifics below document *what the script does* and remain the reference for it.
 
 ### 1. Load and validate config
 
@@ -436,6 +468,10 @@ Claude Code cannot host an interactive SSH session itself, so hand it to the OS
   terminal
 
 Tell the user they can start `claude` in that session to continue on the remote.
+On a freshly provisioned box, `/repo:sudo` is the companion step that unblocks
+root-level remediation over SSH — a non-interactive SSH session can't answer a
+`sudo` password prompt, so an agent stalls on it until a validated
+passwordless-sudo drop-in is installed.
 
 ### 8. Report
 
@@ -444,6 +480,12 @@ hourly cost estimate, idle-shutdown window, the SSH alias, whether the ID was
 written back to `.env`, and the teardown command (`/repo:remote --down`).
 
 ## `--status` and `--down`
+
+Both delegate to the shared script (`repo-remote status` / `repo-remote down`),
+which resolves the same two config layers and only ever touches instances
+carrying this repo's `repo-remote` tag. `repo-remote down` without `--yes` is a
+dry run that lists exactly what would stop; `--yes` acts, and `--delete`
+terminates.
 
 - `--status`: list all instances labeled `repo-remote=<repo-name>` with state
   and uptime; estimate accumulated cost. Uses the resolved credentials (shared

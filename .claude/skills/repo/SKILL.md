@@ -14,7 +14,7 @@ each change; add `--ask` to review findings and confirm first. Anything
 irreversible — deleting a branch, worktree, stash, or untracked file — is never
 automatic: it takes an explicit opt-in and passes a permanent-loss check.
 Commands whose only action is consequential (`orphans`, `update-tools`,
-`followups`, `release`, `remote`) always confirm first by nature. The environment commands (`remote`) stand up
+`followups`, `release`, `remote`, `sudo`) always confirm first by nature. The environment commands (`remote`) stand up
 infrastructure only after showing exactly what they will create and what it
 costs.
 
@@ -26,9 +26,12 @@ costs.
 | [[all]] | The whole hygiene pass in order — audit, docs, tidy, update-tools, reset — safe fixes by default, destructive steps gated |
 | [[audit]] | Full sweep — runs all hygiene checks, produces a summary report |
 | [[reset]] | Back to baseline — review stale worktrees/branches/stashes, sync with remote, return to the default branch |
+| [[handoff]] | Roll the session safely — file follow-ups, reset, check for a CLI update, write a handoff note the next session reads first |
 | [[tidy]] | Tidy up — build artifacts, caches, temp files, empty dirs |
-| [[release]] | Cut a release — pre-flight, semver decision, CHANGELOG, version bump, tag, GitHub Release |
-| [[remote]] | Launch a cloud dev session (GCP or AWS) with this repo ready to go, then open SSH |
+| [[release]] | Cut a release — pre-flight, semver decision, CHANGELOG, version bump, tag, GitHub Release. Supports per-project release policy via named phase-boundary seams in `.repo/release-policy.md` |
+| [[host-optimize]] | Prepare a Mac (or Linux box) for heavy Loom/agent build use — audit Gatekeeper churn, backup-agent interference, build-tree bloat; apply safe fixes, gate consequential ones |
+| [[remote]] | Launch a cloud dev session (GCP or AWS) with this repo ready to go, then open SSH. Its provisioning contract is implemented once in `scripts/repo/repo-remote.sh` (installed to `.claude/skills/repo/scripts/`); the interactive flow delegates to that script, which also serves as a headless `repo-remote up --yes --json` entry point for non-interactive callers (e.g. loom's `fleet add-worker`) |
+| [[sudo]] | Opt-in passwordless-sudo setup for a dev machine — install a `visudo`-validated `/etc/sudoers.d` drop-in (blanket `ALL` or a scoped command list) so an agent over SSH isn't blocked on password prompts; always confirmed first, validated with rollback on failure |
 | [[update-tools]] | Check installed tool packages (Loom, Anvil, …) against their sources and offer updates |
 | [[followups]] | Capture follow-on work from this session and file it as issues — here or in upstream tool repos, always confirmed first |
 | [[branches]] | Branch & worktree hygiene — merged PRs, orphaned branches, stale worktrees |
@@ -45,6 +48,8 @@ costs.
 - When the working tree feels messy (`tidy`, `orphans`)
 - When `git branch` output has grown unmanageable (`branches`)
 - When local hardware isn't enough or you need a clean Linux box (`remote`)
+- Before turning a Mac into a heavy Loom/agent build host (`host-optimize`)
+- To unblock an agent driving a dev box over SSH from `sudo` password prompts (`sudo`)
 - Periodically, to keep installed tool packages current (`update-tools`)
 - Periodically (monthly) as general hygiene (`audit`)
 - Before a demo, handoff, or onboarding (clean up before they arrive)
@@ -132,3 +137,31 @@ or malformed config keeps the guard on; the opt-in toggles are the inverse.
 The full stable interface (input/output contract, exit semantics, every env
 name) is documented in the hook's own header — downstream tools (e.g. Loom's
 installer) gate on it via this repo's release version.
+
+## Handoff-note hook (SessionStart)
+
+The installer wires a second hook, `session-start-handoff.sh`, as two
+`SessionStart` entries — one matching `startup`, one matching `resume`. When
+[[handoff]] has left a note at `.claude/handoff.md`, the hook emits it as
+session context via `hookSpecificOutput.additionalContext`: the note's path,
+its age, a staleness warning once the note passes seven days, and the note
+itself. When the note is at or under a size cap (`MAX_BODY_BYTES`, 10 KB) the
+**full body is inlined**; above the cap it falls back to an outline built from
+the note's `#`/`##` headers plus an explicit oversize warning. Inlining the body
+is deliberate (issue #33): the load-bearing content lives in the body, and a
+headers-only summary conveys shape but nothing actionable.
+
+Behavioral contract:
+
+- **Read-only.** It never writes, deletes, or modifies the note. Absorbing the
+  note and deleting it is [[handoff]]'s own one-shot contract.
+- **Silent when there is nothing to say.** No note, or an unreadable one, means
+  no output and exit 0.
+- **Fails open.** Malformed stdin, a missing `cwd`, or any internal error exits
+  0 with no output. A hook fault must never block session start.
+- **Skips `/clear`.** `clear` is not a process relaunch, so re-emitting the
+  banner there would be noise.
+
+There are no configuration toggles — the hook's behavior is fixed. To disable
+it, remove its `SessionStart` entries from `.claude/settings.json` (or run
+`uninstall.sh`, which removes only the entries it owns).

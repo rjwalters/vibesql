@@ -924,6 +924,90 @@ function qsplit(s,   out, n, i, c, j, qc, ci, inner, SQ, DQ) {
 }
 '
 
+# =============================================================================
+# MULTI-LINE QUOTE-AWARE SEGMENTATION (#71)
+#
+# The three segment parsers (parse_force_ops, lifecycle_or_cloud_reason,
+# extract_rm_targets) originally segmented per awk INPUT RECORD with
+# `$0 = qsplit($0); split($0, segs, "\n")`. Because awk's default RS="\n" splits
+# a multi-line command into separate records BEFORE the pattern block runs,
+# qsplit()'s quote-tracking state — scoped to a single call — reset at every
+# embedded newline. An interior line of an otherwise-inert multi-line quoted
+# DATA literal (echo/printf/--body) was therefore lexed as its own top-level
+# segment with no memory that it is still inside an open quote from a prior line,
+# so a quoted `git push --force origin main` false-`ask`ed (parse_force_ops) and
+# a quoted `halt` false-`deny`ed (lifecycle_or_cloud_reason). PR #69 fixed the
+# identical defect in extract_rm_targets() with a whole-buffer slurp-then-segment
+# lexer; this shared helper generalizes that lexer so all three parsers segment
+# ONCE over the full command and cannot drift (the same rationale the _QSPLIT_AWK
+# header gives for sharing qsplit()).
+#
+# `ml_segment(buf, segs)` fills the caller's `segs[]` out-array (AWK passes arrays
+# by reference) with one entry per top-level segment and returns the count. It
+# deliberately does NOT reuse qsplit()+split("\n"): qsplit() emits a `\n` for each
+# REAL separator while ALSO leaving a literal newline that lived inside an inert
+# quoted span untouched, so the two become indistinguishable to a downstream
+# `split(s, segs, "\n")`. Segmentation is therefore done inline here, so an inert
+# quoted span's embedded newlines never become segment boundaries.
+#
+# Segmentation contract (identical to qsplit()'s single-line behaviour, now
+# correctly carried ACROSS embedded newlines):
+#   - Separators `;` `&` (`&&`) `|` (`||`) OUTSIDE any quote split segments.
+#   - A raw newline OUTSIDE any quote ALSO splits — so a GENUINE multi-line
+#     command still yields a real later-line segment and still denies (safety
+#     floor preserved; matches the old per-record behaviour where each input line
+#     was its own record).
+#   - An INERT quoted span (no `$(` and no backtick) is copied VERBATIM, so its
+#     embedded newlines/separators stay literal and never manufacture a phantom
+#     segment out of quoted documentation prose (the false positive).
+#   - A quoted span carrying command substitution (`$(` or a backtick) keeps its
+#     separators ACTIVE (walked char-by-char, exactly like qsplit()), so a
+#     smuggled payload is never hidden behind an opening quote.
+#   - An unterminated quote copies the remainder verbatim (best-effort; never
+#     widens a deny into an allow).
+# =============================================================================
+_ML_QSPLIT_AWK='
+function ml_segment(buf, segs,   SQ, DQ, s, n, seg, segc, i, c, qc, ci, j, inner) {
+    SQ = sprintf("%c", 39)   # single quote
+    DQ = sprintf("%c", 34)   # double quote
+    split("", segs)          # clear the caller-supplied out-array
+    s = buf
+    n = length(s)
+    seg = ""
+    segc = 0
+    i = 1
+    while (i <= n) {
+        c = substr(s, i, 1)
+        if (c == DQ || c == SQ) {
+            qc = c
+            ci = 0
+            for (j = i + 1; j <= n; j++) if (substr(s, j, 1) == qc) { ci = j; break }
+            if (ci == 0) {
+                seg = seg substr(s, i)   # unterminated quote: copy rest verbatim
+                i = n + 1
+                continue
+            }
+            inner = substr(s, i + 1, ci - i - 1)
+            if (index(inner, "$(") == 0 && index(inner, "`") == 0) {
+                seg = seg substr(s, i, ci - i + 1)   # inert span: verbatim (newlines stay literal)
+                i = ci + 1
+                continue
+            }
+            seg = seg c   # command substitution present: keep separators ACTIVE
+            i++
+            continue
+        }
+        if (c == ";" || c == "&" || c == "|" || c == "\n") {
+            segs[++segc] = seg; seg = ""; i++; continue
+        }
+        seg = seg c
+        i++
+    }
+    segs[++segc] = seg
+    return segc
+}
+'
+
 # Parse force-op segments out of a command, emitting one TAB-separated
 # "<cpath>\t<target>" line per genuine git force-push / hard-reset. Portable awk
 # only (mirrors extract_rm_targets / lifecycle_or_cloud_reason segment parsing):
@@ -943,12 +1027,20 @@ function qsplit(s,   out, n, i, c, j, qc, ci, inner, SQ, DQ) {
 #   - reset --hard: always emitted with <target> = "@HEAD@".
 # The caller resolves "@HEAD@" to the checked-out branch and applies the mode.
 parse_force_ops() {
-    printf '%s' "$1" | awk "$_QSPLIT_AWK"'
-    BEGIN { SEP = sprintf("%c", 31) }  # US (unit separator) — non-whitespace so
-                                       # bash read does not trim an empty cpath.
-    {
-        $0 = qsplit($0)   # quote-aware segmentation (#3755)
-        n = split($0, segs, "\n")
+    printf '%s' "$1" | awk "$_ML_QSPLIT_AWK"'
+    BEGIN {
+        SEP = sprintf("%c", 31)  # US (unit separator) — non-whitespace so bash
+                                 # read does not trim an empty cpath.
+        buf = ""
+    }
+    # Slurp the whole (possibly multi-line) command, then segment ONCE with the
+    # shared quote-aware lexer (#71) so a multi-line quoted DATA literal whose
+    # interior line is a force-push phrase is no longer mis-read as a real
+    # segment (the pre-#71 per-record `qsplit()` reset quote state at each
+    # embedded newline).
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        n = ml_segment(buf, segs)
         for (i = 1; i <= n; i++) {
             seg = segs[i]
             sub(/^[ \t]+/, "", seg)
@@ -1089,6 +1181,142 @@ strip_literal_text() {
     }'
 }
 
+# Redact the quoted argument(s) of a non-executing "data sink" command word
+# (echo, printf) so a dangerous-looking string that appears ONLY as quoted DATA
+# handed to echo/printf no longer trips the raw ALWAYS_BLOCK_PATTERNS scan
+# (catastrophic tier) or the ASK_PATTERNS scan (ask tier) (#53). echo/printf
+# print their arguments verbatim; they never EXECUTE them, so a quoted argument
+# is inert text — exactly like a --body/-m value — yet strip_literal_text()'s
+# flag allowlist never covered it. This is the meta false-positive that blocked
+# a guard self-test (`echo '{"…":"<dangerous cmd>"}' | guard-destructive.sh`)
+# and blocked filing this very issue's heredoc body.
+#
+# Command-word anchored (mirrors fastpath_builtin_admits() and the segment
+# parsers): the quoted args are redacted ONLY for a simple command whose FIRST
+# token is exactly `echo` or `printf` (optionally behind a bare `sudo`/`env`
+# wrapper). A wrapper that actually EXECUTES its argument — `bash -c '<payload>'`,
+# `sh -c`, `eval`, `xargs` — is never a data sink and is never redacted here.
+#
+# Safety floor, identical to strip_literal_text()/qsplit():
+#   - A quoted span is redacted ONLY when it carries no command substitution /
+#     backtick opener (`$(` or a backtick), so a smuggled `echo "$(<payload>)"`
+#     keeps its payload intact and still hard-denies.
+#   - The `echo '<payload>' | sh` shape (data PIPED into a shell that WOULD
+#     execute it) is handled by the command_has_shell_segment() gate at the call
+#     site, which skips this redaction entirely whenever any pipeline segment's
+#     command word is a shell — so the raw scan still sees and blocks the payload.
+#
+# Single-pass quote-aware lexer. It deliberately does NOT reuse qsplit(), whose
+# `\n`-per-separator contract would conflate a real newline inside a multi-line
+# quoted span with a shell separator; here a multi-line span is redacted as one
+# inert unit (`.` never matches a newline, so each line stays SAME-LENGTH and the
+# surrounding byte offsets are preserved). Best-effort like strip_literal_text():
+# an unterminated quote copies the remainder verbatim (never redacts), and the
+# result feeds only the NARROWING scans, so the worst case is a raw substring
+# surviving (a false block) — never a catastrophic block being skipped.
+strip_datasink_literals() {
+    printf '%s' "$1" | awk '
+    BEGIN {
+        SQ = sprintf("%c", 39)   # single quote
+        DQ = sprintf("%c", 34)   # double quote
+        buf = ""
+    }
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        s = buf
+        n = length(s)
+        out = ""
+        i = 1
+        atcmd = 1     # at the start of a simple command (command-word position)
+        sink = 0      # inside an echo/printf data-sink command
+        while (i <= n) {
+            c = substr(s, i, 1)
+            # A shell separator resets to command-word position.
+            if (c == ";" || c == "&" || c == "|" || c == "\n") {
+                out = out c; i++; atcmd = 1; sink = 0; continue
+            }
+            # Leading whitespace is copied without leaving command-word position.
+            if (c == " " || c == "\t") { out = out c; i++; continue }
+            # Command-word position: read the first token and classify it.
+            if (atcmd) {
+                atcmd = 0
+                tok = ""
+                j = i
+                while (j <= n) {
+                    cc = substr(s, j, 1)
+                    if (cc == " " || cc == "\t" || cc == ";" || cc == "&" || cc == "|" || cc == "\n") break
+                    tok = tok cc
+                    j++
+                }
+                # A bare sudo/env wrapper: emit it and stay in command-word
+                # position so the NEXT token is classified as the command word.
+                if (tok == "sudo" || tok == "env") {
+                    out = out tok; i = j; atcmd = 1; continue
+                }
+                if (tok == "echo" || tok == "printf") { sink = 1 }
+                out = out tok; i = j; continue
+            }
+            # Mid-command: a quoted span is redacted only inside a data sink.
+            if (c == DQ || c == SQ) {
+                qc = c
+                ci = 0
+                for (j = i + 1; j <= n; j++) {
+                    if (substr(s, j, 1) == qc) { ci = j; break }
+                }
+                if (ci == 0) {
+                    # Unterminated quote: copy the rest verbatim, never redact.
+                    out = out substr(s, i); i = n + 1; continue
+                }
+                inner = substr(s, i + 1, ci - i - 1)
+                if (sink && index(inner, "$(") == 0 && index(inner, "`") == 0) {
+                    gsub(/./, "X", inner)   # . never matches \n: multi-line stays same-length
+                }
+                out = out qc inner qc; i = ci + 1; continue
+            }
+            out = out c; i++
+        }
+        printf "%s", out
+    }'
+}
+
+# Return 0 (success) if ANY quote-aware segment's command word is a shell binary
+# (sh/bash/dash/zsh/ksh/csh/tcsh/fish/pwsh, with or without a leading path).
+# GATES strip_datasink_literals(): when a shell could consume the command's data
+# (e.g. `echo '<payload>' | sh`), the data-sink redaction is skipped so the raw
+# catastrophic scan still sees — and blocks — the payload. Conservative by
+# construction: a shell ANYWHERE in the command disables the (narrowing)
+# redaction, so the worst case is a preserved false BLOCK, never a skipped one.
+# `guard-destructive.sh` (basename is not a bare shell word) is deliberately NOT
+# matched, so the guard's own `echo '<json>' | guard-destructive.sh` self-test
+# still redacts and no longer false-blocks (#53). Emits "yes"/"no".
+command_has_shell_segment() {
+    printf '%s' "$1" | awk "$_QSPLIT_AWK"'
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        found = 0
+        s = qsplit(buf)   # quote-aware segmentation (#3755); separators -> \n
+        n = split(s, segs, "\n")
+        for (i = 1; i <= n; i++) {
+            seg = segs[i]
+            sub(/^[ \t]+/, "", seg)
+            # Strip any run of leading VAR=val assignments, then a sudo/env wrapper,
+            # so the REAL command word is classified. The required trailing [ \t]+
+            # in the assignment pattern guarantees the loop makes progress.
+            while (match(seg, /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/)) { seg = substr(seg, RLENGTH + 1) }
+            sub(/^sudo[ \t]+/, "", seg)
+            sub(/^env[ \t]+/, "", seg)
+            sub(/^[ \t]+/, "", seg)
+            m = split(seg, toks, /[ \t]+/)
+            if (m == 0) continue
+            w = toks[1]
+            sub(/.*\//, "", w)   # basename only
+            if (w == "sh" || w == "bash" || w == "dash" || w == "zsh" || \
+                w == "ksh" || w == "csh" || w == "tcsh" || w == "fish" || w == "pwsh") { found = 1 }
+        }
+        print (found ? "yes" : "no")
+    }'
+}
+
 # Helper: output a deny decision and exit
 #
 # Optional second arg is a short, STABLE rule tag (issue #3771) recorded as the
@@ -1171,6 +1399,18 @@ ALWAYS_BLOCK_PATTERNS=(
     # (root followed by a closing quote) still matches (#3553). The trailing
     # class matches anything that is not a path-continuation character (so `/`,
     # `/ `, `/*`, `/;`, `/'` all count as "root itself" but `/tmp` does not).
+    # NOTE (#72): these three patterns require `rm` to be immediately followed by
+    # whitespace, so a command-word substitution like `$(which rm) -rf /` (where
+    # `rm` is followed by `)`) does NOT match here. That shape is instead caught
+    # by the extract_rm_targets() -> rm-protected-path path below, whose deny
+    # covers root, $HOME, AND every top-level dir — a superset of these three.
+    # For that superset claim to actually hold for the substitution shape, the
+    # extract path must recognize the SAME home/root targets these literal
+    # patterns do: extract_rm_targets() strips a leading `env` (and VAR=val
+    # assignments) as well as `sudo`, and the protected-path loop expands a bare
+    # `~`/`$HOME` target before the check — so `env $(which rm) -rf /`,
+    # `$(which rm) -rf ~`, and `$(which rm) -rf $HOME` all deny just like their
+    # literal counterparts. No parallel regex is needed for the substitution case.
     'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+/([^[:alnum:]._~/-]|$)'
     'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+~([^[:alnum:]._~/-]|$)'
     'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]+\$HOME([^[:alnum:]._~/-]|$)'
@@ -1239,6 +1479,19 @@ if [[ "$COMMAND" == *"--body"* || "$COMMAND" == *"--message"* || \
       "$COMMAND" == *"--comment"* || "$COMMAND" == *"-m"* ]]; then
     COMMAND_NO_LITERAL_TEXT=$(strip_literal_text "$COMMAND")
 fi
+# ALSO redact the quoted args of a data-sink command word (echo/printf), so a
+# dangerous string handed to echo/printf as inert DATA no longer trips the raw
+# scan (#53) — the meta false-positive that blocked guard self-tests and filing
+# this issue's heredoc body. Gated on echo/printf being present (off the hot
+# path otherwise) AND on NO shell segment existing: when data is piped into a
+# shell that would execute it (`echo '<payload>' | sh`), the redaction is skipped
+# so the raw scan still blocks the payload. `-c` wrappers (bash -c/sh -c) are
+# never data sinks, and `$(`/backtick spans are never redacted, so smuggling
+# still hard-denies.
+if [[ "$COMMAND" == *"echo"* || "$COMMAND" == *"printf"* ]] && \
+   [[ "$(command_has_shell_segment "$COMMAND")" == "no" ]]; then
+    COMMAND_NO_LITERAL_TEXT=$(strip_datasink_literals "$COMMAND_NO_LITERAL_TEXT")
+fi
 
 for pattern in "${ALWAYS_BLOCK_PATTERNS[@]}"; do
     if echo "$COMMAND_NO_LITERAL_TEXT" | grep -qiE "$pattern"; then
@@ -1286,6 +1539,15 @@ if [[ "$COMMAND_NO_COMMENT" == *"--body"* || "$COMMAND_NO_COMMENT" == *"--messag
       "$COMMAND_NO_COMMENT" == *"--comment"* || "$COMMAND_NO_COMMENT" == *"-m"* ]]; then
     COMMAND_ASK_SCAN=$(strip_literal_text "$COMMAND_NO_COMMENT")
 fi
+# Mirror the catastrophic tier's data-sink redaction (#53): an ask-phrase quoted
+# as inert echo/printf data (e.g. `echo 'run gh issue close 5 to clean up'`)
+# should not false-ask. Same shell-segment gate keeps `echo '<phrase>' | sh`
+# reaching the raw ask scan. Never feeds the catastrophic scan, so it can only
+# NARROW an ask, never miss a hard deny.
+if [[ "$COMMAND_NO_COMMENT" == *"echo"* || "$COMMAND_NO_COMMENT" == *"printf"* ]] && \
+   [[ "$(command_has_shell_segment "$COMMAND_NO_COMMENT")" == "no" ]]; then
+    COMMAND_ASK_SCAN=$(strip_datasink_literals "$COMMAND_ASK_SCAN")
+fi
 
 # =============================================================================
 # SYSTEM-LIFECYCLE + CLOUD-CLI DELETE (segment-parsed, command-word anchored)
@@ -1312,10 +1574,16 @@ fi
 lifecycle_or_cloud_reason() {
     # Emit a deny reason (one per line) for every segment whose command word is a
     # system-lifecycle command or an az/gcloud delete. Portable awk only.
-    printf '%s' "$1" | awk "$_QSPLIT_AWK"'
-    {
-        $0 = qsplit($0)   # quote-aware segmentation (#3755)
-        n = split($0, segs, "\n")
+    printf '%s' "$1" | awk "$_ML_QSPLIT_AWK"'
+    BEGIN { buf = "" }
+    # Slurp the whole (possibly multi-line) command, then segment ONCE with the
+    # shared quote-aware lexer (#71) so a multi-line quoted DATA literal whose
+    # interior line is a lifecycle/cloud word (e.g. `halt`) is no longer mis-read
+    # as a real segment (the pre-#71 per-record `qsplit()` reset quote state at
+    # each embedded newline, hard-denying inert quoted prose).
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        n = ml_segment(buf, segs)
         for (i = 1; i <= n; i++) {
             seg = segs[i]
             sub(/^[ \t]+/, "", seg)
@@ -1398,8 +1666,10 @@ fi
 #
 # Only *actual local* `rm` command words are inspected. `extract_rm_targets`
 # splits the command on ; | & && || and, for each simple-command segment whose
-# command word is `rm` (optionally sudo-prefixed) AND which carries a
-# recursive/force flag, emits the non-flag argument tokens. Consequences (#3553):
+# command word is `rm` (optionally sudo-prefixed) — OR a command-word
+# *substitution* `$(...)`/backtick in executable position (#72) — AND which
+# carries a recursive/force flag, emits the non-flag argument tokens.
+# Consequences (#3553):
 #   - A token from an earlier command in the same line (e.g. the `host-ip.txt`
 #     in `HOST=$(cat host-ip.txt); ssh $HOST rm -rf …`) is never mis-read as an
 #     rm target — only tokens of a real `rm` segment are considered.
@@ -1416,24 +1686,107 @@ fi
 
 extract_rm_targets() {
     # Emit one rm-target token per line for every local `rm -r/-f` invocation.
-    # Portable awk only (no GNU/BSD-specific escapes); replaces the shell
-    # separators with newlines, then inspects each simple command.
-    printf '%s' "$1" | awk "$_QSPLIT_AWK"'
-    {
-        $0 = qsplit($0)   # quote-aware segmentation (#3755)
-        n = split($0, segs, "\n")
-        for (i = 1; i <= n; i++) {
-            seg = segs[i]
+    # Portable awk only (no GNU/BSD-specific escapes).
+    #
+    # MULTI-LINE QUOTE AWARENESS (#60): slurp the whole (possibly multi-line)
+    # command into ONE buffer, then segment ONCE with a quote-aware walk — instead
+    # of the old per-awk-record `$0 = qsplit($0)`, whose quote-tracking reset at
+    # every input newline because awk's default RS split the command into separate
+    # records. That per-record form false-blocked a multi-line quoted DATA literal
+    # (echo/printf/--body) whose interior line merely BEGINS with `rm -rf /`: the
+    # interior line was scanned as its own top-level segment with no memory that it
+    # is still inside an open quote from a prior line, so its command word resolved
+    # to a real `rm` and its lone `/` token hit the protected-root deny. Mirrors
+    # the buffer-slurp the catastrophic/ask redactors (strip_datasink_literals /
+    # strip_literal_text) and command_has_shell_segment() already use.
+    #
+    # Segmentation is delegated to the shared ml_segment() lexer (#71,
+    # _ML_QSPLIT_AWK) rather than reusing qsplit()+split("\n"), because qsplit()
+    # emits a `\n` for each real separator while ALSO leaving a literal newline
+    # that lived inside an inert quoted span untouched — the two are then
+    # indistinguishable to a downstream `split(s, segs, "\n")`, which is exactly
+    # why the naive slurp-then-qsplit would still re-split the quoted `rm -rf /`
+    # line into its own segment. ml_segment() walks the buffer once so an inert
+    # quoted span's embedded newlines never become segment boundaries. PR #69
+    # introduced this lexer inline here; #71 extracted it into the shared helper
+    # so parse_force_ops()/lifecycle_or_cloud_reason() reuse the SAME algorithm
+    # instead of duplicating it (see the _ML_QSPLIT_AWK header for the full
+    # segmentation contract).
+    printf '%s' "$1" | awk "$_ML_QSPLIT_AWK"'
+    BEGIN { buf = "" }
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        segc = ml_segment(buf, segs)
+        for (si = 1; si <= segc; si++) {
+            seg = segs[si]
             sub(/^[ \t]+/, "", seg)
-            sub(/^sudo[ \t]+/, "", seg)
+            # Strip a leading run of VAR=val assignments and sudo/env wrappers
+            # (in any order/repetition) so the REAL command word — a literal `rm`
+            # OR a command-word substitution — is what we classify. `env` is
+            # stripped alongside `sudo` (#72): `env $(which rm) -rf /` and
+            # `env rm -rf /` must be seen as an rm command word, not shielded
+            # behind the wrapper. The required trailing [ \t]+ in each sub()
+            # guarantees the while loop makes progress and terminates.
+            while (sub(/^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/, "", seg) || \
+                   sub(/^sudo[ \t]+/, "", seg) || \
+                   sub(/^env[ \t]+/, "", seg)) { }
             sub(/^[ \t]+/, "", seg)
-            if (seg !~ /^rm([ \t]|$)/) continue
-            m = split(seg, toks, /[ \t]+/)
+            # Determine the argument tail and the token index to start scanning
+            # from. Two command-word shapes emit targets:
+            #   (a) a literal `rm` command word — scan from toks[2] (skip "rm").
+            #   (b) a command-word *substitution* — `$(...)` or a backtick pair —
+            #       in executable position (#72). The substitution result becomes
+            #       the command word at run time, so `$(which rm) -rf /` never
+            #       presents a literal `rm` token yet is exactly as dangerous. We
+            #       deliberately do NOT try to resolve what the substitution names
+            #       (`which rm`, `command -v rm`, an alias, a PATH-relative rm, … —
+            #       unbounded and trivially bypassable); we key on the SHAPE
+            #       (substitution in command-word position + a recursive/force
+            #       flag + a protected-path target) and let the downstream
+            #       protected-path check decide. A benign `$(which ls) -la /tmp`
+            #       carries no recursive/force flag, so it emits no target and
+            #       stays allowed — no blanket deny on command-word substitutions.
+            tail = ""
+            start = 0
+            if (seg ~ /^rm([ \t]|$)/) {
+                tail = seg
+                start = 2
+            } else if (substr(seg, 1, 2) == "$(") {
+                # Balanced-paren skip past the substitution so an internal space
+                # (e.g. `$(command -v rm)`) is NOT mis-split into a bogus
+                # flag/target token. Start depth at 1 for the opening `(`.
+                depth = 1
+                p = 3
+                L = length(seg)
+                while (p <= L && depth > 0) {
+                    ch = substr(seg, p, 1)
+                    if (ch == "(") depth++
+                    else if (ch == ")") depth--
+                    p++
+                }
+                if (depth != 0) continue   # unterminated: emit nothing (conservative)
+                tail = substr(seg, p)
+                sub(/^[ \t]+/, "", tail)
+                start = 1
+            } else if (substr(seg, 1, 1) == "`") {
+                # Backtick command word: skip to the closing backtick.
+                p = 2
+                L = length(seg)
+                while (p <= L && substr(seg, p, 1) != "`") p++
+                if (p > L) continue        # unterminated: emit nothing
+                p++                         # step past the closing backtick
+                tail = substr(seg, p)
+                sub(/^[ \t]+/, "", tail)
+                start = 1
+            } else {
+                continue
+            }
+            m = split(tail, toks, /[ \t]+/)
             has_rf = 0
-            for (j = 2; j <= m; j++)
+            for (j = start; j <= m; j++)
                 if (toks[j] ~ /^-/ && toks[j] ~ /[rRfF]/) has_rf = 1
             if (!has_rf) continue
-            for (j = 2; j <= m; j++) {
+            for (j = start; j <= m; j++) {
                 if (toks[j] == "") continue
                 if (toks[j] ~ /^-/) continue
                 print toks[j]
@@ -1481,8 +1834,14 @@ normalize_abs_path() {
 }
 
 # Cheap pre-check keeps awk off the hot path for the ~99% of commands that have
-# no recursive/force rm at all.
-if echo "$COMMAND" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]'; then
+# no recursive/force rm at all. The first alternative matches a literal `rm`
+# command word; the second admits a command-word *substitution* (#72) — a
+# closing `)` or backtick immediately followed by a recursive/force flag, as in
+# `$(which rm) -rf /` or `` `which rm` -rf / `` — so extract_rm_targets() is
+# invoked for that shape too. This gate is only an optimization: a false match
+# here is harmless because extract_rm_targets() emits a target only for a real
+# rm-flavored (substitution/rm command word + recursive-force flag) segment.
+if echo "$COMMAND" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]|[)`][[:space:]]+-[a-zA-Z]*[rf]'; then
     RM_TARGETS=$(extract_rm_targets "$COMMAND" | head -20)
 
     for target in $RM_TARGETS; do
@@ -1510,6 +1869,31 @@ if echo "$COMMAND" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]'; then
             *.pyc)
                 continue ;;
         esac
+
+        # Expand a leading `~` or `$HOME` token so home-directory targets are
+        # recognized the same way the literal-rm ALWAYS_BLOCK `$HOME`/`~`
+        # patterns handle them (#72). extract_rm_targets() emits the raw token,
+        # so a substitution-path target of `~` or `$HOME` (as in
+        # `$(which rm) -rf ~`) would otherwise be treated as a CWD-relative path
+        # and never flagged, an asymmetry vs. literal `rm -rf ~`/`rm -rf $HOME`.
+        # Only bare-home and home-subpath forms are expanded — this mirrors the
+        # literal floor exactly: bare `$HOME`/`~` deny (whole-home wipe) while a
+        # home *subpath* expands to a deeper path and stays allowed.
+        if [[ -n "$HOME" ]]; then
+            # The `~` in the case globs below is a LITERAL match against the
+            # emitted target token, not a path we want the shell to expand —
+            # SC2088 (tilde-does-not-expand-in-quotes) is exactly the intended
+            # behaviour here, so it is suppressed.
+            # shellcheck disable=SC2088
+            case "$target" in
+                '~')          target="$HOME" ;;
+                '~/'*)        target="$HOME/${target#\~/}" ;;
+                '$HOME')      target="$HOME" ;;
+                '$HOME/'*)    target="$HOME/${target#\$HOME/}" ;;
+                '${HOME}')    target="$HOME" ;;
+                '${HOME}/'*)  target="$HOME/${target#\$\{HOME\}/}" ;;
+            esac
+        fi
 
         # Resolve path to absolute (raw — normalization happens next).
         ABS_PATH=""
