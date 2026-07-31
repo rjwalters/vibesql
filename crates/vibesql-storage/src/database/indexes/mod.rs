@@ -38,3 +38,8 @@ pub use index_manager::IndexManager;
 pub use index_metadata::{IndexData, IndexMetadata};
 pub use ivfflat::IVFFlatIndex;
 pub use streaming::OwnedStreamingRangeScan;
+// Key normalization used when storing/looking up index keys. Exported so the
+// executor's in-batch unique-index duplicate tracking (issue #6346) can build
+// keys with the exact same canonical form the stored index bodies use
+// (Integer 1 and Real 1.0 must collide, matching `IndexData::get`).
+pub use value_normalization::{normalize_cow, normalize_for_comparison};

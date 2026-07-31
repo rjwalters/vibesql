@@ -2313,13 +2313,15 @@ mod tests {
                     ColumnSchema::new("id".to_string(), DataType::Integer, false),
                     ColumnSchema::new("y".to_string(), DataType::Integer, true),
                     ColumnSchema::new("z".to_string(), DataType::Integer, true),
+                    ColumnSchema::new("w".to_string(), DataType::Integer, true),
                 ],
                 vec!["id".to_string()],
             );
             child.set_sql_source(
                 "CREATE TABLE c(id INTEGER PRIMARY KEY, \
                  y INTEGER REFERENCES p(x) ON DELETE CASCADE, \
-                 z INTEGER CHECK(z > 0))"
+                 z INTEGER CHECK(z > 0), \
+                 w INTEGER UNIQUE)"
                     .to_string(),
             );
             db.create_table(child).unwrap();
@@ -2331,6 +2333,7 @@ mod tests {
                     SqlValue::Integer(10),
                     SqlValue::Integer(1),
                     SqlValue::Integer(5),
+                    SqlValue::Integer(7),
                 ]),
             )
             .unwrap();
@@ -2357,6 +2360,15 @@ mod tests {
         // source spacing (`CHECK(z > 0)` → `z > 0`, SQLite-compatible).
         assert_eq!(child.check_constraints.len(), 1, "CHECK must be rehydrated");
         assert_eq!(child.check_constraints[0].0, "z > 0");
+
+        // UNIQUE constraint survives (issue #6346): without it, the
+        // executor's intra-statement duplicate detection went empty after
+        // replay and multi-row INSERTs could write colliding rows.
+        assert_eq!(
+            child.unique_constraints,
+            vec![vec!["w".to_string()]],
+            "UNIQUE must be rehydrated"
+        );
 
         // FK survives with its action and resolved parent columns (the
         // parent's CreateTable precedes the child's in the WAL).

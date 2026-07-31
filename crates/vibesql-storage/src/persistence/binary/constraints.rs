@@ -263,6 +263,63 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
             Some(table_level_key_parts.unwrap_or_else(|| vec![None; pk_cols.len()]));
     }
 
+    // ---- UNIQUE constraints (column-level first, then table-level) ----
+    // Neither `TableSchema::unique_constraints` nor
+    // `unique_constraint_collations` is a serialized binary field, so before
+    // this rehydration a reloaded table silently forgot every schema-level
+    // UNIQUE constraint (issue #6346): the executor's in-batch duplicate
+    // working set for multi-row INSERT went empty, `Table`'s per-constraint
+    // hash maps were never built, and collation-aware UNIQUE enforcement
+    // (`UNIQUE(a COLLATE nocase)`, issue #5881) was lost. Cross-statement
+    // duplicates were still caught only because the implicit
+    // `sqlite_autoindex_*` metadata IS serialized.
+    //
+    // Ordering must match `ConstraintValidator::process_constraints` exactly
+    // (column-level UNIQUE in column order, then table-level UNIQUE in
+    // declaration order): the positions align with the implicit autoindex
+    // ordinals from `create_implicit_indexes` and with `Table`'s positional
+    // unique-index maps.
+    let mut unique_constraints: Vec<Vec<String>> = Vec::new();
+    let mut unique_constraint_collations: Vec<Vec<Option<String>>> = Vec::new();
+    for col_def in &create.columns {
+        for constraint in &col_def.constraints {
+            if matches!(constraint.kind, vibesql_ast::ColumnConstraintKind::Unique { .. }) {
+                unique_constraints.push(vec![col_def.name.clone()]);
+                // Column-level UNIQUE carries no key-part COLLATE; enforcement
+                // falls back to the column's declared collation.
+                unique_constraint_collations.push(vec![None]);
+            }
+        }
+    }
+    for table_constraint in &create.table_constraints {
+        if let vibesql_ast::TableConstraintKind::Unique { columns, .. } = &table_constraint.kind {
+            let mut names: Vec<String> = Vec::with_capacity(columns.len());
+            let mut collations: Vec<Option<String>> = Vec::with_capacity(columns.len());
+            for part in columns {
+                match part {
+                    vibesql_ast::IndexColumn::Column { column_name, collation, .. } => {
+                        names.push(column_name.clone());
+                        collations.push(collation.clone());
+                    }
+                    vibesql_ast::IndexColumn::Expression { .. } => {
+                        // The CREATE TABLE path rejects expression key parts in
+                        // table-level UNIQUE, so an accepted source can't
+                        // contain one. Never silently drop a constraint.
+                        return Err(StorageError::NotImplemented(format!(
+                            "Persisted sql_source for table '{}' contains an expression key \
+                             part in a table-level UNIQUE constraint",
+                            schema.name
+                        )));
+                    }
+                }
+            }
+            unique_constraints.push(names);
+            unique_constraint_collations.push(collations);
+        }
+    }
+    schema.unique_constraints = unique_constraints;
+    schema.unique_constraint_collations = unique_constraint_collations;
+
     // ---- CHECK constraints (column-level first, then table-level) ----
     // Matches ConstraintValidator::process_constraints ordering and naming.
     let mut check_constraints: Vec<(String, vibesql_ast::Expression)> = Vec::new();
@@ -660,6 +717,52 @@ mod tests {
         schema.primary_key = Some(vec!["id".to_string()]);
         rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
         assert_eq!(schema.primary_key_collations, Some(vec![None]));
+    }
+
+    #[test]
+    fn rehydrates_column_level_unique_constraints() {
+        // `TableSchema::unique_constraints` is not a serialized binary field;
+        // it must be rederived from `sql_source` so intra-statement duplicate
+        // detection (and Table's per-constraint hash maps) survive a reload
+        // (issue #6346).
+        let mut schema =
+            schema_with_source("t", vec![col("a"), col("b")], "CREATE TABLE t(a UNIQUE, b)");
+        assert!(schema.unique_constraints.is_empty(), "precondition: not yet rehydrated");
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+
+        assert_eq!(schema.unique_constraints, vec![vec!["a".to_string()]]);
+        assert_eq!(schema.unique_constraint_collations, vec![vec![None]]);
+    }
+
+    #[test]
+    fn rehydrates_table_level_unique_with_ordering_and_collation() {
+        // Column-level UNIQUE constraints come first (column order), then
+        // table-level ones (declaration order) — the positions must align
+        // with the implicit autoindex ordinals and Table's positional
+        // unique-index maps. Explicit key-part COLLATE survives (issue #5881).
+        let mut schema = schema_with_source(
+            "t",
+            vec![col("a"), col("b"), col("c")],
+            "CREATE TABLE t(a UNIQUE, b, c, UNIQUE(b COLLATE nocase, c))",
+        );
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+
+        assert_eq!(
+            schema.unique_constraints,
+            vec![vec!["a".to_string()], vec!["b".to_string(), "c".to_string()]]
+        );
+        assert_eq!(
+            schema.unique_constraint_collations,
+            vec![vec![None], vec![Some("nocase".to_string()), None]]
+        );
+    }
+
+    #[test]
+    fn table_without_unique_constraints_rehydrates_empty() {
+        let mut schema = schema_with_source("t", vec![col("a")], "CREATE TABLE t(a INTEGER)");
+        rehydrate_constraints_from_sql_source(&mut schema, &HashMap::new()).unwrap();
+        assert!(schema.unique_constraints.is_empty());
+        assert!(schema.unique_constraint_collations.is_empty());
     }
 
     #[test]

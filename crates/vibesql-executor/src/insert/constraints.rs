@@ -326,13 +326,136 @@ pub fn enforce_check_constraints(
     Ok(())
 }
 
+/// Per-statement working set of unique-index keys already claimed by earlier
+/// rows of the same multi-row INSERT (issue #6346).
+///
+/// The stored index bodies only reflect rows that have been physically
+/// inserted, but the multi-row INSERT path validates every row BEFORE
+/// inserting any — so without this set, two colliding rows in one VALUES list
+/// both pass the index-backed uniqueness checks and are both written. Keys
+/// are stored in the same canonical form the index bodies use
+/// (`normalize_for_comparison`, matching `IndexData::get`), so numeric
+/// variants like 1 and 1.0 collide exactly as they would against stored data.
+#[derive(Debug, Default)]
+pub struct BatchUniqueIndexKeys {
+    /// index name -> normalized non-NULL keys claimed by earlier batch rows
+    keys: std::collections::HashMap<
+        String,
+        std::collections::HashSet<Vec<vibesql_types::SqlValue>>,
+    >,
+}
+
+impl BatchUniqueIndexKeys {
+    /// True when an earlier row of this statement already claimed `key`
+    /// (raw, un-normalized values) under `index_name`.
+    pub fn contains(&self, index_name: &str, key: &[vibesql_types::SqlValue]) -> bool {
+        self.keys
+            .get(index_name)
+            .is_some_and(|set| set.contains(&normalize_index_key(key)))
+    }
+
+    /// Record `key` (raw, un-normalized values) as claimed under `index_name`.
+    pub fn insert(&mut self, index_name: &str, key: &[vibesql_types::SqlValue]) {
+        self.keys.entry(index_name.to_string()).or_default().insert(normalize_index_key(key));
+    }
+}
+
+/// Normalize an index key the way the stored index bodies do (see
+/// `IndexData::get` / index insertion), so in-batch comparisons agree with
+/// existing-data comparisons.
+fn normalize_index_key(key: &[vibesql_types::SqlValue]) -> Vec<vibesql_types::SqlValue> {
+    key.iter().map(vibesql_storage::database::indexes::normalize_for_comparison).collect()
+}
+
+/// Record every unique-index key the (already validated) `row_values` will
+/// occupy into `batch_index_keys`, so later rows of the same statement can be
+/// checked against it (issue #6346).
+///
+/// Mirrors the key construction in [`enforce_unique_indexes`]: partial-index
+/// predicates are evaluated leniently (a row outside the predicate never
+/// enters the index), expression components are evaluated with failures
+/// treated as NULL (matching expression-index maintenance), and keys
+/// containing NULL are skipped (multiple NULLs never conflict).
+pub fn record_unique_index_keys(
+    db: &vibesql_storage::Database,
+    schema: &vibesql_catalog::TableSchema,
+    table_name: &str,
+    row_values: &[vibesql_types::SqlValue],
+    batch_index_keys: &mut BatchUniqueIndexKeys,
+) {
+    let indexes_for_table = db.list_indexes_for_table(table_name);
+    if indexes_for_table.is_empty() {
+        return;
+    }
+
+    let candidate_row = vibesql_storage::Row::new(row_values.to_vec());
+    let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+        .with_schema_context(crate::evaluator::SchemaExprContext::Index);
+
+    for index_name in indexes_for_table {
+        let Some(index_metadata) = db.get_index(&index_name) else {
+            continue;
+        };
+        if !index_metadata.unique {
+            continue;
+        }
+
+        // Partial index: a row that doesn't satisfy the predicate never
+        // enters the index, so it claims no key. Lenient on eval errors
+        // (row treated as not-in-index) — the enforcement pass that ran
+        // before this already propagated any hard errors.
+        if let Some(predicate) = index_metadata.where_clause.as_deref() {
+            let satisfied = evaluator
+                .eval(predicate, &candidate_row)
+                .map(|v| crate::partial_index_maintenance::is_predicate_truthy(&v))
+                .unwrap_or(false);
+            if !satisfied {
+                continue;
+            }
+        }
+
+        // Build the key: plain columns read from the row, expression
+        // components are evaluated (failures become NULL, matching
+        // expression-index maintenance).
+        let mut key_values = Vec::with_capacity(index_metadata.columns.len());
+        for index_col in &index_metadata.columns {
+            if let Some(name) = index_col.column_name() {
+                match schema.get_column_index(name) {
+                    Some(col_idx) => key_values.push(row_values[col_idx].clone()),
+                    None => key_values.push(vibesql_types::SqlValue::Null),
+                }
+            } else if let Some(expr) = index_col.get_expression() {
+                key_values.push(
+                    evaluator.eval(expr, &candidate_row).unwrap_or(vibesql_types::SqlValue::Null),
+                );
+            } else {
+                key_values.push(vibesql_types::SqlValue::Null);
+            }
+        }
+
+        // NULL keys never conflict (multiple NULLs are allowed).
+        if key_values.contains(&vibesql_types::SqlValue::Null) {
+            continue;
+        }
+
+        batch_index_keys.insert(&index_name, &key_values);
+    }
+}
+
 /// Enforce UNIQUE constraint for user-defined indexes (CREATE UNIQUE INDEX)
 /// Returns Ok if all unique index constraints are satisfied
+///
+/// `batch_index_keys` carries the keys already claimed by earlier rows of the
+/// same multi-row INSERT statement (issue #6346): the stored index bodies
+/// cannot see rows that are validated but not yet inserted, so in-batch
+/// duplicates must be caught against this working set. Single-row callers
+/// pass an empty default.
 pub fn enforce_unique_indexes(
     db: &vibesql_storage::Database,
     schema: &vibesql_catalog::TableSchema,
     table_name: &str,
     row_values: &[vibesql_types::SqlValue],
+    batch_index_keys: &BatchUniqueIndexKeys,
 ) -> Result<(), ExecutorError> {
     // Get all indexes for this table
     let indexes_for_table = db.list_indexes_for_table(table_name);
@@ -381,6 +504,7 @@ pub fn enforce_unique_indexes(
                     row_values,
                     table,
                     &snapshot,
+                    batch_index_keys,
                 )?;
                 continue;
             }
@@ -408,6 +532,22 @@ pub fn enforce_unique_indexes(
             // (NULL != NULL in SQL, so multiple NULLs are allowed)
             if key_values.contains(&vibesql_types::SqlValue::Null) {
                 continue;
+            }
+
+            // In-batch duplicate: an earlier row of this same statement
+            // already claimed this key (issue #6346). The stored index body
+            // cannot catch this because no batch row is inserted yet.
+            if batch_index_keys.contains(&index_name, &key_values) {
+                let columns_str = index_metadata
+                    .columns
+                    .iter()
+                    .map(|col| format!("{}.{}", table_name, col.expect_column_name()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "UNIQUE constraint failed: {}",
+                    columns_str
+                )));
             }
 
             // Check if this key already exists in the index
@@ -460,6 +600,7 @@ fn enforce_unique_expression_index(
     row_values: &[vibesql_types::SqlValue],
     table: Option<&vibesql_storage::Table>,
     snapshot: &vibesql_storage::TxnSnapshot,
+    batch_index_keys: &BatchUniqueIndexKeys,
 ) -> Result<(), ExecutorError> {
     let Some(table) = table else {
         return Ok(());
@@ -477,6 +618,15 @@ fn enforce_unique_expression_index(
     else {
         return Ok(());
     };
+
+    // In-batch duplicate: an earlier row of this same statement already
+    // claimed this expression key (issue #6346).
+    if batch_index_keys.contains(&index_metadata.index_name, &new_key) {
+        return Err(ExecutorError::SqliteCompatError(format!(
+            "UNIQUE constraint failed: index '{}'",
+            index_metadata.index_name
+        )));
+    }
 
     for (_idx, existing_row) in table.scan_visible(snapshot) {
         // Partial expression indexes: rows outside the predicate are not in
