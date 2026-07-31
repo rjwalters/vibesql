@@ -54,9 +54,15 @@
 RECENT_HOURS=48
 STALE_HOURS=168
 
-# Max section headers rendered. The real-world note that motivated this was
-# 7.5 KB - far too much to inject on every launch - but its headers convey the
-# shape in a handful of lines.
+# Payload sizing (issue #33). When the note is small enough (<= MAX_BODY_BYTES)
+# it is cheap to inline verbatim on every launch, and the full body is what
+# carries the actionable content - a headers-only outline conveys shape but
+# nothing to act on. Above that cap we fall back to a headers-only outline
+# (capped at MAX_HEADERS) plus a loud oversize warning, bounding the pathological
+# case. The 10 KB cap comfortably covers the ~9 KB real-world note that motivated
+# the hook, and /repo:handoff's exclusion discipline is designed to keep notes
+# short, so the common case inlines.
+MAX_BODY_BYTES=10240
 MAX_HEADERS=9
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo ".")"
@@ -126,11 +132,6 @@ elif (( AGE_H < RECENT_HOURS ));  then AGE_LABEL="${AGE_H}h old"
 else                                   AGE_LABEL="$(( AGE_H / 24 ))d old"
 fi
 
-# Headers only - never the file body. `|| true` because grep exits 1 when the
-# note has no headers at all (a valid, non-error state) and head closing the
-# pipe early can surface as a non-zero status.
-HEADERS=$(grep -E '^#{1,2} ' "$NOTE" 2>/dev/null | head -n "$MAX_HEADERS" | sed 's/^#* *//' || true)
-
 CONTEXT="A /repo:handoff note is pending in this repository.
 
   Path: $NOTE
@@ -142,11 +143,41 @@ if (( AGE_H >= STALE_HOURS )); then
          every claim in it against the repo before acting on it."
 fi
 
-if [[ -n "$HEADERS" ]]; then
+# Payload policy (issue #33). Under the size cap, inline the full note body -
+# that is where the load-bearing, actionable content lives; a headers-only
+# outline conveys shape but nothing to act on, which was the observed failure.
+# Above the cap, fall back to that outline plus an explicit oversize warning so a
+# pathological note cannot bloat every launch. The read-in-full / one-shot
+# directive below is appended in BOTH branches.
+NOTE_BYTES=$(wc -c < "$NOTE" 2>/dev/null | tr -d '[:space:]') || NOTE_BYTES=""
+[[ "$NOTE_BYTES" =~ ^[0-9]+$ ]] || NOTE_BYTES=0
+
+if (( NOTE_BYTES <= MAX_BODY_BYTES )); then
+    # Full body inline. `|| BODY=""` keeps a read failure on the fail-open path.
+    BODY=$(cat "$NOTE" 2>/dev/null) || BODY=""
     CONTEXT="$CONTEXT
+
+The full note follows between the markers - read it now:
+
+----- BEGIN HANDOFF NOTE -----
+$BODY
+----- END HANDOFF NOTE -----"
+else
+    # Oversize fallback: headers only. `|| true` because grep exits 1 when the
+    # note has no headers at all (a valid, non-error state) and head closing the
+    # pipe early can surface as a non-zero status.
+    HEADERS=$(grep -E '^#{1,2} ' "$NOTE" 2>/dev/null | head -n "$MAX_HEADERS" | sed 's/^#* *//' || true)
+    CONTEXT="$CONTEXT
+  OVERSIZE: this note is ${NOTE_BYTES} bytes, above the ${MAX_BODY_BYTES}-byte
+            inline cap, so only its section headers are shown below. Open the
+            note and read it in full now - the actionable detail is in the body,
+            not these headers."
+    if [[ -n "$HEADERS" ]]; then
+        CONTEXT="$CONTEXT
 
 Sections:
 $(printf '%s\n' "$HEADERS" | sed 's/^/  - /')"
+    fi
 fi
 
 CONTEXT="$CONTEXT

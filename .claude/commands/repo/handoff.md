@@ -86,8 +86,14 @@ reset actually did — any earlier and it is speculative.
 2. A pointer in the agent's auto-memory index (`MEMORY.md` in the memory
    directory, when one exists): a single line —
    `- Handoff note at .claude/handoff.md — READ FIRST, then delete note + this line.`
-   The memory index is read automatically at session start; the pointer is
-   what makes the repo file reliably found rather than merely present.
+   The memory index is read automatically at session start, but it arrives as
+   passive background context, not an instruction — so the pointer is a
+   *best-effort backup*, not a guarantee the note is read (a live handoff has
+   been observed to slip past it). The mechanism that actively announces the
+   note is the `session-start-handoff.sh` **SessionStart hook** (installed by
+   Repo Skills), which surfaces the note as session context on startup and
+   resume — the full body inlined when the note is small, a header outline plus
+   an oversize warning when it is large.
 
 **What goes in — only what is not recoverable from the repo:**
 
@@ -127,7 +133,8 @@ to. End by printing an exact, copy-pasteable block for the human, e.g.:
 claude update
 #   3. Relaunch in this repo:
 cd <repo-root> && claude
-# The new session will find the handoff note via its memory index.
+# The SessionStart hook announces the handoff note to the new session
+# (the memory-index pointer is a best-effort backup).
 ```
 
 Then stop. The ritual is complete when the note is durable and the
