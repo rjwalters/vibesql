@@ -68,6 +68,13 @@ frozen in `CLAUDE.md` (ยง "Results Tables and the Canonical Pass-Rate Query") โ€
 does **not** invent a new query; it *is* that query, re-labeled as the headline
 compatibility claim.
 
+> **Single-file runs cannot perturb this metric (#6317).** `./scripts/tcltest
+> test <file>` (and `make test-tcl-file`) persists its per-test forensics to a
+> **separate** sibling DB (`~/.vibesql/test_results/tcl_single_file_results.vbsql`),
+> never to the canonical suite DB, so the `MAX(run_id)` run selection used by the
+> canonical query, `make test-tcl-status`, and the website export always resolves
+> to a suite run.
+
 > **Local vs. certified denominator (honesty note).** In a local worktree the
 > `skipped`-row count reflects whatever ran on this machine, and some Bucket-A
 > exclusions only appear at runtime via `ifcapable` guards rather than as static

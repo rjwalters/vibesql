@@ -45,6 +45,14 @@ print_info() { echo -e "${BLUE}ℹ $1${NC}"; }
 TCL_TEST_DIR="docs/reference/sqlite/test"
 RESULTS_DIR="$HOME/.vibesql/test_results"
 RESULTS_DB="$RESULTS_DIR/tcl_test_results.vbsql"
+# Single-file (`tcltest test <file>`) forensics DB (#6317). Same schema as
+# RESULTS_DB but a SEPARATE file: many consumers (cmd_status, cmd_analyze,
+# export_tcl_results.py, tcl_triage.py, and the canonical queries frozen in
+# CLAUDE.md) select "the latest run" via MAX(run_id), so writing a one-file
+# diagnostic run into the canonical suite DB would make it the latest run and
+# silently corrupt the canonical pass-rate baseline. Keeping single-file
+# forensics in their own sibling DB guarantees zero perturbation.
+SINGLE_FILE_RESULTS_DB="$RESULTS_DIR/tcl_single_file_results.vbsql"
 VIBESQL_BIN="./target/release/vibesql"
 
 # Check if VibeSQL is built
@@ -66,14 +74,18 @@ check_tcl_tests() {
     fi
 }
 
-# Initialize results database
+# Initialize results database.
+# Optional arg: path of the DB to initialize (default: the canonical suite DB).
+# cmd_test passes SINGLE_FILE_RESULTS_DB (or a user-supplied --results-db path)
+# so single-file forensics get the same schema without touching RESULTS_DB.
 init_results_db() {
-    mkdir -p "$RESULTS_DIR"
+    local db="${1:-$RESULTS_DB}"
+    mkdir -p "$(dirname "$db")"
 
     # Create the results database if it doesn't exist
-    if [ ! -f "$RESULTS_DB" ]; then
-        print_info "Initializing results database: $RESULTS_DB"
-        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+    if [ ! -f "$db" ]; then
+        print_info "Initializing results database: $db"
+        "$VIBESQL_BIN" "$db" -c "
             CREATE TABLE IF NOT EXISTS tcl_test_runs (
                 run_id INTEGER PRIMARY KEY,
                 started_at TEXT NOT NULL,
@@ -112,11 +124,11 @@ init_results_db() {
         "
     else
         # Check if we need to migrate the schema (add new columns)
-        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+        "$VIBESQL_BIN" "$db" -c "
             SELECT skipped_setup_failed FROM tcl_test_runs LIMIT 1
         " 2>/dev/null || {
             print_info "Migrating database schema..."
-            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            "$VIBESQL_BIN" "$db" -c "
                 ALTER TABLE tcl_test_runs ADD COLUMN skipped_setup_failed INTEGER DEFAULT 0;
                 ALTER TABLE tcl_test_runs ADD COLUMN setup_failures INTEGER DEFAULT 0;
             " 2>/dev/null || true
@@ -126,11 +138,11 @@ init_results_db() {
         # that produced them (nullable; historical rows read back as NULL,
         # understood to mean "unknown/local"). Probe-then-ALTER, matching the
         # additive-migration pattern used above.
-        "$VIBESQL_BIN" "$RESULTS_DB" -c "
+        "$VIBESQL_BIN" "$db" -c "
             SELECT machine_tag FROM tcl_test_runs LIMIT 1
         " 2>/dev/null || {
             print_info "Migrating database schema (machine_tag)..."
-            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            "$VIBESQL_BIN" "$db" -c "
                 ALTER TABLE tcl_test_runs ADD COLUMN machine_tag TEXT;
             " 2>/dev/null || true
         }
@@ -141,7 +153,7 @@ init_results_db() {
         # exists once a table uses AUTOINCREMENT, so its presence is the marker
         # for an already-migrated DB.
         local has_autoincrement
-        has_autoincrement="$("$VIBESQL_BIN" "$RESULTS_DB" --format raw -c "
+        has_autoincrement="$("$VIBESQL_BIN" "$db" --format raw -c "
             SELECT COUNT(*) FROM sqlite_master
             WHERE type='table' AND name='tcl_test_results'
               AND sql LIKE '%AUTOINCREMENT%'
@@ -149,7 +161,7 @@ init_results_db() {
 
         if [ "$has_autoincrement" != "1" ]; then
             print_info "Migrating tcl_test_results to AUTOINCREMENT id..."
-            "$VIBESQL_BIN" "$RESULTS_DB" -c "
+            "$VIBESQL_BIN" "$db" -c "
                 CREATE TABLE tcl_test_results_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id INTEGER NOT NULL,
@@ -219,6 +231,10 @@ Options for 'run':
 Options for 'test':
   --no-native-tcl          Use static parsing instead of native tclsh
   --timeout SECONDS        Per-file timeout (default: 1200 native, 5 static)
+  --results-db PATH        Persist per-test forensics to PATH (default:
+                           ~/.vibesql/test_results/tcl_single_file_results.vbsql,
+                           a dedicated DB separate from the canonical suite DB)
+  --no-db                  Do not persist results to any database
 
 Note: Native tclsh mode is used by default. This correctly handles TCL constructs
 like loops that cannot be statically parsed.
@@ -309,6 +325,14 @@ cmd_test() {
     local verbose=false
     local timeout=""
     local test_file=""
+    # Forensics persistence (#6317): single-file runs persist per-test detail
+    # rows (including expected_output/actual_output for failures) by default,
+    # so a transient failure leaves enough on disk to diff expected vs actual
+    # after the process exits. They go to a DEDICATED sibling DB — never the
+    # canonical suite DB — so `make test-tcl-status`, the website export, and
+    # the canonical MAX(run_id) queries are never perturbed by a one-file run.
+    local persist=true
+    local results_db="$SINGLE_FILE_RESULTS_DB"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -328,12 +352,26 @@ Options:
   --no-native-tcl    Use static parsing instead of native tclsh
   --verbose          Show detailed output including expected vs actual
   --timeout SECONDS  Per-file timeout (default: 1200 native, 5 static)
+  --results-db PATH  Persist per-test forensics to PATH instead of the default
+                     single-file forensics DB
+                     (~/.vibesql/test_results/tcl_single_file_results.vbsql)
+  --no-db            Do not persist results to any database
+
+Forensics persistence (default ON):
+  Every single-file run saves per-test detail rows — including expected vs
+  actual output for failed tests — under its own run_id in the single-file
+  forensics DB, so intermittent failures stay diagnosable after the process
+  exits. This DB is deliberately SEPARATE from the canonical suite results DB
+  (~/.vibesql/test_results/tcl_test_results.vbsql): single-file runs never
+  become the latest run there, so `make test-tcl-status` and the canonical
+  pass-rate queries are never perturbed.
 
 Examples:
   ./scripts/tcltest test select1.test
   ./scripts/tcltest test select1.test --verbose
   ./scripts/tcltest test select1.test --no-native-tcl
   ./scripts/tcltest test joinB.test --timeout 1800
+  ./scripts/tcltest test joinD.test --no-db
 EOF
                 exit 0
                 ;;
@@ -352,6 +390,14 @@ EOF
             --timeout)
                 timeout="$2"
                 shift 2
+                ;;
+            --results-db)
+                results_db="$2"
+                shift 2
+                ;;
+            --no-db)
+                persist=false
+                shift
                 ;;
             *)
                 if [ -z "$test_file" ]; then
@@ -388,6 +434,12 @@ EOF
     if $native_tcl; then
         print_info "Using native TCL mode"
     fi
+    if $persist; then
+        # Initialize/migrate the forensics DB (creates it on a machine with no
+        # pre-existing results DB). Never touches the canonical suite DB.
+        init_results_db "$results_db"
+        print_info "Forensics DB: $results_db (separate from the canonical suite DB)"
+    fi
     echo ""
 
     # Run the test using Python runner
@@ -396,6 +448,10 @@ EOF
         "--file" "$full_path"
         "--vibesql" "$VIBESQL_BIN"
     )
+
+    if $persist; then
+        py_args+=("--results-db" "$results_db")
+    fi
 
     if $native_tcl; then
         py_args+=("--native-tcl")
@@ -409,7 +465,19 @@ EOF
         py_args+=("--timeout" "$timeout")
     fi
 
-    python3 "${py_args[@]}"
+    local rc=0
+    python3 "${py_args[@]}" || rc=$?
+
+    if $persist; then
+        echo ""
+        print_info "Per-test forensics saved to: $results_db"
+        if [ "$rc" -ne 0 ]; then
+            echo "Diff expected vs actual for this run's failures with:"
+            echo "  $VIBESQL_BIN $results_db -c \"SELECT test_name, status, expected_output, actual_output, error_message FROM tcl_test_results WHERE run_id = (SELECT MAX(run_id) FROM tcl_test_results) AND status != 'passed'\""
+        fi
+    fi
+
+    return $rc
 }
 
 # Run command: execute test suite
