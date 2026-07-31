@@ -1101,6 +1101,14 @@ impl SqlExecutor {
             vibesql_ast::Statement::Pragma(pragma_stmt) => {
                 result = self.execute_pragma(&pragma_stmt)?;
             }
+            vibesql_ast::Statement::Attach(attach_stmt) => {
+                self.execute_attach(&attach_stmt)?;
+                result.row_count = 0;
+            }
+            vibesql_ast::Statement::Detach(detach_stmt) => {
+                self.execute_detach(&detach_stmt)?;
+                result.row_count = 0;
+            }
             _ => {
                 return Err(anyhow::anyhow!("Statement type not yet supported in CLI"));
             }
@@ -2314,15 +2322,83 @@ impl SqlExecutor {
         }
     }
 
+    /// Execute `ATTACH [DATABASE] 'filename' AS schema-name` (#6310, Phase 1).
+    ///
+    /// Phase 1 attachments are session-scoped: the attached database is an
+    /// empty catalog schema plus a registry entry; nothing about it is
+    /// persisted (persistence writers and WAL emission skip attached schemas).
+    /// `':memory:'`, the empty filename, and paths to nonexistent or empty
+    /// files are accepted; attaching an existing non-empty database file is
+    /// rejected until file-backed attachments land (#6362) — never silently
+    /// presenting a real database file as an empty schema.
+    fn execute_attach(&mut self, stmt: &vibesql_ast::AttachStmt) -> anyhow::Result<()> {
+        // SQLite rejects ATTACH inside an explicit transaction.
+        if self.db.in_transaction() {
+            return Err(anyhow::anyhow!("cannot ATTACH database within transaction"));
+        }
+
+        // Phase 1 guard: an existing non-empty file is a real database we
+        // cannot load yet (see #6362).
+        if stmt.filename != ":memory:" && !stmt.filename.is_empty() {
+            let path = std::path::Path::new(&stmt.filename);
+            if path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
+                return Err(anyhow::anyhow!(
+                    "attaching existing database files is not yet supported (see #6362)"
+                ));
+            }
+        }
+
+        self.db.catalog.attach_database(&stmt.schema_name, &stmt.filename).map_err(
+            |e| match e {
+                // SQLite-compat wording for name collisions with main/temp,
+                // existing schemas, and existing attachments.
+                vibesql_catalog::CatalogError::SchemaAlreadyExists(name) => {
+                    anyhow::anyhow!("database {} is already in use", name)
+                }
+                other => anyhow::anyhow!("{}", other),
+            },
+        )
+    }
+
+    /// Execute `DETACH [DATABASE] schema-name` (#6310, Phase 1).
+    ///
+    /// Drops the attached schema's tables from storage, then removes the
+    /// schema, its views/triggers/indexes, and the registry entry.
+    fn execute_detach(&mut self, stmt: &vibesql_ast::DetachStmt) -> anyhow::Result<()> {
+        // SQLite rejects DETACH inside an explicit transaction.
+        if self.db.in_transaction() {
+            return Err(anyhow::anyhow!("cannot DETACH database within transaction"));
+        }
+
+        let name = &stmt.schema_name;
+        if !self.db.catalog.is_attached_schema(name) {
+            return Err(anyhow::anyhow!("no such database: {}", name));
+        }
+
+        // Drop the schema's tables from storage first (row data lives there);
+        // WAL emission is already suppressed for attached-schema tables.
+        let canonical = name.to_ascii_lowercase();
+        for table in self.db.catalog.attached_table_names(&canonical) {
+            let qualified = format!("{}.{}", canonical, table);
+            self.db.drop_table(&qualified).map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        self.db.catalog.detach_database(&canonical).map_err(|e| anyhow::anyhow!("{}", e))
+    }
+
     /// PRAGMA database_list
     ///
-    /// Lists the databases attached to the current connection. VibeSQL has no
-    /// ATTACH, so at most two rows are reported, matching sqlite3:
+    /// Lists the databases attached to the current connection, matching
+    /// sqlite3:
     ///   - seq 0, name `main`, file = the backing file path (absolute) or "" for
     ///     an in-memory / no-path session.
     ///   - seq 1, name `temp`, file = "" (always empty) — emitted only once a
     ///     temp object has materialized this session's temp schema, mirroring
     ///     sqlite3 3.51.0, which omits the `temp` row until a temp object exists.
+    ///   - seq 2+, one row per ATTACHed database in attachment order (#6310),
+    ///     file = the declared path ("" for `:memory:`). Attachments start at
+    ///     seq 2 whether or not the `temp` row is present, mirroring sqlite3's
+    ///     internal database-slot numbering.
     fn execute_pragma_database_list(&self) -> anyhow::Result<QueryResult> {
         let columns = vec!["seq".to_string(), "name".to_string(), "file".to_string()];
 
@@ -2345,6 +2421,22 @@ impl SqlExecutor {
         // Its file is always empty.
         if self.db.catalog.has_temp_objects() {
             rows.push(vec![Some("1".to_string()), Some("temp".to_string()), Some(String::new())]);
+        }
+
+        // ATTACHed databases in attachment order, starting at seq 2 (#6310).
+        // Phase 1 attachments are session-scoped, so the file column reports
+        // the declared path as written ("" for `:memory:`).
+        for (i, attached) in self.db.catalog.attached_databases().iter().enumerate() {
+            let file = if attached.path == ":memory:" {
+                String::new()
+            } else {
+                attached.path.clone()
+            };
+            rows.push(vec![
+                Some((2 + i).to_string()),
+                Some(attached.name.clone()),
+                Some(file),
+            ]);
         }
 
         let row_count = rows.len();

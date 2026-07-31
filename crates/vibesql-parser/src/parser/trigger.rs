@@ -142,24 +142,32 @@ impl Parser {
                         message: "temporary trigger may not have qualified name".to_string(),
                     });
                 }
-                // VibeSQL exposes only the `main` and `temp` schemas (no ATTACH),
-                // so a trigger name qualified with any other database is an
-                // "unknown database <name>" prepare-time error, matching SQLite
-                // (trigger7-1.2). `TEMPORARY` is only a keyword synonym for `TEMP`
-                // in `CREATE TEMPORARY TRIGGER` syntax — it is not a valid
-                // `schema.object` qualifier, so `temporary.r1` is an unknown
-                // database exactly like any other unrecognized name.
+                // A non-`main`/`temp` qualifier may name an ATTACHed database
+                // (#6310), which only the executor can verify — so unknown-
+                // database detection is deferred to execution (TriggerExecutor
+                // emits SQLite's "unknown database <name>" there, trigger7-1.2).
+                // To keep that error echoing the spelling as written (SQLite
+                // preserves the original case — `temporary`, not the normalized
+                // keyword spelling `TEMPORARY`), carry the verbatim source
+                // spelling for unquoted qualifiers; schema comparisons
+                // downstream are case-insensitive so this is lossless.
                 if !schema_name.eq_ignore_ascii_case("main")
                     && !schema_name.eq_ignore_ascii_case("temp")
                 {
-                    // Echo the verbatim source spelling (case preserved) rather
-                    // than the normalized identifier, matching SQLite.
-                    let reported = schema_source.as_deref().unwrap_or(&schema_name);
-                    return Err(ParseError {
-                        message: format!("unknown database {}", reported),
-                    });
+                    let verbatim = match schema_source.as_deref() {
+                        Some(src)
+                            if !src.starts_with('"')
+                                && !src.starts_with('[')
+                                && !src.starts_with('`') =>
+                        {
+                            src.to_string()
+                        }
+                        _ => schema_name,
+                    };
+                    Some(verbatim)
+                } else {
+                    Some(schema_name)
                 }
-                Some(schema_name)
             }
             (true, None) => Some("temp".to_string()),
             (false, None) => None,
@@ -705,6 +713,21 @@ impl Parser {
             false
         };
 
+        // Optional schema qualifier: `DROP TRIGGER [schema.]name` (SQLite;
+        // `main.tr1`, `temp.tr1`, or an ATTACHed database — #6310). The schema
+        // position accepts a keyword too (`temp` is a keyword).
+        let schema = if matches!(self.peek_at_offset(1), Token::Symbol('.'))
+            && matches!(
+                self.peek(),
+                Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::Keyword { .. }
+            ) {
+            let schema_name = self.parse_identifier_or_keyword()?;
+            self.advance(); // consume '.'
+            Some(schema_name)
+        } else {
+            None
+        };
+
         // Parse trigger name. SQLite accepts a single-quoted string literal as
         // the trigger name in DROP TRIGGER (e.g. `DROP TRIGGER 'tr'`), so accept
         // a string token in addition to bare / delimited identifiers.
@@ -731,7 +754,7 @@ impl Parser {
             self.advance();
         }
 
-        Ok(vibesql_ast::DropTriggerStmt { trigger_name, cascade, if_exists })
+        Ok(vibesql_ast::DropTriggerStmt { trigger_name, schema, cascade, if_exists })
     }
 }
 

@@ -1321,3 +1321,310 @@ fn test_pragma_index_xinfo_expression_column_cid_and_explicit_collation() {
     assert_eq!(result.rows[1][1], Some("-2".to_string()));
     assert_eq!(result.rows[1][2], None);
 }
+
+// ============================================================================
+// ATTACH DATABASE / DETACH DATABASE (#6310, Phase 1 — session-scoped)
+// ============================================================================
+
+/// Helper: a fresh in-memory executor for ATTACH tests.
+fn attach_test_executor() -> SqlExecutor {
+    SqlExecutor::new(None).unwrap()
+}
+
+#[test]
+fn test_attach_memory_lifecycle_cross_schema() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+
+    let result = ex.execute("SELECT * FROM aux.t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+
+    // Cross-schema join between main and aux.
+    ex.execute("CREATE TABLE m(a INTEGER)").unwrap();
+    ex.execute("INSERT INTO m VALUES (10)").unwrap();
+    let result = ex.execute("SELECT a, x FROM m, aux.t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("10".to_string()), Some("1".to_string())]]);
+}
+
+#[test]
+fn test_attach_nonexistent_file_behaves_like_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("newfile.db");
+    let mut ex = attach_test_executor();
+    ex.execute(&format!("ATTACH '{}' AS aux", path.display())).unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+    let result = ex.execute("SELECT x FROM aux.t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("7".to_string())]]);
+    // Phase 1 is session-scoped: nothing is written to the declared path.
+    assert!(!path.exists(), "Phase 1 must not create the attached file");
+}
+
+#[test]
+fn test_attach_existing_nonempty_file_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("real.db");
+    std::fs::write(&path, b"not empty").unwrap();
+    let mut ex = attach_test_executor();
+    let err = ex.execute(&format!("ATTACH '{}' AS aux", path.display())).unwrap_err();
+    assert!(
+        err.to_string().contains("attaching existing database files is not yet supported"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_attach_duplicate_and_reserved_names_rejected() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    for (sql, expected) in [
+        ("ATTACH ':memory:' AS aux", "database aux is already in use"),
+        ("ATTACH ':memory:' AS AUX", "database AUX is already in use"),
+        ("ATTACH ':memory:' AS main", "database main is already in use"),
+        ("ATTACH ':memory:' AS temp", "database temp is already in use"),
+    ] {
+        let err = ex.execute(sql).unwrap_err();
+        assert_eq!(err.to_string(), expected, "for {sql}");
+    }
+}
+
+#[test]
+fn test_attach_max_limit() {
+    let mut ex = attach_test_executor();
+    for i in 0..10 {
+        ex.execute(&format!("ATTACH ':memory:' AS db{i}")).unwrap();
+    }
+    let err = ex.execute("ATTACH ':memory:' AS one_more").unwrap_err();
+    assert_eq!(err.to_string(), "too many attached databases - max 10");
+}
+
+#[test]
+fn test_detach_removes_schema_and_reattach_works() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+    ex.execute("DETACH aux").unwrap();
+
+    // Subsequent references fail.
+    assert!(ex.execute("SELECT * FROM aux.t").is_err());
+    assert!(ex.execute("INSERT INTO aux.t VALUES (2)").is_err());
+
+    // Re-attach after detach works and starts empty.
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    assert!(ex.execute("SELECT * FROM aux.t").is_err(), "re-attached schema must be empty");
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+}
+
+#[test]
+fn test_detach_unknown_database_errors() {
+    let mut ex = attach_test_executor();
+    let err = ex.execute("DETACH nosuch").unwrap_err();
+    assert_eq!(err.to_string(), "no such database: nosuch");
+    // DETACH DATABASE noise word accepted too.
+    let err = ex.execute("DETACH DATABASE nosuch").unwrap_err();
+    assert_eq!(err.to_string(), "no such database: nosuch");
+}
+
+#[test]
+fn test_attach_detach_rejected_inside_transaction() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS pre").unwrap();
+    ex.execute("BEGIN").unwrap();
+    let err = ex.execute("ATTACH ':memory:' AS aux").unwrap_err();
+    assert_eq!(err.to_string(), "cannot ATTACH database within transaction");
+    let err = ex.execute("DETACH pre").unwrap_err();
+    assert_eq!(err.to_string(), "cannot DETACH database within transaction");
+    ex.execute("COMMIT").unwrap();
+    // Both work again outside the transaction.
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("DETACH pre").unwrap();
+}
+
+#[test]
+fn test_pragma_database_list_enumerates_attachments() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS a1").unwrap();
+    ex.execute("ATTACH 'somefile.db' AS a2").unwrap();
+
+    let result = ex.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.columns, vec!["seq", "name", "file"]);
+    // main (seq 0) + two attachments starting at seq 2 (no temp objects yet).
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Some("0".to_string()), Some("main".to_string()), Some(String::new())],
+            vec![Some("2".to_string()), Some("a1".to_string()), Some(String::new())],
+            vec![Some("3".to_string()), Some("a2".to_string()), Some("somefile.db".to_string())],
+        ]
+    );
+
+    // Detach shifts the remaining attachment's seq.
+    ex.execute("DETACH a1").unwrap();
+    let result = ex.execute("PRAGMA database_list").unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Some("0".to_string()), Some("main".to_string()), Some(String::new())],
+            vec![Some("2".to_string()), Some("a2".to_string()), Some("somefile.db".to_string())],
+        ]
+    );
+}
+
+#[test]
+fn test_unqualified_resolution_order_temp_main_attached() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS a1").unwrap();
+    ex.execute("ATTACH ':memory:' AS a2").unwrap();
+
+    // Table only in attached schemas: attach order decides (a1 wins).
+    ex.execute("CREATE TABLE a1.s(x INTEGER)").unwrap();
+    ex.execute("CREATE TABLE a2.s(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO a1.s VALUES (1)").unwrap();
+    ex.execute("INSERT INTO a2.s VALUES (2)").unwrap();
+    let result = ex.execute("SELECT x FROM s").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+
+    // main shadows attached.
+    ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO t VALUES (0)").unwrap();
+    ex.execute("CREATE TABLE a1.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO a1.t VALUES (5)").unwrap();
+    let result = ex.execute("SELECT x FROM t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // temp shadows main (and attached).
+    ex.execute("CREATE TEMP TABLE t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO temp.t VALUES (99)").unwrap();
+    let result = ex.execute("SELECT x FROM t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("99".to_string())]]);
+}
+
+#[test]
+fn test_attach_names_case_insensitive() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS AuxDB").unwrap();
+    ex.execute("CREATE TABLE auxdb.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO AUXDB.t VALUES (3)").unwrap();
+    let result = ex.execute("SELECT x FROM \"AuxDB\".t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("3".to_string())]]);
+    ex.execute("DETACH \"AUXDB\"").unwrap();
+    assert!(ex.execute("SELECT x FROM auxdb.t").is_err());
+}
+
+#[test]
+fn test_attached_qualified_ddl_and_drop_forms() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("CREATE TABLE aux.t(z INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+
+    // Index on the attached table (index follows the table's schema).
+    ex.execute("CREATE INDEX i1 ON t(z)").unwrap();
+
+    // Qualified view + trigger.
+    ex.execute("CREATE VIEW aux.v1 AS SELECT z FROM t").unwrap();
+    let result = ex.execute("SELECT * FROM aux.v1").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("7".to_string())]]);
+    ex.execute("CREATE TRIGGER aux.tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (8)").unwrap();
+
+    // Corresponding DROP forms.
+    ex.execute("DROP TRIGGER aux.tr1").unwrap();
+    ex.execute("DROP VIEW aux.v1").unwrap();
+    ex.execute("DROP INDEX i1").unwrap();
+    ex.execute("DROP TABLE aux.t").unwrap();
+    ex.execute("DETACH aux").unwrap();
+}
+
+#[test]
+fn test_qualified_drop_trigger_is_schema_scoped() {
+    let mut ex = attach_test_executor();
+    ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+    ex.execute("CREATE TRIGGER tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+
+    // Wrong-schema qualified drop does not remove the main trigger.
+    let err = ex.execute("DROP TRIGGER temp.tr1").unwrap_err();
+    assert!(err.to_string().contains("tr1"), "got: {err}");
+    // Unknown database qualifier errors with SQLite wording.
+    let err = ex.execute("DROP TRIGGER nosuch.tr1").unwrap_err();
+    assert_eq!(err.to_string(), "unknown database nosuch");
+
+    // main-qualified drop removes it.
+    ex.execute("DROP TRIGGER main.tr1").unwrap();
+    assert!(ex.execute("DROP TRIGGER tr1").is_err(), "trigger should be gone");
+}
+
+#[test]
+fn test_create_trigger_unknown_database_errors_at_execution() {
+    let mut ex = attach_test_executor();
+    ex.execute("CREATE TABLE t1(x INTEGER)").unwrap();
+    let err = ex
+        .execute("CREATE TRIGGER temporary.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END")
+        .unwrap_err();
+    assert_eq!(err.to_string(), "unknown database temporary");
+    // An arbitrary unknown qualifier errors the same way…
+    let err = ex
+        .execute("CREATE TRIGGER auxdb.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END")
+        .unwrap_err();
+    assert_eq!(err.to_string(), "unknown database auxdb");
+    // …and succeeds once a database of that name is attached.
+    ex.execute("ATTACH ':memory:' AS auxdb").unwrap();
+    ex.execute("CREATE TABLE auxdb.t1(x INTEGER)").unwrap();
+    ex.execute("CREATE TRIGGER auxdb.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END").unwrap();
+}
+
+#[test]
+fn test_detach_cleans_up_views_triggers_indexes() {
+    let mut ex = attach_test_executor();
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("CREATE TABLE aux.t(z INTEGER)").unwrap();
+    ex.execute("CREATE INDEX iz ON t(z)").unwrap();
+    ex.execute("CREATE VIEW aux.v1 AS SELECT z FROM t").unwrap();
+    ex.execute("CREATE TRIGGER aux.tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+    ex.execute("DETACH aux").unwrap();
+
+    assert!(ex.execute("SELECT * FROM aux.v1").is_err());
+    assert!(ex.execute("SELECT * FROM aux.t").is_err());
+
+    // Re-attaching gives a clean schema — the old objects are gone.
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    ex.execute("CREATE TABLE aux.t(z INTEGER)").unwrap();
+    ex.execute("CREATE VIEW aux.v1 AS SELECT z FROM t").unwrap();
+    ex.execute("CREATE TRIGGER aux.tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+}
+
+#[test]
+fn test_attached_schema_not_persisted_to_main_snapshot() {
+    // ATTACH is session-scoped in Phase 1: saving the main database must not
+    // capture attached schemas or their objects, and a fresh session on the
+    // same file must reopen without them.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("main.vbsql");
+    let db_path_str = db_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(db_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE keep(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO keep VALUES (42)").unwrap();
+        ex.execute("ATTACH ':memory:' AS aux").unwrap();
+        ex.execute("CREATE TABLE aux.gone(y INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.gone VALUES (1)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT y FROM gone").unwrap();
+        ex.save_database(&db_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(db_path_str.clone())).unwrap();
+        // Main data survived.
+        let result = ex.execute("SELECT x FROM keep").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("42".to_string())]]);
+        // Attached schema and its objects did not.
+        assert!(ex.execute("SELECT y FROM aux.gone").is_err());
+        assert!(ex.execute("SELECT * FROM aux.v1").is_err());
+        // The name is free to attach again.
+        ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    }
+}

@@ -104,6 +104,11 @@ impl Database {
         row_id: u64,
         old_values: Vec<vibesql_types::SqlValue>,
     ) {
+        // Session-scoped tables (temp schemas, ATTACHed database schemas) are
+        // never persisted to WAL (#6310).
+        if self.is_temp_table(table_name) {
+            return;
+        }
         self.emit_wal_op(WalOp::Delete {
             table_id: self.table_name_to_id(table_name),
             table_name: table_name.to_string(),
@@ -123,6 +128,11 @@ impl Database {
         column_indices: Vec<u32>,
         is_unique: bool,
     ) {
+        // Indexes on session-scoped tables (temp schemas, ATTACHed database
+        // schemas) are never persisted to WAL (#6310).
+        if self.is_temp_table(table_name) {
+            return;
+        }
         self.emit_wal_op(WalOp::CreateIndex {
             index_id,
             index_name: index_name.to_string(),

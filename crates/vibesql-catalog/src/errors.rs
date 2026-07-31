@@ -65,6 +65,10 @@ pub enum CatalogError {
         table_name: String,
         message: String,
     },
+    /// ATTACH DATABASE would exceed SQLite's attached-database limit
+    /// (`MAX_ATTACHED_DATABASES`). Deliberately not localized: the message
+    /// must match SQLite's exact wording for conformance.
+    TooManyAttachedDatabases,
 }
 
 impl std::fmt::Display for CatalogError {
@@ -275,6 +279,14 @@ impl std::fmt::Display for CatalogError {
                         table_name = table_name.as_str(),
                         message = message.as_str()
                     )
+                )
+            }
+            CatalogError::TooManyAttachedDatabases => {
+                // SQLite-compat wording (not localized on purpose).
+                write!(
+                    f,
+                    "too many attached databases - max {}",
+                    crate::MAX_ATTACHED_DATABASES
                 )
             }
         }

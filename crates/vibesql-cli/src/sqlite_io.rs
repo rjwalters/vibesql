@@ -361,7 +361,10 @@ pub fn export_sqlite<P: AsRef<Path>>(db: &Database, path: P) -> anyhow::Result<E
 
     // Iterate all tables in the database
     for schema_name in &db.catalog.list_schemas() {
-        if vibesql_catalog::Catalog::is_temp_schema(schema_name) {
+        if vibesql_catalog::Catalog::is_temp_schema(schema_name)
+            // Attached schemas are session-scoped (#6310) and not exported.
+            || db.catalog.is_attached_schema(schema_name)
+        {
             continue;
         }
 

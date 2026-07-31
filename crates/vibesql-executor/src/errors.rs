@@ -1621,6 +1621,10 @@ impl From<vibesql_catalog::CatalogError> for ExecutorError {
             vibesql_catalog::CatalogError::SchemaNotEmpty(name) => {
                 ExecutorError::SchemaNotEmpty(name)
             }
+            vibesql_catalog::CatalogError::TooManyAttachedDatabases => {
+                // SQLite-compat wording (attach.test / e_attach); see #6310.
+                ExecutorError::SqliteCompatError(err.to_string())
+            }
             vibesql_catalog::CatalogError::RoleAlreadyExists(name) => {
                 ExecutorError::StorageError(format!("Role '{}' already exists", name))
             }

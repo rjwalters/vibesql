@@ -247,7 +247,8 @@ impl Database {
         };
 
         // Schemas (excluding default and temp schemas which are auto-created)
-        // Skip all temp schemas (temp_1, temp_2, etc.) - they are session-scoped
+        // Skip all temp schemas (temp_1, temp_2, etc.) and attached schemas
+        // (#6310) - they are session-scoped
         let schemas = self
             .catalog
             .list_schemas()
@@ -255,6 +256,7 @@ impl Database {
             .filter(|name| {
                 name != vibesql_catalog::DEFAULT_SCHEMA
                     && !vibesql_catalog::Catalog::is_temp_schema(name)
+                    && !self.catalog.is_attached_schema(name)
             })
             .map(|name| JsonSchema { name })
             .collect();

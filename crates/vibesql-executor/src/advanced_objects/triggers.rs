@@ -53,6 +53,17 @@ pub fn execute_drop_trigger(
     stmt: &DropTriggerStmt,
     db: &mut Database,
 ) -> Result<(), ExecutorError> {
+    // Schema-qualified drop targets exactly that schema (#6310).
+    if let Some(schema) = stmt.schema.as_deref() {
+        if stmt.if_exists
+            && db.catalog.get_trigger_in_schema(&stmt.trigger_name, Some(schema)).is_none()
+        {
+            return Ok(());
+        }
+        db.catalog.drop_trigger_in_schema(&stmt.trigger_name, Some(schema))?;
+        return Ok(());
+    }
+
     // `DROP TRIGGER IF EXISTS` on a missing trigger is a no-op (SQLite /
     // SQL:2008); a bare DROP TRIGGER errors with TriggerNotFound.
     if stmt.if_exists && db.catalog.get_trigger(&stmt.trigger_name).is_none() {

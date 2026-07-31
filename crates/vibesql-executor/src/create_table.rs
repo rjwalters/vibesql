@@ -221,9 +221,10 @@ impl CreateTableExecutor {
         // <name>" (e.g. `CREATE TABLE george.t1(x)` when `george` was never
         // attached) rather than the internal catalog error text. This mirrors
         // sqlite3's wording for qualified DDL against an unknown database
-        // (e_createtable-1.2.1.x). ATTACH itself is not supported by VibeSQL
-        // (single-file engine), so any non-main/non-temp qualifier the user
-        // supplies reaches this path.
+        // (e_createtable-1.2.1.x). ATTACH registers the attached database as a
+        // catalog schema (#6310), so an attached qualifier passes this
+        // `schema_exists` gate automatically; any other unknown qualifier the
+        // user supplies reaches this path.
         if !database.catalog.schema_exists(&schema_name) {
             return Err(ExecutorError::SqliteCompatError(format!(
                 "unknown database {}",

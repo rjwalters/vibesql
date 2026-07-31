@@ -41,14 +41,20 @@ impl Database {
     // Table Operations
     // ============================================================================
 
-    /// Check if a table name refers to a temporary table (in any temp schema)
+    /// Check if a table name refers to a session-scoped table that must NOT be
+    /// persisted to WAL: a temporary table (in any temp schema) or a table in
+    /// an ATTACHed database schema (session-scoped in Phase 1 of #6310 —
+    /// attached schemas are never persisted into the main database's WAL or
+    /// snapshot; file-backed attachment persistence is #6362).
     ///
-    /// Temporary tables are not persisted to WAL.
     /// This checks if the table is in ANY temp schema (temp_1, temp_2, etc.)
-    fn is_temp_table(&self, table_name: &str) -> bool {
-        // Check if the table name is qualified with a temp schema prefix (e.g., "temp_1.foo")
+    /// or in any currently attached schema.
+    pub(super) fn is_temp_table(&self, table_name: &str) -> bool {
+        // Check if the table name is qualified with a temp or attached schema
+        // prefix (e.g., "temp_1.foo", "aux.foo")
         if let Some((schema, _)) = table_name.split_once('.') {
             vibesql_catalog::Catalog::is_temp_schema(schema)
+                || self.catalog.is_attached_schema(schema)
         } else {
             // Unqualified name - check if it exists in this session's temp schema
             let temp_qualified =
@@ -84,11 +90,11 @@ impl Database {
             format!("{}.{}", current_schema, identifier.canonical())
         };
 
-        // Check if this is a temporary table (in any temp schema)
-        // Temp tables are not persisted to WAL
-        let is_temp = identifier
-            .schema_canonical()
-            .is_some_and(|s| vibesql_catalog::Catalog::is_temp_schema(s));
+        // Check if this is a session-scoped table (in any temp schema, or in
+        // an ATTACHed database schema). Neither is persisted to WAL.
+        let is_temp = identifier.schema_canonical().is_some_and(|s| {
+            vibesql_catalog::Catalog::is_temp_schema(s) || self.catalog.is_attached_schema(s)
+        });
 
         if !is_temp {
             // Assign table ID and emit WAL entry for persistence
@@ -252,7 +258,18 @@ impl Database {
             if qualified_name_lowercase != qualified_name_original
                 && qualified_name_lowercase != qualified_name_uppercase
             {
-                return self.tables.get(&qualified_name_lowercase);
+                if let Some(table) = self.tables.get(&qualified_name_lowercase) {
+                    return Some(table);
+                }
+            }
+
+            // Finally, check attached databases in attachment order (SQLite
+            // searches temp, then main, then each ATTACHed database — #6310).
+            for attached in self.catalog.attached_databases() {
+                let attached_qualified = format!("{}.{}", attached.name, lowercase_name);
+                if let Some(table) = self.tables.get(&attached_qualified) {
+                    return Some(table);
+                }
             }
         }
 
@@ -330,6 +347,21 @@ impl Database {
                 && self.tables.contains_key(&qualified_name_uppercase)
             {
                 return self.tables.get_mut(&qualified_name_uppercase);
+            }
+
+            // Finally, check attached databases in attachment order (SQLite
+            // searches temp, then main, then each ATTACHed database — #6310).
+            let attached_names: Vec<String> = self
+                .catalog
+                .attached_databases()
+                .iter()
+                .map(|a| a.name.clone())
+                .collect();
+            for attached_name in attached_names {
+                let attached_qualified = format!("{}.{}", attached_name, lowercase_name);
+                if self.tables.contains_key(&attached_qualified) {
+                    return self.tables.get_mut(&attached_qualified);
+                }
             }
         }
 

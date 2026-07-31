@@ -351,6 +351,7 @@ fn test_drop_trigger() {
     // Drop the trigger
     let drop_stmt = DropTriggerStmt {
         trigger_name: "my_trigger".to_string(),
+        schema: None,
         cascade: false,
         if_exists: false,
     };
@@ -368,6 +369,7 @@ fn test_drop_trigger_not_found() {
 
     let drop_stmt = DropTriggerStmt {
         trigger_name: "nonexistent_trigger".to_string(),
+        schema: None,
         cascade: false,
         if_exists: false,
     };
@@ -382,6 +384,7 @@ fn test_drop_trigger_if_exists_missing_is_noop() {
 
     let drop_stmt = DropTriggerStmt {
         trigger_name: "nonexistent_trigger".to_string(),
+        schema: None,
         cascade: false,
         if_exists: true,
     };
@@ -535,7 +538,7 @@ fn test_drop_trigger_rolled_back_with_transaction() {
     db.begin_transaction().expect("BEGIN");
     crate::TriggerExecutor::drop_trigger(
         &mut db,
-        &DropTriggerStmt { trigger_name: "tr2".to_string(), cascade: false, if_exists: false },
+        &DropTriggerStmt { trigger_name: "tr2".to_string(), schema: None, cascade: false, if_exists: false },
     )
     .expect("DROP TRIGGER inside txn");
     assert!(db.catalog.get_trigger("tr2").is_none(), "trigger dropped inside txn");

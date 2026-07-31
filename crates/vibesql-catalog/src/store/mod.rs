@@ -28,6 +28,7 @@ use crate::{
 
 // Submodules - each handles a specific area of catalog operations
 mod advanced;
+mod attachments;
 mod indexes;
 mod privileges;
 mod schemas;
@@ -36,6 +37,7 @@ mod tables;
 
 // Re-export types from submodules
 pub use advanced::ViewDropBehavior;
+pub use attachments::{AttachedDatabase, MAX_ATTACHED_DATABASES};
 
 /// Global counter for generating unique session IDs.
 /// This ensures each Catalog instance gets a unique session ID,
@@ -54,6 +56,10 @@ pub struct Catalog {
     /// Computed once on Catalog creation from the session_id.
     pub(crate) temp_schema_name: String,
     pub(crate) schemas: HashMap<String, Schema>,
+    /// Session-scoped registry of ATTACHed databases in attachment order
+    /// (SQLite `ATTACH DATABASE`, Phase 1 — #6310). Each entry has a matching
+    /// schema in `schemas`. Never persisted; see `store/attachments.rs`.
+    pub(crate) attached_databases: Vec<attachments::AttachedDatabase>,
     pub(crate) current_schema: String,
     pub(crate) privilege_grants: Vec<PrivilegeGrant>,
     pub(crate) roles: HashSet<String>,
@@ -125,6 +131,7 @@ impl Catalog {
             session_id,
             temp_schema_name: temp_schema_name.clone(),
             schemas: HashMap::new(),
+            attached_databases: Vec::new(),
             current_schema: crate::DEFAULT_SCHEMA.to_string(),
             privilege_grants: Vec::new(),
             roles: HashSet::new(),

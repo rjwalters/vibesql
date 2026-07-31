@@ -125,6 +125,24 @@ impl super::super::Catalog {
             .ok_or_else(|| CatalogError::TriggerNotFound(name.to_string()))
     }
 
+    /// Drop a TRIGGER scoped to a specific schema (`DROP TRIGGER main.tr1` /
+    /// `temp.tr1` / `<attached>.tr1` — #6310). Never falls through to another
+    /// schema, unlike the unqualified [`Catalog::drop_trigger`].
+    ///
+    /// `schema` follows the same convention as
+    /// [`Catalog::get_trigger_in_schema`]: `None`/`Some("main")` for the main
+    /// schema, `Some("temp")` for the temp schema, or an attached schema name.
+    pub fn drop_trigger_in_schema(
+        &mut self,
+        name: &str,
+        schema: Option<&str>,
+    ) -> Result<(), CatalogError> {
+        self.triggers
+            .remove(&trigger_storage_key(schema, name))
+            .map(|_| ())
+            .ok_or_else(|| CatalogError::TriggerNotFound(name.to_string()))
+    }
+
     /// Get all triggers for a table with a specific event
     ///
     /// # Arguments
