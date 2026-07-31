@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-hnsw benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster test-scripts fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-hnsw benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -110,6 +110,7 @@ help:
 	@echo "  make test-tcl-file FILE=X - Run specific TCL test file"
 	@echo "  make test-tcl-status    - Show TCL test status"
 	@echo "  make test-cluster       - Run 3-node TCP consensus cluster smoke tests"
+	@echo "  make test-scripts       - Build Python bindings, install them, run scripts/ pytest suite"
 	@echo ""
 	@echo "Fuzzing targets:"
 	@echo "  make fuzz               - Run all fuzz targets (5 min each)"
@@ -325,6 +326,18 @@ test-tcl-status:
 # partitioned followers). Exits nonzero on any failure.
 test-cluster:
 	cargo test --release -p vibesql-consensus --test tcp_cluster --test leader_reads --test follower_reads -- --nocapture
+
+# Run the scripts/ Python test suite against THIS checkout's bindings (#6323).
+# Builds the wheel via build-python, installs it into the active Python
+# environment, then runs pytest with VIBESQL_REQUIRE_BINDINGS=1 so missing
+# bindings FAIL instead of silently skipping. Installs into whatever `python3`
+# resolves to — activate a virtualenv first if your system Python is
+# externally managed (PEP 668). See scripts/README.md.
+test-scripts: build-python
+	@echo "Installing freshly built wheel into the active Python environment..."
+	python3 -m pip install --force-reinstall --quiet "$$(ls -t target/wheels/vibesql-*.whl | head -1)"
+	@echo "Running scripts/ test suite..."
+	VIBESQL_REQUIRE_BINDINGS=1 python3 -m pytest
 
 #
 # Fuzzing Targets
