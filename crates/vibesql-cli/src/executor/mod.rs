@@ -2479,6 +2479,26 @@ impl SqlExecutor {
             _ => None,
         };
 
+        // SQLite: `PRAGMA foreign_key_check(NAME)` on a table that does not
+        // exist raises "no such table: NAME" (pragma4-4.6.5, fkey5). This
+        // differs from `foreign_key_list` / `table_info`, which return an empty
+        // result for a missing table — so the check lives here, not in those.
+        // The schema tables (sqlite_master and its aliases) are always valid
+        // targets and never error. This mirrors the same no-such-table
+        // validation `integrity_check` performs for its name-argument form.
+        // (The schema-qualified `<other>.foreign_key_check(NAME)` form is
+        // already handled above, so any `stmt.database` reaching here is the
+        // current/main schema; the bare-name lookup matches the per-table
+        // resolution used in the scan loop below.)
+        if let Some(ref name) = table_name {
+            let lower = name.to_ascii_lowercase();
+            let is_schema_table =
+                matches!(lower.as_str(), "sqlite_master" | "sqlite_schema" | "sqlite_temp_schema");
+            if !is_schema_table && self.db.catalog.get_table(name).is_none() {
+                anyhow::bail!("no such table: {}", name);
+            }
+        }
+
         // Collect tables to check
         let tables_to_check: Vec<String> = if let Some(ref name) = table_name {
             vec![name.clone()]
@@ -2970,7 +2990,10 @@ impl SqlExecutor {
     /// in-memory database or the (always-empty-file) `temp` schema -- same
     /// path-resolution precedent as `execute_pragma_database_list`'s `main`
     /// row.
-    fn execute_pragma_filename(&self, stmt: &vibesql_ast::PragmaStmt) -> anyhow::Result<QueryResult> {
+    fn execute_pragma_filename(
+        &self,
+        stmt: &vibesql_ast::PragmaStmt,
+    ) -> anyhow::Result<QueryResult> {
         let schema = stmt.database.as_deref().unwrap_or("main").to_ascii_lowercase();
         let file = if schema == "temp" {
             String::new()
