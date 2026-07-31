@@ -304,13 +304,17 @@ test-tcl-all:
 	@echo "Running full SQLite TCL test suite (all 1174 files)..."
 	./scripts/tcltest run --timeout $(TCL_TIMEOUT) --batch-size $(TCL_BATCH_SIZE) --jobs $(TCL_JOBS)
 
-# Run specific TCL test file
+# Run specific TCL test file. Per-test forensics (including expected vs actual
+# for failures) are persisted by default to the dedicated single-file DB
+# (~/.vibesql/test_results/tcl_single_file_results.vbsql) — never the canonical
+# suite DB (#6317). Pass extra tcltest flags via TCLTEST_ARGS, e.g.
+#   make test-tcl-file FILE=joinD.test TCLTEST_ARGS=--no-db
 test-tcl-file:
 	@if [ -z "$(FILE)" ]; then \
 		echo "Usage: make test-tcl-file FILE=select1.test"; \
 		exit 1; \
 	fi
-	./scripts/tcltest test $(FILE) --timeout $(TCL_TIMEOUT)
+	./scripts/tcltest test $(FILE) --timeout $(TCL_TIMEOUT) $(TCLTEST_ARGS)
 
 # Show TCL test status
 test-tcl-status:
