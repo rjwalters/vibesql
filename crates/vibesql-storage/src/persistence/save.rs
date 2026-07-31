@@ -435,12 +435,13 @@ impl Database {
                 continue;
             }
             let metadata = self.get_index(&index_name).unwrap();
-            // Skip indexes on tables in attached schemas - session-scoped (#6310)
-            if metadata
-                .table_name
-                .split_once('.')
-                .is_some_and(|(schema, _)| self.catalog.is_attached_schema(schema))
-            {
+            // Skip indexes on tables in attached schemas - session-scoped (#6310).
+            // Filter on `metadata.schema` (the owning schema resolved at CREATE
+            // INDEX time), not a qualifier embedded in `table_name`: an
+            // unqualified `CREATE INDEX i1 ON t(z)` that resolves to an attached
+            // table stores the bare `"t"` as table_name, so a name-prefix check
+            // would leak the index into the dump.
+            if self.catalog.is_attached_schema(&metadata.schema) {
                 continue;
             }
             write!(writer, "CREATE")

@@ -580,6 +580,13 @@ fn export_indexes(db: &Database, conn: &Connection, warnings: &mut Vec<String>) 
             continue;
         }
         let Some(metadata) = db.get_index(&index_name) else { continue };
+        // Indexes on tables in ATTACHed schemas are session-scoped (#6310) and
+        // not exported. Filter on `metadata.schema` (the owning schema resolved
+        // at CREATE INDEX time) — an unqualified `CREATE INDEX i1 ON t(z)` that
+        // resolves to an attached table stores the bare `"t"` as table_name.
+        if db.catalog.is_attached_schema(&metadata.schema) {
+            continue;
+        }
         let unique = if metadata.unique { "UNIQUE " } else { "" };
         let cols: Vec<String> = metadata
             .columns

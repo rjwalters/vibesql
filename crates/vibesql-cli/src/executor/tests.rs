@@ -1628,3 +1628,46 @@ fn test_attached_schema_not_persisted_to_main_snapshot() {
         ex.execute("ATTACH ':memory:' AS aux").unwrap();
     }
 }
+
+#[test]
+fn test_attached_table_index_not_persisted_to_main_snapshot() {
+    // Regression test for the Judge-reported #6310 leak: `CREATE INDEX i1 ON
+    // t(z)` with an *unqualified* table target that resolves to an attached
+    // table (`aux.t`) stores the bare `"t"` as the index's table_name. The
+    // persistence filters must key off the index's owning schema — not a
+    // qualifier embedded in table_name — or the index leaks into the binary
+    // checkpoint and the main database refuses to open in the next session
+    // ("Failed to create index: Table 't' not found").
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("main_idx.vbsql");
+    let db_path_str = db_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(db_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE keep(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO keep VALUES (42)").unwrap();
+        ex.execute("ATTACH ':memory:' AS aux").unwrap();
+        // Attached-only table: the unqualified index target below can only
+        // resolve to aux.t via the attached fallback.
+        ex.execute("CREATE TABLE aux.t(z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+        ex.execute("CREATE INDEX i1 ON t(z)").unwrap();
+        ex.save_database(&db_path_str).unwrap();
+    }
+
+    {
+        // The main database must reopen cleanly — an unopenable database here
+        // is exactly the reported bug.
+        let mut ex = SqlExecutor::new(Some(db_path_str.clone())).unwrap();
+        // Main data survived.
+        let result = ex.execute("SELECT x FROM keep").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("42".to_string())]]);
+        // No attached-schema artifacts survived: the attached table is gone…
+        assert!(ex.execute("SELECT z FROM aux.t").is_err());
+        // …and the leaked index name is free for reuse in main.
+        ex.execute("CREATE TABLE t_main(z INTEGER)").unwrap();
+        ex.execute("CREATE INDEX i1 ON t_main(z)").unwrap();
+        // The name is free to attach again.
+        ex.execute("ATTACH ':memory:' AS aux").unwrap();
+    }
+}

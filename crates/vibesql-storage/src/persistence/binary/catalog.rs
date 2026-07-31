@@ -152,19 +152,20 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // Write indexes
     //
     // Indexes on tables in ATTACHed database schemas are session-scoped
-    // (#6310) and are filtered out (the metadata's table_name carries the
-    // schema qualifier for qualified creations). The count and the write loop
-    // iterate the same filtered list so they stay in lockstep.
+    // (#6310) and are filtered out. Filter on `metadata.schema` — the owning
+    // schema resolved at CREATE INDEX time — NOT on a qualifier embedded in
+    // `metadata.table_name`: an unqualified `CREATE INDEX i1 ON t(z)` that
+    // resolves to an attached table stores the bare `"t"` as table_name, so a
+    // name-prefix check would leak the index into the checkpoint and brick the
+    // main database on reload (the index's table doesn't exist there). The
+    // count and the write loop iterate the same filtered list so they stay in
+    // lockstep.
     let index_names: Vec<String> = db
         .list_indexes()
         .into_iter()
         .filter(|name| {
-            db.get_index(name).is_none_or(|metadata| {
-                match metadata.table_name.split_once('.') {
-                    Some((schema, _)) => !db.catalog.is_attached_schema(schema),
-                    None => true,
-                }
-            })
+            db.get_index(name)
+                .is_none_or(|metadata| !db.catalog.is_attached_schema(&metadata.schema))
         })
         .collect();
     write_u32(writer, index_names.len() as u32)?;

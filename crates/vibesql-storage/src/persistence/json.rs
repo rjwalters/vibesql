@@ -288,6 +288,15 @@ impl Database {
                     && !lower_name.starts_with("sqlite_autoindex_")
                     && !lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
             })
+            // Skip indexes on tables in ATTACHed schemas — session-scoped
+            // (#6310). Filter on `metadata.schema` (the owning schema resolved
+            // at CREATE INDEX time): an unqualified `CREATE INDEX i1 ON t(z)`
+            // that resolves to an attached table stores the bare `"t"` as
+            // table_name, so only the schema tag identifies it reliably.
+            .filter(|index_name| {
+                self.get_index(index_name)
+                    .is_none_or(|metadata| !self.catalog.is_attached_schema(&metadata.schema))
+            })
             .filter_map(|index_name| {
                 self.get_index(&index_name).map(|metadata| JsonIndex {
                     name: index_name,
