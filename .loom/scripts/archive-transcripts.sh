@@ -46,6 +46,10 @@
 
 set -uo pipefail
 
+_ARCHIVE_TRANSCRIPTS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/config-resolver.sh
+source "$_ARCHIVE_TRANSCRIPTS_SCRIPT_DIR/lib/config-resolver.sh"
+
 # ------------------------------------------------------------------ output ---
 RED='\033[0;31m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; NC='\033[0m'
@@ -86,9 +90,30 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # slugify a path the way Claude Code names its projects/ subdirs: '/' -> '-'.
 slugify() { printf '%s' "$1" | sed 's#/#-#g'; }
 
-# portable mtime epoch (BSD stat then GNU stat).
-file_mtime_epoch() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-file_size()        { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
+# Portable mtime epoch / size. GNU `stat -c` first (it is an illegal option on
+# BSD/macOS, so it fails cleanly there), then BSD `stat -f`. The reverse order
+# MISFIRES on GNU: `stat -f %m <path>` there means --file-system (a bare mode
+# flag, not a format arg) and prints a multi-line filesystem report to stdout
+# while still exiting non-zero — a `2>/dev/null || fallback` chain doesn't
+# catch this because the polluted stdout was already emitted before the
+# command failed, so it leaks into the captured value ahead of the fallback's
+# real output. Validate the captured value is purely numeric instead of
+# trusting the exit code (same technique as build-slot.sh's
+# _loom_build_slot_age_secs).
+file_mtime_epoch() {
+    local v
+    v="$(stat -c %Y "$1" 2>/dev/null || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] || v="$(stat -f %m "$1" 2>/dev/null || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] || v=0
+    printf '%s\n' "$v"
+}
+file_size() {
+    local v
+    v="$(stat -c %s "$1" 2>/dev/null || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] || v="$(stat -f %z "$1" 2>/dev/null || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] || v=0
+    printf '%s\n' "$v"
+}
 epoch_to_date()    { date -r "$1" +%Y-%m-%d 2>/dev/null || date -d "@$1" +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d; }
 iso_now()          { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
@@ -101,14 +126,21 @@ PROJECTS_DIR="$CLAUDE_BASE/projects"
 # and for the config.json read).  A worktree resolves to the worktree root.
 REPO_ROOT="$(git -C "$SOURCE_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
 REPO_LABEL="$(basename "${REPO_ROOT:-$SOURCE_CWD}")"
-CONFIG_JSON="${REPO_ROOT:+$REPO_ROOT/.loom/config.json}"
 
+# Config read via the config-resolver tier chain (#4062) instead of a single
+# hand-rolled `.loom/config.json` read — a `.loom-project/project.json` or
+# `.loom-local/local.json` override is picked up too. Only attempted when
+# REPO_ROOT resolved (best-effort, same as the historical CONFIG_JSON guard).
 CFG_ENABLED=false
 CFG_DIR=""
-if [[ -n "${CONFIG_JSON:-}" && -f "$CONFIG_JSON" ]] && command -v jq >/dev/null 2>&1; then
-  # Best-effort: malformed JSON -> jq fails -> disabled default preserved.
-  CFG_ENABLED="$(jq -r '.loom.transcriptArchive.enabled // false' "$CONFIG_JSON" 2>/dev/null || echo false)"
-  CFG_DIR="$(jq -r '.loom.transcriptArchive.dir // ""' "$CONFIG_JSON" 2>/dev/null || echo "")"
+if [[ -n "${REPO_ROOT:-}" ]] && command -v jq >/dev/null 2>&1; then
+  # Resolve the merged effective config ONCE (config-resolver, #4062) — then
+  # extract both keys from that single resolved JSON via jq, rather than two
+  # loom_config_get calls that would each re-merge all four config tiers.
+  # Best-effort: a malformed tier soft-fails to {} -> disabled default preserved.
+  _archive_cfg="$(loom_resolve_config "$REPO_ROOT")"
+  CFG_ENABLED="$(echo "$_archive_cfg" | jq -r '.loom.transcriptArchive.enabled // false' 2>/dev/null || echo false)"
+  CFG_DIR="$(echo "$_archive_cfg" | jq -r '.loom.transcriptArchive.dir // ""' 2>/dev/null || echo "")"
 fi
 
 ENABLED=false

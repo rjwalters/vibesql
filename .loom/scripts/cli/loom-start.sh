@@ -14,6 +14,10 @@
 
 set -euo pipefail
 
+_LOOM_START_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/config-resolver.sh
+source "$_LOOM_START_SCRIPT_DIR/../lib/config-resolver.sh"
+
 # Find repository root
 find_repo_root() {
     local dir="$PWD"
@@ -43,7 +47,6 @@ if [[ -z "$REPO_ROOT" ]]; then
     exit 1
 fi
 
-CONFIG_FILE="$REPO_ROOT/.loom/config.json"
 # shellcheck disable=SC2034  # LOG_DIR reserved for future logging enhancements
 LOG_DIR="/tmp"
 TMUX_SOCKET="loom"
@@ -112,7 +115,8 @@ ${YELLOW}CONFIGURATION:${NC}
 ${YELLOW}REQUIREMENTS:${NC}
     - tmux must be installed
     - claude CLI must be in PATH
-    - .loom/config.json must exist
+    - a resolved config with a non-empty terminals array must exist (.loom/config.json,
+      .loom-project/project.json, or .loom-local/local.json)
 EOF
 }
 
@@ -153,19 +157,62 @@ check_dependencies() {
     fi
 }
 
-# Check if config file exists
+# List of config tier paths (lowest to highest precedence), for diagnostics.
+_loom_start_config_tiers() {
+    local repo_root="$1"
+    local defaults_path
+    defaults_path="$(_loom_config_private_defaults_path)"
+    [[ -n "$defaults_path" ]] && echo "$defaults_path"
+    echo "$repo_root/$LOOM_CONFIG_LEGACY_REL"
+    echo "$repo_root/$LOOM_CONFIG_PROJECT_REL"
+    echo "$repo_root/$LOOM_CONFIG_LOCAL_REL"
+}
+
+# Check that a valid, non-empty effective config resolves for this workspace.
+#
+# Migrated onto the config-resolver tier chain (#4062). Two distinct failure
+# modes are preserved, matching loom-daemon's handle_validate_command /
+# role_validation.rs `has_terminals` precondition (#4059) so the Bash and Rust
+# entry points agree:
+#
+#   1. MALFORMED TIER (regression guard): loom_resolve_config soft-fails a
+#      malformed tier file to `{}` silently -- appropriate for the resolver's
+#      general contract, but NOT here. A typo'd config must still fail loudly
+#      (non-zero, explicit message) rather than silently degrading to "no
+#      terminals configured" -- so every EXISTING tier file is validated as
+#      parseable JSON before the merge is trusted.
+#   2. NO TERMINALS ANYWHERE: retargeted from "the legacy .loom/config.json
+#      file exists" to "the resolved config has a non-empty `terminals`
+#      array" -- absence of the legacy file no longer implies absence of
+#      config under tiering (terminals may come from
+#      .loom-project/project.json alone). The exit behavior (non-zero) is
+#      preserved; only the condition is retargeted.
+#
+# Sets EFFECTIVE_CONFIG (compact JSON) as a side effect for reuse by callers
+# (Trap 2 -- resolve once, don't re-merge per key).
 check_config() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo -e "${RED}Error: Configuration file not found: $CONFIG_FILE${NC}" >&2
+    local tier_path
+    while IFS= read -r tier_path; do
+        if [[ -f "$tier_path" ]] && ! jq empty "$tier_path" 2>/dev/null; then
+            echo -e "${RED}Error: Invalid JSON in $tier_path${NC}" >&2
+            exit 1
+        fi
+    done < <(_loom_start_config_tiers "$REPO_ROOT")
+
+    EFFECTIVE_CONFIG="$(loom_resolve_config "$REPO_ROOT")"
+
+    local has_terminals
+    has_terminals=$(echo "$EFFECTIVE_CONFIG" | jq '(.terminals // []) | length > 0' 2>/dev/null || echo false)
+    if [[ "$has_terminals" != "true" ]]; then
+        echo -e "${RED}Error: No Loom config with a non-empty \`terminals\` array found in any tier.${NC}" >&2
+        echo "" >&2
+        echo "Searched (lowest to highest precedence):" >&2
+        while IFS= read -r tier_path; do
+            echo "  - $tier_path" >&2
+        done < <(_loom_start_config_tiers "$REPO_ROOT")
         echo "" >&2
         echo "Have you initialized Loom in this repository?" >&2
         echo "Run: ./scripts/install-loom.sh" >&2
-        exit 1
-    fi
-
-    # Validate JSON
-    if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-        echo -e "${RED}Error: Invalid JSON in $CONFIG_FILE${NC}" >&2
         exit 1
     fi
 }
@@ -284,17 +331,17 @@ main() {
     # Check config
     check_config
 
-    # Parse terminals from config
+    # Parse terminals from the effective config (EFFECTIVE_CONFIG was resolved
+    # once by check_config() above via loom_resolve_config -- Trap 1/2: array
+    # sites resolve once and reuse the merged JSON, never per-field
+    # loom_config_get). check_config() already guarantees a non-empty
+    # terminals array here (the hard-fail precondition it enforces), so no
+    # redundant zero-count check is needed at this point.
     local terminals
-    terminals=$(jq -c '.terminals // []' "$CONFIG_FILE")
+    terminals=$(echo "$EFFECTIVE_CONFIG" | jq -c '.terminals // []')
 
     local terminal_count
     terminal_count=$(echo "$terminals" | jq 'length')
-
-    if [[ "$terminal_count" -eq 0 ]]; then
-        echo -e "${YELLOW}No terminals configured in $CONFIG_FILE${NC}"
-        exit 0
-    fi
 
     # Filter by role if specified
     if [[ -n "$only_role" ]]; then
@@ -307,11 +354,22 @@ main() {
         fi
     fi
 
-    # Display summary
+    # Display summary. Under tiering, "Config:" names every tier that
+    # actually exists on disk rather than a single legacy path -- naming only
+    # .loom/config.json would be misleading (or falsely read as "none") once
+    # a higher tier supplies the effective config (#4062).
+    local config_tiers_present
+    # `|| true`: under `set -o pipefail`, a while-loop's exit status is that
+    # of the last command run in its final iteration -- if the LAST tier path
+    # tested happens to not exist (the common case for .loom-local/local.json
+    # and the private-defaults tier), `[[ -f "$t" ]]` is the last thing that
+    # ran and its nonzero status would otherwise propagate through the
+    # pipeline and trip `set -e`, aborting the script (#4062 regression).
+    config_tiers_present=$(_loom_start_config_tiers "$REPO_ROOT" | while IFS= read -r t; do [[ -f "$t" ]] && echo "$t"; done | paste -sd ', ' - || true)
     echo -e "${BOLD}Loom Agent Pool${NC}"
     echo ""
     echo -e "  Workspace: ${CYAN}$REPO_ROOT${NC}"
-    echo -e "  Config: ${CYAN}$CONFIG_FILE${NC}"
+    echo -e "  Config: ${CYAN}${config_tiers_present:-none found}${NC}"
     echo -e "  Agents: ${CYAN}$terminal_count${NC}"
     if [[ -n "$only_role" ]]; then
         echo -e "  Filter: ${CYAN}$only_role${NC}"

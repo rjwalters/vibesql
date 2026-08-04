@@ -152,6 +152,97 @@ fi
 
 rm -rf "$STUBDIR" "$REPO" "$SCRATCH"
 
+# --- Test 6b: df failure -> unmeasurable, NOT a fake 0 (#4164) ---
+echo ""
+echo "Test 6b: a failing df yields non-zero exit + empty stdout (unknown != zero)"
+FAILDIR=$(mktemp -d /tmp/loom-dh-faildf.XXXXXX)
+cat > "$FAILDIR/df" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$FAILDIR/df"
+
+REPO2=$(mktemp -d /tmp/loom-dh-repo2.XXXXXX)
+set +e
+FAIL_OUT="$(PATH="$FAILDIR:$PATH" loom_worktree_root_free_gb "$REPO2" 2>/tmp/loom-dh-fail-stderr.$$)"
+FAIL_STATUS=$?
+set -e
+FAIL_STDERR="$(cat /tmp/loom-dh-fail-stderr.$$)"
+rm -f "/tmp/loom-dh-fail-stderr.$$"
+
+if [[ $FAIL_STATUS -ne 0 ]]; then
+    pass "a failing df returns non-zero exit (was: silently returned 0)"
+else
+    fail "a failing df returned exit 0 (expected non-zero)"
+fi
+assert_eq "$FAIL_OUT" "" "a failing df prints nothing on stdout (was: printed a fake '0')"
+if [[ -n "$FAIL_STDERR" ]]; then
+    pass "a failing df emits a stderr message naming the probed path"
+else
+    fail "a failing df produced no stderr message"
+fi
+
+# --- Test 6c: regression — an unmeasurable probe never resolves to 1|floor ---
+echo ""
+echo "Test 6c: regression — feeding the unmeasurable result into loom_wave_size_from_disk fails loudly, not '1|floor'"
+# Pre-#4164, a df failure produced a fake "0" that flowed straight into
+# loom_wave_size_from_disk and silently floored to wave size 1 with reason
+# "floor" -- indistinguishable from a genuinely full disk. Post-fix,
+# loom_worktree_root_free_gb's stdout is EMPTY on failure; feeding that empty
+# value to loom_wave_size_from_disk must be rejected (non-integer, exit 2),
+# never resolve to "1|floor". The real caller (sweep.md Stage -1) skips this
+# call entirely on probe failure -- this test guards a misuse of the empty
+# value if it were ever passed through anyway.
+if loom_wave_size_from_disk daemon 10 "$FAIL_OUT" >/dev/null 2>&1; then
+    fail "loom_wave_size_from_disk accepted an empty free_gb value (should reject non-integer input)"
+else
+    pass "loom_wave_size_from_disk rejects an empty/unmeasurable free_gb value (never silently floors to 1)"
+fi
+
+rm -rf "$FAILDIR" "$REPO2"
+
+# --- Test 6d: missing dependency -> fail-closed source, not a silent no-op ---
+echo ""
+echo "Test 6d: sourcing disk-headroom.sh without its worktree-root.sh sibling fails loudly (#4164)"
+ISOLATED=$(mktemp -d /tmp/loom-dh-isolated.XXXXXX)
+cp "$DISK_HEADROOM_LIB" "$ISOLATED/disk-headroom.sh"
+# Deliberately do NOT copy worktree-root.sh alongside it.
+ISO_OUT="$(bash -c "source '$ISOLATED/disk-headroom.sh' 2>&1; echo \"exit=\$?\"; command -v loom_worktree_root_free_gb >/dev/null 2>&1 && echo DEFINED || echo UNDEFINED")"
+if [[ "$ISO_OUT" == *"exit=0"* ]]; then
+    fail "sourcing disk-headroom.sh with a missing dependency reported exit=0 (expected non-zero)"
+else
+    pass "sourcing disk-headroom.sh with a missing dependency fails loudly (non-zero)"
+fi
+if [[ "$ISO_OUT" == *"UNDEFINED"* ]]; then
+    pass "loom_worktree_root_free_gb is never defined when the dependency source fails"
+else
+    fail "loom_worktree_root_free_gb got defined even though worktree-root.sh failed to load"
+fi
+rm -rf "$ISOLATED"
+
+# --- Test 6e: a genuine measured 0 free GB still returns 0 with exit 0 ---
+echo ""
+echo "Test 6e: a real 0-free-GB measurement still prints 0 with exit 0 (real pressure stays distinguishable from a broken probe)"
+ZERODIR=$(mktemp -d /tmp/loom-dh-zerodf.XXXXXX)
+cat > "$ZERODIR/df" <<'EOF'
+#!/usr/bin/env bash
+echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
+echo "/dev/full         52428800  52428800         0      100% /full"
+EOF
+chmod +x "$ZERODIR/df"
+
+REPO3=$(mktemp -d /tmp/loom-dh-repo3.XXXXXX)
+set +e
+ZERO_OUT="$(PATH="$ZERODIR:$PATH" loom_worktree_root_free_gb "$REPO3")"
+ZERO_STATUS=$?
+set -e
+assert_eq "$ZERO_STATUS" "0" "a genuine 0-free-GB df result still exits 0"
+assert_eq "$ZERO_OUT" "0" "a genuine 0-free-GB df result still prints 0 (not empty)"
+# And it still floors the wave size to 1 with reason "floor" -- a REAL full
+# disk (not an unmeasurable probe) is the one case that legitimately floors.
+assert_eq "$(wave daemon 10 "$ZERO_OUT")" "1|floor" "a genuine 0 GB free still floors the wave size to 1 (floor)"
+rm -rf "$ZERODIR" "$REPO3"
+
 # --- Test 7: disk-headroom.sh is sourceable directly under zsh (#3680) ---
 echo ""
 echo "Test 7: disk-headroom.sh sources cleanly under zsh (regression guard for #3680)"

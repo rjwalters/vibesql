@@ -260,6 +260,65 @@ assert_eq "true" "$nc_cached_result" "forge_get_pr_nocache with gh-cached wrappe
 
 rm -rf "$NC_STUB_DIR"
 
+# --- Test CI-status helpers stay UNCACHED (issue #4667) ---
+# The sweep/judge/champion skills now route their hot discovery reads through
+# gh-cached, but CI status is explicitly carved out: it is the read a verdict
+# and a merge are gated on, so a cached green could predate the push that broke
+# the build. forge_get_check_runs / forge_get_commit_status must therefore keep
+# invoking plain `gh` from PATH — never a cache wrapper, and never with the
+# wrapper-only `--no-cache` flag (the #3547 failure shape). This locks the
+# carve-out in at the library level so a future "cache everything" pass has to
+# delete a failing test rather than silently weaken a merge gate.
+echo ""
+echo "Testing CI-status helpers are uncached (issue #4667)..."
+
+CI_STUB_DIR=$(mktemp -d)
+CI_ARGS_FILE="$CI_STUB_DIR/argv.txt"
+
+cat > "$CI_STUB_DIR/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CI_ARGS_FILE"
+for a in "$@"; do
+  if [[ "$a" == "--no-cache" ]]; then
+    echo "unknown flag: --no-cache" >&2
+    exit 1
+  fi
+done
+# `gh api ... --jq` filters server-side; the helpers ask for a reshaped object,
+# so just emit the already-shaped result the helper would have produced.
+case "$*" in
+  *check-runs*) printf '{"total_count":1,"check_runs":[{"name":"build","status":"completed","conclusion":"success","html_url":"u"}]}\n' ;;
+  *status*)     printf '{"state":"success","statuses":[]}\n' ;;
+  *)            exit 1 ;;
+esac
+exit 0
+STUB
+chmod +x "$CI_STUB_DIR/gh"
+
+# A `gh-cached` that must never be reached by these helpers.
+cat > "$CI_STUB_DIR/gh-cached" <<'STUB'
+#!/usr/bin/env bash
+echo "gh-cached must NOT be used for CI-status reads" >&2
+exit 1
+STUB
+chmod +x "$CI_STUB_DIR/gh-cached"
+
+FORGE_TYPE="github"
+: > "$CI_ARGS_FILE"
+
+cr_state=$(GH_CI_ARGS_FILE="$CI_ARGS_FILE" PATH="$CI_STUB_DIR:$PATH" \
+  forge_get_check_runs "owner/repo" "deadbeef" 2>/dev/null | jq -r '.check_runs[0].conclusion' 2>/dev/null || echo "")
+assert_eq "success" "$cr_state" "forge_get_check_runs reaches plain gh (no --no-cache, no wrapper)"
+
+cs_state=$(GH_CI_ARGS_FILE="$CI_ARGS_FILE" PATH="$CI_STUB_DIR:$PATH" \
+  forge_get_commit_status "owner/repo" "deadbeef" 2>/dev/null | jq -r '.state' 2>/dev/null || echo "")
+assert_eq "success" "$cs_state" "forge_get_commit_status reaches plain gh (no --no-cache, no wrapper)"
+
+nocache_hits=$(grep -c -- '--no-cache' "$CI_ARGS_FILE" || true)
+assert_eq "0" "$nocache_hits" "CI-status helpers never pass the wrapper-only --no-cache flag"
+
+rm -rf "$CI_STUB_DIR"
+
 # --- Test gitea_api auth-mode selection (issue #3297) ---
 # Use a `curl` shim on PATH that records its argv and returns a fake 200.
 echo ""

@@ -1,0 +1,7 @@
+# BEGIN LOOM-MANAGED (merge drivers, #4528)
+# install-metadata.json is a machine-local install stamp (loom_version,
+# loom_commit, last_resync, loom_source) that every host's resync
+# re-writes -- always keep our side on a merge conflict; the file is
+# fully re-derived by the next resync regardless of which side "wins".
+.loom/install-metadata.json merge=ours
+# END LOOM-MANAGED (merge drivers, #4528)

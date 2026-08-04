@@ -73,7 +73,16 @@
 # audit table on #3680 for the full file-by-file disposition.
 _LOOM_DISK_HEADROOM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=./worktree-root.sh
-source "$_LOOM_DISK_HEADROOM_LIB_DIR/worktree-root.sh"
+source "$_LOOM_DISK_HEADROOM_LIB_DIR/worktree-root.sh" || return 1
+# Fail-closed dependency guard (#4164): a failed/no-op `source` above must not
+# be allowed to fall through silently — if loom_worktree_root never got
+# defined, abort here (before the function definitions below) so
+# loom_worktree_root_free_gb is never defined either. That turns "quietly
+# returns a fake 0" into "loudly fails to source at all" for the caller.
+command -v loom_worktree_root >/dev/null 2>&1 || {
+    echo "disk-headroom.sh: failed to load worktree-root.sh from '$_LOOM_DISK_HEADROOM_LIB_DIR'" >&2
+    return 1
+}
 
 # loom_worktree_root_free_gb <repo_root>
 #
@@ -84,16 +93,27 @@ source "$_LOOM_DISK_HEADROOM_LIB_DIR/worktree-root.sh"
 # POSIX 512-independent 1024-byte-block output (macOS df differs from GNU df;
 # -P pins the single-line-per-fs columnar format, -k pins 1K blocks), and the
 # 4th column of the data row is "Available" in 1K blocks.
+#
+# Unknown != zero (#4164): on ANY failure to actually measure free space —
+# missing argument, an unresolvable worktree root, a failing/malformed `df` —
+# this prints NOTHING on stdout and returns non-zero, with a stderr message
+# naming the probed path. A genuine measurement of 0 free bytes (a truly full
+# disk) still prints "0" with exit 0 — real disk pressure must stay
+# distinguishable from a broken probe. Callers (sweep.md Stage -1) MUST check
+# the exit status rather than assuming a printed value.
 loom_worktree_root_free_gb() {
     local repo_root="$1"
     if [[ -z "$repo_root" ]]; then
         echo "loom_worktree_root_free_gb: repo_root argument required" >&2
-        echo "0"
-        return 0
+        return 1
     fi
 
     local wt_root
     wt_root="$(loom_worktree_root "$repo_root")"
+    if [[ -z "$wt_root" ]]; then
+        echo "loom_worktree_root_free_gb: could not resolve worktree root for '$repo_root'" >&2
+        return 1
+    fi
 
     # Walk up to the nearest existing ancestor (read-only; never mkdir).
     local probe="$wt_root"
@@ -104,13 +124,16 @@ loom_worktree_root_free_gb() {
     local avail_k
     avail_k="$(df -Pk "$probe" 2>/dev/null | awk 'NR==2 {print $4}')"
     if [[ -z "$avail_k" || ! "$avail_k" =~ ^[0-9]+$ ]]; then
-        # df failed or produced an unexpected shape — report 0 free so the
-        # caller floors to a single worktree rather than crashing.
-        echo "0"
-        return 0
+        # df failed or produced an unexpected shape — this is UNMEASURABLE,
+        # not a measured 0. Print nothing and fail loudly so the caller can
+        # tell the difference (a fake 0 previously floored the wave size to 1
+        # with reason "floor", indistinguishable from a genuinely full disk).
+        echo "loom_worktree_root_free_gb: df failed or returned unexpected output for '$probe'" >&2
+        return 1
     fi
 
-    # 1K blocks -> GB (integer floor).
+    # 1K blocks -> GB (integer floor). A genuine 0 here is a real measurement
+    # (full disk) and is printed with exit 0, same as any other value.
     echo "$(( avail_k / 1024 / 1024 ))"
 }
 

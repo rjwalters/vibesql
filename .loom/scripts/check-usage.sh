@@ -9,14 +9,16 @@
 #   0 - Data returned successfully
 #   1 - Token not found or API call failed
 #
-# Thin wrapper around the loom-usage Python CLI.  Reads the Claude Code
-# OAuth token from the macOS Keychain and calls the Anthropic usage API.
+# Thin stub over the native `loom-daemon usage` subcommand (issue #4275, epic
+# #4081 Phase 3 family 5 — the native port of the retired
+# `loom_tools.common.usage`). Reads the Claude Code OAuth token from the macOS
+# Keychain and calls the Anthropic usage API, caching to
+# `.loom/usage-cache.json`. Flags and exit codes are unchanged.
 
-if command -v loom-usage &>/dev/null; then
-    # No exec — exec makes output invisible in CLI tool contexts
-    # (e.g., Claude Code Bash tool). See loom-shepherd.sh for full rationale.
-    loom-usage "$@"
-    exit $?
-fi
+set -euo pipefail
 
-python3 -m loom_tools.common.usage "$@"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/script-helper.sh"
+
+loom_exec_script_helper usage "$@"

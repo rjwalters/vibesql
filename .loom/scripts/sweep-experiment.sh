@@ -1,12 +1,17 @@
 #!/bin/bash
 
-# sweep-experiment.sh - Thin stub delegating to loom_tools.sweep_experiment (#3725)
+# sweep-experiment.sh - Thin stub delegating to `loom-daemon sweep-experiment` (#3725)
 #
 # The /loom:sweep skill shells out to this for the deterministic parts of the
 # model-cost experiment: tri-state mode resolution, per-issue arm assignment, the
 # startup banner, the durable JSONL append, and the harvest reader. Keeping the
-# arithmetic in Python (not in the LLM-executed markdown) makes arm assignment
-# byte-for-byte deterministic and resume-safe.
+# arithmetic in compiled code (not in the LLM-executed markdown) makes arm
+# assignment byte-for-byte deterministic and resume-safe.
+#
+# Ported from Python to native Rust in issue #4275 (epic #4081 Phase 3 family
+# 5); subcommands, flags and output shapes are unchanged. Arm A resolves its
+# model through the same code path as `resolve-model.sh`, so the experiment and
+# the dispatch path can never disagree (the #4060 contract).
 #
 # Usage:
 #   sweep-experiment.sh resolve-mode
@@ -23,8 +28,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared loom-tools helper
-source "$SCRIPT_DIR/lib/loom-tools.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/script-helper.sh"
 
-# Run the command with proper fallback chain
-run_loom_tool "sweep-experiment" "sweep_experiment" "$@"
+loom_exec_script_helper sweep-experiment "$@"

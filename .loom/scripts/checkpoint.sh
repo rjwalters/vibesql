@@ -36,14 +36,16 @@
 #   # Read checkpoint as JSON
 #   checkpoint.sh read --json
 #
-# See `loom-checkpoint --help` for full usage.
+# See `loom-daemon checkpoint --help` for full usage. This is a thin stub over
+# that native subcommand (issue #4275, epic #4081 Phase 3 family 5 — the native
+# port of the retired `loom_tools.checkpoints`); commands and flags are
+# unchanged.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared loom-tools helper
-source "$SCRIPT_DIR/lib/loom-tools.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/script-helper.sh"
 
-# Run the command with proper fallback chain
-run_loom_tool "checkpoint" "checkpoints" "$@"
+loom_exec_script_helper checkpoint "$@"

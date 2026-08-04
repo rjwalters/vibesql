@@ -39,6 +39,33 @@
 #     documented v1 limitation (see the issue), not a bug this helper guards.
 #   - This helper never creates directories; callers `mkdir -p` the parent as
 #     needed (git worktree add creates only the leaf).
+#
+# Config resolution (#4062): the `worktree.root` key is read through the
+# config-resolver tier chain (loom_config_get) instead of a hand-rolled
+# single-tier `.loom/config.json` read, so an override in
+# `.loom-project/project.json` / `.loom-local/local.json` is honored too.
+# `worktree.root` is a plain string, so a single loom_config_get call is
+# correct here (no array/object multi-field re-merge concern — see
+# config-resolver.sh's docstring on non-scalar values).
+#
+# ${BASH_SOURCE[0]:-$0} (not bare ${BASH_SOURCE[0]}) -- the bash+zsh-portable
+# self-path idiom from #3680: disk-headroom.sh sources this file, and
+# disk-headroom.sh is itself sourced DIRECTLY into the invoking shell by
+# sweep.md's Stage -1, which on macOS is often zsh. Under zsh, BASH_SOURCE is
+# unset, so a bare ${BASH_SOURCE[0]} resolves to the shell's CWD instead of
+# this lib dir and the source below fails (zsh sets $0 to the sourced file's
+# own path, which recovers it).
+_LOOM_WORKTREE_ROOT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=./config-resolver.sh
+source "$_LOOM_WORKTREE_ROOT_LIB_DIR/config-resolver.sh"
+
+# _loom_root_unreadable <dir> — true if the path exists (stat succeeds) but
+# readdir fails (e.g. macOS TCC removable-volumes denial: stat/df keep
+# succeeding while `ls`/readdir returns EPERM). A `-d` check alone cannot
+# detect this state.
+_loom_root_unreadable() {
+    [[ -d "$1" ]] && ! command ls "$1" >/dev/null 2>&1
+}
 
 # loom_worktree_root <repo_root>
 #
@@ -50,7 +77,13 @@ loom_worktree_root() {
     # 1. Env var override — highest priority.
     if [[ -n "${LOOM_WORKTREE_ROOT:-}" ]]; then
         if [[ "$LOOM_WORKTREE_ROOT" == /* ]]; then
-            echo "${LOOM_WORKTREE_ROOT%/}/$(basename "$repo_root")"
+            local env_target="${LOOM_WORKTREE_ROOT%/}/$(basename "$repo_root")"
+            if _loom_root_unreadable "$env_target"; then
+                echo "loom_worktree_root: LOOM_WORKTREE_ROOT target exists but is unreadable (readdir failed, e.g. macOS TCC removable-volumes denial): '$env_target'; falling back to default" >&2
+                echo "$repo_root/.loom/worktrees"
+                return 0
+            fi
+            echo "$env_target"
             return 0
         fi
         echo "loom_worktree_root: LOOM_WORKTREE_ROOT must be an absolute path (got: '$LOOM_WORKTREE_ROOT'); falling back to default" >&2
@@ -58,21 +91,25 @@ loom_worktree_root() {
         return 0
     fi
 
-    # 2. Config key override — .loom/config.json → worktree.root.
-    #    Same jq guard pattern as worktree.linkPaths (worktree.sh).
-    local config_file="$repo_root/.loom/config.json"
-    if command -v jq >/dev/null 2>&1 && [[ -f "$config_file" ]]; then
-        local cfg_root
-        cfg_root=$(jq -r '.worktree.root? // empty' "$config_file" 2>/dev/null)
-        if [[ -n "$cfg_root" ]]; then
-            if [[ "$cfg_root" == /* ]]; then
-                echo "${cfg_root%/}/$(basename "$repo_root")"
+    # 2. Config key override — worktree.root, resolved through the config
+    #    tier chain (legacy .loom/config.json, .loom-project/project.json,
+    #    .loom-local/local.json, private defaults).
+    local cfg_root
+    cfg_root=$(loom_config_get "$repo_root" "worktree.root" "")
+    if [[ -n "$cfg_root" ]]; then
+        if [[ "$cfg_root" == /* ]]; then
+            local cfg_target="${cfg_root%/}/$(basename "$repo_root")"
+            if _loom_root_unreadable "$cfg_target"; then
+                echo "loom_worktree_root: worktree.root target exists but is unreadable (readdir failed, e.g. macOS TCC removable-volumes denial): '$cfg_target'; falling back to default" >&2
+                echo "$repo_root/.loom/worktrees"
                 return 0
             fi
-            echo "loom_worktree_root: worktree.root in .loom/config.json must be an absolute path (got: '$cfg_root'); falling back to default" >&2
-            echo "$repo_root/.loom/worktrees"
+            echo "$cfg_target"
             return 0
         fi
+        echo "loom_worktree_root: worktree.root in the resolved config must be an absolute path (got: '$cfg_root'); falling back to default" >&2
+        echo "$repo_root/.loom/worktrees"
+        return 0
     fi
 
     # 3. Default — unchanged historical behavior.

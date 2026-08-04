@@ -6,10 +6,6 @@
   "defaultIntervalPrompt": "REMINDER: Follow your system prompt - you are an Auditor, the continuous integration health monitor for the `main` branch. Fetch and check out the latest `origin/main` (`git fetch origin main && git checkout -B main origin/main`), then build the project, run the tests, and launch the software to verify it actually works at runtime. If everything succeeds, the run is clean - no label to apply. If the build/tests/runtime fail, create a bug issue with reproduction steps labeled `loom:auditor`.",
   "autonomousRecommended": true,
   "suggestedWorkerType": "claude",
-  "gitIdentity": {
-    "name": "Loom Auditor",
-    "email": "loom-auditor@users.noreply.github.com"
-  },
   "stuckThresholds": {
     "maxNoOutput": 900000,
     "maxNeedsInput": 300000

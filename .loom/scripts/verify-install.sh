@@ -40,6 +40,7 @@ EXIT_BAD_ARGS=2
 EXIT_NO_MANIFEST=3
 EXIT_ENV_ERROR=4
 EXIT_SCHEMA_OUTDATED=5
+EXIT_DANGLING_LINKS=6
 
 # Manifest schema version.
 #   v1: whole-file hash of every tracked path; file list derived from a
@@ -57,6 +58,12 @@ MANIFEST_VERSION=2
 # loom-daemon/src/init/scaffolding.rs LOOM_SECTION_START / LOOM_SECTION_END).
 LOOM_SECTION_START='<!-- BEGIN LOOM ORCHESTRATION -->'
 LOOM_SECTION_END='<!-- END LOOM ORCHESTRATION -->'
+
+# Loom section markers in the top-level AGENTS.md (mirrors
+# loom-daemon/src/init/scaffolding.rs AGENTS_SECTION_START / AGENTS_SECTION_END).
+# A separate marker pair so CLAUDE.md and AGENTS.md regions never collide (#4479).
+AGENTS_SECTION_START='<!-- BEGIN LOOM ORCHESTRATION (AGENTS) -->'
+AGENTS_SECTION_END='<!-- END LOOM ORCHESTRATION (AGENTS) -->'
 
 # Find the repository root (works from worktrees and subdirectories)
 find_repo_root() {
@@ -102,6 +109,8 @@ ${BOLD}USAGE:${NC}
     verify-install.sh verify             Verify against manifest
     verify-install.sh verify --json      Machine-readable output
     verify-install.sh verify --quiet     Exit code only
+    verify-install.sh check-links        Check intra-repo links resolve (#4097)
+    verify-install.sh check-links --quiet  Exit code only
     verify-install.sh --help             Show this help
 
 ${BOLD}DESCRIPTION:${NC}
@@ -117,10 +126,10 @@ ${BOLD}TRACKED FILE SET:${NC}
     metadata file is absent (pre-#3450 installs), a legacy directory
     walk is used instead, with a stderr warning.
 
-    The top-level CLAUDE.md is hashed over its
+    The top-level CLAUDE.md and AGENTS.md are hashed over their
     ${LOOM_SECTION_START} ... ${LOOM_SECTION_END}
-    region only, so sibling edits outside the Loom block do not report
-    drift. All other files are hashed whole.
+    (and the AGENTS-specific) marker region only, so sibling edits outside
+    the Loom block do not report drift. All other files are hashed whole.
 
 ${BOLD}NOT TRACKED (runtime/user/merge-target files):${NC}
     .loom/config.json              Local terminal config
@@ -139,6 +148,7 @@ ${BOLD}EXIT CODES:${NC}
     3    Manifest not found (verify mode)
     4    Environment error (not a git repo, no SHA command)
     5    Manifest schema outdated (verify mode) — run generate
+    6    Dangling intra-repo link(s) found (check-links mode)
 
 ${BOLD}EXAMPLES:${NC}
     # After installation, generate a manifest
@@ -150,15 +160,22 @@ ${BOLD}EXAMPLES:${NC}
     # In CI, check exit code only
     ./.loom/scripts/verify-install.sh verify --quiet
     echo \$?  # 0 = clean, 1 = drift
+
+    # Check that every installed .md file's intra-repo links resolve
+    ./.loom/scripts/verify-install.sh check-links
 EOF
 }
 
-# Return "loom-block" for the top-level CLAUDE.md (region-scoped hashing),
-# empty string for every other path (whole-file hashing). Only the repo-root
-# CLAUDE.md is a merge target; .loom/CLAUDE.md is fully Loom-owned.
+# Return the region-scoped-hashing tag for merge-target root docs, empty string
+# for every other path (whole-file hashing). Only the repo-root CLAUDE.md and
+# AGENTS.md are merge targets (their Loom-managed marker block is hashed, so
+# consumer edits outside it don't report drift); .loom/CLAUDE.md and
+# .loom/AGENTS.md are fully Loom-owned and hashed whole (#4479).
 region_for_path() {
     if [[ "$1" == "CLAUDE.md" ]]; then
         echo "loom-block"
+    elif [[ "$1" == "AGENTS.md" ]]; then
+        echo "loom-block-agents"
     else
         echo ""
     fi
@@ -269,8 +286,14 @@ collect_tracked_files_walk() {
     if [[ -f "$root/CLAUDE.md" ]]; then
         files+=("CLAUDE.md")
     fi
+    if [[ -f "$root/AGENTS.md" ]]; then
+        files+=("AGENTS.md")
+    fi
     if [[ -f "$root/.loom/CLAUDE.md" ]]; then
         files+=(".loom/CLAUDE.md")
+    fi
+    if [[ -f "$root/.loom/AGENTS.md" ]]; then
+        files+=(".loom/AGENTS.md")
     fi
     if [[ -f "$root/.loom/README.md" ]]; then
         files+=(".loom/README.md")
@@ -326,14 +349,155 @@ collect_tracked_files() {
     collect_tracked_files_walk "$root"
 }
 
+# ----------------------------------------------------------------------------
+# Intra-repo link checker (issue #4097)
+#
+# Loom-installed markdown files link to other Loom-installed files (role
+# siblings, `.loom/docs/*`, etc.). A packaging gap — a target referenced by a
+# shipped file but never itself shipped (e.g. `defaults/roles/` missing
+# `probe-protocol.md`) — is invisible to the checksum manifest above, which
+# only verifies files that WERE installed against themselves. This check
+# resolves every intra-repo link found in every installed `.md` file against
+# the install root and fails if any target is missing, so a packaging gap
+# surfaces at install time instead of in a downstream consumer audit.
+#
+# Two reference forms are checked (see #4097's inventory — a `](...)`-only
+# regex misses the second form entirely):
+#   1. Markdown links:        [text](target)
+#   2. Backtick-only paths:   `.loom/docs/build-gate.md` (no [...]() wrapper;
+#      written relative to the install root, e.g. `.loom/roles/foo.md`,
+#      `.claude/commands/loom/foo.md`).
+#
+# External links (http(s)://, mailto:), pure in-page anchors (#foo), and
+# anchors on an otherwise-resolved target (#anchor suffix) are not checked —
+# only the intra-repo filesystem path.
+# ----------------------------------------------------------------------------
+
+# Extract every link target referenced by `file`, one per output line.
+# Jq-free (grep/sed only) — this check runs unconditionally at install time,
+# same dependency policy as cmd_generate.
+extract_link_targets() {
+    local file="$1"
+    {
+        # Markdown links: [text](target) — keep the ()-body only. A trailing
+        # ` "title"` (rare in this repo, but cheap to strip) is dropped too.
+        # `|| true` guards each block independently: under `set -e -o
+        # pipefail` (active script-wide), a file with zero matches for one
+        # extraction form makes that grep exit 1, and pipefail propagates
+        # that non-zero status to the pipeline — which would abort this
+        # function (and skip the *other* extraction block entirely) for any
+        # file that has, say, backtick-only refs but no markdown-style
+        # links. A file legitimately having zero targets of one form is not
+        # an error (#4147).
+        grep -oE '\]\([^)]+\)' "$file" 2>/dev/null \
+            | sed -E 's/^\]\(//; s/\)$//; s/ "[^"]*"$//' \
+            || true
+        # Backtick-only install-rooted paths, e.g. `.loom/docs/build-gate.md`
+        # or `.claude/roles/foo.md#anchor` — never wrapped in [...]().
+        # The path-segment character class deliberately excludes glob (`*`)
+        # and placeholder (`<name>`) characters, e.g. `.loom/roles/*.md` or
+        # `.loom/roles/<name>.md` in prose about the role-file convention —
+        # neither is a literal link target to resolve. Lines whose prose is
+        # instructing the READER to create the file (`Create \`....md\``) are
+        # tutorial placeholders, not packaging references, and are excluded
+        # (see e.g. `.loom-README.md`'s "Create `.loom/roles/my-role.md`:").
+        grep -viE '\bcreate\b' "$file" 2>/dev/null \
+            | grep -oE '`\.(loom|claude|codex|github)/[A-Za-z0-9_./-]+\.md(#[A-Za-z0-9_-]+)?`' \
+            | sed -E 's/^`//; s/`$//' \
+            || true
+    }
+}
+
+# Resolve a single `target` (as found in `source_rel`, a repo-root-relative
+# path) against `root`. Returns 0 if it resolves, 1 if it's dangling.
+resolve_link_target() {
+    local root="$1" source_rel="$2" target="$3"
+
+    case "$target" in
+        http://*|https://*|mailto:*|"") return 0 ;;   # external / empty
+        \#*) return 0 ;;                               # pure in-page anchor
+    esac
+
+    target="${target%%#*}"          # strip a trailing #anchor fragment
+    [[ -z "$target" ]] && return 0  # was anchor-only
+
+    local resolved
+    if [[ "$target" == /* ]]; then
+        # Root-relative (rare, but handle it rather than mis-resolving it).
+        resolved="$root$target"
+    elif [[ "$target" == .loom/* || "$target" == .claude/* || "$target" == .codex/* || "$target" == .github/* ]]; then
+        # Backtick-only references (and some markdown links) are written
+        # relative to the install root, not the source file's directory —
+        # they mirror the *installed* path, e.g. `.loom/docs/build-gate.md`.
+        resolved="$root/$target"
+    else
+        # A true relative markdown link — resolve from the source file's dir.
+        local src_dir
+        src_dir="$(dirname "$root/$source_rel")"
+        resolved="$src_dir/$target"
+    fi
+
+    # A directory target is satisfied if anything lives beneath it.
+    if [[ -d "$resolved" ]]; then
+        [[ -n "$(find "$resolved" -type f -print -quit 2>/dev/null)" ]]
+        return $?
+    fi
+
+    [[ -e "$resolved" ]]
+}
+
+# Check every intra-repo link in every installed .md file. Prints a summary
+# (unless --quiet) and returns EXIT_OK or EXIT_DANGLING_LINKS.
+cmd_check_links() {
+    local quiet="${1:-}"
+    local root
+    root=$(find_repo_root) || return $EXIT_ENV_ERROR
+
+    local files
+    files=$(collect_tracked_files "$root")
+
+    local dangling=()
+    local checked=0
+    local rel target
+    while IFS= read -r rel; do
+        [[ -z "$rel" ]] && continue
+        [[ "$rel" == *.md ]] || continue
+        [[ -f "$root/$rel" ]] || continue
+        checked=$((checked + 1))
+        while IFS= read -r target; do
+            [[ -z "$target" ]] && continue
+            resolve_link_target "$root" "$rel" "$target" || dangling+=("$rel -> $target")
+        done < <(extract_link_targets "$root/$rel")
+    done <<< "$files"
+
+    if [[ ${#dangling[@]} -eq 0 ]]; then
+        if [[ "$quiet" != "--quiet" ]]; then
+            echo -e "${GREEN}✓ All intra-repo links resolve${NC} ($checked file(s) checked)"
+        fi
+        return $EXIT_OK
+    fi
+
+    if [[ "$quiet" != "--quiet" ]]; then
+        echo -e "${RED}✗ ${#dangling[@]} dangling link(s) found:${NC}" >&2
+        local d
+        for d in "${dangling[@]}"; do
+            echo "  $d" >&2
+        done
+    fi
+    return $EXIT_DANGLING_LINKS
+}
+
 # Emit the hashable bytes for an entry to stdout, honoring region rules.
 # For region "loom-block", emit only the CLAUDE.md Loom marker region
-# (inclusive). For whole-file entries, cat the file verbatim.
+# (inclusive); for "loom-block-agents", the AGENTS.md marker region. For
+# whole-file entries, cat the file verbatim.
 emit_hashable_content() {
     local full_path="$1"
     local region="$2"
     if [[ "$region" == "loom-block" ]]; then
         sed -n "/${LOOM_SECTION_START}/,/${LOOM_SECTION_END}/p" "$full_path"
+    elif [[ "$region" == "loom-block-agents" ]]; then
+        sed -n "/${AGENTS_SECTION_START}/,/${AGENTS_SECTION_END}/p" "$full_path"
     else
         cat "$full_path"
     fi
@@ -347,7 +511,7 @@ compute_entry_digest() {
     local full_path="$1"
     local region="$2"
     local sha size
-    if [[ "$region" == "loom-block" ]]; then
+    if [[ -n "$region" ]]; then
         local block
         block=$(emit_hashable_content "$full_path" "$region")
         sha=$(printf '%s' "$block" | $SHA_CMD | awk '{print $1}')
@@ -705,6 +869,10 @@ main() {
         verify)
             shift
             cmd_verify "${1:-}"
+            ;;
+        check-links)
+            shift
+            cmd_check_links "${1:-}"
             ;;
         --help|-h|help)
             show_help

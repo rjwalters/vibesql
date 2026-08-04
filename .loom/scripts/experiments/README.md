@@ -15,11 +15,13 @@ auto-loaded, never triggered by a normal sweep.
 | `judge-fanout-results-template.md` | **Empty** results-table template (#3748). Columns for dimension findings, verified findings, precision, recall, latency, token cost, and the single-pass-Judge baseline. Shipped with no numbers — the operator fills in REAL measured data. |
 
 The **operator runbook** for executing the deferred measurement lives at
-[`docs/research/judge-fanout-measurement-runbook.md`](../../../docs/research/judge-fanout-measurement-runbook.md).
+[`docs/research/judge-fanout-measurement-runbook.md`](https://github.com/rjwalters/loom/blob/main/docs/research/judge-fanout-measurement-runbook.md)
+(upstream Loom repo — `docs/research/` is not shipped to consumer installs).
 
 Full context, the capability→need mapping, the substrate boundary, and the
 keep/defer/reject verdicts live in
-[`docs/research/dynamic-workflows-evaluation.md`](../../../docs/research/dynamic-workflows-evaluation.md).
+[`docs/research/dynamic-workflows-evaluation.md`](https://github.com/rjwalters/loom/blob/main/docs/research/dynamic-workflows-evaluation.md)
+(upstream Loom repo).
 
 ## Flag contract
 

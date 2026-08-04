@@ -2,6 +2,13 @@
 # test-guard-hook-schema.sh - Regression tests for the PreToolUse hook schema
 # emitted by guard-destructive.sh and guard-readonly-dirs.sh.template (issue #3550).
 #
+# Note (#4041): guard-destructive.sh is now a thin DISPATCHER that defers to
+# either the canonical Repo Skills guard or the vendored generic guard
+# (guard-destructive-generic.sh). The generic guard is the file that actually
+# emits the deny/ask decision schema, so the functional tests exercise the wired
+# dispatcher (which execs the generic) while the raw jq-fallback source-inspection
+# targets guard-destructive-generic.sh directly.
+#
 # Claude Code's PreToolUse hook schema REQUIRES a `hookEventName: "PreToolUse"`
 # field inside the `hookSpecificOutput` object. Without it, Claude Code silently
 # discards the permission decision and the guard becomes inert — every deny/ask
@@ -21,7 +28,14 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULTS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GUARD_DESTRUCTIVE="$DEFAULTS_DIR/hooks/guard-destructive.sh"
+# The vendored generic guard owns the deny/ask/fallback schema emission (#4041).
+GUARD_DESTRUCTIVE_GENERIC="$DEFAULTS_DIR/hooks/guard-destructive-generic.sh"
 GUARD_LOOM_WORKFLOW="$DEFAULTS_DIR/hooks/guard-loom-workflow.sh"
+
+# Force the ask-tier force-op policy to a deterministic value so the ask test
+# below does not depend on the current branch or an inherited LOOM_FORCE_SCOPE
+# (e.g. the autonomous "protected" default set by loom-daemon-start.sh, #3898).
+export LOOM_FORCE_SCOPE=all
 GUARD_READONLY_TEMPLATE="$DEFAULTS_DIR/hooks/guard-readonly-dirs.sh.template"
 
 RED='\033[0;31m'
@@ -66,6 +80,10 @@ if [[ ! -f "$GUARD_DESTRUCTIVE" ]]; then
     echo "ERROR: $GUARD_DESTRUCTIVE not found" >&2
     exit 1
 fi
+if [[ ! -f "$GUARD_DESTRUCTIVE_GENERIC" ]]; then
+    echo "ERROR: $GUARD_DESTRUCTIVE_GENERIC not found" >&2
+    exit 1
+fi
 if [[ ! -f "$GUARD_LOOM_WORKFLOW" ]]; then
     echo "ERROR: $GUARD_LOOM_WORKFLOW not found" >&2
     exit 1
@@ -106,8 +124,8 @@ echo ""
 # ---------------------------------------------------------------------------
 # guard-destructive.sh — raw jq-fallback echo strings carry the field
 # ---------------------------------------------------------------------------
-echo "guard-destructive.sh: raw jq-fallback echoes carry hookEventName"
-FALLBACK_LINES=$(grep -c 'echo "{\\"hookSpecificOutput\\":{\\"hookEventName\\":\\"PreToolUse\\"' "$GUARD_DESTRUCTIVE")
+echo "guard-destructive-generic.sh: raw jq-fallback echoes carry hookEventName"
+FALLBACK_LINES=$(grep -c 'echo "{\\"hookSpecificOutput\\":{\\"hookEventName\\":\\"PreToolUse\\"' "$GUARD_DESTRUCTIVE_GENERIC")
 TESTS_RUN=$((TESTS_RUN + 1))
 if [[ "$FALLBACK_LINES" -eq 2 ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))

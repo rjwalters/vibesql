@@ -3,12 +3,12 @@
 # instrumentation (issue #3725).
 #
 # The sweep skill shells out to `sweep-experiment.sh`, a thin stub that execs
-# `python3 -m loom_tools.sweep_experiment`. In the Loom SOURCE tree the stub
-# cannot resolve loom-tools from `defaults/scripts/` (repo-root detection stops
-# at `defaults/.loom`; in a real install the script lives at `.loom/scripts/`),
-# so these tests drive the exact module the stub execs, with PYTHONPATH set the
-# same way `run_loom_tool` sets it. The stub file itself is covered by
-# `bash -n` + `shellcheck` in CI.
+# `loom-daemon sweep-experiment` (issue #4275 ported the implementation from the
+# former Python `sweep_experiment` module to native Rust; the Python package was
+# deleted outright in #4557). These tests drive that exact
+# subcommand, resolving the binary the same way `lib/script-helper.sh` does, so
+# they exercise the real dispatch surface rather than a stand-in. The stub file
+# itself is covered by `bash -n` + `shellcheck` in CI.
 #
 # Usage:
 #   bash defaults/scripts/tests/test-sweep-experiment.sh
@@ -17,9 +17,16 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-export PYTHONPATH="$REPO_ROOT/loom-tools/src:${PYTHONPATH:-}"
 
-SE() { python3 -m loom_tools.sweep_experiment "$@"; }
+# shellcheck source=/dev/null
+source "$REPO_ROOT/defaults/scripts/lib/locate-daemon-bin.sh"
+DAEMON_BIN="$(loom_locate_daemon_bin "$REPO_ROOT")"
+if [[ -z "$DAEMON_BIN" ]]; then
+  echo "SKIP: no loom-daemon binary found (build it with \`cargo build --manifest-path loom-daemon/Cargo.toml\` or set LOOM_DAEMON_BIN)" >&2
+  exit 0
+fi
+
+SE() { "$DAEMON_BIN" sweep-experiment "$@"; }
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
 TESTS_RUN=0; TESTS_PASSED=0; TESTS_FAILED=0
@@ -30,7 +37,7 @@ assert_eq()      { if [[ "$1" == "$2" ]]; then pass "$3"; else fail "$3 (got '$1
 assert_contains(){ if [[ "$1" == *"$2"* ]]; then pass "$3"; else fail "$3 (missing '$2' in: $1)"; fi; }
 assert_file()    { if [[ -f "$1" ]]; then pass "$2"; else fail "$2 (missing: $1)"; fi; }
 
-if ! command -v python3 >/dev/null 2>&1; then echo "ERROR: python3 required" >&2; exit 1; fi
+echo "Using loom-daemon: $DAEMON_BIN"
 
 echo "Case 1: tri-state resolution (env-over-config, default off, malformed -> off)"
 assert_eq "$(SE resolve-mode --config /nonexistent 2>/dev/null)" "off" "default is off"
@@ -77,7 +84,11 @@ SE record --quiet --stats-file "$STATS" --issue 100 --mode experiment --arm A --
 assert_file "$STATS" "stats JSONL created"
 NLINES="$(wc -l < "$STATS" | tr -d ' ')"
 assert_eq "$NLINES" "3" "three JSONL records appended"
-FMODE="$(stat -f '%Lp' "$STATS" 2>/dev/null || stat -c '%a' "$STATS")"
+# GNU `stat -c` first, BSD/macOS `stat -f '%Lp'` second. The reverse order is
+# WRONG on Linux: GNU `stat -f` means "show FILESYSTEM status" and *succeeds*,
+# so the `||` fallback never fires and the comparison sees a block-count dump
+# instead of a mode. (Pre-existing bug, fixed alongside the #4275 repoint.)
+FMODE="$(stat -c '%a' "$STATS" 2>/dev/null || stat -f '%Lp' "$STATS")"
 assert_eq "$FMODE" "600" "stats file is 0600"
 HARV="$(SE harvest --stats-file "$STATS" --archive-dir "$ROOT/archive" --format json 2>/dev/null)"
 assert_contains "$HARV" '"transcript": 1' "harvest joined 1 transcript (exact cost)"

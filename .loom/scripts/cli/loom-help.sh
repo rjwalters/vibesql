@@ -179,13 +179,20 @@ show_command_help() {
             fi
             ;;
         health)
-            local loom_venv="$REPO_ROOT/loom-tools/.venv/bin/loom-daemon-diagnostic"
-            if [[ -n "$REPO_ROOT" && -x "$loom_venv" ]]; then
-                exec "$loom_venv" --help
-            elif command -v loom-daemon-diagnostic &>/dev/null; then
-                exec loom-daemon-diagnostic --help
+            # `loom health` now delegates to native `loom-daemon status` (#4274);
+            # surface that command's help.
+            local loom_daemon_bin=""
+            if command -v loom-daemon &>/dev/null; then
+                loom_daemon_bin="$(command -v loom-daemon)"
+            elif [[ -n "$REPO_ROOT" && -x "$REPO_ROOT/loom-daemon/target/release/loom-daemon" ]]; then
+                loom_daemon_bin="$REPO_ROOT/loom-daemon/target/release/loom-daemon"
+            elif [[ -n "$REPO_ROOT" && -x "$REPO_ROOT/loom-daemon/target/debug/loom-daemon" ]]; then
+                loom_daemon_bin="$REPO_ROOT/loom-daemon/target/debug/loom-daemon"
+            fi
+            if [[ -n "$loom_daemon_bin" ]]; then
+                exec "$loom_daemon_bin" status --help
             else
-                echo -e "${RED}Error: health command not installed (install loom-tools)${NC}"
+                echo -e "${RED}Error: health command requires the loom-daemon binary${NC}"
                 exit 1
             fi
             ;;

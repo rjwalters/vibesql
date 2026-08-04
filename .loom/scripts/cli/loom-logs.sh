@@ -111,7 +111,16 @@ list_logs() {
             local size
             size=$(du -h "$logfile" | cut -f1)
             local modified
-            modified=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$logfile" 2>/dev/null || stat -c "%y" "$logfile" 2>/dev/null | cut -d. -f1)
+            # GNU `stat -c` first (it is an illegal option on BSD/macOS, so it
+            # fails cleanly there), then BSD `stat -f %Sm`. The reverse order
+            # MISFIRES on GNU: `stat -f ... <path>` there means --file-system (a
+            # bare mode flag), which prints a multi-line filesystem report to
+            # STDOUT while exiting non-zero — `2>/dev/null || fallback` only
+            # silences stderr, so the report leaks into the displayed value.
+            # GNU `%y` is human-readable with fractional seconds (hence the
+            # `cut`); the BSD `-t` format is already trimmed, so it is not cut.
+            modified=$(stat -c "%y" "$logfile" 2>/dev/null | cut -d. -f1)
+            [[ -n "$modified" ]] || modified=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$logfile" 2>/dev/null)
             echo -e "  ${GREEN}$name${NC}  ${GRAY}($size, modified $modified)${NC}"
         fi
     done

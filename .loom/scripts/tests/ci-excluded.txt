@@ -1,0 +1,17 @@
+# CI exclusion manifest for defaults/scripts/tests/ (issue #4455)
+#
+# Every `test-*.sh` in this directory must appear in EXACTLY ONE of:
+#   - ci-wired.txt     — run by run-ci-suites.sh in CI (hermetic on ubuntu-latest)
+#   - ci-excluded.txt  — this file: explicitly excluded, with a one-line reason
+#
+# check-ci-suite-manifest.sh enforces that partition in CI, so a newly added
+# suite that is in NEITHER list fails the check — it cannot silently join an
+# unwired pool. To exclude a suite, add a line here: `<suite.sh>  <reason>`.
+# Blank lines and lines beginning with `#` are ignored. The first whitespace-
+# delimited token is the filename; everything after it is the (required) reason.
+#
+# Format: <test-file.sh>  <reason>
+
+test-install-reinstall-safety.sh  Already wired in the "Installer Integration Tests" job (#4188); excluded here to avoid double-running it.
+test-spawn-codex.sh  Already wired in the "Codex Adapter Smoke (mocked)" job (#4468), which adds adapter-specific hermeticity guards; excluded here to avoid double-running it.
+test-spawn-claude.sh  Non-hermetic: spawn-claude.sh's token selection requires a built loom-daemon binary (#4228), absent on a fresh ubuntu runner (FATAL: no loom-daemon binary). Wiring it needs a cargo build step or a binary stub — follow-up.

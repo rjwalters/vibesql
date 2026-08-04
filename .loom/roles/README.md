@@ -42,7 +42,8 @@ To edit a role definition:
 > removed in v0.10.0. Use `/loom:sweep <issue>` for the same single-issue
 > lifecycle, or `mcp__loom__dispatch_sweep` against the Rust `loom-daemon` for
 > multi-account dispatch — see
-> [the migration guide](../../docs/migration/v0.10.0-shepherd-deprecation.md).
+> [the migration guide](https://github.com/rjwalters/loom/blob/main/docs/migration/v0.10.0-shepherd-deprecation.md)
+> (upstream Loom repo — `docs/migration/` is not shipped to consumer installs).
 
 ## Metadata Files (*.json)
 
@@ -68,7 +69,6 @@ Each role can have an optional JSON metadata file with default settings:
 - **`defaultIntervalPrompt`** (string): Default prompt sent at each interval
 - **`autonomousRecommended`** (boolean): Whether autonomous mode is recommended
 - **`suggestedWorkerType`** (string): "claude" or "codex"
-- **`gitIdentity`** (object): `name` / `email` used for commits made by this role
 - **`stuckThresholds`** (object): Per-role stuck-detection limits (e.g. `maxNoOutput`, `maxNeedsInput`, in milliseconds)
 
 ## Creating Custom Roles

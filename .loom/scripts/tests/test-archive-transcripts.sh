@@ -60,8 +60,23 @@ assert_file "$S/index.json"                              "index.json emitted"
 echo ""
 
 echo "Case 2: file/dir modes are 0600/0700"
-DMODE="$(stat -f '%Lp' "$S" 2>/dev/null || stat -c '%a' "$S")"
-FMODE="$(stat -f '%Lp' "$S/UUID1.jsonl" 2>/dev/null || stat -c '%a' "$S/UUID1.jsonl")"
+# GNU `stat -c` first (it is an illegal option on BSD/macOS, so it fails
+# cleanly there), then BSD `stat -f '%Lp'`. The reverse order MISFIRES on
+# GNU: `stat -f '%Lp' <path>` there means --file-system (a bare mode flag,
+# not a format arg) and prints a multi-line filesystem report to stdout
+# while still exiting non-zero, so a `2>/dev/null || fallback` chain doesn't
+# catch it — the polluted stdout was already emitted before the command
+# failed. Validate the captured value is purely numeric instead of trusting
+# the exit code.
+stat_mode() {
+  local v
+  v="$(stat -c '%a' "$1" 2>/dev/null || true)"
+  [[ "$v" =~ ^[0-7]+$ ]] || v="$(stat -f '%Lp' "$1" 2>/dev/null || true)"
+  [[ "$v" =~ ^[0-7]+$ ]] || v=""
+  printf '%s' "$v"
+}
+DMODE="$(stat_mode "$S")"
+FMODE="$(stat_mode "$S/UUID1.jsonl")"
 assert_eq "$DMODE" "700" "session dir is 0700"
 assert_eq "$FMODE" "600" "transcript file is 0600"
 echo ""

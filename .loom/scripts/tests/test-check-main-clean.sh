@@ -20,6 +20,9 @@
 #   - no-arg invocation remains a byte-for-byte whole-status hard-fail (back-compat)
 #   - Loom-owned transient state (.loom/sweep-checkpoint/, etc.) is excluded
 #     internally even when the repo's .gitignore has drifted and omits it (#3778)
+#   - --quarantine atomically stashes NEW dirt (tracked + untracked) to a rescue
+#     ref, leaves main byte-identical to the baseline, preserves the full diff in
+#     the stash, spares baselined dirt, and exits 4 (#4380)
 #
 # Usage:
 #   ./.loom/scripts/tests/test-check-main-clean.sh
@@ -339,6 +342,175 @@ else
     fail "expected 3 reporting only leaked_module.py, got rc=$RC; out=$out"
 fi
 rm -rf "$REPO"
+
+# ========================================================================
+# Atomic quarantine of detected contamination (#4380)
+# ========================================================================
+# The "partial revert" failure mode: a builder contaminates main with BOTH a
+# modified tracked file and a new untracked file, then restores only some of it
+# by hand. `--quarantine` replaces that ad-hoc path with ONE `git stash push
+# --include-untracked` covering every offending path, so main lands back exactly
+# at the pre-contamination baseline and the full diff survives in a rescue ref.
+
+# Build a repo with a committed source file plus a pre-existing (baselined) edit.
+make_repo_with_source() {
+    local dir
+    dir=$(mktemp -d)
+    git -C "$dir" init -q
+    git -C "$dir" config user.email t@t.t
+    git -C "$dir" config user.name test
+    printf '.loom/worktrees/\n.loom/sweep-checkpoint/\n' > "$dir/.gitignore"
+    printf 'original tracked content\n' > "$dir/tracked_source.py"
+    git -C "$dir" add .gitignore tracked_source.py
+    git -C "$dir" commit -q -m init
+    echo "$dir"
+}
+
+echo "Test 21: --quarantine atomically rescues tracked + untracked contamination"
+REPO=$(make_repo_with_source)
+SNAP="$REPO/.loom/sweep-checkpoint/main-clean-baseline-run1.txt"
+
+# Pre-existing operator dirt that predates the sweep — must survive untouched.
+printf 'operator scratch\n' > "$REPO/operator_scratch.txt"
+( cd "$REPO" && "$SCRIPT" --snapshot "$SNAP" >/dev/null 2>&1 ); RC=$?
+if [[ "$RC" -ne 0 ]]; then fail "Test 21 setup: --snapshot expected 0, got $RC"; fi
+
+# Capture the exact pre-contamination state of main (content + porcelain).
+BASELINE_PORCELAIN=$(git -C "$REPO" status --porcelain)
+BASELINE_TRACKED=$(cat "$REPO/tracked_source.py")
+BASELINE_SCRATCH=$(cat "$REPO/operator_scratch.txt")
+
+# --- Contaminate: one MODIFIED TRACKED file + one UNTRACKED file ---
+printf 'original tracked content\ncontaminating edit\n' > "$REPO/tracked_source.py"
+printf 'def leaked():\n    return 42\n' > "$REPO/leaked_module.py"
+
+out=$( cd "$REPO" && "$SCRIPT" --baseline "$SNAP" --quarantine \
+        --label "run=RUNID-TEST issue=4380" 2>&1 ); RC=$?
+
+# 21a: the check flags the contamination and reports a successful quarantine (exit 4)
+if [[ "$RC" -eq 4 ]]; then
+    pass "--quarantine exits 4 (quarantined, caller may continue)"
+else
+    fail "expected exit 4 from --quarantine, got $RC; out=$out"
+fi
+
+# 21b: exactly ONE structured log entry, naming the label and both paths
+json_lines=$(printf '%s\n' "$out" | grep -c '"event":"main-clean.quarantine"' || true)
+json_line=$(printf '%s\n' "$out" | grep '"event":"main-clean.quarantine"' | head -1)
+if [[ "$json_lines" -eq 1 ]] \
+   && [[ "$json_line" == *'"result":"quarantined"'* ]] \
+   && [[ "$json_line" == *'run=RUNID-TEST issue=4380'* ]] \
+   && [[ "$json_line" == *"tracked_source.py"* ]] \
+   && [[ "$json_line" == *"leaked_module.py"* ]]; then
+    pass "exactly one structured log entry, attributed and naming both paths"
+else
+    fail "expected 1 structured entry naming label + both paths, got $json_lines; line=$json_line"
+fi
+
+# 21c: main is byte-identical to the pre-contamination baseline
+AFTER_PORCELAIN=$(git -C "$REPO" status --porcelain)
+if [[ "$AFTER_PORCELAIN" == "$BASELINE_PORCELAIN" ]] \
+   && [[ "$(cat "$REPO/tracked_source.py")" == "$BASELINE_TRACKED" ]] \
+   && [[ ! -e "$REPO/leaked_module.py" ]]; then
+    pass "main worktree is byte-identical to the pre-contamination baseline"
+else
+    fail "main not restored to baseline: porcelain='$AFTER_PORCELAIN'"
+fi
+
+# 21d: baselined (pre-existing) operator dirt was NOT swept up
+if [[ -f "$REPO/operator_scratch.txt" ]] \
+   && [[ "$(cat "$REPO/operator_scratch.txt")" == "$BASELINE_SCRATCH" ]]; then
+    pass "pre-existing baselined dirt left untouched by the quarantine"
+else
+    fail "quarantine swept up pre-existing dirt (operator_scratch.txt)"
+fi
+
+# 21e: the rescue ref retains the FULL diff — tracked edit AND untracked file
+STASH_LIST=$(git -C "$REPO" stash list)
+STASH_DIFF=$(git -C "$REPO" stash show -p --include-untracked 'stash@{0}' 2>/dev/null \
+             || git -C "$REPO" stash show -p 'stash@{0}' 2>/dev/null)
+STASH_FILES=$(git -C "$REPO" stash show --name-only --include-untracked 'stash@{0}' 2>/dev/null || true)
+if [[ "$STASH_LIST" == *"loom-quarantine: run=RUNID-TEST issue=4380"* ]] \
+   && [[ "$STASH_DIFF" == *"contaminating edit"* ]] \
+   && [[ "$STASH_FILES" == *"leaked_module.py"* ]]; then
+    pass "rescue stash retains the full diff (tracked edit + untracked file)"
+else
+    fail "stash lost part of the diff: list='$STASH_LIST' files='$STASH_FILES'"
+fi
+
+# 21f: nothing was discarded — the untracked file is recoverable from the stash
+git -C "$REPO" stash pop -q 2>/dev/null || true
+if [[ -e "$REPO/leaked_module.py" ]] \
+   && [[ "$(cat "$REPO/tracked_source.py")" == *"contaminating edit"* ]]; then
+    pass "quarantine is a rescue, not a discard (stash pop restores everything)"
+else
+    fail "stash pop did not restore the quarantined contamination"
+fi
+rm -rf "$REPO"
+
+# -------- Test 22: --quarantine on a clean main is a no-op (exit 0) --------
+echo "Test 22: --quarantine on a clean main creates no stash (exit 0)"
+REPO=$(make_repo_with_source)
+SNAP="$REPO/.loom/sweep-checkpoint/main-clean-baseline-run2.txt"
+( cd "$REPO" && "$SCRIPT" --snapshot "$SNAP" >/dev/null 2>&1 )
+out=$( cd "$REPO" && "$SCRIPT" --baseline "$SNAP" --quarantine 2>&1 ); RC=$?
+if [[ "$RC" -eq 0 ]] && [[ -z "$(git -C "$REPO" stash list)" ]]; then
+    pass "exit 0 and no stash created when main is clean"
+else
+    fail "expected 0 + empty stash list, got rc=$RC; stash='$(git -C "$REPO" stash list)'"
+fi
+rm -rf "$REPO"
+
+# -------- Test 23: --quarantine writes its entry to --log FILE --------
+echo "Test 23: --quarantine appends the structured entry to --log FILE"
+REPO=$(make_repo_with_source)
+SNAP="$REPO/.loom/sweep-checkpoint/main-clean-baseline-run3.txt"
+( cd "$REPO" && "$SCRIPT" --snapshot "$SNAP" >/dev/null 2>&1 )
+echo "leak" > "$REPO/leaked.txt"
+LOGFILE="$REPO/.loom/logs/quarantine-test.log"
+( cd "$REPO" && "$SCRIPT" --baseline "$SNAP" --quarantine --label "run=R issue=1" \
+    --log "$LOGFILE" >/dev/null 2>&1 ); RC=$?
+if [[ "$RC" -eq 4 && -f "$LOGFILE" ]] \
+   && [[ "$(grep -c '"event":"main-clean.quarantine"' "$LOGFILE")" -eq 1 ]] \
+   && grep -q '"result":"quarantined"' "$LOGFILE"; then
+    pass "--log FILE receives exactly one structured entry"
+else
+    fail "expected 1 structured entry in $LOGFILE, got rc=$RC"
+fi
+rm -rf "$REPO"
+
+# -------- Test 24: --quarantine with --snapshot is a usage error --------
+echo "Test 24: --quarantine is rejected with --snapshot (exit 2)"
+REPO=$(make_repo_with_source)
+( cd "$REPO" && "$SCRIPT" --snapshot "$REPO/snap.txt" --quarantine >/dev/null 2>&1 ); RC=$?
+if [[ "$RC" -eq 2 ]]; then
+    pass "exit 2 for --snapshot --quarantine"
+else
+    fail "expected 2, got $RC"
+fi
+
+# -------- Test 25: detection-only mode still exits 3 and forbids piecemeal restore --------
+echo "Test 25: without --quarantine, detection stays a hard-fail (exit 3)"
+echo "leak" > "$REPO/leaked.txt"
+out=$( cd "$REPO" && "$SCRIPT" 2>&1 ); RC=$?
+if [[ "$RC" -eq 3 ]] \
+   && echo "$out" | grep -qi "ALL-OR-NOTHING" \
+   && echo "$out" | grep -q -- "--quarantine"; then
+    pass "exit 3 with all-or-nothing remediation guidance (no piecemeal restore)"
+else
+    fail "expected 3 + all-or-nothing guidance, got rc=$RC; out=$out"
+fi
+rm -rf "$REPO"
+
+# -------- Test 26: --label / --log require a value (exit 2) --------
+echo "Test 26: --label and --log require a value"
+"$SCRIPT" --label >/dev/null 2>&1; RC1=$?
+"$SCRIPT" --log >/dev/null 2>&1; RC2=$?
+if [[ "$RC1" -eq 2 && "$RC2" -eq 2 ]]; then
+    pass "exit 2 when --label/--log missing their value"
+else
+    fail "expected 2/2, got label=$RC1 log=$RC2"
+fi
 
 # -------- Summary --------
 echo ""

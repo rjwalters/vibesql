@@ -72,16 +72,20 @@ show_help() {
 
 # ---- parser (reused vocabulary, extracted by tests) ----
 # Parse out-of-set dependency references from an issue body. REUSES guide.md's
-# parse_dependencies vocabulary (the `(Blocked by|Depends on|Requires|- [.]) #N`
-# convention #3759's --auto-stack also derives from), restricted to the three
-# DECLARATION phrases this item covers: Depends on / Requires / Part of.
+# parse_dependencies vocabulary (the
+# `(Blocked by|Depends on|Requires|- [.])[*_:[:space:]]*#N` convention #3759's
+# --auto-stack also derives from — tolerant of markdown emphasis/colon between
+# the phrase and #N, e.g. "**Depends on:** #101", #4508), restricted to the
+# three DECLARATION phrases this item covers: Depends on / Requires / Part of.
 #
 # Deliberately EXCLUDES `Blocked by` (that phrase belongs to the loom:blocked
 # machinery, exactly as --auto-stack excludes it from stacking detection).
+# Two-stage: select matching lines, then extract every #N on those lines (not
+# just the first), so comma-separated lists are captured in full.
 # Emits the deduplicated referenced issue numbers, one per line.
 parse_out_of_set_deps() {
     local body="$1"
-    echo "$body" | grep -oE '(Depends on|Requires|Part of) #[0-9]+' \
+    echo "$body" | grep -E '(Depends on|Requires|Part of)[*_:[:space:]]*#[0-9]+' \
         | grep -oE '#[0-9]+' | tr -d '#' | sort -un
 }
 

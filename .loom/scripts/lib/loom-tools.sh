@@ -1,14 +1,33 @@
 #!/bin/bash
-# loom-tools.sh - Shared helpers for locating and invoking loom-tools commands
+# loom-tools.sh - repo-root helper + retired-entry-point shim.
 #
-# This library provides consistent patterns for:
-#   1. Locating loom-tools (source dir or installed)
-#   2. Running loom-tools commands with proper fallbacks
-#   3. Providing helpful error messages when loom-tools is missing
+# ZERO PYTHON as of epic #4081 Phase 4 (#4557).
 #
-# Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/lib/loom-tools.sh"
-#   run_loom_tool "agent-spawn" "agent_spawn" "$@"
+# This library used to locate the Python `loom-tools` package (source checkout,
+# `.venv/`, or a pip/pipx-installed console script) and dispatch into it via
+# `run_loom_tool <cli> <module>` — an exec of `python3 -m loom_tools.<module>`
+# with a PYTHONPATH pointing at `loom-tools/src`, falling back to an
+# editable-install instruction when nothing was found.
+#
+# That package is retired. Everything it provided is now either:
+#   - a native `loom-daemon` subcommand (tokens, clean, cleanup, forge, claim,
+#     checkpoint, agent-spawn, agent-wait, status, stats, usage, resolve-model,
+#     validate-phase, recover-orphans, …) — the thin bash stubs for those live
+#     in defaults/scripts/ and source lib/script-helper.sh, NOT this file; or
+#   - deleted outright as a no-op / unreferenced module.
+#
+# The last surviving Python module, the opt-in `loom-search` semantic-search
+# feature, was itself retired in #4970 (see defaults/docs/semantic-search.md)
+# per the operator's RETIRE decision on #4608 — there is no Python left in
+# this repo at all now.
+#
+# What is still live here: `_find_repo_root`, used by agent-spawn.sh and
+# agent-wait.sh. `run_loom_tool` survives only as a loud, non-silent failure
+# shim so an out-of-tree script in a repo carrying an older Loom install gets an
+# actionable "use loom-daemon <cmd>" message instead of an opaque
+# `python3: No module named loom_tools`.
+#
+# See docs/adr/0013-loom-tools-python-retirement.md.
 
 # Find the repository root from the script location
 _find_repo_root() {
@@ -23,135 +42,31 @@ _find_repo_root() {
     return 1
 }
 
-# Locate loom-tools directory
-# Sets LOOM_TOOLS_DIR if found, returns 1 if not
-# Priority:
-#   1. Local loom-tools in repo (for Loom source repository)
-#   2. Loom source path recorded during installation (for target repos)
-find_loom_tools() {
-    local script_dir="${1:-$(pwd)}"
-    local repo_root
-
-    repo_root="$(_find_repo_root "$script_dir")" || return 1
-
-    # Check for local loom-tools (Loom source repo)
-    if [[ -d "$repo_root/loom-tools/src/loom_tools" ]]; then
-        LOOM_TOOLS_DIR="$repo_root/loom-tools"
-        LOOM_TOOLS_SRC="$repo_root/loom-tools/src"
-        return 0
-    fi
-
-    # Check for recorded loom source path (target repo)
-    if [[ -f "$repo_root/.loom/loom-source-path" ]]; then
-        local loom_source
-        loom_source="$(cat "$repo_root/.loom/loom-source-path")"
-        if [[ -d "$loom_source/loom-tools/src/loom_tools" ]]; then
-            LOOM_TOOLS_DIR="$loom_source/loom-tools"
-            LOOM_TOOLS_SRC="$loom_source/loom-tools/src"
-            return 0
-        fi
-    fi
-
-    # Fallback: loom-source-path missing, try install-metadata.json
-    if [[ -f "$repo_root/.loom/install-metadata.json" ]]; then
-        local loom_source
-        loom_source="$(sed -n 's/.*"loom_source" *: *"\(.*\)".*/\1/p' "$repo_root/.loom/install-metadata.json")"
-        if [[ -n "$loom_source" ]] && [[ -d "$loom_source/loom-tools/src/loom_tools" ]]; then
-            LOOM_TOOLS_DIR="$loom_source/loom-tools"
-            LOOM_TOOLS_SRC="$loom_source/loom-tools/src"
-            # Recreate loom-source-path for future runs
-            echo "$loom_source" > "$repo_root/.loom/loom-source-path"
-            return 0
-        fi
-    fi
-
-    LOOM_TOOLS_DIR=""
-    LOOM_TOOLS_SRC=""
-    return 1
-}
-
-# Run a loom-tools command with proper fallback chain
-# Arguments:
-#   $1 - CLI command name (e.g., "agent-spawn" for loom-agent-spawn)
-#   $2 - Python module name (e.g., "agent_spawn" for loom_tools.agent_spawn)
-#   $@ - Arguments to pass to the command
+# Retired dispatcher. Prints a migration message and exits 1 — it never looks
+# for, or runs, Python.
 #
-# Priority:
-#   1. Python module with PYTHONPATH (if loom-tools source exists)
-#   2. venv CLI in loom-tools directory
-#   3. System-installed CLI (loom-<name>)
-#   4. Error with helpful message
-#
-# This order ensures source code is always authoritative during development.
-# When running in a target repo (not the Loom source), falls back to installed CLI.
+# Arguments (kept for signature compatibility with the pre-#4557 callers):
+#   $1 - former CLI suffix (e.g. "tokens" for the old `loom-tokens`)
+#   $2 - former Python module path (e.g. "tokens.cli"); unused
 run_loom_tool() {
-    local cli_name="$1"
-    local module_name="$2"
-    shift 2
+    local cli_name="${1:-}"
 
-    local full_cli="loom-${cli_name}"
-
-    # Try to find loom-tools directory (source takes precedence)
-    # ${BASH_SOURCE[1]:-$0} hardens the caller-frame lookup for the zsh case
-    # (#3680, defense-in-depth). No current call site sources this file directly
-    # into a zsh shell — every site executes a bash-shebang'd script, so
-    # BASH_SOURCE is always populated and bash behavior is byte-for-byte
-    # unchanged — but the bare bashism would break if that ever changed.
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")" && pwd)"
-
-    if find_loom_tools "$script_dir"; then
-        # Try Python module with PYTHONPATH first (always current source)
-        if [[ -d "$LOOM_TOOLS_SRC/loom_tools" ]]; then
-            PYTHONPATH="${LOOM_TOOLS_SRC}:${PYTHONPATH:-}" exec python3 -m "loom_tools.${module_name}" "$@"
-        fi
-
-        # Try venv CLI
-        if [[ -x "$LOOM_TOOLS_DIR/.venv/bin/$full_cli" ]]; then
-            exec "$LOOM_TOOLS_DIR/.venv/bin/$full_cli" "$@"
-        fi
-    fi
-
-    # Fall back to system-installed CLI (for target repos without source)
-    if command -v "$full_cli" >/dev/null 2>&1; then
-        exec "$full_cli" "$@"
-    fi
-
-    # Not found - provide helpful error message
-    _loom_tool_not_found_error "$cli_name" "$module_name"
-}
-
-# Print helpful error message when loom-tools is not found
-_loom_tool_not_found_error() {
-    local cli_name="$1"
-    local module_name="$2"
-    local full_cli="loom-${cli_name}"
-
-    echo "[ERROR] $full_cli not found." >&2
+    echo "[ERROR] run_loom_tool is retired (epic #4081 Phase 4, #4557)." >&2
     echo "" >&2
-    echo "The loom-tools package is required but not installed." >&2
+    echo "The Python 'loom-tools' package no longer exists. Loom's orchestration" >&2
+    echo "layer is the native 'loom-daemon' binary plus bash scripts." >&2
     echo "" >&2
-    echo "To install:" >&2
-
-    # ${BASH_SOURCE[1]:-$0} — see run_loom_tool above (#3680 defense-in-depth).
-    local script_dir repo_root
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")" && pwd)"
-    if repo_root="$(_find_repo_root "$script_dir")"; then
-        if [[ -d "$repo_root/loom-tools" ]]; then
-            echo "  cd $repo_root && pipx install --editable ./loom-tools" >&2
-            echo "" >&2
-            echo "Or using pip:" >&2
-            echo "  pip install -e $repo_root/loom-tools" >&2
-        elif [[ -f "$repo_root/.loom/loom-source-path" ]]; then
-            local loom_source
-            loom_source="$(cat "$repo_root/.loom/loom-source-path")"
-            echo "  pipx install --editable $loom_source/loom-tools" >&2
-        else
-            echo "  pipx install loom-tools" >&2
-        fi
+    if [[ -n "$cli_name" ]]; then
+        echo "  was:  loom-${cli_name} ..." >&2
+        echo "  now:  loom-daemon ${cli_name} ...   (see 'loom-daemon --help')" >&2
     else
-        echo "  pipx install loom-tools" >&2
+        echo "  Run 'loom-daemon --help' for the native subcommand list." >&2
     fi
+    echo "" >&2
+    echo "If stale 'loom-*' console scripts from an old editable install are still" >&2
+    echo "on PATH, remove them — they shadow the real binary (incident #4079)." >&2
+    echo "'.loom/scripts/cli/loom-daemon-update.sh' warns about them, and" >&2
+    echo "'loom-daemon --version' reports which binary you actually have." >&2
 
     exit 1
 }

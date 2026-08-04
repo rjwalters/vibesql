@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# test-provision-skills.sh — tests for user-scope Loom skills + agents
+# provisioning (Epic #3835 Phase 4, #4261).
+#
+# Covers scripts/install/provision-skills.sh:
+#   - fresh provision creates the whole-dir commands link + all agent links,
+#     all pointing THROUGH the machine checkout (#4261 design decision 3)
+#   - the verifiable-globals contract (PROVISIONED_SKILLS_LINK /
+#     PROVISIONED_AGENT_LINKS, mirroring provision-dispatcher.sh #4053)
+#   - idempotent re-provision
+#   - a pre-existing REAL file/dir at a destination is left untouched + warned
+#     (never clobber an operator's hand-tuned agent or a real commands dir)
+#   - a stale symlink (into an old checkout) is repointed
+#   - a dangling loom-* agent link (renamed/removed role) is pruned
+#   - soft failure (missing source) returns 1 without aborting the caller
+#   - deprovision removes links iff they point into the checkout, never real files
+#
+# Sandboxed $HOME per case via mktemp -d, matching test-loom-dispatcher.sh.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# defaults/scripts/tests -> defaults/scripts/tests/../../.. -> repo root
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+PROVISION_LIB="$REPO_ROOT/scripts/install/provision-skills.sh"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+pass() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1)); echo -e "  ${GREEN}PASS${NC}: $1"; }
+fail() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); echo -e "  ${RED}FAIL${NC}: $1"; }
+
+assert_eq() {
+    if [[ "$1" == "$2" ]]; then pass "$3"; else fail "$3 (expected '$2', got '$1')"; fi
+}
+assert_contains() {
+    if [[ "$1" == *"$2"* ]]; then pass "$3"; else fail "$3 (missing substring: '$2' in: $1)"; fi
+}
+
+[[ -f "$PROVISION_LIB" ]] || { echo "provisioning lib not found at $PROVISION_LIB"; exit 1; }
+
+# shellcheck source=/dev/null
+source "$PROVISION_LIB"
+
+# Build a fake machine-level checkout carrying the shipped skill + agent trees.
+# Echoes the checkout path. Optionally wrap it in a symlink (as the real
+# install does: ~/.local/share/loom -> source checkout) via make_linked_checkout.
+make_real_checkout() {
+    local c; c="$(mktemp -d)"
+    mkdir -p "$c/defaults/.claude/commands/loom" "$c/defaults/.claude/agents"
+    # A handful of representative skill files + a cross-referenced include.
+    for s in builder judge sweep probe-protocol; do
+        echo "# $s skill" > "$c/defaults/.claude/commands/loom/$s.md"
+    done
+    for a in builder judge doctor curator champion; do
+        echo "# loom-$a agent" > "$c/defaults/.claude/agents/loom-$a.md"
+    done
+    printf '%s\n' "$c"
+}
+
+# ── Test 1: fresh provision creates all links, pointing through the checkout ──
+echo "Test 1: fresh provision links the commands dir + every agent (AC1/AC2)"
+CHK=$(make_real_checkout)
+HOME_T=$(mktemp -d)
+# Run in the CURRENT shell (not $(...) which would subshell the globals away),
+# capturing output via a temp file — matches how test-loom-dispatcher.sh asserts
+# on provisioning globals after a direct call.
+OUT_FILE=$(mktemp)
+set +e
+provision_loom_skills "$CHK" "$HOME_T/.claude" >"$OUT_FILE" 2>&1
+rc=$?
+set -e 2>/dev/null || true
+out=$(cat "$OUT_FILE")
+assert_eq "$rc" "0" "fresh provision returns 0"
+
+DEST_CMD="$HOME_T/.claude/commands/loom"
+if [[ -L "$DEST_CMD" ]]; then
+    tgt="$(readlink "$DEST_CMD")"
+    assert_eq "$tgt" "$CHK/defaults/.claude/commands/loom" "commands is a whole-dir symlink through the checkout"
+else
+    fail "commands destination was not created as a symlink"
+fi
+# The link resolves — a skill file is readable through it.
+[[ -f "$DEST_CMD/builder.md" ]] && pass "a skill file resolves through the commands link" || fail "skill file does not resolve through the commands link"
+
+agent_ok=true
+for a in builder judge doctor curator champion; do
+    d="$HOME_T/.claude/agents/loom-$a.md"
+    [[ -L "$d" && "$(readlink "$d")" == "$CHK/defaults/.claude/agents/loom-$a.md" ]] || agent_ok=false
+done
+$agent_ok && pass "every loom-* agent is a per-file symlink through the checkout" || fail "not all agent links point through the checkout"
+
+# ── Test 2: verifiable-globals contract (#4053) ──────────────────────────────
+echo "Test 2: provisioning exposes verifiable globals (#4053)"
+assert_eq "$PROVISIONED_SKILLS_LINK" "$DEST_CMD" "PROVISIONED_SKILLS_LINK points at the commands link"
+agent_count=$(printf '%s\n' "$PROVISIONED_AGENT_LINKS" | grep -c 'loom-' || true)
+assert_eq "$agent_count" "5" "PROVISIONED_AGENT_LINKS enumerates all 5 agent links"
+
+# ── Test 3: idempotent re-provision ──────────────────────────────────────────
+echo "Test 3: re-provision is idempotent (second run returns 0, no changes)"
+before=$(cd "$HOME_T/.claude" && find . | sort)
+set +e
+provision_loom_skills "$CHK" "$HOME_T/.claude" >/dev/null 2>&1
+rc=$?
+set -e 2>/dev/null || true
+after=$(cd "$HOME_T/.claude" && find . | sort)
+assert_eq "$rc" "0" "second provision returns 0"
+assert_eq "$after" "$before" "tree is byte-identical after a second provision"
+
+# ── Test 4: pre-existing REAL file/dir is left untouched + warned ────────────
+echo "Test 4: a real destination file/dir is preserved, never clobbered (design decision 4)"
+CHK2=$(make_real_checkout)
+HOME2=$(mktemp -d)
+mkdir -p "$HOME2/.claude/commands/loom" "$HOME2/.claude/agents"
+echo "OPERATOR REAL COMMANDS" > "$HOME2/.claude/commands/loom/mine.md"
+echo "OPERATOR REAL AGENT" > "$HOME2/.claude/agents/loom-judge.md"
+set +e
+out=$(provision_loom_skills "$CHK2" "$HOME2/.claude" 2>&1)
+set -e 2>/dev/null || true
+# Real commands dir preserved (still a dir with the operator's file, not a link).
+if [[ -L "$HOME2/.claude/commands/loom" ]]; then
+    fail "clobbered the operator's real commands directory with a symlink"
+else
+    assert_eq "$(cat "$HOME2/.claude/commands/loom/mine.md")" "OPERATOR REAL COMMANDS" "operator's real commands dir is preserved"
+fi
+assert_contains "$out" "leaving as-is" "provisioning warns it left the real commands dir alone"
+# Real operator agent preserved (real file, not a link).
+[[ -L "$HOME2/.claude/agents/loom-judge.md" ]] && fail "clobbered operator's real loom-judge.md" \
+    || assert_eq "$(cat "$HOME2/.claude/agents/loom-judge.md")" "OPERATOR REAL AGENT" "operator's real loom-judge.md is preserved"
+# Other agents still linked despite the one preserved real file.
+[[ -L "$HOME2/.claude/agents/loom-builder.md" ]] && pass "sibling agents still linked when one is a real file" || fail "sibling agents were not linked"
+
+# ── Test 5: a stale symlink into an old checkout is repointed ─────────────────
+echo "Test 5: a symlink into an OLD checkout is repointed to the current one (design decision 4)"
+OLD=$(make_real_checkout)
+NEW=$(make_real_checkout)
+HOME3=$(mktemp -d)
+mkdir -p "$HOME3/.claude/commands" "$HOME3/.claude/agents"
+ln -s "$OLD/defaults/.claude/commands/loom" "$HOME3/.claude/commands/loom"
+ln -s "$OLD/defaults/.claude/agents/loom-builder.md" "$HOME3/.claude/agents/loom-builder.md"
+set +e
+provision_loom_skills "$NEW" "$HOME3/.claude" >/dev/null 2>&1
+set -e 2>/dev/null || true
+assert_eq "$(readlink "$HOME3/.claude/commands/loom")" "$NEW/defaults/.claude/commands/loom" "stale commands link repointed to the new checkout"
+assert_eq "$(readlink "$HOME3/.claude/agents/loom-builder.md")" "$NEW/defaults/.claude/agents/loom-builder.md" "stale agent link repointed to the new checkout"
+
+# ── Test 6: a dangling loom-* agent link is pruned ───────────────────────────
+echo "Test 6: a dangling loom-* agent link (removed role) is pruned (design decision 5)"
+CHK6=$(make_real_checkout)
+HOME6=$(mktemp -d)
+mkdir -p "$HOME6/.claude/agents"
+# Simulate a role that used to exist in the checkout but was removed upstream:
+# the link points into the checkout's agents tree but the target is gone.
+ln -s "$CHK6/defaults/.claude/agents/loom-removed.md" "$HOME6/.claude/agents/loom-removed.md"
+# A dangling link that points OUTSIDE the checkout must NOT be pruned.
+ln -s "/nonexistent/operator/place/loom-mine.md" "$HOME6/.claude/agents/loom-mine.md"
+set +e
+provision_loom_skills "$CHK6" "$HOME6/.claude" >/dev/null 2>&1
+set -e 2>/dev/null || true
+[[ -e "$HOME6/.claude/agents/loom-removed.md" || -L "$HOME6/.claude/agents/loom-removed.md" ]] \
+    && fail "dangling in-checkout agent link was not pruned" \
+    || pass "dangling in-checkout agent link pruned"
+[[ -L "$HOME6/.claude/agents/loom-mine.md" ]] \
+    && pass "a dangling link OUTSIDE the checkout is left alone (not Loom's to prune)" \
+    || fail "wrongly pruned an operator link pointing outside the checkout"
+
+# ── Test 7: soft failure (missing source) returns 1, does not abort ──────────
+echo "Test 7: a missing skills source returns 1 (soft failure) without aborting the caller"
+HOME7=$(mktemp -d)
+OUT7=$(mktemp)
+set +e
+provision_loom_skills "/nonexistent/checkout/xyz" "$HOME7/.claude" >"$OUT7" 2>&1
+rc=$?
+set -e 2>/dev/null || true
+out=$(cat "$OUT7")
+assert_eq "$rc" "1" "missing source returns 1"
+assert_contains "$out" "skills source not found" "explains the missing source"
+assert_eq "$PROVISIONED_SKILLS_LINK" "$HOME7/.claude/commands/loom" "globals still published on the soft-fail path"
+
+# Prove non-abort: a caller with 'set -e' semantics can note the failure and go on.
+caller_reached_end=false
+run_caller() {
+    provision_loom_skills "/nonexistent/checkout/xyz" "$HOME7/.claude" >/dev/null 2>&1 || true
+    caller_reached_end=true
+}
+run_caller
+$caller_reached_end && pass "caller continues past a soft failure" || fail "soft failure aborted the caller"
+
+# ── Test 8: deprovision removes checkout links but never real files ──────────
+echo "Test 8: deprovision removes links into the checkout, preserves real operator files (design decision 9)"
+CHK8=$(make_real_checkout)
+HOME8=$(mktemp -d)
+provision_loom_skills "$CHK8" "$HOME8/.claude" >/dev/null 2>&1
+# Add a real operator agent alongside the links.
+echo "OPERATOR" > "$HOME8/.claude/agents/loom-mine.md"  # not from the checkout
+set +e
+deprovision_loom_skills "$CHK8" "$HOME8/.claude" >/dev/null 2>&1
+set -e 2>/dev/null || true
+[[ -e "$HOME8/.claude/commands/loom" || -L "$HOME8/.claude/commands/loom" ]] \
+    && fail "deprovision did not remove the commands link" \
+    || pass "deprovision removed the commands link"
+[[ -L "$HOME8/.claude/agents/loom-builder.md" ]] \
+    && fail "deprovision did not remove an agent link" \
+    || pass "deprovision removed the agent links"
+assert_eq "$(cat "$HOME8/.claude/agents/loom-mine.md" 2>/dev/null)" "OPERATOR" "deprovision preserved the operator's real agent file"
+
+# ── Test 9: deprovision leaves a REAL commands dir alone ─────────────────────
+echo "Test 9: deprovision never removes a real (non-link) destination"
+CHK9=$(make_real_checkout)
+HOME9=$(mktemp -d)
+mkdir -p "$HOME9/.claude/commands/loom"
+echo "REAL" > "$HOME9/.claude/commands/loom/keep.md"
+set +e
+deprovision_loom_skills "$CHK9" "$HOME9/.claude" >/dev/null 2>&1
+set -e 2>/dev/null || true
+assert_eq "$(cat "$HOME9/.claude/commands/loom/keep.md" 2>/dev/null)" "REAL" "deprovision preserved a real commands directory"
+
+echo ""
+echo "======================================"
+echo "test-provision-skills.sh: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
+echo "======================================"
+[[ "$TESTS_FAILED" -eq 0 ]]

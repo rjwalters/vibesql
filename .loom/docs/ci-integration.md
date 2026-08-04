@@ -2,7 +2,7 @@
 
 When Loom is installed into a target repository, the installer creates a
 pull request that adds the `.loom/`, `.claude/`, `.github/labels.yml`,
-`.codex/`, and `CLAUDE.md` files. These changes do not touch the target
+`.codex/`, `CLAUDE.md`, and `AGENTS.md` files. These changes do not touch the target
 project's source — they're purely orchestration scaffolding. Yet, by default,
 the target's CI workflows will run in full on the install PR, which can be
 slow and expensive on projects with heavy test suites.
@@ -52,6 +52,7 @@ on:
       - '.claude/**'
       - '.codex/**'
       - 'CLAUDE.md'
+      - 'AGENTS.md'
       - '.github/labels.yml'
 ```
 

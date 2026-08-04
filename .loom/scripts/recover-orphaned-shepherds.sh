@@ -1,15 +1,19 @@
 #!/bin/bash
 # recover-orphaned-shepherds.sh - Detect and recover orphaned task state.
 #
-# Thin stub that delegates to the Python implementation. The script
-# name is preserved for back-compat with operator muscle memory and any
-# CLAUDE.md / docs that link to it; the underlying Python module was
-# ported in Phase 3.1.6 (#3395, epic #3372) to read
-# `.loom/spawn-loop-state.json` (#3374) + `gh issue list --label loom:building`
-# instead of `.loom/daemon-state.json` + `.loom/progress/`.
+# Delegates to the native `loom-daemon recover-orphans` subcommand (issue
+# #4272, epic #4081 Phase 3 family 2 — a byte-compatible Rust port of the
+# historical Python `loom-recover-orphans` CLI). A capability probe still
+# detects a daemon binary that predates the `recover-orphans` subcommand (a
+# host mid-roll), but there is NO fallback to fall back to: PR #4301 (commit
+# dba33666) deleted `loom_tools/orphan_recovery.py` and its
+# `loom-recover-orphans` console-script entry in the very same commit that
+# added the probe, so the old `run_loom_tool` branch could only ever produce
+# `No module named loom_tools.orphan_recovery`. A stale binary now fails
+# loudly with a rebuild remedy instead (#4384).
 #
-# See `loom-tools/src/loom_tools/orphan_recovery.py` for the full
-# implementation and the per-orphan recovery semantics.
+# The script name is preserved for back-compat with operator muscle memory
+# and any CLAUDE.md / docs that link to it.
 #
 # Usage:
 #   recover-orphaned-shepherds.sh              # Dry-run: show what would be recovered
@@ -22,8 +26,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared loom-tools helper
-source "$SCRIPT_DIR/lib/loom-tools.sh"
+# shellcheck source=lib/locate-daemon-bin.sh
+source "$SCRIPT_DIR/lib/locate-daemon-bin.sh"
 
-# Run the command with proper fallback chain
-run_loom_tool "recover-orphans" "orphan_recovery" "$@"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DAEMON_BIN="$(loom_locate_daemon_bin "$REPO_ROOT")"
+
+if [[ -n "$DAEMON_BIN" ]] && "$DAEMON_BIN" recover-orphans --help >/dev/null 2>&1; then
+    exec "$DAEMON_BIN" recover-orphans "$@"
+fi
+
+# No usable path remains. Fail loudly and actionably rather than degrading
+# into a `No module named loom_tools.orphan_recovery` traceback (#4384).
+if [[ -n "$DAEMON_BIN" ]]; then
+    DAEMON_VERSION="$("$DAEMON_BIN" --version 2>/dev/null || true)"
+    echo "ERROR recover-orphaned-shepherds.sh: $DAEMON_BIN does not support the 'recover-orphans' subcommand (stale build)." >&2
+    echo "  Reported version: ${DAEMON_VERSION:-unknown}" >&2
+else
+    echo "ERROR recover-orphaned-shepherds.sh: no loom-daemon binary could be resolved." >&2
+    echo "  Searched: \$LOOM_DAEMON_BIN, PATH, then $REPO_ROOT/{loom-daemon/,}target/{release,debug}/loom-daemon" >&2
+fi
+echo "  'loom-daemon recover-orphans' requires a binary built at or after commit dba33666 (PR #4301)." >&2
+echo "  There is no Python fallback — loom_tools/orphan_recovery.py was deleted in that same commit." >&2
+echo "  Remedy: rebuild or update loom-daemon, then retry:" >&2
+echo "    cargo build --release -p loom-daemon        # source checkout" >&2
+echo "    ./.loom/scripts/cli/loom-daemon-update.sh   # installed host (self-update)" >&2
+exit 1

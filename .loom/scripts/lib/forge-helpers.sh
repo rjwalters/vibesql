@@ -21,11 +21,29 @@
 #
 # Forge detection priority:
 #   1. LOOM_FORGE_TYPE env var
-#   2. .loom/config.json forge.type (if not "auto")
+#   2. Resolved config (config-resolver tier chain) forge.type (if not "auto")
 #   3. Auto-detect from git remote origin URL
 #   4. Default to "github"
+#
+# Config root resolution (#4062, decision recorded in epic #4081): the
+# resolved-config root is $REPO_ROOT (env) > $WORKSPACE_ROOT (env) > the
+# CANONICAL repo root via `git rev-parse --git-common-dir` — never the
+# worktree CWD. This mirrors spawn-claude.sh's #3938 precedent: forge auth is
+# exactly the kind of thing that must not silently resolve against the wrong
+# (worktree-local) directory.
 
 set -euo pipefail
+
+# ${BASH_SOURCE[0]:-$0} (not bare ${BASH_SOURCE[0]}) -- the bash+zsh-portable
+# self-path idiom from #3680. Slash commands (champion-reference.md,
+# champion-pr-merge.md) `source` this file DIRECTLY into the invoking shell
+# via an absolute path, which on macOS is often zsh (the Bash tool's default
+# shell). Under zsh, BASH_SOURCE is unset, so a bare ${BASH_SOURCE[0]}
+# resolves to the shell's CWD instead of this lib dir and the source below
+# fails (zsh sets $0 to the sourced file's own path, which recovers it).
+_LOOM_FORGE_HELPERS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=./config-resolver.sh
+source "$_LOOM_FORGE_HELPERS_LIB_DIR/config-resolver.sh"
 
 # --- Forge Detection ---
 
@@ -34,6 +52,33 @@ FORGE_TYPE=""
 _GITEA_BASE_URL=""
 _GITEA_TOKEN=""
 _GITEA_USERNAME=""
+
+# _forge_config_root -> echoes the root to resolve config from.
+# Precedence: $REPO_ROOT (env) > $WORKSPACE_ROOT (env) > canonical repo root
+# via `git rev-parse --git-common-dir` (parent of the common .git dir — works
+# identically from the main checkout or any linked worktree) > "." as a last
+# resort when git itself is unavailable (e.g. not inside a git repo).
+_forge_config_root() {
+  if [[ -n "${REPO_ROOT:-}" ]]; then
+    echo "$REPO_ROOT"
+    return 0
+  fi
+  if [[ -n "${WORKSPACE_ROOT:-}" ]]; then
+    echo "$WORKSPACE_ROOT"
+    return 0
+  fi
+
+  local git_common_dir
+  if git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)"; then
+    if [[ "$git_common_dir" != /* ]]; then
+      git_common_dir="$(cd "$git_common_dir" && pwd)"
+    fi
+    dirname "$git_common_dir"
+    return 0
+  fi
+
+  echo "."
+}
 
 # Detect forge type from environment, config, or remote URL.
 # Sets FORGE_TYPE to "github" or "gitea".
@@ -55,19 +100,18 @@ forge_detect() {
     esac
   fi
 
-  # 2. Config file
-  local config_file
-  if [[ -n "${REPO_ROOT:-}" ]]; then
-    config_file="$REPO_ROOT/.loom/config.json"
-  elif [[ -n "${WORKSPACE_ROOT:-}" ]]; then
-    config_file="$WORKSPACE_ROOT/.loom/config.json"
-  else
-    config_file=".loom/config.json"
-  fi
+  # Resolve the merged effective config ONCE per invocation (config-resolver,
+  # #4062) and reuse it below for both the forge.type check and the
+  # forge.gitea.url autodetect fallback — never re-merge the tier chain per
+  # key within a single call.
+  local _forge_root _forge_cfg
+  _forge_root=$(_forge_config_root)
+  _forge_cfg=$(loom_resolve_config "$_forge_root")
 
-  if [[ -f "$config_file" ]] && command -v jq &>/dev/null; then
+  # 2. Resolved config — forge.type (if not "auto")
+  if command -v jq >/dev/null 2>&1; then
     local config_type
-    config_type=$(jq -r '.forge.type // "auto"' "$config_file" 2>/dev/null || echo "auto")
+    config_type=$(echo "$_forge_cfg" | jq -r '.forge.type // "auto"' 2>/dev/null || echo "auto")
     local config_lower
     config_lower=$(echo "$config_type" | tr '[:upper:]' '[:lower:]')
     case "$config_lower" in
@@ -87,9 +131,9 @@ forge_detect() {
       return 0
     fi
     # Check if host matches configured Gitea URL
-    if [[ -f "$config_file" ]] && command -v jq &>/dev/null; then
+    if command -v jq >/dev/null 2>&1; then
       local gitea_url
-      gitea_url=$(jq -r '.forge.gitea.url // ""' "$config_file" 2>/dev/null || echo "")
+      gitea_url=$(echo "$_forge_cfg" | jq -r '.forge.gitea.url // ""' 2>/dev/null || echo "")
       if [[ -n "$gitea_url" ]]; then
         local gitea_host
         gitea_host=$(_extract_host "$gitea_url")
@@ -133,24 +177,22 @@ _load_gitea_config() {
   # Username: env var first, then config. When set, switches to HTTP Basic Auth.
   _GITEA_USERNAME="${GITEA_USERNAME:-}"
 
-  local config_file
-  if [[ -n "${REPO_ROOT:-}" ]]; then
-    config_file="$REPO_ROOT/.loom/config.json"
-  elif [[ -n "${WORKSPACE_ROOT:-}" ]]; then
-    config_file="$WORKSPACE_ROOT/.loom/config.json"
-  else
-    config_file=".loom/config.json"
-  fi
+  # Resolve the merged effective config ONCE (config-resolver, #4062) — only
+  # when at least one of the three env vars above didn't already win, and
+  # only once regardless of how many of the three keys are still missing.
+  if [[ -z "$_GITEA_TOKEN" || -z "$_GITEA_BASE_URL" || -z "$_GITEA_USERNAME" ]] && command -v jq >/dev/null 2>&1; then
+    local _forge_root _forge_cfg
+    _forge_root=$(_forge_config_root)
+    _forge_cfg=$(loom_resolve_config "$_forge_root")
 
-  if [[ -f "$config_file" ]] && command -v jq &>/dev/null; then
     if [[ -z "$_GITEA_TOKEN" ]]; then
-      _GITEA_TOKEN=$(jq -r '.forge.gitea.token // ""' "$config_file" 2>/dev/null || echo "")
+      _GITEA_TOKEN=$(echo "$_forge_cfg" | jq -r '.forge.gitea.token // ""' 2>/dev/null || echo "")
     fi
     if [[ -z "$_GITEA_BASE_URL" ]]; then
-      _GITEA_BASE_URL=$(jq -r '.forge.gitea.url // ""' "$config_file" 2>/dev/null || echo "")
+      _GITEA_BASE_URL=$(echo "$_forge_cfg" | jq -r '.forge.gitea.url // ""' 2>/dev/null || echo "")
     fi
     if [[ -z "$_GITEA_USERNAME" ]]; then
-      _GITEA_USERNAME=$(jq -r '.forge.gitea.username // ""' "$config_file" 2>/dev/null || echo "")
+      _GITEA_USERNAME=$(echo "$_forge_cfg" | jq -r '.forge.gitea.username // ""' 2>/dev/null || echo "")
     fi
   fi
 
@@ -337,6 +379,44 @@ forge_get_pr_nocache() {
   fi
 }
 
+# Get an issue's open/closed state.
+# Usage: forge_get_issue_state NWO ISSUE_NUMBER [GH_CMD]
+# Returns on stdout: "OPEN" or "CLOSED". On any lookup failure or an
+# unrecognized/empty state value, prints nothing and returns exit code 1.
+#
+# Fail-unsafe-to-preserve contract (#4186): this is used to gate destructive
+# cleanup (e.g. merge-pr.sh's worktree removal), so callers MUST treat a
+# non-zero return (empty stdout) as "assume the issue might still be open"
+# and preserve whatever resource the check gates — never assume CLOSED on a
+# lookup failure. This function only ever reports CLOSED when the forge
+# unambiguously says so.
+forge_get_issue_state() {
+  local nwo="$1"
+  local issue_number="$2"
+  local gh_cmd="${3:-gh}"
+  local raw_state=""
+
+  if [[ "$FORGE_TYPE" == "gitea" ]]; then
+    forge_split_nwo "$nwo"
+    raw_state=$(gitea_api GET "repos/$FORGE_OWNER/$FORGE_REPO/issues/$issue_number" 2>/dev/null \
+      | jq -r '.state // empty' 2>/dev/null) || true
+  else
+    raw_state=$("$gh_cmd" api "repos/$nwo/issues/$issue_number" --jq '.state // empty' 2>/dev/null) || true
+  fi
+
+  case "$(echo "$raw_state" | tr '[:lower:]' '[:upper:]')" in
+    OPEN)
+      echo "OPEN"
+      ;;
+    CLOSED)
+      echo "CLOSED"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Check if repo auto-deletes branches on merge.
 # Usage: forge_check_auto_delete NWO
 # Returns: "true" or "false" on stdout
@@ -368,8 +448,8 @@ forge_check_auto_delete() {
 # than reacting to the post-mutation error string (#3820).
 #
 # Gitea returns "unknown" (there is no equivalent single repo flag consumed
-# here; Gitea auto-merge goes through loom-auto-merge's own poll-and-merge, which
-# this probe must not perturb). A probe failure (network/auth/unexpected value)
+# here; Gitea auto-merge goes through forge_auto_merge's own curl poll-and-merge,
+# which this probe must not perturb). A probe failure (network/auth/unexpected value)
 # also returns "unknown" so callers preserve their existing behavior fail-safe.
 forge_check_auto_merge_allowed() {
   local nwo="$1"
@@ -643,6 +723,209 @@ forge_pr_close_targets() {
         --jq '.closingIssuesReferences[].number' 2>/dev/null \
         | sort -un; } || true
   fi
+}
+
+# ---------------------------------------------------------------------------
+# GraphQL-exhaustion REST fallback for label/comment/state mutations (#4856).
+#
+# `gh issue edit`, `gh issue comment`, `gh issue reopen`, and `gh pr comment`
+# are GraphQL-backed mutations. During a long sweep, GraphQL quota (5000/hr,
+# shared across every agent + tool) can exhaust while REST quota still has
+# headroom -- the same independent-quota fact the read-side fallback in
+# `check-duplicate.sh` and merge-pr.sh's #4447 auto-merge-enable fallback
+# already rely on. Before this fix, the best-effort mutating call sites in
+# merge-pr.sh (partial-increment label reset, premature-auto-close reopen,
+# stacked-child deferral comment) simply swallowed a rate-limit rejection
+# with the same generic warning as any other failure, silently dropping the
+# label/comment update instead of retrying over REST -- the exact incident
+# reported in #4856 (an orchestrator working around it by hand with raw
+# `gh api` DELETE/POST/PATCH calls).
+#
+# is_rate_limit_error() reuses the exact five-signature table from
+# check-duplicate.sh's is_rate_limit_error() (itself mirrored from
+# loom-daemon/src/rate_limit_breaker.rs's RATE_LIMIT_SIGNATURES) rather than
+# deriving a new one. The GraphQL and REST phrasings are NOT substrings of
+# each other -- "already" breaks the contiguous "api rate limit exceeded"
+# match -- so both are listed. GitHub-only helpers: every call site below is
+# already gated on `[[ "$FORGE_TYPE" == "github" ]]` by its caller, mirroring
+# the existing `_reset_partial_increment_labels` / `_auto_reconcile_stacked_children`
+# gating in merge-pr.sh, so no Gitea branch is needed here.
+#
+# #5047 extended this same table + fallback shape to issue *creation*
+# (`forge_gh_create_issue_rl_safe`, below) -- the one filing mutation #4856
+# left uncovered, since #4856 was scoped to labels/comments/reopen on
+# already-existing issues.
+is_rate_limit_error() {
+  local text
+  text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *"api rate limit exceeded"*) return 0 ;;
+    *"api rate limit already exceeded"*) return 0 ;;
+    *"secondary rate limit"*) return 0 ;;
+    *"abuse detection mechanism"*) return 0 ;;
+    *"was submitted too quickly"*) return 0 ;;
+  esac
+  return 1
+}
+
+# Post a comment on an issue OR a pull request via `gh issue comment`, falling
+# back to the REST comments endpoint on a GraphQL rate-limit rejection. The
+# REST endpoint (`repos/{nwo}/issues/{n}/comments`) is shared by issues and
+# PRs on GitHub (a PR IS an issue for labels/comments/state), so one function
+# safely serves both `gh issue comment` and `gh pr comment` call sites.
+# Usage: forge_gh_comment_rl_safe NWO NUMBER BODY
+# Returns 0 on success (either path), 1 on failure (message on stderr).
+forge_gh_comment_rl_safe() {
+  local nwo="$1" number="$2" body="$3"
+  local out
+  if out=$(gh issue comment "$number" --repo "$nwo" --body "$body" 2>&1); then
+    return 0
+  fi
+  if is_rate_limit_error "$out"; then
+    if gh api "repos/$nwo/issues/$number/comments" -f "body=$body" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "gh issue comment rate-limited on #$number, and the REST fallback also failed: $out" >&2
+    return 1
+  fi
+  echo "$out" >&2
+  return 1
+}
+
+# Reopen a closed issue via `gh issue reopen`, falling back to a REST PATCH
+# (state=open) on a GraphQL rate-limit rejection.
+# Usage: forge_gh_reopen_issue_rl_safe NWO ISSUE_NUMBER
+forge_gh_reopen_issue_rl_safe() {
+  local nwo="$1" issue_num="$2"
+  local out
+  if out=$(gh issue reopen "$issue_num" --repo "$nwo" 2>&1); then
+    return 0
+  fi
+  if is_rate_limit_error "$out"; then
+    if gh api "repos/$nwo/issues/$issue_num" -X PATCH -f state=open >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "gh issue reopen rate-limited on #$issue_num, and the REST fallback also failed: $out" >&2
+    return 1
+  fi
+  echo "$out" >&2
+  return 1
+}
+
+# Swap one label for another on an issue via `gh issue edit --remove-label
+# --add-label`, falling back to two REST calls (DELETE the old label, POST
+# the new one) on a GraphQL rate-limit rejection. The label name is
+# percent-encoded for the DELETE path segment (GitHub labels commonly contain
+# `:`, e.g. `loom:building`, which must be encoded as `%3A`).
+# Usage: forge_gh_swap_label_rl_safe NWO ISSUE_NUMBER REMOVE_LABEL ADD_LABEL
+forge_gh_swap_label_rl_safe() {
+  local nwo="$1" issue_num="$2" remove_label="$3" add_label="$4"
+  local out
+  if out=$(gh issue edit "$issue_num" --repo "$nwo" \
+      --remove-label "$remove_label" --add-label "$add_label" 2>&1); then
+    return 0
+  fi
+  if is_rate_limit_error "$out"; then
+    local encoded_remove ok=true
+    encoded_remove="${remove_label//:/%3A}"
+    gh api "repos/$nwo/issues/$issue_num/labels/$encoded_remove" -X DELETE >/dev/null 2>&1 || ok=false
+    gh api "repos/$nwo/issues/$issue_num/labels" -f "labels[]=$add_label" >/dev/null 2>&1 || ok=false
+    if [[ "$ok" == "true" ]]; then
+      return 0
+    fi
+    echo "gh issue edit (label swap) rate-limited on #$issue_num, and the REST fallback also failed: $out" >&2
+    return 1
+  fi
+  echo "$out" >&2
+  return 1
+}
+
+# File a NEW issue via `gh issue create`, falling back to a single REST POST
+# to `repos/{nwo}/issues` on a GraphQL rate-limit rejection (#5047).
+#
+# `gh issue create` is GraphQL-backed, so every issue-filing role (Architect,
+# Auditor, Curator decomposition, Builder decomposition, Doctor, Hermit,
+# Judge) died outright once the GraphQL pool exhausted -- even though the
+# independent REST pool routinely sits ~99% unused at that moment (observed
+# 2026-08-03: core 19/5000 consumed vs graphql 1378/5000). Comments, labels
+# and state already had REST fallbacks (#4856, above); creation did not.
+#
+# **Labels are applied atomically with creation on BOTH paths** -- `--label`
+# on the primary path, a `labels` array in the same POST body on the REST
+# path. Never degrade this to create-then-label: that doubles the request
+# count under exactly the conditions where requests are scarce, and can
+# half-fail, leaving an unlabelled issue that no role's queue query finds.
+#
+# NWO may be the empty string, meaning "the repo of the current working
+# directory". That is the preferred form: the REST path then uses `gh api`'s
+# literal `{owner}/{repo}` placeholder, which gh expands from the git remote
+# with ZERO API calls -- unlike `gh repo view --json nameWithOwner`, which is
+# itself GraphQL-backed and so fails first under the very exhaustion this
+# fallback exists for (#4659).
+#
+# This is the single-sourced recipe referenced by the role prompts that file
+# issues (architect.md, auditor.md, builder-complexity.md, builder-pr.md,
+# curator.md, doctor.md, hermit.md, hermit-patterns.md, judge.md) -- via the
+# executable wrapper `create-issue.sh`. Update this function, not each
+# prompt, if the recipe needs to change.
+#
+# Usage: forge_gh_create_issue_rl_safe NWO TITLE BODY [LABEL...]
+# Stdout: the new issue's URL (both paths).
+# Returns 0 on success (either path), 1 on failure (message on stderr).
+forge_gh_create_issue_rl_safe() {
+  local nwo="$1" title="$2" body="$3"
+  shift 3
+  local labels=("$@")
+
+  local -a create_args=(--title "$title" --body "$body")
+  if [[ -n "$nwo" ]]; then
+    create_args+=(--repo "$nwo")
+  fi
+  local label
+  for label in "${labels[@]+"${labels[@]}"}"; do
+    create_args+=(--label "$label")
+  done
+
+  # Capture stdout (the issue URL) separately from stderr (the error text the
+  # rate-limit signature table is matched against), so a successful create
+  # never returns gh's progress chatter as the URL.
+  local err_file out err rc=0
+  err_file=$(mktemp)
+  out=$(gh issue create "${create_args[@]}" 2>"$err_file") || rc=$?
+  err=$(cat "$err_file" 2>/dev/null || true)
+  rm -f "$err_file"
+
+  if [[ $rc -eq 0 ]]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  if is_rate_limit_error "$err"; then
+    # One POST carries title + body + labels together. `--input -` takes the
+    # JSON body on stdin, which also sidesteps the guard false positive where
+    # a heredoc body containing `>=` is classified as a Bash redirect.
+    local payload labels_json
+    labels_json=$(jq -nc '$ARGS.positional' --args "${labels[@]+"${labels[@]}"}")
+    payload=$(jq -n --arg t "$title" --arg b "$body" --argjson l "$labels_json" \
+      '{title: $t, body: $b, labels: $l}')
+    local rest_path
+    if [[ -n "$nwo" ]]; then
+      rest_path="repos/$nwo/issues"
+    else
+      # Literal placeholder — gh expands it from the git remote, no API call.
+      rest_path='repos/{owner}/{repo}/issues'
+    fi
+    if out=$(printf '%s' "$payload" \
+        | gh api --method POST "$rest_path" --input - --jq '.html_url' 2>/dev/null); then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    echo "gh issue create rate-limited, and the REST fallback also failed: $err" >&2
+    return 1
+  fi
+
+  echo "$err" >&2
+  return 1
 }
 
 # Get PR comments.

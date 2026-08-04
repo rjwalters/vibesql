@@ -45,6 +45,12 @@ gh issue edit 84 --remove-label "loom:issue" --add-label "loom:building"
 WORKTREE_ABS="$(cd .loom/worktrees/issue-84 && pwd)"
 # -> e.g. /Users/you/repo/.loom/worktrees/issue-84
 
+# 3a. Assert it's really a managed worktree BEFORE any edit — the same two
+#     checks guard-worktree-paths.sh applies to every Edit/Write/Bash write
+#     it confines (#4178):
+[[ -f "$WORKTREE_ABS/.loom-managed" ]] || echo "FATAL: no .loom-managed sentinel"
+[[ "$(git -C "$WORKTREE_ABS" rev-parse --show-toplevel)" == "$WORKTREE_ABS" ]] || echo "FATAL: toplevel mismatch"
+
 # 4. Do your work using ABSOLUTE paths (implement, test, commit)
 #    - Write/Edit: pass "$WORKTREE_ABS/<file>"
 #    - Bash:       git -C "$WORKTREE_ABS" ...  OR  cd "$WORKTREE_ABS" && <cmd>
@@ -84,6 +90,16 @@ silently contaminating main (#3513, recurrence of #2802).
    git -C "$WORKTREE_ABS" status        # changes should be HERE
    ./.loom/scripts/check-main-clean.sh  # backstop: exits 3 if main is dirty
    ```
+
+**A guard denial is not a signal to retry via a different tool.** Two
+independent PreToolUse guards confine writes to your worktree while any
+managed worktree exists: `guard-worktree-paths.sh` on the Edit/Write matcher,
+and `guard-destructive-generic.sh` on the Bash matcher for the common write
+idioms (`>`/`>>` redirection, `tee`, `sed -i`, `cp`/`mv`) (#4178). If one
+denies, the fix is always to re-derive `$WORKTREE_ABS` and use it — never to
+fall back from Edit/Write to a Bash write (or vice versa) for the same target.
+That fallback is exactly how sweep #4063 escaped worktree isolation and edited
+live guard hooks in the main checkout.
 
 ### Collision Detection
 
@@ -189,9 +205,16 @@ cd .loom/worktrees/issue-XX
 - Always use `./.loom/scripts/worktree.sh` to create branches
 - Prevents nested worktree issues
 
-**Don't run `git stash` in main and try to apply in worktrees**
-- Stash is local to the repository, not shared between worktrees
-- Each worktree has its own working directory
+**Don't use `git stash` for ad-hoc WIP handling in a worktree**
+- Stash (`refs/stash`) is **shared repo-wide across every linked worktree** —
+  the opposite of per-worktree isolation. Two parallel builders in different
+  worktrees can `git stash` and `git stash pop` each other's WIP, silently
+  swapping or overwriting uncommitted work (observed in production: kicad-tools
+  PRs #4524/#4526).
+- Use `./.loom/scripts/worktree.sh snapshot <issue-number>` instead — it
+  captures WIP as a patch file under
+  `<worktree-root>/.snapshots/issue-<N>-<timestamp>.patch`, scoped to your own
+  worktree, with no risk of collision with other builders' stashes.
 
 **Don't use `git push --force` without `--force-with-lease`**
 - `--force-with-lease` is safer - it fails if someone else pushed
@@ -233,6 +256,12 @@ When working with parallel agents (multiple Builders running simultaneously), us
 - Use `loom-claim` for atomic file-based locking
 - Label change is still needed (for visibility), but loom-claim prevents races
 - First Builder to claim wins; others move to next issue
+
+> `loom-claim` is a PATH shim over `loom-daemon claim` (issue #4275 ported the
+> implementation from Python to native Rust). The command name, positional
+> grammar and exit codes below are unchanged, and the shim needs no pip install
+> — it is provisioned next to the `loom-daemon` binary. The `command -v
+> loom-claim` degradation guard below still applies unchanged.
 
 ### Claiming Workflow
 
@@ -289,7 +318,7 @@ while true; do
   fi
 
   # Find available issues
-  ISSUES=$(gh issue list --label="loom:issue" --state=open --json number --jq '.[].number')
+  ISSUES=$(gh issue list --label="loom:issue" --state=open --limit 500 --json number --jq '.[].number')
 
   for ISSUE_NUMBER in $ISSUES; do
     # Try atomic claim

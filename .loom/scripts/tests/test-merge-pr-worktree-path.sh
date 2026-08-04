@@ -23,6 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MERGE_PR="$SCRIPTS_DIR/merge-pr.sh"
+FORGE_HELPERS="$SCRIPTS_DIR/lib/forge-helpers.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -101,6 +102,20 @@ assert_grep "Discovered worktree for branch" "$MERGE_PR" \
 assert_grep "re-run with: --worktree-path" "$MERGE_PR" \
     "discovery fallback suggests --worktree-path in the hint"
 
+# --- Test 2b: async-close-race guard (#4186) source surface ---
+assert_grep "_issue_is_closed_for_cleanup" "$MERGE_PR" \
+    "merge-pr.sh defines the close-target-aware cleanup gate"
+assert_grep "forge_pr_close_targets" "$MERGE_PR" \
+    "merge-pr.sh's cleanup gate consults forge_pr_close_targets (async-close-race adaptation)"
+assert_grep "forge_get_issue_state" "$MERGE_PR" \
+    "merge-pr.sh's cleanup gate consults forge_get_issue_state for non-close-target issues"
+assert_grep "Preserving worktree at" "$MERGE_PR" \
+    "default-path preserved-worktree case logs a clear reason"
+assert_grep "Preserving discovered worktree at" "$MERGE_PR" \
+    "discovered-path preserved-worktree case logs a clear reason"
+assert_grep "forge_get_issue_state" "$FORGE_HELPERS" \
+    "forge-helpers.sh defines forge_get_issue_state"
+
 # --- Test 3: Precedence — --no-cleanup-worktree warns when combined ---
 echo ""
 echo "Test 3: --no-cleanup-worktree wins over --worktree-path"
@@ -146,8 +161,15 @@ simulate_cleanup() {
     #   $5 override_has_sentinel ("true" / "false") # does override path have .loom-managed
     #   $6 discovered          (string or "")     # discovered worktree path
     #   $7 discovered_has_sentinel ("true" / "false")
+    #   $8 issue_num           (string or "", default "") # set only on the
+    #      feature/issue-<N> path; empty models the unaffected pr-<N> path (#4186)
+    #   $9 is_close_target     ("true" / "false", default "false") # is
+    #      issue_num among forge_pr_close_targets for the just-merged PR?
+    #   $10 issue_state        ("OPEN" / "CLOSED" / "", default "") # live
+    #      forge_get_issue_state result; "" models a lookup failure
     local preserve="$1" cleanup="$2" override="$3" default_exists="$4" \
-          override_has_sentinel="$5" discovered="$6" discovered_has_sentinel="$7"
+          override_has_sentinel="$5" discovered="$6" discovered_has_sentinel="$7" \
+          issue_num="${8:-}" is_close_target="${9:-false}" issue_state="${10:-}"
 
     if [[ "$cleanup" != "true" ]]; then
         echo "skip:no-cleanup"; return 0
@@ -156,7 +178,8 @@ simulate_cleanup() {
         echo "skip:env"; return 0
     fi
     if [[ -n "$override" ]]; then
-        # --worktree-path bypasses sentinel
+        # --worktree-path bypasses sentinel (and the #4186 issue gate below —
+        # the operator explicitly took responsibility for this path).
         if [[ "$override_has_sentinel" == "true" ]]; then
             echo "remove:override-managed"
         else
@@ -164,14 +187,39 @@ simulate_cleanup() {
         fi
         return 0
     fi
+
+    # Close-target-aware issue gate (#4186), mirroring
+    # _issue_is_closed_for_cleanup: no issue_num (pr-<N> path) always allows
+    # removal; a close-target issue always allows removal (the merge itself
+    # closes it, no race); otherwise fall back to the live state lookup,
+    # where CLOSED allows and anything else (including a lookup failure,
+    # modeled by issue_state="") preserves.
+    _gate_allows_removal() {
+        if [[ -z "$issue_num" ]]; then
+            return 0
+        fi
+        if [[ "$is_close_target" == "true" ]]; then
+            return 0
+        fi
+        [[ "$issue_state" == "CLOSED" ]]
+    }
+
     if [[ "$default_exists" == "true" ]]; then
-        echo "remove:default"
+        if _gate_allows_removal; then
+            echo "remove:default"
+        else
+            echo "preserve:default-open-issue"
+        fi
         return 0
     fi
     # Fallback discovery
     if [[ -n "$discovered" ]]; then
         if [[ "$discovered_has_sentinel" == "true" ]]; then
-            echo "remove:discovered-managed"
+            if _gate_allows_removal; then
+                echo "remove:discovered-managed"
+            else
+                echo "preserve:discovered-open-issue"
+            fi
         else
             echo "warn:discovered-user-owned"
         fi
@@ -244,6 +292,65 @@ if [[ "$result" == "skip:nothing-to-do" ]]; then
     pass "case H: nothing-found is a quiet no-op"
 else
     fail "case H: expected 'skip:nothing-to-do', got '$result'"
+fi
+
+# --- Test 5: async-close-race issue gate (#4186) ---
+echo ""
+echo "Test 5: close-target-aware issue gate on the default and discovered paths"
+
+# Case I: default path, issue IS a close target of the merged PR — a normal
+# `Closes #N` merge must clean up exactly as before this change, no state
+# lookup consulted at all.
+result=$(simulate_cleanup 0 true "" true false "" false 42 true "")
+if [[ "$result" == "remove:default" ]]; then
+    pass "case I: Closes-target issue removes unconditionally (no regression)"
+else
+    fail "case I: expected 'remove:default', got '$result'"
+fi
+
+# Case J: default path, issue is NOT a close target and its live state is
+# OPEN — the partial-increment shape (#3667); preserve.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "OPEN")
+if [[ "$result" == "preserve:default-open-issue" ]]; then
+    pass "case J: non-target open issue preserves the worktree"
+else
+    fail "case J: expected 'preserve:default-open-issue', got '$result'"
+fi
+
+# Case K: default path, issue is NOT a close target and the state lookup
+# failed (modeled as an empty issue_state) — fail-unsafe-to-preserve.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "")
+if [[ "$result" == "preserve:default-open-issue" ]]; then
+    pass "case K: issue-state lookup failure preserves the worktree (fail-unsafe)"
+else
+    fail "case K: expected 'preserve:default-open-issue', got '$result'"
+fi
+
+# Case L: default path, issue is NOT a close target but its live state is
+# CLOSED (e.g. closed independently of this PR) — safe to remove.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "CLOSED")
+if [[ "$result" == "remove:default" ]]; then
+    pass "case L: non-target issue whose live state is CLOSED still removes"
+else
+    fail "case L: expected 'remove:default', got '$result'"
+fi
+
+# Case M: no issue_num at all (the pr-<N> worktree path) — gate is skipped
+# entirely; default-path removal is unaffected.
+result=$(simulate_cleanup 0 true "" true false "" false "" false "")
+if [[ "$result" == "remove:default" ]]; then
+    pass "case M: pr-<N> path (no ISSUE_NUM) is unaffected by the issue gate"
+else
+    fail "case M: expected 'remove:default', got '$result'"
+fi
+
+# Case N: discovered (non-standard-path) Loom-managed worktree, issue is NOT
+# a close target and is OPEN — preserve at the discovered-path call site too.
+result=$(simulate_cleanup 0 true "" false false "/found" true 42 false "OPEN")
+if [[ "$result" == "preserve:discovered-open-issue" ]]; then
+    pass "case N: discovered-path gate also preserves for a non-target open issue"
+else
+    fail "case N: expected 'preserve:discovered-open-issue', got '$result'"
 fi
 
 # --- Summary ---

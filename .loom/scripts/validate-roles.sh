@@ -5,6 +5,20 @@
 # This script checks that all configured roles have their dependencies
 # properly configured, preventing silent failures where work gets stuck.
 #
+# OPERATOR-MANUAL TOOL (no in-repo caller besides its own test, #5277). The
+# canonical, actively-wired validator is the Rust `loom-daemon validate`
+# command (`loom-daemon/src/role_validation.rs` /
+# `loom-daemon/src/cli/misc_cmds.rs::handle_validate_command`) -- it runs the
+# identical role-dependency checks, is invoked proactively at daemon startup
+# and documented in `defaults/docs/runtime-adapters.md`. This Bash script is
+# kept as a dependency-light fallback: it needs only `jq` + the shared
+# `lib/config-resolver.sh`, so it works before `loom-daemon` has ever been
+# built (e.g. a fresh source checkout, or a shell-only CI step) or when an
+# operator wants a quick check without invoking the daemon binary. Its
+# config-tier-resolution behavior is covered by
+# `defaults/scripts/tests/test-config-tiers-cli-migration.sh` (Tests 2-4);
+# if this script changes, keep that test passing.
+#
 # Usage:
 #   ./validate-roles.sh [OPTIONS]
 #
@@ -50,7 +64,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help)
-            head -27 "$0" | tail -23
+            head -35 "$0" | tail -14
             exit 0
             ;;
         *)
@@ -82,21 +96,40 @@ WORKSPACE_ROOT=$(find_workspace_root) || {
     exit 1
 }
 
-CONFIG_FILE="$WORKSPACE_ROOT/.loom/config.json"
+# Resolved through the config-resolver tier chain (#4062) rather than a
+# hand-rolled single-tier .loom/config.json read -- a workspace may supply
+# terminals entirely from .loom-project/project.json or .loom-local/local.json.
+# Resolved ONCE and reused below by get_configured_roles (Trap 2 -- never
+# re-merge the tier chain per key).
+_LOOM_VALIDATE_ROLES_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./lib/config-resolver.sh
+source "$_LOOM_VALIDATE_ROLES_LIB_DIR/lib/config-resolver.sh"
 
-if [[ ! -f "$CONFIG_FILE" ]]; then
+EFFECTIVE_CONFIG=$(loom_resolve_config "$WORKSPACE_ROOT")
+
+# Retargeted hard-fail precondition (#4059/#4062): "no tier supplies a
+# non-empty terminals array" replaces "the legacy .loom/config.json file is
+# missing" -- mirrors loom-daemon's handle_validate_command / role_validation.rs
+# `has_terminals` check so the Bash and Rust validators agree. Both the --json
+# and human output branches are preserved, and the message names every tier
+# searched instead of a single legacy path.
+TERMINAL_COUNT=$(echo "$EFFECTIVE_CONFIG" | jq '(.terminals // []) | length' 2>/dev/null || echo 0)
+if [[ "$TERMINAL_COUNT" -eq 0 ]]; then
     if [[ "$JSON_OUTPUT" == "true" ]]; then
-        echo '{"error": "Config file not found: '"$CONFIG_FILE"'"}'
+        echo '{"error": "No Loom config with a non-empty terminals array found in any tier", "searched": ["'"$WORKSPACE_ROOT/$LOOM_CONFIG_LEGACY_REL"'", "'"$WORKSPACE_ROOT/$LOOM_CONFIG_PROJECT_REL"'", "'"$WORKSPACE_ROOT/$LOOM_CONFIG_LOCAL_REL"'"]}'
     else
-        echo -e "${RED}Error: Config file not found: $CONFIG_FILE${NC}" >&2
+        echo -e "${RED}Error: No Loom config with a non-empty \`terminals\` array found in any tier.${NC}" >&2
+        echo "Searched (lowest to highest precedence):" >&2
+        echo "  - $WORKSPACE_ROOT/$LOOM_CONFIG_LEGACY_REL" >&2
+        echo "  - $WORKSPACE_ROOT/$LOOM_CONFIG_PROJECT_REL" >&2
+        echo "  - $WORKSPACE_ROOT/$LOOM_CONFIG_LOCAL_REL" >&2
     fi
     exit 1
 fi
 
-# Extract configured roles from config.json
-# Uses jq to parse terminals and extract roleFile names
+# Extract configured roles from the resolved effective config.
 get_configured_roles() {
-    jq -r '.terminals[]?.roleConfig?.roleFile // empty' "$CONFIG_FILE" 2>/dev/null | \
+    echo "$EFFECTIVE_CONFIG" | jq -r '.terminals[]?.roleConfig?.roleFile // empty' 2>/dev/null | \
         sed 's/\.md$//' | \
         sort -u
 }

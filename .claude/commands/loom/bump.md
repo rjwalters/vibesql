@@ -20,7 +20,7 @@ Walk the current repository root **once** and record which version-bearing files
 
 1. **`scripts/version.sh`** (top-level): if this file already exists from a prior `/loom:bump` run, **short-circuit** the detection. Skip directly to Phase 5 ("Invoke the generated script"). The script is the source of truth on subsequent runs — the operator may have edited it.
 
-2. **`package.json`** (top-level): an npm project. Read `.version` via `jq -r .version`.
+2. **`package.json`** (top-level): an npm project. Read `.version` via `jq -r .version`. **Skip this source if `.name == "loom-workspace"`** — that's the Loom installer's own workspace-scaffolding stub (`defaults/package.json`, copied into any consumer repo that lacked a root `package.json`), not a real project version source. It carries no `version` field in current installs; if an older stub with a leftover `version` field is still present, treat it the same way — skip it and keep walking the remaining detection sources instead of reporting a false version.
 
 3. **`*/package.json`** (workspace packages): an npm workspace / monorepo. Glob the top-level for subdirectory `package.json` files and read `.version` from each. Common patterns: `packages/*/package.json`, `apps/*/package.json`, or simply `<name>/package.json` (Loom's `mcp-loom/package.json` shape).
 
@@ -423,4 +423,5 @@ Release v$NEW_VERSION complete
 - **`scripts/version.sh` is the source of truth on subsequent runs.** Phase 1's short-circuit step ensures the skill defers to the generated script after the first run.
 - **Multiple shapes can coexist.** An npm+cargo monorepo (Loom's own shape) needs updates across `package.json`, `Cargo.toml`, `Cargo.lock`, and possibly `CLAUDE.md`. Emit writers for every detected shape.
 - **The seven detection sources are**: `package.json`, `*/package.json` (workspace), `Cargo.toml` (+ workspace members + `Cargo.lock`), `pyproject.toml` (`[project]` or `[tool.poetry]`), `setup.py`/`setup.cfg` (legacy Python), top-level shell script with `VERSION="X.Y.Z"`, and `CLAUDE.md`/`README.md` with `**Version**: X.Y.Z`.
+- **The top-level `package.json` source is skipped when it's the Loom-installed `loom-workspace` stub** (`.name == "loom-workspace"`) — it's workspace scaffolding, not a real project version source, and must never be reported as a detected version even if an older install left a stale `version` field on it.
 - **Branch protection**: if the operator's repo enforces PR-only merges to `main`, a direct push of the bump commit will fail. In that case, push the bump commit to a feature branch and open a PR — the tag can be created after the PR merges.

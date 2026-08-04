@@ -10,6 +10,13 @@
 #   4. --keep-branch leaves the local branch intact after removal.
 #   5. Running `remove` from a shell whose cwd is inside the target worktree
 #      completes successfully (script cd's out first — no shell corruption).
+#   6. A worktree with uncommitted changes is REFUSED (#4449): non-zero exit,
+#      worktree + work intact, message lists what it found and how to proceed.
+#   7. The same worktree removes cleanly with an explicit --force.
+#   8. Loom runtime markers (.loom-managed et al) do NOT count as uncommitted
+#      work — otherwise the guard would refuse every managed worktree in a repo
+#      whose .gitignore predates #3838.
+#   9. A staged-only (index) change also triggers the refusal.
 #
 # Follows the throwaway-repo harness pattern in test-worktree-sentinel.sh:
 # a bare origin remote + a working repo, with worktree.sh + its lib/ helpers
@@ -166,6 +173,124 @@ if ( cd "$REPO/.loom/worktrees/issue-104" && \
 else
     cd "$REPO"
     fail "in-worktree remove exited non-zero (see /tmp/rm-out5.$$)"
+fi
+
+# --- Test 6: a dirty worktree is refused (#4449) -----------------------------
+# The data-loss precedent: `git worktree remove --force` discards the working
+# tree unconditionally, so `remove` must refuse rather than destroy work.
+echo ""
+echo "Test 6: remove refuses a worktree with uncommitted changes (#4449)"
+make_worktree 105
+cd "$REPO"
+echo "an uncommitted fix that must not be destroyed" > ".loom/worktrees/issue-105/wip.txt"
+if ./.loom/scripts/worktree.sh remove 105 >/tmp/rm-out6.$$ 2>&1; then
+    fail "remove succeeded on a dirty worktree (should have refused)"
+else
+    pass "remove exited non-zero for a dirty worktree"
+fi
+if [[ -d ".loom/worktrees/issue-105" ]]; then
+    pass "dirty worktree directory left untouched"
+else
+    fail "dirty worktree directory was removed"
+fi
+if [[ -f ".loom/worktrees/issue-105/wip.txt" ]]; then
+    pass "uncommitted work survived the refused removal"
+else
+    fail "uncommitted work was destroyed"
+fi
+if grep -q "Refusing to remove" /tmp/rm-out6.$$ 2>/dev/null; then
+    pass "refusal message mentions 'Refusing to remove'"
+else
+    fail "no clear refusal message emitted"
+fi
+if grep -q "wip.txt" /tmp/rm-out6.$$ 2>/dev/null; then
+    pass "refusal lists the uncommitted path it found"
+else
+    fail "refusal did not list what it found"
+fi
+# The refusal must tell the caller how to proceed (AC: commit / patch / stash /
+# force), not just say no.
+remedies=0
+for needle in "commit" "diff HEAD" "stash" "--force"; do
+    grep -qi -- "$needle" /tmp/rm-out6.$$ 2>/dev/null && remedies=$((remedies + 1))
+done
+if [[ "$remedies" -eq 4 ]]; then
+    pass "refusal explains all four ways to proceed (commit/patch/stash/--force)"
+else
+    fail "refusal is missing remediation guidance ($remedies/4 found)"
+fi
+# --json mode must still emit a single parseable refusal document on stdout.
+if ./.loom/scripts/worktree.sh remove 105 --json >/tmp/rm-out6b.$$ 2>/dev/null; then
+    fail "remove --json succeeded on a dirty worktree (should have refused)"
+else
+    if grep -q '"success": false' /tmp/rm-out6b.$$ && grep -q '"removed": false' /tmp/rm-out6b.$$; then
+        pass "--json refusal reports success=false, removed=false on stdout"
+    else
+        fail "--json refusal did not emit the expected JSON (see /tmp/rm-out6b.$$)"
+    fi
+fi
+
+# --- Test 7: --force removes the dirty worktree ------------------------------
+echo ""
+echo "Test 7: remove --force discards uncommitted changes and removes the worktree"
+cd "$REPO"
+if ./.loom/scripts/worktree.sh remove 105 --force >/tmp/rm-out7.$$ 2>&1; then
+    if [[ ! -d ".loom/worktrees/issue-105" ]]; then
+        pass "dirty worktree removed with --force"
+    else
+        fail "dirty worktree still present after remove --force"
+    fi
+    if grep -qi "discarding them (--force)" /tmp/rm-out7.$$ 2>/dev/null; then
+        pass "--force announces that it discarded the uncommitted changes"
+    else
+        fail "--force did not announce the discard"
+    fi
+else
+    fail "remove --force exited non-zero on a dirty worktree (see /tmp/rm-out7.$$)"
+fi
+
+# --- Test 8: Loom runtime markers are not "uncommitted work" -----------------
+# worktree.sh writes .loom-managed into every worktree it creates. A repo whose
+# .gitignore predates #3838 does not ignore it, so a naive porcelain check would
+# see every managed worktree as dirty and refuse ALL removals.
+echo ""
+echo "Test 8: Loom runtime markers alone do not trigger the dirty refusal"
+make_worktree 106
+cd "$REPO"
+# Prove the marker really is visible to git in this harness (no .gitignore).
+if git -C ".loom/worktrees/issue-106" status --porcelain --untracked-files=all | grep -q ".loom-managed"; then
+    pass "precondition: .loom-managed is untracked+visible to git in this repo"
+else
+    echo "  (note: .loom-managed already ignored here — guard still exercised below)"
+fi
+touch ".loom/worktrees/issue-106/.loom-in-use" ".loom/worktrees/issue-106/.loom-checkpoint"
+if ./.loom/scripts/worktree.sh remove 106 >/tmp/rm-out8.$$ 2>&1; then
+    pass "remove succeeded with only Loom runtime markers present"
+else
+    fail "remove refused a worktree whose only 'changes' are Loom markers (see /tmp/rm-out8.$$)"
+fi
+if [[ ! -d ".loom/worktrees/issue-106" ]]; then
+    pass "marker-only worktree was removed"
+else
+    fail "marker-only worktree still present"
+fi
+
+# --- Test 9: a staged-only change also triggers the refusal ------------------
+echo ""
+echo "Test 9: remove refuses a worktree with staged-but-uncommitted changes"
+make_worktree 107
+cd "$REPO"
+echo "staged content" > ".loom/worktrees/issue-107/staged.txt"
+git -C ".loom/worktrees/issue-107" add staged.txt
+if ./.loom/scripts/worktree.sh remove 107 >/tmp/rm-out9.$$ 2>&1; then
+    fail "remove succeeded on a worktree with staged changes (should have refused)"
+else
+    pass "remove exited non-zero for staged-but-uncommitted changes"
+fi
+if [[ -f ".loom/worktrees/issue-107/staged.txt" ]]; then
+    pass "staged work survived the refused removal"
+else
+    fail "staged work was destroyed"
 fi
 
 # --- Summary ----------------------------------------------------------------

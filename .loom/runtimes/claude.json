@@ -1,0 +1,10 @@
+{
+  "runtime": "claude",
+  "capabilities": {
+    "mcp": "yes",
+    "subagents": "yes",
+    "hooks": "yes",
+    "skills": "yes",
+    "worktreeIsolation": "yes"
+  }
+}

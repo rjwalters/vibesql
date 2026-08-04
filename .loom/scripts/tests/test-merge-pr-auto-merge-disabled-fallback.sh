@@ -67,9 +67,10 @@ assert_eq() {
 
 # --- The exact gh error string surfaced by the repo-level toggle ---
 # Mirrors the failure in issue #3763's Context block. The `gh` prefix and the
-# surrounding loom-auto-merge WARNING wrapper are included to prove the
-# substring matcher is robust to the real, decorated output.
-disabled_error="WARNING: Failed to enable auto-merge for PR #26: gh: Auto merge is not allowed for this repository"
+# surrounding "Failed to enable auto-merge" wrapper (as emitted by
+# `loom-daemon forge auto-merge`, or the shell forge_auto_merge fallback) are
+# included to prove the substring matcher is robust to the real, decorated output.
+disabled_error="Failed to enable auto-merge for PR #26: gh: Auto merge is not allowed for this repository"
 clean_error="gh: Pull request Pull request is in clean status (enablePullRequestAutoMerge)"
 unstable_error="gh: Pull request Pull request is in unstable status (enablePullRequestAutoMerge)"
 

@@ -80,7 +80,7 @@ echo
 echo "--- Detection: authoritative body-text signal, same-candidate-set only ---"
 
 assert_contains "Detection reuses guide.md parse_dependencies convention" 'parse_dependencies'
-assert_contains "Detection restricted to Depends on / Requires" '(Depends on|Requires) #[0-9]+'
+assert_contains "Detection restricted to Depends on / Requires" '(Depends on|Requires)[*_:[:space:]]*#[0-9]+'
 assert_contains "Blocked by deliberately excluded from stacking detection" 'EXCLUDES `Blocked by`'
 assert_contains "body field added to existing gh issue view read (no new API call)" 'no new API call'
 # THE load-bearing guard: same-candidate-set restriction must be stated explicitly.
@@ -123,7 +123,13 @@ assert_contains "Generalizes single global DEPENDS_ON value" 'the pre-existing s
 assert_contains "worktree.sh --base mechanics untouched" 'worktree.sh N --base feature/issue-<parent>'
 assert_contains "gh pr create --base mechanics untouched" 'gh pr create --base feature/issue-<parent>'
 assert_contains "Explicit --depends-on never overridden by detected edge" 'never override'
-assert_contains "Daemon path forwards depends_on per candidate" 'mcp__loom__dispatch_sweep(kind={"Issue": N}, depends_on=<parent>)'
+# Param-tolerant on purpose: the load-bearing contract is that the daemon-path
+# dispatch call forwards `depends_on=<parent>` for a candidate with a detected
+# edge. The call's *other* parameters are free to grow (e.g. `workspace_root=`
+# added by #4549), so anchoring on the closing `)` would make this a stale
+# doc-literal assertion that breaks on every unrelated signature addition.
+assert_matches "Daemon path forwards depends_on per candidate" \
+    'mcp__loom__dispatch_sweep\(kind=[{]"Issue": N[}], depends_on=<parent>'
 assert_contains "No daemon-side code change" 'no daemon-side code change'
 
 echo
@@ -146,7 +152,7 @@ echo
 echo "--- Cross-file: guide.md regex convention still present (reused, not modified) ---"
 
 if [[ -f "$GUIDE_MD" ]]; then
-    if grep -qF -- '(Blocked by|Depends on|Requires|\- \[.\]) #[0-9]+' "$GUIDE_MD"; then
+    if grep -qF -- '(Blocked by|Depends on|Requires|\- \[.\])[*_:[:space:]]*#[0-9]+' "$GUIDE_MD"; then
         echo "PASS: guide.md parse_dependencies regex convention intact (reused by --auto-stack)"
         PASS=$((PASS + 1))
     else
