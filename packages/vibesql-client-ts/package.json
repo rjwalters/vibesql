@@ -56,16 +56,16 @@
     "LICENSE"
   ],
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
-    "@types/node": "^20.19.43",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
-    "@vitest/coverage-v8": "^2.1.9",
-    "eslint": "^9.39.5",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.1",
     "prettier": "^3.9.6",
-    "react": "^18.3.1",
+    "react": "^19.2.8",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.67.0",
-    "vitest": "^3.2.7"
+    "vitest": "^4.1.10"
   }
 }

@@ -25,9 +25,9 @@
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "react": "^18.0.0",
