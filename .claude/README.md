@@ -8,7 +8,7 @@ This directory contains Claude Code configuration for the VibeSQL project.
 - **`settings.local.json`**: Personal preferences (gitignored, create if needed)
 - **`agents/`**: Custom subagent definitions for Loom roles (see below)
 - **`skills/`**: Installed skill packages — currently `skills/repo/` (Repo Skills), managed by its installer
-- **`commands/repo/`**: Repo Skills slash commands (`/repo:<command>`, 18 files) — managed by the Repo Skills installer; edit outside its markers only
+- **`commands/repo/`**: Repo Skills slash commands (`/repo:<command>`, 20 files) — managed by the Repo Skills installer; edit outside its markers only
 
 ## Pre-approved Commands
 
@@ -27,13 +27,11 @@ The `settings.json` file pre-approves common development commands to streamline 
 - Configuration: config, check-ignore
 
 ### Package Management
-- `pnpm daemon:dev` - Run daemon in dev mode
-- `pnpm daemon:build` - Build daemon (release)
-- `pnpm check:all` - Run all checks
+- `pnpm check:all` - Run all checks (fmt, clippy, test, build)
 - `pnpm check:ci` - Run CI checks locally
 
 ### Code Quality
-- `pnpm clippy` - Rust linting
+- `pnpm lint` - Rust linting (clippy)
 - `pnpm test` - Run tests
 
 ### Rust/Cargo

@@ -60,26 +60,6 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
-  # npm dependency updates for the TypeScript client (own lockfile,
-  # carries the critical vitest alert)
-  - package-ecosystem: "npm"
-    directory: "/packages/vibesql-client-ts"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      dependencies:
-        patterns:
-          - "*"
-    labels:
-      - "dependencies"
-      - "loom:review-requested"
-    reviewers:
-      - "rwalters"
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-
   # npm/pnpm dependency updates for web-demo
   - package-ecosystem: "npm"
     directory: "/web-demo"

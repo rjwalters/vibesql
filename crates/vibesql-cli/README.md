@@ -185,9 +185,12 @@ The CLI is organized into modules:
 ## Dependencies
 
 - `clap 4` - Command-line argument parsing
-- `rustyline 13` - Line editing and history
+- `rustyline 18` - Line editing and history
 - `prettytable-rs 0.10` - Table formatting
 - `serde_json 1.0` - JSON formatting
-- `csv 1.3` - CSV parsing and formatting
 - `anyhow 1.0` - Error handling
-- `atty 0.2` - Terminal detection for stdin piping
+- `toml 1.1` - Config file (`~/.vibesqlrc`) parsing
+- `dirs 6.0` - Home/config directory resolution
+- `regex 1.10` - Pattern matching
+- `rusqlite` - SQLite comparison/interop
+- `log 0.4` - Logging
