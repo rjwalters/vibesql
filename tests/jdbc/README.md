@@ -103,4 +103,4 @@ If you find compatibility issues:
 2. Note the JDK version
 3. Document the error message
 4. Include connection code used
-5. Report at: https://github.com/rwalters/vibesql/issues
+5. Report at: https://github.com/rjwalters/vibesql/issues

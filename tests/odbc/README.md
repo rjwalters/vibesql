@@ -70,4 +70,4 @@ If you find compatibility issues:
 1. Note the specific ODBC driver version
 2. Document the error message
 3. Include connection settings used
-4. Report at: https://github.com/rwalters/vibesql/issues
+4. Report at: https://github.com/rjwalters/vibesql/issues
