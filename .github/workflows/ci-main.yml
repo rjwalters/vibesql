@@ -19,7 +19,9 @@ jobs:
   # ============================================================================
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Cold-cache runs (sccache miss) exceed 30 minutes; last warm-cache
+    # green run was ~21 min, PR CI's equivalent job runs ~33 min cold.
+    timeout-minutes: 45
     steps:
       - name: Free disk space
         run: |
