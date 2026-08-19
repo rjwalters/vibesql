@@ -38,9 +38,22 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-JUDGE_MD="$REPO_ROOT/defaults/.claude/commands/loom/judge.md"
-DOCTOR_MD="$REPO_ROOT/defaults/.claude/commands/loom/doctor.md"
-CURATOR_MD="$REPO_ROOT/defaults/.claude/commands/loom/curator.md"
+# Role prompts are shipped (installed at .claude/commands/loom/<role>.md), so
+# resolve each the way each layout actually lays it out: the installed path
+# first (consumer repos, and Loom's own dogfooded checkout), falling back to
+# the defaults/ source-tree path (a bare source checkout with no
+# .claude/commands/loom/ copy yet). See issue #6194 / #6241.
+resolve_role_md() {
+    local role="$1"
+    if [[ -f "$REPO_ROOT/.claude/commands/loom/$role.md" ]]; then
+        echo "$REPO_ROOT/.claude/commands/loom/$role.md"
+    else
+        echo "$REPO_ROOT/defaults/.claude/commands/loom/$role.md"
+    fi
+}
+JUDGE_MD="$(resolve_role_md judge)"
+DOCTOR_MD="$(resolve_role_md doctor)"
+CURATOR_MD="$(resolve_role_md curator)"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

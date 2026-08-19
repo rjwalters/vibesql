@@ -355,8 +355,14 @@ EOF
 # only ever logs the literal word "restart" and cannot distinguish a plain
 # restart from a drain-mode one. Lets a test assert exactly which flags the
 # update script threaded through to `loom-daemon restart`.
+#
+# Optional $5 (Issue #6007): a JSON body to emit on `status --json`. Absent (the
+# default, and what every pre-#6007 caller gets), `status` falls through to the
+# "unsupported subcommand" arm and exits 1 — exactly how a daemon binary that
+# cannot answer the probe behaves, which is the fallback path the #6007
+# pending-roll detector is written to tolerate. Must not contain single quotes.
 write_fake_daemon_restart_argv() {
-    local path="$1" commit="$2" restart_marker="$3" restart_rc="$4"
+    local path="$1" commit="$2" restart_marker="$3" restart_rc="$4" status_json="${5:-}"
     cat > "$path" <<EOF
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
@@ -366,6 +372,10 @@ fi
 if [[ "\${1:-}" == "restart" ]]; then
     echo "\$*" >> "${restart_marker}"
     exit ${restart_rc}
+fi
+if [[ -n '${status_json}' && "\${1:-}" == "status" ]]; then
+    printf '%s\n' '${status_json}'
+    exit 0
 fi
 if [[ "\${1:-}" == "calibrate" ]]; then
     exit 1
@@ -700,18 +710,49 @@ WantedBy=default.target
 EOF
 }
 
-# Writes a fake `cargo` that, on `cargo build --release` (cwd = loom-daemon/),
-# copies $NEW_FAKE_BIN_SRC into target/release/loom-daemon instead of
-# compiling. Tests export NEW_FAKE_BIN_SRC before invoking loom-daemon-update.sh.
+# Writes a fake `cargo` that, on `cargo build --release [--message-format=...]`
+# (cwd = loom-daemon/), copies $NEW_FAKE_BIN_SRC into
+# ${CARGO_TARGET_DIR:-target}/release/loom-daemon instead of compiling --
+# honoring CARGO_TARGET_DIR (#6160) exactly like real cargo does, so tests can
+# redirect the build output the same way a redirected host does. Tests export
+# NEW_FAKE_BIN_SRC before invoking loom-daemon-update.sh. When a
+# --message-format=json* flag is present (the invocation loom-daemon-update.sh
+# actually uses since #6160), also emits the compiler-artifact/build-finished
+# JSON messages loom-daemon-update.sh parses to locate the built executable --
+# shaped like real `cargo build --message-format=json-render-diagnostics`
+# output (a null-executable library artifact first, matching the real
+# multi-target stream, then the bin target's own artifact with the real,
+# possibly-redirected, absolute executable path). Also answers `cargo metadata
+# --format-version 1 --no-deps` with a minimal object reporting the same
+# (redirect-aware) target_directory, for the fallback path's own test coverage.
 write_fake_cargo() {
     local path="$1"
     cat > "$path" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "build" ]]; then
-    mkdir -p target/release
-    cp "$NEW_FAKE_BIN_SRC" target/release/loom-daemon
-    chmod +x target/release/loom-daemon
-    echo "[fake cargo] build ok"
+    target_dir="${CARGO_TARGET_DIR:-target}"
+    mkdir -p "$target_dir/release"
+    cp "$NEW_FAKE_BIN_SRC" "$target_dir/release/loom-daemon"
+    chmod +x "$target_dir/release/loom-daemon"
+    abs_target_dir="$(cd "$target_dir" && pwd)"
+    for arg in "$@"; do
+        case "$arg" in
+            --message-format=json*)
+                printf '{"reason":"compiler-artifact","target":{"kind":["lib"],"name":"loom_daemon"},"executable":null}\n'
+                printf '{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"loom-daemon"},"executable":"%s/release/loom-daemon"}\n' "$abs_target_dir"
+                printf '{"reason":"build-finished","success":true}\n'
+                break
+                ;;
+        esac
+    done
+    echo "[fake cargo] build ok" >&2
+    exit 0
+fi
+if [[ "${1:-}" == "metadata" ]]; then
+    target_dir="${CARGO_TARGET_DIR:-target}"
+    mkdir -p "$target_dir"
+    abs_target_dir="$(cd "$target_dir" && pwd)"
+    printf '{"target_directory":"%s"}\n' "$abs_target_dir"
     exit 0
 fi
 echo "[fake cargo] unsupported subcommand: $*" >&2
@@ -983,7 +1024,20 @@ BASE_WORKDIR="$(mktemp -d)"
 #
 # Tests below that need a pinned value still set it on their own invocation
 # (e.g. `LOOM_DAEMON_BIN="$W1/..." bash ...`), which applies regardless.
-live_state_sandbox_init "$BASE_WORKDIR/live-state"
+#
+# The return code is CHECKED, never bare (#6420). init returns non-zero when it
+# could not `cd` into the sandbox root (#6386 — the cwd tier is then still aimed
+# at wherever this suite was launched from, i.e. potentially a LIVE checkout) or
+# when the ambient supervisor label is the real production one (#5501). This
+# suite runs under `set -uo pipefail` with NO `-e`, so a bare call would swallow
+# both and continue with a HALF-ARMED sandbox — the exact state the helper's own
+# failure path exists to prevent — while driving the real lifecycle scripts.
+if ! live_state_sandbox_init "$BASE_WORKDIR/live-state"; then
+    echo "FATAL: live-state sandbox init failed — refusing to run this suite against a half-armed sandbox (#6420)." >&2
+    echo "  See the reason above (lib/live-state-sandbox.sh): a writable sandbox root is required, and the ambient LOOM_LAUNCHD_LABEL / LOOM_WATCHDOG_LABEL must not be the real production identities." >&2
+    rm -rf "$BASE_WORKDIR"
+    exit 1
+fi
 
 # Supervisor identity, not a state path — the watchdog LaunchAgent must be
 # provisioned under the scratch label so a restart path can never touch the
@@ -1009,6 +1063,16 @@ export LOOM_PROVISION_ALLOW_SCRIPT=1
 # any test regresses into one, this decoy dies and the final assertion fails.
 # Spawned OUTSIDE $BASE_WORKDIR's path so the trap's `pkill -f "$BASE_WORKDIR"`
 # does not sweep it; killed explicitly below.
+#
+# Deliberately NOT renamed per #5548's "test fixtures should not be named
+# `loom-daemon`" fix: the whole point of this fixture is to BE a process
+# named `loom-daemon` so the label-blind pgrep tier it decoys has something
+# to (not) match -- renaming it would defeat the test. It is tracked via
+# bg_proc_track/bg_proc_reap (EXIT/INT/TERM traps) like every other
+# background fixture in this suite, so it does not additionally widen
+# #5548's "orphaned past all cleanup" risk beyond what SIGKILL of the test
+# runner already allows for any tracked fixture (a hard, documented
+# bash/POSIX limit -- see lib/bg-proc-trap.sh).
 DECOY_DIR="$(mktemp -d)"
 cat > "$DECOY_DIR/loom-daemon" <<'EOF'
 #!/usr/bin/env bash
@@ -1157,7 +1221,14 @@ else
     echo -e "${RED}✗${NC} fixture: old daemon process is alive before update"
 fi
 
-( cd "$W5" && PATH="$TEST_PATH" LOOM_DAEMON_BIN="$INSTALLED5" NEW_FAKE_BIN_SRC="$NEW_FAKE5" \
+# `LOOM_PID_FILE=''` (empty) is deliberate and load-bearing since #6386:
+# loom-daemon-update.sh (and the loom-daemon-stop.sh it delegates the restart's
+# stop half to) now resolve LOOM_PID_FILE AHEAD of the $PWD-derived state home,
+# and live_state_sandbox_init exports it suite-wide. A scenario whose fixture
+# pid file lives at "$W<N>/.loom/.daemon.pid" must therefore say it means the
+# $PWD tier. Safe: the paired `cd "$W<N>"` keeps that tier inside this suite's
+# own scratch workspace.
+( cd "$W5" && PATH="$TEST_PATH" LOOM_PID_FILE='' LOOM_DAEMON_BIN="$INSTALLED5" NEW_FAKE_BIN_SRC="$NEW_FAKE5" \
     env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     bash "$UPDATE_SCRIPT" >"$W5/update.log" 2>&1 )
 update_rc=$?
@@ -1233,7 +1304,7 @@ echo "$old_pid5b" > "$W5B/.loom/.daemon.pid"
 # Capture to a log rather than /dev/null (#4799): when this scenario wedged in
 # CI the tail of the suite output was undiagnostic precisely because its update
 # run wrote nowhere, so the failure surfaced as silence. Mirror scenario 5.
-( cd "$W5B" && PATH="$TEST_PATH" LOOM_DAEMON_BIN="$INSTALLED5B" NEW_FAKE_BIN_SRC="$NEW_FAKE5B" \
+( cd "$W5B" && PATH="$TEST_PATH" LOOM_PID_FILE='' LOOM_DAEMON_BIN="$INSTALLED5B" NEW_FAKE_BIN_SRC="$NEW_FAKE5B" \
     env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     bash "$UPDATE_SCRIPT" >"$W5B/update.log" 2>&1 )
 update5b_rc=$?
@@ -1388,7 +1459,7 @@ bg_proc_track "$old_pid7"
 sleep 0.3
 echo "$old_pid7" > "$W7/.loom/.daemon.pid"
 
-( cd "$W7" && PATH="$TEST_PATH" LOOM_DAEMON_BIN="$INSTALLED7" NEW_FAKE_BIN_SRC="$NEW_FAKE7" \
+( cd "$W7" && PATH="$TEST_PATH" LOOM_PID_FILE='' LOOM_DAEMON_BIN="$INSTALLED7" NEW_FAKE_BIN_SRC="$NEW_FAKE7" \
     bash "$UPDATE_SCRIPT" --no-restart >/dev/null 2>&1 )
 
 TESTS_RUN=$((TESTS_RUN + 1))
@@ -1808,7 +1879,7 @@ pid17=$!
 bg_proc_track "$pid17"
 sleep 0.3
 echo "$pid17" > "$W17/.loom/.daemon.pid"
-check_pid_out=$( cd "$W17" && PATH="$TEST_PATH" LOOM_DAEMON_LAUNCHD=0 \
+check_pid_out=$( cd "$W17" && PATH="$TEST_PATH" LOOM_PID_FILE='' LOOM_DAEMON_LAUNCHD=0 \
     LOOM_DAEMON_BIN="$INSTALLED17" bash "$UPDATE_SCRIPT" --check 2>&1 )
 TESTS_RUN=$((TESTS_RUN + 1))
 if echo "$check_pid_out" | grep -qi 'manager: PID-file'; then
@@ -3405,7 +3476,7 @@ fi
 # 57. ff-abort classification (#4951): local <default> has DIVERGED from
 #     origin/<default> in commit history, but the two are content-IDENTICAL
 #     (`git diff origin/main...main` is empty — e.g. a local resync commit
-#     and its own revert that net to no change, the robb-STUDIO 2026-08-02
+#     and its own revert that net to no change, the studio-host 2026-08-02
 #     incident shape). Default (no --auto-resolve-safe-abort): still hard
 #     aborts (exit 1, HEAD untouched) but now names the exact safe command
 #     instead of the old bare "resolve manually" message.
@@ -4654,6 +4725,132 @@ else
     echo "  cosign argv: $(cat "$WS_COSIGN_ARGS" 2>/dev/null)"
 fi
 
+# ------------------------------------------------------------
+# T. Release-cadence gap visibility (#6010): the newest resolved release is
+#    NEWER than the installed binary (so ARTIFACT_MODE still wins and the
+#    update proceeds normally) but OLDER than the source tree's own VERSION
+#    file. Both the plain-run advisory and the --check summary must name the
+#    gap so an operator can tell, before running a forced --fetch elsewhere,
+#    that the artifact path cannot reach current source yet.
+# ------------------------------------------------------------
+WT="$BASE_WORKDIR/w-fetch-t"
+new_fixture "$WT"
+write_fake_daemon "$WT/installed-loom-daemon" "oldc0mm" "$WT/marker"
+echo "0.20.0" > "$WT/VERSION"
+
+WT_ASSETS="$WT/gh-assets"
+mkdir -p "$WT_ASSETS"
+WT_BIN_NAME="loom-daemon-x86_64-unknown-linux-gnu"
+write_fake_artifact_daemon "$WT_ASSETS/$WT_BIN_NAME" "0.16.0" "artifact-t"
+sha256_of "$WT_ASSETS/$WT_BIN_NAME" > "$WT_ASSETS/$WT_BIN_NAME.sha256"
+
+WT_FAKEBIN="$WT/fakebin"
+mkdir -p "$WT_FAKEBIN"
+# write_fake_daemon reports version 0.15.0, so tag v0.16.0 IS newer than
+# installed -- but still behind the fixture's VERSION file (0.20.0) above.
+write_fake_gh "$WT_FAKEBIN/gh" "v0.16.0" "$WT_ASSETS"
+
+outT=$( cd "$WT" && PATH="$WT_FAKEBIN:$TEST_PATH" \
+    LOOM_DAEMON_BIN="$WT/installed-loom-daemon" \
+    LOOM_DAEMON_UPDATE_GH_REPO="test-owner/test-repo" \
+    LOOM_DAEMON_UPDATE_TARGET="x86_64-unknown-linux-gnu" \
+    bash "$UPDATE_SCRIPT" --no-restart 2>&1; echo "EXIT=$?" )
+rcT=$(echo "$outT" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
+assert_eq "0" "$rcT" "release-gap: a still-usable (newer-than-installed) artifact update still exits 0"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$outT" | grep -q 'Artifact path cannot reach current source' \
+    && echo "$outT" | grep -q '0.20.0' && echo "$outT" | grep -q 'v0.16.0'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} release-gap: plain run warns when the resolved release is behind source VERSION"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} release-gap: plain run warns when the resolved release is behind source VERSION"
+    echo "  output: $outT"
+fi
+
+WT2="$BASE_WORKDIR/w-fetch-t2"
+new_fixture "$WT2"
+write_fake_daemon "$WT2/installed-loom-daemon" "oldc0mm" "$WT2/marker"
+echo "0.20.0" > "$WT2/VERSION"
+WT2_ASSETS="$WT2/gh-assets"
+mkdir -p "$WT2_ASSETS"
+write_fake_artifact_daemon "$WT2_ASSETS/$WT_BIN_NAME" "0.16.0" "artifact-t2"
+sha256_of "$WT2_ASSETS/$WT_BIN_NAME" > "$WT2_ASSETS/$WT_BIN_NAME.sha256"
+WT2_FAKEBIN="$WT2/fakebin"
+mkdir -p "$WT2_FAKEBIN"
+write_fake_gh "$WT2_FAKEBIN/gh" "v0.16.0" "$WT2_ASSETS"
+
+outT2=$( cd "$WT2" && PATH="$WT2_FAKEBIN:$TEST_PATH" \
+    LOOM_DAEMON_BIN="$WT2/installed-loom-daemon" \
+    LOOM_DAEMON_UPDATE_GH_REPO="test-owner/test-repo" \
+    LOOM_DAEMON_UPDATE_TARGET="x86_64-unknown-linux-gnu" \
+    bash "$UPDATE_SCRIPT" --check 2>&1; echo "EXIT=$?" )
+rcT2=$(echo "$outT2" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
+assert_eq "3" "$rcT2" "release-gap: --check still reports the available artifact update (exit 3)"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$outT2" | grep -q 'Release gap: installed 0.15.0, newest release 0.16.0, source 0.20.0'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} release-gap: --check summarizes installed/release/source together"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} release-gap: --check summarizes installed/release/source together"
+    echo "  output: $outT2"
+fi
+
+# ------------------------------------------------------------
+# U. Release-cadence gap visibility (#6010), forced --fetch: the newest
+#    resolved release is OLDER than the installed binary (the real #6010
+#    incident shape -- a host already built past the last cut release) AND
+#    older than source VERSION. The existing hard-fail (exit 1, never falls
+#    back to a source build) must additionally NAME the source-gap cause.
+# ------------------------------------------------------------
+WU="$BASE_WORKDIR/w-fetch-u"
+new_fixture "$WU"
+write_fake_artifact_daemon "$WU/installed-loom-daemon" "0.18.12" "instcommit"
+echo "0.18.13" > "$WU/VERSION"
+
+WU_ASSETS="$WU/gh-assets"
+mkdir -p "$WU_ASSETS"
+WU_BIN_NAME="loom-daemon-x86_64-unknown-linux-gnu"
+write_fake_artifact_daemon "$WU_ASSETS/$WU_BIN_NAME" "0.18.0" "artifact-u"
+sha256_of "$WU_ASSETS/$WU_BIN_NAME" > "$WU_ASSETS/$WU_BIN_NAME.sha256"
+
+WU_FAKEBIN="$WU/fakebin"
+mkdir -p "$WU_FAKEBIN"
+write_fake_gh "$WU_FAKEBIN/gh" "v0.18.0" "$WU_ASSETS"
+write_fake_cargo "$WU_FAKEBIN/cargo"
+
+outU=$( cd "$WU" && PATH="$WU_FAKEBIN:$TEST_PATH" \
+    LOOM_DAEMON_BIN="$WU/installed-loom-daemon" \
+    LOOM_DAEMON_UPDATE_GH_REPO="test-owner/test-repo" \
+    LOOM_DAEMON_UPDATE_TARGET="x86_64-unknown-linux-gnu" \
+    bash "$UPDATE_SCRIPT" --no-restart --fetch 2>&1; echo "EXIT=$?" )
+rcU=$(echo "$outU" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
+assert_eq "1" "$rcU" "release-gap: forced --fetch behind BOTH installed and source still hard-fails (exit 1)"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$outU" | grep -q 'no usable release artifact was resolved' \
+    && echo "$outU" | grep -q 'Cause: the newest release (0.18.0) is behind this source tree'"'"'s VERSION (0.18.13)'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} release-gap: forced --fetch hard-fail names the source-gap cause"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} release-gap: forced --fetch hard-fail names the source-gap cause"
+    echo "  output: $outU"
+fi
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$outU" | grep -q 'Rebuilding loom-daemon (cargo build'; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} release-gap: forced --fetch hard-fail never falls back to 'cargo build'"
+    echo "  output: $outU"
+else
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} release-gap: forced --fetch hard-fail never falls back to 'cargo build'"
+fi
+
 # ============================================================
 # P1-P8. --prune-stale-entry-points (#5139): the stale-entry-point advisory
 #     (tests 45-48 above) detects but never removes anything. This flag
@@ -5078,6 +5275,20 @@ else
     echo "  output: $out70"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
+# Issue #6007: this fixture's fake daemon cannot answer `status --json`, which
+# stands in for a pre-#6007 daemon (one that really did clear the drain flag and
+# resume dispatch). The detector must stay conservative there and keep the
+# historical "re-run" advice rather than promising a convergence that binary does
+# not implement.
+if echo "$out70" | grep -q 'Re-run this script' && ! echo "$out70" | grep -q 'ROLL PENDING'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} an unconfirmable pending roll falls back to the historical re-run advice (#6007)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} an unconfirmable pending roll falls back to the historical re-run advice (#6007)"
+    echo "  output: $out70"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
 if ! grep -qi 'reset-failed' "$SD_LOG70" 2>/dev/null; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} fail-safe timeout NEVER triggers the reset-failed+start self-heal"
@@ -5195,6 +5406,437 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} --dry-run --restart-now on systemd describes the immediate (non-drained) plan"
     echo "  output: $dry72_now"
+fi
+
+# ============================================================
+# 73. (#6008) The generic ff-only hard abort names the host-local config tier
+#     when the blocking dirty tracked file is a config tier. `.loom/config.json`
+#     is NOT in the managed set (it never was — that is why this case hard-aborts
+#     rather than being auto-discarded), so on a fleet host a deliberate
+#     host-specific edit there re-blocks every roll forever and the checkout
+#     drifts hundreds of commits behind (the loom-worker-2 incident). The abort
+#     must therefore point at .loom-local/local.json, not just "resolve
+#     manually" — and must NOT emit that hint when the blocker is some other file.
+# ============================================================
+W73="$BASE_WORKDIR/w73"
+BARE73="$BASE_WORKDIR/w73-origin.git"
+new_fixture_with_origin "$W73" "$BARE73"
+mkdir -p "$W73/.loom"
+printf '{"safehouse":{"enabled":true}}\n' > "$W73/.loom/config.json"
+( cd "$W73" && git add .loom/config.json && git -c user.email=test@test -c user.name=test commit -q -m "track legacy config" && git push -q origin HEAD:refs/heads/main )
+TMPCLONE73="$(mktemp -d)"
+git clone -q "$BARE73" "$TMPCLONE73"
+printf '{"safehouse":{"enabled":true,"room":"loom-fleet"}}\n' > "$TMPCLONE73/.loom/config.json"
+( cd "$TMPCLONE73" && git commit -aq -m "origin updates the tracked config" && git push -q origin HEAD:refs/heads/main )
+rm -rf "$TMPCLONE73"
+# The host's deliberate, host-specific edit: safehoused is not provisioned here.
+printf '{"safehouse":{"enabled":false}}\n' > "$W73/.loom/config.json"
+HEAD_BEFORE73="$(cd "$W73" && git rev-parse --short HEAD)"
+out73=$( cd "$W73" && PATH="$TEST_PATH" bash "$UPDATE_SCRIPT" --auto-resolve-safe-abort 2>&1 )
+rc73=$?
+assert_eq "1" "$rc73" "dirty tracked .loom/config.json still hard-aborts (never auto-discarded)"
+HEAD_AFTER73="$(cd "$W73" && git rev-parse --short HEAD)"
+assert_eq "$HEAD_BEFORE73" "$HEAD_AFTER73" "dirty config tier: HEAD untouched"
+TESTS_RUN=$((TESTS_RUN + 1))
+if grep -q '"enabled":false' "$W73/.loom/config.json"; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} the host's deliberate config edit is left untouched"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} the host's deliberate config edit is left untouched"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$out73" | grep -q '\.loom/config\.json' \
+    && echo "$out73" | grep -q '\.loom-local/local\.json'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} hard abort names the dirty config tier and points at .loom-local/local.json (#6008)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} hard abort names the dirty config tier and points at .loom-local/local.json (#6008)"
+    echo "  output: $out73"
+fi
+# The hint is targeted, not unconditional: test 61's blocker was an ordinary
+# unmanaged file, so that abort must stay free of the config-tier advice.
+TESTS_RUN=$((TESTS_RUN + 1))
+if ! echo "$out61" | grep -q '\.loom-local/local\.json'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} config-tier hint is NOT emitted when the blocker is an ordinary unmanaged file"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} config-tier hint is NOT emitted when the blocker is an ordinary unmanaged file"
+    echo "  output: $out61"
+fi
+
+# ============================================================
+# 74. Staleness is compared against the SYSTEMD-managed binary, not the
+#     PATH-resolved one (#6009 AC1/AC2): the unit's ExecStart= points at a
+#     binary that is CURRENT (matches source HEAD) while a DIFFERENT,
+#     STALE `loom-daemon` sits earlier on PATH. --check must report
+#     "already up to date" (using the supervisor's binary), not "update
+#     available" (which the pre-#6009 PATH-only comparison would have
+#     reported) -- and must explicitly warn that the two paths diverge.
+# ============================================================
+W74="$BASE_WORKDIR/w74"
+new_fixture "$W74"
+HEAD74="$(cd "$W74" && git rev-parse --short HEAD)"
+PATHBIN_DIR74="$W74/path-bin"
+mkdir -p "$PATHBIN_DIR74"
+write_fake_daemon "$PATHBIN_DIR74/loom-daemon" "deadbee" "$W74/path-marker"
+SUP_DIR74="$W74/supervisor-install"
+mkdir -p "$SUP_DIR74"
+write_fake_daemon "$SUP_DIR74/loom-daemon" "$HEAD74" "$W74/sup-marker"
+SD_BIN74="$W74/systemd-bin"
+SD_LOG74="$W74/systemctl.log"
+write_fake_systemd_active_bin "$SD_BIN74" "$SD_LOG74" "4242"
+HOME74="$W74/home"
+UNIT74="loom-daemon-test-sd74.service"
+UNIT_PATH74="$HOME74/.config/systemd/user/${UNIT74}"
+write_fixture_unit_pre4267 "$UNIT_PATH74" "$SUP_DIR74/loom-daemon"
+check74_out=$( cd "$W74" && PATH="$SD_BIN74:$PATHBIN_DIR74:$TEST_PATH" HOME="$HOME74" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_DAEMON_SYSTEMD=1 LOOM_SYSTEMD_UNIT="$UNIT74" \
+    bash "$UPDATE_SCRIPT" --check 2>&1 )
+rc74=$?
+assert_eq "0" "$rc74" "#6009: --check exits 0 (up to date) when the SUPERVISOR's binary matches source HEAD, even though a stale one sits on PATH"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check74_out" | grep -qF "$SUP_DIR74/loom-daemon" && echo "$check74_out" | grep -qi 'already up to date'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: 'Installed binary' line reports the systemd-managed binary, not the PATH one"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: 'Installed binary' line reports the systemd-managed binary, not the PATH one"
+    echo "  output: $check74_out"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check74_out" | grep -qF "$PATHBIN_DIR74/loom-daemon" && echo "$check74_out" | grep -qF "$SUP_DIR74/loom-daemon" \
+    && echo "$check74_out" | grep -qi 'is NOT the binary systemd will actually launch'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: divergence between the PATH-resolved and systemd-managed binaries is reported explicitly (AC2)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: divergence between the PATH-resolved and systemd-managed binaries is reported explicitly (AC2)"
+    echo "  output: $check74_out"
+fi
+
+# ============================================================
+# 75. Mirror of test 74 in the OTHER direction (#6009 AC1/AC2, closes the
+#     "false update available" case from the issue body): the unit's
+#     ExecStart= binary is STALE while a CURRENT (matches source HEAD)
+#     `loom-daemon` sits on PATH. --check must still report "update
+#     available" (comparing against the supervisor's STALE binary, not the
+#     PATH-current one) and must warn about the divergence.
+# ============================================================
+W75="$BASE_WORKDIR/w75"
+new_fixture "$W75"
+HEAD75="$(cd "$W75" && git rev-parse --short HEAD)"
+PATHBIN_DIR75="$W75/path-bin"
+mkdir -p "$PATHBIN_DIR75"
+write_fake_daemon "$PATHBIN_DIR75/loom-daemon" "$HEAD75" "$W75/path-marker"
+SUP_DIR75="$W75/supervisor-install"
+mkdir -p "$SUP_DIR75"
+write_fake_daemon "$SUP_DIR75/loom-daemon" "deadbee" "$W75/sup-marker"
+SD_BIN75="$W75/systemd-bin"
+SD_LOG75="$W75/systemctl.log"
+write_fake_systemd_active_bin "$SD_BIN75" "$SD_LOG75" "4242"
+HOME75="$W75/home"
+UNIT75="loom-daemon-test-sd75.service"
+UNIT_PATH75="$HOME75/.config/systemd/user/${UNIT75}"
+write_fixture_unit_pre4267 "$UNIT_PATH75" "$SUP_DIR75/loom-daemon"
+check75_out=$( cd "$W75" && PATH="$SD_BIN75:$PATHBIN_DIR75:$TEST_PATH" HOME="$HOME75" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_DAEMON_SYSTEMD=1 LOOM_SYSTEMD_UNIT="$UNIT75" \
+    bash "$UPDATE_SCRIPT" --check 2>&1 )
+rc75=$?
+assert_eq "3" "$rc75" "#6009: --check exits 3 (update available) when the SUPERVISOR's binary is stale, even though a current one sits on PATH"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check75_out" | grep -qi 'already up to date'; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: never reports 'up to date' off the PATH-resolved binary when the supervisor's own binary is stale"
+    echo "  output: $check75_out"
+else
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: never reports 'up to date' off the PATH-resolved binary when the supervisor's own binary is stale"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check75_out" | grep -qF "$PATHBIN_DIR75/loom-daemon" && echo "$check75_out" | grep -qF "$SUP_DIR75/loom-daemon" \
+    && echo "$check75_out" | grep -qi 'is NOT the binary systemd will actually launch'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: divergence reported even when the PATH-resolved binary looks current"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: divergence reported even when the PATH-resolved binary looks current"
+    echo "  output: $check75_out"
+fi
+
+# ============================================================
+# 76. launchd mirror of test 74 (#6009 AC1/AC2): the plist's
+#     ProgramArguments[0] points at a binary that is CURRENT while a
+#     DIFFERENT, STALE `loom-daemon` sits on PATH. --check reports "already
+#     up to date" (using the launchd-managed binary) and warns about the
+#     divergence. Requires a real /usr/libexec/PlistBuddy (macOS-only,
+#     mirrors the plutil-gated scenarios 21-22 above).
+# ============================================================
+if ! command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+    echo -e "${YELLOW}⊘${NC} SKIP scenario 76 (launchd supervisor-vs-PATH divergence): /usr/libexec/PlistBuddy not available — resolve_supervisor_bin()'s launchd branch is a macOS-only production path"
+else
+W76="$BASE_WORKDIR/w76"
+new_fixture "$W76"
+HEAD76="$(cd "$W76" && git rev-parse --short HEAD)"
+PATHBIN_DIR76="$W76/path-bin"
+mkdir -p "$PATHBIN_DIR76"
+write_fake_daemon "$PATHBIN_DIR76/loom-daemon" "deadbee" "$W76/path-marker"
+SUP_DIR76="$W76/supervisor-install"
+mkdir -p "$SUP_DIR76"
+write_fake_daemon "$SUP_DIR76/loom-daemon" "$HEAD76" "$W76/sup-marker"
+LD_BIN76="$W76/launchd-bin"
+write_fake_launchd_loaded_bin "$LD_BIN76" "$W76/launchctl.log"
+HOME76="$W76/home"
+PLIST76="$HOME76/Library/LaunchAgents/${LOOM_LAUNCHD_LABEL}.plist"
+write_fixture_plist_pre4077 "$PLIST76" "$LOOM_LAUNCHD_LABEL" "$SUP_DIR76/loom-daemon" "$HOME76"
+check76_out=$( cd "$W76" && PATH="$LD_BIN76:$PATHBIN_DIR76:$TEST_PATH" HOME="$HOME76" \
+    LOOM_DAEMON_LAUNCHD=1 \
+    bash "$UPDATE_SCRIPT" --check 2>&1 )
+rc76=$?
+assert_eq "0" "$rc76" "#6009 (launchd): --check exits 0 (up to date) when the SUPERVISOR's binary matches source HEAD, even though a stale one sits on PATH"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check76_out" | grep -qF "$SUP_DIR76/loom-daemon" && echo "$check76_out" | grep -qi 'already up to date'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009 (launchd): 'Installed binary' line reports the launchd-managed binary, not the PATH one"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009 (launchd): 'Installed binary' line reports the launchd-managed binary, not the PATH one"
+    echo "  output: $check76_out"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check76_out" | grep -qF "$PATHBIN_DIR76/loom-daemon" && echo "$check76_out" | grep -qF "$SUP_DIR76/loom-daemon" \
+    && echo "$check76_out" | grep -qi 'is NOT the binary launchd will actually launch'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009 (launchd): divergence between the PATH-resolved and launchd-managed binaries is reported explicitly (AC2)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009 (launchd): divergence between the PATH-resolved and launchd-managed binaries is reported explicitly (AC2)"
+    echo "  output: $check76_out"
+fi
+fi
+
+# ============================================================
+# 77. Post-provision verification also covers the SUPERVISOR's own path
+#     (#6009 AC3): after a normal rebuild+provision run, when the systemd
+#     unit's ExecStart= still points at a DIFFERENT path than the one just
+#     provisioned, the script explicitly warns that the supervisor was NOT
+#     updated and names --relaunch as the fix (rather than silently
+#     reporting success).
+# ============================================================
+W77="$BASE_WORKDIR/w77"
+new_fixture "$W77"
+HEAD77="$(cd "$W77" && git rev-parse --short HEAD)"
+NEW_FAKE77="$W77/new-fake-daemon"
+write_fake_daemon "$NEW_FAKE77" "$HEAD77" "$W77/new-marker"
+SUP_DIR77="$W77/other-supervisor-bin"
+mkdir -p "$SUP_DIR77"
+write_fake_daemon "$SUP_DIR77/loom-daemon" "aaaaaaa" "$W77/sup-marker"
+SD_BIN77="$W77/systemd-bin"
+SD_LOG77="$W77/systemctl.log"
+write_fake_systemd_active_bin "$SD_BIN77" "$SD_LOG77" "4242"
+HOME77="$W77/home"
+UNIT77="loom-daemon-test-sd77.service"
+UNIT_PATH77="$HOME77/.config/systemd/user/${UNIT77}"
+write_fixture_unit_pre4267 "$UNIT_PATH77" "$SUP_DIR77/loom-daemon"
+MACHINE_INSTALL77="$W77/machine-install"
+out77=$( cd "$W77" && PATH="$SD_BIN77:$TEST_PATH" HOME="$HOME77" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_DAEMON_SYSTEMD=1 LOOM_SYSTEMD_UNIT="$UNIT77" \
+    LOOM_DAEMON_BIN_DIR="$MACHINE_INSTALL77" NEW_FAKE_BIN_SRC="$NEW_FAKE77" \
+    bash "$UPDATE_SCRIPT" --no-restart 2>&1 )
+rc77=$?
+assert_eq "0" "$rc77" "#6009: a run that provisions to a path the supervisor doesn't point at still exits 0 (advisory, not a hard failure)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -x "$MACHINE_INSTALL77/loom-daemon" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: provisioning itself still succeeded at the machine-level destination"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: provisioning itself still succeeded at the machine-level destination"
+    echo "  output: $out77"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$out77" | grep -qF "$SUP_DIR77/loom-daemon" && echo "$out77" | grep -qF "$MACHINE_INSTALL77/loom-daemon" \
+    && echo "$out77" | grep -qi 'is NOT the one just provisioned' && echo "$out77" | grep -q -- '--relaunch'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009 AC3: post-provision verification warns the supervisor's config still points elsewhere and names --relaunch"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009 AC3: post-provision verification warns the supervisor's config still points elsewhere and names --relaunch"
+    echo "  output: $out77"
+fi
+
+# ============================================================
+# 78. No FALSE divergence when the two paths are two spellings of the SAME
+#     file (#6009): the systemd unit's ExecStart= names a symlink that
+#     resolves to exactly the binary PATH resolution finds. The divergence
+#     advisory must stay silent (it is compared through _lde_realpath), and
+#     the staleness verdict is unchanged — this is the ordinary healthy
+#     `/usr/local/bin/loom-daemon -> ~/.local/bin/loom-daemon` install, not
+#     the stale-entry-point condition.
+# ============================================================
+W78="$BASE_WORKDIR/w78"
+new_fixture "$W78"
+HEAD78="$(cd "$W78" && git rev-parse --short HEAD)"
+PATHBIN_DIR78="$W78/path-bin"
+mkdir -p "$PATHBIN_DIR78"
+write_fake_daemon "$PATHBIN_DIR78/loom-daemon" "$HEAD78" "$W78/path-marker"
+SUP_DIR78="$W78/supervisor-link-dir"
+mkdir -p "$SUP_DIR78"
+ln -s "$PATHBIN_DIR78/loom-daemon" "$SUP_DIR78/loom-daemon"
+SD_BIN78="$W78/systemd-bin"
+SD_LOG78="$W78/systemctl.log"
+write_fake_systemd_active_bin "$SD_BIN78" "$SD_LOG78" "4242"
+HOME78="$W78/home"
+UNIT78="loom-daemon-test-sd78.service"
+UNIT_PATH78="$HOME78/.config/systemd/user/${UNIT78}"
+write_fixture_unit_pre4267 "$UNIT_PATH78" "$SUP_DIR78/loom-daemon"
+check78_out=$( cd "$W78" && PATH="$SD_BIN78:$PATHBIN_DIR78:$TEST_PATH" HOME="$HOME78" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_DAEMON_SYSTEMD=1 LOOM_SYSTEMD_UNIT="$UNIT78" \
+    bash "$UPDATE_SCRIPT" --check 2>&1 )
+rc78=$?
+assert_eq "0" "$rc78" "#6009: --check exits 0 when the supervisor's ExecStart is a symlink to the PATH-resolved binary"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$check78_out" | grep -qi 'will actually launch'; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} #6009: no divergence warning when ExecStart is just a symlink to the PATH-resolved binary"
+    echo "  output: $check78_out"
+else
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} #6009: no divergence warning when ExecStart is just a symlink to the PATH-resolved binary"
+fi
+
+# ============================================================
+# 79. Drain timeout against a #6007+ daemon that RETAINED the roll (Issue
+#     #6007): same fail-safe shape as test 70 (exit 8, pre-update pid still
+#     running, nothing cancelled), but the daemon still reports
+#     `drain.draining: true` past the deadline — it kept dispatch paused and
+#     re-armed the restart instead of handing the admission window back to the
+#     work finder. The exit-8 advice must therefore say "nothing to re-run" and
+#     must NOT tell the operator to re-run the script, which on a busy host is
+#     exactly what reproduced the livelock this issue fixes.
+# ============================================================
+W79="$BASE_WORKDIR/w79"
+new_fixture "$W79"
+HEAD79="$(cd "$W79" && git rev-parse --short HEAD)"
+INSTALLED79="$W79/installed/loom-daemon"
+mkdir -p "$W79/installed"
+RESTART_MARKER79="$W79/restart-invoked"
+# The pending-roll status body the still-running daemon reports. Shaped exactly
+# like `loom-daemon status --json`'s drain block (draining first, then deadline,
+# then the note the supervisor recorded on the refusal).
+PENDING_JSON79='{"drain": {"draining": true, "deadline": "2026-08-11T18:00:00Z", "note": "ROLL PENDING (retry 1)"}}'
+write_fake_daemon_restart_argv "$INSTALLED79" "deadbee" "$RESTART_MARKER79" 0 "$PENDING_JSON79"
+NEW_FAKE79="$W79/new-fake-daemon"
+write_fake_daemon_restart_argv "$NEW_FAKE79" "$HEAD79" "$RESTART_MARKER79" 0 "$PENDING_JSON79"
+sleep 60 >/dev/null 2>&1 &
+STILL_RUNNING_PID79=$!
+bg_proc_track "$STILL_RUNNING_PID79"
+SD_BIN79="$W79/systemd-bin"
+SD_LOG79="$W79/systemctl.log"
+SD_STATE79="$W79/systemd-pid-state"
+write_fake_systemd_pid_bin "$SD_BIN79" "$SD_LOG79" "$SD_STATE79" "${STILL_RUNNING_PID79}:active:success"
+
+out79=$( cd "$W79" && PATH="$SD_BIN79:$TEST_PATH" LOOM_SYSTEMD_FORCE=1 LOOM_DAEMON_SYSTEMD=1 \
+    LOOM_SYSTEMD_UNIT="loom-daemon-test-sd79.service" \
+    LOOM_DAEMON_BIN="$INSTALLED79" NEW_FAKE_BIN_SRC="$NEW_FAKE79" \
+    LOOM_DAEMON_DRAIN_POLL_SECS=1 LOOM_DAEMON_RESTART_POLL_INTERVAL=0.2 \
+    bash "$UPDATE_SCRIPT" --drain 2>&1 )
+rc79=$?
+assert_eq "8" "$rc79" "a retained (pending) roll still exits 8 — the fail-safe is unchanged (#6007)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$out79" | grep -q 'ROLL PENDING' && echo "$out79" | grep -q 'Nothing to re-run' \
+    && ! echo "$out79" | grep -q 'Re-run this script'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} a retained roll reports 'nothing to re-run' instead of the advice that reproduces the livelock (#6007)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} a retained roll reports 'nothing to re-run' instead of the advice that reproduces the livelock (#6007)"
+    echo "  output: $out79"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$out79" | grep -q -- '--abort-drain' && echo "$out79" | grep -q -- '--force-after-timeout'; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} the pending-roll message names both operator escape hatches (#6007)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} the pending-roll message names both operator escape hatches (#6007)"
+    echo "  output: $out79"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+# The whole point of the fail-safe: a pending roll must not have touched the
+# in-flight work or the running (pre-update) process.
+if kill -0 "$STILL_RUNNING_PID79" 2>/dev/null && ! grep -qi 'reset-failed' "$SD_LOG79" 2>/dev/null; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} a pending roll never forces the sweep-cancelling restart the fail-safe prevents"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} a pending roll never forces the sweep-cancelling restart the fail-safe prevents"
+    echo "  systemctl.log: $(cat "$SD_LOG79" 2>/dev/null)"
+fi
+kill "$STILL_RUNNING_PID79" 2>/dev/null || true
+
+# ============================================================
+# 80. Regression test (#6160): the rebuild is found and PROVISIONED even
+#     when cargo's own build output directory is redirected via
+#     CARGO_TARGET_DIR to a directory OUTSIDE the source tree entirely.
+#     The old logic probed only two hardcoded paths
+#     (<repo>/loom-daemon/target/release, <repo>/target/release) and
+#     hard-failed on this exact host shape even though the build had
+#     fully succeeded (observed for real on a host with
+#     ~/.cargo/config.toml's build.target-dir redirected after an ENOSPC
+#     incident) -- the script now resolves the artifact from cargo's own
+#     build output instead of guessing.
+# ============================================================
+W80="$BASE_WORKDIR/w80"
+new_fixture "$W80"
+HEAD80="$(cd "$W80" && git rev-parse --short HEAD)"
+INSTALLED80="$W80/installed/loom-daemon"
+mkdir -p "$W80/installed"
+write_fake_daemon "$INSTALLED80" "deadbee" "$W80/old-marker"
+NEW_FAKE80="$W80/new-fake-daemon"
+write_fake_daemon "$NEW_FAKE80" "$HEAD80" "$W80/new-marker"
+REDIRECTED_TARGET80="$BASE_WORKDIR/w80-redirected-cargo-target"
+mkdir -p "$REDIRECTED_TARGET80"
+# No .loom/.daemon.pid -> WAS_RUNNING resolves false (mirrors test 6's
+# shape): this scenario is purely about locating + provisioning the
+# artifact, not the restart path.
+
+out80=$( cd "$W80" && PATH="$TEST_PATH" LOOM_DAEMON_BIN="$INSTALLED80" NEW_FAKE_BIN_SRC="$NEW_FAKE80" \
+    CARGO_TARGET_DIR="$REDIRECTED_TARGET80" \
+    bash "$UPDATE_SCRIPT" 2>&1 )
+rc80=$?
+assert_eq "0" "$rc80" "a CARGO_TARGET_DIR redirect outside the source tree still succeeds (#6160)"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -x "$REDIRECTED_TARGET80/release/loom-daemon" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} fixture sanity: the build actually landed in the CARGO_TARGET_DIR redirect (#6160)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} fixture sanity: the build actually landed in the CARGO_TARGET_DIR redirect (#6160)"
+fi
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ ! -e "$W80/loom-daemon/target/release/loom-daemon" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} nothing was written to the old hardcoded target/release path (proves resolution followed the redirect, not a coincidental match, #6160)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} nothing was written to the old hardcoded target/release path (proves resolution followed the redirect, not a coincidental match, #6160)"
+fi
+
+TESTS_RUN=$((TESTS_RUN + 1))
+installed_commit80="$("$INSTALLED80" --version 2>/dev/null | grep -oE 'commit [0-9a-f]+' | awk '{print $2}')"
+if [[ "$installed_commit80" == "$HEAD80" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} the redirected-target build was actually PROVISIONED to LOOM_DAEMON_BIN, not silently dropped (#6160)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} the redirected-target build was actually PROVISIONED to LOOM_DAEMON_BIN, not silently dropped (#6160)"
+    echo "  installed commit: ${installed_commit80:-<none>}, expected: $HEAD80"
+    echo "  output: $out80"
 fi
 
 # ============================================================

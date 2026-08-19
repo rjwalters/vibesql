@@ -23,6 +23,16 @@
 # sibling agent shim, then invoke the real script from the source checkout and
 # assert on the generated manifest and verify exit codes.
 #
+# Unlike most install-tree tests (test-install-lock.sh, test-install-*-safety
+# etc.), verify-install.sh is a *shipped* script (scripts/* -> .loom/scripts/*
+# per scripts/install/manifest.sh) — the property this suite asserts matters
+# most in a consumer repo, where verify-install.sh actually runs. This test
+# therefore resolves its subject the way each layout actually lays it out:
+# `.loom/scripts/verify-install.sh` first (installed consumer repos, and
+# Loom's own dogfooded checkout), falling back to
+# `defaults/scripts/verify-install.sh` (a bare source checkout with no
+# .loom/scripts/ symlink/copy yet). See issue #6194.
+#
 # Usage:
 #   bash .loom/scripts/tests/test-verify-install-scope.sh
 
@@ -30,7 +40,11 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-VERIFY_SCRIPT="$REPO_ROOT/defaults/scripts/verify-install.sh"
+if [[ -f "$REPO_ROOT/.loom/scripts/verify-install.sh" ]]; then
+    VERIFY_SCRIPT="$REPO_ROOT/.loom/scripts/verify-install.sh"
+else
+    VERIFY_SCRIPT="$REPO_ROOT/defaults/scripts/verify-install.sh"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -251,6 +265,113 @@ fi
 ( cd "$FBTMP" && bash "$VERIFY_SCRIPT" verify --quiet )
 assert_eq "0" "$?" "Case 4c: fallback verify is clean (exit 0)"
 rm -rf "$FBTMP"
+echo ""
+
+# ---------------------------------------------------------------------------
+# Case 5: marker-integrity check catches malformed marker structure that a
+# hash-only comparison cannot -- specifically the "baked-in corruption" case,
+# where `generate` runs against an ALREADY malformed CLAUDE.md, so the broken
+# extraction is exactly what the manifest's hash records, and every later
+# `verify` against the same still-malformed file would otherwise report a
+# clean match (issue #6195).
+# ---------------------------------------------------------------------------
+echo "Case 5: marker-integrity check (issue #6195)"
+
+# 5a: duplicated BEGIN/END pair, baked in at generate time.
+REPO=$(seed_repo)
+cat > "$REPO/CLAUDE.md" <<'EOF'
+# Consumer Project
+
+Sibling intro section.
+
+<!-- BEGIN LOOM ORCHESTRATION -->
+## Loom
+First (stray) copy of the block.
+<!-- END LOOM ORCHESTRATION -->
+
+Some content between the two copies.
+
+<!-- BEGIN LOOM ORCHESTRATION -->
+## Loom
+Second, canonical copy of the block.
+<!-- END LOOM ORCHESTRATION -->
+
+## Sibling Tail Section
+tail.
+EOF
+( cd "$REPO" && bash "$VERIFY_SCRIPT" generate --quiet )
+( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --quiet )
+assert_eq "1" "$?" "Case 5a: duplicated marker pair baked in at generate -> verify exit 1 (was silently clean pre-#6195)"
+HUMAN_OUT=$( cd "$REPO" && bash "$VERIFY_SCRIPT" verify 2>&1 )
+assert_contains "$HUMAN_OUT" "duplicated marker" "Case 5a: human output names duplicated marker(s)"
+JSON_OUT=$( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --json 2>&1 )
+assert_contains "$JSON_OUT" '"marker_integrity"' "Case 5a: json output carries a marker_integrity array"
+assert_contains "$JSON_OUT" "duplicated marker" "Case 5a: json marker_integrity entry names the problem"
+TESTS_RUN=$((TESTS_RUN + 1))
+if echo "$JSON_OUT" | jq -e . >/dev/null 2>&1; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 5a: json output is well-formed"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 5a: json output is not valid JSON"
+fi
+rm -rf "$REPO"
+echo ""
+
+# 5b: BEGIN present with no matching END, baked in at generate time.
+REPO=$(seed_repo)
+cat > "$REPO/CLAUDE.md" <<'EOF'
+# Consumer Project
+
+Sibling intro.
+
+<!-- BEGIN LOOM ORCHESTRATION -->
+## Loom
+Block content with no closing marker -- a bad merge ate the END line.
+
+## Sibling Tail Section
+tail.
+EOF
+( cd "$REPO" && bash "$VERIFY_SCRIPT" generate --quiet )
+( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --quiet )
+assert_eq "1" "$?" "Case 5b: missing END marker baked in at generate -> verify exit 1"
+HUMAN_OUT=$( cd "$REPO" && bash "$VERIFY_SCRIPT" verify 2>&1 )
+assert_contains "$HUMAN_OUT" "missing END marker" "Case 5b: human output names missing END marker"
+rm -rf "$REPO"
+echo ""
+
+# 5c: well-formed markers still verify clean -- no false positive from the new check.
+REPO=$(seed_repo)
+( cd "$REPO" && bash "$VERIFY_SCRIPT" generate --quiet )
+( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --quiet )
+assert_eq "0" "$?" "Case 5c: well-formed marker pair -> verify exit 0 (no false positive)"
+JSON_OUT=$( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --json 2>&1 )
+assert_contains "$JSON_OUT" '"marker_integrity": []' "Case 5c: json marker_integrity array is empty when well-formed"
+rm -rf "$REPO"
+echo ""
+
+# 5d: content edited OUTSIDE the markers is not reported as a marker-integrity
+# problem -- the check must not police repo-authored content (AC #2).
+REPO=$(seed_repo)
+( cd "$REPO" && bash "$VERIFY_SCRIPT" generate --quiet )
+cat > "$REPO/CLAUDE.md" <<'EOF'
+# Consumer Project
+
+Sibling intro section HEAVILY rewritten by another tool.
+
+<!-- BEGIN LOOM ORCHESTRATION -->
+## Loom
+Loom-managed content lives here.
+<!-- END LOOM ORCHESTRATION -->
+
+## Sibling Tail Section
+Even more sibling-owned content, unrelated to marker structure.
+EOF
+( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --quiet )
+assert_eq "0" "$?" "Case 5d: sibling edit outside markers -> verify exit 0 (markers untouched)"
+JSON_OUT=$( cd "$REPO" && bash "$VERIFY_SCRIPT" verify --json 2>&1 )
+assert_contains "$JSON_OUT" '"marker_integrity": []' "Case 5d: json marker_integrity array empty for sibling-only edit"
+rm -rf "$REPO"
 echo ""
 
 # ---------------------------------------------------------------------------

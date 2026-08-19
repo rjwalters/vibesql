@@ -18,6 +18,23 @@
 #   - Shows a work-queue summary (open loom:issue / loom:review-requested /
 #     loom:pr / loom:architect / loom:hermit / loom:curated / loom:auditor
 #     counts) when `gh` is available on a GitHub forge.
+#   - Surfaces PARKED WORK (#5664): a repo holding open loom:operator-only
+#     issues looks IDENTICAL, from this summary alone, to a repo with no work
+#     at all -- zero loom:issue, zero review-requested, zero pr all read as
+#     "nothing pending" whether the backlog is genuinely empty or is sitting
+#     on N proposals a human (or a self-healing Champion pass) has not yet
+#     un-parked. The work-queue summary now always includes an open
+#     loom:operator-only count, split into its #5679 sub-kinds
+#     (loom:operator-blocked / loom:operator-decision) when present, so
+#     "parked but not visibly moving" is distinguishable from "no work" and
+#     from "genuinely needs a human decision" without reading labels by hand.
+#   - Surfaces OUTSTANDING QUARANTINE STASHES (#5185): when a builder
+#     contaminates the primary clone, `check-main-clean.sh --quarantine`
+#     rescues the dirt into a labelled `git stash` entry. That was recorded
+#     only in a structured log, so the entries accumulated unreconciled (29 on
+#     one host, oldest 7 days) and were noticed only by accident. This section
+#     reports the count and the most recent entries, so quarantined work is
+#     discoverable without knowing a quarantine ever happened.
 #   - Surfaces MACHINE-DAEMON state for this workspace (#4793): this script
 #     only ever inspected the LOCAL tmux agent pool, so a repo actively
 #     managed by a separate machine-level `loom-daemon` fleet (autonomous
@@ -158,8 +175,14 @@ ${YELLOW}OUTPUT:${NC}
     in-repo build). A Work Queue summary (open ${CYAN}loom:issue${NC} /
     ${CYAN}loom:review-requested${NC} / ${CYAN}loom:pr${NC} counts, plus
     pending-proposal counts for ${CYAN}loom:architect${NC} / ${CYAN}loom:hermit${NC} /
-    ${CYAN}loom:curated${NC} / ${CYAN}loom:auditor${NC}) is shown when 'gh' is
-    available on a GitHub forge.
+    ${CYAN}loom:curated${NC} / ${CYAN}loom:auditor${NC}, plus a ${CYAN}Parked${NC} line for
+    open ${CYAN}loom:operator-only${NC} split into its blocked/decision sub-kinds) is
+    shown when 'gh' is available on a GitHub forge -- Parked is always shown,
+    even at zero, so a repo holding parked-but-not-moving proposals cannot
+    read identically to a repo with no work at all. A ${YELLOW}Quarantined work${NC} section appears when
+    the primary clone has outstanding ${CYAN}loom-quarantine${NC} stash entries — work a
+    sweep rescued out of the main checkout that nobody has reconciled yet.
+    Full list: ${CYAN}./.loom/scripts/check-main-clean.sh --list-quarantined${NC}.
 
 ${YELLOW}EXIT STATUS:${NC}
     Always 0 when the workspace resolves — an empty pool is not an error.
@@ -244,9 +267,22 @@ count_label() {
 # these a non-empty proposal pipeline still rendered as an all-zero work
 # queue, which read as "nothing pending" even when several proposals were
 # awaiting Champion review.
+#
+# Also includes open loom:operator-only, split into its #5679 sub-kinds
+# (#5664): before this, a repo holding several parked proposals rendered
+# EXACTLY like an empty backlog here -- loom:operator-only was not counted at
+# all, so "parked and not moving" and "genuinely nothing pending" were
+# indistinguishable without reading labels by hand. loom:operator-blocked
+# marks a dependency-only park (Champion's own self-healing re-scan,
+# `classify-dependency-block.sh --check-unescalate`, un-parks these on its
+# own once the recorded blocker closes or a startable subset is declared --
+# see champion-issue-promo.md "Pass 0"); loom:operator-decision marks one that
+# genuinely needs a human. A non-zero "blocked" count that stays non-zero
+# across several `loom status` calls is the signal worth noticing: it means
+# the self-heal is not (yet) resolving something it should.
 work_queue_json() {
     command -v jq &>/dev/null || { echo "null"; return 0; }
-    local issue rr pr architect hermit curated auditor
+    local issue rr pr architect hermit curated auditor operator_only operator_blocked operator_decision
     issue=$(count_label issue "loom:issue") || { echo "null"; return 0; }
     rr=$(count_label pr "loom:review-requested") || { echo "null"; return 0; }
     pr=$(count_label pr "loom:pr") || { echo "null"; return 0; }
@@ -254,6 +290,9 @@ work_queue_json() {
     hermit=$(count_label issue "loom:hermit") || { echo "null"; return 0; }
     curated=$(count_label issue "loom:curated") || { echo "null"; return 0; }
     auditor=$(count_label issue "loom:auditor") || { echo "null"; return 0; }
+    operator_only=$(count_label issue "loom:operator-only") || { echo "null"; return 0; }
+    operator_blocked=$(count_label issue "loom:operator-blocked") || { echo "null"; return 0; }
+    operator_decision=$(count_label issue "loom:operator-decision") || { echo "null"; return 0; }
     jq -nc \
         --argjson issue "$issue" \
         --argjson review_requested "$rr" \
@@ -262,9 +301,13 @@ work_queue_json() {
         --argjson hermit "$hermit" \
         --argjson curated "$curated" \
         --argjson auditor "$auditor" \
+        --argjson operator_only "$operator_only" \
+        --argjson operator_blocked "$operator_blocked" \
+        --argjson operator_decision "$operator_decision" \
         '{"loom:issue":$issue, "loom:review-requested":$review_requested, "loom:pr":$pr,
           "loom:architect":$architect, "loom:hermit":$hermit, "loom:curated":$curated,
-          "loom:auditor":$auditor}'
+          "loom:auditor":$auditor, "loom:operator-only":$operator_only,
+          "loom:operator-blocked":$operator_blocked, "loom:operator-decision":$operator_decision}'
 }
 
 # Read the configured terminals as compact JSON array (or "[]"), resolved
@@ -437,6 +480,34 @@ daemon_state_json_obj() {
           }'
 }
 
+# ---- Outstanding quarantine stashes (#5185) ------------------------------
+# Delegates to check-main-clean.sh, which owns the quarantine mechanism and
+# therefore owns the definition of "a Loom-produced stash entry". Memoized:
+# emit_human and emit_json can both ask for it, and it shells out to git.
+#
+# Degrades to `null` — never an error, never a non-zero exit — when the script
+# is missing, predates --list-quarantined (an older installed copy exits 2 on
+# the unknown flag), or emits anything that is not valid JSON. `loom status`
+# must keep working on every install, exactly like the Work Queue and Machine
+# Daemon sections above.
+_LOOM_STATUS_QUARANTINE_JSON=""
+quarantine_stashes_json() {
+    if [[ -n "$_LOOM_STATUS_QUARANTINE_JSON" ]]; then
+        echo "$_LOOM_STATUS_QUARANTINE_JSON"
+        return 0
+    fi
+    _LOOM_STATUS_QUARANTINE_JSON="null"
+    local script="$REPO_ROOT/.loom/scripts/check-main-clean.sh"
+    if [[ -x "$script" ]] && command -v jq &>/dev/null; then
+        local out=""
+        out=$("$script" --list-quarantined --json 2>/dev/null) || out=""
+        if [[ -n "$out" ]]; then
+            _LOOM_STATUS_QUARANTINE_JSON=$(printf '%s' "$out" | jq -c '.' 2>/dev/null || echo "null")
+        fi
+    fi
+    echo "$_LOOM_STATUS_QUARANTINE_JSON"
+}
+
 # ---- JSON output ---------------------------------------------------------
 emit_json() {
     if ! command -v jq &>/dev/null; then
@@ -474,11 +545,15 @@ emit_json() {
     local daemon_json
     daemon_json=$(daemon_state_json_obj)
 
+    local quarantine_json
+    quarantine_json=$(quarantine_stashes_json)
+
     jq -nc \
         --argjson running "$running_json" \
         --argjson terminals "$terminals" \
         --argjson work_queue "$work_queue_json" \
         --argjson daemon "$daemon_json" \
+        --argjson quarantine_stashes "$quarantine_json" \
         '
         ($running | map(.id)) as $running_ids
         | {
@@ -506,7 +581,8 @@ emit_json() {
                 | ($terminals | map(.id) | index($rid)) | not))
                 | map({session: .session, id: .id, pid: .pid, uptime_seconds: .uptime_seconds, status: "unmanaged"})),
             work_queue: $work_queue,
-            daemon: $daemon
+            daemon: $daemon,
+            quarantine_stashes: $quarantine_stashes
           }'
 }
 
@@ -664,6 +740,7 @@ emit_human() {
     wq=$(work_queue_json)
     if [[ -n "$wq" && "$wq" != "null" ]]; then
         local wq_issue wq_rr wq_pr wq_architect wq_hermit wq_curated wq_auditor
+        local wq_operator_only wq_operator_blocked wq_operator_decision
         wq_issue=$(echo "$wq" | jq -r '."loom:issue"' 2>/dev/null)
         wq_rr=$(echo "$wq" | jq -r '."loom:review-requested"' 2>/dev/null)
         wq_pr=$(echo "$wq" | jq -r '."loom:pr"' 2>/dev/null)
@@ -671,10 +748,51 @@ emit_human() {
         wq_hermit=$(echo "$wq" | jq -r '."loom:hermit"' 2>/dev/null)
         wq_curated=$(echo "$wq" | jq -r '."loom:curated"' 2>/dev/null)
         wq_auditor=$(echo "$wq" | jq -r '."loom:auditor"' 2>/dev/null)
+        wq_operator_only=$(echo "$wq" | jq -r '."loom:operator-only" // 0' 2>/dev/null)
+        wq_operator_blocked=$(echo "$wq" | jq -r '."loom:operator-blocked" // 0' 2>/dev/null)
+        wq_operator_decision=$(echo "$wq" | jq -r '."loom:operator-decision" // 0' 2>/dev/null)
         echo ""
         echo -e "${BOLD}Work Queue:${NC}"
         echo -e "  ${CYAN}loom:issue${NC} ${wq_issue}   ${CYAN}loom:review-requested${NC} ${wq_rr}   ${CYAN}loom:pr${NC} ${wq_pr}"
         echo -e "  ${BOLD}Pending proposals:${NC} ${CYAN}loom:architect${NC} ${wq_architect}   ${CYAN}loom:hermit${NC} ${wq_hermit}   ${CYAN}loom:curated${NC} ${wq_curated}   ${CYAN}loom:auditor${NC} ${wq_auditor}"
+        # Parked work (#5664): always shown, even at zero -- a repo holding
+        # parked-but-not-moving proposals must not read identically to an
+        # empty backlog. loom:operator-blocked (dependency-only, #5679) is
+        # expected to self-heal via Champion's Pass 0 re-scan
+        # (classify-dependency-block.sh --check-unescalate); a count that
+        # stays non-zero across repeated checks is the signal worth acting on.
+        # loom:operator-decision genuinely needs a human. Pre-#5679 escalations
+        # carry neither sub-label ("No backfill"), so the two sub-counts can
+        # sum to less than the total.
+        echo -e "  ${BOLD}Parked:${NC} ${CYAN}loom:operator-only${NC} ${wq_operator_only} ${GRAY}(blocked: ${wq_operator_blocked}, decision: ${wq_operator_decision})${NC}"
+    fi
+
+    # Outstanding quarantine stashes (#5185). Shown ONLY when something is
+    # outstanding: a quiet stack is the normal state and does not deserve a
+    # line, but an entry sitting unreconciled is work nobody has looked at.
+    local qs
+    qs=$(quarantine_stashes_json)
+    if [[ -n "$qs" && "$qs" != "null" ]] && command -v jq &>/dev/null; then
+        local q_count q_empty
+        q_count=$(echo "$qs" | jq -r '.count // 0' 2>/dev/null || echo 0)
+        q_empty=$(echo "$qs" | jq -r '.empty_count // 0' 2>/dev/null || echo 0)
+        # Normalize before any arithmetic: a malformed report must degrade to
+        # "no section", never to a bash arithmetic error under `set -e`.
+        [[ "$q_count" =~ ^[0-9]+$ ]] || q_count=0
+        [[ "$q_empty" =~ ^[0-9]+$ ]] || q_empty=0
+        if [[ "$q_count" -gt 0 ]]; then
+            echo ""
+            echo -e "${YELLOW}${BOLD}Quarantined work (unreconciled): ${q_count}${NC}${GRAY}$( [[ "$q_empty" -gt 0 ]] && echo " — $q_empty empty" )${NC}"
+            # Newest few only; the full list (and the safe-inspection recipe)
+            # is one command away.
+            echo "$qs" | jq -r '.stashes[:3][]
+                | "  \(.commit[:12])  \(.age)  (\(.producer))\(if .empty then "  [EMPTY]" else "" end)\(if .issue then "  issue=\(.issue)" else "" end)"' \
+                2>/dev/null || true
+            if [[ "$q_count" -gt 3 ]]; then
+                echo -e "  ${GRAY}… and $((q_count - 3)) more${NC}"
+            fi
+            echo -e "  ${GRAY}(list: ./.loom/scripts/check-main-clean.sh --list-quarantined)${NC}"
+        fi
     fi
 
     echo ""

@@ -17,6 +17,11 @@
 # built with `git init`. We do NOT run the full installer — the guard is
 # pure (only touches the source repo).
 #
+# Source-tree-only by design (#6194): scripts/install-loom.sh lives at the
+# repo root, not under defaults/, so it is never shipped into an installed
+# consumer repo. This suite SKIPs (exit 0) rather than errors when run
+# outside Loom's own checkout.
+#
 # Usage:
 #   bash defaults/scripts/tests/test-install-source-guard.sh
 
@@ -79,8 +84,8 @@ assert_nonzero_exit() {
 }
 
 if [[ ! -f "$INSTALL_SCRIPT" ]]; then
-    echo "ERROR: $INSTALL_SCRIPT not found" >&2
-    exit 1
+    echo "SKIP: source-tree-only test, $INSTALL_SCRIPT not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 
 # Build a runnable harness once: extract the check_source_state function

@@ -11,6 +11,14 @@
 #   - A stale lock dir from a dead PID is recovered (not stranded).
 #   - On lock-acquisition timeout, --json emits the documented error schema.
 #
+# Also covers the issue #6014 fixes:
+#   - A late release from a stale/wedged holder (wrong acquisition token)
+#     cannot remove a different, currently-live holder's lock.
+#   - A release with no token (never acquired / already released) is a no-op.
+#   - The git-worktree-add lock is released as soon as `git worktree add`
+#     completes, not held through a slow post-worktree hook -- a second,
+#     unrelated invocation is not serialized behind the first one's hook.
+#
 # Pattern follows test-worktree-sentinel.sh: throw-away bare origin + clone in a
 # mktemp dir, copy worktree.sh + lib/, exercise behaviors.
 
@@ -273,6 +281,158 @@ EOF
     fi
     # Cleanup the synthetic lock we created.
     rm -rf .loom/locks/worktree-add
+)
+cleanup_repo "$REPO"
+
+# --- Test 7: late release from a stale/wedged holder cannot clobber a live holder's lock (#6014) ---
+echo ""
+echo "Test 7: late release with a stale token cannot remove a different, live holder's lock"
+REPO=$(setup_repo)
+(
+    cd "$REPO"
+
+    # Exercise the exact lock primitives worktree.sh uses (not a hand-rolled
+    # reimplementation): extract _worktree_locks_dir / _worktree_lock_path /
+    # acquire_worktree_lock / release_worktree_lock from the copy of
+    # worktree.sh under test and source them directly.
+    START_LINE=$(grep -n '^_worktree_locks_dir() {' .loom/scripts/worktree.sh | head -1 | cut -d: -f1)
+    END_LINE=$(awk '/^release_worktree_lock\(\) \{/{f=1} f && /^}/{print NR; exit}' .loom/scripts/worktree.sh)
+    FUNCS_FILE=$(mktemp /tmp/loom-wt-lockfns.XXXXXX)
+    sed -n "${START_LINE},${END_LINE}p" .loom/scripts/worktree.sh > "$FUNCS_FILE"
+
+    # These three are consumed only inside the extracted lock functions that
+    # get `source`d from "$FUNCS_FILE" below — a dynamic path shellcheck
+    # cannot statically follow, so it reports them as unused (SC2034).
+    # shellcheck disable=SC2034
+    LOOM_WORKTREE_LOCK_TIMEOUT=5
+    # shellcheck disable=SC2034
+    LOOM_WORKTREE_LOCK_POLL_INTERVAL=1
+    # shellcheck disable=SC2034
+    JSON_OUTPUT=""
+    print_warning() { :; }
+
+    # shellcheck disable=SC1090
+    source "$FUNCS_FILE"
+    rm -f "$FUNCS_FILE"
+
+    # --- Process A acquires the lock and remembers its own token. ---
+    acquire_worktree_lock 200
+    TOKEN_A="$WORKTREE_LOCK_TOKEN"
+
+    # --- An operator judges A dead/wedged and manually clears the lock dir
+    #     directly -- the exact recovery path acquire_worktree_lock's own
+    #     timeout error message suggests (issue #6014, step 2). ---
+    rm -rf "$(_worktree_lock_path 200)"
+
+    # --- Process B legitimately re-acquires the now-vacant lock. ---
+    acquire_worktree_lock 201
+    TOKEN_B="$WORKTREE_LOCK_TOKEN"
+
+    if [[ "$TOKEN_A" == "$TOKEN_B" ]]; then
+        fail "test setup invalid: acquisition tokens A and B are identical"
+    else
+        # --- Process A, unaware it was pre-empted, finally unwinds and its
+        #     EXIT trap fires release_worktree_lock with ITS OWN remembered
+        #     token (not whatever now happens to be current on disk). ---
+        release_worktree_lock 200 "$TOKEN_A"
+
+        LOCK_201="$(_worktree_lock_path 201)"
+        if [[ -d "$LOCK_201" ]] && [[ -f "$LOCK_201/owner.json" ]] && grep -q "$TOKEN_B" "$LOCK_201/owner.json"; then
+            pass "stale holder A's late release (mismatched token) left live holder B's lock intact"
+        else
+            fail "stale holder A's late release clobbered live holder B's lock"
+        fi
+
+        # --- Process B's own, correctly-tokened release DOES remove it. ---
+        release_worktree_lock 201 "$TOKEN_B"
+        if [[ ! -d "$LOCK_201" ]]; then
+            pass "live holder B's own release (matching token) removes its lock"
+        else
+            fail "live holder B's own release (matching token) failed to remove its lock"
+        fi
+    fi
+
+    # --- An empty token (never acquired, or already released) must never
+    #     remove a lock -- defends against a caller accidentally releasing
+    #     before/without ever successfully acquiring. ---
+    LOCK_202="$(_worktree_lock_path 202)"
+    mkdir -p "$LOCK_202"
+    cat > "$LOCK_202/owner.json" <<EOF
+{
+  "issue": 202,
+  "owner_pid": $$,
+  "token": "some-real-token",
+  "script": "worktree.sh",
+  "acquired_at": "1970-01-01T00:00:00Z"
+}
+EOF
+    release_worktree_lock 202 ""
+    if [[ -d "$LOCK_202" ]]; then
+        pass "release with an empty token is a no-op (never removes an unowned lock)"
+    else
+        fail "release with an empty token incorrectly removed a lock"
+    fi
+    rm -rf "$LOCK_202"
+)
+cleanup_repo "$REPO"
+
+# --- Test 8: the lock is released right after `git worktree add`, not held through the post-worktree hook (#6014) ---
+echo ""
+echo "Test 8: a slow post-worktree hook for one issue does not serialize an unrelated invocation"
+REPO=$(setup_repo)
+(
+    cd "$REPO"
+
+    MARKER="/tmp/loom-wt-hook-marker-$$"
+    rm -f "$MARKER"
+    # Hook blocks ONLY for issue 98 (simulating a slow `cargo build --release`
+    # in a project's real post-worktree hook), signaling readiness via a
+    # marker file so the test doesn't have to guess timing.
+    cat > .loom/hooks/post-worktree.sh <<EOF
+#!/usr/bin/env bash
+if [[ "\$3" == "98" ]]; then
+    touch "$MARKER"
+    sleep 6
+fi
+exit 0
+EOF
+    chmod +x .loom/hooks/post-worktree.sh
+
+    set +e
+    ./.loom/scripts/worktree.sh 98 >/tmp/wt-98.$$ 2>&1 &
+    PID98=$!
+
+    # Wait (bounded) for the hook to signal it has started sleeping -- i.e.
+    # `git worktree add` for issue 98 is done and its lock should already be
+    # released.
+    WAITED=0
+    while [[ ! -f "$MARKER" ]] && [[ $WAITED -lt 30 ]]; do
+        sleep 1
+        WAITED=$((WAITED + 1))
+    done
+
+    if [[ ! -f "$MARKER" ]]; then
+        fail "post-worktree hook for issue 98 never signaled start (see /tmp/wt-98.$$)"
+        kill "$PID98" 2>/dev/null
+        wait "$PID98" 2>/dev/null
+    else
+        START=$(date +%s)
+        timeout 30 ./.loom/scripts/worktree.sh 99 >/tmp/wt-99.$$ 2>&1
+        rc99=$?
+        ELAPSED=$(( $(date +%s) - START ))
+
+        if [[ $rc99 -eq 0 ]] && [[ -f .loom/worktrees/issue-99/.loom-managed ]] && [[ $ELAPSED -lt 5 ]]; then
+            pass "issue 99's worktree.sh completed in ${ELAPSED}s while issue 98's hook was still sleeping (not serialized)"
+        else
+            echo "--- worktree.sh 99 output (rc=$rc99, elapsed=${ELAPSED}s) ---" >&2
+            cat /tmp/wt-99.$$ >&2 2>/dev/null || true
+            fail "issue 99's worktree.sh was serialized behind issue 98's slow hook (rc=$rc99, elapsed=${ELAPSED}s, expected <5s)"
+        fi
+
+        wait "$PID98" 2>/dev/null
+    fi
+    set -e
+    rm -f "$MARKER" /tmp/wt-98.$$ /tmp/wt-99.$$
 )
 cleanup_repo "$REPO"
 

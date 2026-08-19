@@ -21,22 +21,43 @@ This section documents how Champion handles non-standard situations during PR au
 **Scenario**: Repository has no CI/CD configured, or PR doesn't trigger any checks.
 
 **Handling**:
+
+**#6211: empty stdout alone is NOT proof "no checks exist".** An earlier
+version of this doc detected "no checks" via empty stdout from `gh pr checks
+--json` alone (with stderr discarded via `2>/dev/null` and the exit code
+never inspected). That is unsafe: `gh pr checks` can ALSO return empty stdout
+during a transient forge failure (e.g. the intermittent TLS handshake error
+#6169 hit, observed ~1 call in 3 on one host) — a state indistinguishable
+from genuine "no checks configured" once stderr is thrown away. Since this
+read gates Champion's auto-merge, that ambiguity is a real (if rare)
+false-positive path: a PR with actual pending/unrun CI could get merged.
+
+The fix distinguishes the two cases instead of collapsing them: the genuine
+no-checks case has a documented, stable signature — EMPTY stdout, NONZERO
+exit, and stderr containing "no checks reported" — and only that combination
+is trusted. Any other empty read is ambiguous and gets one retry before
+failing closed (never silently defaulting to "no checks"). Critically, the
+genuine no-checks case is resolved on the very first read (its stderr always
+matches immediately), so a repo that legitimately has zero CI checks
+configured (e.g. a quickstart repo) is never made to wait — only an
+ambiguous read pays the one retry.
+
 ```bash
-# With no checks, `gh pr checks --json bucket,name` prints "no checks reported..."
-# to STDERR, exits non-zero, and emits EMPTY stdout. Detect via empty stdout
-# (robust) rather than matching error text. CHECKS captured with 2>/dev/null.
-# NOTE: `printf '%s\n' "$VAR" | jq`, never `echo "$VAR" | jq` — zsh's `echo`
-# builtin reinterprets `\n`/`\t` escapes by default, which corrupts captured
-# `gh --json` output (embedded newlines in body/comment text are represented
-# as literal `\n` inside the JSON string) before jq ever parses it (#5094).
-CHECKS=$(gh pr checks "$PR_NUMBER" --json bucket,name 2>/dev/null)
-if [ -z "$CHECKS" ] || [ "$(printf '%s\n' "$CHECKS" | jq 'length')" = "0" ]; then
+# See champion-pr-merge.md criterion #6 ("CI Status Check") for the full
+# read_ci_checks() definition and rationale (#6211). Summary of its contract:
+#   NO_CHECKS="true"    -> confirmed genuine no-checks signature; PASS, merge.
+#   NO_CHECKS="false"   -> real checks exist; $CHECKS holds them, evaluate buckets.
+#   NO_CHECKS="unknown" -> still ambiguous after one retry; SKIP, do not merge.
+read_ci_checks "$PR_NUMBER"
+if [ "$NO_CHECKS" = "true" ]; then
   echo "PASS: No CI checks required"
   # Continue to merge
 fi
 ```
 
-**Decision**: **Allow merge** - absence of CI is not a blocker.
+**Decision**: **Allow merge** only once the genuine no-checks signature is
+confirmed — absence of CI is not a blocker, but an *ambiguous* empty read is
+not the same thing as absence of CI and must not be treated as one.
 
 **Rationale**: Many repositories don't use CI, or use rulesets without status checks.
 
@@ -66,14 +87,41 @@ fi
 
 **Scenario**: Builder force-pushes new commits after Judge added `loom:pr` label.
 
-**Handling**:
-- **Recency check** catches this (PR updated recently)
-- **CI check** re-runs after force push
-- **Judge approval remains valid** if PR still has `loom:pr` label
+**Fixed by #5686** — this used to be a real gap: recency and CI re-running are
+necessary but not sufficient, because neither one re-checks whether the
+*approval itself* still describes the current tree. `loom:pr` is a verdict
+about a specific head SHA, not about the PR as an object.
 
-**Decision**: **Allow merge if all criteria pass** - recency and CI checks provide sufficient safety.
+**Handling** (current): Judge stamps every verdict comment with
+`<!-- loom:verdict-sha sha=<head> verdict=approved|changes-requested -->`
+(`judge.md` → "Verdict SHA Marker"). `champion-pr-merge.md`'s Verdict-State
+Janitor Part 2 runs `./.loom/scripts/verdict-staleness-guard.sh <PR> --clear`
+on every `loom:pr` candidate **before** the 6 safety criteria:
+- If the marker's SHA still matches the current head (`FRESH`, exit `0`) or no
+  marker exists at all — the verdict predates this convention, or the Judge
+  dropped the marker (`UNVERIFIABLE`, exit `11`, fails safe) → proceed to the
+  safety criteria as before. Since #6319 an unmarked verdict is *anchored* to
+  the then-current head by Judge's sweep (`--anchor`) and by the daemon's
+  periodic pass, so exit `11` should be rare and short-lived rather than a
+  permanent resting state.
+- If the head has moved since the verdict was rendered (`STALE`, exit `12`)
+  → the guard has already cleared `loom:pr` and re-queued the PR as
+  `loom:review-requested` with an auditable old→new-SHA comment. **Do not
+  merge**; a fresh Judge pass evaluates the tree that is actually here now.
 
-**Recommended improvement**: Judge should remove `loom:pr` on force-push (not Champion's responsibility).
+`loom-daemon`'s `claim_reconciliation::reconcile_pr_verdicts` runs the same
+decision as an always-on periodic backstop, independent of any Judge/Champion
+pass happening to look at the PR (see `daemon-reference.md` → "Stale-verdict
+reconciliation").
+
+**Decision**: **Allow merge only if the approval is still fresh** (or
+unverifiable, pre-migration) — a stale approval is never merge-eligible,
+regardless of recency/CI.
+
+**This was the "recommended improvement" in a prior revision of this
+document** ("Judge should remove `loom:pr` on force-push, not Champion's
+responsibility") — it now ships as the Verdict SHA Marker convention plus the
+Verdict-State Janitor Part 2 gate.
 
 ---
 
@@ -176,7 +224,11 @@ gh issue edit <number> --add-label "loom:evaluating"
 | A prior Champion verdict comment already carries `VERDICT_MARKER` for the issue's **current** title+body hash | **Unrevised since last review — skip** | No comment, no claim, no label change. A genuine title/body edit changes the hash and always produces a fresh marker and a fresh evaluation; comments and label churn do not. |
 | Issue already carries `loom:evaluating` and the claim is younger than `LOOM_STALE_EVALUATING_MINUTES` | **Concurrent evaluation in progress** | Skip, do not stomp the claim; continue the batch. |
 | Issue already carries `loom:evaluating` and the claim is older than `LOOM_STALE_EVALUATING_MINUTES` | **Stale claim — a prior Champion pass likely died mid-evaluation** | Reclaim (`--add-label "loom:evaluating"` again) then evaluate normally. |
-| ≥2 prior "NEEDS REVISION" comments exist and the issue is not already `loom:operator-only` | **N=2 threshold reached** | Escalate instead of posting a third+ near-identical rejection: comment with `<!-- champion:proposal-escalated -->` and add `loom:operator-only` (Champion routes, a human decides — the proposal label stays, nothing is closed). |
+| ≥2 prior "NEEDS REVISION" comments exist, the issue is not already `loom:operator-only`, and the recurring findings are **not** dependency-only | **N=2 threshold reached** | Escalate instead of posting a third+ near-identical rejection: comment with `<!-- champion:proposal-escalated -->` and add `loom:operator-only` (Champion routes, a human decides — the proposal label stays, nothing is closed). |
+| ≥2 prior rejections but **every** recurring finding names a dependency *and* cites an open, non-cycle issue/PR | **Timing finding, not a merits finding (#5664)** | **Defer — do not escalate.** `classify-dependency-block.sh --check-defer` returns `DEFER`; no label, no new comment, only a `<!-- champion:dep-defer:<fingerprint> -->` marker PATCHed onto the existing verdict comment. The condition ends when the blocker closes, an event a later pass detects for free. |
+| Same, but every recorded blocker has since **closed** | **Stale verdict (#5664)** | `--check-defer` returns `REEVALUATE`; re-run the 8 criteria instead of escalating on a finding that no longer holds. |
+| Already `loom:operator-only`, escalation was Champion's own and dependency-only, every recorded blocker now closed | **Self-healing un-escalation (#5664)** | `classify-dependency-block.sh --check-unescalate --apply` removes `loom:operator-only` (and its `loom:operator-blocked` sub-kind label, #5671, if present — never required, since a pre-#5679 escalation carries no sub-label at all) and posts one `<!-- champion:proposal-unescalated:<fingerprint> -->` comment; the proposal rejoins normal evaluation in the same pass. A merits escalation, a `<!-- champion:dep-cycle:` escalation, or a human-applied label is never un-escalated. |
+| Blocker is still **open**, but the issue declares a `## Startable Subset` — a part of its work stated to be independent of that blocker | **Sub-issue granularity carve-out ("recurred after closure", #5664)** | Criterion 2 does not fail on this dependency; promote (Step 3) scoped to the declared subset, directing the Builder to `Part of #<issue>` and leaving the remainder for a later pass. Already-parked case: `--check-unescalate` also un-escalates here (`SUBSET_CARVEOUT: yes`) even though the blocker is still open — distinct from the row above, which requires the blocker to have *closed*. |
 | Fewer than 2 prior rejections | **Ordinary reject** | Post the `VERDICT_MARKER`-tagged "NEEDS REVISION" comment as before, release `loom:evaluating`. |
 
 **Rationale**: This is the *same* idempotency-marker + escalation-marker + operator-routing shape as Edge Case 5b's Capped-PR Recovery Pass, applied to the proposal-evaluation side of Champion instead of the PR-merge side — a marker keyed to the thing whose change would invalidate it (here, the proposal's own title+body text; there, the latest Judge rejection comment ID) stops duplicate comments, and a bounded escalation threshold (here, N=2 identical verdicts; there, the Doctor-cycle cap) converts an infinite silent loop into a single human-visible routing decision.
@@ -404,6 +456,9 @@ EXISTING=$(gh issue list --search "Follow-on from PR #$PR_NUMBER" --limit 500)
 | Stale PR (>24h) | Route to Doctor | Comment once (idempotent marker), swap `loom:pr` → `loom:changes-requested` |
 | Doctor-cycle-capped PR (`loom:blocked` + `loom:changes-requested`) | Three-way on forward progress | Distinct new defects → grant a cycle (remove `loom:blocked` only); same-defect/ambiguous → keep parked with rationale; approach not viable → add `loom:operator-only`, recommend closing (never close it) |
 | Unrevised proposal re-entering the queue every cycle | Idempotency marker + N=2 escalation | Unrevised since last review → skip silently (title+body hash marker match, never `updatedAt`); ≥2 prior rejections → escalate to `loom:operator-only` instead of a 3rd+ duplicate comment; `loom:evaluating` claim prevents concurrent double-evaluation |
+| Proposal whose only recurring finding is an open, non-cycle dependency | Dependency-timing gate (`classify-dependency-block.sh --check-defer`) | **Defer, never escalate** — the condition self-clears when the blocker closes; blocker already closed → re-evaluate rather than escalate on a stale finding (#5664) |
+| Proposal stuck at `loom:operator-only` from a dependency-only escalation whose blocker has since closed | Pass 0 self-healing re-scan (`--check-unescalate --apply`) | Remove `loom:operator-only`, post one fingerprinted un-escalation comment, rejoin evaluation the same pass; merits/cycle/human-applied escalations are never touched (#5664) |
+| Proposal (parked or not) whose blocker is still open but that declares a `## Startable Subset` covering only part of its scope | Sub-issue granularity carve-out ("recurred after closure", #5664) | Criterion 2's dependency finding does not fail the whole issue; promote scoped to the declared subset (`Part of #<issue>`), or un-escalate an already-parked one via `--check-unescalate` (`SUBSET_CARVEOUT: yes`) even while the blocker stays open — `detect-startable-subset.sh` |
 | Test-only changes | Allow | Standard criteria apply |
 | Human holds PR (removes `loom:pr`) | Skip | Not a merge candidate without `loom:pr` |
 | Multiple linked issues | Allow | Verify all closed |

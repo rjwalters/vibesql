@@ -128,8 +128,8 @@ wrong for an **epic** — an epic can sit `OPEN` for months after every one of
 its capability/implementation children has closed and the feature has
 shipped, simply because nobody ran `champion-epic.md`'s "Epic Completion"
 step to close it. A dependent that cites that epic as a blocker then reads as
-blocked forever. This is exactly what happened to 2AMLogic/marketing#56
-against 2AMLogic/klayout-tools#391 (14/15 children closed, the feature
+blocked forever. This is exactly what happened to example-org/downstream-repo#101
+against example-org/tool-repo#202 (14/15 children closed, the feature
 shipped, the epic still open) across two consecutive Champion passes, and it
 compounded into an unrecoverable **cross-repo** deadlock because the epic's
 one remaining phase happened to depend back on the blocked dependent (the
@@ -147,13 +147,13 @@ section for how the two complement each other).
 ### Step 1 — parse the reference (cross-repo aware)
 
 Blocking references in this fleet are frequently cross-repo (the
-marketing#56 → klayout-tools#391 shape) — `owner/repo#N`, not just `#N` in
+downstream-repo#101 → tool-repo#202 shape) — `owner/repo#N`, not just `#N` in
 the current repo. `gh issue view` does **not** accept the bare `owner/repo#N`
 positional form (`invalid issue format`) — it needs `-R owner/repo <N>` (or a
 full URL), so parsing must split the two:
 
 ```bash
-# $1 = a candidate reference string, e.g. "#391" or "2AMLogic/klayout-tools#391"
+# $1 = a candidate reference string, e.g. "#202" or "example-org/tool-repo#202"
 # $2 = "owner/repo" Champion is currently running in (used when $1 is bare)
 parse_blocker_ref() {
   local ref="$1" this_repo="$2"
@@ -284,6 +284,12 @@ DEPENDENT_ISSUE=<the issue/PR being evaluated, in the CURRENT repo>
 ALREADY_ROUTED=$(gh issue view "$DEPENDENT_ISSUE" --json labels --jq \
   '.labels[] | select(.name=="loom:operator-only")' 2>/dev/null)
 if [ -n "$ALREADY_ROUTED" ]; then
+  # Stays unconditional HERE (#5664). champion-issue-promo.md's equivalent
+  # short-circuit became conditional so a dependency-only escalation can
+  # self-heal when its blocker closes; this one must not, because the escalation
+  # it guards says "an epic looks complete but is still open" — that resolves
+  # only by a human closing or promoting the epic, never on its own. An
+  # un-escalation here would loop the same escalation forever.
   echo "#$DEPENDENT_ISSUE already routed to loom:operator-only — skip silently"
 else
   # REST, not `gh issue view` — only the REST payload has the numeric comment
@@ -316,9 +322,11 @@ open — and this state has now been observed unchanged across $NEXT_STREAK
 evaluations. This is not a live blocker; it needs an operator to close or
 promote \`$BLOCKER_REPO#$BLOCKER_NUM\`.
 
+Blocked by $BLOCKER_REPO#$BLOCKER_NUM
+
 ---
 *Automated by Champion role*" \
-        && gh issue edit "$DEPENDENT_ISSUE" --add-label "loom:operator-only"
+        && gh issue edit "$DEPENDENT_ISSUE" --add-label "loom:operator-only,loom:operator-blocked"
     else
       # Still within budget: tally the streak IN PLACE (PATCH, no new
       # comment/notification) and keep not-gating on this reference.
@@ -397,6 +405,12 @@ construction rather than by an explicit reset step.
 - `ALREADY_ROUTED=yes` short-circuits everything — a dependent already
   carrying `loom:operator-only` from this mechanism is never re-tallied or
   re-escalated.
+- The escalation always adds `loom:operator-blocked` alongside
+  `loom:operator-only` (#5671) — this condition is, by construction,
+  self-clearing once `$BLOCKER_REPO#$BLOCKER_NUM` closes or promotes, which is
+  exactly the distinction #5664 needs from a genuine operator decision. See
+  `.loom/docs/label-state-machine.md` "operator-only sub-kinds" for the full
+  convention, including the required `Blocked by #N` machine-readable line.
 - This check must run **independently of** any body-hash-keyed idempotency
   skip a caller applies to itself (e.g. `champion-issue-promo.md`'s unrevised-
   proposal skip). A dependent's own text can stay byte-identical for weeks

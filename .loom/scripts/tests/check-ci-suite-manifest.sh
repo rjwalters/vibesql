@@ -17,14 +17,38 @@
 # loom-workspace, worktree-paths, methodology-inject, skill-router). Since
 # #5275 it also covers tests/install/ (installer/uninstaller unit suites) and
 # tests/hermit/ (the Hermit role's stateless-ceremony heuristic regression
-# guard) -- both were previously orphaned (no CI runner at all). Entries for
-# any external directory are qualified with their path relative to the repo
-# root (e.g. `tests/hooks/test-guard-destructive.sh`,
+# guard) -- both were previously orphaned (no CI runner at all). Since #5278
+# it also covers the top-level scripts/ directory (non-recursive — only
+# `scripts/test-*.sh` itself, not subdirectories), whose suites are invoked
+# directly as their own CI/build-gate steps rather than via run-ci-suites.sh;
+# they are listed in ci-excluded.txt with a "wired elsewhere" reason (see that
+# file) so run-ci-suites.sh doesn't double-run them. Entries for any external
+# directory are qualified with their path relative to the repo root (e.g.
+# `tests/hooks/test-guard-destructive.sh`,
 # `defaults/hooks/tests/test-skill-router.sh`,
-# `tests/install/test-forge-detect.sh`) so they can't collide with a
-# same-named suite in this directory.
+# `tests/install/test-forge-detect.sh`, `scripts/test-changelog.sh`) so they
+# can't collide with a same-named suite in this directory.
 #
 # Exit 0 = invariant holds; exit 1 = violation (details printed to stderr).
+#
+# NOTE for suite authors (#6194/#6241): this manifest check does NOT detect a
+# hardcoded source-tree-only subject path. If your new suite resolves a
+# subject under $REPO_ROOT, classify it before wiring it in:
+#   - Subject is SHIPPED (installed into a consumer repo, e.g. anything under
+#     defaults/.claude/, defaults/docs/, defaults/hooks/, or defaults/scripts/
+#     other than scripts/install/) -> resolve the installed path first
+#     (.claude/commands/loom/<x>, .loom/docs/<x>, .loom/hooks/<x>,
+#     .loom/scripts/<x>), falling back to the defaults/ source-tree path, so
+#     the suite genuinely runs in both layouts. Prefer a self-relative
+#     resolution (off $SCRIPT_DIR) when the subject ships alongside the test
+#     itself (see test-merge-pr-*.sh, test-sweep-experiment.sh).
+#   - Subject is SOURCE-TREE-ONLY (lives at the repo root outside defaults/,
+#     e.g. scripts/install/*.sh, scripts/install-loom.sh, scripts/loom) ->
+#     guard with `echo "SKIP: source-tree-only test, <path> not found (not
+#     shipped into an installed repo)" >&2; exit 0` rather than a hard
+#     `exit 1`/`FATAL` (see test-gitignore-guard.sh, test-loom-dispatcher.sh).
+# A suite with neither treatment silently breaks in every installed consumer
+# repo instead of running (or SKIPping) cleanly.
 
 set -euo pipefail
 
@@ -33,8 +57,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WIRED_MANIFEST="$SCRIPT_DIR/ci-wired.txt"
 EXCLUDED_MANIFEST="$SCRIPT_DIR/ci-excluded.txt"
 # Directories of suites outside defaults/scripts/tests/ that this manifest
-# also governs, each relative to the repo root (#4769, #4451, #5275).
-EXTERNAL_TEST_DIRS=("tests/hooks" "defaults/hooks/tests" "tests/install" "tests/hermit")
+# also governs, each relative to the repo root (#4769, #4451, #5275, #5278).
+# The scan below is non-recursive (bash glob `test-*.sh` in each dir), so
+# "scripts" only picks up top-level scripts/test-*.sh, not subdirectories.
+EXTERNAL_TEST_DIRS=("tests/hooks" "defaults/hooks/tests" "tests/install" "tests/hermit" "scripts")
 
 fail=0
 err() { printf 'ERROR: %s\n' "$1" >&2; fail=1; }

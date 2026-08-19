@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # test-install-stash-scope.sh — regression tests for the reinstall stash guard
-# scoping (issue #3597).
+# scoping (issue #3597; issue #5289 added tests 4-5; issue #6196 added tests
+# 6-7).
 #
 # The `--quick` reinstall (install.sh) and `--clean` install (install-loom.sh)
 # guards used to run an unscoped `git stash push`, sweeping sibling installers'
 # uncommitted tracked changes into the stash and leaving a half-old/half-new
 # hybrid tree. The fix scopes the stash to the intersection of the dirty set
-# with Loom's ownership set (manifest paths + .gitignore) via
+# with Loom's ownership set (manifest paths + .gitignore + CLAUDE.md) via
 # scripts/install/stash-scope.sh::_emit_loom_owned_dirty_paths.
 #
 # Strategy: source the real helper against a temp git repo seeded with both a
@@ -15,7 +16,19 @@
 #   2. a pathspec-scoped `git stash push` leaves the sibling change untouched
 #      in the working tree and absent from the stash,
 #   3. a tree dirty with ONLY sibling changes yields no owned-dirty paths
-#      (callers skip the stash entirely).
+#      (callers skip the stash entirely),
+#   4. root CLAUDE.md carries the same explicit ownership-set carve-out
+#      `.gitignore` already has (issue #5289 — CLAUDE.md's Loom section is
+#      synthesized at install time, not copied from a literal defaults/
+#      file, so the manifest walk alone never lists it),
+#   5. a dirty root CLAUDE.md is actually selected for stashing by
+#      `_emit_loom_owned_dirty_paths` (the property the reinstall's
+#      in-block-edit conflict guard at install.sh:~1290 depends on).
+#
+# Source-tree-only by design (#6194): scripts/install/stash-scope.sh lives at
+# the repo root, not under defaults/, so it is never shipped into an
+# installed consumer repo. This suite SKIPs (exit 0) rather than errors when
+# run outside Loom's own checkout.
 #
 # Usage:
 #   bash defaults/scripts/tests/test-install-stash-scope.sh
@@ -56,8 +69,8 @@ assert_eq() {
 }
 
 if [[ ! -f "$STASH_SCOPE" ]]; then
-  echo "ERROR: $STASH_SCOPE not found" >&2
-  exit 1
+  echo "SKIP: source-tree-only test, $STASH_SCOPE not found (not shipped into an installed repo)" >&2
+  exit 0
 fi
 
 # shellcheck source=/dev/null
@@ -143,6 +156,85 @@ printf '{"version":"newer"}\n' > "$TMP_REPO/$SIBLING_PATH"
 
 SELECTED_SIBLING_ONLY="$(_emit_loom_owned_dirty_paths "$REPO_ROOT" "$TMP_REPO")"
 assert_eq "" "$SELECTED_SIBLING_ONLY" "sibling-only dirty tree produces no owned-dirty paths"
+
+echo "== Test 4: root CLAUDE.md is explicitly carved into the ownership set (issue #5289) =="
+# Root CLAUDE.md's Loom section is synthesized at install time from
+# LOOM_ROOT_POINTER (loom-daemon/src/init/scaffolding.rs) rather than copied
+# verbatim from a defaults/CLAUDE.md file, so `_emit_installed_files_manifest`'s
+# walk-of-defaults/ never enumerates it -- exactly the same gap `.gitignore`
+# already has an explicit carve-out for (it too is rewritten by
+# `loom-daemon init` but isn't part of the defaults/ walk). Without that
+# carve-out, `_emit_loom_owned_dirty_paths` never selects a dirty root
+# CLAUDE.md, so `install.sh --quick`'s reinstall never stashes an uncommitted
+# CLAUDE.md edit before the chained uninstall's marker-based `sed` strips the
+# Loom block -- silently destroying the edit with no conflict ever surfaced,
+# even when it landed *inside* the `<!-- BEGIN/END LOOM ORCHESTRATION -->`
+# markers (reproduction: issue #5289).
+if printf '%s\n' "$OWNERSHIP" | grep -qxF "CLAUDE.md"; then
+  pass "CLAUDE.md present in the Loom ownership set"
+else
+  fail "CLAUDE.md present in the Loom ownership set" "ownership set: $OWNERSHIP"
+fi
+if printf '%s\n' "$OWNERSHIP" | grep -qxF ".gitignore"; then
+  pass ".gitignore present in the Loom ownership set (sibling carve-out, #3588)"
+else
+  fail ".gitignore present in the Loom ownership set (sibling carve-out, #3588)" "ownership set: $OWNERSHIP"
+fi
+
+echo "== Test 5: a dirty root CLAUDE.md is selected for stashing (issue #5289) =="
+CLAUDE_TMP_REPO="$(mktemp -d "${TMPDIR:-/tmp}/loom-stash-scope-claude.XXXXXX")"
+git -C "$CLAUDE_TMP_REPO" init -q
+git -C "$CLAUDE_TMP_REPO" config user.email test@example.com
+git -C "$CLAUDE_TMP_REPO" config user.name "Test"
+printf '# Project\n\n<!-- BEGIN LOOM ORCHESTRATION -->\nold pointer\n<!-- END LOOM ORCHESTRATION -->\n' \
+  > "$CLAUDE_TMP_REPO/CLAUDE.md"
+git -C "$CLAUDE_TMP_REPO" add -A
+git -C "$CLAUDE_TMP_REPO" commit -qm "seed"
+printf '# Project\n\n<!-- BEGIN LOOM ORCHESTRATION -->\nUSER IN-BLOCK EDIT\n<!-- END LOOM ORCHESTRATION -->\n' \
+  > "$CLAUDE_TMP_REPO/CLAUDE.md"
+
+CLAUDE_SELECTED="$(_emit_loom_owned_dirty_paths "$REPO_ROOT" "$CLAUDE_TMP_REPO")"
+if printf '%s\n' "$CLAUDE_SELECTED" | grep -qxF "CLAUDE.md"; then
+  pass "dirty root CLAUDE.md is selected for stashing"
+else
+  fail "dirty root CLAUDE.md is selected for stashing" "selected: [$CLAUDE_SELECTED]"
+fi
+rm -rf "$CLAUDE_TMP_REPO"
+
+echo "== Test 6: root AGENTS.md is explicitly carved into the ownership set (issue #6196) =="
+# Root AGENTS.md has the identical gap CLAUDE.md had before #5289: its Loom
+# section is synthesized at install time from AGENTS_ROOT_POINTER
+# (loom-daemon/src/init/scaffolding.rs), not copied from a literal defaults/
+# AGENTS.md file, so the manifest walk alone never lists it. Without this
+# carve-out, a repo-authored edit placed outside AGENTS.md's marker block --
+# exactly the surface #6196 gives AGENTS.md-aware runtimes to see
+# repo-specific guidance -- would have no stash protection across a `--quick`
+# reinstall.
+if printf '%s\n' "$OWNERSHIP" | grep -qxF "AGENTS.md"; then
+  pass "AGENTS.md present in the Loom ownership set"
+else
+  fail "AGENTS.md present in the Loom ownership set" "ownership set: $OWNERSHIP"
+fi
+
+echo "== Test 7: a dirty root AGENTS.md is selected for stashing (issue #6196) =="
+AGENTS_TMP_REPO="$(mktemp -d "${TMPDIR:-/tmp}/loom-stash-scope-agents.XXXXXX")"
+git -C "$AGENTS_TMP_REPO" init -q
+git -C "$AGENTS_TMP_REPO" config user.email test@example.com
+git -C "$AGENTS_TMP_REPO" config user.name "Test"
+printf '# Project\n\n<!-- BEGIN LOOM ORCHESTRATION (AGENTS) -->\nold pointer\n<!-- END LOOM ORCHESTRATION (AGENTS) -->\n' \
+  > "$AGENTS_TMP_REPO/AGENTS.md"
+git -C "$AGENTS_TMP_REPO" add -A
+git -C "$AGENTS_TMP_REPO" commit -qm "seed"
+printf '# Project\n\nRepo-specific guidance for AGENTS.md-aware runtimes.\n\n<!-- BEGIN LOOM ORCHESTRATION (AGENTS) -->\nUSER IN-BLOCK EDIT\n<!-- END LOOM ORCHESTRATION (AGENTS) -->\n' \
+  > "$AGENTS_TMP_REPO/AGENTS.md"
+
+AGENTS_SELECTED="$(_emit_loom_owned_dirty_paths "$REPO_ROOT" "$AGENTS_TMP_REPO")"
+if printf '%s\n' "$AGENTS_SELECTED" | grep -qxF "AGENTS.md"; then
+  pass "dirty root AGENTS.md is selected for stashing"
+else
+  fail "dirty root AGENTS.md is selected for stashing" "selected: [$AGENTS_SELECTED]"
+fi
+rm -rf "$AGENTS_TMP_REPO"
 
 echo ""
 echo "Ran $TESTS_RUN test(s): $TESTS_PASSED passed, $TESTS_FAILED failed"

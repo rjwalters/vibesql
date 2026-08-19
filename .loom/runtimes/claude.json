@@ -1,5 +1,6 @@
 {
   "runtime": "claude",
+  "accountProvider": "claude",
   "capabilities": {
     "mcp": "yes",
     "subagents": "yes",

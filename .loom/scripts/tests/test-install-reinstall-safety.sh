@@ -27,12 +27,26 @@
 #   - Hook-dedup quote-normalization (scaffolding.rs): split out to #4200,
 #     tracked as a Rust unit test there.
 #
+# Group 7 (issue #6509, follow-up to #6499/#6502): install.sh's reinstall-time
+# `git stash pop --index` against $TARGET_PATH is routed through
+# defaults/scripts/safe-stash-pop.sh (#6501) via
+# scripts/install/reinstall-stash-pop.sh::_reinstall_safe_stash_pop, so a
+# conflicting pop can never leave conflict markers / unmerged index entries
+# behind. Exercised directly against the pure, side-effect-free helper
+# function rather than the full installer end-to-end (same rationale as
+# Group 2's extracted loom_daemon_binary_stale()).
+#
 # Strategy: install.sh's loom_daemon_binary_stale() is pure and side-effect
 # free, so it is extracted via awk (same pattern as
 # test-install-source-guard.sh) and exercised in an isolated harness rather
 # than running the full installer end-to-end. The --confirm-reinstall gate
 # and the uninstall staging scope are tested by actually invoking
 # install.sh / uninstall-loom.sh against throwaway temp git repos.
+#
+# Source-tree-only by design (#6194): install.sh and scripts/uninstall-loom.sh
+# both live at the repo root, not under defaults/, so neither is shipped into
+# an installed consumer repo. This suite SKIPs (exit 0) rather than errors
+# when run outside Loom's own checkout.
 #
 # Usage:
 #   bash defaults/scripts/tests/test-install-reinstall-safety.sh
@@ -43,6 +57,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 INSTALL_SH="$REPO_ROOT/install.sh"
 UNINSTALL_SH="$REPO_ROOT/scripts/uninstall-loom.sh"
+REINSTALL_STASH_POP="$REPO_ROOT/scripts/install/reinstall-stash-pop.sh"
+REAL_SAFE_STASH_POP="$REPO_ROOT/defaults/scripts/safe-stash-pop.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -105,13 +121,34 @@ assert_nonzero_exit() {
     fi
 }
 
+assert_eq() {
+    local expected="$1" actual="$2" msg="$3"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if [[ "$expected" == "$actual" ]]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: $msg"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: $msg"
+        echo "    expected: [$expected]"
+        echo "    actual:   [$actual]"
+    fi
+}
+
+# A tracked file carries conflict markers when it has BOTH an opening
+# `<<<<<<< ` and a closing `>>>>>>> ` at line start (same narrow definition
+# safe-stash-pop.sh and primary_checkout_reaper use).
+has_markers() {
+    grep -q '^<<<<<<< ' "$1" 2>/dev/null && grep -q '^>>>>>>> ' "$1" 2>/dev/null
+}
+
 if [[ ! -f "$INSTALL_SH" ]]; then
-    echo "ERROR: $INSTALL_SH not found" >&2
-    exit 1
+    echo "SKIP: source-tree-only test, $INSTALL_SH not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 if [[ ! -f "$UNINSTALL_SH" ]]; then
-    echo "ERROR: $UNINSTALL_SH not found" >&2
-    exit 1
+    echo "SKIP: source-tree-only test, $UNINSTALL_SH not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 
 # Extract a single top-level function body ("name() {" ... "}") from a file.
@@ -393,6 +430,489 @@ assert_contains "$OUTPUT5" "Resolving to main repository root" \
 
 git -C "$T4" worktree remove "$T4_WT2" --force 2>/dev/null || rm -rf "$T4_WT2"
 rm -rf "$T4"
+echo ""
+
+echo "================================================================"
+echo "Group 5: --dry-run (issue #5517) -- plan-only, zero mutation, exit 0"
+echo "================================================================"
+echo ""
+
+# Case 1: fresh (not-yet-installed) target -- install.sh --dry-run prints a
+# plan, exits 0, and leaves the target byte-for-byte empty.
+T5=$(mktemp -d /tmp/loom-dry-run-fresh-test.XXXXXX)
+git -C "$T5" init --quiet
+git -C "$T5" config user.email "test@test.com"
+git -C "$T5" config user.name "Test"
+git -C "$T5" commit --allow-empty -m "init" --quiet
+PRE_T5_SHA="$(git -C "$T5" rev-parse HEAD)"
+
+OUTPUT5="$("$INSTALL_SH" --dry-run "$T5" < /dev/null 2>&1)"
+EXIT5=$?
+assert_zero_exit "$EXIT5" "Case 1: install.sh --dry-run on a fresh target exits 0"
+assert_contains "$OUTPUT5" "DRY RUN" "Case 1: output announces a dry run"
+assert_contains "$OUTPUT5" "What Will Be Installed" "Case 1: output prints the planned-writes summary"
+
+POST_T5_SHA="$(git -C "$T5" rev-parse HEAD)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$PRE_T5_SHA" == "$POST_T5_SHA" ]] && [[ -z "$(git -C "$T5" status --porcelain)" ]] && [[ ! -d "$T5/.loom" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 1: target is untouched (no .loom/, clean git status, HEAD unchanged)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 1: target was mutated by --dry-run"
+fi
+
+rm -rf "$T5"
+echo ""
+
+# Case 2: existing install + --dry-run --confirm-reinstall WITHOUT -y/--quick.
+# Mirrors the real reinstall gate exactly: NON_INTERACTIVE is false here (no
+# -y/--quick/--full), so a real run would hit the interactive "Proceed with
+# reinstall?" prompt -- the preview must say so, not fabricate a removal plan
+# for a branch the real invocation would never reach.
+T6=$(mktemp -d /tmp/loom-dry-run-noninteractive-test.XXXXXX)
+mkdir -p "$T6/.loom"
+echo '{}' > "$T6/.loom/config.json"
+git -C "$T6" init --quiet
+git -C "$T6" config user.email "test@test.com"
+git -C "$T6" config user.name "Test"
+git -C "$T6" add -A
+git -C "$T6" commit -m "existing install" --quiet
+PRE_T6_SHA="$(git -C "$T6" rev-parse HEAD)"
+
+OUTPUT6="$("$INSTALL_SH" --dry-run --confirm-reinstall "$T6" < /dev/null 2>&1)"
+EXIT6=$?
+assert_zero_exit "$EXIT6" "Case 2: install.sh --dry-run --confirm-reinstall (no -y) exits 0"
+assert_contains "$OUTPUT6" "would be prompted" "Case 2: preview says a real run would hit the interactive prompt"
+
+POST_T6_SHA="$(git -C "$T6" rev-parse HEAD)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$PRE_T6_SHA" == "$POST_T6_SHA" ]] && [[ -z "$(git -C "$T6" status --porcelain)" ]] && [[ -f "$T6/.loom/config.json" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 2: existing install left completely untouched"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 2: existing install was mutated by --dry-run"
+fi
+
+rm -rf "$T6"
+echo ""
+
+# Case 3: existing install + --dry-run --quick --confirm-reinstall -- this IS
+# the destructive-reinstall branch (matches install.sh's own INSTALL_TYPE=="1"
+# gate). The preview must show the concrete removal plan (via
+# scripts/uninstall-loom.sh --dry-run) and leave the target byte-identical.
+T7=$(mktemp -d /tmp/loom-dry-run-destructive-test.XXXXXX)
+mkdir -p "$T7/.loom"
+echo '{}' > "$T7/.loom/config.json"
+git -C "$T7" init --quiet
+git -C "$T7" config user.email "test@test.com"
+git -C "$T7" config user.name "Test"
+git -C "$T7" add -A
+git -C "$T7" commit -m "existing install" --quiet
+PRE_T7_SHA="$(git -C "$T7" rev-parse HEAD)"
+PRE_T7_FILES="$(find "$T7" -type f -not -path '*/.git/*' | sort | xargs md5sum 2>/dev/null)"
+
+OUTPUT7="$("$INSTALL_SH" --dry-run --quick --confirm-reinstall "$T7" < /dev/null 2>&1)"
+EXIT7=$?
+assert_zero_exit "$EXIT7" "Case 3: install.sh --dry-run --quick --confirm-reinstall exits 0"
+assert_contains "$OUTPUT7" "DESTRUCTIVE reinstall" "Case 3: preview names the destructive-reinstall plan"
+assert_contains "$OUTPUT7" ".loom/config.json" "Case 3: preview lists the concrete file(s) that would be removed"
+
+POST_T7_SHA="$(git -C "$T7" rev-parse HEAD)"
+POST_T7_FILES="$(find "$T7" -type f -not -path '*/.git/*' | sort | xargs md5sum 2>/dev/null)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$PRE_T7_SHA" == "$POST_T7_SHA" ]] && [[ "$PRE_T7_FILES" == "$POST_T7_FILES" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 3: target files are byte-identical before/after (nothing removed)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 3: target files changed despite --dry-run"
+fi
+
+rm -rf "$T7"
+echo ""
+
+# Case 4: scripts/uninstall-loom.sh --dry-run directly -- Step 1-3 build/report
+# the removal manifest, exit 0 before Step 4 (worktree)/5 (removal)/6
+# (smart-remove writes) ever run.
+T8=$(mktemp -d /tmp/loom-dry-run-uninstall-direct-test.XXXXXX)
+mkdir -p "$T8/.loom/roles" "$T8/.loom/scripts"
+echo '{}' > "$T8/.loom/config.json"
+git -C "$T8" init --quiet
+git -C "$T8" config user.email "test@test.com"
+git -C "$T8" config user.name "Test"
+git -C "$T8" add -A
+git -C "$T8" commit -m "existing install" --quiet
+PRE_T8_SHA="$(git -C "$T8" rev-parse HEAD)"
+
+OUTPUT8="$("$UNINSTALL_SH" --local --dry-run "$T8" < /dev/null 2>&1)"
+EXIT8=$?
+assert_zero_exit "$EXIT8" "Case 4: uninstall-loom.sh --local --dry-run exits 0 without -y"
+assert_contains "$OUTPUT8" "DRY RUN" "Case 4: output announces a dry run"
+assert_contains "$OUTPUT8" ".loom/config.json" "Case 4: output lists the concrete file(s) that would be removed"
+
+POST_T8_SHA="$(git -C "$T8" rev-parse HEAD)"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$PRE_T8_SHA" == "$POST_T8_SHA" ]] && [[ -z "$(git -C "$T8" status --porcelain)" ]] && [[ -f "$T8/.loom/config.json" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 4: target left completely untouched"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 4: target was mutated by --dry-run"
+fi
+
+rm -rf "$T8"
+echo ""
+
+echo "================================================================"
+echo "Group 6: --local mode preserves live .loom/worktrees/* by default (issue #5973)"
+echo "================================================================"
+echo ""
+
+# Regression guard for issue #5973: uninstall-loom.sh's RUNTIME_DIRS Step 5
+# loop used to `rm -rf .loom/worktrees` unconditionally -- the whole
+# directory, including every live `issue-N` worktree inside it -- with no
+# dirty-check and no per-worktree naming in the output. install.sh's
+# --confirm-reinstall / --clean reinstall flows chain
+# "uninstall-loom.sh --yes --local" directly against the live target, so a
+# plain reinstall silently destroyed any worktree an operator had
+# deliberately kept checked out between sessions (branches survived; the
+# working directories did not).
+#
+# Case 1: a CLEAN, git-registered worktree under .loom/worktrees/ must
+# survive a plain `--local` uninstall (no --remove-worktrees) -- the new
+# default.
+T9=$(mktemp -d /tmp/loom-worktree-preserve-test.XXXXXX)
+git -C "$T9" init --quiet
+git -C "$T9" config user.email "test@test.com"
+git -C "$T9" config user.name "Test"
+mkdir -p "$T9/.loom/roles" "$T9/.loom/scripts"
+echo '{}' > "$T9/.loom/config.json"
+git -C "$T9" add -A
+git -C "$T9" commit -m "existing install" --quiet
+git -C "$T9" worktree add "$T9/.loom/worktrees/issue-100" -b "feature/issue-100" --quiet
+
+OUTPUT9="$("$UNINSTALL_SH" --yes --local "$T9" 2>&1 < /dev/null)"
+EXIT9=$?
+assert_zero_exit "$EXIT9" "Case 1: uninstall-loom.sh --local (no --remove-worktrees) exits 0"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -d "$T9/.loom/worktrees/issue-100" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 1: .loom/worktrees/issue-100 directory survives on disk"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 1: .loom/worktrees/issue-100 directory was removed"
+fi
+
+WT_LIST_9="$(git -C "$T9" worktree list 2>/dev/null)"
+assert_contains "$WT_LIST_9" "issue-100" \
+    "Case 1: git still lists .loom/worktrees/issue-100 as a registered worktree"
+assert_contains "$OUTPUT9" "Preserving" \
+    "Case 1: output announces that worktrees were preserved"
+assert_contains "$OUTPUT9" ".loom/worktrees/issue-100" \
+    "Case 1: output names the specific preserved worktree (not just a parent-dir summary)"
+
+rm -rf "$T9"
+echo ""
+
+# Case 2: a DIRTY (uncommitted changes) worktree must be REFUSED even with
+# --remove-worktrees passed -- git's own dirty-check, not a blind rm -rf.
+T10=$(mktemp -d /tmp/loom-worktree-dirty-refuse-test.XXXXXX)
+git -C "$T10" init --quiet
+git -C "$T10" config user.email "test@test.com"
+git -C "$T10" config user.name "Test"
+mkdir -p "$T10/.loom/roles" "$T10/.loom/scripts"
+echo '{}' > "$T10/.loom/config.json"
+git -C "$T10" add -A
+git -C "$T10" commit -m "existing install" --quiet
+git -C "$T10" worktree add "$T10/.loom/worktrees/issue-200" -b "feature/issue-200" --quiet
+echo "uncommitted work" > "$T10/.loom/worktrees/issue-200/wip.txt"
+
+OUTPUT10="$("$UNINSTALL_SH" --yes --local --remove-worktrees "$T10" 2>&1 < /dev/null)"
+EXIT10=$?
+assert_zero_exit "$EXIT10" "Case 2: uninstall-loom.sh --local --remove-worktrees exits 0 overall (one skip doesn't abort the run)"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ -d "$T10/.loom/worktrees/issue-200" ]] && [[ -f "$T10/.loom/worktrees/issue-200/wip.txt" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 2: dirty worktree (and its uncommitted file) survives --remove-worktrees"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 2: dirty worktree was destroyed despite uncommitted changes"
+fi
+
+assert_contains "$OUTPUT10" "skipped" \
+    "Case 2: output reports the dirty worktree as skipped, not silently dropped"
+assert_contains "$OUTPUT10" ".loom/worktrees/issue-200" \
+    "Case 2: output names the specific skipped worktree"
+
+rm -rf "$T10"
+echo ""
+
+# Case 3: a CLEAN worktree IS removed when --remove-worktrees is explicitly
+# passed -- the fix must not over-correct into "never remove". Uses
+# `git worktree remove` (not `rm -rf`), so the branch itself survives, same
+# as the pre-#5973 behavior the original report observed.
+T11=$(mktemp -d /tmp/loom-worktree-optin-remove-test.XXXXXX)
+git -C "$T11" init --quiet
+git -C "$T11" config user.email "test@test.com"
+git -C "$T11" config user.name "Test"
+mkdir -p "$T11/.loom/roles" "$T11/.loom/scripts"
+echo '{}' > "$T11/.loom/config.json"
+git -C "$T11" add -A
+git -C "$T11" commit -m "existing install" --quiet
+git -C "$T11" worktree add "$T11/.loom/worktrees/issue-300" -b "feature/issue-300" --quiet
+
+OUTPUT11="$("$UNINSTALL_SH" --yes --local --remove-worktrees "$T11" 2>&1 < /dev/null)"
+EXIT11=$?
+assert_zero_exit "$EXIT11" "Case 3: uninstall-loom.sh --local --remove-worktrees exits 0"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ ! -d "$T11/.loom/worktrees/issue-300" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Case 3: clean worktree IS removed when --remove-worktrees is passed"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Case 3: clean worktree survived despite --remove-worktrees"
+fi
+
+assert_contains "$OUTPUT11" "removed: .loom/worktrees/issue-300" \
+    "Case 3: output names the specific removed worktree"
+BRANCH_LIST_11="$(git -C "$T11" branch --list 'feature/issue-300')"
+assert_contains "$BRANCH_LIST_11" "feature/issue-300" \
+    "Case 3: the branch itself survives (git worktree remove, not a branch delete)"
+
+rm -rf "$T11"
+echo ""
+
+echo "================================================================"
+echo "Group 7: reinstall stash-pop safety (issue #6509, follow-up to #6499/#6502)"
+echo "================================================================"
+echo ""
+
+if [[ ! -f "$REINSTALL_STASH_POP" ]]; then
+    echo -e "${YELLOW}SKIP${NC}: source-tree-only helper, $REINSTALL_STASH_POP not found"
+elif [[ ! -f "$REAL_SAFE_STASH_POP" ]]; then
+    echo -e "${YELLOW}SKIP${NC}: $REAL_SAFE_STASH_POP not found (safe-stash-pop.sh, #6501)"
+else
+    # shellcheck source=/dev/null
+    source "$REINSTALL_STASH_POP"
+
+    export GIT_AUTHOR_NAME="test" GIT_AUTHOR_EMAIL="test@example.com"
+    export GIT_COMMITTER_NAME="test" GIT_COMMITTER_EMAIL="test@example.com"
+    export GIT_CONFIG_NOSYSTEM=1
+
+    G7_WORKDIR=$(mktemp -d /tmp/loom-reinstall-stash-pop-test.XXXXXX)
+    # A loom_root with NEITHER a source-tree nor a target-local
+    # safe-stash-pop.sh available -- exercises the raw-pop fallback (#6509
+    # Availability note: older install / partial tree / curl-piped standalone
+    # install predating #6501).
+    G7_NO_WRAPPER_ROOT="$G7_WORKDIR/no-wrapper-root"
+    mkdir -p "$G7_NO_WRAPPER_ROOT/defaults/scripts"
+
+    echo "-- Case 1: wrapper resolution prefers <target>/.loom/scripts/ over the source tree --"
+    G7_T1="$G7_WORKDIR/t1"
+    git init --quiet "$G7_T1"
+    git -C "$G7_T1" checkout -q -b main
+    printf 'a\n' > "$G7_T1/f.txt"
+    git -C "$G7_T1" add f.txt
+    git -C "$G7_T1" commit -q -m c1
+    mkdir -p "$G7_T1/.loom/scripts"
+    cp "$REAL_SAFE_STASH_POP" "$G7_T1/.loom/scripts/safe-stash-pop.sh"
+    chmod +x "$G7_T1/.loom/scripts/safe-stash-pop.sh"
+    printf 'a\nwip\n' > "$G7_T1/f.txt"
+    git -C "$G7_T1" stash push -q -m wip
+
+    _reinstall_safe_stash_pop "$REPO_ROOT" "$G7_T1" "stash@{0}"
+    assert_eq "wrapper" "$REINSTALL_POP_MODE" "Case 1: target-local wrapper: mode=wrapper"
+    assert_eq "$G7_T1/.loom/scripts/safe-stash-pop.sh" "$REINSTALL_POP_WRAPPER" \
+        "Case 1: target-local copy is preferred over the source-tree copy"
+    assert_eq "clean" "$REINSTALL_POP_RESULT" "Case 1: target-local wrapper: clean pop result"
+    assert_eq "0" "$REINSTALL_POP_STATUS" "Case 1: target-local wrapper: clean pop status 0"
+
+    echo "-- Case 2: falls back to <loom_root>/defaults/scripts/ with no target-local copy --"
+    G7_T2="$G7_WORKDIR/t2"
+    git init --quiet "$G7_T2"
+    git -C "$G7_T2" checkout -q -b main
+    printf 'a\n' > "$G7_T2/f.txt"
+    git -C "$G7_T2" add f.txt
+    git -C "$G7_T2" commit -q -m c1
+    printf 'a\nwip\n' > "$G7_T2/f.txt"
+    git -C "$G7_T2" stash push -q -m wip
+
+    _reinstall_safe_stash_pop "$REPO_ROOT" "$G7_T2" "stash@{0}"
+    assert_eq "wrapper" "$REINSTALL_POP_MODE" "Case 2: source-tree fallback: mode=wrapper"
+    assert_eq "$REPO_ROOT/defaults/scripts/safe-stash-pop.sh" "$REINSTALL_POP_WRAPPER" \
+        "Case 2: source-tree copy used when no target-local copy exists"
+    assert_eq "clean" "$REINSTALL_POP_RESULT" "Case 2: source-tree fallback: clean pop result"
+    assert_contains "$(cat "$G7_T2/f.txt")" "wip" "Case 2: source-tree fallback: content restored"
+    assert_eq "0" "$(git -C "$G7_T2" stash list | wc -l | tr -d ' ')" \
+        "Case 2: source-tree fallback: stash entry consumed"
+
+    echo "-- Case 3: --index staged/unstaged split preserved on the clean path (#3611) --"
+    G7_T3="$G7_WORKDIR/t3"
+    git init --quiet "$G7_T3"
+    git -C "$G7_T3" checkout -q -b main
+    printf 'line1\nline2\n' > "$G7_T3/f.txt"
+    printf 'orig\n' > "$G7_T3/g.txt"
+    git -C "$G7_T3" add f.txt g.txt
+    git -C "$G7_T3" commit -q -m c1
+    # Stage one hunk, leave the other unstaged, then stash both -- --index is
+    # what reproduces the split on pop.
+    printf 'line1\nline2\nSTAGED\n' > "$G7_T3/f.txt"
+    git -C "$G7_T3" add f.txt
+    printf 'orig\nUNSTAGED\n' > "$G7_T3/g.txt"
+    git -C "$G7_T3" stash push -q -m wip
+
+    _reinstall_safe_stash_pop "$REPO_ROOT" "$G7_T3" "stash@{0}"
+    assert_eq "clean" "$REINSTALL_POP_RESULT" "Case 3: --index split: clean pop result"
+    assert_contains "$(git -C "$G7_T3" diff --staged --name-only)" "f.txt" \
+        "Case 3: --index split: f.txt's hunk came back STAGED"
+    assert_contains "$(git -C "$G7_T3" diff --name-only)" "g.txt" \
+        "Case 3: --index split: g.txt's hunk came back UNSTAGED"
+
+    echo "-- Case 4: THE INCIDENT SHAPE (#6499/#6502) -- a conflicting reinstall pop --"
+    echo "   must never leave conflict markers or unmerged entries in \$TARGET_PATH"
+    G7_T4="$G7_WORKDIR/t4"
+    git init --quiet "$G7_T4"
+    git -C "$G7_T4" checkout -q -b main
+    mkdir -p "$G7_T4/.loom"
+    printf '{\n  "safehouse": {"socket": "/committed/loom.sock"}\n}\n' > "$G7_T4/.loom/config.json"
+    git -C "$G7_T4" add .loom/config.json
+    git -C "$G7_T4" commit -q -m "add config"
+    # Stash a host-specific edit, then have the "upstream reinstall" rewrite
+    # the same lines -- the same shape as the real incident (a
+    # `loom-daemon init` rewrite landing on top of a host-specific stashed
+    # edit).
+    printf '{\n  "safehouse": {"socket": "/host/patched.sock"}\n}\n' > "$G7_T4/.loom/config.json"
+    git -C "$G7_T4" stash push -q -m wip
+    printf '{\n  "safehouse": {"socket": "/upstream/new.sock"}\n}\n' > "$G7_T4/.loom/config.json"
+    git -C "$G7_T4" add .loom/config.json
+    git -C "$G7_T4" commit -q -m upstream
+
+    _reinstall_safe_stash_pop "$REPO_ROOT" "$G7_T4" "stash@{0}"
+    assert_eq "wrapper" "$REINSTALL_POP_MODE" "Case 4: incident shape: mode=wrapper"
+    assert_eq "restored" "$REINSTALL_POP_RESULT" \
+        "Case 4: incident shape: result=restored (conflict, rolled back)"
+    assert_nonzero_exit "$REINSTALL_POP_STATUS" "Case 4: incident shape: non-zero status signals a conflict"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if has_markers "$G7_T4/.loom/config.json"; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 4: incident shape: NO conflict markers left in .loom/config.json"
+    else
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 4: incident shape: NO conflict markers left in .loom/config.json"
+    fi
+    assert_eq "" "$(git -C "$G7_T4" ls-files --unmerged)" "Case 4: incident shape: no unmerged index entries remain"
+    assert_eq "" "$(git -C "$G7_T4" status --porcelain)" "Case 4: incident shape: working tree is clean again"
+    assert_eq "1" "$(git -C "$G7_T4" stash list | wc -l | tr -d ' ')" \
+        "Case 4: incident shape: the stash entry is PRESERVED (nothing discarded)"
+    assert_contains "$REINSTALL_POP_OUTPUT" ".loom/config.json" \
+        "Case 4: incident shape: REINSTALL_POP_OUTPUT names the conflicting file"
+
+    echo "-- Case 5: fallback -- clean pop still works when neither wrapper copy exists --"
+    G7_T5="$G7_WORKDIR/t5"
+    git init --quiet "$G7_T5"
+    git -C "$G7_T5" checkout -q -b main
+    printf 'a\n' > "$G7_T5/f.txt"
+    git -C "$G7_T5" add f.txt
+    git -C "$G7_T5" commit -q -m c1
+    printf 'a\nwip\n' > "$G7_T5/f.txt"
+    git -C "$G7_T5" stash push -q -m wip
+
+    _reinstall_safe_stash_pop "$G7_NO_WRAPPER_ROOT" "$G7_T5" "stash@{0}"
+    assert_eq "raw" "$REINSTALL_POP_MODE" "Case 5: no-wrapper fallback: mode=raw"
+    assert_eq "clean" "$REINSTALL_POP_RESULT" "Case 5: no-wrapper fallback: clean pop result"
+    assert_eq "0" "$REINSTALL_POP_STATUS" "Case 5: no-wrapper fallback: clean pop status 0"
+    assert_contains "$(cat "$G7_T5/f.txt")" "wip" "Case 5: no-wrapper fallback: content restored"
+
+    echo "-- Case 6: fallback -- a conflicting pop reproduces today's pre-#6509 raw-pop --"
+    echo "   behavior exactly (the explicitly permitted fallback shape)"
+    G7_T6="$G7_WORKDIR/t6"
+    git init --quiet "$G7_T6"
+    git -C "$G7_T6" checkout -q -b main
+    printf 'line1\nline2\nline3\n' > "$G7_T6/f.txt"
+    git -C "$G7_T6" add f.txt
+    git -C "$G7_T6" commit -q -m c1
+    printf 'STASHED\nline2\nline3\n' > "$G7_T6/f.txt"
+    git -C "$G7_T6" stash push -q -m wip
+    printf 'UPSTREAM\nline2\nline3\n' > "$G7_T6/f.txt"
+    git -C "$G7_T6" add f.txt
+    git -C "$G7_T6" commit -q -m upstream
+
+    _reinstall_safe_stash_pop "$G7_NO_WRAPPER_ROOT" "$G7_T6" "stash@{0}"
+    assert_eq "raw" "$REINSTALL_POP_MODE" "Case 6: no-wrapper conflict fallback: mode=raw"
+    assert_eq "raw_conflict" "$REINSTALL_POP_RESULT" "Case 6: no-wrapper conflict fallback: result=raw_conflict"
+    assert_nonzero_exit "$REINSTALL_POP_STATUS" "Case 6: no-wrapper conflict fallback: non-zero status"
+    assert_eq "1" "$(git -C "$G7_T6" stash list | wc -l | tr -d ' ')" \
+        "Case 6: no-wrapper conflict fallback: the stash entry is PRESERVED (nothing discarded)"
+    # This is the one branch where the pre-#6509 limitation is EXPECTED to
+    # reproduce: a raw `git stash pop --index` conflict leaves markers behind.
+    # Confirming that here proves the fallback genuinely IS the documented
+    # raw-pop-with-warning behavior, not a silently-different new behavior.
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if has_markers "$G7_T6/f.txt"; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 6: markers ARE left (today's documented, permitted fallback shape)"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 6: markers ARE left (today's documented, permitted fallback shape)"
+        echo "    no markers found -- fixture no longer reproduces a raw-pop conflict"
+    fi
+
+    echo "-- Case 7: install.sh wiring -- sources the helper and calls the function --"
+    echo "   (not an inline raw pop), with reapply sequenced after the pop"
+    if grep -q 'source "\$LOOM_ROOT/scripts/install/reinstall-stash-pop.sh"' "$INSTALL_SH"; then
+        TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 7: install.sh sources scripts/install/reinstall-stash-pop.sh"
+    else
+        TESTS_RUN=$((TESTS_RUN + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 7: install.sh sources scripts/install/reinstall-stash-pop.sh"
+    fi
+
+    G7_CALL_LINE=$(grep -n '_reinstall_safe_stash_pop "\$LOOM_ROOT" "\$TARGET_PATH"' "$INSTALL_SH" | head -1 | cut -d: -f1)
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if [[ -n "$G7_CALL_LINE" ]]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 7: install.sh's reinstall block calls _reinstall_safe_stash_pop"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 7: install.sh's reinstall block calls _reinstall_safe_stash_pop"
+    fi
+
+    # The old inline raw pop this issue replaces must be gone from the
+    # REINSTALL_STASHED_USER_CHANGES block (it still legitimately exists
+    # INSIDE reinstall-stash-pop.sh's own fallback branch, which install.sh
+    # does not duplicate).
+    if grep -q 'REINSTALL_POP_OUTPUT="\$(git -C "\$TARGET_PATH" stash pop --index 2>&1)"' "$INSTALL_SH"; then
+        TESTS_RUN=$((TESTS_RUN + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 7: install.sh's reinstall block no longer inlines a raw 'git stash pop --index'"
+        echo "    the pre-#6509 inline raw pop is still present verbatim"
+    else
+        TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 7: install.sh's reinstall block no longer inlines a raw 'git stash pop --index'"
+    fi
+
+    # Sequencing (#6509 issue body): on the wrapper's "restored" conflict
+    # path, the REINSTALL_RESET_PATHS reapply-from-snapshot loop must run
+    # AFTER the _reinstall_safe_stash_pop call, not before -- the wrapper's
+    # rollback lands each reset path back at its pre-pop (HEAD-reset) state,
+    # and only the reapply loop puts the fresh post-init Loom content back.
+    G7_RESTORED_LINE=$(grep -n '"\$REINSTALL_POP_RESULT" == "restored"' "$INSTALL_SH" | head -1 | cut -d: -f1)
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if [[ -n "$G7_CALL_LINE" && -n "$G7_RESTORED_LINE" && "$G7_RESTORED_LINE" -gt "$G7_CALL_LINE" ]]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: Case 7: the 'restored' branch's reset-path reapply is sequenced after the pop call"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: Case 7: the 'restored' branch's reset-path reapply is sequenced after the pop call"
+        echo "    call line=$G7_CALL_LINE restored-branch line=$G7_RESTORED_LINE"
+    fi
+
+    rm -rf "$G7_WORKDIR"
+fi
 echo ""
 
 echo "================================================================"

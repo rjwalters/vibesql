@@ -28,7 +28,7 @@
 # Installation selection is DERIVABLE, not configured: `GET
 # /repos/{owner}/{repo}/installation` (JWT-authed) resolves the installation
 # for any repo the app can see, cached per-owner so a fleet spanning multiple
-# GitHub accounts/orgs (e.g. rjwalters vs 2AMLogic) resolves the right
+# GitHub accounts/orgs (e.g. rjwalters vs example-org) resolves the right
 # installation for whichever repo it is currently operating on.
 #
 # # Fallback-first (the load-bearing default)
@@ -56,10 +56,12 @@
 # Usage (executable):
 #   ./github-app-token.sh status                 # cheap, no network
 #   ./github-app-token.sh get-token OWNER/REPO    # mints/reuses a token
+#   ./github-app-token.sh get-token --force OWNER/REPO   # ignores the cache
 #
 # Usage (sourced, for tests / advanced callers):
 #   source ".../lib/github-app-token.sh"
 #   github_app_configured && github_app_get_token "owner/repo"
+#   github_app_configured && github_app_get_token "owner/repo" force
 
 set -euo pipefail
 
@@ -237,8 +239,19 @@ _github_app_cache_path() {
 # mapping cache file path. This value is not a secret (an installation id is
 # just an integer identifying a repo grant) so it does not need 0600, but it
 # lives in the same 0700 directory as the token cache for simplicity.
+#
+# Keyed by (owner, app id) rather than owner alone (#5912): a host running
+# daemons for two repos that share a GitHub account but are backed by two
+# different GitHub Apps would otherwise collide on one cache entry --
+# whichever app resolves first wins, and the second app then mints against an
+# installation id its JWT has no claim on (404), silently falling back to
+# ambient `gh` auth. `_GH_APP_ID` is populated by `_github_app_load_config`
+# (via `github_app_configured`) before every call site here is reached.
+# Pre-existing owner-only cache files (`owner-<owner>.installation`) are
+# simply left as dead filenames -- no migration needed.
 _github_app_installation_cache_path() {
-  echo "$(_github_app_cache_dir)/owner-${1}.installation"
+  local app_id="${_GH_APP_ID:-unknown}"
+  echo "$(_github_app_cache_dir)/owner-${1}-app-${app_id}.installation"
 }
 
 # _github_app_write_cache <installation_id> <token> <expires_at_iso8601> ->
@@ -357,14 +370,26 @@ _github_app_api_mint_token() {
 
 # --- Top-level entry point ---
 
-# github_app_get_token <owner/repo> -> echoes a valid installation token on
-# stdout, minting or reusing the cache as needed. On success also sets
+# github_app_get_token <owner/repo> [force] -> echoes a valid installation
+# token on stdout, minting or reusing the cache as needed. On success also sets
 # GITHUB_APP_INSTALLATION_ID and GITHUB_APP_TOKEN_EXPIRES_AT (non-secret).
 # Returns 1 (with $_GH_APP_LAST_ERROR set) on any failure -- callers MUST
 # treat that as "fall back to ambient auth", not a hard error (#4430 AC:
 # expired/revoked/unreadable key falls back rather than hard-failing).
+#
+# A non-empty second argument (`force`) BYPASSES the token cache and always
+# mints (#6074). An installation token is minted with the permissions the
+# installation held at mint time and is then reused for up to ~1h, so a
+# permission grant that has *already propagated* on GitHub's side is still
+# invisible to every caller until that cached token ages out -- the exact
+# window that made a Builder's `git push` succeed (Contents:write, present in
+# the cached token) while `gh pr create` returned `403 Resource not accessible
+# by integration`. Forcing a fresh mint collapses that window from ~1h to one
+# API round-trip. The freshly minted token overwrites the cache, so the
+# recovery is shared with every later caller on this host rather than being
+# re-paid per call site.
 github_app_get_token() {
-  local nwo="$1"
+  local nwo="$1" force="${2:-}"
   if ! github_app_configured; then
     return 1
   fi
@@ -386,7 +411,10 @@ github_app_get_token() {
   fi
 
   local cached token expires_at expires_epoch
-  cached=$(_github_app_read_cache "$installation_id" || echo "")
+  cached=""
+  if [[ -z "$force" ]]; then
+    cached=$(_github_app_read_cache "$installation_id" || echo "")
+  fi
   if [[ -n "$cached" ]]; then
     token=$(echo "$cached" | jq -r '.token')
     expires_at=$(echo "$cached" | jq -r '.expires_at')
@@ -433,7 +461,16 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
       ;;
     get-token)
       shift || true
-      _nwo="${1:-}"
+      # `--force` may appear before or after the owner/repo argument (#6074).
+      _gh_app_force=""
+      _nwo=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --force) _gh_app_force="force" ;;
+          *) _nwo="$1" ;;
+        esac
+        shift
+      done
       if [[ -z "$_nwo" ]]; then
         jq -cn '{status:"error", message:"owner/repo argument required"}'
         exit 0
@@ -442,16 +479,33 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
         jq -cn --arg message "$_GH_APP_LAST_ERROR" '{status:"not_configured", message:$message}'
         exit 0
       fi
-      if _gh_app_token=$(github_app_get_token "$_nwo"); then
-        jq -cn --arg token "$_gh_app_token" --arg installation_id "$GITHUB_APP_INSTALLATION_ID" \
-          --arg app_id "$_GH_APP_ID" --arg expires_at "$GITHUB_APP_TOKEN_EXPIRES_AT" \
+      # `github_app_get_token` sets GITHUB_APP_INSTALLATION_ID /
+      # GITHUB_APP_TOKEN_EXPIRES_AT as a side effect, but `$(...)` command
+      # substitution runs its command in a SUBSHELL -- those assignments never
+      # propagate back to this (the parent) shell, so reading them directly
+      # after the substitution always sees the pre-call (empty) values (the
+      # root cause of `installation_id` always coming back empty in the CLI
+      # envelope). Fix: emit them as two extra output lines from INSIDE the
+      # same subshell (`github_app_get_token` itself always emits exactly one
+      # trailing-newline-terminated line -- the token), then split the
+      # captured 3-line output back apart out here (#5401).
+      if _gh_app_out=$(
+        github_app_get_token "$_nwo" "$_gh_app_force" &&
+          printf '%s\n%s' "$GITHUB_APP_INSTALLATION_ID" "$GITHUB_APP_TOKEN_EXPIRES_AT"
+      ); then
+        _gh_app_token="${_gh_app_out%%$'\n'*}"
+        _gh_app_rest="${_gh_app_out#*$'\n'}"
+        _gh_app_installation_id="${_gh_app_rest%%$'\n'*}"
+        _gh_app_expires_at="${_gh_app_rest#*$'\n'}"
+        jq -cn --arg token "$_gh_app_token" --arg installation_id "$_gh_app_installation_id" \
+          --arg app_id "$_GH_APP_ID" --arg expires_at "$_gh_app_expires_at" \
           '{status:"ok", token:$token, installation_id:$installation_id, app_id:$app_id, expires_at:$expires_at}'
       else
         jq -cn --arg message "$_GH_APP_LAST_ERROR" '{status:"error", message:$message}'
       fi
       ;;
     *)
-      echo "Usage: github-app-token.sh {status|get-token OWNER/REPO}" >&2
+      echo "Usage: github-app-token.sh {status|get-token [--force] OWNER/REPO}" >&2
       exit 64
       ;;
   esac

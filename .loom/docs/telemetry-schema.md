@@ -184,16 +184,60 @@ paired `sweep.outcome`).
   "issue": 4703,
   "sweep_id": "sweep-issue-4703-0",
   "completed_at": "2026-07-30T12:08:32Z",
-  "result": "success"
+  "result": "success",
+  "tokens_by_model": [
+    {
+      "model": "claude-sonnet-5",
+      "speed": "standard",
+      "service_tier": "standard",
+      "input": 48000,
+      "cache_read": 15000,
+      "cache_write_5m": 500,
+      "cache_write_1h": 1500,
+      "output": 6120
+    }
+  ]
 }
 ```
 
 `result` is one of `success`, `failure`, `cancelled`, `blocked`.
 
+#### Per-model token usage (Issue #6384)
+
+`tokens_by_model` is an **additive, optional** array — omitted entirely
+(never an empty array, never a fabricated `0`) when no attributable
+transcript was found for this sweep. Each row is a
+`(model, speed, service_tier)` bucket with raw, **not cost-weighted** input
+(`input` = `input_tokens` + `cache_read_input_tokens` +
+`cache_creation_input_tokens`; `cache_read`/`cache_write_5m`/
+`cache_write_1h` further split the cache portion) and output token counts —
+the same shape and same underlying aggregation
+(`crate::transcript_tokens::sum_sweep_tokens_by_model`) the safehouse
+`completion-v1` envelope's own `tokens_by_model` field already carries, so
+the two paths report identical per-sweep token data. This closes the gap
+where a dashboard-sourced backfill (reconstructing completions from
+`sweep.completed` + GitHub when the safehouse→egress path is down) had no
+token data to fall back on.
+
+Populated on the backfill/local-journal export path
+(`observability::backfill::synthesize_completed`, copied verbatim from the
+paired `sweep.outcome` record's own `tokens_by_model` — see below); the live
+event-bus path (`observability::collector::terminal_records`) does not yet
+compute it (that path also does not compute `sweep.outcome`'s `tokens_in`/
+`tokens_out` today, for the same reason — no `workspace_root`/sweep-start
+instant in scope at that call site).
+
+This field is purely additive — a `schema_version` bump is unnecessary (see
+"`schema_version` semantics" above). Like `pr_number`/`tokens_in`/
+`tokens_out`, it is workload detail about a private repo and is not added to
+the public (unauthenticated, private-repo) redaction allowlist
+(`dashboard/src/redaction.ts`) by this change.
+
 ### `sweep.outcome`
 
 The full post-hoc outcome: model/config/effort, per-phase durations, terminal
-result, and PR number. (A distinct type from the daemon's internal
+result, PR number, and (Issue #5357) the sweep's work-output — tokens
+processed and lines changed. (A distinct type from the daemon's internal
 `sweep_outcomes::OutcomeRecord`, which #4704 maps this into for its journal.)
 
 ```json
@@ -212,13 +256,57 @@ result, and PR number. (A distinct type from the daemon's internal
   ],
   "total_duration_sec": 512,
   "result": "success",
-  "pr_number": 4710
+  "pr_number": 4710,
+  "tokens_in": 48213,
+  "tokens_out": 6120,
+  "lines_added": 214,
+  "lines_deleted": 37,
+  "tokens_by_model": [
+    {
+      "model": "claude-sonnet-5",
+      "speed": "standard",
+      "service_tier": "standard",
+      "input": 48000,
+      "cache_read": 15000,
+      "cache_write_5m": 500,
+      "cache_write_1h": 1500,
+      "output": 6120
+    }
+  ]
 }
 ```
 
-`config` (free-form string map), `phase_durations`, `model`, `effort`, and
-`pr_number` are omitted when empty/unset. `config` is a map — not fixed fields —
-so operator-tunable knobs can be captured without a schema bump.
+`config` (free-form string map), `phase_durations`, `model`, `effort`,
+`pr_number`, `tokens_in`, `tokens_out`, `lines_added`, `lines_deleted`, and
+`tokens_by_model` are omitted when empty/unset. `config` is a map — not fixed
+fields — so operator-tunable knobs can be captured without a schema bump.
+
+`tokens_by_model` (Issue #6384) is the same per-model breakdown documented
+under `sweep.completed` above — the same aggregation
+(`crate::transcript_tokens::sum_sweep_tokens_by_model`), computed here with
+the sweep's real start/completion instant
+(`sweep_registry::outcome_journal::append_outcome_telemetry_journal`), and
+the source `sweep.completed`'s own copy is taken from.
+
+#### Work-output fields (Issue #5357)
+
+Four **independently optional** fields, each omitted (never coerced to `0`)
+when unavailable — a sweep with no PR carries no LOC pair; a sweep whose
+Claude Code transcripts were pruned/rotated before capture carries no token
+pair. The two pairs are unrelated to each other, so a record can carry
+either, both, or neither.
+
+| Field | Source | Notes |
+|---|---|---|
+| `tokens_in` | Sum of `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` across the sweep's own Claude Code transcripts (parent session + every subagent). | **Raw**, not cost-weighted — this record already carries `model`, so a consumer applies whatever per-model pricing table it wants without a backfill when that table changes. |
+| `tokens_out` | Sum of `output_tokens` across the same transcripts. | Kept separate from `tokens_in` — input and output tokens price very differently per model, so a cost-weighted total needs both counts plus `model`, not one pre-mixed number. |
+| `lines_added` | `git diff --numstat` between the worktree's `HEAD` and its mainline merge base, summed. | **Local only — never a forge API call.** Sampled opportunistically while the worktree is still live (so a `--merge`-mode sweep's own synchronous post-merge worktree cleanup, which can complete before the daemon ever observes the sweep's process exit, does not erase it), with a live-probe fallback at outcome-write time for a sweep that died before any sampling tick. |
+| `lines_deleted` | Same `git diff --numstat`, deletions side. | Kept as a separate field from `lines_added` (not a net) — a large refactor that adds and deletes a similar line count is not "no work done". |
+
+Neither pair is added to the public (unauthenticated, private-repo) redaction
+allowlist — like `pr_number`, they are workload detail about a private repo
+and stay behind the same authenticated-only boundary (see
+`dashboard/src/redaction.ts`).
 
 ### `tokens.snapshot`
 
@@ -280,13 +368,41 @@ probe stays absent rather than being coerced to a fake zero (the daemon's
   "logical_cpus": 28,
   "cpu_idle_fraction": 0.83,
   "load_per_core": 0.51,
-  "worktree_root_free_gb": 200
+  "worktree_root_free_gb": 200,
+  "worktree_root_total_gb": 1000
 }
 ```
 
-`cpu_idle_fraction`, `load_per_core`, and `worktree_root_free_gb` are omitted when
-unmeasurable. A consumer MUST treat an absent measurement as "unknown", never as
-zero/full.
+`cpu_idle_fraction`, `load_per_core`, `worktree_root_free_gb`, and
+`worktree_root_total_gb` are omitted when unmeasurable. A consumer MUST treat an
+absent measurement as "unknown", never as zero/full.
+
+**`worktree_root_total_gb` (Issue #5356).** Total capacity (GB) of the
+worktree-root scratch volume — the denominator `worktree_root_free_gb` needs to
+become a percentage, which is comparable across a heterogeneous fleet in a way an
+absolute free-GB figure is not (40 GB free means something very different on a
+128 GB worker than on a 2 TB studio box). Sourced from the same `df -Pk` sample as
+`worktree_root_free_gb` (`disk_headroom.rs`'s `worktree_root_disk_gb`, one probe
+for both columns rather than two separate subprocess spawns).
+
+Follows the **exact same "unknown != zero" contract** `worktree_root_free_gb`
+already established: omitted, never a fabricated `0`, when the probe cannot
+measure it. This can happen independently of the free-space reading, so a record
+may legitimately carry `worktree_root_free_gb` with no `worktree_root_total_gb` —
+a consumer that sees this shape MUST render the free reading in GB only and MUST
+NOT compute a percentage against a fabricated denominator. This is also exactly
+the shape a record from a pre-#5356 daemon has (the field did not exist yet), so
+the same rendering rule keeps old and new "no total" records indistinguishable —
+neither is an error.
+
+This field is purely additive — a `schema_version` bump is unnecessary (see
+"`schema_version` semantics" above: only a **breaking** wire change requires one),
+and passes through public redaction unchanged for the same reason
+`worktree_root_free_gb` does (`dashboard/src/redaction.ts`): total disk capacity
+describes the machine, not any repo, issue, branch, or operator. It is a mild
+fingerprinting signal for a named host — reviewed and deliberately allowed
+through, since free-GB is already public and this is only the denominator that
+turns it into a percentage.
 
 **Binary identity (`build_commit` / `built_at`, #4956).** `daemon_version` is
 `CARGO_PKG_VERSION`, so it only moves once per release: every build between two
@@ -309,6 +425,31 @@ Both fields are additive and pass through public redaction unchanged (they
 describe the released binary, not any repo or operator — see
 `dashboard/src/redaction.ts`), so an older consumer that ignores unknown keys is
 unaffected.
+
+**Watchdog/crash-protection state (`protection`, #5352).** An optional object
+carrying this host's watchdog/crash-protection classification — the same
+verdict `loom-daemon status`'s own `Protection:` line and `--json`'s
+`protection` object already compute
+(`daemon_install_state::probe_protection`), reused rather than re-derived so
+the two surfaces can never disagree:
+
+```json
+{ "state": "watchdog-not-provisioned", "watchdog_provisioned": false }
+```
+
+- `state` — one of `"protected"`, `"no-marker"` (crash protection disarmed —
+  no autonomy-desired marker), `"watchdog-not-provisioned"` (marker present,
+  but nothing is scheduled to detect a future daemon death), or `"unknown"`
+  (the probe ran but could not answer the provisioning check itself — no
+  `launchctl`/`systemctl`, or an unreachable `systemctl --user` bus).
+- `watchdog_provisioned` — whether the watchdog job/timer was found
+  provisioned, omitted when `state` is `"unknown"`.
+
+The whole `protection` object is **omitted** on a record from a pre-#5352
+daemon, or when the host-local probe could not construct a report at all — a
+consumer MUST treat that absence as "not reported", never as "unprotected":
+synthesizing a false negative from a missing field would be worse than no
+signal at all.
 
 ## Persistence & read surface (`sweep.outcome`, Issue #4704)
 

@@ -21,7 +21,7 @@ loom-daemon (per host)
   exporter: HttpsExporter (default) or OtlpExporter (opt-in, #4858)
         │
         ▼
-Cloudflare Worker backend (deploy-your-own, or the 2AM reference instance)
+Cloudflare Worker backend (deploy-your-own, or an operator-run reference instance)
   D1 (durable history) + Durable Object (live "what's running now")
         │
         ├── /api/*     authenticated, full detail   (Cloudflare Access)
@@ -38,14 +38,14 @@ this pipeline is infrastructure **you** deploy and point your own daemons at.
 
 ## 1. Enable telemetry on a daemon
 
-Add the `observability` block to that host's `.loom/config.json`:
+Add the `observability` block to that host's `.loom/config.json` — **except**
+`ingestKeyFile`, see the callout below:
 
 ```json
 {
   "observability": {
     "enabled": true,
     "endpoint": "https://<your-worker>.workers.dev/ingest",
-    "ingestKeyFile": "/etc/loom/observability-ingest.key",
     "batchSize": 50,
     "flushIntervalSecs": 30,
     "queueCapacity": 2000
@@ -62,7 +62,7 @@ Precedence is **env > config > default**, the same rule every other
 |---|---|---|
 | `enabled` | `LOOM_OBSERVABILITY_ENABLED` | `false` |
 | `endpoint` | `LOOM_OBSERVABILITY_ENDPOINT` | unset (disables export) |
-| `ingestKeyFile` | `LOOM_OBSERVABILITY_INGEST_KEY_FILE` | unset (disables export) |
+| `ingestKeyFile` | `LOOM_OBSERVABILITY_INGEST_KEY_FILE` | `$HOME/.loom/observability/ingest.key` |
 | `batchSize` | `LOOM_OBSERVABILITY_BATCH_SIZE` | 50 |
 | `flushIntervalSecs` | `LOOM_OBSERVABILITY_FLUSH_INTERVAL_SECS` | 30 |
 | `queueCapacity` | `LOOM_OBSERVABILITY_QUEUE_CAPACITY` | 2000 |
@@ -71,11 +71,31 @@ Precedence is **env > config > default**, the same rule every other
 The ingest key is **never inline in config** — `ingestKeyFile` is a path the
 daemon reads once at startup and holds only in memory, sent solely as an
 `Authorization: Bearer` header. A misconfigured block (missing endpoint or
-key file) degrades to off; it does not crash the daemon. Source of truth:
-`loom-daemon/src/observability/mod.rs`'s module doc (config resolution,
-FLAGS-OFF posture, read-only invariant) and its `collector.rs` / `queue.rs` /
-`exporter.rs` / `sender.rs` siblings (collector, durable queue, exporter
-trait + HTTPS implementation, retry-drain loop).
+unreadable key file) degrades to off; it does not crash the daemon. Source of
+truth: `loom-daemon/src/observability/mod.rs`'s module doc (config
+resolution, FLAGS-OFF posture, read-only invariant) and its `collector.rs` /
+`queue.rs` / `exporter.rs` / `sender.rs` siblings (collector, durable queue,
+exporter trait + HTTPS implementation, retry-drain loop).
+
+**`ingestKeyFile` must never be committed to the shared `.loom/config.json`**
+— unlike every other `observability.*` key above, it is host-specific by
+definition (every host's key lives at a different, unshareable path). It
+defaults to `$HOME/.loom/observability/ingest.key`, so the common case needs
+no config value at all: install each host's key at that conventional path
+(`dashboard/docs/deploy-runbook.md` step 9a) and leave `ingestKeyFile` unset
+everywhere. A host that genuinely needs a non-default path (e.g. a system
+path for a service account) sets it in the gitignored, per-host
+`.loom-local/local.json` override tier (`config_resolver.rs`, highest
+precedence) or via `$LOOM_OBSERVABILITY_INGEST_KEY_FILE` — never in the
+committed file. Issue #5336 is exactly the failure mode this avoids: a
+macOS `ingestKeyFile` value was committed to this repo's own shared
+`.loom/config.json` and every other host that `git pull`ed `main` inherited
+a path to a key file that did not exist on it, with telemetry silently off
+for a day before anyone noticed.
+`./defaults/scripts/check-ingest-key-file.sh` validates the resolved path on
+any host — readable, and not a path copied from a different host's
+`$HOME` — usable both right after provisioning a host and as a periodic
+fleet-wide regression check.
 
 ## 2. What gets sent: the wire schema
 
@@ -151,7 +171,7 @@ warning.
 `loom-daemon status` now states the answer positively (issue #5083):
 
 ```
-Observability: OK — last export 12s ago, 3481 record(s) as host_id=robb-studio → https://…/ingest
+Observability: OK — last export 12s ago, 3481 record(s) as host_id=studio-host → https://…/ingest
 ```
 
 The same facts are machine-readable under `observability_export` in
@@ -164,7 +184,8 @@ loom-daemon status --json | jq -e '.observability_export.state == "healthy"'
 
 | `state` | Meaning | Rendered as |
 |---|---|---|
-| `disabled` | Exporter not running: `enabled=false`, or enabled but under-configured (no endpoint / no readable ingest key / `otlp` without the Cargo feature) | `Observability: disabled …` |
+| `disabled` | Exporter deliberately not running: `enabled=false`, or the block is absent. **Never** reported for `enabled: true` — see `misconfigured` below (#5337) | `Observability: disabled …` |
+| `misconfigured` | `enabled: true`, but a required piece of config could not be resolved (no endpoint, no `ingestKeyFile`, or that file is missing/unreadable/empty, or `otlp` without the Cargo feature) — a config error to fix, not a benign off-by-choice state (#5337) | `Observability: MISCONFIGURED …` |
 | `starting` | Running, nothing acked yet, still inside the grace window (3 × `flushIntervalSecs`, floored at 10 min) — a just-rolled daemon, not a fault | `Observability: starting …` |
 | `never_exported` | Running well past the grace window and **no batch has ever been acked** — the silent failure mode | `Observability: NEVER EXPORTED …` |
 | `healthy` | Batches are being acked and the ids agree | `Observability: OK …` |
@@ -175,14 +196,21 @@ loom-daemon status --json | jq -e '.observability_export.state == "healthy"'
 `started_at`, `last_success_at`, `last_failure_at`, `last_failure_detail`,
 `records_exported`, `consecutive_failures`, and `flush_interval_secs`. A `null`
 `observability_export` means the daemon binary predates #5083 — "cannot tell",
-never "disabled"; restart the daemon onto a current binary.
+never "disabled"; restart the daemon onto a current binary. Under
+`misconfigured`, `endpoint` reflects whatever piece of config *did* resolve
+(`null` only when the endpoint itself is what's missing) and
+`last_failure_detail` names the offending path plus the underlying error (e.g.
+an `ingestKeyFile` `io::Error`'s `Display`, which includes the OS errno) — the
+same "never the key itself" discipline every other error surface in this
+module uses.
 
-The health section keeps its anomaly-only contract. It now recognizes two
-additional *non-green* conditions — `never_exported` and `failing` — which are
-anomalies by the same rule that already admitted `host_id_mismatch`; `healthy`,
-`starting`, and `disabled` still render nothing at all. When a section does
-render, its `detail` payload carries the full `observability_export` record, so
-a machine consumer of `loom-daemon health --json` gets the positive facts too.
+The health section keeps its anomaly-only contract. It now recognizes three
+additional *non-green* conditions — `misconfigured`, `never_exported`, and
+`failing` — which are anomalies by the same rule that already admitted
+`host_id_mismatch`; `healthy`, `starting`, and `disabled` still render nothing
+at all. When a section does render, its `detail` payload carries the full
+`observability_export` record, so a machine consumer of `loom-daemon health
+--json` gets the positive facts too.
 
 **Note on scope**: this is a *transport-level* signal — it answers "are batches
 being acked", not "is every record kind being enqueued". A host can report
@@ -220,16 +248,60 @@ dead-end login wall for an anonymous visitor.
 - Token/cost analytics (burn curves, forecasting, per-repo attribution, and
   why that surface is authenticated-only): `dashboard/docs/token-analytics.md`
 
-## 6. The 2AM reference instance
+## 5b. Doc-maintenance throughput (Guide, local-only, issue #6136)
 
-`dashboard.2amlogic.com` is a live, operator-owned deployment of this same
+Everything in sections 1-5 above is the `sweep.*`/`tokens.snapshot` pipeline,
+and it only ever covers **Builder sweeps** — the daemon's `SweepRegistry`
+tracks a sweep's checkpoint file and phase transitions, which is what
+`sweep.phase`/`sweep.completed`/`sweep.outcome` are sampled from
+(`.loom/docs/telemetry-schema.md`). Support-role crons — Judge, Champion,
+Curator, and Guide — run as role **prompts**
+(`defaults/.claude/commands/loom/<role>.md`), not as tracked sweeps, so none
+of them ever emit `sweep.*` records; their token spend falls into
+`dashboard/docs/token-analytics.md`'s "unattributed" bucket, reported as a
+single undifferentiated total with no per-role breakdown.
+
+Guide's Document Maintenance phase (the WORK_LOG.md/WORK_PLAN.md/README.md
+docs PRs) closes a **narrow slice** of that gap with its own small, decoupled
+local telemetry surface — deliberately **not** wired into the
+`loom-daemon`/Cloudflare pipeline above, since attaching a role prompt to the
+`SweepRegistry` machinery would be a much larger change than this issue's
+visibility-only scope:
+
+- **Emission**: `create_docs_pr()` (Step 5) calls
+  `./.loom/scripts/guide-docs-telemetry.sh record --pr <N> --duration-sec <N>
+  --files <csv>` right before releasing the docs-guide lock, appending one
+  JSON line — `{schema_version, emitted_at, emitted_at_epoch, host_id,
+  record: {kind: "guide.docs_maintenance", repo, pr_number, duration_sec,
+  files_changed}}` — to `.loom/logs/guide-docs-telemetry.jsonl` (gitignored,
+  host-local, same directory `sweep-outcome-telemetry.jsonl` already lives
+  in). `duration_sec` is the phase's elapsed lock-hold time
+  (`docs-guide-lock.sh age`, read before release) — a proxy for agent/token
+  spend, not a real token count (no token-usage API is available to a role
+  prompt's shell environment).
+- **Query**: `./.loom/scripts/guide-docs-telemetry.sh report --since 7d`
+  (accepts `7d`/`24h`/`30m`/`90s`/a bare integer of seconds; `--json` for a
+  machine-readable summary) prints doc-maintenance PR count and total/average
+  phase time over the window, from one command — a zero-activity window
+  renders "No doc-maintenance PRs in this window." rather than erroring.
+- **What this does NOT do**: it does not add a `guide.*` kind to the wire
+  schema in `.loom/docs/telemetry-schema.md`, does not export anywhere, and
+  does not appear in the Cloudflare-backed dashboard — it is a purely local,
+  single-host-at-a-time journal an operator queries directly on whichever
+  host is running Guide. A fleet-wide, dashboard-integrated version of this
+  (real per-account token attribution, multi-host aggregation) is a natural
+  follow-up, not required by #6136's acceptance criteria.
+
+## 6. The operator reference instance
+
+`dashboard.example.com` is a live, operator-owned deployment of this same
 backend (not a shared Loom service — every fleet deploys its own). Its
 specific account/database IDs, Access application layout, credential file
-locations, and cutover history (the hostname-wide Access app was retired in
-favor of the single-URL `/login`-scoped layout on 2026-07-31) are recorded
-in [`dashboard/docs/reference-deployment.md`](https://github.com/rjwalters/loom/blob/main/dashboard/docs/reference-deployment.md)
-— useful as a concrete filled-in example of every value the deploy runbook
-asks you to supply, not as a second copy of the how-to.
+locations, and cutover history now live in that operator's own
+infrastructure repo (example-org/fleet-repo#305), not in this repo — this repo's
+[`dashboard/docs/reference-deployment.md`](https://github.com/rjwalters/loom/blob/main/dashboard/docs/reference-deployment.md)
+only records the *shape* such a document should take (which values to
+capture, and why) so you can produce the equivalent for your own instance.
 
 ## Map of every detail doc
 
@@ -240,5 +312,6 @@ asks you to supply, not as a second copy of the how-to.
 | `dashboard/docs/cloudflare-access.md` | Gating the authenticated view behind SSO; single-URL fallback |
 | `dashboard/docs/query-api.md` | `/api/*` vs `/public/*` routes, redaction policy, live tail |
 | `dashboard/docs/token-analytics.md` | Burn curves, forecasting, per-repo attribution |
-| `dashboard/docs/reference-deployment.md` | The 2AM instance specifically — concrete IDs, current state |
+| `defaults/scripts/guide-docs-telemetry.sh` | Local doc-maintenance throughput telemetry (§5b) — record + report, no daemon/Cloudflare involvement |
+| `dashboard/docs/reference-deployment.md` | Generic guidance/template for recording your own instance's deployment identity in your own infrastructure repo — carries no operator identity here |
 | `loom-daemon/src/observability/mod.rs` | Config resolution, collector/queue/exporter/sender source of truth |

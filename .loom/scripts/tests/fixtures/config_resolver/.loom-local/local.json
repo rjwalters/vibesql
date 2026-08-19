@@ -4,6 +4,6 @@
   },
   "overriddenByLocal": "local-value",
   "autonomous": {
-    "perTokenConcurrency": 4
+    "exampleTierProbe": 4
   }
 }

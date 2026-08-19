@@ -165,6 +165,12 @@
 #                        Unset by default (no `-m` emitted).
 #   LOOM_CODEX_MODEL_CHECK  Set to 0 to disable the Claude-shaped-model refusal
 #                        below (issue #5028). Default on (`1`).
+#   LOOM_CODEX_AUTH_MODE_CHECK  Set to 0 to disable the ChatGPT-plan pinned-
+#                        model guard below (issue #5499): a ChatGPT-plan
+#                        profile only accepts its account's own default
+#                        model, so an explicitly pinned model (even a
+#                        Codex-family one) is dropped with a warning rather
+#                        than launched into a guaranteed 400. Default on (`1`).
 #   LOOM_EFFORT          Reasoning effort, mapped to
 #                        `-c model_reasoning_effort=<value>`. Skipped when an
 #                        explicit `-c model_reasoning_effort=` override is
@@ -577,6 +583,38 @@ if [[ "$HAS_SKIP_GIT_CHECK_ARG" != "true" ]]; then
     fi
 fi
 
+# --- Account provider resolution (issue #5609, design D8) ---
+# Reads THIS runtime's own manifest (defaults/runtimes/codex.json)'s
+# "accountProvider" field so the pool `tokens select --provider` dispatches
+# into is a property of the runtime manifest, not a value hardcoded in this
+# script -- an operator can locally repoint it by editing
+# .loom/runtimes/codex.json without touching this script. Resolution mirrors
+# check-runtime-capabilities.sh's precedence: an on-disk
+# <repo>/.loom/runtimes/<name>.json wins over the defaults/runtimes/ fallback
+# next to this script. A missing file, missing field, or missing `jq` all
+# fall open to "claude" (never fail closed) -- design D8's "a missing
+# accountProvider on an un-resynced install must default to claude". Mirrors
+# the identical helper in spawn-claude.sh; each spawn adapter stays a
+# self-contained sibling rather than sourcing a shared lib for one lookup.
+_loom_account_provider_for_runtime() {
+    local runtime_name="$1" manifest=""
+    if [[ -f "${WORKSPACE}/.loom/runtimes/${runtime_name}.json" ]]; then
+        manifest="${WORKSPACE}/.loom/runtimes/${runtime_name}.json"
+    elif [[ -f "${_SCRIPT_DIR}/../runtimes/${runtime_name}.json" ]]; then
+        manifest="${_SCRIPT_DIR}/../runtimes/${runtime_name}.json"
+    fi
+    if [[ -z "$manifest" ]] || ! command -v jq >/dev/null 2>&1; then
+        printf '%s\n' "claude"
+        return
+    fi
+    local provider
+    provider="$(jq -r '.accountProvider // "claude"' "$manifest" 2>/dev/null)"
+    case "$provider" in
+        "" | null) provider="claude" ;;
+    esac
+    printf '%s\n' "$provider"
+}
+
 # --- Auth: CODEX_HOME profile passthrough (see header) ---
 CODEX_PROFILE_NAME=""
 if [[ -n "${LOOM_SPAWN_NO_EXPORT:-}" ]]; then
@@ -598,9 +636,10 @@ else
             log_error "No loom-daemon binary supporting provider-aware account selection was found."
             exit 78
         fi
+        _account_provider="$(_loom_account_provider_for_runtime codex)"
         _selection_stderr_file="$(mktemp)"
         _selection_output=""
-        if ! _selection_output="$("$_daemon_bin" tokens select --provider codex \
+        if ! _selection_output="$("$_daemon_bin" tokens select --provider "$_account_provider" \
             --workspace "$WORKSPACE" --export 2>"$_selection_stderr_file")"; then
             log_error "Codex account selection failed:"
             cat "$_selection_stderr_file" >&2 || true
@@ -644,6 +683,54 @@ else
         fi
     else
         log_info "spawn-codex: no Codex profile requested — using the Codex CLI's ambient login state (~/.codex)"
+    fi
+fi
+
+# --- ChatGPT-plan auth-mode guard for a pinned model (issue #5499) ---
+# A Codex profile authenticated via a ChatGPT PLAN (interactive `codex login`)
+# restricts the CLI to the account's own default model — an EXPLICITLY pinned
+# model, even a Codex-family one like `gpt-5-codex`, is rejected on the wire
+# with a 400 `invalid_request_error`: "The '<model>' model is not supported
+# when using Codex with a ChatGPT account." The Claude-shaped-model refusal
+# above cannot catch this: `gpt-5-codex` is correctly Codex-family, so it
+# passes that check — the real incompatibility is model vs AUTH MODE, not
+# model vs runtime family, and nothing before this point has verified it.
+#
+# Detected here, AFTER CODEX_HOME is resolved and BEFORE the CLI is ever
+# dispatched, via `codex login status`'s own designed-for-this wording
+# ("Logged in using ChatGPT" vs "Logged in using an API key") — never by
+# opening or parsing `auth.json` itself, which Loom treats as opaque mutable
+# state owned by Codex (see account_lifecycle.rs's module doc). A ChatGPT-plan
+# match DROPS the pinned model (with a warning) rather than launching a
+# doomed invocation — the account's own default model is exactly what a
+# manual `codex exec` with no `-m` uses successfully. This is a warn-and-drop,
+# not a hard refusal (unlike the Claude-shaped-model check): the pin is a
+# now-provably-wrong REQUEST, not a malformed one, and dropping it lets the
+# scheduled role/sweep still run productively on the account's own default
+# instead of dying every cadence tick.
+#
+# Skipped entirely under LOOM_CODEX_NO_EXEC (argv-preview mode promises to
+# "never touch the real CLI") and when no model is pinned at all (nothing to
+# drop). Bounded to 10s via bounded-run.sh — same budget
+# account_lifecycle.rs's `codex login status` call uses — so a wedged CLI
+# cannot hang a spawn. Escape hatch: LOOM_CODEX_AUTH_MODE_CHECK=0.
+CODEX_DROP_PINNED_MODEL=false
+if [[ -n "$EFFECTIVE_MODEL" && -z "${LOOM_CODEX_NO_EXEC:-}" \
+      && "${LOOM_CODEX_AUTH_MODE_CHECK:-1}" != "0" ]] \
+    && command -v codex >/dev/null 2>&1; then
+    _auth_mode_bounded_run_lib="${_SCRIPT_DIR}/lib/bounded-run.sh"
+    if [[ -f "$_auth_mode_bounded_run_lib" ]]; then
+        # shellcheck source=./lib/bounded-run.sh
+        source "$_auth_mode_bounded_run_lib"
+        _login_status_out="$(bounded_run 10 codex login status </dev/null 2>&1)"
+        _login_status_rc=$?
+        if [[ $_login_status_rc -eq 0 ]] \
+            && printf '%s' "$_login_status_out" | grep -qi "logged in using chatgpt"; then
+            log_warn "spawn-codex: this Codex profile is authenticated via a ChatGPT plan, which only supports the account's own default model (issue #5499)."
+            log_warn "spawn-codex: dropping the pinned model '$EFFECTIVE_MODEL' rather than launching a doomed invocation — the CLI 400s with \"model is not supported when using Codex with a ChatGPT account\"."
+            log_warn "spawn-codex: fix by omitting autonomous.roleRunner.roleModels/LOOM_MODEL/LOOM_CODEX_MODEL for this role/profile, or point it at an API-key-authenticated profile. Escape hatch: LOOM_CODEX_AUTH_MODE_CHECK=0."
+            CODEX_DROP_PINNED_MODEL=true
+        fi
     fi
 fi
 
@@ -743,7 +830,35 @@ CODEX_ARGS=()
 if [[ "$HAS_PROMPT" == "true" ]]; then
     CODEX_ARGS+=(exec)
 fi
-CODEX_ARGS+=(${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"})
+if [[ "$CODEX_DROP_PINNED_MODEL" == "true" ]]; then
+    # Issue #5499: strip the pinned `-m`/`--model` (both the two-token and
+    # `=`-joined single-token forms) that the ChatGPT-plan guard above decided
+    # not to forward. Filtered here, not skipped at push-time, so every OTHER
+    # passthrough arg (sandbox, effort, `-c` overrides, `--skip-git-repo-check`)
+    # is preserved unchanged regardless of where in PASSTHROUGH_ARGS the model
+    # flag landed.
+    _codex_filtered_args=()
+    _codex_skip_next_arg=false
+    for _codex_arg in ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}; do
+        if [[ "$_codex_skip_next_arg" == "true" ]]; then
+            _codex_skip_next_arg=false
+            continue
+        fi
+        case "$_codex_arg" in
+            -m | --model)
+                _codex_skip_next_arg=true
+                continue
+                ;;
+            -m=* | --model=*)
+                continue
+                ;;
+        esac
+        _codex_filtered_args+=("$_codex_arg")
+    done
+    CODEX_ARGS+=(${_codex_filtered_args[@]+"${_codex_filtered_args[@]}"})
+else
+    CODEX_ARGS+=(${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"})
+fi
 if [[ "$HAS_PROMPT" == "true" ]]; then
     CODEX_ARGS+=("$PROMPT")
 fi
@@ -854,7 +969,12 @@ if [[ -f "$_classifier_lib" ]]; then
         _terminal_account="unknown"
     fi
     case "$_terminal_category" in
-        SUCCESS|TOKEN_EXPIRED|TOKEN_EXHAUSTED|RECOVERABLE|TIMEOUT|FATAL|CWD_DELETED|MODEL_REFUSAL|SESSION_LIMIT)
+        # MODEL_CREDITS_EXHAUSTED (#5687) is listed so the allowlist stays a
+        # complete mirror of the classifier's category set. The `codex` table
+        # emits no credit-exhaustion pattern of its own today, so this arm is
+        # unreachable for provider=codex — but an allowlist that silently drops
+        # a valid category is exactly how terminal feedback goes missing.
+        SUCCESS|TOKEN_EXPIRED|TOKEN_EXHAUSTED|MODEL_CREDITS_EXHAUSTED|RECOVERABLE|TIMEOUT|FATAL|CWD_DELETED|MODEL_REFUSAL|SESSION_LIMIT)
             printf '# LOOM_TERMINAL_RESULT v=1 provider=codex account=%s category=%s exit_code=%s\n' \
                 "$_terminal_account" "$_terminal_category" "$_exit_code" >&2
             ;;

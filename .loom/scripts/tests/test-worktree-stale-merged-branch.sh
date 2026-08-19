@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# test-worktree-stale-merged-branch.sh — Tests for #5657.
+#
+# `worktree.sh N`, when no LOCAL branch exists for feature/issue-N but
+# `refs/remotes/origin/feature/issue-N` does, used to ALWAYS reuse the remote
+# branch as the worktree base — even when that branch's current tip is
+# already the head of an already-MERGED pull request (i.e. it was already
+# squash-merged and is semantically obsolete). This happens whenever the
+# target repo has forge auto-delete-head-branches disabled (or any other path
+# that leaves a merged branch's ref on origin), and matters most with the
+# partial-increment (#3667/#3599) slice convention where the SAME branch name
+# feature/issue-N is reused across an issue's slices: the next slice's
+# worktree would silently be built on top of already-merged, now-conflicting
+# history, producing a CONFLICTING PR with zero CI runs.
+#
+# This suite verifies the reuse path now calls the existing
+# `_worktree_merged_pr_head_sha` helper (already wired into the removal path,
+# #4889) BEFORE reusing the remote branch:
+#   1. origin/feature/issue-N's tip IS the head of an already-merged PR ->
+#      the stale remote branch is skipped; worktree.sh creates a fresh branch
+#      from the base ref instead, with an actionable message naming the PR.
+#   2. origin/feature/issue-N's tip is NOT the head of any merged PR (the
+#      #4823 in-flight case) -> continues to reuse it exactly as before.
+#   3. The forge lookup is unavailable (no working `gh`) -> fails open to the
+#      pre-existing reuse behavior, never blocking worktree creation.
+#
+# Companion to test-worktree-remote-branch-tracking.sh (#4823, must keep
+# passing unmodified) — follows the same throwaway-bare-origin harness, plus
+# the fake-forge-binary pattern from test-worktree-remove-squash-merge.sh
+# (#4889).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKTREE_SH="$SCRIPTS_DIR/worktree.sh"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+TESTS_RUN=0
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+pass() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1)); echo -e "  ${GREEN}PASS${NC}: $1"; }
+fail() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); echo -e "  ${RED}FAIL${NC}: $1"; }
+
+# Build a throwaway repo with an origin/main ref plus a pushed
+# feature/issue-77 branch carrying one unique commit — but with NO local copy
+# of that branch (deleted after push), simulating a fresh clone / cleaned-up
+# worktree that never had it locally. Echoes the working-tree path.
+setup_repo() {
+    local name="${1:-stalerepo}"
+    local tmp
+    tmp=$(mktemp -d /tmp/loom-wtstale.XXXXXX)
+    git init -q -b main "$tmp/origin.git" --bare
+    git init -q -b main "$tmp/$name"
+    (
+        cd "$tmp/$name"
+        git config user.email t@t
+        git config user.name t
+        git commit --allow-empty -q -m init
+        git remote add origin "$tmp/origin.git"
+        git push -q origin main
+        mkdir -p .loom/scripts/lib .loom/hooks
+        cp "$WORKTREE_SH" .loom/scripts/worktree.sh
+        if [[ -d "$SCRIPTS_DIR/lib" ]]; then
+            cp -R "$SCRIPTS_DIR"/lib/* .loom/scripts/lib/ 2>/dev/null || true
+        fi
+        chmod +x .loom/scripts/worktree.sh
+
+        # Create the "existing PR" branch, push it, then delete the LOCAL
+        # copy (origin keeps it, e.g. auto-delete-head-branches is off).
+        git checkout -q -b feature/issue-77
+        echo "pr-artifact" > pr-file.txt
+        git add pr-file.txt
+        git commit -q -m "pr: add artifact from existing PR branch"
+        git push -q origin feature/issue-77
+        git checkout -q main
+        git branch -q -D feature/issue-77
+    )
+    echo "$tmp/$name"
+}
+
+cleanup_repo() {
+    local repo="$1"
+    [[ -z "$repo" ]] && return 0
+    rm -rf "$(dirname "$repo")"
+}
+
+# A minimal `gh` stand-in on PATH, modeling
+# `pr list --head <branch> --state merged --json headRefOid,number --limit 1`.
+# FAKE_GH_MODE=merged reports a merged PR whose headRefOid is the CURRENT tip
+# of origin/<branch> (the stale case this issue targets). FAKE_GH_MODE=none
+# reports no merged PR at all (the #4823 in-flight case). FAKE_GH_MODE=off
+# makes every call fail (forge unavailable — fail open).
+install_fake_gh() {
+    local repo="$1"
+    local fake_bin
+    fake_bin="$(dirname "$repo")/fakebin"
+    mkdir -p "$fake_bin"
+    cat > "$fake_bin/gh" << EOF
+#!/bin/bash
+if [[ "\${FAKE_GH_MODE:-none}" == "off" ]]; then
+    echo "gh: fake forge unavailable in this test" >&2
+    exit 1
+fi
+if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
+    shift 2
+    branch=""
+    while [[ \$# -gt 0 ]]; do
+        case "\$1" in
+            --head) branch="\$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [[ "\${FAKE_GH_MODE:-none}" == "merged" && -n "\$branch" ]]; then
+        sha="\$(git -C "$repo" rev-parse --verify -q "refs/remotes/origin/\$branch" 2>/dev/null || echo "")"
+        if [[ -n "\$sha" ]]; then
+            echo "[{\"headRefOid\": \"\$sha\", \"number\": 999}]"
+            exit 0
+        fi
+    fi
+    echo "[]"
+    exit 0
+fi
+echo "fake gh: unsupported invocation: \$*" >&2
+exit 1
+EOF
+    chmod +x "$fake_bin/gh"
+    echo "$fake_bin"
+}
+
+# --- Test 1: origin/feature/issue-77's tip IS an already-merged PR's head ---
+echo "Test 1: origin/feature/issue-77 is the head of an already-merged PR -> worktree.sh skips it, branches fresh from base"
+REPO=$(setup_repo stalerepo1)
+FAKE_BIN=$(install_fake_gh "$REPO")
+OUT_LOG="/tmp/wtstale-merged.$$"
+(
+    cd "$REPO"
+    PATH="$FAKE_BIN:$PATH" FAKE_GH_MODE=merged ./.loom/scripts/worktree.sh 77 >"$OUT_LOG" 2>&1 || { echo "FAILED"; cat "$OUT_LOG"; }
+)
+if [[ ! -f "$REPO/.loom/worktrees/issue-77/pr-file.txt" ]]; then
+    pass "worktree does NOT contain the stale merged branch's artifact (created fresh from base, not reused)"
+else
+    fail "worktree contains the stale merged branch's artifact — reused a branch that was already squash-merged"
+fi
+WT_HEAD=$(git -C "$REPO/.loom/worktrees/issue-77" rev-parse HEAD 2>/dev/null || echo "")
+MAIN_HEAD=$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo "")
+if [[ -n "$WT_HEAD" && "$WT_HEAD" == "$MAIN_HEAD" ]]; then
+    pass "worktree HEAD equals origin/main's head commit (fresh branch from base)"
+else
+    fail "worktree HEAD ($WT_HEAD) does not equal origin/main ($MAIN_HEAD)"
+fi
+if grep -qi "already-merged PR #999" "$OUT_LOG"; then
+    pass "output names the already-merged PR and explains why the branch was skipped"
+else
+    fail "output does not explain the skip (see $OUT_LOG)"
+    cat "$OUT_LOG"
+fi
+cleanup_repo "$REPO"
+rm -f "$OUT_LOG"
+
+# --- Test 2: origin/feature/issue-77 exists but is NOT a merged PR head (#4823 in-flight case) ---
+echo ""
+echo "Test 2: origin/feature/issue-77 is NOT the head of any merged PR -> worktree.sh still reuses it (#4823 unaffected)"
+REPO=$(setup_repo stalerepo2)
+FAKE_BIN=$(install_fake_gh "$REPO")
+OUT_LOG="/tmp/wtstale-inflight.$$"
+(
+    cd "$REPO"
+    PATH="$FAKE_BIN:$PATH" FAKE_GH_MODE=none ./.loom/scripts/worktree.sh 77 >"$OUT_LOG" 2>&1 || { echo "FAILED"; cat "$OUT_LOG"; }
+)
+if [[ -f "$REPO/.loom/worktrees/issue-77/pr-file.txt" ]]; then
+    pass "worktree contains the in-flight branch's artifact (still reused, per #4823)"
+else
+    fail "worktree is missing the in-flight branch's artifact — regressed #4823"
+    cat "$OUT_LOG"
+fi
+cleanup_repo "$REPO"
+rm -f "$OUT_LOG"
+
+# --- Test 3: forge lookup unavailable -> fails open to the pre-existing reuse behavior ---
+echo ""
+echo "Test 3: forge lookup unavailable -> worktree.sh falls open and still reuses the remote branch"
+REPO=$(setup_repo stalerepo3)
+FAKE_BIN=$(install_fake_gh "$REPO")
+OUT_LOG="/tmp/wtstale-unavailable.$$"
+(
+    cd "$REPO"
+    PATH="$FAKE_BIN:$PATH" FAKE_GH_MODE=off ./.loom/scripts/worktree.sh 77 >"$OUT_LOG" 2>&1 || { echo "FAILED"; cat "$OUT_LOG"; }
+)
+if [[ -f "$REPO/.loom/worktrees/issue-77/pr-file.txt" ]]; then
+    pass "worktree contains the branch's artifact (forge unavailable -> fail open to reuse)"
+else
+    fail "worktree is missing the branch's artifact — forge-unavailable case incorrectly blocked reuse"
+    cat "$OUT_LOG"
+fi
+cleanup_repo "$REPO"
+rm -f "$OUT_LOG"
+
+# --- Summary ---
+echo ""
+echo "Tests run: $TESTS_RUN, Passed: $TESTS_PASSED, Failed: $TESTS_FAILED"
+[[ $TESTS_FAILED -eq 0 ]] || exit 1

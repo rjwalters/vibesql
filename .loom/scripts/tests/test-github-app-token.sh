@@ -70,7 +70,15 @@ echo "Testing github_app_configured (mechanism/fallback selection)..."
 unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH 2>/dev/null || true
 REPO_ROOT="$WORK_DIR/no-config-repo"
 mkdir -p "$REPO_ROOT"
-if ! (REPO_ROOT="$REPO_ROOT" github_app_configured); then
+# REPO_ROOT alone only isolates config tiers 2-4 (legacy .loom/config.json,
+# .loom-project/project.json, .loom-local/local.json) per config-resolver.sh's
+# documented precedence. Tier 1 (private/shared defaults --
+# $LOOM_CONFIG_DEFAULTS_FILE, else ~/.local/share/loom/config/defaults.json)
+# is host-global and must be explicitly disabled too (#5441), matching the
+# LOOM_CONFIG_DEFAULTS_FILE="" idiom used elsewhere (e.g.
+# test-config-resolver.sh) -- otherwise a host with real forge.githubApp
+# defaults provisioned (e.g. for fleet dispatch) spuriously fails this case.
+if ! (REPO_ROOT="$REPO_ROOT" LOOM_CONFIG_DEFAULTS_FILE="" github_app_configured); then
     pass "unconfigured (no env, no config) -> github_app_configured fails, i.e. fallback path"
 else
     fail "unconfigured should NOT report configured"
@@ -274,7 +282,12 @@ else
 fi
 
 unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH
-not_configured_output=$(bash "$LIB_DIR/github-app-token.sh" status)
+# Same tier-1 leak as the "unconfigured" case above (#5441): these `status`
+# and `get-token` CLI invocations resolve config via REPO_ROOT (defaulted to
+# the real repo here since it's unset), which only covers tiers 2-4. Disable
+# tier 1 explicitly so a host with real forge.githubApp defaults provisioned
+# doesn't spuriously fail these "not configured" assertions.
+not_configured_output=$(LOOM_CONFIG_DEFAULTS_FILE="" bash "$LIB_DIR/github-app-token.sh" status)
 not_configured_status=$(echo "$not_configured_output" | jq -r '.status')
 if [[ "$not_configured_status" == "not_configured" ]]; then
     pass "\`status\` CLI reports not_configured with no app credentials"
@@ -282,7 +295,7 @@ else
     fail "\`status\` CLI should report not_configured" "$not_configured_output"
 fi
 
-get_token_output=$(bash "$LIB_DIR/github-app-token.sh" get-token owner/repo)
+get_token_output=$(LOOM_CONFIG_DEFAULTS_FILE="" bash "$LIB_DIR/github-app-token.sh" get-token owner/repo)
 get_token_status=$(echo "$get_token_output" | jq -r '.status')
 if [[ "$get_token_status" == "not_configured" ]]; then
     pass "\`get-token\` CLI falls back to not_configured (never a hard failure) when unconfigured"
@@ -359,6 +372,11 @@ fi
 # cache file is rewritten with the numeric id.
 STUB_INSTALL_BODY='{"id": 55}'
 poison_owner="poisoned"
+# The cache path is keyed by (owner, app id) (#5912); `github_app_get_token`
+# below runs in a command-substitution SUBSHELL, where `github_app_configured`
+# populates `_GH_APP_ID` from the exported `LOOM_GITHUB_APP_ID="424242"`
+# above. Set it here too so this (parent-shell) path computation matches.
+_GH_APP_ID="424242"
 poison_cache="$(_github_app_installation_cache_path "$poison_owner")"
 mkdir -p "$(dirname "$poison_cache")"
 printf '%s' "null" > "$poison_cache"
@@ -373,8 +391,100 @@ else
     fail "github_app_get_token should self-heal past a poisoned 'null' cache" "got: ${heal_token:-<none>}"
 fi
 
+# ============================================================================
+# `get-token` CLI envelope carries a non-empty installation_id (#5401
+# regression test: `_gh_app_token=$(github_app_get_token "$_nwo")` runs the
+# mint in a SUBSHELL, so GITHUB_APP_INSTALLATION_ID's assignment inside it
+# never propagated back out -- `installation_id` came back "" even on a
+# successful mint).
+# ============================================================================
+echo "Testing get-token CLI envelope installation_id (#5401)..."
+
+# The stub `curl`/`github_app_jwt` functions above only exist in THIS shell;
+# `get-token` runs as a genuine child process (matching how `loom-daemon`
+# invokes it), so both the functions AND the plain variables the `curl` stub
+# reads (`STUB_INSTALL_BODY`/`STUB_INSTALL_CODE`) must be exported for the
+# child to see them.
+export STUB_INSTALL_BODY='{"id": 55}'
+export STUB_INSTALL_CODE='200'
+export -f curl github_app_jwt
+cli_get_token_output=$(bash "$LIB_DIR/github-app-token.sh" get-token cliowner/repo)
+cli_get_token_status=$(echo "$cli_get_token_output" | jq -r '.status')
+cli_get_token_installation_id=$(echo "$cli_get_token_output" | jq -r '.installation_id')
+cli_get_token_token=$(echo "$cli_get_token_output" | jq -r '.token')
+if [[ "$cli_get_token_status" == "ok" && "$cli_get_token_installation_id" == "55" && "$cli_get_token_token" == "ghs_mintedvalue" ]]; then
+    pass "\`get-token\` CLI envelope reports the real installation_id on a successful mint"
+else
+    fail "\`get-token\` CLI envelope should carry a non-empty, correct installation_id" "$cli_get_token_output"
+fi
+
 unset -f curl github_app_jwt
 unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH
+
+# ============================================================================
+# Installation cache is keyed by (owner, app id), not owner alone (#5912): two
+# different GitHub Apps configured under the same owner must not collide on
+# one cache file, regardless of which resolves first.
+# ============================================================================
+echo "Testing installation cache keying by (owner, app id) (#5912)..."
+
+shared_owner="shared-owner"
+
+_GH_APP_ID="111111"
+path_app_one="$(_github_app_installation_cache_path "$shared_owner")"
+_GH_APP_ID="222222"
+path_app_two="$(_github_app_installation_cache_path "$shared_owner")"
+_GH_APP_ID=""
+
+if [[ "$path_app_one" != "$path_app_two" ]]; then
+    pass "two different app ids for the same owner resolve to distinct cache paths"
+else
+    fail "cache paths should differ by app id" "both resolved to: $path_app_one"
+fi
+
+# End-to-end: mint via app 111111 (installation 55), then via app 222222
+# (installation 66) for the same owner/repo -- each must resolve/cache its
+# own installation id without clobbering the other, in either order. Redefine
+# the network/JWT stubs -- the #5401 section above `unset -f`'d them, and
+# `get-token` runs as a genuine child process so both the functions and the
+# `STUB_INSTALL_*` variables they read must be exported for the child to see.
+curl() {
+    local url=""
+    for _a in "$@"; do url="$_a"; done
+    case "$url" in
+        */installation) printf '%s\n%s' "$STUB_INSTALL_BODY" "$STUB_INSTALL_CODE" ;;
+        */access_tokens) printf '%s\n%s' '{"token":"ghs_mintedvalue","expires_at":"2099-01-01T00:00:00Z"}' '200' ;;
+        *) printf '%s\n%s' '{}' '404' ;;
+    esac
+}
+github_app_jwt() { echo "fake.jwt.signature"; }
+export LOOM_GITHUB_APP_KEY_PATH="$KEY_PATH"
+export -f curl github_app_jwt
+
+export STUB_INSTALL_BODY='{"id": 55}'
+export STUB_INSTALL_CODE='200'
+app_one_out=$(LOOM_GITHUB_APP_ID="111111" bash "$LIB_DIR/github-app-token.sh" get-token "${shared_owner}/repo")
+app_one_installation_id=$(echo "$app_one_out" | jq -r '.installation_id')
+
+export STUB_INSTALL_BODY='{"id": 66}'
+app_two_out=$(LOOM_GITHUB_APP_ID="222222" bash "$LIB_DIR/github-app-token.sh" get-token "${shared_owner}/repo")
+app_two_installation_id=$(echo "$app_two_out" | jq -r '.installation_id')
+
+# Re-resolve app one again (no re-stub needed -- it should hit its own cache
+# file, still holding installation 55, not app two's 66).
+app_one_out_again=$(LOOM_GITHUB_APP_ID="111111" bash "$LIB_DIR/github-app-token.sh" get-token "${shared_owner}/repo")
+app_one_installation_id_again=$(echo "$app_one_out_again" | jq -r '.installation_id')
+
+if [[ "$app_one_installation_id" == "55" && "$app_two_installation_id" == "66" \
+      && "$app_one_installation_id_again" == "55" ]]; then
+    pass "two apps sharing an owner resolve/cache independent installation ids without clobbering each other"
+else
+    fail "app-scoped installation caches should not collide" \
+      "app_one=$app_one_installation_id app_two=$app_two_installation_id app_one_again=$app_one_installation_id_again"
+fi
+
+unset -f curl github_app_jwt
+unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH STUB_INSTALL_BODY STUB_INSTALL_CODE
 
 # --- Summary ---
 echo ""

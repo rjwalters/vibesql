@@ -234,7 +234,7 @@ find scripts -name "*.sh" -exec shellcheck {} \; 2>&1 | grep -c "error\|warning"
 
 ### Step 3: Pre-PR Verification Checklist
 
-**BEFORE running `gh pr create`, complete this checklist:**
+**BEFORE opening the PR (`./.loom/scripts/create-pr.sh`, see "Creating the PR"), complete this checklist:**
 
 ```markdown
 ## Pre-PR Verification
@@ -256,6 +256,7 @@ Local verification:
 - [ ] Commits are signed off if required (`commit.signoff: true` in `.loom/config.json`, or a DCO/`sign-off` requirement — `git commit --signoff`; see "DCO sign-off" above)
 - [ ] Relevant tests pass
 - [ ] Each criterion has explicit verification (not "I think it works")
+- [ ] If this diff touches anything under `defaults/`, either `scripts/version.sh` was run to bump `VERSION` (and its five synced files), or the PR body/a commit message includes `<!-- loom:no-surface-change -->` (see `defaults/scripts/check-defaults-version-bump.sh` for the exact rule)
 ```
 
 ### Step 4: Document Verification in PR Description
@@ -387,6 +388,52 @@ Local verification:
 1. Go back to Step 1 and re-extract criteria
 2. Verify each one explicitly
 3. Only then create the PR
+
+---
+
+## Test-First Discipline (TDD line, required in PR body)
+
+**Why**: Loom's cross-session `Builder → Judge` cycle is the *between-turn* half
+of an evaluator-optimizer loop (`CLAUDE.md` § "Sweep Lifecycle"). What's
+missing is a checkable trace of the *in-Builder* half — did the test exist
+before the fix, not just after it. This section is the concrete signal ADR-0015
+(`docs/adr/0015-builder-test-first-checkpoint.md`) decided on, adapted from
+[damusix/atomic-claude](https://github.com/damusix/atomic-claude)'s
+maker/checker split (issue #5849, evaluation `docs/research/atomic-claude-evaluation.md`).
+
+**When your diff touches executing code** (anything Judge would run tests
+against — not a docs-only, ADR-only, or pure-config change), your PR body's
+`## Test Plan` section MUST include one `TDD:` line:
+
+```
+TDD: yes — <test path> written first; failed for the right reason before the fix, passes after
+TDD: no — <reason, e.g. "pure refactor, existing coverage in tests/foo_test.rs already exercises this path">
+```
+
+**How to earn a `TDD: yes` line — practice this while implementing, not
+retroactively while writing the PR body:**
+
+- **New behavior**: write the test first, run it, confirm it fails for the
+  right reason (not a typo/syntax error) — then implement until it passes.
+- **Bug fix**: write a test that reproduces the bug (fails on the pre-fix
+  code) — then fix — then confirm it passes.
+- If you did this, the `TDD:` line's `<test path>` must be a real path in your
+  diff — Judge checks it against the changed-files list (see
+  `judge.md` § "Test-First (TDD) Claim Verification"). Do not write `yes` for
+  a test you added *after* confirming the fix already worked; that is exactly
+  the unverified self-report this checkpoint exists to catch. If you didn't
+  actually write the test first, write `TDD: no` and say why (e.g. "test
+  added after implementation for coverage, not written first") — an honest
+  `no` is advisory-only; a false `yes` is a blocking Judge finding.
+- **When there is nothing to test-first** (design/investigation issues like
+  this one, docs, ADRs, `.github/labels.yml`, config-only changes), use
+  `TDD: no — <reason>` or omit the line entirely — both are advisory, never
+  blocking. Do not invent a placeholder test to satisfy this checkpoint.
+
+**This is advisory on absence, blocking only on contradiction** — a missing
+line or a plausible `TDD: no` never blocks approval; a `TDD: yes` claim the
+diff does not corroborate does. Full decision and rationale (including why
+this isn't a `buildGate` check): ADR-0015.
 
 ---
 
@@ -719,13 +766,90 @@ When creating a PR, verify:
 7. PR description includes verification table for each criterion
 8. Tests added/updated as needed
 9. Commits carry a `Signed-off-by:` trailer if required (`commit.signoff: true` in `.loom/config.json`, or a DCO/`sign-off` check — see "DCO sign-off")
+10. `## Test Plan` includes a `TDD:` line for any diff touching executing code (see "Test-First Discipline" above) — omit only for docs/config/ADR-only changes
+
+### Lease Fencing: Confirm You Still Own the Claim (Epic #6165 Phase 3, #6309)
+
+**Immediately before `git push` + opening the PR** — the one irreversible,
+externally-visible action of this whole Builder run — run the sweep-side
+fencing check:
+
+```bash
+./.loom/scripts/sweep-lease-fence.sh check "$N"
+FENCE_RC=$?
+if [[ "$FENCE_RC" -eq 3 ]]; then
+  echo "Lease fence: EXPIRED — my claim's lease record is stale on the forge's own clock. Aborting before push/PR-open; NOT pushing, NOT opening a PR." >&2
+  # Stop here for issue $N. Do not push, do not create a PR, do not touch
+  # the loom:building label or contest any peer's claim — report this issue
+  # as not-contributed-this-run, same as any other Builder failure marker.
+elif [[ "$FENCE_RC" -eq 4 ]]; then
+  echo "Lease fence: SUPERSEDED — a different host's lease is now the freshest for issue $N. Aborting before push/PR-open; NOT pushing, NOT opening a PR." >&2
+  # Same stop-here handling as the EXPIRED branch above.
+else
+  # FENCE_RC == 0 (fresh & own host, OR no lease evidence to fence against —
+  # fail-open, see the script's own header doc) -> proceed exactly as before.
+  git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+  # ... then open the PR (see "Creating the PR" below) ...
+fi
+```
+
+This is **fencing, not a lock** — it bounds the cost of a race to one wasted
+build, it does not prevent the race (Phase 1, `defaults/docs/lease-renewal.md`,
+keeps the lease alive for the whole run; Phase 2,
+`loom-daemon/src/claim_reconciliation.rs`, is the *daemon's* symmetric check
+before reclaiming a peer's claim). Reads the freshest
+`<!-- loom:lease host=… sweep=… -->` comment on issue `$N` and confirms BOTH:
+the comment is still fresh (`now - updated_at <= LEASE_TTL_MINUTES`, default
+15, override with `--ttl-minutes` or `LOOM_LEASE_TTL_MINUTES`) and its
+`host=` still names **this** host (`--host`, defaulting to this host's own
+identity — same `LOOM_HOST_ID` > `$HOSTNAME` > `hostname` precedence
+`sweep_registry::host_identity()` uses). On EITHER failure it aborts (exit
+`3` = expired, `4` = superseded — the two are logged distinctly so a
+post-incident read can tell them apart) **before doing anything
+externally-visible**: no push, no PR. It never contests or cleans up a peer's
+claim — the `loom:building` label is left exactly as-is; that is out of
+scope for this check (see the script's own header doc,
+`defaults/scripts/sweep-lease-fence.sh`). A manual `/loom:sweep`, GH Actions
+cron, or `--no-daemon` run has no lease comment to fence against at all — the
+check fails open (exit `0`) for those, same as every other lease-record
+reader in this repo treats "no lease" as "no evidence", never as "not
+fresh".
 
 ### Creating the PR
+
+**Open the PR with `./.loom/scripts/create-pr.sh`, never a bare `gh pr create` (#6074).**
+The flags are a subset of `gh pr create`'s, so the call below reads the same — but three
+things a bare `gh pr create` cannot do are load-bearing here:
+
+- **It adopts an already-open PR for your branch** (prints that PR's URL, exits 0, creates
+  nothing). So if a previous attempt on this issue already pushed and opened a PR, you
+  converge on it instead of failing or duplicating.
+- **It re-verifies the target issue's freshness immediately before opening the PR
+  (#6277).** When the body carries a closing keyword (`Closes`/`Fixes`/`Resolves #N`), the
+  script re-checks whether `#N` was already closed by a *different*, already-merged PR — the
+  two-workers-race scenario that otherwise isn't caught until Judge review. On a detected
+  supersede it refuses to open a duplicate PR (names the superseding PR, exits non-zero,
+  does not push further, does not delete the branch). `Part of #N` / `Contributes to #N`
+  partial-increment references are exempt by construction — see "Partial increments" below.
+- **It survives the GitHub App permission window.** A cached App installation token can
+  hold `Contents:write` while `Pull-requests:write` has not propagated into it yet, so
+  your `git push` succeeds and the very next `gh pr create` returns `403 Resource not
+  accessible by integration`. The script force-mints a fresh installation token (bypassing
+  the ~1h cache) and then falls back to a personal token, instead of dying. Before this,
+  that 403 killed the sweep with no PR and the next dispatch **rebuilt the identical
+  work**, leaving an orphaned `feature/issue-N` branch behind each pass.
+
+**If it still fails, do NOT rebuild and do NOT delete the branch** — your commits are
+already pushed. Re-run the script (it is idempotent), or report the branch name so the PR
+can be opened from it by hand. The same rule applies on an install predating this script
+(no `.loom/scripts/create-pr.sh` on disk — fall back to a plain `gh pr create` there): a
+`403 … not accessible by integration` after a successful push is a transient credential
+window, never a signal to redo the work.
 
 ```bash
 # CORRECT way to create PR
 # Title MUST use conventional commit format: "fix:", "feat:", "refactor:", etc.
-gh pr create --title "fix: descriptive summary of the change" --label "loom:review-requested" --body "$(cat <<'EOF'
+./.loom/scripts/create-pr.sh --title "fix: descriptive summary of the change" --label "loom:review-requested" --body "$(cat <<'EOF'
 ## Summary
 Brief description of what this PR does and why.
 
@@ -743,6 +867,9 @@ Brief description of what this PR does and why.
 
 ## Test Plan
 How you verified the changes work.
+
+TDD: yes — tests/foo_test.rs written first, failed for the right reason, now passes
+(or: TDD: no — <reason>, e.g. docs-only / config-only / refactor with existing coverage)
 
 Closes #123
 EOF

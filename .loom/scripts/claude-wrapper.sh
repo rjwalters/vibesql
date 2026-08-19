@@ -44,6 +44,32 @@
 
 set -euo pipefail
 
+# Self-reap the wrapper's own process GROUP at exit (Issue #6192): this is the
+# primary daemon-dispatch path (dispatch.rs appends `--use-wrapper` by
+# default), and unlike `spawn-claude.sh`'s plain `exec claude`, this script
+# already runs `claude` as a managed foreground/background child (never
+# exec-replaces itself) — so it is the natural, low-risk place to sweep any
+# child it leaves behind (a build tool stuck in disk-wait, a detached `tail`
+# still holding its output pipe, etc.) once IT exits, for ANY reason: a normal
+# retry-loop exit, an exhausted-retries failure, or an external kill (SIGTERM
+# — the daemon's own #4980 group-kill hits this process too, since it is a
+# process-group member). This is bound to THIS process's own exit only — a
+# daemon restart never signals this already-running tree, so it cannot
+# interfere with sweeps surviving daemon restarts (the deliberate design that
+# motivated #6192's careful scoping).
+#
+# The library is only SOURCED here; the trap itself is installed by
+# `_wrapper_exit_cleanup` (defined next to `clear_retry_state` below) at the
+# two `trap ... EXIT` sites this script already had. That indirection is
+# load-bearing: bash keeps exactly ONE EXIT trap, so installing a second one
+# here would be silently replaced by `main()`'s own EXIT trap a moment later
+# and never fire.
+_reap_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/reap-process-group.sh"
+if [[ -f "$_reap_lib" ]]; then
+    # shellcheck source=lib/reap-process-group.sh
+    source "$_reap_lib"
+fi
+
 # Configuration with environment variable overrides
 MAX_RETRIES="${LOOM_MAX_RETRIES:-5}"
 INITIAL_WAIT="${LOOM_INITIAL_WAIT:-60}"
@@ -288,6 +314,23 @@ EOJSON
 clear_retry_state() {
     if [[ -n "${RETRY_STATE_FILE}" ]] && [[ -f "${RETRY_STATE_FILE}" ]]; then
         rm -f "${RETRY_STATE_FILE}"
+    fi
+}
+
+# The wrapper's single EXIT handler (Issue #6192). Bash keeps exactly ONE EXIT
+# trap, so the #6192 self-reap has to be folded into the handler this script
+# already installs rather than added as a second `trap ... EXIT` — a second
+# one would silently replace the retry-state cleanup (or be replaced by it,
+# depending on order) instead of composing with it.
+#
+# Order matters: clear the retry state FIRST (cheap, and the thing a retrying
+# supervisor reads), then reap. The reap TERM-then-KILLs, with a 2s grace
+# window in between, so putting it first would delay the state cleanup by
+# seconds on every single wrapper exit.
+_wrapper_exit_cleanup() {
+    clear_retry_state
+    if declare -F loom_reap_own_process_group >/dev/null 2>&1; then
+        loom_reap_own_process_group "claude-wrapper"
     fi
 }
 
@@ -662,6 +705,61 @@ PYEOF
     return 0  # Always succeed — this is a warning-only check
 }
 
+# Warn — but never abort — when the current workspace is not marked trusted
+# in ~/.claude.json (issue #5314). Claude Code silently ignores every
+# `permissions.allow` entry in an untrusted workspace's `.claude/settings.json`
+# and only says so on a line buried inside the session transcript ("Ignoring
+# N permissions.allow entries ... this workspace has not been trusted"),
+# which is easy to miss in a headless sweep log. This is a sibling of
+# check_global_mcp_configs (#5033) above: same warn-only, non-aborting
+# contract, same ~/.claude.json read.
+#
+# Provisioning (`loom-daemon workspace add`, and transitively `fleet
+# add-worker` / `loom migrate`, which both shell out to it) is the primary
+# fix — it seeds the trust bit at registration time. This check exists for
+# the residual cases provisioning cannot cover: a workspace spawned into
+# without ever having been registered, or a `~/.claude.json` edited/reset
+# after registration.
+#
+# Scoped to the `claude` runtime only: `hasTrustDialogAccepted` is a
+# Claude-Code-CLI-specific concept with no equivalent in the other runtime
+# adapters' (`spawn-codex.sh` / `spawn-aider.sh` / `spawn-generic.sh`) config
+# surfaces, so this check has no reason to run for them.
+check_workspace_trust() {
+    local global_config="${HOME}/.claude.json"
+    local workspace="${WORKSPACE}"
+
+    if [[ ! -f "${global_config}" ]]; then
+        log_warn "⚠ ~/.claude.json not found — workspace '${workspace}' is not marked trusted; permissions.allow entries will be silently ignored until it is registered (loom-daemon workspace add ${workspace}) or the trust dialog is accepted interactively once"
+        return 0
+    fi
+
+    # Emits "1" (trusted), "0" (present but not trusted / missing entry), or
+    # nothing on unparseable JSON / missing python3 — mirrors
+    # check_global_mcp_configs's silent-fallthrough-on-malformed-input
+    # contract so a broken ~/.claude.json never turns this into a false
+    # warning (or a crash).
+    local trusted
+    trusted=$(python3 - "${global_config}" "${workspace}" 2>/dev/null <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        cfg = json.load(f)
+    entry = cfg.get('projects', {}).get(sys.argv[2], {})
+    print('1' if entry.get('hasTrustDialogAccepted') is True else '0')
+except Exception:
+    pass
+PYEOF
+)
+
+    if [[ "${trusted}" == "0" ]]; then
+        log_warn "⚠ Workspace '${workspace}' is not trusted in ~/.claude.json (projects[\"${workspace}\"].hasTrustDialogAccepted != true) — permissions.allow entries will be silently ignored"
+        log_warn "Fix: loom-daemon workspace add ${workspace}  (or accept the trust dialog interactively once)"
+    fi
+
+    return 0  # Always succeed — this is a warning-only check
+}
+
 # Ordered explicit candidate directories for the node toolchain (#5032).
 # claude-wrapper.sh runs from launchd jobs and `ssh host 'cmd'` non-login
 # shells that never source the login profile, so /opt/homebrew/bin (Apple
@@ -742,7 +840,7 @@ _node_tool_search_paths() {
 # half-install — i.e. mechanically repairable by `npm ci` rather than a genuine
 # build-source error (#5032).
 #
-# "Broken half-install" is the robb-pro root cause: node_modules existed and
+# "Broken half-install" is the laptop-host root cause: node_modules existed and
 # was non-empty, but node_modules/@modelcontextprotocol/sdk was an EMPTY
 # directory, so `npm run build` died with MODULE_NOT_FOUND exactly like a real
 # source error. Checking that every declared dependency resolves to a directory
@@ -1309,14 +1407,66 @@ is_account_exhaustion() {
     # This is why the #4501 regex fix in `lib/classify-error.sh` — adding the
     # per-model "reached your <model> limit" ceiling — reaches the rotation path
     # here with no change needed in this function.
+    #
+    # MODEL_CREDITS_EXHAUSTED (#5687) is accepted alongside TOKEN_EXHAUSTED. It
+    # is a distinct category so the in-session sweep orchestrator can name the
+    # signature it downgrades models on, but on THIS (subprocess-supervision)
+    # path there is no per-call model knob to downgrade with, so the correct
+    # response is byte-identical to TOKEN_EXHAUSTED: rotate to another account
+    # and mark this one exhausted. Keeping the two in one predicate is what
+    # makes the new category a pure rename from the wrapper's point of view.
     # Fall back to an inline regex if the classifier lib was not sourced (kept
-    # in lockstep with the classifier's pattern, including the #4501 addition).
+    # in lockstep with the classifier's patterns, including #4501 and #5687).
     if declare -F classify_error >/dev/null 2>&1; then
-        [[ "$(classify_error "${output}" "${exit_code}")" == "TOKEN_EXHAUSTED" ]]
-        return
+        case "$(classify_error "${output}" "${exit_code}")" in
+            TOKEN_EXHAUSTED|MODEL_CREDITS_EXHAUSTED) return 0 ;;
+            *) return 1 ;;
+        esac
     fi
     [[ "${exit_code}" -ne 0 ]] && echo "${output}" \
-        | grep -qiE "hit your (limit|session limit|weekly limit)|hit\.your\.limit|monthly usage limit|out of extra usage|reached your ([^[:space:]]+[[:space:]]+){0,3}limit"
+        | grep -qiE "hit your ([^[:space:]]+[[:space:]]+){0,3}limit|hit\.your\.limit|monthly usage limit|out of extra usage|reached your ([^[:space:]]+[[:space:]]+){0,3}limit|(ran |run )?out of (usage |extra |plan )?credits|no (usage |extra |plan )?credits (remaining|left)|insufficient (usage |plan )?credits"
+}
+
+# --- Account rotation on an auth-dead (401 / invalid-bearer-token) credential
+# (issue #6030) ---
+#
+# Observed 2026-08-11 on a fleet host: a wave of daemon-dispatched children
+# died within minutes, each ending in
+#   [ERROR]   | Failed to authenticate. API Error: 401 Invalid bearer token
+# This is a DIFFERENT failure class from `is_account_exhaustion` above — an
+# exhausted account recovers on its own once its quota window resets; an
+# auth-dead one (a revoked/invalid OAuth token) fails EVERY dispatch forever
+# until a human re-authenticates it. Before this, a 401-invalid-bearer death
+# matched no `classify_error` category (see `lib/classify-error.sh`'s #6030
+# comment), so it fell through to the RECOVERABLE catch-all: the wrapper
+# retried the same dead credential with backoff until MAX_RETRIES, then died
+# with `classification=RECOVERABLE` — never marking the account bad, so the
+# NEXT spawn could select the exact same auth-dead account again with no
+# memory of the failure.
+#
+# Return 0 if the captured output indicates the active account's credential is
+# dead (needs re-authentication), not merely out of quota.
+is_account_auth_dead() {
+    local output="$1"
+    local exit_code="${2:-1}"
+
+    if declare -F classify_error >/dev/null 2>&1; then
+        [[ "$(classify_error "${output}" "${exit_code}")" == "TOKEN_EXPIRED" ]]
+        return
+    fi
+    # Fallback if the classifier lib wasn't sourced — kept in lockstep with
+    # `lib/classify-error.sh`'s TOKEN_EXPIRED pattern.
+    [[ "${exit_code}" -ne 0 ]] && echo "${output}" \
+        | grep -qiE "401[^a-z]*authentication_error|invalid bearer token|OAuth token has expired|token has expired"
+}
+
+# Echo a short human phrase describing why the account was considered
+# auth-dead (used as the .bad_tokens reason string and the rotation log line).
+_auth_dead_phrase() {
+    local output="$1"
+    local m
+    m="$(echo "${output}" | grep -ioE "401[^a-z]*authentication_error|invalid bearer token|OAuth token has expired|token has expired" | head -1)"
+    echo "${m:-401/invalid credential}"
 }
 
 # Return 0 if the captured output indicates a concurrent-session-limit fault
@@ -1389,8 +1539,9 @@ _exhaustion_phrase() {
     # Kept in lockstep with the classifier's TOKEN_EXHAUSTED regex so the
     # rotation log line quotes the phrase that actually fired — including the
     # per-model "reached your <model> limit" ceiling added in #4501 (which
-    # names the constrained model, e.g. "reached your Fable 5 limit").
-    m="$(echo "${output}" | grep -ioE "hit your (limit|session limit|weekly limit)|monthly usage limit|out of extra usage|used 100% of your weekly limit|reached your ([^[:space:]]+[[:space:]]+){0,3}limit" | head -1)"
+    # names the constrained model, e.g. "reached your Fable 5 limit") and the
+    # per-model-tier credit exhaustion added in #5687 ("out of usage credits").
+    m="$(echo "${output}" | grep -ioE "hit your ([^[:space:]]+[[:space:]]+){0,3}limit|monthly usage limit|out of extra usage|used 100% of your weekly limit|reached your ([^[:space:]]+[[:space:]]+){0,3}limit|out of (usage |extra |plan )?credits|no (usage |extra |plan )?credits (remaining|left)|insufficient (usage |plan )?credits" | head -1)"
     echo "${m:-usage limit}"
 }
 
@@ -1458,6 +1609,62 @@ rotate_exhausted_account() {
         if "${daemon_bin}" tokens mark-bad "${ACTIVE_TOKEN_NAME}" \
             --reason "exhausted: ${reason}" --workspace "${ws}" >/dev/null 2>&1; then
             log_info "Marked account '${ACTIVE_TOKEN_NAME}' exhausted in .bad_tokens (${reason})"
+        else
+            log_warn "Could not record '${ACTIVE_TOKEN_NAME}' in .bad_tokens (continuing to re-select)"
+        fi
+    else
+        log_warn "Active account name unknown — cannot mark it bad; re-selecting anyway"
+    fi
+
+    local sel_output _sel_rc
+    set +e
+    sel_output="$("${daemon_bin}" tokens select --workspace "${ws}" --export 2>/dev/null)"
+    _sel_rc=$?
+    set -e
+    if [[ ${_sel_rc} -ne 0 || -z "${sel_output}" ]]; then
+        return 1
+    fi
+
+    eval "${sel_output}"
+    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+        return 1
+    fi
+
+    ACTIVE_TOKEN_NAME="${LOOM_TOKEN_NAME:-}"
+    log_info "Rotated OAuth account → '${ACTIVE_TOKEN_NAME}' (token tail=…${CLAUDE_CODE_OAUTH_TOKEN: -4})"
+    return 0
+}
+
+# Mark the active account auth-dead in .loom/tokens/.bad_tokens (issue #6030),
+# then re-run Loom token selection (which now skips it) and re-export
+# CLAUDE_CODE_OAUTH_TOKEN. Structurally identical to [rotate_exhausted_account]
+# above, but marks the entry with an "auth-dead: ..." reason instead of
+# "exhausted: ..." — `bad_tokens::auth_reason_regex` classifies that as
+# `BadReasonClass::Auth` (permanent; clears only via `loom-daemon tokens
+# unblock`), NOT `BadReasonClass::Exhaustion` (which would let the entry
+# silently expire on the exhaustion cooldown and readmit a still-broken
+# credential into rotation). Returns 0 on success (a new account is exported),
+# 1 when the pool has no eligible account left (or no loom-daemon binary
+# resolves).
+rotate_auth_dead_account() {
+    local reason="$1"
+    local ws daemon_bin
+    ws="$(_resolve_token_workspace)"
+    daemon_bin="$(declare -F loom_locate_daemon_bin >/dev/null 2>&1 && loom_locate_daemon_bin "${ws}" || true)"
+
+    if [[ -z "${ACTIVE_TOKEN_NAME}" ]]; then
+        ACTIVE_TOKEN_NAME="$(_derive_token_name "${ws}" "${CLAUDE_CODE_OAUTH_TOKEN:-}" || true)"
+    fi
+
+    if [[ -z "${daemon_bin}" ]]; then
+        log_warn "No loom-daemon binary resolved — cannot mark '${ACTIVE_TOKEN_NAME:-unknown}' bad or re-select"
+        return 1
+    fi
+
+    if [[ -n "${ACTIVE_TOKEN_NAME}" ]]; then
+        if "${daemon_bin}" tokens mark-bad "${ACTIVE_TOKEN_NAME}" \
+            --reason "auth-dead: ${reason}" --workspace "${ws}" >/dev/null 2>&1; then
+            log_info "Marked account '${ACTIVE_TOKEN_NAME}' auth-dead in .bad_tokens (${reason}) — needs re-authentication (loom-daemon tokens unblock ${ACTIVE_TOKEN_NAME})"
         else
             log_warn "Could not record '${ACTIVE_TOKEN_NAME}' in .bad_tokens (continuing to re-select)"
         fi
@@ -2090,7 +2297,7 @@ run_with_retry() {
         _FLUSH_TEMP_OUTPUT=""
         _FLUSH_LOG_FILE=""
         _FLUSH_PRE_LOG_LINES=0
-        trap clear_retry_state EXIT
+        trap _wrapper_exit_cleanup EXIT
 
         output=$(cat "${temp_output}")
 
@@ -2197,6 +2404,42 @@ run_with_retry() {
             # console script: epic #4081 Phase 4 (#4557) deleted the package that
             # provided it, so naming it here would be dead-end recovery advice.
             log_error "Retry after the soonest account reset, or run 'loom-daemon tokens unblock <name>'."
+            echo "# ACCOUNT_POOL_EXHAUSTED" >&2
+            clear_retry_state
+            return 1
+        fi
+
+        # Auth-dead account (401 invalid/expired bearer token — issue #6030) →
+        # this credential needs re-authentication, not another attempt on the
+        # SAME account and not the transient-backoff path below (TOKEN_EXPIRED
+        # is terminal per `classification_is_transient`, so without this branch
+        # the wrapper would just die here). Mark the account bad with a reason
+        # distinct from exhaustion ("auth-dead: ...", not "exhausted: ...") so
+        # it stays excluded permanently (until an operator re-authenticates and
+        # runs `tokens unblock`) rather than timing back into rotation on the
+        # exhaustion cooldown, then rotate to a healthy account and retry the
+        # SAME attempt WITHOUT consuming a MAX_RETRIES slot — one dead
+        # credential no longer takes the whole dispatch down with it. Shares
+        # the `rotations`/`max_rotations` cap with the exhaustion path above:
+        # both consume the same finite account pool.
+        if is_account_auth_dead "${output}" "${exit_code}"; then
+            rotations=$((rotations + 1))
+            if [[ "${rotations}" -gt "${max_rotations}" ]]; then
+                log_error "Account rotation cap (${max_rotations}) exceeded — aborting to avoid a loop"
+                echo "# ACCOUNT_POOL_EXHAUSTED" >&2
+                clear_retry_state
+                return 1
+            fi
+            local _auth_phrase
+            _auth_phrase="$(_auth_dead_phrase "${output}")"
+            log_warn "Auth-dead account detected (${_auth_phrase}) — marking bad and rotating account (attempt ${attempt}/${MAX_RETRIES} NOT consumed)"
+            if rotate_auth_dead_account "${_auth_phrase}"; then
+                write_retry_state "running" "${attempt}"
+                # Retry the SAME attempt number on the fresh account.
+                continue
+            fi
+            log_error "Whole account pool exhausted or auth-dead — every account is marked bad or rate-limited."
+            log_error "Re-authenticate the affected account(s), then run 'loom-daemon tokens unblock <name>'."
             echo "# ACCOUNT_POOL_EXHAUSTED" >&2
             clear_retry_state
             return 1
@@ -2310,6 +2553,10 @@ run_preflight_checks() {
     # This is non-fatal: warnings are logged but pre-flight always succeeds.
     check_global_mcp_configs
 
+    # Warn about an untrusted workspace surfacing only inside sweep transcripts
+    # (issue #5314). Non-fatal, same as the check above.
+    check_workspace_trust
+
     log_info "All pre-flight checks passed"
     return 0
 }
@@ -2317,7 +2564,7 @@ run_preflight_checks() {
 # Main entry point
 main() {
     # Ensure retry state file is cleaned up on exit (normal or abnormal)
-    trap clear_retry_state EXIT
+    trap _wrapper_exit_cleanup EXIT
 
     log_info "Claude wrapper starting"
     log_info "Arguments: $*"

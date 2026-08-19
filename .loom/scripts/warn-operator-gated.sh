@@ -1,26 +1,39 @@
 #!/usr/bin/env bash
 # Loom Operator-Gate Advisory Scan for /loom:sweep all (#5137)
 #
-# The `all` sentinel's aggressive candidate taxonomy hard-skips exactly one
-# label class (`loom:operator-only`) and treats every other open issue as a
-# buildable candidate. Some issues declare operator-gating in their BODY TEXT
-# ("the index is login-walled, so acquisition is operator-gated", "Operator
-# decision: send this paired with the paper") without carrying the label —
-# so the sentinel would plan to dispatch them as ordinary build candidates.
+# The `all` sentinel's aggressive candidate taxonomy hard-skips two label
+# classes (`loom:operator-only` and, since #5817, `loom:needs-capability`)
+# and treats every other open issue as a buildable candidate. Some issues
+# declare operator-gating in their BODY TEXT ("the index is login-walled, so
+# acquisition is operator-gated", "Operator decision: send this paired with
+# the paper") without carrying either label — so the sentinel would plan to
+# dispatch them as ordinary build candidates. Some declare it in their TITLE
+# instead ("Operator: visit the county archive and photograph the 1850
+# census page") with a body that contains none of the phrase vocabulary
+# below — a real 2026-08-17 sweep run missed exactly this shape (#6391).
 #
 # This tool scans each candidate's already-fetched `body` (the same field the
 # survey fetches for ## Affected Files overlap estimation, #4161, and
-# Depends on / Requires edge detection, #3759 — no new API call) for two
-# independent, ADVISORY-ONLY signals:
+# Depends on / Requires edge detection, #3759 — no new API call) plus the
+# candidate's `title` (one extra `gh issue view --json title` read per
+# candidate, #6391) for three independent, ADVISORY-ONLY signals:
 #
 #   1. Direct phrase match — the body itself contains an instruction-shaped
 #      operator-gate fragment (see PHRASES below). Case-insensitive.
 #   2. Dependency match — the body declares `Depends on #A` / `Requires #A`
 #      (the same restricted vocabulary #3759's --auto-stack and #3747's
 #      warn-out-of-set-deps.sh both reuse) and #A currently carries the
-#      `loom:operator-only` label — the #87 -> #4 shape from the issue: the
-#      sweep would skip the prerequisite as operator-only, then dispatch the
-#      dependent that needs it.
+#      `loom:operator-only` OR `loom:needs-capability` label — the #87 -> #4
+#      shape from the issue: the sweep would skip the prerequisite as
+#      operator-only (or needs-capability), then dispatch the dependent that
+#      needs it.
+#   3. Title-prefix match (#6391) — the title itself, after stripping leading
+#      whitespace/markdown decoration, STARTS WITH `Operator:` / `Operator —`
+#      / `Operator-only` (see TITLE_PREFIXES below). Case-insensitive. A
+#      PREFIX match, not a substring-anywhere match — a title that merely
+#      contains "operator" mid-sentence ("Fix operator dashboard rendering")
+#      does not match. Checked independently of the body, so it still fires
+#      when the body is empty or contains none of the PHRASES vocabulary.
 #
 # ADVISORY ONLY: this tool never hard-skips a candidate, never mutates a
 # label, and never blocks the sweep. It only ANNOTATES the confirmation-gate
@@ -37,7 +50,11 @@
 # where <annotation> is one of:
 #   ⚠ body declares operator-gating: "<matched phrase>"
 #   ⚠ depends on #<A>, which is loom:operator-only
-# A candidate matching both prints two lines (one per signal).
+#   ⚠ depends on #<A>, which is loom:needs-capability
+#   ⚠ title declares operator-gating: "<matched prefix>"
+# A candidate matching more than one signal prints one line per signal; a
+# dependency carrying BOTH labels prints one dependency line per label
+# (deduplicated by label, in declared order).
 #
 # Zero matches across the whole candidate set -> zero lines of output, and the
 # caller's plan/listing is byte-for-byte unchanged from before this tool
@@ -64,7 +81,7 @@ err()  { echo -e "${RED}ERROR: $1${NC}" >&2; }
 info() { echo -e "${BLUE}ℹ $1${NC}" >&2; }
 
 show_help() {
-    sed -n '2,58p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,70p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # ---- phrase vocabulary (extracted by tests) ----
@@ -76,12 +93,22 @@ show_help() {
 # credentials" / "needs credentials" for the same reason: a bare "credentials"
 # substring would false-positive on unrelated text like "store credentials in
 # .env" or "credentials are already configured".
+#
+# The "human action" pair (#6198) is narrowed the same way: agents commonly
+# open an operator-task body with "**Operator task — requires human action, not
+# automation.**", which `requires operator` misses by one word. `requires human
+# action` / `needs human action` are instruction-shaped; a bare `human`
+# substring would false-positive on ordinary prose like "the human-in-the-loop
+# design" or "a human reviews the diff".
 PHRASES=(
     'operator-gated'
     'operator-only in substance'
     'operator authorization required'
     'operator decision:'
+    'operator task'
     'requires operator'
+    'requires human action'
+    'needs human action'
     'login-walled'
     'paid gpu'
     'requires credentials'
@@ -98,6 +125,40 @@ _operator_gate_phrase_match() {
     for phrase in "${PHRASES[@]}"; do
         if printf '%s' "$lower_body" | grep -qF -- "$phrase"; then
             printf '%s' "$phrase"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ---- title-prefix vocabulary (extracted by tests, #6391) ----
+# A title that opens by declaring operator-gating up front — "Operator:
+# visit the archive", "Operator — renew the domain", "Operator-only: rotate
+# this credential" — is a distinct discipline from the PHRASES vocabulary
+# above: a PREFIX match (must appear at the true start of the title, after
+# stripping leading whitespace/markdown decoration), not a substring-anywhere
+# match. A title that merely mentions "operator" mid-sentence ("Fix operator
+# dashboard rendering") must NOT match — same false-positive discipline the
+# PHRASES vocabulary already applies to bodies.
+TITLE_PREFIXES=(
+    'Operator:'
+    'Operator —'
+    'Operator-only'
+)
+
+# Return 0 (and print the matched prefix, display-cased as declared in
+# TITLE_PREFIXES) when `title`, after stripping leading whitespace and
+# markdown decoration (heading `#`, emphasis `*`/`_`, blockquote `>`, list
+# marker `-`), starts with one of TITLE_PREFIXES case-insensitively.
+# Otherwise return 1 and print nothing.
+_operator_gate_title_prefix_match() {
+    local title="$1" prefix stripped lower_stripped lower_prefix
+    stripped="$(printf '%s' "$title" | sed -E 's/^[[:space:]#*_>-]+//')"
+    lower_stripped="$(printf '%s' "$stripped" | tr '[:upper:]' '[:lower:]')"
+    for prefix in "${TITLE_PREFIXES[@]}"; do
+        lower_prefix="$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]')"
+        if [[ "$lower_stripped" == "$lower_prefix"* ]]; then
+            printf '%s' "$prefix"
             return 0
         fi
     done
@@ -122,6 +183,23 @@ parse_operator_gate_deps() {
 _warn_candidate_operator_gated() {
     local candidate="$1"
 
+    # Signal 3: title-prefix match (#6391). Checked independently of the
+    # body read below, so it still fires when the body is empty or its
+    # early-return below would otherwise skip the rest of this function.
+    local title
+    if [[ -n "$REPO_NWO" ]]; then
+        title="$(gh issue view "$candidate" --repo "$REPO_NWO" --json title -q '.title' 2>/dev/null || echo '')"
+    else
+        title="$(gh issue view "$candidate" --json title -q '.title' 2>/dev/null || echo '')"
+    fi
+    if [[ -n "$title" ]]; then
+        local title_matched
+        if title_matched="$(_operator_gate_title_prefix_match "$title")"; then
+            printf '%s\t⚠ title declares operator-gating: "%s"\n' "$candidate" "$title_matched"
+            MATCH_COUNT=$((MATCH_COUNT + 1))
+        fi
+    fi
+
     local body
     if [[ -n "$REPO_NWO" ]]; then
         body="$(gh issue view "$candidate" --repo "$REPO_NWO" --json body -q '.body' 2>/dev/null || echo '')"
@@ -137,20 +215,24 @@ _warn_candidate_operator_gated() {
         MATCH_COUNT=$((MATCH_COUNT + 1))
     fi
 
-    # Signal 2: a declared dependency (#A) that itself carries loom:operator-only.
+    # Signal 2: a declared dependency (#A) that itself carries
+    # loom:operator-only or loom:needs-capability (#5817 — either kind of
+    # hard-skip block means the child cannot itself be completed either).
     local dep
     for dep in $(parse_operator_gate_deps "$body"); do
         [[ "$dep" == "$candidate" ]] && continue
-        local labels
+        local labels dep_label
         if [[ -n "$REPO_NWO" ]]; then
             labels="$(gh issue view "$dep" --repo "$REPO_NWO" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || echo '')"
         else
             labels="$(gh issue view "$dep" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || echo '')"
         fi
-        if printf '%s' ",$labels," | grep -qF ',loom:operator-only,'; then
-            printf '%s\t⚠ depends on #%s, which is loom:operator-only\n' "$candidate" "$dep"
-            MATCH_COUNT=$((MATCH_COUNT + 1))
-        fi
+        for dep_label in loom:operator-only loom:needs-capability; do
+            if printf '%s' ",$labels," | grep -qF ",$dep_label,"; then
+                printf '%s\t⚠ depends on #%s, which is %s\n' "$candidate" "$dep" "$dep_label"
+                MATCH_COUNT=$((MATCH_COUNT + 1))
+            fi
+        done
     done
     return 0
 }

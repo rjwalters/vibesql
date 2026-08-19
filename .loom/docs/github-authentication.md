@@ -170,7 +170,7 @@ rate-limit bucket, centralizes repo access in one place (adding a repo to the
 fleet is an installation edit, not a PAT rebuild per host), and mints
 short-lived (~1h) tokens on-host from a private key instead of parking a
 long-lived PAT on a cloud disk. Commits/comments made with a minted token
-attribute to the app's bot identity (e.g. `2am-loom[bot]`), not a personal
+attribute to the app's bot identity (e.g. `example-loom[bot]`), not a personal
 account.
 
 **This is entirely opt-in and fallback-first.** With no app credentials
@@ -270,6 +270,54 @@ Forge credential: OK — github-app (app 123456 installation 789)
   app is installed on.
 - **Clock skew**: the minted JWT's `iat` is backdated 60 seconds per GitHub's
   own guidance, tolerating modest host clock drift without a manual fix.
+
+### The cached-permission window: `403 … not accessible by integration` (#6074)
+
+An installation token is minted with the permissions the installation held **at
+mint time**, then reused from the on-disk cache for up to ~1h. So there is a
+window — after a permission grant has already propagated on GitHub's side, before
+the cached token turns over — in which one write scope is present and another is
+not. Observed live on 2026-08-12: a Builder's `git push` **succeeded**
+(`Contents:write` was in the cached token) and the very next `gh pr create`
+returned
+
+```
+HTTP 403: Resource not accessible by integration
+```
+
+because `Pull-requests:write` was not. This is **not** rate-limit exhaustion (a
+REST retry with the same token 403s identically) and **not** a mint failure (the
+mint succeeded — `run_with_github_app`'s ambient-auth fallback only covers a
+token that cannot be minted at all), so nothing upstream noticed. The sweep died
+with no PR, the issue stayed ready, and the next dispatch **rebuilt the identical
+work**, leaving an orphaned `feature/issue-N` branch behind each pass.
+
+Every Loom write call site now escalates on — and only on — that one signature,
+via `forge_gh_perm_safe` in `.loom/scripts/lib/forge-helpers.sh`:
+
+| Rung | Credential | Why |
+|---|---|---|
+| 1 | whatever `gh` already resolves | the normal path; nothing changes when it works |
+| 2 | a **force-minted** installation token (`github-app-token.sh get-token --force`) | bypasses the ~1h cache, so an already-propagated grant applies immediately instead of being waited out |
+| 3 | a personal token — `LOOM_PERSONAL_GH_TOKEN`, else the operator's own `gh auth login` credential (reached by dropping the daemon-owned `GH_CONFIG_DIR`/`GH_TOKEN`) | a credential the App permission set cannot gate at all |
+
+Rung 3 is skipped when it would be a verbatim replay of rung 1 (no
+App-delivered credential in the environment and no `LOOM_PERSONAL_GH_TOKEN`).
+Any other failure — including a genuine permission misconfiguration on a
+personal token — propagates unretried, exactly as before.
+
+Wired call sites: `create-pr.sh` (PR creation), `create-issue.sh` /
+`forge_gh_create_issue_rl_safe` (issue filing), `forge_gh_comment_rl_safe`
+(comments), `forge_gh_swap_label_rl_safe` (label edits), and the sweep's
+own Builder-recovery PR creation.
+
+**Builders never lose work to this window.** `create-pr.sh` adopts an
+already-open PR for the head branch instead of creating a second one, and the
+sweep's Builder validation now opens the PR from an **already-pushed** branch
+rather than failing with "no uncommitted or unpushed changes" — so a 403 that
+lands between `git push` and PR creation costs one retry, not a full rebuild.
+If you find a `feature/issue-N` branch with no PR, re-run
+`./.loom/scripts/create-pr.sh` from it; do not rebuild.
 
 ### Long-running sweep children and credential snapshots (#4458)
 

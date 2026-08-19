@@ -26,45 +26,80 @@
 # date flags), so they were confirmed hermetic and ubuntu-portable the same
 # way as the tests/hooks/ suites above before being wired in here.
 
+test-app-permission-fallback.sh
 test-archive-transcripts.sh
 test-blame-issue.sh
 test-bounded-run.sh
+test-build-gate-timeout.sh
 test-build-rs-watchset.sh
 test-build-slot.sh
+test-champion-ci-checks-no-checks-signal.sh
 test-champion-critical-file-check.sh
+test-check-ci-status.sh
 test-check-duplicate.sh
+test-check-conflict-markers.sh
 test-check-git-identity.sh
 test-check-host-sleep.sh
+test-check-defaults-version-bump.sh
+test-check-ingest-key-file.sh
 test-check-main-clean.sh
 test-check-main-freshness.sh
+test-check-quarantine-stashes.sh
 test-check-runtime-capabilities.sh
+test-check-shell-syntax.sh
+test-check-verified-corrections-preserved.sh
+test-classify-dependency-block.sh
+test-classify-error.sh
 test-clean-stale-binary.sh
+test-clean-stale-building-labels.sh
 test-cleanup-branches-pr-review-branch.sh
 test-config-resolver.sh
 test-config-tiers-cli-migration.sh
+test-cpu-budget.sh
+test-create-pr-superseded-issue.sh
 test-default-branch.sh
 test-dependency-parse.sh
 test-detect-dependency-cycle.sh
+test-detect-startable-subset.sh
 test-disk-headroom.sh
+test-docs-guide-lock.sh
+test-docs-worktree.sh
 test-fleet-check.sh
 test-fleet-send.sh
 test-forge-helpers.sh
 test-forge-helpers-rate-limit-fallback.sh
+test-forge-transient-classification.sh
 test-gh-cached.sh
 test-github-app-token.sh
 test-gitignore-guard.sh
 test-guard-codex-bridge.sh
 test-guard-hook-schema.sh
+test-guide-docs-pr-race.sh
+test-guide-docs-telemetry.sh
+test-guide-operator-attention-fold.sh
+test-guide-pool-pressure-defer.sh
+test-guide-work-log-debounce.sh
+test-guide-work-log-issue-out-of-order.sh
+test-guide-work-log-issue-pagination.sh
+test-guide-work-log-out-of-order-merge.sh
+test-guide-work-log-pr-pagination.sh
+test-guide-work-log-self-loop.sh
+test-guide-work-plan-debounce.sh
+test-host-sleep-config.sh
 test-install-active-session.sh
+test-install-agents-md-reapply.sh
 test-install-full-reinstall-no-target-mutation.sh
+test-install-lock.sh
 test-install-pr-markers.sh
 test-install-source-guard.sh
 test-install-stash-scope.sh
 test-install-sync-labels.sh
+test-judge-fallback-cap.sh
 test-judge-fanout-experiment.sh
 test-live-state-sandbox.sh
 test-locate-daemon-bin.sh
 test-loom-daemon-launchd-plist.sh
+test-loom-daemon-quiesce.sh
 test-loom-daemon-start.sh
 test-loom-daemon-stop.sh
 test-loom-daemon-update.sh
@@ -74,7 +109,9 @@ test-loom-status.sh
 test-mcp-config.sh
 test-merge-pr-auto-merge-disabled-fallback.sh
 test-merge-pr-auto-reconcile.sh
+test-merge-pr-closed-issue-cleanup.sh
 test-merge-pr-dirty-worktree-guard.sh
+test-merge-pr-head-mismatch.sh
 test-merge-pr-help.sh
 test-merge-pr-local-branch-cleanup.sh
 test-merge-pr-merge-ordering-guard.sh
@@ -82,19 +119,25 @@ test-merge-pr-partial-increment.sh
 test-merge-pr-primary-checkout-advice.sh
 test-merge-pr-primary-worktree-guard.sh
 test-merge-pr-rate-limit-fallback.sh
+test-merge-pr-stale-mergeable.sh
 test-merge-pr-unstable-fallback.sh
 test-merge-pr-worktree-awk.sh
 test-merge-pr-worktree-path.sh
+test-merge-pr-worktree-remove-diagnosis.sh
+test-operator-only-subkind.sh
 test-pr-worktree-isolation.sh
 test-probe-tokens-fallback.sh
 test-provision-codex-hooks.sh
 test-provision-hooks.sh
 test-provision-skills.sh
 test-rebase-stacked-children.sh
+test-recover-orphaned-shepherds-diagnostics.sh
 test-reconcile-stack.sh
 test-require-complexity-marker.sh
 test-resolve-tier-model.sh
 test-resync-installed.sh
+test-run-ci-suites-daemon-guard.sh
+test-safe-stash-pop.sh
 test-safehoused-service.sh
 test-spawn-generic.sh
 test-spawn-worker.sh
@@ -102,29 +145,43 @@ test-stale-claim-standdown-suppression.sh
 test-sweep-auto-stack.sh
 test-sweep-checkpoint.sh
 test-sweep-experiment.sh
+test-sweep-lease-fence.sh
+test-sweep-lease-fence-race.sh
+test-sweep-lease-renew.sh
 test-sweep-pr-mode.sh
 test-sweep-run-registry.sh
 test-sync-labels-repo-flag.sh
+test-urgent-flip-guard.sh
+test-verdict-staleness-guard.sh
 test-verify-install-scope.sh
 test-warn-operator-gated.sh
 test-warn-out-of-set-deps.sh
 test-worktree-base-override.sh
 test-worktree-concurrency.sh
+test-worktree-existing-dir-drift-check.sh
 test-worktree-hookspath.sh
 test-worktree-json-purity.sh
+test-worktree-local-branch-upstream-tracking.sh
 test-worktree-nested-symlinks.sh
 test-worktree-remote-branch-tracking.sh
+test-worktree-remove-squash-merge.sh
 test-worktree-remove.sh
 test-worktree-root-override.sh
 test-worktree-sentinel-reinvoke.sh
 test-worktree-sentinel.sh
 test-worktree-snapshot.sh
+test-worktree-stale-merged-branch.sh
 test-worktree-stash-baseline.sh
 
 # tests/hooks/ (repo root) — Claude-path guard suites, wired since #4769.
 tests/hooks/test-guard-destructive-dispatcher.sh
 tests/hooks/test-guard-destructive.sh
 tests/hooks/test-guard-loom-workflow.sh
+# Not a Claude-path guard, but the same repo-root tests/hooks/ location and
+# hermetic-fixture pattern (throwaway `git worktree add` trees, fake binaries,
+# no network/forge calls) — covers .loom/hooks/post-worktree.sh's redirected-
+# CARGO_TARGET_DIR resolution, wired since #6013.
+tests/hooks/test-post-worktree-target-dir.sh
 
 # defaults/hooks/tests/ — remaining unwired guard-hook suites, wired since #4451.
 defaults/hooks/tests/test-guard-background-subagents.sh
@@ -138,12 +195,18 @@ defaults/hooks/tests/test-skill-router.sh
 # trigger, never as an invoked job step). All confirmed hermetic (no live
 # network/forge calls, fake/stub binaries only) and ubuntu-portable.
 tests/install/test-daemon-build-shortcut.sh
+tests/install/test-dry-run-preview-manifest.sh
 tests/install/test-forge-detect.sh
 tests/install/test-git-repo-detection.sh
 tests/install/test-hooks-preserve.sh
+tests/install/test-lint-ignore-configs.sh
+tests/install/test-manifest-freshness-after-hook-wiring.sh
+tests/install/test-pnpm-runnable-check.sh
 tests/install/test-provision-daemon.sh
+tests/install/test-uninstall-clean-preserves-unmanaged-hooks.sh
 tests/install/test-uninstall-labels-block.sh
 tests/install/test-uninstall-preserve-siblings.sh
+tests/install/test-uninstall-shim-cleanup.sh
 
 # tests/hermit/ — the Hermit role's stateless-ceremony heuristic regression
 # guard, wired since #5275 (was previously orphaned, no CI runner at all).

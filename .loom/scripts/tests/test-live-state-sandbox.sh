@@ -244,6 +244,215 @@ snap_size=$(
 check "$([[ "${snap_size:-0}" -ge 6 ]] && echo 0 || echo 1)" \
     "snapshot covers both the \$HOME/.loom and the checkout state roots ($snap_size paths)"
 
+# ============================================================
+# 9. Supervisor IDENTITY (#5501): sandboxing paths does not sandbox
+#    LOOM_LAUNCHD_LABEL / LOOM_WATCHDOG_LABEL — a path-clean run whose label
+#    resolves to the REAL production identity must fail the guard too.
+# ============================================================
+
+# 9a. A scratch label passes cleanly.
+check "$(live_state_sandbox_assert_supervisor_scoped "com.example.scratch-1234" && echo 0 || echo 1)" \
+    "a scratch LOOM_LAUNCHD_LABEL passes the supervisor-identity guard"
+
+# 9b. The REAL production launchd label fails loudly.
+case9b_err="$WORKDIR/case9b.err"
+live_state_sandbox_assert_supervisor_scoped "com.rjwalters.loom-daemon" 2>"$case9b_err"
+rc9b=$?
+check "$([[ "$rc9b" -ne 0 ]] && echo 0 || echo 1)" \
+    "the REAL production launchd label FAILS the supervisor-identity guard (rc=$rc9b)"
+check "$(grep -q 'com.rjwalters.loom-daemon' "$case9b_err" && echo 0 || echo 1)" \
+    "the guard names the offending production label in its failure output" "$(cat "$case9b_err")"
+
+# 9c. The REAL production watchdog label fails loudly too (second arg).
+case9c_err="$WORKDIR/case9c.err"
+live_state_sandbox_assert_supervisor_scoped "com.example.scratch-5678" "com.rjwalters.loom-daemon-watchdog" 2>"$case9c_err"
+rc9c=$?
+check "$([[ "$rc9c" -ne 0 ]] && echo 0 || echo 1)" \
+    "the REAL production watchdog label FAILS the supervisor-identity guard (rc=$rc9c)"
+
+# 9d. Reading ambient env (no args) catches a harness that EXPORTED the real
+#     label before calling live_state_sandbox_init — the exact #5501 shape.
+case9d_err="$WORKDIR/case9d.err"
+(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    export LOOM_LAUNCHD_LABEL="com.rjwalters.loom-daemon"
+    cd "$FAKE_REPO" || exit 1
+    live_state_sandbox_init "$WORKDIR/sandbox9d"
+) 2>"$case9d_err"
+rc9d=$?
+check "$([[ "$rc9d" -ne 0 ]] && echo 0 || echo 1)" \
+    "live_state_sandbox_init itself fails when the ambient LOOM_LAUNCHD_LABEL is the real one (rc=$rc9d, #5501 AC1)"
+
+# 9e. live_state_sandbox_assert_untouched ALSO re-checks the supervisor
+#     identity, in case a case exports the real label sometime AFTER init.
+case9e_err="$WORKDIR/case9e.err"
+(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    cd "$FAKE_REPO" || exit 1
+    live_state_sandbox_snapshot
+    live_state_sandbox_init "$WORKDIR/sandbox9e" >/dev/null
+    export LOOM_LAUNCHD_LABEL="com.rjwalters.loom-daemon"
+    live_state_sandbox_assert_untouched
+) 2>"$case9e_err"
+rc9e=$?
+check "$([[ "$rc9e" -ne 0 ]] && echo 0 || echo 1)" \
+    "live_state_sandbox_assert_untouched fails when the real label was set AFTER init (rc=$rc9e)"
+
+# 9f. The LOOM_DAEMON_STOP_DRYRUN bypass (#5501 AC2): the supported way to
+#     exercise default-label semantics is exempt from the guard.
+check "$(
+    eval "$NEUTRAL_ENV"
+    export LOOM_DAEMON_STOP_DRYRUN=1
+    live_state_sandbox_assert_supervisor_scoped "com.rjwalters.loom-daemon" "com.rjwalters.loom-daemon-watchdog" \
+        && echo 0 || echo 1
+)" \
+    "LOOM_DAEMON_STOP_DRYRUN=1 bypasses the guard for the real labels (the supported dry-run seam)"
+
+# ============================================================
+# 10. $PWD is a resolution tier too (#6386): the lifecycle scripts derive
+#     DAEMON_STATE_HOME from `find_repo_root`'s walk up from the cwd, so a
+#     suite launched from the LIVE checkout hands every sub-invocation that
+#     forgets its own `cd` the live `.loom` as its state home. That is the 11h
+#     fleet-dispatcher outage. init now `cd`s into the sandbox and gives it a
+#     `.loom/`, so the cwd tier lands in scratch by default.
+# ============================================================
+
+# 10a. init leaves the caller standing in the sandbox.
+cwd10=$(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    cd "$FAKE_REPO" || exit 1
+    live_state_sandbox_init "$WORKDIR/sandbox10" >/dev/null 2>&1
+    pwd -P
+)
+check "$([[ "$cwd10" == "$(cd "$WORKDIR/sandbox10" && pwd -P)" ]] && echo 0 || echo 1)" \
+    "init cds the caller into the sandbox root, off the live checkout (#6386)" \
+    "cwd after init: $cwd10"
+
+# 10b. …and the sandbox is a VALID workspace root, so find_repo_root's walk
+#      stops there instead of continuing up into the live checkout. (A cd into
+#      a dir with no `.loom` would keep walking and land right back on it.)
+root10=$(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    cd "$FAKE_REPO" || exit 1
+    live_state_sandbox_init "$WORKDIR/sandbox10" >/dev/null 2>&1
+    _lss_repo_root_from "$PWD"
+)
+check "$([[ "$root10" == "$WORKDIR/sandbox10" ]] && echo 0 || echo 1)" \
+    "the sandbox root has its own .loom/, so the cwd tier resolves to scratch, not the checkout (#6386)" \
+    "repo root from cwd: $root10 (checkout is $FAKE_REPO)"
+
+# 10c. Without the cd, the same walk lands on the live checkout — the tier this
+#      hardening closes is real, not hypothetical. (Guards against 10a/10b
+#      passing vacuously if the fixture stopped being reachable.)
+root10c=$(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    cd "$FAKE_REPO" || exit 1
+    _lss_repo_root_from "$PWD"
+)
+check "$([[ "$root10c" == "$FAKE_REPO" ]] && echo 0 || echo 1)" \
+    "control: without the cd, the cwd tier resolves to the live checkout" \
+    "repo root from cwd: $root10c"
+
+# 10d. A cd that CANNOT succeed is fatal and loud, never a silent half-armed
+#      sandbox: the paths are exported but the cwd tier is still aimed at
+#      wherever the suite was launched from, which is the dangerous half.
+mkdir -p "$WORKDIR/blocked" && : > "$WORKDIR/blocked/notadir"
+case10d_err="$WORKDIR/case10d.err"
+(
+    eval "$NEUTRAL_ENV"
+    export HOME="$FAKE_HOME"
+    cd "$FAKE_REPO" || exit 1
+    live_state_sandbox_init "$WORKDIR/blocked/notadir/sandbox" >/dev/null
+) 2>"$case10d_err"
+rc10d=$?
+check "$([[ "$rc10d" -ne 0 ]] && echo 0 || echo 1)" \
+    "init FAILS when it cannot cd into the sandbox root (rc=$rc10d, #6386)"
+check "$(grep -q '6386' "$case10d_err" && echo 0 || echo 1)" \
+    "the failed-cd message explains that find_repo_root can still escape" "$(cat "$case10d_err")"
+
+# ============================================================
+# 11. init's failure return must be CHECKED by its callers (#6420).
+#
+#     10d proves the helper fails loudly. That is only half the contract: the
+#     CI suites run under `set -uo pipefail` with NO `-e`, so a BARE
+#     `live_state_sandbox_init …` swallows that failure and carries on with a
+#     half-armed sandbox — env paths redirected, but the cwd tier still aimed
+#     at wherever the suite was launched from (a live checkout, in the #6386
+#     incident) — while driving the real lifecycle scripts.
+# ============================================================
+
+# 11a. Structural: every call site in the four daemon-lifecycle suites checks
+#      the return code (`if ! …` or `… || …`). Enumerated from the files
+#      themselves so a NEW bare call site fails this suite rather than being
+#      discovered on a fleet host.
+GUARDED_CALLERS=(
+    test-loom-daemon-start.sh
+    test-loom-daemon-stop.sh
+    test-loom-daemon-update.sh
+    test-loom-daemon-quiesce.sh
+)
+unchecked=""
+no_call=""
+for suite in "${GUARDED_CALLERS[@]}"; do
+    suite_file="$SCRIPT_DIR/$suite"
+    call_lines="$(grep -nE '^[^#]*live_state_sandbox_init[[:space:]]+"' "$suite_file" 2>/dev/null)"
+    if [[ -z "$call_lines" ]]; then
+        no_call="$no_call $suite"
+        continue
+    fi
+    while IFS= read -r call_line; do
+        [[ -n "$call_line" ]] || continue
+        if [[ "$call_line" != *"if ! "* && "$call_line" != *"||"* ]]; then
+            unchecked="$unchecked
+    $suite:$call_line"
+        fi
+    done <<< "$call_lines"
+done
+check "$([[ -z "$no_call" ]] && echo 0 || echo 1)" \
+    "every daemon-lifecycle suite still calls live_state_sandbox_init (the check below is not vacuous)" \
+    "no call site found in:$no_call"
+check "$([[ -z "$unchecked" ]] && echo 0 || echo 1)" \
+    "no daemon-lifecycle suite calls live_state_sandbox_init bare — every call site checks its rc (#6420)" \
+    "unchecked call sites:$unchecked"
+
+# 11b. Behavioural: the guarded shape actually aborts, and the bare shape
+#      actually does NOT (the reason 11a is worth enforcing). Both run the same
+#      guaranteed-failing init as 10d, in a scratch script that mirrors a
+#      suite's own `set -uo pipefail` preamble.
+cat > "$WORKDIR/mini-suite-guarded.sh" <<MINI
+#!/usr/bin/env bash
+set -uo pipefail
+source "$SCRIPT_DIR/lib/live-state-sandbox.sh"
+if ! live_state_sandbox_init "$WORKDIR/blocked/notadir/sandbox"; then
+    echo "ABORTED"
+    exit 1
+fi
+echo "REACHED-THE-CASES"
+MINI
+guarded_out="$(bash "$WORKDIR/mini-suite-guarded.sh" 2>/dev/null)"
+guarded_rc=$?
+check "$([[ "$guarded_rc" -ne 0 && "$guarded_out" == *"ABORTED"* && "$guarded_out" != *"REACHED-THE-CASES"* ]] && echo 0 || echo 1)" \
+    "a checked call site aborts before any case runs when init fails (rc=$guarded_rc, #6420)" \
+    "output: $guarded_out"
+
+cat > "$WORKDIR/mini-suite-bare.sh" <<MINI
+#!/usr/bin/env bash
+set -uo pipefail
+source "$SCRIPT_DIR/lib/live-state-sandbox.sh"
+live_state_sandbox_init "$WORKDIR/blocked/notadir/sandbox"
+echo "REACHED-THE-CASES"
+MINI
+bare_out="$(bash "$WORKDIR/mini-suite-bare.sh" 2>/dev/null)"
+bare_rc=$?
+check "$([[ "$bare_rc" -eq 0 && "$bare_out" == *"REACHED-THE-CASES"* ]] && echo 0 || echo 1)" \
+    "control: a BARE call site sails past the same failure under set -uo pipefail (rc=$bare_rc, #6420)" \
+    "output: $bare_out"
+
 echo
 echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $TESTS_FAILED failed"
 [[ "$TESTS_FAILED" -eq 0 ]]

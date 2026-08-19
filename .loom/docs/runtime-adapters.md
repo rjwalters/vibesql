@@ -291,6 +291,7 @@ set:
 | `CWD_DELETED` | worktree removed mid-run | abandon cleanly |
 | `TOKEN_EXPIRED` | 401 / OAuth expired | skip this token |
 | `TOKEN_EXHAUSTED` | quota / weekly / usage limit | rotate to another account, mark bad |
+| `MODEL_CREDITS_EXHAUSTED` | per-model-**tier** credits ran out ("out of usage credits") | in-session dispatch: re-dispatch one model rung down, same account. Subprocess dispatch: identical to `TOKEN_EXHAUSTED` |
 | `SESSION_LIMIT` | concurrent-session cap (healthy account) | re-select, retry, do **not** mark bad |
 | `MODEL_REFUSAL` | safety classifier refused the turn | drop one ladder rung, no Doctor cycle consumed |
 | `RECOVERABLE` | rate limit / 5xx / network | retry with backoff |
@@ -309,9 +310,13 @@ through the generic transients.
 Two tables ship today:
 
 - **`claude`** — the reference implementation: `CWD_DELETED` → `MODEL_REFUSAL` →
-  `TOKEN_EXPIRED` → `SESSION_LIMIT` → `TOKEN_EXHAUSTED` → the CLI's
-  "No messages returned" transient. Order is load-bearing (`SESSION_LIMIT`
-  before `TOKEN_EXHAUSTED`, #3947).
+  `TOKEN_EXPIRED` → `SESSION_LIMIT` → `TOKEN_EXHAUSTED` →
+  `MODEL_CREDITS_EXHAUSTED` → the CLI's
+  "No messages returned" transient. Order is load-bearing twice over:
+  `SESSION_LIMIT` before `TOKEN_EXHAUSTED` (#3947), and
+  `MODEL_CREDITS_EXHAUSTED` last (#5687) so the #4501 per-model ceiling
+  ("reached your Fable 5 limit. Run `/usage-credits` …"), which mentions
+  credits too, keeps its existing classification.
 - **`codex`** — added with the Codex adapter (#4468): `FATAL` config faults
   (trusted-directory refusal, unknown `-c` config field, unconstructable
   sandbox) → `TOKEN_EXHAUSTED` (plan/quota wording) → `TOKEN_EXPIRED`
@@ -458,7 +463,28 @@ by the standalone checker and daemon admission:
   "mcp"]` on `builder.json`. A role with no `runtimeRequirements` key has no
   constraints (any runtime is compatible). This is a distinct field from the
   pre-existing `suggestedWorkerType` (a dispatch *preference* hint) — the checker
-  reads only `runtimeRequirements`.
+  reads only `runtimeRequirements`, and `runtime_admission::resolve_and_admit`
+  never lets `suggestedWorkerType` change which runtime is actually selected
+  (see below) — only `runtimeRequirements` is enforced.
+
+  **`suggestedWorkerType` is observability-only, deliberately never a selection
+  input (#6201).** Wiring a role's own hint into the `choose_runtime`
+  precedence chain sounds appealing but is unsound in general: `builder.json`
+  declares the *aspirational* `"codex"` (the eventual promotion target once
+  Codex's `worktreeIsolation` capability promotes past `"partial"` — see
+  "Promotion gate" in `guardrail-parity-codex.md`) while its own
+  `runtimeRequirements` make Codex fail closed *today* — if the hint drove
+  selection, every zero-config Builder/sweep dispatch would immediately try
+  Codex and get rejected. Instead, `resolve_and_admit`'s `ResolvedRuntime`
+  carries the declared `suggested_worker_type` alongside the *actually*
+  admitted runtime, and `runtime_admission::suggested_worker_type_mismatch_warning`
+  logs a loud `WARN` (from both `role_runner`'s standalone role ticks and
+  `sweep_registry`'s per-sweep dispatch) whenever they diverge AND something
+  really did override the built-in default (`RuntimeSource::BuiltIn` is
+  exempt — see that function's doc comment) — the diagnostic the #6201
+  incident lacked entirely: `curator.json` declared `"claude"`, a broad
+  `runtimes.default`-style override silently redirected it onto Codex, and
+  nothing logged the divergence anywhere for nine days.
 - **Matcher** — `defaults/scripts/check-runtime-capabilities.sh --role <name>
   --runtime <name>` loads both files and checks requirements ⊆ capabilities,
   where a requirement is satisfied only by a declared `"yes"` (`"partial"` AND
@@ -669,6 +695,46 @@ model-selection block resolves an effective model (explicit `-m`/`--model` >
 `sonnet`, `haiku`, `fable`, or `claude*`, `@effort` stripped) logs the same fix
 options and exits `78` (`EX_CONFIG`) before any auth work. Escape hatch:
 `LOOM_CODEX_MODEL_CHECK=0`.
+
+#### ChatGPT-plan seats cannot serve a pinned model at all (#5499)
+
+The family-level checks above only catch a Claude-shaped model on a Codex
+runtime. They cannot catch a **Codex-family** model — e.g. `gpt-5-codex` — that
+still fails, because the real incompatibility is model vs the profile's **auth
+mode**, not model vs runtime family: a Codex profile authenticated via a
+ChatGPT plan (interactive `codex login`, as opposed to `codex login
+--with-api-key`) only accepts the account's own default model. Pinning
+anything else — including a perfectly valid Codex model name — gets rejected
+on the wire with a 400 `invalid_request_error`:
+
+```
+The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account.
+```
+
+**If the Codex profile a role/runtime binding points at is authenticated via a
+ChatGPT plan, omit `roleModels`/`LOOM_MODEL`/`LOOM_CODEX_MODEL` for that
+role entirely** and let the CLI use the account's own default — this is the
+single most likely first-run misconfiguration for a Codex-bound role, and the
+error text otherwise only ever surfaces in the role's own log
+(`role-<role>.log` or a sweep's per-issue log), never in `loom-daemon health`.
+
+`spawn-codex.sh` now guards against it directly: once CODEX_HOME is resolved
+and an explicit model is about to be forwarded, it runs `codex login status`
+(bounded, 10s) and checks the CLI's own wording — "Logged in using ChatGPT" vs
+"Logged in using an API key" — never `auth.json`'s contents, which Loom treats
+as opaque. A ChatGPT-plan match **drops** the pinned model (warning logged,
+invocation still runs on the account's default) rather than launching a
+doomed invocation. Escape hatch: `LOOM_CODEX_AUTH_MODE_CHECK=0`. Because this
+runs in the adapter every caller passes through — role runner, sweep dispatch,
+or a hand-run `LOOM_RUNTIME=codex` — it needs no daemon-side counterpart the
+way the family-level check above does.
+
+As defense in depth, `classify-error.sh`'s `codex` provider table now
+classifies this specific 400 as `FATAL` rather than the generic
+`RECOVERABLE` catch-all — the fault is the model/auth-mode pairing, not the
+transport, so retrying the identical invocation can never succeed. Before this
+the failure retried on every role-runner/sweep cadence tick indefinitely,
+burning one invocation per cycle.
 
 Daemon admission runs before any claim lock, forge mutation, account selection,
 log header, or child spawn. Successful sweep status and

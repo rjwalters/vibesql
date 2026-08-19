@@ -142,6 +142,27 @@ assert_eq "$BIN9" "$stdout_out" "stdout still carries only the resolved path (di
 assert_contains "$BIN9" "$stderr_out" "stderr names the resolved binary path (#4997 AC1)"
 assert_contains "machine-level install" "$stderr_out" "stderr names which precedence tier the binary was resolved from"
 
+# ---------- 9b. LOOM_LOCATE_DAEMON_BIN_QUIET=1 suppresses the resolution
+#                trace for a single call, without affecting the resolved
+#                path on stdout (#6392) ----------
+BIN9B_HOME="$WORKDIR/t9b-home"
+BIN9B="$BIN9B_HOME/.local/bin/loom-daemon"
+make_fake_bin "$BIN9B"
+stdout_out=$( env -i PATH="$MINIMAL_PATH" HOME="$BIN9B_HOME" LOOM_LOCATE_DAEMON_BIN_QUIET=1 \
+    bash -c "source '$LIB'; loom_locate_daemon_bin '$WORKDIR/t9b-root'" 2>"$WORKDIR/t9b-stderr" )
+stderr_out="$(cat "$WORKDIR/t9b-stderr")"
+assert_eq "$BIN9B" "$stdout_out" "LOOM_LOCATE_DAEMON_BIN_QUIET=1 still resolves the correct path on stdout"
+assert_eq "" "$stderr_out" "LOOM_LOCATE_DAEMON_BIN_QUIET=1 suppresses the resolution-trace stderr line (#6392)"
+
+# Default (unset) behavior is unchanged -- the trace still prints when the
+# quiet opt-in is not requested, so existing callers see no behavior change.
+BIN9C_HOME="$WORKDIR/t9c-home"
+BIN9C="$BIN9C_HOME/.local/bin/loom-daemon"
+make_fake_bin "$BIN9C"
+stderr_out=$( env -i PATH="$MINIMAL_PATH" HOME="$BIN9C_HOME" \
+    bash -c "source '$LIB'; loom_locate_daemon_bin '$WORKDIR/t9c-root'" 2>&1 >/dev/null )
+assert_contains "loom_locate_daemon_bin: resolved" "$stderr_out" "the resolution trace still prints by default (LOOM_LOCATE_DAEMON_BIN_QUIET unset -- no behavior change for existing callers)"
+
 # ---------- 10. $LOOM_PREFER_REPO_BUILD=1 hoists the repo-local build above
 #                the machine-level install and $PATH (#4997) ----------
 REPO10="$WORKDIR/t10-repo"
@@ -216,6 +237,97 @@ assert_lockstep "default precedence, nothing but the machine install resolves" \
     PATH="$MINIMAL_PATH" HOME="$LOCK12_HOME" LOCKSTEP_ROOT="$WORKDIR/t12-empty-root"
 assert_lockstep "LOOM_PREFER_REPO_BUILD=1, no repo build present falls through to machine install" \
     PATH="$MINIMAL_PATH" HOME="$LOCK12_HOME" LOCKSTEP_ROOT="$WORKDIR/t12-empty-root" LOOM_PREFER_REPO_BUILD=1
+
+# ---------- 13. REGRESSION (#6208): a repo-local build under a redirected
+#                $CARGO_TARGET_DIR is still discovered when no other
+#                candidate (LOOM_DAEMON_BIN, $PATH, machine-level install)
+#                is present. Mirrors test 80 in test-loom-daemon-update.sh
+#                (#6160/#6209), which fixed the same class of bug for the
+#                build-verification path; this is the discovery-only
+#                counterpart. Before this fix, only the four hardcoded
+#                <repo>/loom-daemon/target and <repo>/target paths were
+#                probed, so a build that landed entirely outside the repo
+#                tree (as CARGO_TARGET_DIR redirects typically do) was never
+#                found even though it existed and was executable. ----------
+ROOT13="$WORKDIR/t13-repo"
+REDIRECT13="$WORKDIR/t13-redirected-cargo-target"
+make_fake_bin "$REDIRECT13/release/loom-daemon"
+out=$( env -i PATH="$MINIMAL_PATH" HOME="$WORKDIR/t13-nohome" CARGO_TARGET_DIR="$REDIRECT13" \
+    bash -c "source '$LIB'; loom_locate_daemon_bin '$ROOT13'" 2>"$WORKDIR/t13-stderr" )
+assert_eq "$REDIRECT13/release/loom-daemon" "$out" \
+    "a repo-local build under a redirected \$CARGO_TARGET_DIR is discovered when nothing else resolves (#6208)"
+stderr_out="$(cat "$WORKDIR/t13-stderr")"
+assert_contains "repo-local build" "$stderr_out" "stderr still names the repo-local-build provenance tier for a \$CARGO_TARGET_DIR-redirected find"
+
+# ---------- 14. REGRESSION (#6208): a build redirected via
+#                ~/.cargo/config.toml's build.target-dir (NOT the
+#                $CARGO_TARGET_DIR env var -- only `cargo metadata` itself
+#                can see that redirect) is still discovered, keyed off a
+#                loom-daemon/Cargo.toml manifest. ----------
+ROOT14="$WORKDIR/t14-repo"
+mkdir -p "$ROOT14/loom-daemon"
+touch "$ROOT14/loom-daemon/Cargo.toml"
+REDIRECT14="$WORKDIR/t14-redirected-config-target"
+make_fake_bin "$REDIRECT14/release/loom-daemon"
+
+# A fake `cargo` that only answers `metadata --format-version 1 --no-deps
+# --manifest-path <root>/loom-daemon/Cargo.toml` with the redirected
+# target_directory -- anything else is an error (proves the real subcommand
+# invocation shape is exactly what's expected, not just "any cargo call").
+FAKE_CARGO_DIR14="$WORKDIR/t14-fake-cargo-bin"
+mkdir -p "$FAKE_CARGO_DIR14"
+cat > "$FAKE_CARGO_DIR14/cargo" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "metadata" ]]; then
+    echo '{"target_directory":"$REDIRECT14"}'
+    exit 0
+fi
+echo "[fake cargo] unsupported: \$*" >&2
+exit 1
+EOF
+chmod +x "$FAKE_CARGO_DIR14/cargo"
+
+out=$( env -i PATH="$FAKE_CARGO_DIR14:$MINIMAL_PATH" HOME="$WORKDIR/t14-nohome" \
+    bash -c "source '$LIB'; loom_locate_daemon_bin '$ROOT14'" 2>"$WORKDIR/t14-stderr" )
+assert_eq "$REDIRECT14/release/loom-daemon" "$out" \
+    "a build.target-dir redirect (no \$CARGO_TARGET_DIR set) is discovered via 'cargo metadata', keyed off loom-daemon/Cargo.toml (#6208)"
+stderr_out="$(cat "$WORKDIR/t14-stderr")"
+assert_contains "repo-local build" "$stderr_out" "stderr still names the repo-local-build provenance tier for a cargo-metadata-resolved find"
+
+# ---------- 15. $CARGO_TARGET_DIR (cheap, no subprocess) is checked BEFORE
+#                falling back to 'cargo metadata' -- a poisoned fake cargo
+#                that fails if invoked at all must never be called when
+#                $CARGO_TARGET_DIR alone already resolves the binary. ----------
+ROOT15="$WORKDIR/t15-repo"
+mkdir -p "$ROOT15/loom-daemon"
+touch "$ROOT15/loom-daemon/Cargo.toml"
+REDIRECT15="$WORKDIR/t15-redirected-cargo-target"
+make_fake_bin "$REDIRECT15/release/loom-daemon"
+POISON_MARKER15="$WORKDIR/t15-cargo-was-called"
+POISON_CARGO_DIR15="$WORKDIR/t15-poison-cargo-bin"
+mkdir -p "$POISON_CARGO_DIR15"
+cat > "$POISON_CARGO_DIR15/cargo" <<EOF
+#!/usr/bin/env bash
+touch "$POISON_MARKER15"
+exit 1
+EOF
+chmod +x "$POISON_CARGO_DIR15/cargo"
+
+out=$( env -i PATH="$POISON_CARGO_DIR15:$MINIMAL_PATH" HOME="$WORKDIR/t15-nohome" CARGO_TARGET_DIR="$REDIRECT15" \
+    bash -c "source '$LIB'; loom_locate_daemon_bin '$ROOT15'" 2>/dev/null )
+assert_eq "$REDIRECT15/release/loom-daemon" "$out" \
+    "\$CARGO_TARGET_DIR resolves the binary even with a loom-daemon/Cargo.toml present and cargo on \$PATH"
+if [[ -e "$POISON_MARKER15" ]]; then
+    fail "cargo metadata is NOT invoked when \$CARGO_TARGET_DIR alone already resolves the binary (poison marker was created)"
+else
+    pass "cargo metadata is NOT invoked when \$CARGO_TARGET_DIR alone already resolves the binary"
+fi
+
+# ---------- 16. LOCKSTEP (#6208): loom_daemon_bin_search_paths must list the
+#                same $CARGO_TARGET_DIR-redirected candidate
+#                loom_locate_daemon_bin actually resolves. ----------
+assert_lockstep "\$CARGO_TARGET_DIR-redirected repo-local build" \
+    PATH="$MINIMAL_PATH" HOME="$WORKDIR/t16-nohome" CARGO_TARGET_DIR="$REDIRECT13" LOCKSTEP_ROOT="$ROOT13"
 
 # ---------- summary ----------
 echo

@@ -199,6 +199,13 @@
 #   LOOM_DAEMON_UPDATE_COSIGN_OIDC_ISSUER  Expected keyless certificate issuer
 #                          (default https://token.actions.githubusercontent.com,
 #                          i.e. GitHub Actions' OIDC provider).
+#   LOOM_PID_FILE         #6386: the pid file consulted for liveness detection,
+#                          TIER 1 -- ahead of the $PWD/machine-derived
+#                          "<state home>/.daemon.pid". Same precedence
+#                          loom-daemon-stop.sh (which this script delegates the
+#                          restart's stop half to), loom-daemon-watchdog.sh and
+#                          the daemon itself use, so the restart can never plan
+#                          against a different file than the stop acts on.
 #   LOOM_DAEMON_BIN       Path to the loom-daemon binary (else auto-detected,
 #                          same resolution as loom-daemon-start.sh). When set,
 #                          the fresh binary is provisioned directly to this
@@ -365,7 +372,12 @@
 #      primitive refusing to choose between "cancel work" and "restart" on the
 #      operator's behalf, exactly as designed. The freshly-built/provisioned
 #      binary IS staged at the resolved destination; it just was not activated
-#      this run. Re-run once the in-flight sweep(s) finish, or re-run with
+#      this run. On a #6007+ daemon the roll is RETAINED (dispatch stays paused
+#      and the restart re-arms itself when in-flight reaches zero), so this exit
+#      means "not yet", not "not ever": the script says so and there is nothing
+#      to re-run. Against an older daemon (or when the status probe cannot
+#      confirm the pending roll) the historical advice still applies — re-run
+#      once the in-flight sweep(s) finish, or re-run with
 #      --force-after-timeout to force the roll through immediately.
 #
 # See also: loom-daemon-start.sh (writes .loom/.daemon.flags), loom-daemon-stop.sh
@@ -813,10 +825,11 @@ verify_artifact_signature() {
     esac
 }
 
-# Temp dirs created by fetch_and_verify_artifact, cleaned up on any exit
-# (including the hard-abort `exit 1` calls it makes on a verification
-# failure) so a checksum-mismatch abort never leaves the unverified artifact
-# lying around.
+# Temp dirs/files created by fetch_and_verify_artifact (and, since #6160,
+# the `cargo build --release --message-format=json-render-diagnostics`
+# capture below) cleaned up on any exit (including the hard-abort `exit 1`
+# calls both make on a verification/resolution failure) so an abort never
+# leaves an unverified artifact or a build-JSON temp file lying around.
 _LOOM_FETCH_TMPDIRS=()
 _cleanup_fetch_tmpdirs() {
     local d
@@ -1294,6 +1307,34 @@ verify_destination_artifact() {
     ok "Post-provision verification: destination binary at $dest is the fetched release artifact ($dest_version)."
 }
 
+# verify_supervisor_matches_provisioned <provisioned_dest> — the #6009
+# counterpart to verify_destination_binary()/verify_destination_artifact()
+# above: those two only prove the binary THIS RUN WROTE embeds the expected
+# commit. Neither says anything about whether that is the binary
+# systemd/launchd will actually launch on the restart that follows — if the
+# supervisor's persisted config (SUPERVISOR_BIN, resolved during staleness
+# detection above from the unit's ExecStart= / the plist's
+# ProgramArguments[0]) still points at a DIFFERENT path than what was just
+# provisioned, the freshly-built binary never reaches the running daemon: the
+# restart request goes to the OLD binary, and systemd/launchd's own relaunch
+# re-execs that SAME stale path again afterward.
+#
+# Advisory only (never exits non-zero) — provisioning to <provisioned_dest>
+# already succeeded at what it set out to do; correcting the supervisor's own
+# config is what --relaunch is for (it re-renders the plist/unit against the
+# current binary resolution).
+verify_supervisor_matches_provisioned() {
+    local provisioned="$1"
+    [[ -n "$SUPERVISOR_BIN" ]] || return 0
+    [[ -n "$provisioned" ]] || return 0
+    local provisioned_real supervisor_real
+    provisioned_real="$(_lde_realpath "$provisioned")"
+    supervisor_real="$(_lde_realpath "$SUPERVISOR_BIN")"
+    if [[ -n "$provisioned_real" && "$provisioned_real" != "$supervisor_real" ]]; then
+        warn "The ${DAEMON_MANAGER}-managed binary (${SUPERVISOR_BIN}) is NOT the one just provisioned (${provisioned}) — restarting below re-launches the daemon via the EXISTING ${DAEMON_MANAGER} config, not from this build, so it may still come back on the OLD binary. Run '$(basename "$0") --relaunch' to re-render the ${DAEMON_MANAGER} config so it points at the current binary."
+    fi
+}
+
 # ---------- args ----------
 DRY_RUN=false
 FORCE=false
@@ -1424,7 +1465,16 @@ resolve_lifecycle_script() {
     echo ""
 }
 
-PID_FILE="$DAEMON_STATE_HOME/.daemon.pid"
+# ---------- pid-file resolution (#6386) ----------
+# LOOM_PID_FILE is TIER 1 here for the SAME reason (and with the same
+# precedence) as in loom-daemon-stop.sh: this script restarts the daemon by
+# invoking that stop script, so if the two disagreed about which pid file is
+# "the daemon", update would plan its restart against one file while the stop
+# it delegates to acts on another. The pid file only feeds liveness detection
+# here (DAEMON_MANAGER/WAS_RUNNING below); the actual kill happens inside
+# loom-daemon-stop.sh --restarting. FLAGS_FILE stays state-home-derived --
+# LOOM_PID_FILE names the pid file, not the state home.
+PID_FILE="${LOOM_PID_FILE:-$DAEMON_STATE_HOME/.daemon.pid}"
 FLAGS_FILE="$DAEMON_STATE_HOME/.daemon.flags"
 START_SCRIPT="$(resolve_lifecycle_script loom-daemon-start.sh)"
 STOP_SCRIPT="$(resolve_lifecycle_script loom-daemon-stop.sh)"
@@ -1731,6 +1781,18 @@ sync_with_origin() {
         fi
         err "Fast-forward merge from origin/${DEFAULT_BRANCH} did not apply — local commits have diverged, or a dirty tracked file conflicts with the incoming change."
         err "Refusing to guess or hard-reset: resolve manually (rebase/merge by hand), or pass --allow-stale to build the current (stale) checkout as-is."
+        # #6008: on a fleet host the most common non-managed blocker here is a
+        # host-specific edit parked in a TRACKED config tier — it re-blocks every
+        # roll forever, so the checkout drifts hundreds of commits behind. Name
+        # the host-local tier instead of only saying "resolve manually".
+        local dirty_cfg_tiers
+        dirty_cfg_tiers="$( (cd "$repo_root" && git diff --name-only HEAD -- \
+            .loom/config.json .loom-project/project.json 2>/dev/null) | tr '\n' ' ')"
+        dirty_cfg_tiers="${dirty_cfg_tiers%"${dirty_cfg_tiers##*[![:space:]]}"}"
+        if [[ -n "$dirty_cfg_tiers" ]]; then
+            err "Dirty TRACKED config tier(s) present: ${dirty_cfg_tiers}"
+            err "If that diff is host-specific — a per-host path or socket, or an on/off switch that is true of this box and false of the others (worktree.root, safehouse.enabled, safehouse.socket) — it does not belong in a tracked file at all. Move it to the gitignored .loom-local/local.json tier, which never shows up in git status and so can never block this sync again. Per-key runbook: https://github.com/rjwalters/loom/blob/main/docs/design/config-resolution-tiers.md"
+        fi
         return 1
     fi
     ok "Fast-forwarded local ${DEFAULT_BRANCH} to origin/${DEFAULT_BRANCH} (${n} commit(s))."
@@ -1741,21 +1803,235 @@ if ! sync_with_origin "$REPO_ROOT"; then
     exit 1
 fi
 
+# ---------- launchd ownership detection (macOS, mirrors loom-daemon-stop.sh #4042) ----------
+# launchd is checked AHEAD of the .loom/.daemon.pid tier because the plist's
+# KeepAlive:SuccessfulExit assigns a FRESH pid on every supervised relaunch, so
+# the pid file goes stale after the first relaunch even for a launchd job that
+# loom-daemon-start.sh itself started; a hand-bootstrapped daemon has no state
+# files at all. Honors LOOM_DAEMON_LAUNCHD symmetrically with start/stop.sh so a
+# --no-launchd install never reaches into the machine-global launchd domain.
+# Shared domain resolver (#4130): gui/<uid> ↦ user/<uid>, sourced verbatim so
+# update agrees with the domain the start put the job in.
+#
+# NOTE (#6009): this section — plus the systemd mirror below it and the
+# DAEMON_MANAGER resolution that follows — was moved up from its original
+# position (well after the staleness-detection block that used to sit here)
+# so that the supervisor's OWN exec path can be resolved and compared
+# BEFORE the staleness decision is made, not after it.
+_LOOM_LAUNCHD_LIB_DIR="$(cd "$SCRIPT_DIR/../lib" 2>/dev/null && pwd)"
+if [[ -r "$_LOOM_LAUNCHD_LIB_DIR/launchd-domain.sh" ]]; then
+    # shellcheck source=../lib/launchd-domain.sh
+    source "$_LOOM_LAUNCHD_LIB_DIR/launchd-domain.sh"
+fi
+
+IS_DARWIN=false
+[[ "$(uname -s)" == "Darwin" ]] && IS_DARWIN=true
+USE_LAUNCHD="$IS_DARWIN"
+if [[ "${LOOM_DAEMON_LAUNCHD:-}" =~ ^(0|false|no)$ ]]; then
+    USE_LAUNCHD=false
+fi
+DEFAULT_LAUNCHD_LABEL="com.rjwalters.loom-daemon"
+LAUNCHD_LABEL="${LOOM_LAUNCHD_LABEL:-$DEFAULT_LAUNCHD_LABEL}"
+# Resolve the domain ONLY when launchd interaction is on (#4130): probing
+# `launchctl print gui/<uid>` when LOOM_DAEMON_LAUNCHD=0 would reach the
+# machine-global launchd domain the disabled path must never touch (#4078). The
+# placeholder is inert — launchd_job_loaded and the launchd restart path all
+# short-circuit on USE_LAUNCHD, so it is never consumed when launchd is off.
+if [[ "$USE_LAUNCHD" == "true" ]]; then
+    LAUNCHD_SERVICE="$(resolve_launchd_domain)/${LAUNCHD_LABEL}"
+else
+    LAUNCHD_SERVICE="/${LAUNCHD_LABEL}"
+fi
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+
+launchd_job_loaded() {
+    [[ "$USE_LAUNCHD" == "true" ]] || return 1
+    command -v launchctl >/dev/null 2>&1 || return 1
+    launchctl print "$LAUNCHD_SERVICE" >/dev/null 2>&1
+}
+launchd_job_pid() {
+    launchctl print "$LAUNCHD_SERVICE" 2>/dev/null | awk -F'= ' '/^[[:space:]]*pid = /{gsub(/[^0-9]/, "", $2); print $2; exit}'
+}
+
+# ---------- systemd --user ownership detection (Linux, #4260 sub-issue C) ----------
+# The Linux mirror of the launchd tier just above, checked at the SAME level
+# (ahead of the pid-file tier): a `systemd --user` unit's pid also goes stale on
+# every `Restart=on-success` relaunch (loom-daemon-start.sh #4268), so the pid
+# file alone cannot answer "is it running, and how". Honors LOOM_DAEMON_SYSTEMD
+# symmetrically with loom-daemon-start.sh --no-systemd / loom-daemon-stop.sh: a
+# --no-systemd install must never invoke systemctl at all. Shared resolver
+# (lib/systemd-user.sh, #4268) sourced verbatim so update agrees with the unit
+# name start/stop resolve.
+_LOOM_SYSTEMD_LIB_DIR="$(cd "$SCRIPT_DIR/../lib" 2>/dev/null && pwd)"
+if [[ -r "$_LOOM_SYSTEMD_LIB_DIR/systemd-user.sh" ]]; then
+    # shellcheck source=../lib/systemd-user.sh
+    source "$_LOOM_SYSTEMD_LIB_DIR/systemd-user.sh"
+fi
+
+IS_LINUX_SYSTEMD=false
+if ! [[ "${LOOM_DAEMON_SYSTEMD:-}" =~ ^(0|false|no)$ ]] \
+    && declare -f is_linux_systemd >/dev/null 2>&1 && is_linux_systemd; then
+    IS_LINUX_SYSTEMD=true
+fi
+
+# Resolved ONLY when systemd interaction is on -- mirrors the launchd guard just
+# above; these calls are inert placeholders otherwise since every systemd
+# function below short-circuits on IS_LINUX_SYSTEMD.
+if [[ "$IS_LINUX_SYSTEMD" == "true" ]]; then
+    SYSTEMD_UNIT="$(resolve_systemd_unit)"
+    SYSTEMD_UNIT_PATH="$(resolve_systemd_unit_path)"
+else
+    SYSTEMD_UNIT="${LOOM_SYSTEMD_UNIT:-loom-daemon.service}"
+    SYSTEMD_UNIT_PATH=""
+fi
+
+systemd_unit_loaded() {
+    [[ "$IS_LINUX_SYSTEMD" == "true" ]] || return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl --user is-active --quiet "$SYSTEMD_UNIT" 2>/dev/null \
+        || systemctl --user is-enabled --quiet "$SYSTEMD_UNIT" 2>/dev/null
+}
+systemd_unit_pid() {
+    systemctl --user show -p MainPID --value "$SYSTEMD_UNIT" 2>/dev/null
+}
+# systemd_unit_active_state / systemd_unit_result — the two `systemctl --user
+# show` properties the #4950 verification/recovery logic below keys off of:
+# ActiveState (e.g. active/inactive/failed) and Result (success/timeout/...).
+# Mirror systemd_unit_pid's plain --value query shape.
+systemd_unit_active_state() {
+    systemctl --user show -p ActiveState --value "$SYSTEMD_UNIT" 2>/dev/null
+}
+systemd_unit_result() {
+    systemctl --user show -p Result --value "$SYSTEMD_UNIT" 2>/dev/null
+}
+
+# Resolve which manager owns the running daemon: launchd, then systemd (both
+# checked ahead of the pid-file tier -- their pids go stale on every supervised
+# relaunch), then the .loom/.daemon.pid file (nohup/script-managed), or none.
+# WAS_RUNNING is derived from this — a launchd- or systemd-loaded job counts as
+# running regardless of pid-file state.
+DAEMON_MANAGER="none"
+WAS_RUNNING=false
+if launchd_job_loaded; then
+    DAEMON_MANAGER="launchd"
+    WAS_RUNNING=true
+elif systemd_unit_loaded; then
+    DAEMON_MANAGER="systemd"
+    WAS_RUNNING=true
+elif [[ -f "$PID_FILE" ]]; then
+    existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+        DAEMON_MANAGER="pidfile"
+        WAS_RUNNING=true
+    fi
+fi
+
+describe_manager() {
+    case "$DAEMON_MANAGER" in
+        launchd) echo "Running daemon manager: launchd (label ${LAUNCHD_LABEL})." ;;
+        systemd) echo "Running daemon manager: systemd --user (unit ${SYSTEMD_UNIT})." ;;
+        pidfile) echo "Running daemon manager: PID-file/nohup (.loom/.daemon.pid)." ;;
+        *)       echo "Running daemon manager: not running." ;;
+    esac
+}
+
+# ---------- supervisor's actual exec path (#6009) ----------
+# DAEMON_MANAGER is now known. Resolve the path the detected supervisor will
+# actually exec -- systemd's `ExecStart=`, launchd's `ProgramArguments[0]` --
+# read from the supervisor's OWN persisted config, deliberately SEPARATE from
+# `locate_daemon_bin()`'s PATH-based resolution below. The two are not
+# guaranteed to agree (e.g. a stray/older `loom-daemon` earlier on PATH than
+# the one the supervisor was actually pointed at), and PATH resolution alone
+# has no way to notice that divergence on its own.
+#
+# Echoes the resolved absolute path on stdout and returns 0, or returns 1
+# with no output when it cannot be determined (no supervisor, unreadable
+# config, or the config's binary entry could not be parsed).
+resolve_supervisor_bin() {
+    case "$DAEMON_MANAGER" in
+        launchd)
+            [[ -r "$LAUNCHD_PLIST" ]] || return 1
+            command -v /usr/libexec/PlistBuddy >/dev/null 2>&1 || return 1
+            local bin
+            bin="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$LAUNCHD_PLIST" 2>/dev/null)"
+            [[ -n "$bin" ]] || return 1
+            echo "$bin"
+            ;;
+        systemd)
+            [[ -n "$SYSTEMD_UNIT_PATH" && -r "$SYSTEMD_UNIT_PATH" ]] || return 1
+            local line
+            # The LAST ExecStart= wins if the unit file somehow has more than
+            # one (matches systemd's own override semantics); take only the
+            # binary token, dropping any trailing args -- matches how
+            # render_systemd_unit() in loom-daemon-start.sh renders it
+            # (`ExecStart=<bin>`, no args).
+            line="$(grep '^ExecStart=' "$SYSTEMD_UNIT_PATH" 2>/dev/null | tail -1)"
+            [[ -n "$line" ]] || return 1
+            echo "${line#ExecStart=}" | awk '{print $1}'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+SUPERVISOR_BIN=""
+if [[ "$DAEMON_MANAGER" == "launchd" || "$DAEMON_MANAGER" == "systemd" ]]; then
+    SUPERVISOR_BIN="$(resolve_supervisor_bin || true)"
+fi
+
 # ---------- staleness detection ----------
 DAEMON_BIN=$(locate_daemon_bin "$REPO_ROOT")
 
+# Staleness is compared against the binary the detected supervisor actually
+# launches (SUPERVISOR_BIN, resolved just above), falling back to the
+# PATH-resolved DAEMON_BIN only when no supervisor is detected or its exec
+# path could not be determined (#6009) — PATH resolution alone cannot notice
+# a supervisor pointed at a different absolute path than the PATH-resolved
+# one.
+STALENESS_BIN="$DAEMON_BIN"
+STALENESS_SOURCE="PATH resolution"
+if [[ -n "$SUPERVISOR_BIN" ]]; then
+    STALENESS_BIN="$SUPERVISOR_BIN"
+    STALENESS_SOURCE="${DAEMON_MANAGER} supervisor config"
+fi
+
 INSTALLED_COMMIT="unknown"
 INSTALLED_VERSION=""
-if [[ -n "$DAEMON_BIN" && -x "$DAEMON_BIN" ]]; then
-    installed_version_output=$("$DAEMON_BIN" --version 2>/dev/null || true)
+if [[ -n "$STALENESS_BIN" && -x "$STALENESS_BIN" ]]; then
+    installed_version_output=$("$STALENESS_BIN" --version 2>/dev/null || true)
     extracted=$(extract_commit "$installed_version_output")
     [[ -n "$extracted" ]] && INSTALLED_COMMIT="$extracted"
     INSTALLED_VERSION=$(extract_version "$installed_version_output")
 fi
 
 SOURCE_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# Source tree's own VERSION file (#5517 keeps this in sync with Cargo.toml et
+# al.) -- used below purely for the artifact-fetch gap-visibility note (#6010):
+# comparing the newest release against the CURRENT source tree, not just
+# against whatever happens to be installed already.
+SOURCE_VERSION=""
+[[ -r "$REPO_ROOT/VERSION" ]] && SOURCE_VERSION="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION" 2>/dev/null || true)"
 
-echo "Installed binary: ${DAEMON_BIN:-<none found>} (commit ${INSTALLED_COMMIT})"
+echo "Installed binary: ${STALENESS_BIN:-<none found>} (commit ${INSTALLED_COMMIT}, resolved via ${STALENESS_SOURCE})"
+# Divergence advisory (#6009 AC2). Compared through _lde_realpath so the two
+# spellings of the SAME file (the common `/usr/local/bin/loom-daemon` symlink
+# into `~/.local/bin/loom-daemon`) are not reported as a divergence — only a
+# genuinely different file is.
+if [[ -n "$SUPERVISOR_BIN" && -n "$DAEMON_BIN" ]]; then
+    _sup_real="$(_lde_realpath "$SUPERVISOR_BIN")"
+    _path_real="$(_lde_realpath "$DAEMON_BIN")"
+    # _lde_realpath echoes "" for a path that does not exist (e.g. a supervisor
+    # config still pointing at a deleted binary) — fall back to the raw spelling
+    # so the comparison stays meaningful instead of collapsing to "" == "".
+    [[ -n "$_sup_real" ]] || _sup_real="$SUPERVISOR_BIN"
+    [[ -n "$_path_real" ]] || _path_real="$DAEMON_BIN"
+else
+    _sup_real=""; _path_real=""
+fi
+if [[ -n "$SUPERVISOR_BIN" && -n "$DAEMON_BIN" && "$_sup_real" != "$_path_real" ]]; then
+    warn "PATH-resolved loom-daemon (${DAEMON_BIN}) is NOT the binary ${DAEMON_MANAGER} will actually launch (${SUPERVISOR_BIN}) — the staleness comparison above deliberately used the ${DAEMON_MANAGER}-managed binary, not the PATH one, since only the former is what the running daemon comes back on. If the PATH one is a leftover entry point, the stale-entry-point advisory below says whether --prune-stale-entry-points can remove it."
+fi
 echo "Source tree HEAD:  ${SOURCE_COMMIT}"
 if [[ -n "$MACHINE_CHECKOUT" ]]; then
     echo "Source tree:       $REPO_ROOT (machine checkout, LOOM_MACHINE_CHECKOUT)"
@@ -1765,8 +2041,8 @@ if [[ "$FF_SYNCED" == "true" ]]; then
 fi
 
 UPDATE_NEEDED=false
-if [[ -z "$DAEMON_BIN" ]]; then
-    echo "No loom-daemon binary currently resolvable — a build is needed. Checked:"
+if [[ -z "$STALENESS_BIN" ]]; then
+    echo "No loom-daemon binary currently resolvable (checked: ${STALENESS_SOURCE}) — a build is needed. PATH search checked:"
     loom_daemon_bin_search_paths "$REPO_ROOT" | sed 's/^/  - /'
     UPDATE_NEEDED=true
 elif [[ "$INSTALLED_COMMIT" == "unknown" || "$SOURCE_COMMIT" == "unknown" ]]; then
@@ -1793,6 +2069,14 @@ ARTIFACT_BIN=""
 ARTIFACT_COMMIT=""
 ARTIFACT_VERSION_OUTPUT=""
 ARTIFACT_FALLBACK_REASON=""
+# Gap-visibility (#6010): true when the newest resolved release is behind the
+# CURRENT source tree's VERSION file — independent of ARTIFACT_MODE, which
+# only compares against the (possibly much older) INSTALLED_VERSION. This is
+# the condition that made `--fetch` unusable fleet-wide once releases fell
+# behind `main`: every host reported "not newer than installed" even though
+# the release was also behind source, so the real gap was invisible until a
+# forced `--fetch` hard-failed.
+FETCH_RELEASE_BEHIND_SOURCE=false
 if [[ "$FETCH_MODE" != "off" ]]; then
     if fetch_resolve_latest; then
         FETCH_VERSION_CMP="$(semver_compare "$FETCH_LATEST_VERSION" "${INSTALLED_VERSION:-0.0.0}")"
@@ -1810,6 +2094,11 @@ if [[ "$FETCH_MODE" != "off" ]]; then
             echo "Release artifact available: ${ARTIFACT_TAG} (target ${ARTIFACT_TARGET}) — preferring fetch over a local rebuild."
         else
             echo "Latest release ${FETCH_LATEST_TAG} (${FETCH_LATEST_VERSION}) is not newer than the installed version (${INSTALLED_VERSION:-unknown}) — nothing to fetch; falling back to the local source-tree comparison."
+        fi
+
+        if [[ -n "$SOURCE_VERSION" ]] && [[ "$(semver_compare "$FETCH_LATEST_VERSION" "$SOURCE_VERSION")" == "-1" ]]; then
+            FETCH_RELEASE_BEHIND_SOURCE=true
+            warn "Artifact path cannot reach current source: newest release ${FETCH_LATEST_TAG} (${FETCH_LATEST_VERSION}) is behind this source tree's VERSION (${SOURCE_VERSION}) — a forced '--fetch' will hard-fail until a release >= ${SOURCE_VERSION} is cut; '--no-fetch' (source build) remains available in the meantime."
         fi
     else
         ARTIFACT_FALLBACK_REASON="$FETCH_RESOLVE_REASON"
@@ -1906,102 +2195,6 @@ print_final_installed_line() {
         echo "Installed: ${commit} (origin/${DEFAULT_BRANCH} is at ${ORIGIN_COMMIT} — does NOT match; built from a checkout that was behind or diverged, e.g. --allow-stale)"
     fi
     idle_shutdown_notice
-}
-
-# ---------- launchd ownership detection (macOS, mirrors loom-daemon-stop.sh #4042) ----------
-# launchd is checked AHEAD of the .loom/.daemon.pid tier because the plist's
-# KeepAlive:SuccessfulExit assigns a FRESH pid on every supervised relaunch, so
-# the pid file goes stale after the first relaunch even for a launchd job that
-# loom-daemon-start.sh itself started; a hand-bootstrapped daemon has no state
-# files at all. Honors LOOM_DAEMON_LAUNCHD symmetrically with start/stop.sh so a
-# --no-launchd install never reaches into the machine-global launchd domain.
-# Shared domain resolver (#4130): gui/<uid> ↦ user/<uid>, sourced verbatim so
-# update agrees with the domain the start put the job in.
-_LOOM_LAUNCHD_LIB_DIR="$(cd "$SCRIPT_DIR/../lib" 2>/dev/null && pwd)"
-if [[ -r "$_LOOM_LAUNCHD_LIB_DIR/launchd-domain.sh" ]]; then
-    # shellcheck source=../lib/launchd-domain.sh
-    source "$_LOOM_LAUNCHD_LIB_DIR/launchd-domain.sh"
-fi
-
-IS_DARWIN=false
-[[ "$(uname -s)" == "Darwin" ]] && IS_DARWIN=true
-USE_LAUNCHD="$IS_DARWIN"
-if [[ "${LOOM_DAEMON_LAUNCHD:-}" =~ ^(0|false|no)$ ]]; then
-    USE_LAUNCHD=false
-fi
-DEFAULT_LAUNCHD_LABEL="com.rjwalters.loom-daemon"
-LAUNCHD_LABEL="${LOOM_LAUNCHD_LABEL:-$DEFAULT_LAUNCHD_LABEL}"
-# Resolve the domain ONLY when launchd interaction is on (#4130): probing
-# `launchctl print gui/<uid>` when LOOM_DAEMON_LAUNCHD=0 would reach the
-# machine-global launchd domain the disabled path must never touch (#4078). The
-# placeholder is inert — launchd_job_loaded and the launchd restart path all
-# short-circuit on USE_LAUNCHD, so it is never consumed when launchd is off.
-if [[ "$USE_LAUNCHD" == "true" ]]; then
-    LAUNCHD_SERVICE="$(resolve_launchd_domain)/${LAUNCHD_LABEL}"
-else
-    LAUNCHD_SERVICE="/${LAUNCHD_LABEL}"
-fi
-LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
-
-launchd_job_loaded() {
-    [[ "$USE_LAUNCHD" == "true" ]] || return 1
-    command -v launchctl >/dev/null 2>&1 || return 1
-    launchctl print "$LAUNCHD_SERVICE" >/dev/null 2>&1
-}
-launchd_job_pid() {
-    launchctl print "$LAUNCHD_SERVICE" 2>/dev/null | awk -F'= ' '/^[[:space:]]*pid = /{gsub(/[^0-9]/, "", $2); print $2; exit}'
-}
-
-# ---------- systemd --user ownership detection (Linux, #4260 sub-issue C) ----------
-# The Linux mirror of the launchd tier just above, checked at the SAME level
-# (ahead of the pid-file tier): a `systemd --user` unit's pid also goes stale on
-# every `Restart=on-success` relaunch (loom-daemon-start.sh #4268), so the pid
-# file alone cannot answer "is it running, and how". Honors LOOM_DAEMON_SYSTEMD
-# symmetrically with loom-daemon-start.sh --no-systemd / loom-daemon-stop.sh: a
-# --no-systemd install must never invoke systemctl at all. Shared resolver
-# (lib/systemd-user.sh, #4268) sourced verbatim so update agrees with the unit
-# name start/stop resolve.
-_LOOM_SYSTEMD_LIB_DIR="$(cd "$SCRIPT_DIR/../lib" 2>/dev/null && pwd)"
-if [[ -r "$_LOOM_SYSTEMD_LIB_DIR/systemd-user.sh" ]]; then
-    # shellcheck source=../lib/systemd-user.sh
-    source "$_LOOM_SYSTEMD_LIB_DIR/systemd-user.sh"
-fi
-
-IS_LINUX_SYSTEMD=false
-if ! [[ "${LOOM_DAEMON_SYSTEMD:-}" =~ ^(0|false|no)$ ]] \
-    && declare -f is_linux_systemd >/dev/null 2>&1 && is_linux_systemd; then
-    IS_LINUX_SYSTEMD=true
-fi
-
-# Resolved ONLY when systemd interaction is on -- mirrors the launchd guard just
-# above; these calls are inert placeholders otherwise since every systemd
-# function below short-circuits on IS_LINUX_SYSTEMD.
-if [[ "$IS_LINUX_SYSTEMD" == "true" ]]; then
-    SYSTEMD_UNIT="$(resolve_systemd_unit)"
-    SYSTEMD_UNIT_PATH="$(resolve_systemd_unit_path)"
-else
-    SYSTEMD_UNIT="${LOOM_SYSTEMD_UNIT:-loom-daemon.service}"
-    SYSTEMD_UNIT_PATH=""
-fi
-
-systemd_unit_loaded() {
-    [[ "$IS_LINUX_SYSTEMD" == "true" ]] || return 1
-    command -v systemctl >/dev/null 2>&1 || return 1
-    systemctl --user is-active --quiet "$SYSTEMD_UNIT" 2>/dev/null \
-        || systemctl --user is-enabled --quiet "$SYSTEMD_UNIT" 2>/dev/null
-}
-systemd_unit_pid() {
-    systemctl --user show -p MainPID --value "$SYSTEMD_UNIT" 2>/dev/null
-}
-# systemd_unit_active_state / systemd_unit_result — the two `systemctl --user
-# show` properties the #4950 verification/recovery logic below keys off of:
-# ActiveState (e.g. active/inactive/failed) and Result (success/timeout/...).
-# Mirror systemd_unit_pid's plain --value query shape.
-systemd_unit_active_state() {
-    systemctl --user show -p ActiveState --value "$SYSTEMD_UNIT" 2>/dev/null
-}
-systemd_unit_result() {
-    systemctl --user show -p Result --value "$SYSTEMD_UNIT" 2>/dev/null
 }
 
 # ---------- verify a launchd restart actually relaunched the job (#4232) ----------
@@ -2172,6 +2365,33 @@ build_restart_invoke_args() {
     fi
 }
 
+# ---------- pending-roll detection (Issue #6007) ----------
+# drain_roll_still_armed -- 0 when the still-running daemon reports a drain STILL
+# in progress after our pid poll expired. Our poll window is the drain's own
+# timeout + 60s (DRAIN_POLL_SECS above), so by here the deadline has passed: a
+# pre-#6007 daemon would have cleared the flag and be reporting
+# `draining: false`. Still-draining therefore means the daemon RETAINED the roll
+# — on a #6007+ daemon a relaunch drain that misses its deadline keeps dispatch
+# paused and re-arms itself, so the restart lands on its own once the in-flight
+# set reaches zero. That changes the exit-8 advice completely: "re-run once the
+# sweeps finish" is exactly the operator babysitting #6007 removed, and on a busy
+# host re-running reproduces the same outcome.
+#
+# Deliberately conservative: any failure to reach or parse the status (pre-#6007
+# daemon, no `--json`, absent binary) returns non-zero, so the message falls back
+# to the historical wording rather than promising a convergence the running
+# daemon may not implement. Uses `grep`, not `jq` (never assume jq on a worker).
+drain_roll_still_armed() {
+    local bin="${1:-$PROVISION_TARGET}"
+    [[ -x "$bin" ]] || return 1
+    local json
+    json="$("$bin" status --json 2>/dev/null)" || return 1
+    [[ -n "$json" ]] || return 1
+    printf '%s' "$json" \
+        | tr -d ' \n' \
+        | grep -q '"drain":{[^}]*"draining":true'
+}
+
 # ---------- re-render + relaunch on a refused restart (#4118) ----------
 # The exit-6 fallback USED to tell the operator to `launchctl bootstrap` the
 # EXISTING plist. That plist is stale by construction (it is the pre-#4077 file
@@ -2314,36 +2534,6 @@ perform_systemd_relaunch() {
     "$START_SCRIPT"
 }
 
-# Resolve which manager owns the running daemon: launchd, then systemd (both
-# checked ahead of the pid-file tier -- their pids go stale on every supervised
-# relaunch), then the .loom/.daemon.pid file (nohup/script-managed), or none.
-# WAS_RUNNING is derived from this — a launchd- or systemd-loaded job counts as
-# running regardless of pid-file state.
-DAEMON_MANAGER="none"
-WAS_RUNNING=false
-if launchd_job_loaded; then
-    DAEMON_MANAGER="launchd"
-    WAS_RUNNING=true
-elif systemd_unit_loaded; then
-    DAEMON_MANAGER="systemd"
-    WAS_RUNNING=true
-elif [[ -f "$PID_FILE" ]]; then
-    existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
-    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
-        DAEMON_MANAGER="pidfile"
-        WAS_RUNNING=true
-    fi
-fi
-
-describe_manager() {
-    case "$DAEMON_MANAGER" in
-        launchd) echo "Running daemon manager: launchd (label ${LAUNCHD_LABEL})." ;;
-        systemd) echo "Running daemon manager: systemd --user (unit ${SYSTEMD_UNIT})." ;;
-        pidfile) echo "Running daemon manager: PID-file/nohup (.loom/.daemon.pid)." ;;
-        *)       echo "Running daemon manager: not running." ;;
-    esac
-}
-
 # ---------- drain-restart default selection (Issue #5138) ----------
 # On systemd an IMMEDIATE (non-drained) restart is actively destructive
 # (#5119): the daemon exits 0, but its role-run/sweep children remain in the
@@ -2383,6 +2573,9 @@ fi
 # ---------- --check: report only, no writes ----------
 if [[ "$CHECK_ONLY" == "true" ]]; then
     describe_manager
+    if [[ "$FETCH_RELEASE_BEHIND_SOURCE" == "true" ]]; then
+        warn "Release gap: installed ${INSTALLED_VERSION:-unknown}, newest release ${FETCH_LATEST_VERSION:-unknown}, source ${SOURCE_VERSION:-unknown} — the artifact-fetch path cannot reach current source until a release >= ${SOURCE_VERSION} is cut."
+    fi
     if [[ "$UPDATE_NEEDED" == "true" ]]; then
         if [[ "$ARTIFACT_MODE" == "true" ]]; then
             warn "Update available via release artifact ${ARTIFACT_TAG} (installed=${INSTALLED_VERSION:-unknown}, latest=${ARTIFACT_VERSION}, target=${ARTIFACT_TARGET})."
@@ -2422,6 +2615,9 @@ fi
 # building from source" — refuse rather than mask a resolution failure.
 if [[ "$FETCH_MODE" == "force" && "$ARTIFACT_MODE" != "true" ]]; then
     err "--fetch (or LOOM_DAEMON_UPDATE_FETCH=1) was given but no usable release artifact was resolved${ARTIFACT_FALLBACK_REASON:+ (${ARTIFACT_FALLBACK_REASON})}."
+    if [[ "$FETCH_RELEASE_BEHIND_SOURCE" == "true" ]]; then
+        err "Cause: the newest release (${FETCH_LATEST_VERSION:-unknown}) is behind this source tree's VERSION (${SOURCE_VERSION:-unknown}) — no release has been cut yet for the current tree (#6010)."
+    fi
     err "Refusing to silently fall back to a source build; re-run without --fetch to allow that, or resolve the cause above."
     exit 1
 fi
@@ -2456,7 +2652,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
         if [[ -n "$ARTIFACT_FALLBACK_REASON" ]]; then
             echo "[dry-run] Artifact-fetch was not used: ${ARTIFACT_FALLBACK_REASON}."
         fi
-        echo "[dry-run] Would run: (cd $DAEMON_DIR && cargo build --release)"
+        echo "[dry-run] Would run: (cd $DAEMON_DIR && cargo build --release --message-format=json-render-diagnostics)"
     fi
     echo "[dry-run] Would provision the fresh binary to: $PROVISION_TARGET"
     build_restart_invoke_args
@@ -2549,28 +2745,68 @@ else
 
     echo
     echo "Rebuilding loom-daemon (cargo build --release)..."
-    if ! (cd "$DAEMON_DIR" && cargo build --release); then
+    # Resolve the artifact cargo ACTUALLY produced from cargo's own build
+    # output (#6160), instead of probing two hardcoded target/release/
+    # paths. The old probe was a SILENT no-op on any host where cargo's
+    # output directory is redirected (CARGO_TARGET_DIR, or
+    # ~/.cargo/config.toml's build.target-dir, e.g. after an ENOSPC-driven
+    # move off the internal volume) -- the build fully succeeded, but this
+    # script never found the binary it built and never provisioned it,
+    # leaving the fleet host on its stale binary while reporting a rebuild.
+    # `--message-format=json-render-diagnostics` keeps rustc's human-readable
+    # errors/warnings on stderr (unchanged from a plain `cargo build`,
+    # still visible to the operator/caller) while emitting cargo's
+    # structured build JSON -- including the artifact's REAL on-disk path --
+    # to stdout, which is captured below. This is exact and survives
+    # CARGO_TARGET_DIR, --target-dir, workspace layouts, and per-profile
+    # directories, unlike guessing at candidate paths.
+    BUILD_JSON_LOG="$(mktemp "${TMPDIR:-/tmp}/loom-daemon-build-json.XXXXXX" 2>/dev/null || mktemp)"
+    _LOOM_FETCH_TMPDIRS+=("$BUILD_JSON_LOG")
+    if ! (cd "$DAEMON_DIR" && cargo build --release --message-format=json-render-diagnostics) >"$BUILD_JSON_LOG"; then
         err "cargo build --release failed — the running daemon (if any) was left untouched."
         exit 1
     fi
 
-    NEW_BIN=""
-    for candidate in \
-        "$DAEMON_DIR/target/release/loom-daemon" \
-        "$REPO_ROOT/target/release/loom-daemon"; do
-        # `cargo build --release` run from loom-daemon/ writes to that crate's own
-        # target/ when loom-daemon is a standalone crate, but to the WORKSPACE
-        # root's target/ when it is a member of a Cargo workspace (this repo's
-        # actual layout: root Cargo.toml -> [workspace] members = [...,
-        # "loom-daemon"]). Check both, matching locate_daemon_bin()'s candidate
-        # order above.
-        if [[ -x "$candidate" ]]; then
-            NEW_BIN="$candidate"
-            break
-        fi
-    done
-    if [[ -z "$NEW_BIN" ]]; then
-        err "Build did not produce an executable at $DAEMON_DIR/target/release/loom-daemon or $REPO_ROOT/target/release/loom-daemon"
+    # The LAST "executable":"...loom-daemon" field in the JSON stream is the
+    # loom-daemon BIN target's own compiler-artifact message; every earlier
+    # compiler-artifact message (its library target, its build script, and
+    # every dependency) reports executable:null and is skipped automatically
+    # -- the pattern below requires a quoted value. Parsed with grep/sed, not
+    # jq: never assume jq is installed on a fleet worker (see the
+    # artifact-fetch section above for the same convention).
+    NEW_BIN="$(grep -o '"executable":"[^"]*/loom-daemon"' "$BUILD_JSON_LOG" | tail -n1 \
+        | sed -E 's/^"executable":"//; s/"$//')"
+
+    if [[ -z "$NEW_BIN" || ! -x "$NEW_BIN" ]]; then
+        # Belt-and-braces fallback for a cargo version/output shape the grep
+        # above doesn't expect: ask cargo directly where its target
+        # directory is (`cargo metadata`, which resolves the SAME
+        # CARGO_TARGET_DIR / build.target-dir redirect the build itself
+        # used), then the redirect env var directly, then finally the
+        # pre-#6160 hardcoded candidates (still correct on an unredirected
+        # host).
+        FALLBACK_CANDIDATES=()
+        META_TARGET_DIR="$(cd "$DAEMON_DIR" && cargo metadata --format-version 1 --no-deps 2>/dev/null \
+            | grep -o '"target_directory":"[^"]*"' | head -n1 | sed -E 's/^"target_directory":"//; s/"$//')"
+        [[ -n "$META_TARGET_DIR" ]] && FALLBACK_CANDIDATES+=("$META_TARGET_DIR/release/loom-daemon")
+        [[ -n "${CARGO_TARGET_DIR:-}" ]] && FALLBACK_CANDIDATES+=("$CARGO_TARGET_DIR/release/loom-daemon")
+        FALLBACK_CANDIDATES+=("$DAEMON_DIR/target/release/loom-daemon" "$REPO_ROOT/target/release/loom-daemon")
+        NEW_BIN=""
+        for candidate in "${FALLBACK_CANDIDATES[@]}"; do
+            if [[ -x "$candidate" ]]; then
+                NEW_BIN="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$NEW_BIN" || ! -x "$NEW_BIN" ]]; then
+        # Hard failure (#6160): a build that reports success must NEVER be
+        # silently treated as a no-op success -- exactly the "reports a
+        # build succeeded... [host] stays on whatever binary it had" failure
+        # mode this issue closes.
+        err "cargo build --release reported success but no loom-daemon executable could be located -- checked cargo's own build JSON, cargo metadata's target_directory, \$CARGO_TARGET_DIR, and the conventional $DAEMON_DIR/target/release and $REPO_ROOT/target/release paths."
+        err "Refusing to report a successful update when the built artifact cannot be found (#6160)."
         exit 1
     fi
     ok "Build succeeded: $NEW_BIN"
@@ -2645,12 +2881,22 @@ if [[ -n "${LOOM_DAEMON_BIN:-}" ]]; then
     else
         verify_destination_binary "$dest"
     fi
+    # #6009: also confirm the SUPERVISOR's own config points at this exact
+    # destination, not a different (stale) path.
+    verify_supervisor_matches_provisioned "$dest"
 else
     if declare -F provision_machine_daemon >/dev/null 2>&1; then
         # Hard-fail on provisioning failure: a soft warn here (the pre-#4053
         # behavior) left the exit code at 0, which is exactly the "reports
         # success while shipping nothing" defect this issue closes.
-        if ! provision_machine_daemon "$NEW_BIN"; then
+        #
+        # $REPO_ROOT is always a genuine Loom SOURCE checkout here (this
+        # script rebuilds from source — see the REPO_ROOT resolution above),
+        # so $REPO_ROOT/defaults is available; pass it through so an
+        # already-installed standalone daemon picks up (or refreshes) its
+        # `loom-daemon init` recovery payload on every update, not only on
+        # first install (#5389).
+        if ! provision_machine_daemon "$NEW_BIN" "" "$REPO_ROOT/defaults"; then
             err "Machine-level provisioning FAILED (see above). Refusing to report success; the freshly-built binary is at $NEW_BIN — set LOOM_DAEMON_BIN=$NEW_BIN to use it directly."
             exit 1
         fi
@@ -2663,6 +2909,9 @@ else
         else
             verify_destination_binary "${PROVISIONED_DAEMON_BIN:-}"
         fi
+        # #6009: also confirm the SUPERVISOR's own config points at this
+        # exact destination, not a different (stale) path.
+        verify_supervisor_matches_provisioned "${PROVISIONED_DAEMON_BIN:-}"
     else
         warn "scripts/install/provision-daemon.sh not found/sourceable — skipping machine-level provisioning."
         warn "Freshly-built binary: $NEW_BIN (set LOOM_DAEMON_BIN=$NEW_BIN to use it directly)"
@@ -2683,8 +2932,13 @@ if [[ "$NO_RESTART" == "true" ]]; then
             echo "'launchctl bootout $LAUNCHD_SERVICE' no longer kills in-flight sweeps on a current build (#5081 — each sweep runs in its own process group and reparents to pid 1), but a hand-run bootout+bootstrap can still race and leave the daemon down (bootout is asynchronous); prefer --relaunch above, which settles/retries/verifies the relaunch safely."
         elif [[ "$DAEMON_MANAGER" == "systemd" ]]; then
             echo "The running (systemd-managed) daemon is still the PRE-update binary. Restart it with:"
-            echo "  $PROVISION_TARGET restart --drain   (RECOMMENDED, Issue #5138: pauses dispatch, waits for in-flight sweeps to finish, THEN relaunches — an immediate restart here can kill sweeps and land the unit in 'failed', #5119)"
-            echo "  $PROVISION_TARGET restart      (immediate/non-drained — only if you have confirmed nothing is in flight)"
+            # #5119: NOT "in-flight sweeps preserved" here -- unlike launchd, a
+            # systemd stop job runs over the unit's whole cgroup, so a plain
+            # restart's exit(0) reaps every sweep/role-run child with it. The
+            # drain variant is the one that genuinely preserves them, which is
+            # why it leads (and is the default on systemd, #5138).
+            echo "  $PROVISION_TARGET restart --drain   (RECOMMENDED, Issue #5138: pauses dispatch, waits for in-flight sweeps to finish, THEN relaunches — the preserving variant; an immediate restart here can kill sweeps and land the unit in 'failed', #5119)"
+            echo "  $PROVISION_TARGET restart      (immediate/non-drained — in-flight sweeps AND role runs in the unit cgroup ARE terminated; only if you have confirmed nothing is in flight)"
             echo "(this two-step --no-restart + manual restart is equivalent to a single 'loom-daemon-update.sh --drain' invocation, which builds + provisions + drain-restarts in one command — drain is also the DEFAULT on systemd for a plain 'loom-daemon-update.sh' run, no flag needed)"
             echo "If that binary predates #4267 and refuses the restart, re-render + relaunch under supervision:"
             echo "  loom-daemon-update.sh --relaunch   (preserves the live unit's LOOM_* env; SIGTERMs the daemon so sweep children reparent)"
@@ -2771,7 +3025,15 @@ if [[ "$DAEMON_MANAGER" == "launchd" ]]; then
                 && kill -0 "$CUR_PID_AFTER_DRAIN" 2>/dev/null; then
                 warn "Drain timed out after ${RESTART_POLL_SECS}s without --force-after-timeout — the FAIL-SAFE held: loom-daemon is STILL RUNNING its PRE-update binary (pid ${CUR_PID_AFTER_DRAIN}). No in-flight sweep was cancelled or killed."
                 warn "The freshly-built binary IS provisioned at $PROVISION_TARGET but was NOT activated this run."
-                warn "Re-run this script (or 'loom-daemon restart --drain' by hand) once the in-flight sweep(s) finish, or re-run with --force-after-timeout to force the roll through."
+                # Issue #6007: on a #6007+ daemon the roll is RETAINED rather than
+                # discarded, so the recurrence advice is "do nothing", not
+                # "re-run" — re-running on a busy host is what reproduced this.
+                if drain_roll_still_armed "$PROVISION_TARGET"; then
+                    warn "The daemon reports its drain STILL IN PROGRESS past the deadline — it has KEPT THE ROLL PENDING (#6007): new dispatch is still paused and the restart re-arms itself the moment the in-flight set reaches zero. Nothing to re-run — this host converges onto the provisioned binary on its own (or resumes dispatch and says so once the pending roll's paused-dispatch budget is spent)."
+                    warn "Watch it with 'loom-daemon status' (the line under 'Drain: DRAINING …' explains the pending roll). To take over: 'loom-daemon restart --abort-drain' gives up and resumes dispatch now, or 'loom-daemon restart --drain --force-after-timeout' cancels the remaining sweep(s) and rolls immediately."
+                else
+                    warn "Re-run this script (or 'loom-daemon restart --drain' by hand) once the in-flight sweep(s) finish, or re-run with --force-after-timeout to force the roll through."
+                fi
                 exit 8
             fi
         fi
@@ -2903,7 +3165,15 @@ if [[ "$DAEMON_MANAGER" == "systemd" ]]; then
                 && kill -0 "$CUR_PID_AFTER_DRAIN" 2>/dev/null; then
                 warn "Drain timed out after ${RESTART_POLL_SECS}s without --force-after-timeout — the FAIL-SAFE held: loom-daemon is STILL RUNNING its PRE-update binary (pid ${CUR_PID_AFTER_DRAIN}). No in-flight sweep was cancelled or killed."
                 warn "The freshly-built binary IS provisioned at $PROVISION_TARGET but was NOT activated this run."
-                warn "Re-run this script (or 'loom-daemon restart --drain' by hand) once the in-flight sweep(s) finish, or re-run with --force-after-timeout to force the roll through."
+                # Issue #6007: on a #6007+ daemon the roll is RETAINED rather than
+                # discarded, so the recurrence advice is "do nothing", not
+                # "re-run" — re-running on a busy host is what reproduced this.
+                if drain_roll_still_armed "$PROVISION_TARGET"; then
+                    warn "The daemon reports its drain STILL IN PROGRESS past the deadline — it has KEPT THE ROLL PENDING (#6007): new dispatch is still paused and the restart re-arms itself the moment the in-flight set reaches zero. Nothing to re-run — this host converges onto the provisioned binary on its own (or resumes dispatch and says so once the pending roll's paused-dispatch budget is spent)."
+                    warn "Watch it with 'loom-daemon status' (the line under 'Drain: DRAINING …' explains the pending roll). To take over: 'loom-daemon restart --abort-drain' gives up and resumes dispatch now, or 'loom-daemon restart --drain --force-after-timeout' cancels the remaining sweep(s) and rolls immediately."
+                else
+                    warn "Re-run this script (or 'loom-daemon restart --drain' by hand) once the in-flight sweep(s) finish, or re-run with --force-after-timeout to force the roll through."
+                fi
                 exit 8
             fi
         fi
@@ -3022,6 +3292,27 @@ echo "Starting loom-daemon with preserved flags: ${RESTART_ARGS[*]:-<none>}"
 # macOS).
 if [[ "${#RESTART_ARGS[@]}" -gt 0 ]]; then
     "$START_SCRIPT" "${RESTART_ARGS[@]}"
+elif [[ "$FLAGS_SOURCE" == "$FLAGS_FILE" ]]; then
+    # Issue #5429: a persisted-flags FILE that EXISTS but is empty is a
+    # CONFIRMED prior FLAGS-OFF state (distinct from the "no file at all"
+    # branch below, which is genuinely a guess). A bare `$START_SCRIPT`
+    # invocation here would leave WANT_WORK_FINDER/WANT_HEALTH_GATE unset,
+    # which loom-daemon-start.sh's autonomy-downgrade refusal (#4011/#5409)
+    # cannot distinguish from a silent, un-intentional default -- and the
+    # autonomy-desired intent marker it checks is written unconditionally on
+    # ANY successful start (autonomous or not, see write_intent_marker in
+    # loom-daemon-start.sh), so it is already present on every restart of a
+    # daemon that was already running, regardless of whether autonomy was
+    # ever on. That mismatch made this exact restart refuse with exit 1
+    # whenever the marker pre-existed (e.g. immediately after a prior start
+    # in the same process lifetime), even though the persisted-flags file
+    # unambiguously says "no flags". Passing --no-work-finder/--no-health-gate
+    # explicitly states that confirmed intent (byte-identical resulting
+    # LOOM_WORK_FINDER=0/LOOM_MAIN_HEALTH_GATE=0 env — see the non-`--from-config`
+    # branch in loom-daemon-start.sh, "on" is the only value forced differently
+    # from "unset") while satisfying the downgrade check's own "explicit ask is
+    # not silent" exemption.
+    "$START_SCRIPT" --no-work-finder --no-health-gate
 else
     "$START_SCRIPT"
 fi

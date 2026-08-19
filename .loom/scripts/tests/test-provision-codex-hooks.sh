@@ -33,8 +33,23 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-PROVISION="$REPO_ROOT/defaults/scripts/provision-codex-hooks.sh"
-BRIDGE="$REPO_ROOT/defaults/hooks/guard-codex-bridge.sh"
+# provision-codex-hooks.sh and guard-codex-bridge.sh are both shipped
+# (installed at .loom/scripts/provision-codex-hooks.sh and
+# .loom/hooks/guard-codex-bridge.sh respectively), so resolve each the way
+# each layout actually lays it out: the installed path first (consumer
+# repos, and Loom's own dogfooded checkout), falling back to the
+# defaults/ source-tree path (a bare source checkout with no installed
+# copy yet). See issue #6194 / #6241.
+if [[ -f "$REPO_ROOT/.loom/scripts/provision-codex-hooks.sh" ]]; then
+    PROVISION="$REPO_ROOT/.loom/scripts/provision-codex-hooks.sh"
+else
+    PROVISION="$REPO_ROOT/defaults/scripts/provision-codex-hooks.sh"
+fi
+if [[ -f "$REPO_ROOT/.loom/hooks/guard-codex-bridge.sh" ]]; then
+    BRIDGE="$REPO_ROOT/.loom/hooks/guard-codex-bridge.sh"
+else
+    BRIDGE="$REPO_ROOT/defaults/hooks/guard-codex-bridge.sh"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,6 +61,15 @@ pass() { PASS=$((PASS + 1)); TOTAL=$((TOTAL + 1)); printf "${GREEN}PASS${NC} %s\
 fail() { FAIL=$((FAIL + 1)); TOTAL=$((TOTAL + 1)); printf "${RED}FAIL${NC} %s\n" "$1"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this suite"; exit 1; }
+
+if [[ ! -f "$PROVISION" ]]; then
+    echo -e "${RED}FATAL${NC}: provision-codex-hooks.sh not found at $PROVISION"
+    exit 1
+fi
+if [[ ! -f "$BRIDGE" ]]; then
+    echo -e "${RED}FATAL${NC}: guard-codex-bridge.sh not found at $BRIDGE"
+    exit 1
+fi
 
 TMPROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPROOT"' EXIT

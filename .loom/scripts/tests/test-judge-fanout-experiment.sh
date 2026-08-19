@@ -22,7 +22,17 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-EXP_DIR="$REPO_ROOT/defaults/scripts/experiments"
+# The experiments/ directory is shipped (installed at
+# .loom/scripts/experiments), so resolve it the way each layout actually
+# lays it out: the installed path first (consumer repos, and Loom's own
+# dogfooded checkout), falling back to the defaults/ source-tree path (a
+# bare source checkout with no .loom/scripts/ copy yet). See issue #6194 /
+# #6241.
+if [[ -d "$REPO_ROOT/.loom/scripts/experiments" ]]; then
+    EXP_DIR="$REPO_ROOT/.loom/scripts/experiments"
+else
+    EXP_DIR="$REPO_ROOT/defaults/scripts/experiments"
+fi
 GATE="$EXP_DIR/judge-fanout-experiment.sh"
 WORKFLOW_JS="$EXP_DIR/judge-fanout-workflow.js"
 RUNNER="$EXP_DIR/judge-fanout-corpus-runner.sh"

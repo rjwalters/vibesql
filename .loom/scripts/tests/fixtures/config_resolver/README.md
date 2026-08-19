@@ -18,8 +18,12 @@ Deliberately exercises, in one tree:
   both the legacy and project tiers; `guards` gets fields from both legacy
   and project)
 - **A key set at the lowest and highest tiers with an untouched middle tier**
-  (`autonomous.perTokenConcurrency`: legacy=2, local=4, project doesn't
-  mention it — local should win)
+  (`autonomous.exampleTierProbe`: legacy=2, local=4, project doesn't mention
+  it — local should win. A synthetic placeholder key, not a real config knob
+  — it previously reused `autonomous.perTokenConcurrency` for this purpose,
+  but that knob was retired in #5743, so this fixture now uses a name with no
+  runtime meaning to avoid implying the merge test depends on any specific
+  live knob)
 
 The private/shared-defaults tier is intentionally left out of this fixture
 (every consumer sets `LOOM_CONFIG_DEFAULTS_FILE=""` before resolving it, to

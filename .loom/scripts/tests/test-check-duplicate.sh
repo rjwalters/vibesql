@@ -100,7 +100,18 @@ trap 'rm -rf "$STUB_DIR" 2>/dev/null || true' EXIT
 # check-duplicate.sh's `loom-daemon --version` probe fails and it falls back
 # to the `gh` stub below (byte-for-byte the documented fallback path,
 # defaults/scripts/check-duplicate.sh). Keeps this test independent of
-# whether a real loom-daemon happens to be installed on the host. ---
+# whether a real loom-daemon happens to be installed on the host.
+#
+# NOT renamed per #5548's "test fixtures should not be named `loom-daemon`"
+# fix, unlike the fixtures in test-loom-status.sh / test-gh-cached.sh /
+# test-loom-daemon-watchdog.sh: check-duplicate.sh resolves this binary via a
+# bare `command -v loom-daemon` PATH lookup with no LOOM_DAEMON_BIN-style
+# override, so the literal name is load-bearing here -- renaming it would
+# stop check-duplicate.sh from finding it at all, defeating the test. This
+# poses no #5548-shaped liveness-check risk in practice: the stub is invoked
+# synchronously (`exit 1`, no backgrounding, no loop), so even a leaked copy
+# left on disk after a failed trap can never appear as a running process for
+# a `pgrep`-style liveness check to match. ---
 cat > "$STUB_DIR/loom-daemon" <<'STUB'
 #!/usr/bin/env bash
 exit 1
@@ -627,6 +638,63 @@ EOF
 run_cds --include-merged-prs --issue 4659 --threshold 50 --title "Alpha Bravo Charlie Delta"
 assert_eq "0" "$RC" "(ad) Self-numbered candidate in the merged-PRs pool excluded via --issue -> exit 0"
 assert_not_contains "$OUT" "DUPLICATE_FOUND" "(ad) No DUPLICATE_FOUND from the merged-PRs self-numbered match"
+
+echo ""
+echo "Testing check-duplicate.sh leading-dash title handling via \"--\" (issue #5898)..."
+
+# check-duplicate.sh's positional-argument branch used to fall into the
+# same "-*)" case as an unrecognized option flag whenever the first
+# positional token itself began with "-"/"--" -- a real hazard in CLI-tool
+# repos, where a bug report's title quotes the offending flag verbatim
+# (e.g. "--strategy basic calls route_all() with no timeout ..." from
+# issue #4697). The "--" end-of-options separator now disambiguates: every
+# argument after a bare "--" is consumed as positional text, verbatim, no
+# matter what it starts with.
+
+# (ae) A leading-dash TITLE round-trips through the positional form via
+# "--", instead of being rejected as an unknown option.
+reset_state
+cat > "$STUB_DIR/issues-open.json" <<'EOF'
+[{"number": 5898, "title": "Strategy Basic Ignored Widget", "body": ""}]
+EOF
+run_cds --threshold 50 -- "--strategy basic is ignored"
+assert_eq "1" "$RC" "(ae) Leading-dash title via '--' -> parsed correctly, finds the keyword match"
+assert_not_contains "$ERR" "Unknown option" "(ae) Leading-dash title via '--' -> not misparsed as an unknown option"
+assert_contains "$OUT" "#5898: Strategy Basic Ignored Widget (similarity: 75%)" \
+  "(ae) Leading-dash title via '--' is used verbatim as the title text"
+
+# (ae2) Regression guard: WITHOUT "--", the same leading-dash title is still
+# rejected as an unknown option -- documents the boundary the fix respects
+# (the caller must supply "--", per --help), and pins the pre-existing error
+# path so a future change can't silently swallow it either.
+reset_state
+run_cds "--strategy basic is ignored"
+assert_eq "2" "$RC" "(ae2) Leading-dash title WITHOUT '--' -> still rejected as an unknown option (documented behavior)"
+assert_contains "$ERR" "Unknown option" "(ae2) Leading-dash title WITHOUT '--' -> error names it as an unknown option"
+
+# (ae3) A leading-dash BODY (the second positional argument) also round-trips
+# through "--", not just the title -- both positionals share the same
+# end-of-options handling.
+reset_state
+cat > "$STUB_DIR/issues-open.json" <<'EOF'
+[{"number": 5899, "title": "Strategy Basic Ignored Widget", "body": ""}]
+EOF
+run_cds --threshold 50 -- "Some title" "--strategy basic is ignored"
+assert_eq "1" "$RC" "(ae3) Leading-dash body via '--' -> parsed correctly, finds the keyword match"
+assert_not_contains "$ERR" "Unknown option" "(ae3) Leading-dash body via '--' -> not misparsed as an unknown option"
+assert_contains "$OUT" "#5899: Strategy Basic Ignored Widget (similarity: 60%)" \
+  "(ae3) Leading-dash body via '--' feeds keyword extraction alongside the title"
+
+# (ae4) "--" is a no-op when everything before/after it is otherwise a
+# normal --title/--body flag invocation -- the separator must not interfere
+# with the documented flag-based form.
+reset_state
+cat > "$STUB_DIR/issues-open.json" <<'EOF'
+[{"number": 5900, "title": "Strategy Basic Ignored Widget", "body": ""}]
+EOF
+run_cds --threshold 50 --title "Strategy Basic Ignored"
+assert_eq "1" "$RC" "(ae4) --title flag form is unaffected by the '--' handling"
+assert_contains "$OUT" "#5900" "(ae4) --title flag form still finds the match"
 
 echo ""
 echo "Testing check-duplicate.sh REST fallback on GraphQL rate limit (issue #4526)..."

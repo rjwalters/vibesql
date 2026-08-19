@@ -14,7 +14,14 @@
 #       SUCCESS         — exit 0 (regardless of output content)
 #       TIMEOUT         — exit 124/137 (productive cycle, not a failure)
 #       CWD_DELETED     — working directory was removed
-#       TOKEN_EXPIRED   — 401 / OAuth token expired (skip this token)
+#       TOKEN_EXPIRED   — 401 / OAuth token expired (skip this token). Also
+#                         covers two account-level death phrasings folded in
+#                         by issue #6424 rather than a new category (identical
+#                         remedy: mark bad, rotate, needs human
+#                         re-authorization): "organization has disabled
+#                         [Claude subscription access]" and "Failed to
+#                         authenticate ... socket connection was closed
+#                         unexpectedly".
 #       TOKEN_EXHAUSTED — quota/weekly/per-model limit hit (rotate). Covers
 #                         both the "hit your … limit" family (#3738) and the
 #                         per-model "reached your <model> limit" ceiling the
@@ -23,6 +30,25 @@
 #                         headroom on a cheaper model) chosen over a new
 #                         model-dimensioned category so no downstream consumer
 #                         has to learn a new enum value.
+#       MODEL_CREDITS_EXHAUSTED
+#                       — per-model-TIER usage credits ran out (issue #5687):
+#                         "You're out of usage credits". Distinct from
+#                         TOKEN_EXHAUSTED because the remedy differs in KIND,
+#                         not just degree: credits are scoped to a model tier,
+#                         so re-dispatching the SAME work on a CHEAPER model
+#                         under the SAME account is a valid (often the only
+#                         available) remedy — account rotation is not the only
+#                         option, and on a single-account host it is not an
+#                         option at all. Every account-pool consumer treats it
+#                         exactly like TOKEN_EXHAUSTED (rotate, same cooldown,
+#                         same retryability), so the daemon path is unchanged;
+#                         the distinct NAME exists so the in-session
+#                         `/loom:sweep` orchestrator — which dispatches wave
+#                         builders through the Task tool and never runs this
+#                         classifier as a subprocess — has a precise signature
+#                         to key its one-rung-down model fallback on (see
+#                         sweep.md, "Credit-exhaustion fallback"), and so
+#                         sweep forensics can name the failure class.
 #       SESSION_LIMIT   — concurrent-session-limit fault (issue #3947): the
 #                         account is NOT out of quota, it just cannot start
 #                         another *simultaneous* session right now (a capacity
@@ -78,8 +104,14 @@
 #
 #   Within the `claude` table, match order is significant and preserved from
 #   the pre-split implementation: CWD_DELETED -> MODEL_REFUSAL ->
-#   TOKEN_EXPIRED -> SESSION_LIMIT -> TOKEN_EXHAUSTED -> the "No messages
-#   returned" RECOVERABLE case. SESSION_LIMIT must precede TOKEN_EXHAUSTED
+#   TOKEN_EXPIRED -> SESSION_LIMIT -> TOKEN_EXHAUSTED ->
+#   MODEL_CREDITS_EXHAUSTED -> the "No messages returned" RECOVERABLE case.
+#   MODEL_CREDITS_EXHAUSTED is checked LAST among the account-side categories
+#   (#5687) so every pre-existing vector keeps its pre-#5687 category: the
+#   #4501 per-model ceiling ("You've reached your Fable 5 limit. Run
+#   /usage-credits to continue …") mentions credits too, and matching the new
+#   branch first would have re-classified it. SESSION_LIMIT must precede
+#   TOKEN_EXHAUSTED
 #   because "concurrent session limit" contains the substring "session limit"
 #   that the exhaustion regex also matches (#3947) — and, since #4501 widened
 #   the exhaustion regex to "reached your <model> limit", it now also contains
@@ -144,8 +176,42 @@ _classify_error_claude() {
         return
     fi
 
-    # Token expired (401 auth error) — this specific token is bad
-    if echo "$output" | grep -qiE "401[^a-z]*authentication_error|OAuth token has expired|token has expired"; then
+    # Token expired (401 auth error) — this specific token is bad.
+    #
+    # Issue #6030: "invalid bearer token" was OBSERVED end-to-end on a live
+    # fleet host as the wrapper's `log_permanent_death` tail: "Failed to
+    # authenticate. API Error: 401 Invalid bearer token". None of the prior
+    # patterns matched it (it says neither "authentication_error" nor
+    # "expired"), so it fell all the way through the claude table and the
+    # generic table's rate-limit/5xx/network checks into the generic
+    # RECOVERABLE catch-all — the wrapper retried the same dead credential
+    # with backoff until MAX_RETRIES, then died with classification=RECOVERABLE
+    # instead of TOKEN_EXPIRED, and the account was never marked bad. The next
+    # spawn could select the SAME auth-dead account again with no memory of
+    # the failure — this is the mechanism behind the issue's "most died within
+    # minutes" observation on a wave dispatch.
+    #
+    # Issue #6424: two more account-level death phrasings hit the same gap.
+    # "Your organization has disabled Claude subscription access for Claude
+    # Code" (a billing/authorization fault, resolved by the operator) and
+    # "Failed to authenticate. API Error: 403 The socket connection was closed
+    # unexpectedly" (observed as the sibling death-tail on the same incident)
+    # both matched none of the patterns above and fell through to the generic
+    # RECOVERABLE catch-all — measured on one host's logs, 37 of 43 permanent
+    # deaths carried the first phrase and the remaining 6 carried the second.
+    # Folded into TOKEN_EXPIRED rather than a new distinct category: the
+    # remedy is identical in kind (mark this account bad, rotate, needs human
+    # re-authorization, never blind-retried), and `claude-wrapper.sh`'s
+    # `is_account_auth_dead()` already dispatches on exactly this
+    # classification, so no daemon-side enum change is required. Only the
+    # substring "organization has disabled" is matched (not the full sentence)
+    # so minor wording drift in the CLI's own phrasing still classifies. The
+    # socket-closed phrase is deliberately anchored to "failed to
+    # authenticate ... socket connection was closed unexpectedly" (not a bare
+    # "socket connection was closed") so an unrelated transient network drop
+    # mid-session — which legitimately belongs in the generic RECOVERABLE
+    # table — is not swept into this terminal, account-marked-bad branch.
+    if echo "$output" | grep -qiE "401[^a-z]*authentication_error|invalid bearer token|OAuth token has expired|token has expired|organization has disabled|failed to authenticate.*socket connection was closed unexpectedly"; then
         echo "TOKEN_EXPIRED"
         return
     fi
@@ -194,8 +260,58 @@ _classify_error_claude() {
     # `loom-daemon/src/tokens_pool/health.rs`'s `TerminalClassification`,
     # `bad_tokens.rs`/`failure_counts.rs`). Per-model account state is tracked
     # as an explicit follow-up, not smuggled in here.
-    if echo "$output" | grep -qiE "hit your (limit|session limit|weekly limit)|hit\.your\.limit|monthly usage limit|out of extra usage|reached your ([^[:space:]]+[[:space:]]+){0,3}limit"; then
+    #
+    # Issue #5631: "hit your (limit|session limit|weekly limit)" was a fixed
+    # alternation that missed "You've hit your monthly spend limit" (a
+    # billing cap, distinct from "monthly usage limit"), so a spend-capped
+    # account fell through to RECOVERABLE and was retried with backoff
+    # instead of rotated away from. Widened to the same bounded-filler shape
+    # already used for "reached your <model> limit" above, so the next
+    # "hit your <N-word> limit" variant is caught without another round trip.
+    if echo "$output" | grep -qiE "hit your ([^[:space:]]+[[:space:]]+){0,3}limit|hit\.your\.limit|monthly usage limit|out of extra usage|reached your ([^[:space:]]+[[:space:]]+){0,3}limit"; then
         echo "TOKEN_EXHAUSTED"
+        return
+    fi
+
+    # Per-model-TIER credit exhaustion (issue #5687) — "You're out of usage
+    # credits". Observed 2026-08-08 during a `/loom:sweep all` run: all six
+    # in-session wave builders were dispatched on the session-default model and
+    # died within minutes of each other when the account's credits for THAT
+    # MODEL TIER ran out. None of the TOKEN_EXHAUSTED phrasings above fires on
+    # this wording (there is no "limit" token and no "extra usage"), so before
+    # this branch it fell through to the RECOVERABLE catch-all and the wrapper
+    # retried the same model with backoff instead of rotating or downgrading.
+    #
+    # Why this is a DISTINCT category rather than another TOKEN_EXHAUSTED
+    # phrase (the #4501 precedent went the other way):
+    #   * The remedy differs in kind. Credits are model-tier-scoped, so
+    #     re-running the SAME work on a cheaper model under the SAME account
+    #     clears it. On a single-account host — and on the in-session Task
+    #     dispatch path, which has no account pool at all — that is the ONLY
+    #     remedy; "rotate the account" is not applicable there.
+    #   * The consumer that needs it is not this classifier's caller. The
+    #     `/loom:sweep` orchestrator dispatches wave builders via the Task
+    #     tool, so no subprocess exists for this file to classify; it reads
+    #     the failure text itself and needs a named signature to key its
+    #     one-rung-down model fallback on (sweep.md, "Credit-exhaustion
+    #     fallback"). Folding the phrase into TOKEN_EXHAUSTED would have made
+    #     that signature unnameable.
+    # Behaviourally it is a SYNONYM of TOKEN_EXHAUSTED for every account-pool
+    # consumer: `claude-wrapper.sh::is_account_exhaustion` accepts it (rotate +
+    # mark bad), `classification_is_transient` retries it, and
+    # `tokens_pool::health` gives it the identical PlanExhausted cooldown. So
+    # the daemon/wrapper path behaves as it would have under TOKEN_EXHAUSTED —
+    # only the reported name (and therefore the telemetry + the orchestrator's
+    # remedy choice) is finer-grained.
+    #
+    # Ordered AFTER TOKEN_EXHAUSTED deliberately: #4501's live message
+    # ("You've reached your Fable 5 limit. Run /usage-credits to continue or
+    # switch models with /model.") also mentions credits, and must keep its
+    # existing classification. The regex is anchored on the word "credits"
+    # preceded by an exhaustion verb so an unrelated mention ("credit card
+    # declined", "credit the original author") cannot false-positive.
+    if echo "$output" | grep -qiE "(ran |run )?out of (usage |extra |plan )?credits|no (usage |extra |plan )?credits (remaining|left)|insufficient (usage |plan )?credits"; then
+        echo "MODEL_CREDITS_EXHAUSTED"
         return
     fi
 
@@ -277,6 +393,27 @@ _classify_error_codex() {
     # it FATAL is the safe direction: a worker that cannot establish its
     # sandbox must NOT be silently retried into running unsandboxed.
     if echo "$output" | grep -qiE "not inside a trusted directory|unknown configuration field|landlock_sandbox_executable_not_provided"; then
+        echo "FATAL"
+        return
+    fi
+
+    # Model unsupported for this account's auth mode (issue #5499). Observed
+    # verbatim as a 400 `invalid_request_error` when an explicitly-pinned
+    # model (even a Codex-family one, e.g. `gpt-5-codex`) is forwarded to a
+    # ChatGPT-plan-authenticated profile: "The 'gpt-5-codex' model is not
+    # supported when using Codex with a ChatGPT account." Retrying the
+    # identical invocation can never succeed — the fault is the model/auth-mode
+    # pairing, not the transport or the account's quota — so this must NOT
+    # fall through to the generic RECOVERABLE catch-all below (the pre-#5499
+    # behavior, which retried this identically forever, burning an invocation
+    # every cadence tick). `spawn-codex.sh` independently guards against this
+    # by dropping a pinned model before launch when it detects a ChatGPT-plan
+    # profile (issue #5499); this classification is the backstop for every
+    # OTHER path that can still reach the CLI with a bad pin (the guard's own
+    # escape hatch `LOOM_CODEX_AUTH_MODE_CHECK=0`, a pre-existing/ambient
+    # `CODEX_HOME` the guard could not resolve in time, or a future caller
+    # that bypasses spawn-codex.sh entirely).
+    if echo "$output" | grep -qiE "is not supported when using codex with a chatgpt account"; then
         echo "FATAL"
         return
     fi
@@ -459,12 +596,15 @@ classification_is_transient() {
             return 1
             ;;
         # Retryable: RECOVERABLE (including the unknown-non-zero-exit
-        # catch-all), plus TOKEN_EXHAUSTED and SESSION_LIMIT. The latter two are
+        # catch-all), plus TOKEN_EXHAUSTED, MODEL_CREDITS_EXHAUSTED and
+        # SESSION_LIMIT. Those three are
         # normally consumed by a caller's account-rotation / re-selection path
         # BEFORE this predicate is reached; they land here only when that path
         # is capped or found no alternate account, where a bounded
         # backoff-and-retry (rather than a permanent death) is exactly what
         # claude-wrapper.sh's own comments already promise.
+        # MODEL_CREDITS_EXHAUSTED (#5687) is deliberately in the SAME arm as
+        # TOKEN_EXHAUSTED: it is a distinct NAME, not a distinct retry policy.
         *)
             return 0
             ;;

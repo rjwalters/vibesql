@@ -14,7 +14,7 @@ loom <command> [options]
 |---------|--------------|
 | `start` | Start the machine-level `loom-daemon` (delegates to `loom-daemon-start.sh`) |
 | `stop`  | Stop the machine-level `loom-daemon` (delegates to `loom-daemon-stop.sh`) |
-| `restart` | Restart the machine-level `loom-daemon` (drain-and-roll; falls back to stop+start) |
+| `restart` | Restart the machine-level `loom-daemon` (supervised in-place relaunch, **not** a drain; falls back to stop+start) |
 | `status`| Show machine-level + current-repo status (read-only) |
 | `sweep <issue>` | Dispatch `/loom:sweep <issue>` for the current repo |
 | `update`| Refresh the user-scoped mcp-loom bundle (#4230), then thin-delegate the daemon update to `loom-daemon-update.sh` |
@@ -232,16 +232,24 @@ confusing than useful in machine mode.
 
 ### `restart` verb (Gap 3)
 
-`loom restart` mirrors `start`/`stop` — same collision guard — and prefers a
-**drain-and-roll** restart: it first tries the daemon's own supervised restart
-IPC (`loom-daemon restart`, #4077), which can apply a code update without
-touching the loaded launchd job at all. If that is unavailable (not
-launchd-managed) or refused (not currently running, or a pre-#4077 binary), it
-falls back to a plain stop-then-start via the same checkout-resolved
-lifecycle-script delegates — on launchd this does bootout+bootstrap the job,
-which no longer tears down in-flight sweeps on a current build (every sweep
-runs in its own process group, #5081), though it still cannot apply a plist
-`EnvironmentVariables` change without that reload (#4995).
+`loom restart` mirrors `start`/`stop` — same collision guard — and prefers the
+**supervised in-place** restart: it first tries the daemon's own restart IPC
+(`loom-daemon restart`, #4077), which can apply a code update without touching
+the loaded launchd job at all. If that is unavailable (not supervised) or
+refused (not currently running, or a pre-#4077 binary), it falls back to a plain
+stop-then-start via the same checkout-resolved lifecycle-script delegates — on
+launchd this does bootout+bootstrap the job, which no longer tears down
+in-flight sweeps on a current build (every sweep runs in its own process group,
+#5081), though it still cannot apply a plist `EnvironmentVariables` change
+without that reload (#4995).
+
+> **It is not a drain (#5119).** A plain `loom restart` does not wait for
+> in-flight work, and what happens to that work is **supervisor-specific**: on
+> launchd sweep/role-run children reparent to pid 1 and survive, while on
+> systemd they sit in the daemon unit's cgroup and the stop job terminates them.
+> The wrapper no longer claims otherwise, and the primitive prints the
+> supervisor-specific truth. Use `loom-daemon restart --drain` when in-flight
+> sweeps must finish first.
 
 ### Sweep dispatch on a multi-repo worker host (#4299)
 
@@ -443,14 +451,29 @@ boundary no matter where it is invoked. What one pass does:
    — **excluding `sweep.modelAliases`**. That key's Rust/Python resolvers diverge;
    migrating it would freeze the divergence into every consumer repo, so it is
    left in the (lower-precedence, on-disk) legacy tier and reported as excluded.
-   **Host-local keys** (`worktree.root` — a per-host scratch-disk path) are routed
-   to the **gitignored** `.loom-local/local.json` (the resolver's `LOCAL_CONFIG_REL`
-   tier), *not* the tracked, shared `project.json`: since this same pass
-   `git rm --cached`s the legacy config, `project.json` becomes the highest tier
-   every fresh clone / CI run picks up, so a stray `worktree.root` there would
-   silently propagate one operator's filesystem layout to the whole team. An
-   existing `project.json` is left untouched (idempotency); an existing
-   `local.json` override is preserved (only a missing `worktree.root` is filled in).
+   **Host-local keys** are routed to the **gitignored** `.loom-local/local.json`
+   (the resolver's `LOCAL_CONFIG_REL` tier), *not* the tracked, shared
+   `project.json`: since this same pass `git rm --cached`s the legacy config,
+   `project.json` becomes the highest tier every fresh clone / CI run picks up, so
+   a stray host-local value there would silently propagate one operator's machine
+   to the whole team. The list is `MC_HOST_LOCAL_KEYS` in
+   `scripts/install/migrate-consumer.sh` — currently `worktree.root` (per-host
+   scratch-disk path), `safehouse.enabled` and `safehouse.socket` (whether
+   safehoused is provisioned on this box, and where its socket lives). The
+   criterion for adding one is **"the value is materially true of one host and
+   false of the others"**, and routing is per-**sub-key**, never per-object:
+   `safehouse.room` / `.rooms` / `.persona` describe what the repo does regardless
+   of who runs it, so they stay in the tracked `project.json` while their siblings
+   move. An object emptied by the routing (a `safehouse` block that was *only*
+   `enabled`/`socket`) is pruned from `project.json`. An existing `project.json` is
+   left untouched (idempotency); an existing `local.json` override is preserved —
+   only keys unset there are filled in, so `safehouse.enabled=false` survives a
+   re-run rather than being re-derived. For a host whose dirt has *already* been
+   committed (migration is a one-time pass, not an ongoing per-field fixer), the
+   by-hand per-key procedure is
+   [`docs/design/config-resolution-tiers.md`](https://github.com/rjwalters/loom/blob/main/docs/design/config-resolution-tiers.md)
+   §5 (in the Loom checkout — this doc ships into consumer repos, which have no
+   `docs/design/`).
 3. **Untrack the committed implementation** per the manifest — `git rm --cached`
    (files stay on disk, just leave the index) + a gitignore block single-sourced
    with `install-loom.sh --local`. Only the machine-served namespaces (`/.loom/`,

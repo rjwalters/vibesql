@@ -20,6 +20,10 @@
 # jq -n fails at runtime) carry the same field, so future schema drift is caught
 # on either code path.
 #
+# Source-tree-only by design (#6194): hooks/ is not copied into an installed
+# repo's .loom/hooks/ (see #4262), so this suite SKIPs (exit 0) rather than
+# errors when run outside Loom's own checkout.
+#
 # Usage:
 #   bash defaults/scripts/tests/test-guard-hook-schema.sh
 
@@ -76,22 +80,18 @@ if ! command -v jq &>/dev/null; then
     exit 1
 fi
 
-if [[ ! -f "$GUARD_DESTRUCTIVE" ]]; then
-    echo "ERROR: $GUARD_DESTRUCTIVE not found" >&2
-    exit 1
-fi
-if [[ ! -f "$GUARD_DESTRUCTIVE_GENERIC" ]]; then
-    echo "ERROR: $GUARD_DESTRUCTIVE_GENERIC not found" >&2
-    exit 1
-fi
-if [[ ! -f "$GUARD_LOOM_WORKFLOW" ]]; then
-    echo "ERROR: $GUARD_LOOM_WORKFLOW not found" >&2
-    exit 1
-fi
-if [[ ! -f "$GUARD_READONLY_TEMPLATE" ]]; then
-    echo "ERROR: $GUARD_READONLY_TEMPLATE not found" >&2
-    exit 1
-fi
+# Source-tree-only test (issue #6194): since #4262, hook scripts are no
+# longer copied into an installed repo's .loom/hooks/ — they execute from the
+# machine-level checkout via user-scope wiring instead. DEFAULTS_DIR above
+# resolves to .loom/ in an installed consumer repo, where none of these files
+# exist, so a missing subject here means "wrong environment for this suite",
+# not "broken install" — skip loudly rather than error.
+for _f in "$GUARD_DESTRUCTIVE" "$GUARD_DESTRUCTIVE_GENERIC" "$GUARD_LOOM_WORKFLOW" "$GUARD_READONLY_TEMPLATE"; do
+    if [[ ! -f "$_f" ]]; then
+        echo "SKIP: source-tree-only test, $_f not found (hooks/ is not shipped into an installed repo's .loom/hooks/, #4262)" >&2
+        exit 0
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # guard-destructive.sh — functional deny path

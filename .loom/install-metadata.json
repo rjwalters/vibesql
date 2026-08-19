@@ -1,6 +1,6 @@
 {
-  "loom_version": "0.18.0",
-  "loom_commit": "2dc30c4e",
+  "loom_version": "0.18.105",
+  "loom_commit": "e7be0bd3",
   "install_date": "2026-07-24",
   "loom_source": "/Users/rwalters/GitHub/loom",
   "installed_files": [
@@ -211,5 +211,5 @@
     ".loom/scripts/worktree-return.sh",
     ".loom/scripts/worktree.sh"
   ],
-  "last_resync": "2026-08-04"
+  "last_resync": "2026-08-18"
 }

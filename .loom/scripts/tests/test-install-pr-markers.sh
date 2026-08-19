@@ -20,6 +20,11 @@
 # commit message that *would* be sent to `gh pr create` / `git commit` by
 # redirecting them through the stubs into temp files. No real PRs created.
 #
+# Source-tree-only by design (#6194): scripts/install/create-pr.sh and
+# scripts/install-loom.sh both live at the repo root, not under defaults/, so
+# neither is shipped into an installed consumer repo. This suite SKIPs
+# (exit 0) rather than errors when run outside Loom's own checkout.
+#
 # Usage:
 #   bash defaults/scripts/tests/test-install-pr-markers.sh
 
@@ -90,13 +95,13 @@ assert_starts_with() {
 }
 
 if [[ ! -f "$CREATE_PR" ]]; then
-    echo "ERROR: $CREATE_PR not found" >&2
-    exit 1
+    echo "SKIP: source-tree-only test, $CREATE_PR not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 
 if [[ ! -f "$INSTALL_SH" ]]; then
-    echo "ERROR: $INSTALL_SH not found" >&2
-    exit 1
+    echo "SKIP: source-tree-only test, $INSTALL_SH not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,11 @@
 #
 # Usage:
 #   ./defaults/scripts/tests/test-install-active-session.sh
+#
+# Source-tree-only by design (#6194/#6241): scripts/install/check-active-session.sh
+# and scripts/install-loom.sh both live at the repo root, not under defaults/,
+# so neither is ever shipped into an installed consumer repo. This suite
+# SKIPs (exit 0) rather than errors when run outside Loom's own checkout.
 
 set -euo pipefail
 
@@ -132,13 +137,13 @@ run_check() {
 # Preconditions
 # ───────────────────────────────────────────────────────────────────────────
 if [[ ! -x "$CHECK_SCRIPT" ]]; then
-  echo "ERROR: check script not executable: $CHECK_SCRIPT" >&2
-  exit 1
+  echo "SKIP: source-tree-only test, $CHECK_SCRIPT not found (not shipped into an installed repo)" >&2
+  exit 0
 fi
 
 if [[ ! -x "$INSTALL_SCRIPT" ]]; then
-  echo "ERROR: install script not executable: $INSTALL_SCRIPT" >&2
-  exit 1
+  echo "SKIP: source-tree-only test, $INSTALL_SCRIPT not found (not shipped into an installed repo)" >&2
+  exit 0
 fi
 
 # ───────────────────────────────────────────────────────────────────────────

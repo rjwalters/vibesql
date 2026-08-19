@@ -53,6 +53,19 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/worktree-root.sh"
 # shellcheck source=lib/default-branch.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/default-branch.sh"
 
+# Worktree-removal ledger (#5950). `worktree.sh remove` is one of several
+# independent removal paths; each records to the same file so a vanished
+# worktree can be attributed without guessing. Sourced defensively with a no-op
+# fallback: the ledger is purely diagnostic, so a partially-resynced .loom/
+# (this script newer than its lib/ sibling) must degrade to "no ledger entry",
+# never to a `source`-failure that breaks worktree creation and removal.
+if [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/worktree-removal-log.sh" ]]; then
+    # shellcheck source=lib/worktree-removal-log.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/worktree-removal-log.sh"
+else
+    loom_record_worktree_removal() { :; }
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -135,20 +148,43 @@ EOF
 #
 # A repo-global lock serializes the entire `git worktree add` call so this
 # race cannot happen. The cost — two builders on different issues no longer
-# parallelize through the helper — is acceptable because (a) `git worktree
-# add` itself is short relative to the rest of an issue's lifecycle, and
-# (b) parallel hangs that hold an `index.lock` for 10-20 minutes are the
-# very problem this PR fixes.
+# parallelize through the helper for the (short) duration of `git worktree
+# add` itself — is acceptable because (a) `git worktree add` itself is short
+# relative to the rest of an issue's lifecycle, and (b) parallel hangs that
+# hold an `index.lock` for 10-20 minutes are the very problem this PR fixes.
 #
 # The lock path uses the same name (`worktree-<id>/`) the per-issue version
 # used so its layout matches `.loom/locks/issue-<N>/`. The "id"
 # here is the constant string "add"; per-issue accounting still lives in the
 # `owner.json` body for debugging visibility.
 #
+# **Critical-section scope (issue #6014):** the lock is held across the
+# `git worktree add` invocation itself (plus its short recovery retry) and
+# the repo-level git preparation that immediately precedes it and must not
+# race with a concurrent add — `git worktree prune`, the `git fetch` of
+# `origin/$DEFAULT_BRANCH` / the base branch / `origin/feature/issue-N`, and
+# base-branch resolution. It is explicitly NOT held across anything that
+# follows the add: sentinel writing, sparse-checkout setup, submodule init,
+# or the project-specific `post-worktree.sh` hook. The call site releases the
+# lock the moment `git worktree add` returns, success or failure, rather than
+# waiting for the script's EXIT trap. A repo whose post-worktree hook can run
+# for minutes (e.g. a `cargo build --release`) must not serialize every
+# *unrelated* worktree creation on the host behind it — the post-add phase
+# does not touch `.git/config.lock` at all, so it needs no repo-global
+# serialization.
+#
+# **Ownership verification (issue #6014):** each acquisition writes a random
+# one-shot `token` into `owner.json` alongside `owner_pid`, and
+# `acquire_worktree_lock` returns it via the `WORKTREE_LOCK_TOKEN` global.
+# `release_worktree_lock` requires the caller to pass that same token back
+# and refuses to remove the lock directory unless the token it finds on disk
+# still matches — so a late release from a stale/wedged holder (e.g. its
+# EXIT trap finally firing well after an operator judged it dead, manually
+# cleared the lock, and a different process legitimately re-acquired it)
+# is a safe no-op instead of deleting a live holder's lock out from under it.
+#
 # Tunables (env vars, documented in show_help):
-#   LOOM_WORKTREE_LOCK_TIMEOUT       — seconds to wait (default 600 = 10min,
-#                                      sized to cover worst-case cold-clone
-#                                      submodule init on heavy repos)
+#   LOOM_WORKTREE_LOCK_TIMEOUT       — seconds to wait (default 600 = 10min)
 #   LOOM_WORKTREE_LOCK_POLL_INTERVAL — seconds between poll attempts (default 2)
 
 LOOM_WORKTREE_LOCK_TIMEOUT="${LOOM_WORKTREE_LOCK_TIMEOUT:-600}"
@@ -177,8 +213,11 @@ _worktree_lock_path() {
 }
 
 # Returns 0 if lock acquired, non-zero otherwise. Sets WORKTREE_LOCK_HOLDER_PID
-# on timeout failure so the caller can include it in error output.
+# on timeout failure so the caller can include it in error output. On success,
+# sets WORKTREE_LOCK_TOKEN to the one-shot acquisition token the caller MUST
+# pass back to release_worktree_lock (see "Ownership verification" above).
 WORKTREE_LOCK_HOLDER_PID=""
+WORKTREE_LOCK_TOKEN=""
 
 acquire_worktree_lock() {
     local issue="$1"
@@ -194,15 +233,21 @@ acquire_worktree_lock() {
 
     while true; do
         if mkdir "$lock" 2>/dev/null; then
-            # Lock acquired; record owner metadata for debugging.
+            # Lock acquired; record owner metadata for debugging plus a
+            # one-shot token so release can verify it still owns this lock
+            # (issue #6014 — see "Ownership verification" above).
+            local token
+            token="$$-$(date -u +%s%N 2>/dev/null || date -u +%s)-$RANDOM"
             cat > "$lock/owner.json" <<EOF
 {
   "issue": $issue,
   "owner_pid": $$,
+  "token": "$token",
   "script": "worktree.sh",
   "acquired_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+            WORKTREE_LOCK_TOKEN="$token"
             return 0
         fi
 
@@ -231,12 +276,38 @@ EOF
     done
 }
 
+# release_worktree_lock <issue> <token>
+#
+# Removes the repo-global worktree-add lock ONLY if <token> matches the
+# token currently recorded in owner.json — i.e. only if the caller is the
+# process that most recently acquired it (issue #6014). A caller with a
+# stale/empty token (already released, or never actually held the lock)
+# leaves the directory untouched: there is nothing it can safely prove it
+# owns, so removing anything would risk deleting a different, live holder's
+# lock (the exact race described in issue #6014).
 release_worktree_lock() {
     local issue="$1"
+    local token="$2"
     [[ -z "$issue" ]] && return 0
+    # No token means we never held the lock (or already released it) — never
+    # remove a lock directory we cannot prove is ours.
+    [[ -z "$token" ]] && return 0
+
     local lock
     lock="$(_worktree_lock_path "$issue")"
     [[ -d "$lock" ]] || return 0
+
+    local current_token=""
+    if [[ -f "$lock/owner.json" ]]; then
+        current_token=$(awk -F'"' '/"token"[[:space:]]*:/ {print $4; exit}' "$lock/owner.json" 2>/dev/null)
+    fi
+
+    if [[ "$current_token" != "$token" ]]; then
+        # The lock directory belongs to a different acquisition (ours was
+        # already cleared and reassigned) — do NOT touch it.
+        return 0
+    fi
+
     rm -rf "$lock" 2>/dev/null || true
 }
 
@@ -333,8 +404,10 @@ cleanup_partial_worktree_state() {
 #      once the worktree is gone).
 #   5. Hop out of the worktree first if our cwd is inside it (CWD-safety).
 #   6. `git worktree remove --force`; warn (don't hard-fail) on failure.
-#   7. `git branch -d` the attached branch (safe delete, refuses on unmerged
-#      commits) unless --keep-branch.
+#   7. Delete the attached branch (unless --keep-branch) via merge-pr.sh's
+#      squash-aware `_maybe_delete_local_branch` safety rule (#4889) — see
+#      the header above `_wt_load_branch_safety_helper` below for why a bare
+#      `git branch -d` can never clean up a squash-merged branch.
 #   8. `git worktree prune`.
 #
 # Guard 3 exists because step 6 is `git worktree remove --force`, which discards
@@ -397,23 +470,128 @@ _worktree_dirty_lines() {
     ' || true
 }
 
-# Whether $branch has a MERGED pull request on the forge (#5177 / #4889).
+# --------------------------------------------------------------------------
+# Squash-aware branch-safety helper (#5177 / #4889)
+# --------------------------------------------------------------------------
 #
-# This repo squash-merges, so once a PR lands, the branch's original commits are
-# never reachable from the squash commit on main — `git branch -d`'s "fully
-# merged" safety check therefore refuses to delete a genuinely-landed branch.
-# When the forge confirms the PR merged, the work IS landed and `git branch -D`
-# is safe, mirroring merge-pr.sh's existing squash-aware `-d`→`-D` fallback.
+# The branch-delete step used to be a bare `git branch -d`, which ALWAYS
+# refuses on a squash-merged branch: a squash merge rewrites every commit
+# into one new commit on the default branch, so the original branch tip is
+# never an ancestor of HEAD and never satisfies `git branch --merged`. This
+# repo squash-merges (`merge-pr.sh --squash`), so `worktree.sh remove`
+# could never clean up the branch it had just detached.
 #
-# Fail-closed: a missing gh, any gh error, or an empty result all return
-# non-zero ("not merged"), so a probe failure never escalates to a force-delete.
-_worktree_pr_is_merged() {
-    local repo_root="$1" branch="$2" count
-    [[ -n "$branch" ]] || return 1
-    command -v gh >/dev/null 2>&1 || return 1
-    count="$( (cd "$repo_root" 2>/dev/null && \
-        gh pr list --head "$branch" --state merged --json number --jq 'length' 2>/dev/null) )" || return 1
-    [[ -n "$count" && "$count" != "0" ]]
+# merge-pr.sh already solved this (#4100): its private
+# `_maybe_delete_local_branch` compares the local branch tip against the
+# merged PR's `head.sha` and only upgrades to `git branch -D` when they
+# match — every commit on the branch was verifiably part of the merged PR,
+# so force-delete is safe even though `--merged` disagrees. A tip that does
+# NOT match (unpushed local work) still falls back to plain `-d`, preserving
+# the conservative refusal.
+#
+# Rather than reimplement that comparison a second time with different
+# strictness, extract the real function body verbatim from the live
+# merge-pr.sh source and `eval` it into this process — the same technique
+# cleanup-branches.sh already uses for its PR review-branch cleanup pass
+# (#4405), so the safety rule has exactly one implementation shared by every
+# call site instead of duplicated logic that could silently drift.
+
+# Extract one top-level function definition verbatim from a shell script.
+# merge-pr.sh defines every function at column 0 with its closing brace also
+# at column 0, so "first `^}` after the opening line" is exact. Mirrors
+# cleanup-branches.sh's identically named helper.
+_wt_extract_shell_fn() {
+    local fn_name="$1" src="$2"
+    awk -v fn="$fn_name" '
+        $0 ~ "^" fn "\\(\\) \\{" { grab=1 }
+        grab { print }
+        grab && /^}/ { exit }
+    ' "$src"
+}
+
+# Load `_maybe_delete_local_branch` (+ its three worktree-introspection
+# dependencies: `_primary_worktree_path`, `_is_primary_worktree_path`,
+# `_find_worktree_by_branch`) from the live merge-pr.sh source into this
+# process. The loaded body reads globals `$REPO_ROOT` / `$DEFAULT_BRANCH_NAME`
+# and calls `info`/`warning`/`success` — the caller must set/define all five
+# before invoking `_maybe_delete_local_branch`. Returns 1 (never hard-fails)
+# if merge-pr.sh is missing or the helper was renamed/removed upstream, so
+# the caller can fall back to a plain `git branch -d`.
+_wt_load_branch_safety_helper() {
+    local merge_pr_script
+    merge_pr_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/merge-pr.sh"
+    [[ -f "$merge_pr_script" ]] || return 1
+
+    local fn_src
+    fn_src="$(_wt_extract_shell_fn _maybe_delete_local_branch "$merge_pr_script")"
+    [[ -n "$fn_src" ]] || return 1
+
+    local dep_fn dep_src dep_fns=""
+    for dep_fn in _primary_worktree_path _is_primary_worktree_path _find_worktree_by_branch; do
+        dep_src="$(_wt_extract_shell_fn "$dep_fn" "$merge_pr_script")"
+        if [[ -n "$dep_src" ]]; then
+            dep_fns+="$dep_src"$'\n'
+        else
+            # Upstream renamed/removed the helper: degrade to the generic
+            # "checked out somewhere" warning path instead of aborting.
+            case "$dep_fn" in
+                _is_primary_worktree_path) dep_fns+="$dep_fn() { return 1; }"$'\n' ;;
+                *)                         dep_fns+="$dep_fn() { :; }"$'\n' ;;
+            esac
+        fi
+    done
+
+    eval "$dep_fns"
+    eval "$fn_src"
+}
+
+# Look up the head SHA of a MERGED pull request whose head branch matches
+# <branch>, via the forge (`loom-daemon forge` when present for Gitea
+# passthrough, else `gh` directly — same convention as cleanup-branches.sh's
+# $FORGE). MUST be called as a plain statement, never inside `$(...)` — it
+# sets three globals rather than printing, because a command-substitution
+# subshell would silently discard the global side effect:
+#   _WT_PR_LOOKUP_SHA    - the resolved head SHA, or empty if none found
+#   _WT_PR_LOOKUP_NUMBER - the resolved PR number, or empty if none found
+#   _WT_PR_LOOKUP_STATUS - one of:
+#     found       - a merged PR head SHA was resolved (see _WT_PR_LOOKUP_SHA)
+#     not_found   - the forge was reachable but no merged PR matches this branch
+#     unavailable - no forge tool / no jq / the query itself failed (network,
+#                   auth, rate limit, ...) — the safety check could not even
+#                   be attempted, distinct from "checked, and it's unmerged"
+# Never fails the caller — always returns 0.
+_worktree_merged_pr_head_sha() {
+    local branch="$1"
+    _WT_PR_LOOKUP_SHA=""
+    _WT_PR_LOOKUP_NUMBER=""
+    _WT_PR_LOOKUP_STATUS="unavailable"
+    if [[ -z "$branch" ]]; then
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        return 0
+    fi
+    local forge_cmd
+    if command -v loom-daemon >/dev/null 2>&1; then
+        forge_cmd="loom-daemon forge"
+    elif command -v gh >/dev/null 2>&1; then
+        forge_cmd="gh"
+    else
+        return 0
+    fi
+    local pr_json
+    pr_json="$($forge_cmd pr list --head "$branch" --state merged --json headRefOid,number --limit 1 2>/dev/null)" || return 0
+    local sha number
+    sha="$(echo "$pr_json" | jq -r '.[0].headRefOid // empty' 2>/dev/null || echo "")"
+    number="$(echo "$pr_json" | jq -r '.[0].number // empty' 2>/dev/null || echo "")"
+    if [[ -n "$sha" ]]; then
+        _WT_PR_LOOKUP_STATUS="found"
+        _WT_PR_LOOKUP_SHA="$sha"
+        _WT_PR_LOOKUP_NUMBER="$number"
+    else
+        _WT_PR_LOOKUP_STATUS="not_found"
+    fi
+    return 0
 }
 
 # remove_worktree_command [--keep-branch] [--force] [--json] <issue-number>
@@ -571,6 +749,14 @@ remove_worktree_command() {
         _rm_warning "Could not remove worktree at $worktree_path"
     fi
 
+    # 6b. #5950: record the removal in the shared ledger, covering both the
+    #     ordinary `git worktree remove` path and the #5177 direct-removal
+    #     fallback above (`$removed` is true for either).
+    if [[ "$removed" == true ]]; then
+        loom_record_worktree_removal "$repo_root" "worktree.sh remove" "$worktree_path" \
+            "${attached_branch:-}" "explicit_remove"
+    fi
+
     # 7. Branch cleanup (unless --keep-branch). Deferred until after removal so
     #    the worktree's checkout lock on the branch is released first.
     local branch_status="none"
@@ -583,23 +769,45 @@ remove_worktree_command() {
         if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/$attached_branch"; then
             _rm_info "Local branch '$attached_branch' does not exist — skipping branch delete"
             branch_status="absent"
-        elif git -C "$repo_root" branch -d "$attached_branch" >/dev/null 2>&1; then
-            _rm_success "Local branch '$attached_branch' deleted"
-            branch_status="deleted"
-        elif _worktree_pr_is_merged "$repo_root" "$attached_branch"; then
-            # #5177 / #4889: `git branch -d` refused because a squash-merged
-            # branch is never "fully merged" by reachability — but the forge
-            # confirms its PR merged, so the work is landed and -D is safe.
-            if git -C "$repo_root" branch -D "$attached_branch" >/dev/null 2>&1; then
-                _rm_success "Local branch '$attached_branch' force-deleted (PR merged — squash-safe)"
-                branch_status="deleted"
-            else
-                _rm_warning "Could not delete local branch '$attached_branch' even after confirming its PR merged"
-                branch_status="unmerged"
-            fi
         else
-            _rm_warning "Could not delete local branch '$attached_branch' (may have unmerged commits — use 'git branch -D' if intentional)"
-            branch_status="unmerged"
+            # Squash-aware delete via merge-pr.sh's shared safety rule (#4889)
+            # instead of a bare `git branch -d`, which can never delete a
+            # squash-merged branch (see the header above
+            # `_wt_load_branch_safety_helper`). `info`/`warning`/`success` and
+            # `REPO_ROOT`/`DEFAULT_BRANCH_NAME` are the globals the extracted
+            # `_maybe_delete_local_branch` body expects.
+            info()    { _rm_info "$*"; }
+            warning() { _rm_warning "$*"; }
+            success() { _rm_success "$*"; }
+            # shellcheck disable=SC2034  # read inside the evaluated _maybe_delete_local_branch body
+            REPO_ROOT="$repo_root"
+            # shellcheck disable=SC2034  # read inside the evaluated _maybe_delete_local_branch body
+            DEFAULT_BRANCH_NAME="$(cd "$repo_root" 2>/dev/null && loom_default_branch 2>/dev/null || true)"
+
+            # Plain statement, NOT `$(...)` — command substitution runs in a
+            # subshell, which would silently discard the global side effects
+            # (_WT_PR_LOOKUP_SHA / _WT_PR_LOOKUP_STATUS) this sets.
+            _worktree_merged_pr_head_sha "$attached_branch"
+            if [[ "$_WT_PR_LOOKUP_STATUS" == "unavailable" ]]; then
+                _rm_info "Could not query the forge for a merged PR on '$attached_branch' — falling back to git's plain merge check"
+            fi
+
+            if _wt_load_branch_safety_helper; then
+                _maybe_delete_local_branch "$attached_branch" "$_WT_PR_LOOKUP_SHA"
+            else
+                _rm_warning "Could not load the branch-delete safety helper from merge-pr.sh — falling back to plain 'git branch -d'"
+                if git -C "$repo_root" branch -d "$attached_branch" >/dev/null 2>&1; then
+                    _rm_success "Local branch '$attached_branch' deleted"
+                else
+                    _rm_warning "Could not delete local branch '$attached_branch' (may have unmerged commits — use 'git branch -D $attached_branch' if intentional)"
+                fi
+            fi
+
+            if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$attached_branch"; then
+                branch_status="unmerged"
+            else
+                branch_status="deleted"
+            fi
         fi
     fi
 
@@ -840,6 +1048,14 @@ snapshot_worktree_command() {
 # neither literally invokes `git stash pop|drop|clear`, so the guard's
 # pattern match never sees them, and it keeps asking on every raw stash
 # pop/drop/clear exactly as it did before this issue.
+#
+# Since #5754 that replacement path is also the ENFORCED one: raw stash
+# *creation* (`git stash`/`push`/`save`) inside a managed worktree with a
+# second managed worktree active is denied outright, and the deny message
+# names `stash-push <N>`/`stash-pop <N>`/`snapshot <N>` literally. `git stash
+# create` — used below — is deliberately excluded from that deny, since it
+# writes no `refs/stash` entry; excluding it is what keeps this function
+# callable at all.
 stash_push_worktree_command() {
     local issue_number="" json=false include_untracked=false
     local usage="Usage: pnpm worktree stash-push <issue-number> [--include-untracked] [--json]"
@@ -1423,14 +1639,32 @@ Environment Variables:
   LOOM_WORKTREE_ALWAYS_INCLUDE      Extra sparse-mode safety paths (space-sep)
   LOOM_SUBMODULE_TIMEOUT            Per-submodule init timeout (default 300s)
   LOOM_WORKTREE_LOCK_TIMEOUT        Lock acquisition timeout in seconds
-                                    (default 600 — sized to cover worst-case
-                                    cold-clone submodule init)
+                                    (default 600 — covers the pre-add git
+                                    prep (prune/fetch) plus 'git worktree
+                                    add' itself; the lock is released as soon
+                                    as the add returns, before sentinel
+                                    writing, submodule init or the
+                                    post-worktree hook run)
   LOOM_WORKTREE_LOCK_POLL_INTERVAL  Lock poll interval in seconds (default 2)
   LOOM_PRESERVE_WORKTREE            Disable cleanup-on-merge for all worktrees
 
 Project-Specific Hooks:
   Create .loom/hooks/post-worktree.sh to run custom setup after worktree creation.
   This file is NOT overwritten by Loom upgrades.
+
+  Declaring a repo-owned file under .loom/hooks/: no manifest entry, naming
+  convention, or sentinel is required. Every uninstall/reinstall path
+  (including a --clean reinstall) computes its removal candidates from Loom's
+  own defaults/hooks/ -- per-repo .loom/hooks/ copies are outside that
+  ownership boundary entirely (Epic #3835 Phase 5, #4262: hooks execute from
+  the machine-level checkout, not the per-repo copy), so nothing under
+  .loom/hooks/ is ever swept as "unmanaged" on uninstall, whatever its name.
+  This is enforced, not just documented (issue #5971) -- a real consumer
+  incident lost a repo-owned .loom/hooks/post-worktree.sh to a --clean
+  reinstall before the fix. A fresh --quick install still COPIES the
+  current defaults/hooks/*.sh names into .loom/hooks/ (install_hooks_and_cli)
+  -- an existing file there is preserved unless the install explicitly forces
+  an overwrite (--clean / --force), matching a same-named Loom-shipped hook.
 
   The hook receives three arguments:
     \$1 - Absolute path to the new worktree
@@ -1737,8 +1971,15 @@ if ! acquire_worktree_lock "$ISSUE_NUMBER"; then
     exit 1
 fi
 
-# Release the lock on any exit path (success, failure, signal).
-trap 'release_worktree_lock "$ISSUE_NUMBER"' EXIT INT TERM
+# Safety-net release on any exit path (success, failure, signal) reached
+# BEFORE the explicit release right after `git worktree add` below. Once that
+# explicit release runs it clears WORKTREE_LOCK_TOKEN, which makes this trap
+# a no-op for the (expected, common) case where we already released
+# promptly (issue #6014 — the lock must not be held through submodule init /
+# the post-worktree hook). $WORKTREE_LOCK_TOKEN is expanded when the trap
+# actually fires, not when it is registered, so it always reflects whichever
+# acquisition (or lack thereof) is current at that time.
+trap 'release_worktree_lock "$ISSUE_NUMBER" "$WORKTREE_LOCK_TOKEN"' EXIT INT TERM
 
 # Re-run cleanup under the lock so a crashed concurrent peer (one that died
 # between our pre-cleanup and our lock acquisition) is still handled.
@@ -1928,6 +2169,51 @@ if [[ -d "$WORKTREE_PATH" ]]; then
         local_commits_behind=$(git -C "$WORKTREE_PATH" rev-list --count "HEAD..$BASE_REF" 2>/dev/null) || local_commits_behind="0"
         local_uncommitted=$(git -C "$WORKTREE_PATH" status --porcelain 2>/dev/null) || local_uncommitted=""
 
+        # #6257: this "worktree directory + branch already registered with
+        # git" fast path is a completely different code path from the
+        # "local branch exists, no worktree dir yet" reuse path below
+        # (#6095/#6100) — that fix's upstream-tracking correction never runs
+        # here, so a worktree left with stale HEAD and/or wrong upstream
+        # tracking was silently "preserved" (below) and handed straight to a
+        # Judge/Doctor session with no signal that it no longer matched the
+        # branch's actual pushed tip. Correct/report drift against the
+        # branch's OWN upstream (not just BASE_REF, computed above) before
+        # deciding whether to preserve.
+        git -C "$WORKTREE_PATH" fetch origin "$BRANCH_NAME" 2>/dev/null || true
+        if git -C "$WORKTREE_PATH" show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+            wt_current_upstream="$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref "$BRANCH_NAME@{u}" 2>/dev/null || true)"
+            if [[ "$wt_current_upstream" != "origin/$BRANCH_NAME" ]]; then
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    if [[ -n "$wt_current_upstream" ]]; then
+                        print_warning "Worktree branch '$BRANCH_NAME' was tracking '$wt_current_upstream' - correcting to 'origin/$BRANCH_NAME'"
+                    else
+                        print_info "Worktree branch '$BRANCH_NAME' has no upstream - setting it to 'origin/$BRANCH_NAME'"
+                    fi
+                fi
+                git -C "$WORKTREE_PATH" branch --set-upstream-to="origin/$BRANCH_NAME" "$BRANCH_NAME" 2>/dev/null || true
+            fi
+
+            wt_head_sha="$(git -C "$WORKTREE_PATH" rev-parse HEAD 2>/dev/null || true)"
+            wt_origin_tip="$(git -C "$WORKTREE_PATH" rev-parse "origin/$BRANCH_NAME" 2>/dev/null || true)"
+            if [[ -n "$wt_head_sha" && -n "$wt_origin_tip" && "$wt_head_sha" != "$wt_origin_tip" ]] && \
+               git -C "$WORKTREE_PATH" merge-base --is-ancestor "$wt_head_sha" "$wt_origin_tip" 2>/dev/null; then
+                # Local HEAD is a strict ancestor of the branch's pushed tip -
+                # i.e. genuinely behind (not just diverged/ahead with unpushed
+                # local commits, which is expected and not drift).
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    print_warning "Worktree HEAD ($wt_head_sha) is behind the pushed tip of branch '$BRANCH_NAME' ($wt_origin_tip) - this worktree may be stale"
+                    if [[ -n "$local_uncommitted" ]]; then
+                        print_warning "Worktree also has uncommitted changes - resolve before evaluating/building on it:"
+                        print_info "  ./.loom/scripts/worktree.sh snapshot $ISSUE_NUMBER --include-untracked   # save WIP"
+                        print_info "  git -C $WORKTREE_PATH checkout -- .                                       # clear tracked working-tree drift"
+                        print_info "  git -C $WORKTREE_PATH pull --ff-only                                      # resync to origin/$BRANCH_NAME"
+                    else
+                        print_info "  git -C $WORKTREE_PATH pull --ff-only   # resync to origin/$BRANCH_NAME"
+                    fi
+                fi
+            fi
+        fi
+
         if [[ "$local_commits_ahead" -gt 0 || -n "$local_uncommitted" ]]; then
             # Worktree has real work - preserve it
             # Back-fill/refresh the Loom sentinel so a resumed worktree that
@@ -1992,6 +2278,35 @@ if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
         echo ""
     fi
 
+    # #6095: a pre-existing local branch can be carrying a stale or wrong
+    # upstream (e.g. left tracking origin/$DEFAULT_BRANCH from whatever
+    # created it, rather than its own PR branch) — and unlike the sibling
+    # "no local branch, but origin/$BRANCH_NAME exists" path just below
+    # (#4823), this reuse path never touched tracking at all, so the wrong
+    # upstream persisted across every subsequent worktree.sh invocation. A
+    # later `git pull --ff-only` in the reused worktree then silently
+    # fast-forwards the branch onto the WRONG upstream's tip instead of
+    # the branch's own remote history (observed on #6086/PR #6093: local
+    # feature/issue-6086 tracked origin/main, and a --ff-only pull moved it
+    # to main's tip). If origin has a branch of the same name, (re)point the
+    # local branch's upstream at it before handing the branch to `git
+    # worktree add`. If origin has no branch of this name (never pushed),
+    # leave tracking as-is — do not fabricate an upstream that doesn't exist.
+    git fetch origin "$BRANCH_NAME" 2>/dev/null || true
+    if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+        current_upstream="$(git rev-parse --abbrev-ref "$BRANCH_NAME@{u}" 2>/dev/null || true)"
+        if [[ "$current_upstream" != "origin/$BRANCH_NAME" ]]; then
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                if [[ -n "$current_upstream" ]]; then
+                    print_warning "Branch '$BRANCH_NAME' was tracking '$current_upstream' - correcting to 'origin/$BRANCH_NAME'"
+                else
+                    print_info "Branch '$BRANCH_NAME' has no upstream - setting it to 'origin/$BRANCH_NAME'"
+                fi
+            fi
+            git branch --set-upstream-to="origin/$BRANCH_NAME" "$BRANCH_NAME" 2>/dev/null || true
+        fi
+    fi
+
     CREATE_ARGS=("$WORKTREE_PATH" "$BRANCH_NAME")
 else
     # No local branch by this name. Before falling back to a fresh branch off
@@ -2004,7 +2319,40 @@ else
     # independent of --base (which only chooses the start point when we DO
     # need to create a fresh branch, below).
     git fetch origin "$BRANCH_NAME" 2>/dev/null || true
+    _WT_REUSE_REMOTE_BRANCH=false
     if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+        # #5657: before reusing the remote branch, check whether its current
+        # tip is already the head of an already-MERGED PR (e.g. a
+        # partial-increment slice whose branch name — feature/issue-N — gets
+        # reused by the next slice, and the forge left the ref on origin
+        # because auto-delete-head-branches is off). Reusing a
+        # squash-merged branch produces a worktree whose history conflicts
+        # with main and a PR with zero real diff, not the in-flight-cycle
+        # case #4823 was written to protect.
+        #
+        # Plain statement, NOT `$(...)` — command substitution runs in a
+        # subshell, which would silently discard the global side effects
+        # (_WT_PR_LOOKUP_SHA / _WT_PR_LOOKUP_NUMBER / _WT_PR_LOOKUP_STATUS)
+        # this sets.
+        _worktree_merged_pr_head_sha "$BRANCH_NAME"
+        if [[ "$_WT_PR_LOOKUP_STATUS" == "found" ]]; then
+            remote_tip_sha="$(git rev-parse "refs/remotes/origin/$BRANCH_NAME" 2>/dev/null || true)"
+            if [[ -n "$remote_tip_sha" && "$remote_tip_sha" == "$_WT_PR_LOOKUP_SHA" ]]; then
+                if [[ "$JSON_OUTPUT" != "true" ]]; then
+                    print_info "origin/$BRANCH_NAME is the head of already-merged PR #${_WT_PR_LOOKUP_NUMBER:-?} - creating a fresh branch from $BASE_DISPLAY instead"
+                fi
+            else
+                _WT_REUSE_REMOTE_BRANCH=true
+            fi
+        else
+            # not_found (checked, unmerged) or unavailable (forge
+            # unreachable — fail open, never block worktree creation on a
+            # forge outage): preserve today's reuse behavior exactly.
+            _WT_REUSE_REMOTE_BRANCH=true
+        fi
+    fi
+
+    if [[ "$_WT_REUSE_REMOTE_BRANCH" == "true" ]]; then
         if [[ "$JSON_OUTPUT" != "true" ]]; then
             print_info "Remote branch 'origin/$BRANCH_NAME' already exists - creating a local branch tracking it (not branching from $BASE_DISPLAY)"
         fi
@@ -2065,7 +2413,7 @@ _handle_feature_branch_in_main_worktree() {
     fi
 
     # Extract the conflicting worktree path from the error message
-    # Example: "fatal: 'feature/issue-2853' is already used by worktree at '/Users/rwalters/GitHub/loom'"
+    # Example: "fatal: 'feature/issue-2853' is already used by worktree at '/path/to/loom'"
     local conflict_path
     conflict_path=$(echo "$error_output" | grep -o "is already used by worktree at '[^']*'" | sed "s/is already used by worktree at '//;s/'$//")
 
@@ -2192,6 +2540,16 @@ _try_worktree_add() {
 
 
 if _try_worktree_add; then
+    # Release the git-race-prevention lock now — the operation that required
+    # repo-global serialization (git worktree add's contention on
+    # .git/config.lock) is complete. Everything below (sentinel writing,
+    # submodule init, the project-specific post-worktree hook) does not
+    # touch .git/config.lock and must not block unrelated worktree creations
+    # for other issues (issue #6014). Clearing WORKTREE_LOCK_TOKEN makes the
+    # EXIT trap's later release_worktree_lock call a no-op.
+    release_worktree_lock "$ISSUE_NUMBER" "$WORKTREE_LOCK_TOKEN"
+    WORKTREE_LOCK_TOKEN=""
+
     # Get absolute path to worktree
     ABS_WORKTREE_PATH=$(cd "$WORKTREE_PATH" && pwd)
 
@@ -2294,29 +2652,6 @@ if _try_worktree_add; then
         cd - > /dev/null
     fi
 
-    # Symlink node_modules from main workspace if available
-    # This avoids expensive pnpm install on every worktree (30-60s savings)
-    MAIN_WORKSPACE_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
-    MAIN_NODE_MODULES="$MAIN_WORKSPACE_DIR/node_modules"
-    WORKTREE_NODE_MODULES="$ABS_WORKTREE_PATH/node_modules"
-    WORKTREE_PACKAGE_JSON="$ABS_WORKTREE_PATH/package.json"
-
-    if [[ -d "$MAIN_NODE_MODULES" && -f "$WORKTREE_PACKAGE_JSON" && ! -e "$WORKTREE_NODE_MODULES" ]]; then
-        if [[ "$JSON_OUTPUT" != "true" ]]; then
-            print_info "Symlinking node_modules from main workspace..."
-        fi
-
-        if ln -s "$MAIN_NODE_MODULES" "$WORKTREE_NODE_MODULES" 2>/dev/null; then
-            if [[ "$JSON_OUTPUT" != "true" ]]; then
-                print_success "node_modules symlinked (skipping pnpm install)"
-            fi
-        else
-            if [[ "$JSON_OUTPUT" != "true" ]]; then
-                print_warning "Could not symlink node_modules (will install on first build)"
-            fi
-        fi
-    fi
-
     # Resolve the info/exclude path that applies to this worktree. Running
     # `git rev-parse --git-path info/exclude` from inside the worktree returns
     # the correct file for whatever git layout is in play (info/exclude is a
@@ -2325,6 +2660,14 @@ if _try_worktree_add; then
     # Entries appended here keep `git add -A` from staging the created symlinks
     # even when the repo's .gitignore rules don't match a symlink (the classic
     # `node_modules/` dir-rule-vs-symlink hazard from #3528).
+    #
+    # Resolved (and the helper below defined) BEFORE the root node_modules
+    # symlink section so that section can call it too (#5474) — it used to be
+    # defined only after that section, so the root node_modules symlink (and
+    # the .mcp.json symlink further below) never got an exclude entry unless
+    # the consumer repo's .gitignore happened to use the slashless
+    # `node_modules` form (a `node_modules/` trailing-slash rule only matches
+    # directories, not the symlink `worktree.sh` creates here).
     WORKTREE_INFO_EXCLUDE=$(cd "$ABS_WORKTREE_PATH" 2>/dev/null \
         && git rev-parse --git-path info/exclude 2>/dev/null)
     if [[ -n "$WORKTREE_INFO_EXCLUDE" && "$WORKTREE_INFO_EXCLUDE" != /* ]]; then
@@ -2344,6 +2687,30 @@ if _try_worktree_add; then
         grep -qxF "$entry" "$WORKTREE_INFO_EXCLUDE" 2>/dev/null \
             || echo "$entry" >> "$WORKTREE_INFO_EXCLUDE" 2>/dev/null || true
     }
+
+    # Symlink node_modules from main workspace if available
+    # This avoids expensive pnpm install on every worktree (30-60s savings)
+    MAIN_WORKSPACE_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+    MAIN_NODE_MODULES="$MAIN_WORKSPACE_DIR/node_modules"
+    WORKTREE_NODE_MODULES="$ABS_WORKTREE_PATH/node_modules"
+    WORKTREE_PACKAGE_JSON="$ABS_WORKTREE_PATH/package.json"
+
+    if [[ -d "$MAIN_NODE_MODULES" && -f "$WORKTREE_PACKAGE_JSON" && ! -e "$WORKTREE_NODE_MODULES" ]]; then
+        if [[ "$JSON_OUTPUT" != "true" ]]; then
+            print_info "Symlinking node_modules from main workspace..."
+        fi
+
+        if ln -s "$MAIN_NODE_MODULES" "$WORKTREE_NODE_MODULES" 2>/dev/null; then
+            _append_worktree_exclude "node_modules"
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_success "node_modules symlinked (skipping pnpm install)"
+            fi
+        else
+            if [[ "$JSON_OUTPUT" != "true" ]]; then
+                print_warning "Could not symlink node_modules (will install on first build)"
+            fi
+        fi
+    fi
 
     # Symlink nested (per-package) node_modules for pnpm/monorepo workspaces.
     # The root node_modules symlink above does not cover per-package installs
@@ -2429,6 +2796,7 @@ if _try_worktree_add; then
         fi
 
         if ln -s "$MAIN_MCP_JSON" "$WORKTREE_MCP_JSON" 2>/dev/null; then
+            _append_worktree_exclude ".mcp.json"
             if [[ "$JSON_OUTPUT" != "true" ]]; then
                 print_success ".mcp.json symlinked"
             fi
@@ -2485,6 +2853,12 @@ if _try_worktree_add; then
         echo "  gh pr create"
     fi
 else
+    # git worktree add failed — the operation the lock guards is over
+    # (unsuccessfully); release it immediately rather than holding it
+    # through error reporting / exit (issue #6014).
+    release_worktree_lock "$ISSUE_NUMBER" "$WORKTREE_LOCK_TOKEN"
+    WORKTREE_LOCK_TOKEN=""
+
     if [[ "$JSON_OUTPUT" == "true" ]]; then
         echo '{"success": false, "error": "Failed to create worktree"}' >&3
     fi

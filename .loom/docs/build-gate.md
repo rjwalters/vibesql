@@ -429,6 +429,77 @@ Full rationale, telemetry, and the env-knob table live in
 > environment), not in the local post-builder gate. Keep the gate scoped to
 > checks that are deterministic on any host.
 
+### Per-step toolchain timeout + self-reap (#6192)
+
+The build slot above bounds *how many* builds run at once; it does not bound how
+**long** any one of them may run. On 2026-08-14 that gap became an incident: an
+external RAID enclosure stopped servicing I/O while staying mounted, the global
+cargo `target-dir` lived on it, and every `cargo` on the host blocked forever
+inside an uninterruptible `open()`. One in-flight sweep accumulated **five
+concurrent hung `cargo build` processes** over ~5 hours — each retry spawned a
+new build alongside the previous ones, all invisible in disk-wait — while
+already-dead sweeps left further `cargo build` orphans (and a companion detached
+`tail -100` still holding an output pipe) re-parented to launchd. Nothing
+surfaced it; a human found it by noticing a 4h-old idle process.
+
+Host-side detection of a wedged volume is a separate concern. This is the
+**sweep-side bound**: no individual toolchain invocation may hang a gate step
+indefinitely, and nothing the gate spawns may outlive it.
+
+- **Every stage runs under a wall-clock budget.** `build-gate.sh` wraps each
+  `cargo`/`bash` stage in `run_gate_step`, which delegates to
+  `lib/bounded-run.sh`'s `bounded_run` (the same shared helper the watchdog's
+  IPC probe uses — GNU `timeout -k 2` where available, a real TERM-then-KILL
+  fallback where not, since macOS ships no `timeout(1)`).
+- **The budget is generous on purpose.** `LOOM_BUILD_GATE_STEP_TIMEOUT_SECS`
+  defaults to **1800s (30 min)** *per stage*. The point is bounding *forever*,
+  not policing slowness — a real cold release build is allowed to be slow.
+  Set it to `0` to disable per-step bounding entirely (exactly the pre-#6192
+  behavior); if `lib/bounded-run.sh` is missing from an install the gate prints
+  a note and runs stages unbounded.
+- **A timeout fails loudly and distinctly.** The gate prints a `[build-gate]
+  TIMEOUT after <elapsed>s (budget <n>s) — hung command: <argv>` line naming the
+  hung command and its measured elapsed time, then exits **124** — GNU
+  `timeout`'s code, so a wedged-host timeout is greppable in sweep logs and
+  never blends into an ordinary red-test failure.
+- **A timeout arms the dispatch backoff (#4485).** When the gate is running
+  inside a daemon-dispatched sweep (`LOOM_SWEEP_CLAIM_OWNED` is set) it calls
+  `loom-daemon dispatch-backoff record --issue <N> --reason "build-gate
+  timeout: …"`, so the issue's next dispatch is **deferred** instead of racing
+  a fresh retry against a still-wedged host — the pile-up mechanism from the
+  incident. This is strictly best-effort: no claim, no daemon binary, or an
+  unreachable daemon socket are all silently skipped and never change the
+  gate's own 124 verdict.
+- **The gate reaps what it spawned, at its own exit.**
+  `lib/reap-process-group.sh`'s `loom_reap_own_process_group` runs from the
+  gate's `EXIT` trap (folded into the same handler that releases the build
+  slot — bash keeps only one `EXIT` trap), TERM-then-KILLing any residual
+  children so a killed-but-lingering build or a pipe-holding `tail` cannot
+  survive as an orphan. Scope is deliberately split: when the caller **is** its
+  own process-group leader (a sweep leader, which the daemon spawns with
+  `setpgid(0,0)`) the whole group is its own tree and is reaped in full;
+  otherwise only the caller's own descendant subtree is reaped, so a gate run
+  as one foreground step of a larger session can never signal unrelated
+  siblings that merely share an inherited pgid. `LOOM_SWEEP_SELF_REAP=0` opts
+  out. `claude-wrapper.sh` — the default daemon-dispatch path — carries the
+  same self-reap trap.
+- **Fires on success, failure, and kill.** Bash runs an `EXIT` trap for an
+  untrapped `SIGTERM` too — which is what the daemon's group-kill and
+  `loom-daemon cancel` deliver — so a cancelled sweep reaps its own children.
+  `SIGKILL` is untrappable by construction and remains the daemon-side
+  reaper's job (#4980/#3800); this mechanism is the complementary in-process
+  backstop, not a replacement for it.
+- **Bound to the process's own exit, never the daemon's.** The reap only ever
+  runs from a trap inside the exiting process itself, so a daemon restart —
+  which never signals an already-running sweep tree — cannot trigger it. Sweeps
+  keep surviving daemon restarts exactly as designed.
+
+Regression coverage: `defaults/scripts/tests/test-build-gate-timeout.sh` (wired
+into CI) drives the gate with a stubbed hanging `cargo` and a recording stub
+daemon binary, asserting the 124 exit, the loud message, the backoff call shape,
+the claim-less no-op, and the reap's default/opt-out/grandchild/never-self
+behavior.
+
 **Forge-CI corroboration (deferred).** The curated issue's fourth acceptance
 criterion — when the local gate disagrees with a *green* forge CI result on the
 same evaluated SHA, prefer the forge signal and log the divergence loudly

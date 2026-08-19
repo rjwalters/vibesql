@@ -131,6 +131,11 @@ ${BOLD}TRACKED FILE SET:${NC}
     (and the AGENTS-specific) marker region only, so sibling edits outside
     the Loom block do not report drift. All other files are hashed whole.
 
+    verify mode also asserts each region-scoped file's BEGIN/END marker
+    pair is well-formed (exactly one of each, in order) independent of the
+    hash comparison, so a missing, duplicated, or malformed marker pair is
+    always flagged -- even one baked into the manifest at generate time.
+
 ${BOLD}NOT TRACKED (runtime/user/merge-target files):${NC}
     .loom/config.json              Local terminal config
     .loom/daemon-state.json        Daemon runtime state
@@ -143,7 +148,7 @@ ${BOLD}NOT TRACKED (runtime/user/merge-target files):${NC}
 
 ${BOLD}EXIT CODES:${NC}
     0    generate succeeded, or verify found no drift
-    1    verify found modified or missing files
+    1    verify found modified, missing, or marker-malformed files
     2    Invalid arguments
     3    Manifest not found (verify mode)
     4    Environment error (not a git repo, no SHA command)
@@ -525,6 +530,63 @@ compute_entry_digest() {
     printf '%s %s\n' "$sha" "$size"
 }
 
+# Return "<BEGIN>\t<END>" for a region name, or empty for an unrecognized one.
+# Single source of truth for the region->marker-pair mapping, shared by
+# emit_hashable_content (implicitly, via the two branches above) and
+# check_marker_integrity below.
+markers_for_region() {
+    case "$1" in
+        loom-block) printf '%s\t%s\n' "$LOOM_SECTION_START" "$LOOM_SECTION_END" ;;
+        loom-block-agents) printf '%s\t%s\n' "$AGENTS_SECTION_START" "$AGENTS_SECTION_END" ;;
+        *) return 1 ;;
+    esac
+}
+
+# Assert a managed marker block is well-formed: exactly one BEGIN and one END
+# marker, BEGIN preceding END. This is deliberately INDEPENDENT of hash-based
+# drift detection (issue #6195): a file whose markers are already missing,
+# duplicated, or out of order at `generate` time bakes that malformed
+# extraction into the manifest's recorded hash, so a hash-only comparison can
+# never flag it -- every later `verify` against the same still-malformed file
+# reports a clean match. Running this structural check against the current
+# on-disk file every time closes that gap. Prints nothing on success; prints a
+# one-line problem description on failure. Returns 0/1 accordingly.
+check_marker_integrity() {
+    local full_path="$1"
+    local begin="$2"
+    local end="$3"
+
+    local begin_count end_count
+    begin_count=$(grep -Fc -- "$begin" "$full_path" 2>/dev/null || true)
+    end_count=$(grep -Fc -- "$end" "$full_path" 2>/dev/null || true)
+    begin_count=${begin_count:-0}
+    end_count=${end_count:-0}
+
+    if [[ "$begin_count" -eq 0 && "$end_count" -eq 0 ]]; then
+        echo "missing marker block (no BEGIN or END marker found)"
+        return 1
+    elif [[ "$begin_count" -eq 0 ]]; then
+        echo "missing BEGIN marker (END marker present with no matching BEGIN)"
+        return 1
+    elif [[ "$end_count" -eq 0 ]]; then
+        echo "missing END marker (BEGIN marker present with no matching END)"
+        return 1
+    elif [[ "$begin_count" -gt 1 || "$end_count" -gt 1 ]]; then
+        echo "duplicated marker(s) (${begin_count}x BEGIN, ${end_count}x END -- expected exactly 1 of each)"
+        return 1
+    fi
+
+    local begin_line end_line
+    begin_line=$(grep -Fn -- "$begin" "$full_path" | head -1 | cut -d: -f1)
+    end_line=$(grep -Fn -- "$end" "$full_path" | head -1 | cut -d: -f1)
+    if [[ "$begin_line" -ge "$end_line" ]]; then
+        echo "malformed order (END marker at line $end_line appears at or before BEGIN marker at line $begin_line)"
+        return 1
+    fi
+
+    return 0
+}
+
 # Generate manifest
 cmd_generate() {
     local quiet=false
@@ -690,6 +752,7 @@ cmd_verify() {
     local ok_count=0
     local modified_files=()
     local missing_files=()
+    local marker_integrity_failures=()
 
     # Get file paths from manifest
     local file_paths
@@ -712,6 +775,24 @@ cmd_verify() {
             continue
         fi
 
+        # Structural marker-integrity check (issue #6195). Independent of the
+        # hash comparisons below: a file whose markers were ALREADY missing,
+        # duplicated, or out of order when `generate` last ran bakes that
+        # malformed extraction into the recorded hash, so a hash-only
+        # comparison can never flag it on a later verify against the same
+        # still-malformed file. This runs against the current file every time,
+        # regardless of what the manifest recorded.
+        if [[ -n "$region" ]]; then
+            local region_markers region_begin region_end marker_problem
+            if region_markers=$(markers_for_region "$region" 2>/dev/null); then
+                IFS=$'\t' read -r region_begin region_end <<< "$region_markers"
+                marker_problem=""
+                if ! marker_problem=$(check_marker_integrity "$full_path" "$region_begin" "$region_end"); then
+                    marker_integrity_failures+=("$rel_path|$marker_problem")
+                fi
+            fi
+        fi
+
         # A region-scoped entry whose Loom marker block is now absent is real
         # drift (the block was removed), even though the file still exists.
         if [[ "$region" == "loom-block" ]] \
@@ -732,10 +813,11 @@ cmd_verify() {
 
     local modified_count=${#modified_files[@]}
     local missing_count=${#missing_files[@]}
+    local marker_integrity_count=${#marker_integrity_failures[@]}
     local status="ok"
     local exit_code=$EXIT_OK
 
-    if [[ $modified_count -gt 0 ]] || [[ $missing_count -gt 0 ]]; then
+    if [[ $modified_count -gt 0 ]] || [[ $missing_count -gt 0 ]] || [[ $marker_integrity_count -gt 0 ]]; then
         status="drift"
         exit_code=$EXIT_DRIFT
     fi
@@ -794,6 +876,27 @@ cmd_verify() {
                 done
                 printf '\n  '
             fi
+            printf '],\n'
+
+            # Marker-integrity failures array (issue #6195)
+            printf '  "marker_integrity": ['
+            if [[ $marker_integrity_count -gt 0 ]]; then
+                local first=true
+                for entry in "${marker_integrity_failures[@]}"; do
+                    IFS='|' read -r path problem <<< "$entry"
+                    if [[ "$first" == "true" ]]; then
+                        first=false
+                        printf '\n'
+                    else
+                        printf ',\n'
+                    fi
+                    printf '    {\n'
+                    printf '      "path": "%s",\n' "$path"
+                    printf '      "problem": "%s"\n' "$problem"
+                    printf '    }'
+                done
+                printf '\n  '
+            fi
             printf ']\n'
             printf '}\n'
             ;;
@@ -813,6 +916,9 @@ cmd_verify() {
             fi
             if [[ $missing_count -gt 0 ]]; then
                 echo -e "  MISSING:   ${RED}$missing_count files removed${NC}"
+            fi
+            if [[ $marker_integrity_count -gt 0 ]]; then
+                echo -e "  MARKERS:   ${RED}$marker_integrity_count managed-block marker issue(s)${NC}"
             fi
 
             if [[ $modified_count -gt 0 ]]; then
@@ -837,11 +943,22 @@ cmd_verify() {
                 done
             fi
 
+            if [[ $marker_integrity_count -gt 0 ]]; then
+                echo ""
+                echo "Managed-block marker issues:"
+                local entry
+                for entry in "${marker_integrity_failures[@]}"; do
+                    local path problem
+                    IFS='|' read -r path problem <<< "$entry"
+                    echo -e "  ${RED}$path${NC}: $problem"
+                done
+            fi
+
             echo ""
             if [[ "$status" == "ok" ]]; then
                 echo -e "Status: ${GREEN}ALL FILES MATCH${NC}"
             else
-                echo -e "Status: ${RED}DRIFT DETECTED${NC} ($modified_count modified, $missing_count missing)"
+                echo -e "Status: ${RED}DRIFT DETECTED${NC} ($modified_count modified, $missing_count missing, $marker_integrity_count marker issue(s))"
             fi
             ;;
 

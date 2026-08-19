@@ -161,7 +161,9 @@ tcl-baseline-*/
 .loom/*.sock
 .loom/*.tmp
 .loom/*.bak
+.loom/.install.lock
 .loom/logs/
+.loom/.resync-in-progress
 # <<< loom-managed <<<
 
 # Session handoff note (never commit — one-shot session state)

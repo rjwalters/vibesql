@@ -16,6 +16,11 @@
 #   - deprovision removes links iff they point into the checkout, never real files
 #
 # Sandboxed $HOME per case via mktemp -d, matching test-loom-dispatcher.sh.
+#
+# Source-tree-only by design (#6194/#6241): scripts/install/provision-skills.sh
+# lives at the repo root, not under defaults/, so it is never shipped into an
+# installed consumer repo. This suite SKIPs (exit 0) rather than errors when
+# run outside Loom's own checkout.
 
 set -uo pipefail
 
@@ -43,7 +48,10 @@ assert_contains() {
     if [[ "$1" == *"$2"* ]]; then pass "$3"; else fail "$3 (missing substring: '$2' in: $1)"; fi
 }
 
-[[ -f "$PROVISION_LIB" ]] || { echo "provisioning lib not found at $PROVISION_LIB"; exit 1; }
+if [[ ! -f "$PROVISION_LIB" ]]; then
+    echo "SKIP: source-tree-only test, $PROVISION_LIB not found (not shipped into an installed repo)" >&2
+    exit 0
+fi
 
 # shellcheck source=/dev/null
 source "$PROVISION_LIB"

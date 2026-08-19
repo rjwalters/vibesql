@@ -127,14 +127,14 @@ assert_eq "" "$out" "a bare #N with no dependency phrase is NOT an edge"
 echo
 echo "--- parse_dependency_refs: cross-repo reference forms ---"
 
-out="$(parse_dependency_refs 'Blocked by 2AMLogic/klayout-tools#391' 'o/r')"
-assert_eq "2AMLogic/klayout-tools#391" "$out" "explicit owner/repo#N keeps its own repo"
+out="$(parse_dependency_refs 'Blocked by example-org/tool-repo#202' 'o/r')"
+assert_eq "example-org/tool-repo#202" "$out" "explicit owner/repo#N keeps its own repo"
 
-out="$(parse_dependency_refs 'Depends on https://github.com/2AMLogic/marketing/issues/56' 'o/r')"
-assert_eq "2AMLogic/marketing#56" "$out" "issue URL normalizes to owner/repo#N"
+out="$(parse_dependency_refs 'Depends on https://github.com/example-org/downstream-repo/issues/101' 'o/r')"
+assert_eq "example-org/downstream-repo#101" "$out" "issue URL normalizes to owner/repo#N"
 
-out="$(parse_dependency_refs '**Blocked by:** #7 and 2AMLogic/x#8' 'o/r')"
-assert_eq $'2AMLogic/x#8\no/r#7' "$out" "same-repo and cross-repo refs on one line both captured"
+out="$(parse_dependency_refs '**Blocked by:** #7 and example-org/other-repo#8' 'o/r')"
+assert_eq $'example-org/other-repo#8\no/r#7' "$out" "same-repo and cross-repo refs on one line both captured"
 
 echo
 echo "--- _cycle_segment: reports the loop, not the whole path ---"
@@ -255,11 +255,11 @@ assert_contains "$OUT" "CYCLE_PATH: o/r#2 -> o/r#3 -> o/r#2" "reports the loop i
 echo
 echo "--- cross-repo cycle (the motivating incident's shape) ---"
 reset_state
-fixture '2AMLogic/marketing#56' OPEN 'Blocked by 2AMLogic/klayout-tools#391 (epic must land first)'
-fixture '2AMLogic/klayout-tools#391' OPEN 'Phase 8 Depends on https://github.com/2AMLogic/marketing/issues/56 canary output'
-run_ddc --issue 56 --repo 2AMLogic/marketing
+fixture 'example-org/downstream-repo#101' OPEN 'Blocked by example-org/tool-repo#202 (epic must land first)'
+fixture 'example-org/tool-repo#202' OPEN 'Phase 8 Depends on https://github.com/example-org/downstream-repo/issues/101 canary output'
+run_ddc --issue 101 --repo example-org/downstream-repo
 assert_eq "1" "$RC" "exit 1 on a cycle spanning two repos"
-assert_contains "$OUT" "CYCLE_PATH: 2AMLogic/marketing#56 -> 2AMLogic/klayout-tools#391 -> 2AMLogic/marketing#56" \
+assert_contains "$OUT" "CYCLE_PATH: example-org/downstream-repo#101 -> example-org/tool-repo#202 -> example-org/downstream-repo#101" \
     "cross-repo path names both repos"
 
 echo
@@ -357,25 +357,29 @@ assert_contains "$OUT" "UNREADABLE: private/repo#9" "unreadable node is surfaced
 echo
 echo "--- --report: surfaces the cycle and routes to loom:operator-only ---"
 reset_state
-fixture '2AMLogic/marketing#56' OPEN 'Blocked by 2AMLogic/klayout-tools#391'
-fixture '2AMLogic/klayout-tools#391' OPEN 'Depends on 2AMLogic/marketing#56'
-run_ddc --issue 56 --repo 2AMLogic/marketing --report
+fixture 'example-org/downstream-repo#101' OPEN 'Blocked by example-org/tool-repo#202'
+fixture 'example-org/tool-repo#202' OPEN 'Depends on example-org/downstream-repo#101'
+run_ddc --issue 101 --repo example-org/downstream-repo --report
 assert_eq "1" "$RC" "--report still exits 1 on a cycle"
-assert_contains "$OUT" "REPORTED: 2AMLogic/marketing#56" "REPORTED marker emitted"
-COMMENT="$(cat "$STUB_DIR/comments-2AMLogic_marketing_56.log" 2>/dev/null || true)"
+assert_contains "$OUT" "REPORTED: example-org/downstream-repo#101" "REPORTED marker emitted"
+COMMENT="$(cat "$STUB_DIR/comments-example-org_downstream-repo_101.log" 2>/dev/null || true)"
 assert_contains "$COMMENT" "Dependency cycle detected" "comment states the cycle explicitly"
-assert_contains "$COMMENT" "2AMLogic/marketing#56" "comment names this side of the cycle"
-assert_contains "$COMMENT" "2AMLogic/klayout-tools#391" "comment names the OTHER side of the cycle"
+assert_contains "$COMMENT" "example-org/downstream-repo#101" "comment names this side of the cycle"
+assert_contains "$COMMENT" "example-org/tool-repo#202" "comment names the OTHER side of the cycle"
 assert_contains "$COMMENT" "champion:dep-cycle:" "comment carries the idempotency marker"
-LABELS="$(cat "$STUB_DIR/labels-2AMLogic_marketing_56.log" 2>/dev/null || true)"
+LABELS="$(cat "$STUB_DIR/labels-example-org_downstream-repo_101.log" 2>/dev/null || true)"
 assert_contains "$LABELS" "loom:operator-only" "routes to loom:operator-only"
+assert_contains "$LABELS" "loom:operator-decision" "routes to the loom:operator-decision sub-kind (#5671) — breaking a cycle is a judgement call"
+# The blocker list is `sort -u`-ordered, so it reads downstream-repo before
+# tool-repo for these fixture names.
+assert_contains "$COMMENT" "Blocked by example-org/downstream-repo#101 example-org/tool-repo#202" "comment names the blocker(s) in machine-readable form (#5671)"
 
 echo
 echo "--- --report is idempotent: the same cycle is surfaced once ---"
-run_ddc --issue 56 --repo 2AMLogic/marketing --report
+run_ddc --issue 101 --repo example-org/downstream-repo --report
 assert_eq "1" "$RC" "second pass still reports the cycle to its caller"
-assert_contains "$OUT" "ALREADY_REPORTED: 2AMLogic/marketing#56" "second pass skips the comment"
-COMMENT_COUNT="$(jq '.comments | length' "$STUB_DIR/issue-2AMLogic_marketing_56.json")"
+assert_contains "$OUT" "ALREADY_REPORTED: example-org/downstream-repo#101" "second pass skips the comment"
+COMMENT_COUNT="$(jq '.comments | length' "$STUB_DIR/issue-example-org_downstream-repo_101.json")"
 assert_eq "1" "$COMMENT_COUNT" "exactly one comment posted across two passes"
 
 echo

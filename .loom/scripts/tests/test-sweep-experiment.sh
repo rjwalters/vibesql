@@ -18,8 +18,12 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+# lib/ is shipped alongside this test file (scripts/tests and scripts/lib are
+# siblings in both the defaults/ source tree and the installed
+# .loom/scripts/ tree), so resolve it self-relatively rather than hardcoding
+# the defaults/ source-tree path. See issue #6194 / #6241.
 # shellcheck source=/dev/null
-source "$REPO_ROOT/defaults/scripts/lib/locate-daemon-bin.sh"
+source "$SCRIPT_DIR/../lib/locate-daemon-bin.sh"
 DAEMON_BIN="$(loom_locate_daemon_bin "$REPO_ROOT")"
 if [[ -z "$DAEMON_BIN" ]]; then
   echo "SKIP: no loom-daemon binary found (build it with \`cargo build --manifest-path loom-daemon/Cargo.toml\` or set LOOM_DAEMON_BIN)" >&2

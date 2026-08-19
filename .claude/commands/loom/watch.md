@@ -94,8 +94,32 @@ Each tick issues **one** consolidated probe and branches on its exit code:
 loom-daemon health --since <interval> --json
 ```
 
-**Exit-code contract** (from #4761): `0` healthy · `1` degraded (some check
-non-green) · `2` daemon genuinely dead.
+**Exit-code contract** (from #4761, extended by #6191): `0` healthy · `1`
+degraded (some check non-green) · `2` daemon genuinely dead · `3` **busy, not
+confirmed unhealthy**.
+
+> **Exit 3 is not an alert — it means "try again shortly".** The probe bounds
+> its IPC round-trip much tighter than the daemon's own watchdog does, so on a
+> loaded host (many sweeps in flight, load average 20-50) the round-trip can
+> simply run out of budget against a daemon that is provably fine. Exit `3`
+> (`overall: "indeterminate-busy"` in `--json`) is emitted **only** when every
+> non-green section traces back to that exhausted budget *and* two local,
+> no-IPC signals corroborate the daemon — the process is alive and its
+> heartbeat is fresh. Anything without that corroboration is still the
+> ordinary exit `1`.
+>
+> **Treatment in the loop: record the tick and move on.** Do not name a
+> degradation, do not start (or advance) a two-tick confirmation streak, do
+> not alert, and above all do not treat it as R1 (`loom-daemon` is *not*
+> dead — the liveness signal is what produced this code in the first place).
+> The next tick re-probes; if the host is still busy you will see exit `3`
+> again, and if something is genuinely wrong the probe will say so with `1`
+> or `2`. **Do not re-implement the watchdog's consecutive-failure streak
+> logic here** — the whole point of the distinct code is that the daemon
+> already did that work; a run of busy ticks is a statement about host load,
+> not about daemon health. Persistent exit `3` across the *whole window* is
+> worth one line in the closing summary (the host was too loaded to probe
+> cleanly), never a mid-window remediation.
 
 ### Capability gate — detect the subcommand, never the issue number
 
@@ -137,6 +161,12 @@ branching:
 Derive the verdict: **dead** if liveness fails the cross-check → treat as exit 2;
 **degraded** if any other section is non-green → exit 1; else **healthy** → 0.
 
+Fallback mode has no *busy* verdict — exit `3` is produced only by a native
+probe that can see its own IPC budget. In fallback, a `loom-daemon status`
+call that hangs or times out while the liveness cross-check passes is the same
+situation; treat it the way exit `3` is treated above (record the tick, no
+remediation, no confirmation streak) rather than calling it degraded.
+
 Keep the whole battery under ~6 shell calls per tick. The point of #4761 is to
 make this one call; do not let the fallback grow past the thing it replaces.
 
@@ -148,7 +178,12 @@ Each tick, in order:
 
 1. **Probe** (above).
 2. **Classify** the verdict: healthy / degraded (with the specific non-green
-   sections named) / dead.
+   sections named) / dead / **busy** (exit `3`, `overall: "indeterminate-busy"`).
+   A **busy** tick short-circuits the rest of the tick: skip steps 3 and 4
+   entirely (no decision, no action, no two-tick streak started or advanced),
+   record the line at step 5 as `busy — probe budget exhausted, host loaded —
+   no action`, and sleep. It is neither a green tick nor a degradation; the
+   next tick re-probes.
 3. **Decide** using the remediation playbook — at most **one** remediation class
    per tick unless two are provably independent (e.g. a token refresh on root A
    and a runtimes backfill on root B).

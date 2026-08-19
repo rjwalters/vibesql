@@ -8,8 +8,8 @@
 # forced a local checkout of the target was target *resolution* — the script
 # inferred the NWO from the current directory's git remote via
 # forge_detect/forge_get_repo_nwo. `--repo OWNER/NAME` names the target
-# instead, so one workspace can sync labels onto klayout-tools and every
-# gf180-*/sky130-* canary without cloning any of them.
+# instead, so one workspace can sync labels onto a tool repo and every
+# analog-* canary without cloning any of them.
 #
 # This is a black-box test: sync-labels.sh is a full CLI script, so we stub
 # `gh` on PATH, run the real script as a subprocess from a scratch directory,

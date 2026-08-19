@@ -29,7 +29,7 @@
 #
 # Examples:
 #   detect-dependency-cycle.sh --issue 56
-#   detect-dependency-cycle.sh --issue 391 --repo 2AMLogic/klayout-tools
+#   detect-dependency-cycle.sh --issue 202 --repo example-org/tool-repo
 #   detect-dependency-cycle.sh --issue 56 --report          # comment + operator-only
 #
 # Options:
@@ -123,9 +123,9 @@ NO_CACHE=0
 # a second divergent parser; it only widens the REFERENCE half so a cross-repo
 # edge is followable:
 #
-#   #391                                          -> same repo as the citing issue
-#   2AMLogic/klayout-tools#391                    -> explicit owner/repo
-#   https://github.com/2AMLogic/marketing/issues/56 -> issue URL
+#   #202                                          -> same repo as the citing issue
+#   example-org/tool-repo#202                     -> explicit owner/repo
+#   https://github.com/example-org/downstream-repo/issues/101 -> issue URL
 #
 # Two-stage, exactly like every other reuser: stage 1 selects lines declaring a
 # dependency phrase, stage 2 extracts EVERY reference on those lines (not just
@@ -313,9 +313,12 @@ _walk() {
 # ---- reporting (--report only) ----
 # Comment once per distinct cycle (fingerprinted by the cycle's node SET, so the
 # same cycle discovered from either side collapses to one marker) and route the
-# issue to loom:operator-only. Mirrors champion-issue-promo.md's marker-and-skip
-# idempotency: an unchanged cycle is never re-commented, a genuinely different
-# cycle always is.
+# issue to loom:operator-only plus its loom:operator-decision sub-kind (#5671):
+# breaking a cycle means picking which declared edge is wrong, which is a
+# judgement call, not a self-clearing wait — see
+# .loom/docs/label-state-machine.md "operator-only sub-kinds". Mirrors
+# champion-issue-promo.md's marker-and-skip idempotency: an unchanged cycle is
+# never re-commented, a genuinely different cycle always is.
 _report_cycle() {
     local node="$1" pretty="$2" nodes="$3" fingerprint="$4"
     local repo="${node%#*}" num="${node##*#}"
@@ -337,16 +340,18 @@ The declared \`Blocked by\` / \`Depends on\` / \`Requires\` references form a cl
 $pretty
 \`\`\`
 
-Every issue on that path is OPEN, and each one's progress is declared to depend on
-the next, so the loop can never resolve itself: each side re-derives "still blocked"
-on every pass, indefinitely. This is the deadlock shape that previously had to be
-found by hand.
+Every issue on that path is OPEN, and the progress of each node is declared to depend
+on the next, so the loop can never resolve itself: each side re-derives "still
+blocked" on every pass, indefinitely. This is the deadlock shape that previously had
+to be found by hand.
 
 Breaking a cycle is a human decision - which declared dependency edge is wrong, or
 which side ships a partial increment first - so Champion is routing this to
-\`loom:operator-only\` instead of re-deriving the same conclusion forever.
+\`loom:operator-only\` (with the \`loom:operator-decision\` sub-kind: this is a
+judgement call, not a self-clearing wait) instead of re-deriving the same
+conclusion forever.
 
-**Cycle members**: $nodes
+**Cycle members** (machine-readable, #5671): Blocked by $nodes
 
 ---
 *Automated by Champion role (detect-dependency-cycle.sh)*
@@ -358,7 +363,7 @@ EOF
         warn "could not comment on $node"
         return 1
     fi
-    if ! gh issue edit "$num" --repo "$repo" --add-label "loom:operator-only" >/dev/null 2>&1; then
+    if ! gh issue edit "$num" --repo "$repo" --add-label "loom:operator-only,loom:operator-decision" >/dev/null 2>&1; then
         warn "could not add loom:operator-only to $node"
     fi
     echo "REPORTED: $node"

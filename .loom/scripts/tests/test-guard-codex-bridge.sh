@@ -31,8 +31,22 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-SRC_HOOKS="$REPO_ROOT/defaults/hooks"
-SRC_LIB="$REPO_ROOT/defaults/scripts/lib"
+# Hooks and the guard lib are both shipped (installed at .loom/hooks and
+# .loom/scripts/lib respectively), so resolve each the way each layout
+# actually lays it out: the installed path first (consumer repos, and
+# Loom's own dogfooded checkout), falling back to the defaults/
+# source-tree path (a bare source checkout with no installed copy yet).
+# See issue #6194 / #6241.
+if [[ -d "$REPO_ROOT/.loom/hooks" ]]; then
+    SRC_HOOKS="$REPO_ROOT/.loom/hooks"
+else
+    SRC_HOOKS="$REPO_ROOT/defaults/hooks"
+fi
+if [[ -d "$REPO_ROOT/.loom/scripts/lib" ]]; then
+    SRC_LIB="$REPO_ROOT/.loom/scripts/lib"
+else
+    SRC_LIB="$REPO_ROOT/defaults/scripts/lib"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,6 +59,15 @@ pass() { PASS=$((PASS + 1)); TOTAL=$((TOTAL + 1)); printf "${GREEN}PASS${NC} %s\
 fail() { FAIL=$((FAIL + 1)); TOTAL=$((TOTAL + 1)); printf "${RED}FAIL${NC} %s\n" "$1"; }
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this suite"; exit 1; }
+
+if [[ ! -d "$SRC_HOOKS" ]]; then
+    echo -e "${RED}FATAL${NC}: hooks directory not found at $SRC_HOOKS"
+    exit 1
+fi
+if [[ ! -d "$SRC_LIB" ]]; then
+    echo -e "${RED}FATAL${NC}: scripts/lib directory not found at $SRC_LIB"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Fixture: an isolated git repo with the installed hook layout and ONE managed
@@ -335,6 +358,63 @@ shell_case "redirect inside the worktree -> allow" "echo ok > $WT/src/out.txt" a
 assert_bridge "nested bash -c does not launder a catastrophic command" deny \
     "$(run_bridge "$(codex_event shell \
         "$(jq -nc '{command:["bash","-lc","bash -c \"rm -rf /\""]}')" "$WT")")"
+
+echo
+echo "=== workdir anchor validation (issue #4767) ==="
+#
+# `tool_input.workdir` is a MODEL-CHOSEN field (unlike the event's top-level
+# `cwd`). A `workdir` that is not inside the acting session's own git repo
+# must not silently leave GUARD_CWD rootless — that is exactly what let a
+# managed-worktree write past guard-destructive-generic.sh's #4178
+# confinement block before this fix (its `_WT_MAIN_ROOT` came up empty and
+# the containment test `continue`d past every write). Every vector here
+# targets the MAIN CHECKOUT with an absolute path, so if the bridge ever
+# regresses to trusting a rootless/foreign workdir, these turn from `deny`
+# into `allow` — exactly the fixture in the issue's reproduction table.
+
+# A second, unrelated git repo — "resolves to a valid repo" is not enough;
+# it must be the SAME repo as the acting session's.
+OTHER_REPO="$(mktemp -d)"
+git init -q "$OTHER_REPO"
+
+workdir_write_case() {
+    local desc="$1" workdir="$2" command="$3" expected="$4"
+    assert_bridge "$desc" "$expected" \
+        "$(run_bridge "$(codex_event shell "$(jq -nc --arg c "$command" --arg wd "$workdir" '{command:["bash","-lc",$c], workdir:$wd}')" "$WT")")"
+}
+
+for wd_desc_pair in \
+    "/tmp|an out-of-repo absolute path (/tmp)" \
+    "/|the filesystem root (/)" \
+    "${OTHER_REPO}|a non-repo/foreign-repo absolute path" \
+    "${WT}/does/not/exist|a nonexistent directory" \
+    "../../../../../../../../..|a relative workdir that escapes the worktree AND the repo" \
+    ; do
+    wd="${wd_desc_pair%%|*}"
+    desc="${wd_desc_pair#*|}"
+    workdir_write_case "workdir=$desc, redirect into the main checkout -> deny" \
+        "$wd" "echo pwned > $TMPROOT/CLAUDE.md" deny
+    workdir_write_case "workdir=$desc, tee into the main checkout -> deny" \
+        "$wd" "echo pwned | tee $TMPROOT/CLAUDE.md" deny
+    workdir_write_case "workdir=$desc, cp into the main checkout -> deny" \
+        "$wd" "cp $WT/src/a.txt $TMPROOT/CLAUDE.md" deny
+    workdir_write_case "workdir=$desc, mv into the main checkout -> deny" \
+        "$wd" "mv $WT/src/a.txt $TMPROOT/CLAUDE.md" deny
+    workdir_write_case "workdir=$desc, sed -i on the main checkout -> deny" \
+        "$wd" "sed -i '' 's/a/b/' $TMPROOT/CLAUDE.md" deny
+done
+
+# The valid, matching-repo case must be unaffected: a legitimate workdir
+# (absolute, pointing at the acting worktree) still allows a write inside it
+# and still denies escapes into the main checkout.
+workdir_write_case "workdir=the acting worktree (absolute) -> write inside it allowed" \
+    "$WT" "echo ok > $WT/src/workdir-ok.txt" allow
+workdir_write_case "workdir=the acting worktree (absolute) -> write to main checkout still denied" \
+    "$WT" "echo pwned > $TMPROOT/CLAUDE.md" deny
+workdir_write_case "workdir='.' (relative, matches event cwd) -> write to main checkout still denied" \
+    "." "echo pwned > $TMPROOT/CLAUDE.md" deny
+
+rm -rf "$OTHER_REPO"
 
 echo
 echo "=== alternate Codex execution payload shapes ==="

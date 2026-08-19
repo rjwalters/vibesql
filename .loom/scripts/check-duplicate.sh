@@ -14,7 +14,17 @@
 #   check-duplicate.sh "Issue title" ["Issue body"]
 #   check-duplicate.sh --title "Issue title" [--body "Issue body"]
 #   check-duplicate.sh --include-merged-prs --title "Issue title"
+#   check-duplicate.sh -- "--title-like text that starts with a dash" ["Body"]
 #   check-duplicate.sh --help
+#
+# A title (or body) that itself begins with "-"/"--" (common in CLI-tool
+# repos, where a bug report's title quotes the offending flag) is NOT safe to
+# pass positionally without a guard: bash's ordinary `while ... case "$1" in`
+# argument loop cannot distinguish "the caller meant this as an option" from
+# "the caller meant this as literal text that happens to start with a dash"
+# just by looking at the token. Use the standard `--` end-of-options
+# separator (#5898): every argument after a bare `--` is treated as
+# positional text, verbatim, no matter what it starts with.
 #
 # Exit codes:
 #   0 - No duplicates found, safe to create issue
@@ -110,8 +120,15 @@ USAGE:
     check-duplicate.sh --threshold 50 --title "Title"
     check-duplicate.sh --include-merged-prs --title "Title"
     check-duplicate.sh --issue 42 --title "Title"
+    check-duplicate.sh -- "--strategy basic is ignored" ["Body"]
 
 OPTIONS:
+    --                      End of options. Every argument after a bare "--"
+                            is treated as positional text (title, then body)
+                            verbatim, even if it starts with "-" or "--".
+                            Required when a title/body begins with a dash
+                            and is passed positionally rather than via
+                            --title/--body (#5898).
     --title TEXT            The title of the issue to check
     --body TEXT             The body/description of the issue (optional)
     --threshold NUM         Similarity threshold percentage, on a true Jaccard
@@ -151,6 +168,10 @@ EXAMPLES:
 
     # Also surface open work that cross-references issue #42
     check-duplicate.sh --issue 42 --title "Refactor authentication module"
+
+    # A title that itself starts with a dash (e.g. quoting a CLI flag) --
+    # "--" marks the end of options so it is not mistaken for one (#5898)
+    check-duplicate.sh -- "--strategy basic is ignored"
 
 EXIT CODES:
     0  No duplicates (and, with --issue, no related open work) found
@@ -700,53 +721,78 @@ main() {
     local include_merged_prs=false
     local issue=""
 
-    # Parse arguments
+    # Parse arguments. `end_of_options` tracks whether a bare "--" has been
+    # seen: once set, EVERY remaining argument is consumed as positional text
+    # (title, then body), verbatim, regardless of a leading "-"/"--" (#5898).
+    # Without this, a title like "--strategy basic is ignored" passed
+    # positionally falls into the `-*)` unknown-option branch below and is
+    # rejected as a flag instead of being read as the title.
+    local end_of_options=false
     while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --help|-h)
-                print_help
-                exit 0
-                ;;
-            --title)
-                shift
-                title="$1"
-                ;;
-            --body)
-                shift
-                body="$1"
-                ;;
-            --threshold)
-                shift
-                threshold="$1"
-                ;;
-            --include-merged-prs)
-                include_merged_prs=true
-                ;;
-            --issue)
-                shift
-                issue="$1"
-                ;;
-            --json)
-                json_output=true
-                ;;
-            -*)
-                print_error "Unknown option: $1"
-                print_help >&2
-                exit 2
-                ;;
-            *)
-                # Positional arguments: first is title, second is body
-                if [[ -z "$title" ]]; then
+        if ! $end_of_options; then
+            case "$1" in
+                --)
+                    end_of_options=true
+                    shift
+                    continue
+                    ;;
+                --help|-h)
+                    print_help
+                    exit 0
+                    ;;
+                --title)
+                    shift
                     title="$1"
-                elif [[ -z "$body" ]]; then
+                    ;;
+                --body)
+                    shift
                     body="$1"
-                else
-                    print_error "Too many arguments"
+                    ;;
+                --threshold)
+                    shift
+                    threshold="$1"
+                    ;;
+                --include-merged-prs)
+                    include_merged_prs=true
+                    ;;
+                --issue)
+                    shift
+                    issue="$1"
+                    ;;
+                --json)
+                    json_output=true
+                    ;;
+                -*)
+                    print_error "Unknown option: $1"
                     print_help >&2
                     exit 2
-                fi
-                ;;
-        esac
+                    ;;
+                *)
+                    # Positional arguments: first is title, second is body
+                    if [[ -z "$title" ]]; then
+                        title="$1"
+                    elif [[ -z "$body" ]]; then
+                        body="$1"
+                    else
+                        print_error "Too many arguments"
+                        print_help >&2
+                        exit 2
+                    fi
+                    ;;
+            esac
+        else
+            # Past "--": always positional, never re-parsed as an option --
+            # this is what lets a leading-dash title/body round-trip.
+            if [[ -z "$title" ]]; then
+                title="$1"
+            elif [[ -z "$body" ]]; then
+                body="$1"
+            else
+                print_error "Too many arguments"
+                print_help >&2
+                exit 2
+            fi
+        fi
         shift
     done
 

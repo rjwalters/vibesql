@@ -84,6 +84,91 @@
 #                          `autonomous.spawnTaskpolicyClass` config -> unset
 #                          (off by default). No-op on non-macOS or when
 #                          `taskpolicy` is unavailable.
+#   LOOM_SWEEP_CPU_QUOTA   Master toggle for the per-sweep CPU-quota
+#                          enforcement (issue #5111). `0` disables the whole
+#                          mechanism (no budget export, no quota wrap),
+#                          restoring pre-#5111 behavior. Default: enabled.
+#   LOOM_SWEEP_RESERVED_CORES  Cores subtracted off the host's logical core
+#                          count before handing the remainder to the sweep as
+#                          its CPU budget — mirrors the daemon's own
+#                          `min(16, cpu_cores - 2)` agent-concurrency rule.
+#                          Precedence: this env var ->
+#                          `autonomous.spawnReservedCores` config -> default
+#                          `2`. The resulting budget is always >= 1 core.
+#   LOOM_SWEEP_SHARED_CPU_BUDGET  Toggle for the HOST-WIDE division of that
+#                          budget across concurrently-running sweeps (issue
+#                          #5979). `0` keeps the pre-#5979 behavior where
+#                          every sweep independently claims `total -
+#                          reserved`. Precedence: this env var ->
+#                          `autonomous.spawnSharedCpuBudget` config ->
+#                          default enabled.
+#   LOOM_SWEEP_INFLIGHT_SWEEPS  Override the concurrent-sweep divisor instead
+#                          of asking the local daemon for it. A test hook,
+#                          and the escape hatch for a host whose concurrent
+#                          agents this daemon does not track.
+#   LOOM_SWEEP_INFLIGHT_PROBE_TIMEOUT_SECS  Hard bound on that daemon probe
+#                          (default `10`). On timeout the divisor falls back
+#                          to `1`, i.e. exactly pre-#5979 behavior.
+#   LOOM_SWEEP_CPU_BUDGET_CORES  OUTPUT, not an input: exported into the
+#                          spawned session with the computed per-sweep core
+#                          budget so agent-written drivers (e.g. a SPICE
+#                          batch harness) can read "how many cores may I run
+#                          concurrently" from their own environment. Set on
+#                          every platform, whether or not the quota below is
+#                          actually kernel-enforced.
+#   LOOM_SWEEP_WALLCLOCK_CEILING_SECS  Optional hard wall-clock ceiling on
+#                          the ENTIRE spawned session (not each leaf process)
+#                          — enforced via the systemd scope's
+#                          `RuntimeMaxSec=` when a quota wrap applies.
+#                          Precedence: this env var ->
+#                          `autonomous.spawnWallClockCeilingSecs` config ->
+#                          default `0` (disabled). Off by default for the
+#                          same reason `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`
+#                          below is forced to 0: a healthy sweep can
+#                          legitimately run for hours, and this ceiling has
+#                          no notion of "still making progress" — it is a
+#                          blunt backstop for a genuinely runaway/orphaned
+#                          batch, meant to be opted into per-repo (e.g. a
+#                          sim-heavy repo bounding its whole driver, not just
+#                          each leaf's own `timeout`), not a default that
+#                          could kill a legitimate long build.
+#
+# CPU-quota enforcement mechanism (issue #5111 — nothing bounded a sweep's
+# CPU, so an agent-written driver ran 8 concurrent `ngspice` processes and
+# saturated an entire 8-core host with no overall wall-clock/CPU limit).
+# When a Linux host with a reachable `systemd --user` manager is detected
+# (see lib/systemd-user.sh), the final `claude`/`claude-wrapper.sh` exec is
+# wrapped in `systemd-run --user --scope -p CPUQuota=<budget*100>%`, an
+# ACTUAL kernel cgroup quota: the whole process tree the sweep spawns (this
+# script's own descendants, however many leaf processes it forks) can never
+# collectively exceed the budget, regardless of process count — an agent
+# that ignores the published `LOOM_SWEEP_CPU_BUDGET_CORES` budget is still
+# contained. Killing the scope (e.g. #5110's orphan reaping) reaps every
+# process inside it in one shot. On a host with no systemd --user manager
+# (this fleet's macOS hosts), there is no cgroup-equivalent primitive
+# available without extra tooling, so this degrades to advisory-only: the
+# budget is still exported, but nothing kernel-side enforces it there yet
+# (tracked as a follow-up rather than attempted in this same change).
+#
+# Host-wide budget sharing (issue #5979 — three concurrent sweeps, each
+# correctly computing "6 of this 8-core host's cores are mine", summed to 18
+# and drove the host to load 133.87). The budget above is now DIVIDED by the
+# number of sweeps in flight on the host, read from `loom-daemon status
+# --json` at spawn time (see lib/cpu-budget.sh's loom_cpu_inflight_sweeps).
+#
+# SPAWN-TIME SNAPSHOT, deliberately — not live tracking. The divisor is
+# sampled ONCE, here, and never revised for the life of the sweep. A sweep
+# therefore keeps a share sized for the sibling count at its own start: if
+# siblings finish early it leaves headroom unclaimed, and if siblings start
+# later they divide only what the newer snapshot shows. The alternative —
+# continuously re-deriving each sweep's share as the host's population
+# changes — would require re-applying an already-installed systemd
+# `CPUQuota` to a running scope and re-publishing
+# LOOM_SWEEP_CPU_BUDGET_CORES into an already-started agent process, neither
+# of which any mechanism in Loom does today. The snapshot is strictly
+# conservative in the direction that matters: it can only ever leave a host
+# UNDER-subscribed, never over. Live re-balancing is a separate, larger
+# change and is explicitly out of scope here.
 
 set -euo pipefail
 
@@ -215,6 +300,220 @@ if [[ -z "${LOOM_SWEEP_NICED:-}" && "${LOOM_SWEEP_NICE:-1}" != "0" ]]; then
         export LOOM_SWEEP_NICED=1
         log_info "spawn-claude: re-exec at nice -n $_sweep_niceness (issue #4233; LOOM_SWEEP_NICE=0 to disable)"
         exec nice -n "$_sweep_niceness" "$0" "$@"
+    fi
+fi
+
+# --- Per-sweep CPU quota (issue #5111) ---
+#
+# See the header comment block above for the full rationale and env var
+# reference. Unlike the niceness block above, this does NOT re-exec itself —
+# it computes a budget and (on a host that can enforce it) builds a
+# `systemd-run --user --scope ...` prefix array (CPU_QUOTA_WRAP) that the
+# Dispatch section below prepends to the FINAL `claude`/`claude-wrapper.sh`
+# exec. Wrapping only the terminal exec — rather than re-invoking this whole
+# script under a wrapper, the way the niceness block re-execs itself — avoids
+# having to explicitly re-plumb every already-exported env var (the OAuth
+# token, LOOM_MODEL/LOOM_EFFORT flags, the safehouse MCP injection, etc.)
+# through a `systemd-run` invocation that does not automatically inherit an
+# arbitrary parent shell environment the way a plain `exec` does.
+#
+# Detachment side effect (issue #6129): `systemd-run --user --scope` creates
+# its scope as a transient unit owned by the `systemd --user` manager, not by
+# this process or by `loom-daemon` — the wrapped `claude`/`claude-wrapper.sh`
+# ends up with the user manager as its PPID, not this script or the daemon.
+# That means it survives `systemctl --user stop loom-daemon.service` (there is
+# no cgroup/parent relationship for that stop job to reach) exactly like a
+# launchd child survives a daemon exit, just via a different mechanism. This
+# is not itself new behavior for THIS script (spawned children were always
+# meant to outlive an ordinary daemon stop — see daemon_service.rs's "survive,
+# don't drain" policy comment) — #6129's finding is that operators had no way
+# to DELIBERATELY reap them as a group when they actually want to. See the
+# `--unit=`/`--slice=` naming below (predictable enumeration) and
+# `loom-daemon-quiesce.sh` (the explicit, single-command way to stop dispatch
+# AND every in-flight role/sweep child on both platforms).
+CPU_QUOTA_WRAP=()
+if [[ "${LOOM_SWEEP_CPU_QUOTA:-1}" != "0" ]]; then
+    # shellcheck source=./lib/cpu-budget.sh
+    source "${_script_dir}/lib/cpu-budget.sh"
+
+    _cpu_reserved="${LOOM_SWEEP_RESERVED_CORES:-}"
+    _cpu_wallclock="${LOOM_SWEEP_WALLCLOCK_CEILING_SECS:-}"
+    _cpu_shared="${LOOM_SWEEP_SHARED_CPU_BUDGET:-}"
+    _cpu_config_lib="${_script_dir}/lib/config-resolver.sh"
+    if [[ ( -z "$_cpu_reserved" || -z "$_cpu_wallclock" || -z "$_cpu_shared" ) \
+          && -f "$_cpu_config_lib" ]]; then
+        # shellcheck source=./lib/config-resolver.sh
+        source "$_cpu_config_lib"
+        [[ -z "$_cpu_reserved" ]] \
+            && _cpu_reserved="$(loom_config_get "$WORKSPACE" "autonomous.spawnReservedCores" "")"
+        [[ -z "$_cpu_wallclock" ]] \
+            && _cpu_wallclock="$(loom_config_get "$WORKSPACE" "autonomous.spawnWallClockCeilingSecs" "")"
+        [[ -z "$_cpu_shared" ]] \
+            && _cpu_shared="$(loom_config_get "$WORKSPACE" "autonomous.spawnSharedCpuBudget" "")"
+    fi
+    [[ "$_cpu_reserved" =~ ^[0-9]+$ ]] || _cpu_reserved=2
+    [[ "$_cpu_wallclock" =~ ^[0-9]+$ ]] || _cpu_wallclock=0
+    # Enabled unless explicitly switched off (`0` / `false`), matching
+    # LOOM_SWEEP_CPU_QUOTA's own default-on shape.
+    [[ "$_cpu_shared" =~ ^(0|false|no)$ ]] && _cpu_shared=0 || _cpu_shared=1
+
+    _cpu_total_cores="$(loom_cpu_total_cores)"
+
+    # Issue #5979: how many sweeps are running on THIS HOST right now,
+    # including the one being spawned. `1` is both the no-daemon fail-safe
+    # and the honest answer for a solo sweep, so the divided budget collapses
+    # to the pre-#5979 `total - reserved` in exactly those cases.
+    _cpu_inflight=1
+    if [[ "$_cpu_shared" == "1" ]]; then
+        _cpu_inflight="$(loom_cpu_inflight_sweeps "$WORKSPACE")"
+        [[ "$_cpu_inflight" =~ ^[0-9]+$ ]] && ((_cpu_inflight >= 1)) || _cpu_inflight=1
+    fi
+
+    _cpu_budget_cores="$(loom_cpu_budget_cores "$_cpu_total_cores" "$_cpu_reserved" "$_cpu_inflight")"
+    _cpu_quota_pct=$((_cpu_budget_cores * 100))
+
+    # Published parallelism budget (Suggested-direction #2 in #5111): exported
+    # unconditionally, on every platform, so an agent writing a driver script
+    # (e.g. a SPICE batch harness) can read how many cores it may use even
+    # where the quota below is not kernel-enforced. Since #5979 the number is
+    # this sweep's SHARE of the host, not the whole host — a harness that
+    # already reads it gets host-wide coordination for free, with no change
+    # on its side.
+    export LOOM_SWEEP_CPU_BUDGET_CORES="$_cpu_budget_cores"
+    if [[ "$_cpu_shared" == "1" ]]; then
+        log_info "spawn-claude: CPU budget = ${_cpu_budget_cores} core(s) of ${_cpu_total_cores} (reserved ${_cpu_reserved}) divided across ${_cpu_inflight} in-flight sweep(s) on this host — exported as LOOM_SWEEP_CPU_BUDGET_CORES (issues #5111/#5979)"
+    else
+        log_info "spawn-claude: CPU budget = ${_cpu_budget_cores} core(s) of ${_cpu_total_cores} (reserved ${_cpu_reserved}) — host-wide sharing disabled (LOOM_SWEEP_SHARED_CPU_BUDGET=0, #5979) — exported as LOOM_SWEEP_CPU_BUDGET_CORES (issue #5111)"
+    fi
+
+    _systemd_user_lib="${_script_dir}/lib/systemd-user.sh"
+    if [[ -f "$_systemd_user_lib" ]]; then
+        # shellcheck source=./lib/systemd-user.sh
+        source "$_systemd_user_lib"
+    fi
+
+    if command -v is_linux_systemd >/dev/null 2>&1 && is_linux_systemd; then
+        _cpu_quota_props=(-p "CPUQuota=${_cpu_quota_pct}%")
+        if [[ "$_cpu_wallclock" != "0" ]]; then
+            _cpu_quota_props+=(-p "RuntimeMaxSec=${_cpu_wallclock}")
+        fi
+        # Predictable unit naming + a dedicated slice (issue #6129): a
+        # `systemd-run --user --scope` invocation with no --unit= gets an
+        # opaque, systemd-generated name (`run-r<32-hex>.scope`, exactly the
+        # shape #6129's incident had to `grep` command lines to find), and
+        # with no --slice= it lands wherever the default policy places it. An
+        # operator draining a host — or this repo's own quiesce tooling
+        # (loom-daemon-quiesce.sh, #6129) — needs to enumerate every one of
+        # these scopes AS A GROUP without matching on `claude-wrapper.sh -p
+        # /loom:` argv text (fragile: breaks the moment a role/prompt name
+        # changes). `loom-agent-<pid>-<rand>.scope` is unique per spawn (pid
+        # is THIS spawn-claude.sh invocation's own pid, stable across the
+        # niceness re-exec above since exec preserves it; the random suffix
+        # guards a pid reused across two spawns in the same tick) and always
+        # starts with the greppable `loom-agent-` prefix; `loom-agents.slice`
+        # groups every one of them under one cgroup subtree for accounting
+        # and `systemctl --user list-units 'loom-agent-*.scope'` enumeration.
+        # A separate random suffix on the PROBE unit's own name (below) keeps
+        # it from ever colliding with the real unit this spawn will create,
+        # regardless of how quickly systemd garbage-collects the probe scope.
+        _scope_slice="loom-agents.slice"
+        _scope_unit="loom-agent-$$-${RANDOM}${RANDOM}.scope"
+        _scope_probe_unit="loom-agent-probe-$$-${RANDOM}${RANDOM}.scope"
+        _scope_props=(--slice="$_scope_slice")
+        # Probe with a trivial `true` invocation first: a real scope create +
+        # teardown, so a host where the properties above are rejected (e.g.
+        # the "cpu" controller isn't delegated to the user manager) is
+        # detected here rather than replacing this process with a failing
+        # `systemd-run` at the real exec below. Best-effort: probe failure
+        # never blocks the spawn, it just leaves CPU_QUOTA_WRAP empty.
+        #
+        # THREE-WAY outcome, not two (issue #6129): the naming/slice props are
+        # a #6129 ergonomics addition layered on top of #5111's *functional*
+        # quota enforcement, so a host that rejects `--unit=`/`--slice=` (an
+        # old systemd-run, a slice the user manager refuses to create, a
+        # policy that forbids naming transient units) must NOT silently cost
+        # this host its CPU quota — that would be a #5111 regression traded
+        # for an enumeration convenience. So a failed naming probe re-probes
+        # the pre-#6129 unnamed form before giving up: quota preserved,
+        # enumerability degraded to `loom-daemon-quiesce.sh`'s cross-platform
+        # process-pattern step (which was always the launchd mechanism and
+        # reaches an unnamed scope's processes just as well).
+        if systemd-run --user --scope --quiet --unit="$_scope_probe_unit" "${_scope_props[@]}" "${_cpu_quota_props[@]}" -- true >/dev/null 2>&1; then
+            CPU_QUOTA_WRAP=(systemd-run --user --scope --quiet --unit="$_scope_unit" "${_scope_props[@]}" "${_cpu_quota_props[@]}" --)
+            _cpu_quota_msg="spawn-claude: enforcing CPUQuota=${_cpu_quota_pct}% via systemd --user scope unit=${_scope_unit} slice=${_scope_slice} (issue #5111, naming/slice #6129)"
+            [[ "$_cpu_wallclock" != "0" ]] && _cpu_quota_msg+=", RuntimeMaxSec=${_cpu_wallclock}s"
+            log_info "$_cpu_quota_msg"
+        elif systemd-run --user --scope --quiet "${_cpu_quota_props[@]}" -- true >/dev/null 2>&1; then
+            CPU_QUOTA_WRAP=(systemd-run --user --scope --quiet "${_cpu_quota_props[@]}" --)
+            _cpu_quota_msg="spawn-claude: enforcing CPUQuota=${_cpu_quota_pct}% via an UNNAMED systemd --user scope — this host rejected --unit=/--slice= (issue #5111 quota preserved; #6129 scope enumeration unavailable, use loom-daemon-quiesce.sh's process scan to drain)"
+            [[ "$_cpu_wallclock" != "0" ]] && _cpu_quota_msg+=", RuntimeMaxSec=${_cpu_wallclock}s"
+            log_warn "$_cpu_quota_msg"
+        else
+            log_warn "spawn-claude: systemd-run --user --scope probe failed; CPU quota is NOT kernel-enforced this spawn (LOOM_SWEEP_CPU_BUDGET_CORES=${_cpu_budget_cores} remains advisory-only, issue #5111)"
+        fi
+    else
+        log_warn "spawn-claude: no reachable systemd --user manager on this host; CPU quota is advisory-only here (LOOM_SWEEP_CPU_BUDGET_CORES=${_cpu_budget_cores}, issue #5111)"
+    fi
+else
+    log_info "spawn-claude: CPU quota mechanism disabled (LOOM_SWEEP_CPU_QUOTA=0, issue #5111)"
+fi
+
+# --- Host-sleep prevention (issue #6311) ---
+#
+# #3350's check-host-sleep.sh is advisory-only by design — it warns but never
+# mutates anything, so an operator re-applies the mitigation by hand on every
+# host, every run. Repo-level opt-in (`host.preventSleep` in
+# `.loom/config.json`, env override `LOOM_HOST_PREVENT_SLEEP`, standard
+# env > config > default-OFF precedence — see lib/host-sleep-config.sh)
+# self-wraps THIS spawn in `systemd-inhibit --what=idle:sleep`, exactly the
+# manual remediation check-host-sleep.sh has always recommended by hand.
+#
+# This is the single dispatch chokepoint for BOTH named Linux entry points in
+# #6311 ("sweep" and "role runner") — `loom-daemon` invokes this script
+# directly for sweep dispatch (SweepRegistryConfig::resolve_spawn_bin) AND
+# scheduled role-runner dispatch (role_runner.rs); MOM's interactive
+# terminals run `claude` directly and never go through this script, so an
+# interactive session still needs its own manual wrap (see
+# check-host-sleep.sh's "Note:" addition for that case).
+#
+# Linux-only — systemd-inhibit talks to systemd-logind, which needs no
+# privilege. macOS's reliable defense (`sudo pmset -c sleep 0`) is privileged
+# and global; a repo-level config flag must NEVER invoke `sudo` silently
+# (#6311's own explicit macOS guardrail), so this mechanism is a deliberate
+# no-op there — check-host-sleep.sh still surfaces the manual macOS
+# remediation (or, once `host.sleepMitigationAcknowledged` is set, a
+# downgraded one-liner naming it).
+#
+# `idle:sleep` locks are HOST-WIDE, not scoped to this process's own
+# children — visible via `systemd-inhibit --list` for the lifetime of this
+# spawn (the #6311 acceptance criterion), and as a side effect keep every
+# sibling process on the host (including a currently-idle `loom-daemon`)
+# awake too, for as long as at least one sweep/role-runner spawn is in
+# flight.
+#
+# Prefix-array composition mirrors CPU_QUOTA_WRAP immediately above: a
+# `--why=probe -- true` dry run first, so a host that rejects it (no
+# reachable logind, e.g. a container with no dbus) degrades to "spawn
+# without the wrap" rather than replacing this process with a failing
+# `systemd-inhibit` at the real exec below. Never blocks the spawn.
+SLEEP_INHIBIT_WRAP=()
+_sleep_inhibit_config_lib="${_script_dir}/lib/host-sleep-config.sh"
+if [[ -f "$_sleep_inhibit_config_lib" ]]; then
+    # shellcheck source=./lib/host-sleep-config.sh
+    source "$_sleep_inhibit_config_lib"
+    if declare -F loom_host_prevent_sleep_enabled >/dev/null 2>&1 \
+        && [[ "$(loom_host_prevent_sleep_enabled "$WORKSPACE")" == "1" ]]; then
+        if command -v systemd-inhibit >/dev/null 2>&1; then
+            _sleep_inhibit_why="${LOOM_ROLE:-loom}"
+            if systemd-inhibit --what=idle:sleep --who=loom --why=probe -- true >/dev/null 2>&1; then
+                SLEEP_INHIBIT_WRAP=(systemd-inhibit --what=idle:sleep --who=loom --why="$_sleep_inhibit_why" --)
+                log_info "spawn-claude: host.preventSleep is enabled — wrapping this spawn in systemd-inhibit --what=idle:sleep --why=${_sleep_inhibit_why} (issue #6311)"
+            else
+                log_warn "spawn-claude: host.preventSleep is enabled but a systemd-inhibit probe failed (no reachable systemd-logind?); spawning WITHOUT the sleep-inhibit wrap (issue #6311)"
+            fi
+        else
+            log_warn "spawn-claude: host.preventSleep is enabled but systemd-inhibit is not on PATH (macOS, or non-systemd Linux); spawning WITHOUT the sleep-inhibit wrap — see check-host-sleep.sh for the manual remediation (issue #6311)"
+        fi
     fi
 fi
 
@@ -356,6 +655,36 @@ elif [[ -n "${LOOM_EFFORT:-}" ]]; then
     log_info "spawn-claude: effort=$LOOM_EFFORT (from LOOM_EFFORT)"
 fi
 
+# --- Account provider resolution (issue #5609, design D8) ---
+# Reads THIS runtime's own manifest (defaults/runtimes/claude.json)'s
+# "accountProvider" field so the pool `tokens select --provider` dispatches
+# into is a property of the runtime manifest, not a value hardcoded in this
+# script -- an operator can locally repoint it by editing
+# .loom/runtimes/claude.json without touching this script. Resolution mirrors
+# check-runtime-capabilities.sh's precedence: an on-disk
+# <repo>/.loom/runtimes/<name>.json wins over the defaults/runtimes/ fallback
+# next to this script. A missing file, missing field, or missing `jq` all
+# fall open to "claude" (never fail closed) -- design D8's "a missing
+# accountProvider on an un-resynced install must default to claude".
+_loom_account_provider_for_runtime() {
+    local runtime_name="$1" manifest=""
+    if [[ -f "${WORKSPACE}/.loom/runtimes/${runtime_name}.json" ]]; then
+        manifest="${WORKSPACE}/.loom/runtimes/${runtime_name}.json"
+    elif [[ -f "${_script_dir}/../runtimes/${runtime_name}.json" ]]; then
+        manifest="${_script_dir}/../runtimes/${runtime_name}.json"
+    fi
+    if [[ -z "$manifest" ]] || ! command -v jq >/dev/null 2>&1; then
+        printf '%s\n' "claude"
+        return
+    fi
+    local provider
+    provider="$(jq -r '.accountProvider // "claude"' "$manifest" 2>/dev/null)"
+    case "$provider" in
+        "" | null) provider="claude" ;;
+    esac
+    printf '%s\n' "$provider"
+}
+
 # --- Token selection ---
 if [[ -z "${LOOM_SPAWN_NO_EXPORT:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
     _daemon_bin="$(loom_locate_daemon_bin "$WORKSPACE")"
@@ -383,7 +712,8 @@ if [[ -z "${LOOM_SPAWN_NO_EXPORT:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; th
     _daemon_version="$("$_daemon_bin" --version 2>/dev/null | head -1)"
     log_info "spawn-claude: token-selection binary: $_daemon_bin (${_daemon_version:-version unknown})"
 
-    _select_args=(tokens select --workspace "$WORKSPACE" --export)
+    _account_provider="$(_loom_account_provider_for_runtime claude)"
+    _select_args=(tokens select --workspace "$WORKSPACE" --provider "$_account_provider" --export)
     # Pre-flight: auto-unpin if every allowlisted account has hit the
     # consecutive-failure threshold (default 5). Without this, an
     # operator-set pin can trap the spawner once all pinned accounts
@@ -510,7 +840,16 @@ if [[ -f "$_mcp_config_lib" ]]; then
         fi
 
         if [[ -z "$_sh_socket" ]]; then
-            log_warn "spawn-claude: safehouse enabled but no socket resolves (safehouse.socket / \$LOOM_SAFEHOUSE_SOCKET / \$SAFEHOUSED_SOCKET); skipping safehouse MCP injection (loom MCP unaffected)."
+            # Loud on purpose (issue #5523): before this, the message named
+            # only the mechanism ("skipping safehouse MCP injection"), buried
+            # in a per-role sweep log nobody was tailing — every sweep on an
+            # affected host silently stopped narrating to safehouse for 11
+            # hours, unnoticed, because the ONLY consequence anyone could see
+            # from outside was the public fleet pulse going
+            # stale. Name that consequence here, and point at the standalone,
+            # on-demand check (independent of a daemon restart) that answers
+            # "is this drifted?" without reading any sweep log.
+            log_warn "spawn-claude: SAFEHOUSE DRIFT — safehouse.enabled is true but no socket resolves (safehouse.socket / \$LOOM_SAFEHOUSE_SOCKET / \$SAFEHOUSED_SOCKET); no safehouse narration will be recorded for this sweep — the public fleet pulse is fed exclusively from safehouse narration, so this host's activity will not appear there until the socket resolves. Run '.loom/scripts/check-safehouse-socket.sh' to check every managed repo on this host without reading sweep logs. Skipping safehouse MCP injection (loom MCP unaffected)."
         elif ! command -v "$_sh_command" >/dev/null 2>&1; then
             log_warn "spawn-claude: safehouse launch command '$_sh_command' not found in PATH; skipping safehouse MCP injection (loom MCP unaffected)."
         else
@@ -530,13 +869,36 @@ if [[ -f "$_mcp_config_lib" ]]; then
 fi
 
 # --- Dispatch ---
+# SLEEP_INHIBIT_WRAP (issue #6311) then CPU_QUOTA_WRAP (issue #5111) are
+# prepended, in that order, to whichever final command is exec'd below —
+# each empty (no-op) unless its own block above found a usable mechanism.
+# Order composes correctly because both wraps end their own array with a
+# trailing `--`: `systemd-inhibit ... -- systemd-run ... -- claude ...`. The
+# `+"${arr[@]}"` guard on each is required under `set -u`: bash 3.2 (macOS's
+# shipped default) treats `"${arr[@]}"` on a truly empty array as an
+# unbound-variable error without it.
+#
+# Process-group self-reap scope note (Issue #6192): both branches below end
+# in a plain `exec`, which REPLACES this process's image — nothing is left
+# alive afterward to trap the leaf command's exit and reap any children it
+# leaves behind, so `lib/reap-process-group.sh`'s self-reap cannot be wired in
+# here without restructuring `exec` into a fork+wait, a materially riskier
+# change to this script's signal/tty semantics than this issue's scope
+# justifies. This is not a gap in practice for the primary daemon-dispatch
+# path: `sweep_registry::dispatch` appends `--use-wrapper` by default (see
+# `dispatch_appends_use_wrapper_flag`), so daemon-dispatched sweeps take the
+# `USE_WRAPPER` branch into `claude-wrapper.sh`, which already runs `claude`
+# as a managed child (never exec-replaces itself) and carries the self-reap
+# trap directly (see its own header comment). Only a manual/interactive
+# invocation that explicitly omits `--use-wrapper` reaches the raw `exec`
+# below without that backstop.
 if [[ "$USE_WRAPPER" == "true" ]]; then
     _wrapper="${WORKSPACE}/.loom/scripts/claude-wrapper.sh"
     if [[ ! -x "$_wrapper" ]]; then
         log_error "Cannot find executable claude-wrapper.sh at $_wrapper"
         exit 1
     fi
-    exec "$_wrapper" "${PASSTHROUGH_ARGS[@]}"
+    exec ${SLEEP_INHIBIT_WRAP[@]+"${SLEEP_INHIBIT_WRAP[@]}"} ${CPU_QUOTA_WRAP[@]+"${CPU_QUOTA_WRAP[@]}"} "$_wrapper" "${PASSTHROUGH_ARGS[@]}"
 fi
 
 # Default: exec the `claude` CLI directly.
@@ -546,4 +908,4 @@ if ! command -v claude >/dev/null 2>&1; then
     exit 127
 fi
 echo "# LOOM_CLI_START runtime=claude" >&2
-exec claude "${PASSTHROUGH_ARGS[@]}"
+exec ${SLEEP_INHIBIT_WRAP[@]+"${SLEEP_INHIBIT_WRAP[@]}"} ${CPU_QUOTA_WRAP[@]+"${CPU_QUOTA_WRAP[@]}"} claude "${PASSTHROUGH_ARGS[@]}"

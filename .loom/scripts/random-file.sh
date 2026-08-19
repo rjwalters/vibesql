@@ -121,58 +121,6 @@ debug() {
     fi
 }
 
-# Build the find command exclude patterns
-build_exclude_args() {
-    local args=""
-
-    # Add default excludes
-    for pattern in "${DEFAULT_EXCLUDES[@]}"; do
-        # Handle directory patterns
-        if [[ "$pattern" != *.* ]]; then
-            args+=" -path '*/$pattern/*' -o -path '*/$pattern' -o"
-        else
-            # Handle file patterns
-            args+=" -name '$pattern' -o"
-        fi
-    done
-
-    # Add user-specified excludes
-    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-        # Convert glob pattern to find pattern
-        # **/ at start means anywhere in path
-        local find_pattern
-        find_pattern=$(convert_glob_to_find "$pattern")
-        args+=" $find_pattern -o"
-    done
-
-    # Remove trailing " -o" and wrap in parentheses
-    args="${args% -o}"
-    echo "$args"
-}
-
-# Convert a glob pattern to a find -path/-name pattern
-convert_glob_to_find() {
-    local pattern="$1"
-
-    # Handle **/*.ext patterns (anywhere with extension)
-    if [[ "$pattern" == "**/"* ]]; then
-        local rest="${pattern#**/}"
-        if [[ "$rest" == *"*"* ]]; then
-            # It's a wildcard pattern like **/*.test.ts
-            echo "-path '*/$rest' -o -name '${rest#*/}'"
-        else
-            # It's a specific name like **/foo.ts
-            echo "-name '$rest'"
-        fi
-    elif [[ "$pattern" == *"**"* ]]; then
-        # Pattern contains ** somewhere
-        echo "-path '*${pattern//\*\*/\*}'"
-    else
-        # Simple pattern
-        echo "-path '*/$pattern'"
-    fi
-}
-
 # Get list of files matching criteria
 get_matching_files() {
     cd "$WORKSPACE_ROOT"

@@ -1,5 +1,6 @@
 {
   "runtime": "codex",
+  "accountProvider": "codex",
   "capabilities": {
     "mcp": "yes",
     "subagents": "no",

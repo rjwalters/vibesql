@@ -31,6 +31,15 @@ for _candidate in \
     fi
 done
 
+# Pin the #5979 concurrent-sweep divisor for the whole suite. Without this,
+# spawn-claude.sh's CPU-budget block would shell out to `loom-daemon status
+# --json` on EVERY invocation below — against whatever real daemon happens to
+# be running on the host — making every budget assertion depend on the host's
+# live sweep population. `1` is the value a host with no daemon produces, so
+# pinning it here keeps the pre-#5979 expectations meaningful. Section 7c
+# overrides it deliberately to exercise the divided-budget math.
+export LOOM_SWEEP_INFLIGHT_SWEEPS=1
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -132,6 +141,40 @@ assert_eq "TOKEN_EXPIRED" "$result" "OAuth token expired -> TOKEN_EXPIRED"
 # Vector #9: 401 authentication_error → TOKEN_EXPIRED
 result=$(classify_error "401 authentication_error" 1)
 assert_eq "TOKEN_EXPIRED" "$result" "401 authentication_error -> TOKEN_EXPIRED"
+
+# Vector #9b (issue #6030): the exact live death-tail wording, "401 Invalid
+# bearer token" — an auth-dead credential distinct from "authentication_error"
+# / "expired", which none of the pre-#6030 patterns matched (it fell through
+# to the generic RECOVERABLE catch-all instead of TOKEN_EXPIRED).
+result=$(classify_error "Failed to authenticate. API Error: 401 Invalid bearer token" 1)
+assert_eq "TOKEN_EXPIRED" "$result" "'401 Invalid bearer token' -> TOKEN_EXPIRED (#6030)"
+
+# Vector #9c (issue #6030): bare "invalid bearer token" without the leading
+# "401" wording still classifies — the load-bearing phrase is "invalid bearer
+# token", not the numeric code (which #9/#9b already cover independently).
+result=$(classify_error "invalid bearer token" 1)
+assert_eq "TOKEN_EXPIRED" "$result" "'invalid bearer token' (no leading 401) -> TOKEN_EXPIRED (#6030)"
+
+# Vector #9d (issue #6424): "organization has disabled Claude subscription
+# access" — an account-level billing/authorization death fell through to
+# RECOVERABLE (37/43 permanent deaths on one incident host carried this exact
+# line) because none of the pre-#6424 patterns matched it. Folded into
+# TOKEN_EXPIRED (same remedy: mark bad, rotate, needs human re-authorization).
+result=$(classify_error "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access" 1)
+assert_eq "TOKEN_EXPIRED" "$result" "'organization has disabled ...' -> TOKEN_EXPIRED (#6424)"
+
+# Vector #9e (issue #6424): the sibling death-tail from the same incident (the
+# other 6/43 permanent deaths) — "Failed to authenticate. API Error: 403 The
+# socket connection was closed unexpectedly".
+result=$(classify_error "Failed to authenticate. API Error: 403 The socket connection was closed unexpectedly" 1)
+assert_eq "TOKEN_EXPIRED" "$result" "'Failed to authenticate ... socket connection was closed unexpectedly' -> TOKEN_EXPIRED (#6424)"
+
+# Vector #9f (issue #6424, negative case): a bare, unrelated socket-closed
+# network blip — with no "failed to authenticate" wording — must NOT be swept
+# into this terminal, account-marked-bad branch. It stays RECOVERABLE via the
+# generic network-error checks (or the catch-all).
+result=$(classify_error "socket connection was closed unexpectedly" 1)
+assert_eq "RECOVERABLE" "$result" "bare 'socket connection was closed unexpectedly' (no auth wording) stays RECOVERABLE (#6424 negative case)"
 
 # Vector #10: hit your limit → TOKEN_EXHAUSTED
 result=$(classify_error "You've hit your limit" 1)
@@ -296,6 +339,31 @@ assert_eq "SUCCESS" "$result" "exit=0 mentioning 'reached your Fable 5 limit' is
 # unrelated sentence that merely ends in "limit" is not swallowed into exhaustion.
 result=$(classify_error "reached your goal well before the team agreed on any spending limit" 1)
 assert_eq "RECOVERABLE" "$result" "a long unrelated 'reached your … limit' sentence is not exhaustion (#4501)"
+
+# --- Per-model-tier credit exhaustion (issue #5687) ---
+# "You're out of usage credits" matched none of the patterns above (no "limit"
+# token, no "extra usage") and fell through to the RECOVERABLE catch-all, so a
+# whole wave of in-session builders was retried on the SAME exhausted tier
+# instead of dropping a model rung. Its own category — the remedy is a cheaper
+# model on the SAME account, which is a different remedy in KIND from rotation.
+
+# Vector #42: the observed incident wording → MODEL_CREDITS_EXHAUSTED
+result=$(classify_error "You're out of usage credits. Run /usage-credits or switch models with /model." 1)
+assert_eq "MODEL_CREDITS_EXHAUSTED" "$result" "'out of usage credits' -> MODEL_CREDITS_EXHAUSTED (#5687)"
+
+# Vector #43 (ORDERING HAZARD): #4501's per-model ceiling also mentions
+# /usage-credits, and predates this branch — it must keep TOKEN_EXHAUSTED. This
+# only holds because #5687's branch is checked AFTER the exhaustion regex.
+result=$(classify_error "You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model." 1)
+assert_eq "TOKEN_EXHAUSTED" "$result" "#4501's ceiling keeps TOKEN_EXHAUSTED despite naming credits (#5687 ordering)"
+
+# Vector #44 (NO FALSE POSITIVE): an unrelated "credit" mention is not a fault.
+result=$(classify_error "Payment failed: your credit card was declined" 1)
+assert_eq "RECOVERABLE" "$result" "an unrelated 'credit' mention is not credit exhaustion (#5687)"
+
+# Vector #45 (REGRESSION, #3233): exit-code-first survives the new branch too.
+result=$(classify_error "Tip: 'You're out of usage credits' means switch models." 0)
+assert_eq "SUCCESS" "$result" "exit=0 mentioning credit exhaustion is SUCCESS (#3233/#5687)"
 
 # --- Retry-verdict vectors (issue #4501) ---
 # `classification_is_transient` is now THE single source of truth for every retry
@@ -1216,6 +1284,548 @@ fi
 rm -rf "$PRIO_DIR"
 
 # ============================================================
+# Section 7b: per-sweep CPU quota (issue #5111)
+#
+# Nothing bounded a sweep's CPU, so an agent-written driver could run N
+# concurrent CPU-bound processes and saturate an entire host. On a host with
+# a reachable `systemd --user` manager, spawn-claude.sh wraps the final
+# `claude`/`claude-wrapper.sh` exec in `systemd-run --user --scope -p
+# CPUQuota=<budget*100>%` (an actual kernel cgroup quota); everywhere else
+# (this dev host included) it degrades to advisory-only: the computed budget
+# is still exported as LOOM_SWEEP_CPU_BUDGET_CORES, but nothing wraps the
+# exec. Both branches are exercised below — `LOOM_SYSTEMD_FORCE=1` (the same
+# test-only seam lib/systemd-user.sh already exposes) drives the enforced
+# path deterministically on any OS, including this macOS dev host.
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh CPU quota (#5111)..."
+
+CPU_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_WS" "$STUB_DIR" "$CPU_DIR"' EXIT
+
+cat > "$CPU_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "stub-claude budget=${LOOM_SWEEP_CPU_BUDGET_CORES:-unset}"
+STUB
+chmod +x "$CPU_DIR/claude"
+
+# Deterministic core count for every test below, regardless of host.
+cat > "$CPU_DIR/nproc" <<'STUB'
+#!/usr/bin/env bash
+echo 8
+STUB
+chmod +x "$CPU_DIR/nproc"
+
+# Fake `systemd-run` that (1) logs its invocation and (2) actually execs the
+# wrapped command after stripping the leading flags/properties up to `--`, so
+# the stub `claude` behind it still runs and the assertions can see its
+# output too — mirrors how a real `systemd-run --scope` hands off to its
+# target.
+SYSTEMD_RUN_LOG="$CPU_DIR/systemd-run.log"
+cat > "$CPU_DIR/systemd-run" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$SYSTEMD_RUN_LOG"
+args=("\$@")
+skip=0
+for ((i = 0; i < \${#args[@]}; i++)); do
+    if [[ "\${args[i]}" == "--" ]]; then
+        skip=\$((i + 1))
+        break
+    fi
+done
+exec "\${args[@]:skip}"
+STUB
+chmod +x "$CPU_DIR/systemd-run"
+
+# `is_linux_systemd`'s LOOM_SYSTEMD_FORCE=1 branch still probes `command -v
+# systemctl`, so a stub must be on PATH for the forced branch to engage.
+cat > "$CPU_DIR/systemctl" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$CPU_DIR/systemctl"
+
+# Test: with no systemd --user manager reachable (the default on this dev
+# host, and on every macOS worker in this fleet today), the budget is still
+# computed and exported, but nothing wraps the exec — advisory-only.
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 6 core(s) of 8 (reserved 2)" "$output" \
+    "spawn-claude computes budget = total - reserved(2) with no env/config set (#5111)"
+assert_contains "stub-claude budget=6" "$output" \
+    "spawn-claude exports LOOM_SWEEP_CPU_BUDGET_CORES to the child (#5111)"
+assert_contains "advisory-only" "$output" \
+    "spawn-claude logs advisory-only when no systemd --user manager is reachable (#5111)"
+
+# Test: LOOM_SYSTEMD_FORCE=1 drives the enforced path — the final exec is
+# wrapped in `systemd-run --user --scope -p CPUQuota=<budget*100>%`.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "enforcing CPUQuota=600% via systemd --user scope" "$output" \
+    "spawn-claude enforces CPUQuota=600% (6 cores * 100) when a systemd --user scope is available (#5111)"
+assert_contains "stub-claude budget=6" "$output" \
+    "the wrapped stub claude still runs and sees the exported budget (#5111)"
+assert_contains "CPUQuota=600%" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "systemd-run is actually invoked with the computed CPUQuota (#5111)"
+
+# Test (#6129): the scope carries a predictable `loom-agent-` unit name and a
+# dedicated `loom-agents.slice`, so it can be enumerated as a group instead of
+# matched by grepping `claude-wrapper.sh -p /loom:` command-line text.
+assert_contains "--unit=loom-agent-" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "the systemd-run scope carries a predictable loom-agent- unit name (#6129)"
+assert_contains "--slice=loom-agents.slice" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "the systemd-run scope is placed in a dedicated loom-agents.slice (#6129)"
+assert_contains "unit=loom-agent-" "$output" \
+    "the enforced-CPUQuota log line names the assigned scope unit (#6129)"
+# The PROBE call (a throwaway `true` invocation) must use a DIFFERENT unit
+# name than the real dispatch call, so the two can never collide regardless
+# of how quickly systemd garbage-collects the probe scope.
+TESTS_RUN=$((TESTS_RUN + 1))
+_probe_unit=$(grep -o -- '--unit=loom-agent-probe-[^ ]*' "$SYSTEMD_RUN_LOG" | head -n1)
+_real_unit=$(grep -o -- '--unit=loom-agent-[0-9][^ ]*' "$SYSTEMD_RUN_LOG" | grep -v probe | head -n1)
+if [[ -n "$_probe_unit" && -n "$_real_unit" && "$_probe_unit" != "$_real_unit" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: the probe scope and the real dispatch scope use DIFFERENT unit names (#6129)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: the probe scope and the real dispatch scope use DIFFERENT unit names (#6129)"
+    echo "    probe=[$_probe_unit] real=[$_real_unit]"
+fi
+
+# Test (#6129): a host that REJECTS `--unit=`/`--slice=` must not lose #5111's
+# CPU quota as collateral damage — the naming/slice props are a #6129
+# enumeration convenience layered on top of a functional quota, so the probe
+# falls back to the pre-#6129 UNNAMED form rather than giving up on the wrap.
+NAMING_REJECT_DIR="$CPU_DIR/naming-reject"
+mkdir -p "$NAMING_REJECT_DIR"
+NAMING_REJECT_LOG="$NAMING_REJECT_DIR/systemd-run.log"
+: > "$NAMING_REJECT_LOG"
+cat > "$NAMING_REJECT_DIR/systemd-run" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$NAMING_REJECT_LOG"
+for a in "\$@"; do
+    case "\$a" in
+        --unit=*|--slice=*) exit 1 ;;
+    esac
+done
+args=("\$@")
+skip=0
+for ((i = 0; i < \${#args[@]}; i++)); do
+    if [[ "\${args[i]}" == "--" ]]; then
+        skip=\$((i + 1))
+        break
+    fi
+done
+exec "\${args[@]:skip}"
+STUB
+chmod +x "$NAMING_REJECT_DIR/systemd-run"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    PATH="$NAMING_REJECT_DIR:$CPU_DIR:$PATH" LOOM_SYSTEMD_FORCE=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "UNNAMED systemd --user scope" "$output" \
+    "a host rejecting --unit=/--slice= falls back to an unnamed scope, not to no scope at all (#6129)"
+assert_contains "enforcing CPUQuota=600%" "$output" \
+    "the unnamed fallback still enforces the #5111 CPU quota (no quota regression) (#6129)"
+assert_contains "stub-claude budget=6" "$output" \
+    "the unnamed fallback still execs the wrapped claude (#6129)"
+TESTS_RUN=$((TESTS_RUN + 1))
+_final_call=$(grep -v -- '--unit=' "$NAMING_REJECT_LOG" | tail -n1)
+if [[ -n "$_final_call" && "$_final_call" == *"CPUQuota=600%"* && "$_final_call" != *"--slice="* ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: the fallback systemd-run call carries the quota but neither --unit= nor --slice= (#6129)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: the fallback systemd-run call carries the quota but neither --unit= nor --slice= (#6129)"
+    echo "    final call: [$_final_call]"
+fi
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$(cat "$SYSTEMD_RUN_LOG")" != *"RuntimeMaxSec"* ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: no RuntimeMaxSec property is set when the wall-clock ceiling is left at its disabled default (#5111)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: no RuntimeMaxSec property is set when the wall-clock ceiling is left at its disabled default (#5111)"
+fi
+
+# Test: LOOM_SWEEP_RESERVED_CORES overrides the default reservation.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_RESERVED_CORES=4 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 4 core(s) of 8 (reserved 4)" "$output" \
+    "LOOM_SWEEP_RESERVED_CORES overrides the default reservation (#5111)"
+assert_contains "CPUQuota=400%" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "the overridden reservation is reflected in the enforced CPUQuota (#5111)"
+
+# Test: a reservation >= total cores still yields at least a 1-core budget
+# (never a zero/negative quota that would deadlock the sweep).
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_RESERVED_CORES=99 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 1 core(s) of 8 (reserved 99)" "$output" \
+    "an over-large reservation clamps the budget to a floor of 1 core, never 0 (#5111)"
+assert_contains "CPUQuota=100%" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "the floor budget is reflected as CPUQuota=100% (#5111)"
+
+# Test: LOOM_SWEEP_WALLCLOCK_CEILING_SECS adds a RuntimeMaxSec property to
+# the same systemd-run invocation — the driver-level wall-clock bound, not
+# just each leaf process's own timeout.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_WALLCLOCK_CEILING_SECS=21600 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "RuntimeMaxSec=21600" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "LOOM_SWEEP_WALLCLOCK_CEILING_SECS adds a RuntimeMaxSec property when set (#5111)"
+assert_contains "RuntimeMaxSec=21600s" "$output" \
+    "spawn-claude logs the applied wall-clock ceiling (#5111)"
+
+# Test: autonomous.spawnReservedCores / autonomous.spawnWallClockCeilingSecs
+# config knobs are honored when no env override is set (env > config >
+# default precedence, mirroring the #4233 niceness knobs).
+CPU_CFG_WS="$(mktemp -d)"
+mkdir -p "$CPU_CFG_WS/.loom/tokens"
+chmod 700 "$CPU_CFG_WS/.loom/tokens"
+echo -n "fake-token-cfg" > "$CPU_CFG_WS/.loom/tokens/alpha.token"
+chmod 600 "$CPU_CFG_WS/.loom/tokens/alpha.token"
+cat > "$CPU_CFG_WS/.loom/config.json" <<'EOF'
+{ "autonomous": { "spawnReservedCores": 3, "spawnWallClockCeilingSecs": 7200 } }
+EOF
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$CPU_CFG_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 5 core(s) of 8 (reserved 3)" "$output" \
+    "autonomous.spawnReservedCores config knob is honored (#5111)"
+assert_contains "RuntimeMaxSec=7200" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "autonomous.spawnWallClockCeilingSecs config knob is honored (#5111)"
+
+# Test: an explicit LOOM_SWEEP_RESERVED_CORES env still wins over the config
+# knob.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$CPU_CFG_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_RESERVED_CORES=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 7 core(s) of 8 (reserved 1)" "$output" \
+    "LOOM_SWEEP_RESERVED_CORES env wins over autonomous.spawnReservedCores config (#5111)"
+rm -rf "$CPU_CFG_WS"
+
+# Test: LOOM_SWEEP_CPU_QUOTA=0 disables the entire mechanism — no budget
+# export, no systemd-run wrap, byte-for-byte pre-#5111 behavior.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU quota mechanism disabled" "$output" \
+    "LOOM_SWEEP_CPU_QUOTA=0 disables the mechanism (#5111)"
+assert_contains "stub-claude budget=unset" "$output" \
+    "LOOM_SWEEP_CPU_BUDGET_CORES is not exported when the mechanism is disabled (#5111)"
+assert_eq "" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "systemd-run is never invoked when LOOM_SWEEP_CPU_QUOTA=0 (#5111)"
+
+# Test: a failing systemd-run probe (e.g. the cpu controller isn't delegated
+# to the user manager) degrades to advisory-only rather than replacing the
+# process with a failing exec — the spawn must never be blocked by this.
+FAIL_DIR="$(mktemp -d)"
+cp "$CPU_DIR/claude" "$CPU_DIR/nproc" "$CPU_DIR/systemctl" "$FAIL_DIR/"
+cat > "$FAIL_DIR/systemd-run" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$FAIL_DIR/systemd-run"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$FAIL_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "probe failed" "$output" \
+    "a failing systemd-run probe is logged and degrades to advisory-only, not a hard failure (#5111)"
+assert_contains "stub-claude budget=6" "$output" \
+    "the spawn still completes (unwrapped) after a failed probe (#5111)"
+rm -rf "$FAIL_DIR"
+
+# ============================================================
+# Section 7c: host-wide CPU budget across concurrent sweeps (issue #5979)
+#
+# Every assertion in 7b above pins LOOM_SWEEP_INFLIGHT_SWEEPS=1 (see the
+# suite-level export near the top), which is exactly the "one sweep on this
+# host" case — so 7b doubles as the no-regression proof that a solo sweep
+# still receives the full `total - reserved` budget.
+#
+# The tests below vary the divisor. The incident: three sweeps on an 8-core
+# host each computed 6 cores and summed to 18, driving load to 133.87. The
+# budget must now be this sweep's SHARE of the host, both in the exported
+# advisory value (every platform) and in the enforced systemd CPUQuota
+# (Linux + systemd --user only).
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh host-wide CPU budget sharing (#5979)..."
+
+# Test: two concurrent sweeps split the 6-core budget — advisory path (no
+# systemd --user manager, i.e. every macOS worker in this fleet today).
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=2 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 3 core(s) of 8 (reserved 2) divided across 2 in-flight sweep(s)" "$output" \
+    "2 concurrent sweeps each get 3 of the 6 usable cores (#5979)"
+assert_contains "stub-claude budget=3" "$output" \
+    "the divided budget is what the child actually sees in its environment (#5979)"
+assert_contains "advisory-only" "$output" \
+    "an advisory-only platform still exports the DIVIDED budget (#5979)"
+
+# Test: the incident's exact shape — three concurrent sweeps on 8 cores.
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=3 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude budget=2" "$output" \
+    "3 concurrent sweeps get 2 cores each — 6 total, not 18 (the #5979 incident)"
+
+# Test: more concurrent sweeps than usable cores still clamps to 1, never 0.
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=12 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude budget=1" "$output" \
+    "12 concurrent sweeps on 6 usable cores clamp to the 1-core floor (#5979)"
+
+# Test: the ENFORCED path divides too — the systemd CPUQuota that actually
+# binds the cgroup reflects the share, not the whole host.
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    LOOM_SYSTEMD_FORCE=1 LOOM_SWEEP_INFLIGHT_SWEEPS=3 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "enforcing CPUQuota=200% via systemd --user scope" "$output" \
+    "the enforced CPUQuota is the divided share (2 cores * 100), not 600% (#5979)"
+assert_contains "CPUQuota=200%" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "systemd-run is invoked with the divided CPUQuota (#5979)"
+
+# Test: LOOM_SWEEP_SHARED_CPU_BUDGET=0 restores pre-#5979 behavior — each
+# sweep independently claims the whole `total - reserved` budget.
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=3 LOOM_SWEEP_SHARED_CPU_BUDGET=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "CPU budget = 6 core(s) of 8 (reserved 2)" "$output" \
+    "LOOM_SWEEP_SHARED_CPU_BUDGET=0 restores the undivided pre-#5979 budget"
+assert_contains "host-wide sharing disabled" "$output" \
+    "the disabled state is logged, not silent (#5979)"
+assert_contains "stub-claude budget=6" "$output" \
+    "the child sees the undivided budget when sharing is disabled (#5979)"
+
+# Test: the `autonomous.spawnSharedCpuBudget` config knob, and the env var
+# winning over it — same precedence chain as every other spawn knob.
+CPU_SHARE_WS="$(mktemp -d)"
+mkdir -p "$CPU_SHARE_WS/.loom/tokens"
+chmod 700 "$CPU_SHARE_WS/.loom/tokens"
+echo -n "fake-token-share" > "$CPU_SHARE_WS/.loom/tokens/alpha.token"
+chmod 600 "$CPU_SHARE_WS/.loom/tokens/alpha.token"
+cat > "$CPU_SHARE_WS/.loom/config.json" <<'EOF'
+{"autonomous": {"spawnSharedCpuBudget": false}}
+EOF
+output=$(LOOM_WORKSPACE="$CPU_SHARE_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=3 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "host-wide sharing disabled" "$output" \
+    "autonomous.spawnSharedCpuBudget=false disables host-wide sharing (#5979)"
+assert_contains "stub-claude budget=6" "$output" \
+    "the config-disabled path exports the undivided budget (#5979)"
+output=$(LOOM_WORKSPACE="$CPU_SHARE_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=3 LOOM_SWEEP_SHARED_CPU_BUDGET=1 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude budget=2" "$output" \
+    "LOOM_SWEEP_SHARED_CPU_BUDGET env wins over autonomous.spawnSharedCpuBudget config (#5979)"
+rm -rf "$CPU_SHARE_WS"
+
+# Test: a harness that never reads LOOM_SWEEP_CPU_BUDGET_CORES is unaffected
+# on an advisory-only platform — the divided value is exported, nothing wraps
+# the exec, and the child's own arguments/behavior are byte-identical.
+cat > "$CPU_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "oblivious-claude args=$*"
+STUB
+chmod +x "$CPU_DIR/claude"
+: > "$SYSTEMD_RUN_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CPU_DIR:$PATH" \
+    env -u LOOM_SYSTEMD_FORCE LOOM_SWEEP_INFLIGHT_SWEEPS=3 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "oblivious-claude args=-p ping" "$output" \
+    "a harness that ignores the budget runs exactly as before (#5979, advisory by default)"
+assert_eq "" "$(cat "$SYSTEMD_RUN_LOG")" \
+    "nothing wraps the exec on an advisory-only platform, divided or not (#5979)"
+
+# --- The real production read path: `loom-daemon status --json` ----------
+#
+# Everything above pins the divisor through the LOOM_SWEEP_INFLIGHT_SWEEPS
+# test hook. The two tests below drop that hook entirely and drive the
+# divisor through the actual daemon probe, against a stub `loom-daemon` that
+# answers `status --json` from a fixture and delegates every other
+# subcommand (spawn-claude.sh's own token selection) to the real binary.
+cat > "$CPU_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "stub-claude budget=${LOOM_SWEEP_CPU_BUDGET_CORES:-unset}"
+STUB
+chmod +x "$CPU_DIR/claude"
+
+PROBE_DIR="$(mktemp -d)"
+cp "$CPU_DIR/claude" "$CPU_DIR/nproc" "$PROBE_DIR/"
+cat > "$PROBE_DIR/status.json" <<'JSON'
+{"in_flight_count": 2,
+ "in_flight": [
+   {"kind": {"type": "Issue", "value": 83}},
+   {"kind": {"type": "Issue", "value": 85}}
+ ],
+ "unregistered_locked_count": 0, "unregistered_locked": []}
+JSON
+cat > "$PROBE_DIR/loom-daemon" <<STUB
+#!/usr/bin/env bash
+if [[ "\$1" == "status" && "\$2" == "--json" ]]; then
+    if [[ -s "$PROBE_DIR/status.json" ]]; then
+        cat "$PROBE_DIR/status.json"
+        exit 0
+    fi
+    exit 1
+fi
+exec "$DAEMON_BIN" "\$@"
+STUB
+chmod +x "$PROBE_DIR/loom-daemon"
+
+if command -v jq >/dev/null 2>&1; then
+    # Two daemon-reported siblings + this sweep (not yet in the snapshot,
+    # the spawn-time insertion race) = a divisor of 3.
+    output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$PROBE_DIR/loom-daemon" \
+        PATH="$PROBE_DIR:$PATH" \
+        env -u LOOM_SYSTEMD_FORCE -u LOOM_SWEEP_INFLIGHT_SWEEPS \
+        LOOM_SWEEP_CLAIM_OWNED=84 \
+        "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+    assert_contains "divided across 3 in-flight sweep(s)" "$output" \
+        "the divisor is read from a live \`loom-daemon status --json\` (#5979)"
+    assert_contains "stub-claude budget=2" "$output" \
+        "two daemon-reported siblings plus this sweep yield 2 cores each (#5979)"
+
+    # A daemon that cannot answer (down, or an unparseable payload) must fall
+    # back to a divisor of 1 — byte-for-byte pre-#5979 behavior, never a
+    # starved sweep.
+    : > "$PROBE_DIR/status.json"
+    output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$PROBE_DIR/loom-daemon" \
+        PATH="$PROBE_DIR:$PATH" \
+        env -u LOOM_SYSTEMD_FORCE -u LOOM_SWEEP_INFLIGHT_SWEEPS \
+        "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+    assert_contains "divided across 1 in-flight sweep(s)" "$output" \
+        "an unanswerable daemon probe falls back to a divisor of 1 (#5979)"
+    assert_contains "stub-claude budget=6" "$output" \
+        "a host with no answering daemon keeps the full pre-#5979 budget"
+else
+    echo "  SKIP: jq unavailable — the daemon-probe read path needs it"
+fi
+rm -rf "$PROBE_DIR"
+
+rm -rf "$CPU_DIR"
+
+# ============================================================
+# Section 7d: host-sleep prevention wrap (issue #6311)
+#
+# `host.preventSleep` (env override `LOOM_HOST_PREVENT_SLEEP`) self-wraps the
+# final exec in `systemd-inhibit --what=idle:sleep --who=loom --why=<role>`,
+# mirroring the CPU-quota mechanism's fake-`systemd-run`-on-PATH test style
+# (Section 7b above) with a fake `systemd-inhibit` instead.
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh host-sleep prevention (#6311)..."
+
+SLEEP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_WS" "$STUB_DIR" "$SLEEP_DIR"' EXIT
+
+cat > "$SLEEP_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "stub-claude ran, args=$*"
+STUB
+chmod +x "$SLEEP_DIR/claude"
+
+SLEEP_INHIBIT_LOG="$SLEEP_DIR/systemd-inhibit.log"
+cat > "$SLEEP_DIR/systemd-inhibit" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$SLEEP_INHIBIT_LOG"
+args=("\$@")
+skip=0
+for ((i = 0; i < \${#args[@]}; i++)); do
+    if [[ "\${args[i]}" == "--" ]]; then
+        skip=\$((i + 1))
+        break
+    fi
+done
+exec "\${args[@]:skip}"
+STUB
+chmod +x "$SLEEP_DIR/systemd-inhibit"
+
+# Test: absent config -> no wrap at all, systemd-inhibit never invoked even
+# though it is on PATH (byte-for-byte pre-#6311 default behavior).
+rm -f "$TEST_WS/.loom/config.json"
+: > "$SLEEP_INHIBIT_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$SLEEP_DIR:$PATH" \
+    env -u LOOM_HOST_PREVENT_SLEEP LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude ran" "$output" \
+    "absent host.preventSleep: the spawn still runs (#6311)"
+assert_eq "" "$(cat "$SLEEP_INHIBIT_LOG" 2>/dev/null)" \
+    "absent host.preventSleep: systemd-inhibit is never invoked (#6311)"
+
+# Test: host.preventSleep=true wraps the final exec in systemd-inhibit,
+# `--why=` set from $LOOM_ROLE.
+echo '{"host": {"preventSleep": true}}' > "$TEST_WS/.loom/config.json"
+: > "$SLEEP_INHIBIT_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$SLEEP_DIR:$PATH" \
+    LOOM_ROLE=sweep-lifecycle LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "wrapping this spawn in systemd-inhibit" "$output" \
+    "host.preventSleep=true: spawn-claude logs the wrap (#6311)"
+assert_contains "stub-claude ran" "$output" \
+    "host.preventSleep=true: the wrapped stub claude still runs (#6311)"
+sleep_inhibit_log="$(cat "$SLEEP_INHIBIT_LOG" 2>/dev/null)"
+assert_contains "--what=idle:sleep --who=loom --why=sweep-lifecycle" "$sleep_inhibit_log" \
+    "systemd-inhibit is invoked with --why=\$LOOM_ROLE (#6311)"
+
+# Test: LOOM_HOST_PREVENT_SLEEP=0 env override wins over config true.
+: > "$SLEEP_INHIBIT_LOG"
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$SLEEP_DIR:$PATH" \
+    LOOM_HOST_PREVENT_SLEEP=0 LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_eq "" "$(cat "$SLEEP_INHIBIT_LOG" 2>/dev/null)" \
+    "LOOM_HOST_PREVENT_SLEEP=0 env override wins over host.preventSleep=true config (#6311)"
+
+# Test: a failing systemd-inhibit probe (e.g. no reachable systemd-logind)
+# degrades to advisory-only rather than a hard failure -- mirrors the CPU-
+# quota mechanism's own failing-probe test above. A dedicated dir with ONLY
+# an always-failing `systemd-inhibit` (plus `claude`) makes "the probe was
+# attempted and failed" the sole path to this outcome, unlike PATH-absence
+# (which this sandbox's real systemd-inhibit could silently satisfy instead).
+FAIL_SLEEP_DIR="$(mktemp -d)"
+cat > "$FAIL_SLEEP_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "stub-claude ran, args=$*"
+STUB
+chmod +x "$FAIL_SLEEP_DIR/claude"
+cat > "$FAIL_SLEEP_DIR/systemd-inhibit" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$FAIL_SLEEP_DIR/systemd-inhibit"
+
+output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$FAIL_SLEEP_DIR:$PATH" \
+    LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "systemd-inhibit probe failed" "$output" \
+    "host.preventSleep=true with a failing systemd-inhibit probe: logs advisory-only (#6311)"
+assert_contains "stub-claude ran" "$output" \
+    "host.preventSleep=true with a failing systemd-inhibit probe: the spawn still completes unwrapped (#6311)"
+rm -rf "$FAIL_SLEEP_DIR"
+
+rm -f "$TEST_WS/.loom/config.json"
+rm -rf "$SLEEP_DIR"
+
+# ============================================================
 # Section 8: claude-wrapper.sh `Execution error` retry + permanent-death
 #            diagnostics (issue #4255)
 #
@@ -1529,6 +2139,212 @@ assert_contains "ABORT=fatal" "$nt_out" \
 assert_contains "classification=RATE_LIMIT_ABORT" "$nt_out" \
     "log_permanent_death reuses the derived verdict, not a second classification (#4501)"
 rm -rf "$NT_DIR"
+
+# ============================================================
+# Section 10: claude-wrapper.sh account rotation on an auth-dead credential
+# (issue #6030)
+#
+# A 401/invalid-bearer-token death (e.g. "Failed to authenticate. API Error:
+# 401 Invalid bearer token") is a DIFFERENT failure class from exhaustion: the
+# credential is revoked/invalid and will fail every future dispatch until a
+# human re-authenticates it, not just until a quota window resets. Before this
+# it matched no `classify_error` category, so it fell through to the generic
+# RECOVERABLE catch-all and the wrapper retried the same dead credential with
+# backoff until MAX_RETRIES, then died without ever marking the account bad —
+# so the next spawn could pick the exact same auth-dead account again.
+#
+# It must now: (1) classify as TOKEN_EXPIRED, (2) mark the account bad with an
+# "auth-dead: ..." reason (permanent — distinct from "exhausted: ...", which
+# expires on a cooldown), (3) rotate to a healthy account and retry WITHOUT
+# consuming a MAX_RETRIES attempt, and (4) still terminate with
+# ACCOUNT_POOL_EXHAUSTED (not an infinite loop) when the whole pool is dead.
+# ============================================================
+
+echo ""
+echo "Testing claude-wrapper.sh auth-dead account rotation (#6030)..."
+
+if [[ -z "$DAEMON_BIN" ]]; then
+    echo "  (skipping auth-dead rotation tests — loom-daemon binary not found)"
+else
+  # --- Rotation: alpha is auth-dead (401 invalid bearer token), beta succeeds ---
+  AD_WS="$(mktemp -d)"
+  mkdir -p "$AD_WS/.loom/tokens"
+  chmod 700 "$AD_WS/.loom/tokens"
+  printf '%s' "tok-alpha" > "$AD_WS/.loom/tokens/alpha.token"
+  printf '%s' "tok-beta"  > "$AD_WS/.loom/tokens/beta.token"
+  chmod 600 "$AD_WS/.loom/tokens/"*.token
+
+  AD_STUB="$(mktemp -d)"
+  cat > "$AD_STUB/claude" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+  *" -p "*) ;;
+  *) exit 0 ;;
+esac
+if [[ "${CLAUDE_CODE_OAUTH_TOKEN}" == "tok-alpha" ]]; then
+    echo "Failed to authenticate. API Error: 401 Invalid bearer token"
+    exit 1
+fi
+echo "stub-claude success on token=${CLAUDE_CODE_OAUTH_TOKEN}"
+exit 0
+STUB
+  chmod +x "$AD_STUB/claude"
+
+  # MAX_RETRIES=1: if rotation consumed an attempt, beta would never be tried.
+  set +e
+  ad_out=$(
+    LOOM_WORKSPACE="$AD_WS" \
+    LOOM_TOKEN_NAME="alpha" \
+    CLAUDE_CODE_OAUTH_TOKEN="tok-alpha" \
+    LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    LOOM_MAX_RETRIES=1 \
+    LOOM_SHEPHERD_TASK_ID="test-auth-dead" \
+    LOOM_STARTUP_MONITOR_WINDOW=1 \
+    PATH="$AD_STUB:$PATH" \
+    bash "$WRAPPER" -p "ping" 2>&1
+  )
+  ad_rc=$?
+  set -e
+
+  assert_contains "stub-claude success on token=tok-beta" "$ad_out" \
+      "wrapper rotates off an auth-dead account and succeeds on the next account (#6030)"
+  assert_eq "0" "$ad_rc" \
+      "wrapper exits 0 after auth-dead rotation (MAX_RETRIES=1 not consumed) (#6030)"
+  assert_contains "Invalid bearer token" "$ad_out" \
+      "rotation log names the auth-dead phrase that fired (#6030)"
+
+  ad_bad_file="$AD_WS/.loom/tokens/.bad_tokens"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -f "$ad_bad_file" ]] && grep -qw "alpha" "$ad_bad_file" && grep "alpha" "$ad_bad_file" | grep -q "auth-dead:" \
+     && ! grep -qw "beta" "$ad_bad_file"; then
+      TESTS_PASSED=$((TESTS_PASSED + 1))
+      echo -e "  ${GREEN}PASS${NC}: .bad_tokens records alpha with an 'auth-dead:' reason, not 'exhausted:', and not beta"
+  else
+      TESTS_FAILED=$((TESTS_FAILED + 1))
+      echo -e "  ${RED}FAIL${NC}: .bad_tokens records alpha with an 'auth-dead:' reason, not 'exhausted:', and not beta"
+      echo "    .bad_tokens: $(cat "$ad_bad_file" 2>/dev/null || echo '<missing>')"
+  fi
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ "$ad_out" != *"permanent death"* && "$ad_out" != *"Non-transient error detected"* ]]; then
+      TESTS_PASSED=$((TESTS_PASSED + 1))
+      echo -e "  ${GREEN}PASS${NC}: an auth-dead death never logs permanent death / 'non-transient' (#6030)"
+  else
+      TESTS_FAILED=$((TESTS_FAILED + 1))
+      echo -e "  ${RED}FAIL${NC}: an auth-dead death never logs permanent death / 'non-transient' (#6030)"
+      echo "    In: '$ad_out'"
+  fi
+
+  # --- Bounded: a single-account pool still terminates (no infinite rotation) ---
+  AD_WS2="$(mktemp -d)"
+  mkdir -p "$AD_WS2/.loom/tokens"
+  chmod 700 "$AD_WS2/.loom/tokens"
+  printf '%s' "tok-solo" > "$AD_WS2/.loom/tokens/solo.token"
+  chmod 600 "$AD_WS2/.loom/tokens/solo.token"
+
+  AD_STUB2="$(mktemp -d)"
+  cat > "$AD_STUB2/claude" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in
+  *" -p "*) ;;
+  *) exit 0 ;;
+esac
+echo "Failed to authenticate. API Error: 401 Invalid bearer token"
+exit 1
+STUB
+  chmod +x "$AD_STUB2/claude"
+
+  set +e
+  ad2_out=$(
+    LOOM_WORKSPACE="$AD_WS2" \
+    LOOM_TOKEN_NAME="solo" \
+    CLAUDE_CODE_OAUTH_TOKEN="tok-solo" \
+    LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    LOOM_MAX_RETRIES=1 \
+    LOOM_SHEPHERD_TASK_ID="test-auth-dead" \
+    LOOM_STARTUP_MONITOR_WINDOW=1 \
+    PATH="$AD_STUB2:$PATH" \
+    bash "$WRAPPER" -p "ping" 2>&1
+  )
+  ad2_rc=$?
+  set -e
+
+  assert_contains "ACCOUNT_POOL_EXHAUSTED" "$ad2_out" \
+      "auth-dead rotation stays bounded: whole-pool auth-dead still terminates (#6030)"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ "$ad2_rc" -ne 0 ]]; then
+      TESTS_PASSED=$((TESTS_PASSED + 1))
+      echo -e "  ${GREEN}PASS${NC}: auth-dead whole-pool exhaustion exits non-zero (#6030)"
+  else
+      TESTS_FAILED=$((TESTS_FAILED + 1))
+      echo -e "  ${RED}FAIL${NC}: auth-dead whole-pool exhaustion exits non-zero (#6030)"
+  fi
+
+  rm -rf "$AD_WS" "$AD_STUB" "$AD_WS2" "$AD_STUB2"
+fi
+
+# ============================================================
+# Section 9: account-provider resolution from the runtime manifest
+#            (issue #5609, design D8)
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh account-provider resolution from the runtime manifest..."
+
+PROVIDER_WS="$(mktemp -d)"
+mkdir -p "$PROVIDER_WS/.loom/tokens" "$PROVIDER_WS/.loom/runtimes"
+chmod 700 "$PROVIDER_WS/.loom/tokens"
+echo -n "fake-token" > "$PROVIDER_WS/.loom/tokens/only.token"
+chmod 600 "$PROVIDER_WS/.loom/tokens/only.token"
+
+PROVIDER_ARGV_LOG="$(mktemp)"
+PROVIDER_STUB_DIR="$(mktemp -d)"
+cat > "$PROVIDER_STUB_DIR/loom-daemon" <<STUB
+#!/usr/bin/env bash
+if [[ "\$1" == "tokens" && "\$2" == "select" ]]; then
+    printf '%s\n' "\$*" >> "$PROVIDER_ARGV_LOG"
+fi
+exec "$DAEMON_BIN" "\$@"
+STUB
+chmod +x "$PROVIDER_STUB_DIR/loom-daemon"
+
+run_provider_select() {
+    : > "$PROVIDER_ARGV_LOG"
+    LOOM_WORKSPACE="$PROVIDER_WS" LOOM_DAEMON_BIN="$PROVIDER_STUB_DIR/loom-daemon" \
+        PATH="$STUB_DIR:$PATH" \
+        "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" >/dev/null 2>&1 || true
+    cat "$PROVIDER_ARGV_LOG"
+}
+
+if command -v jq >/dev/null 2>&1; then
+    # No runtime manifest at all -> the clap default (claude) still applies.
+    rm -f "$PROVIDER_WS/.loom/runtimes/claude.json"
+    argv="$(run_provider_select)"
+    assert_contains "--provider claude" "$argv" \
+        "no runtime manifest at all resolves to claude (#5609)"
+
+    # claude.json declares its own accountProvider explicitly.
+    cat > "$PROVIDER_WS/.loom/runtimes/claude.json" <<'JSON'
+{"runtime": "claude", "accountProvider": "claude"}
+JSON
+    argv="$(run_provider_select)"
+    assert_contains "--provider claude" "$argv" \
+        "spawn-claude.sh passes the manifest's accountProvider to tokens select (#5609)"
+
+    # A runtime manifest present but missing the accountProvider field still
+    # defaults to claude (D8's fail-open default), never fails closed.
+    cat > "$PROVIDER_WS/.loom/runtimes/claude.json" <<'JSON'
+{"runtime": "claude"}
+JSON
+    argv="$(run_provider_select)"
+    assert_contains "--provider claude" "$argv" \
+        "a runtime manifest with no accountProvider field defaults to claude (#5609)"
+else
+    echo "  SKIP: jq unavailable — account-provider resolution needs it"
+fi
+
+rm -rf "$PROVIDER_WS" "$PROVIDER_STUB_DIR"
+rm -f "$PROVIDER_ARGV_LOG"
 
 # ============================================================
 # Summary

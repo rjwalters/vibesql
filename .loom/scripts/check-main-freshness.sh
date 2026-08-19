@@ -151,8 +151,154 @@ if ! [[ "$A" =~ ^[0-9]+$ ]]; then
     A=0
 fi
 
+# ---------- installed-copy drift check (files present in both trees) ----------
+#
+# Compares the INSTALLED surfaces (.loom/scripts, .loom/hooks,
+# .claude/commands/loom, .loom/docs) against the LOCAL defaults/ tree they
+# were copied from — independent of whether local ${BRANCH} is behind/ahead
+# of ${REMOTE_REF}. This is deliberately computed unconditionally, not just
+# when N > 0 (#5874): a defaults/ change that has already merged to local
+# ${BRANCH} (so N == 0, "up to date") but was never propagated by a resync
+# is invisible to the behind/ahead comparison above entirely — that was the
+# exact blind spot behind #5846 shipping five role-prompt edits + a doc
+# change with installed copies never refreshed, while every version-based
+# currency check kept reporting the fleet as current. Only files present in
+# BOTH trees are compared — never "only on one side" (repo-specific hooks
+# like post-worktree.sh have no defaults/ counterpart and are not drift; as
+# of #4007 guard-worktree-paths.sh DOES have one and is drift-checked like
+# any other hook). Also covers .claude/commands/loom/ (role prompts) and
+# .loom/docs/ (the two installed-surface classes #5846 touched that scripts/
+# and hooks/ alone never would have caught).
+report_tree_drift() {
+    local installed_dir="$1" defaults_dir="$2" label="$3"
+    [[ -d "$installed_dir" && -d "$defaults_dir" ]] || return 0
+
+    local f name
+    for f in "$installed_dir"/*; do
+        [[ -f "$f" ]] || continue
+        name="$(basename "$f")"
+        if [[ -f "$defaults_dir/$name" ]]; then
+            if ! cmp -s "$f" "$defaults_dir/$name" 2>/dev/null; then
+                printf '%b\n' "${YELLOW}  installed ${label}/${name} differs from defaults/${label}/${name}${NC}"
+            fi
+        fi
+    done
+}
+
+# Resolve the repo root so we can find both trees regardless of cwd. Prefer the
+# common dir (worktree-safe); fall back to toplevel.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+if [[ -n "$COMMON_DIR" ]]; then
+    # git-common-dir points at the main checkout's .git; its parent is the main
+    # worktree root, where installed .loom/ and source defaults/ both live.
+    case "$COMMON_DIR" in
+        */.git) REPO_ROOT="${COMMON_DIR%/.git}" ;;
+    esac
+fi
+
+DRIFT_LINES=""
+if [[ -n "$REPO_ROOT" ]]; then
+    DRIFT_LINES="$(
+        report_tree_drift "$REPO_ROOT/.loom/scripts" "$REPO_ROOT/defaults/scripts" "scripts"
+        report_tree_drift "$REPO_ROOT/.loom/hooks" "$REPO_ROOT/defaults/hooks" "hooks"
+        report_tree_drift "$REPO_ROOT/.claude/commands/loom" "$REPO_ROOT/defaults/.claude/commands/loom" "roles"
+        report_tree_drift "$REPO_ROOT/.loom/docs" "$REPO_ROOT/defaults/docs" "docs"
+    )"
+fi
+
+# ---------- resync precondition check (#6202) ----------
+#
+# Every remediation this script prints for "stale installed surfaces" tells
+# the reader to run `resync-installed.sh`. That script needs a defaults/
+# SOURCE tree to sync from, resolved (in priority order) from:
+#   1. $REPO_ROOT/defaults/{hooks,scripts}   (this checkout IS the Loom source repo)
+#   2. .loom/loom-source-path                (a sidecar written by install.sh /
+#                                              install-loom.sh; gitignored by design
+#                                              — it holds a machine-local path)
+#   3. install-metadata.json's "loom_source" (legacy compat; #5624 stopped writing
+#                                              this field, so it is dead for any
+#                                              post-#5624 install)
+#
+# None of these exist on a checkout that never ran the Loom installer locally —
+# a fresh developer clone, a CI checkout, or any machine that received the repo
+# rather than installing into it. On exactly that population, `resync-installed.sh`
+# fails on first use with "Could not locate a defaults/ source tree to sync
+# from" — discovered only AFTER following this script's own remediation, not
+# before (#6202). Mirror resolve_defaults()'s resolution order here (read-only,
+# best-effort) so the gap can be surfaced up front instead.
+resync_precondition_met() {
+    local root="$1"
+    [[ -n "$root" ]] || return 1
+    if [[ -d "$root/defaults/hooks" || -d "$root/defaults/scripts" ]]; then
+        return 0
+    fi
+    if [[ -f "$root/.loom/loom-source-path" ]]; then
+        local src
+        src="$(cat "$root/.loom/loom-source-path" 2>/dev/null || true)"
+        [[ -n "$src" && -d "$src/defaults" ]] && return 0
+    fi
+    if [[ -f "$root/.loom/install-metadata.json" ]]; then
+        local src
+        src="$(sed -n 's/.*"loom_source" *: *"\(.*\)".*/\1/p' "$root/.loom/install-metadata.json" 2>/dev/null | head -1)"
+        [[ -n "$src" && -d "$src/defaults" ]] && return 0
+    fi
+    return 1
+}
+
+RESYNC_PRECONDITION_MET=1
+if [[ -n "$REPO_ROOT" ]] && ! resync_precondition_met "$REPO_ROOT"; then
+    RESYNC_PRECONDITION_MET=0
+fi
+
+# Appended immediately after every "run resync-installed.sh" remediation line
+# above, only when the precondition is actually missing.
+warn_resync_precondition_gap() {
+    [[ "$RESYNC_PRECONDITION_MET" -eq 0 ]] || return 0
+    warn "${YELLOW}  NOTE (#6202): resync-installed.sh has no source tree to sync from on${NC}"
+    warn "${YELLOW}  this checkout — it will fail with 'Could not locate a defaults/ source${NC}"
+    warn "${YELLOW}  tree to sync from' until one of these is true:${NC}"
+    warn "${YELLOW}    - this checkout IS the Loom source repo (has defaults/hooks or${NC}"
+    warn "${YELLOW}      defaults/scripts), or${NC}"
+    warn "${YELLOW}    - .loom/loom-source-path points at a local clone of the Loom source${NC}"
+    warn "${YELLOW}      repo (written by install.sh / install-loom.sh; gitignored by${NC}"
+    warn "${YELLOW}      design, so it never arrives with a plain \`git clone\` of this repo).${NC}"
+    warn "${YELLOW}  Fix: clone https://github.com/rjwalters/loom locally, then either${NC}"
+    warn "${YELLOW}  re-run its installer against this repo, or point the sidecar at it:${NC}"
+    warn "${YELLOW}      echo /path/to/local/loom-clone > .loom/loom-source-path${NC}"
+}
+
 if [[ "$N" -eq 0 && "$A" -eq 0 ]]; then
-    info_oneliner "${GREEN}[freshness-check] local ${BRANCH} is up to date with ${REMOTE_REF}.${NC}"
+    if [[ -z "$DRIFT_LINES" ]]; then
+        info_oneliner "${GREEN}[freshness-check] local ${BRANCH} is up to date with ${REMOTE_REF}.${NC}"
+        exit 0
+    fi
+
+    # Local matches origin, but the installed surfaces have drifted from local
+    # defaults/ (#5874) — the version-comparison blind spot this check exists
+    # to close. See the report_tree_drift() comment above for why this is
+    # checked regardless of N/A.
+    warn ""
+    warn "${YELLOW}${BOLD}========================================================================${NC}"
+    warn "${YELLOW}${BOLD}  WARNING: installed surfaces are behind local defaults/ (#5874)${NC}"
+    warn "${YELLOW}${BOLD}========================================================================${NC}"
+    warn "${YELLOW}Local ${BRANCH} matches ${REMOTE_REF} — but the installed .loom/ and${NC}"
+    warn "${YELLOW}.claude/commands/loom/ copies differ from local defaults/. A merged${NC}"
+    warn "${YELLOW}defaults/ change (e.g. a role-prompt edit) was never propagated by a${NC}"
+    warn "${YELLOW}resync, so this session may be executing STALE instructions even though${NC}"
+    warn "${YELLOW}git itself reports everything current.${NC}"
+    warn ""
+    warn "${BOLD}Remediation (read-only advisory — this script never resyncs for you):${NC}"
+    warn "      ${BOLD}./.loom/scripts/resync-installed.sh${NC}"
+    warn "  (preview first with ${BOLD}--dry-run${NC}; it only touches files present in defaults/)."
+    warn_resync_precondition_gap
+    warn ""
+    warn "${YELLOW}Installed-copy drift (files present in both trees):${NC}"
+    warn "$DRIFT_LINES"
+    warn ""
+    warn "${YELLOW}========================================================================${NC}"
+    warn ""
+    info_oneliner "${YELLOW}[freshness-check] WARNING: installed surfaces differ from local defaults/ even though ${BRANCH} matches ${REMOTE_REF}. See stderr for details.${NC}"
     exit 0
 fi
 
@@ -173,6 +319,7 @@ if [[ "$N" -gt 0 ]]; then
     warn "  then refresh the installed .loom/ copies from defaults/ (#3777):"
     warn "      ${BOLD}./.loom/scripts/resync-installed.sh${NC}"
     warn "  (preview first with ${BOLD}--dry-run${NC}; it only touches files present in defaults/)."
+    warn_resync_precondition_gap
     warn ""
 fi
 
@@ -192,56 +339,14 @@ if [[ "$A" -gt 0 ]]; then
     warn ""
 fi
 
-# ---------- stretch goal: best-effort installed-vs-defaults drift note ----------
+# ---------- installed-vs-defaults drift note (reuses DRIFT_LINES above) ----------
 #
-# When N > 0, additionally flag files present in BOTH .loom/scripts (installed)
-# and defaults/scripts whose content differs. Best-effort: if either tree can't
-# be resolved, skip silently. We only flag content differences for files present
-# in both trees — never "only on one side" (repo-specific hooks like
-# post-worktree.sh have no defaults/ counterpart and are not drift; as of #4007
-# guard-worktree-paths.sh DOES have one and is drift-checked like any other hook).
-report_tree_drift() {
-    local installed_dir="$1" defaults_dir="$2" label="$3"
-    [[ -d "$installed_dir" && -d "$defaults_dir" ]] || return 0
-
-    local f name
-    for f in "$installed_dir"/*; do
-        [[ -f "$f" ]] || continue
-        name="$(basename "$f")"
-        if [[ -f "$defaults_dir/$name" ]]; then
-            if ! cmp -s "$f" "$defaults_dir/$name" 2>/dev/null; then
-                warn "${YELLOW}  installed ${label}/${name} differs from defaults/${label}/${name}${NC}"
-            fi
-        fi
-    done
-}
-
-# Resolve the repo root so we can find both trees regardless of cwd. Prefer the
-# common dir (worktree-safe); fall back to toplevel.
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
-if [[ -n "$COMMON_DIR" ]]; then
-    # git-common-dir points at the main checkout's .git; its parent is the main
-    # worktree root, where installed .loom/ and source defaults/ both live.
-    case "$COMMON_DIR" in
-        */.git) REPO_ROOT="${COMMON_DIR%/.git}" ;;
-    esac
-fi
-
-if [[ -n "$REPO_ROOT" ]]; then
-    drift_found=0
-    if [[ -d "$REPO_ROOT/.loom/scripts" && -d "$REPO_ROOT/defaults/scripts" ]]; then
-        drift_found=1
-    fi
-    if [[ -d "$REPO_ROOT/.loom/hooks" && -d "$REPO_ROOT/defaults/hooks" ]]; then
-        drift_found=1
-    fi
-    if [[ "$drift_found" -eq 1 ]]; then
-        warn "${YELLOW}Installed-copy drift check (files present in both trees):${NC}"
-        report_tree_drift "$REPO_ROOT/.loom/scripts" "$REPO_ROOT/defaults/scripts" "scripts"
-        report_tree_drift "$REPO_ROOT/.loom/hooks" "$REPO_ROOT/defaults/hooks" "hooks"
-        warn ""
-    fi
+# DRIFT_LINES was already computed unconditionally, before the N==0 && A==0
+# early-return above, so it is simply reported here rather than recomputed.
+if [[ -n "$DRIFT_LINES" ]]; then
+    warn "${YELLOW}Installed-copy drift check (files present in both trees):${NC}"
+    warn "$DRIFT_LINES"
+    warn ""
 fi
 
 warn "${YELLOW}========================================================================${NC}"

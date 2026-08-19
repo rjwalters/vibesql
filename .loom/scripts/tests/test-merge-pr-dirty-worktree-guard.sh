@@ -231,6 +231,102 @@ else
     fail "(d) marker-only dirt should still be removed; rc=$rc_d, dir=$([[ -d "$WT_D" ]] && echo yes || echo no), out: $out_d"
 fi
 
+# --- Test 6 (e): lockfile-only dirt -> still refused, message names the file,
+#     but the "cross-host duplicate dispatch" hypothesis is NOT asserted (#5658)
+echo ""
+echo "Test 6: dirty worktree whose ONLY dirt is a lockfile-style artifact is refused, but without the cross-host-dispatch hypothesis"
+
+WT_E="$(make_worktree 5658a)"
+echo "regenerated-by-routine-install" >"$WT_E/some-lib-lock.json"
+git -C "$WT_E" add some-lib-lock.json >/dev/null 2>&1 || true
+
+set +e
+out_e="$(_remove_loom_worktree "$WT_E" 2>&1)"
+rc_e=$?
+set -e
+
+if [[ $rc_e -eq 0 ]] \
+    && [[ "$out_e" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_e" == *"some-lib-lock.json"* ]] \
+    && [[ "$out_e" != *"cross-host duplicate dispatch"* ]] \
+    && [[ -d "$WT_E" ]] \
+    && [[ -f "$WT_E/some-lib-lock.json" ]]; then
+    pass "(e) lockfile-only dirt still refused, names the file, suppresses the cross-host-dispatch hypothesis"
+else
+    fail "(e) expected refuse+name-file+no-hypothesis for lockfile-only dirt; rc=$rc_e, out: $out_e"
+fi
+
+# --- Test 7 (f): tracked source file dirty -> refused, message names the file,
+#     hypothesis IS still offered (existing behavior preserved)
+echo ""
+echo "Test 7: dirty worktree with a tracked source-file change is refused, names the file, and still offers the cross-host-dispatch hypothesis"
+
+WT_F="$(make_worktree 5658b)"
+echo "real in-flight edit" >>"$WT_F/README.md"
+
+set +e
+out_f="$(_remove_loom_worktree "$WT_F" 2>&1)"
+rc_f=$?
+set -e
+
+if [[ $rc_f -eq 0 ]] \
+    && [[ "$out_f" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_f" == *"README.md"* ]] \
+    && [[ "$out_f" == *"cross-host duplicate dispatch"* ]] \
+    && [[ -d "$WT_F" ]]; then
+    pass "(f) tracked source-file dirt still refused, names the file, still offers the cross-host-dispatch hypothesis"
+else
+    fail "(f) expected refuse+name-file+hypothesis for tracked source dirt; rc=$rc_f, out: $out_f"
+fi
+
+# --- Test 8 (g): untracked non-artifact file dirty -> refused, names the file,
+#     hypothesis IS still offered
+echo ""
+echo "Test 8: dirty worktree with an untracked non-artifact file is refused, names the file, and still offers the cross-host-dispatch hypothesis"
+
+WT_G="$(make_worktree 5658c)"
+echo "brand new uncommitted module" >"$WT_G/new_module.py"
+
+set +e
+out_g="$(_remove_loom_worktree "$WT_G" 2>&1)"
+rc_g=$?
+set -e
+
+if [[ $rc_g -eq 0 ]] \
+    && [[ "$out_g" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_g" == *"new_module.py"* ]] \
+    && [[ "$out_g" == *"cross-host duplicate dispatch"* ]] \
+    && [[ -d "$WT_G" ]]; then
+    pass "(g) untracked non-artifact dirt still refused, names the file, still offers the cross-host-dispatch hypothesis"
+else
+    fail "(g) expected refuse+name-file+hypothesis for untracked non-artifact dirt; rc=$rc_g, out: $out_g"
+fi
+
+# --- Test 9 (h): edge case — BOTH a trivial artifact change AND a real source
+#     change dirty at once -> hypothesis is still offered (real work wins)
+echo ""
+echo "Test 9: mixed dirt (lockfile artifact + real source edit) still offers the cross-host-dispatch hypothesis"
+
+WT_H="$(make_worktree 5658d)"
+echo "regenerated-by-routine-install" >"$WT_H/package-lock.json"
+echo "real in-flight edit" >>"$WT_H/README.md"
+
+set +e
+out_h="$(_remove_loom_worktree "$WT_H" 2>&1)"
+rc_h=$?
+set -e
+
+if [[ $rc_h -eq 0 ]] \
+    && [[ "$out_h" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_h" == *"package-lock.json"* ]] \
+    && [[ "$out_h" == *"README.md"* ]] \
+    && [[ "$out_h" == *"cross-host duplicate dispatch"* ]] \
+    && [[ -d "$WT_H" ]]; then
+    pass "(h) mixed trivial+real dirt still refused, names both files, still offers the cross-host-dispatch hypothesis"
+else
+    fail "(h) expected refuse+name-files+hypothesis for mixed dirt; rc=$rc_h, out: $out_h"
+fi
+
 # --- Summary ---
 echo ""
 echo "Tests run: $TESTS_RUN, Passed: $TESTS_PASSED, Failed: $TESTS_FAILED"

@@ -31,6 +31,15 @@
 #     `.service` pair (#4260 sub-issue D) — both drive the SAME
 #     loom-daemon-watchdog.sh payload on a recurring interval, independent of
 #     the daemon job/unit, so a wedged or dead daemon still gets checked,
+#   - self-heals a watchdog-provisioning GAP (#5343): if the daemon was armed
+#     by a path other than a fresh start here (e.g. `fleet add-worker`'s
+#     hand-rolled systemd unit install, or the daemon's own startup marker
+#     healing, #4331) the autonomy-desired marker can end up present with NO
+#     watchdog ever provisioned. Re-running this script against an
+#     ALREADY-RUNNING daemon now provisions the missing watchdog before
+#     exiting (rather than a bare "already running" no-op), or — on a
+#     platform tier with no scheduled-job mechanism at all — files ONE
+#     tracking issue instead of leaving the gap as a status line nobody reads,
 #   - backgrounds the daemon and writes a PID file (.loom/.daemon.pid),
 #   - persists the resolved invocation flags to .loom/.daemon.flags so
 #     `loom-daemon-update.sh` (#3968) can restart with EXACTLY the same
@@ -75,12 +84,22 @@
 #   ./.loom/scripts/cli/loom-daemon-start.sh --no-systemd    Linux only: use legacy nohup instead of a systemd --user service
 #   ./.loom/scripts/cli/loom-daemon-start.sh --print-plist   Print the LaunchAgent plist that WOULD be installed and exit (no side effects)
 #   ./.loom/scripts/cli/loom-daemon-start.sh --print-unit    Print the systemd --user unit that WOULD be installed and exit (no side effects)
-#   ./.loom/scripts/cli/loom-daemon-start.sh --force-env     Suppress the dropped-env-key warning (#4522) for an intentional narrower re-render
+#   ./.loom/scripts/cli/loom-daemon-start.sh --force-env     Acknowledge an intentional narrower re-render (#4522) -- actually DROPS env keys missing from this invocation's env; without it, dropped keys are carried forward from the installed unit/plist by default (#5344)
+#   ./.loom/scripts/cli/loom-daemon-start.sh --heal-watchdog-only   Re-provision a missing watchdog job/timer (#5343's heal_watchdog_provisioning_gap) and exit -- never touches the PID file or attempts to start/stop a daemon (#5405)
 #   ./.loom/scripts/cli/loom-daemon-start.sh --help
 #
 # Environment:
 #   LOOM_DAEMON_BIN     Path to the loom-daemon binary (else auto-detected)
 #   LOOM_SOCKET_PATH    Override the daemon socket (default ~/.loom/loom-daemon.sock)
+#   LOOM_PID_FILE       OUTPUT, not input (#6420). This script is the EXPORTER of
+#                        the pid-file path -- it derives "<state home>/.daemon.pid"
+#                        and exports/bakes it into the plist/unit for the daemon
+#                        and every reader (loom-daemon-stop.sh, -update.sh,
+#                        -watchdog.sh, daemon_pidfile.rs), all of which DO honor an
+#                        inbound value as tier 1 (#6386/#5118). An inbound value is
+#                        deliberately ignored HERE; to place the pid file elsewhere,
+#                        move the state home (LOOM_MACHINE_CHECKOUT / the repo root
+#                        $PWD resolves to). See the rationale at the export site.
 #   LOOM_WORK_FINDER / LOOM_MAIN_HEALTH_GATE  Respected when already exported
 #                        (always wins, even under --from-config -- #4353)
 #   LOOM_DAEMON_LAUNCHD  macOS only: 0/false/no forces the legacy nohup path (same as --no-launchd)
@@ -133,7 +152,10 @@
 #
 # Exit codes:
 #   0  daemon started (or already running)
-#   1  usage error / binary not found / daemon failed to start
+#   1  usage error / binary not found / daemon failed to start / (#5409) a
+#      DETECTED autonomy downgrade on a real start, refused pending an
+#      explicit --work-finder / --no-work-finder / --health-gate /
+#      --no-health-gate / --from-config
 
 set -uo pipefail
 
@@ -389,28 +411,79 @@ extract_systemd_env_value() {
     sed -n "s/^Environment=${want_key}=\\(.*\\)\$/\\1/p" "$unit_file" | head -n1
 }
 
-# warn_dropped_env_keys <old_file> <new_file> <extractor_function_name> — compare
+# ---------- carry-forward injection (#5344) ----------
+# Single-key siblings of the VALUE extractors above -- these WRITE a key/value
+# pair into an already-rendered plist/unit file, in place. Used by
+# warn_dropped_env_keys below to carry a dropped key's INSTALLED value forward
+# into a freshly-rendered file so an unattended re-render (watchdog /
+# automated / a bare re-run from a different shell) never silently narrows
+# the running job's environment.
+
+# inject_one_plist_env_entry <file> <key> <value> — insert a
+# <key>KEY</key><string>VALUE</string> pair into the EnvironmentVariables
+# dict of <file>, immediately before the </dict> that closes it.
+inject_one_plist_env_entry() {
+    local file="$1" key="$2" value="$3"
+    local esc_key esc_value tmp
+    esc_key="$(xml_escape "$key")"
+    esc_value="$(xml_escape "$value")"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/loom-plist-inject.XXXXXX")"
+    awk -v k="$esc_key" -v v="$esc_value" '
+        BEGIN { in_env = 0; injected = 0 }
+        /<key>EnvironmentVariables<\/key>/ { in_env = 1; print; next }
+        in_env && !injected && /<\/dict>/ {
+            printf "        <key>%s</key>\n        <string>%s</string>\n", k, v
+            injected = 1
+        }
+        { print }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# inject_one_systemd_env_entry <file> <key> <value> — append an
+# `Environment=KEY=VALUE` line to <file>, immediately after the last existing
+# `Environment=` line (falling back to right after `[Service]` if somehow
+# none exist). The systemd analog of inject_one_plist_env_entry above.
+inject_one_systemd_env_entry() {
+    local file="$1" key="$2" value="$3"
+    local last_line tmp
+    last_line="$(grep -n '^Environment=' "$file" | tail -n1 | cut -d: -f1)"
+    [[ -z "$last_line" ]] && last_line="$(grep -n '^\[Service\]' "$file" | head -n1 | cut -d: -f1)"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/loom-unit-inject.XXXXXX")"
+    awk -v ln="${last_line:-0}" -v ins="Environment=${key}=${value}" '
+        { print }
+        NR == ln { print ins }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# warn_dropped_env_keys <old_file> <new_file> <keys_extractor_fn> <value_extractor_fn> <injector_fn> — compare
 # the env-var KEY sets (not values) between an already-installed plist/unit and
-# a freshly-rendered replacement; warn (listing the keys) when the replacement
-# DROPS a key the installed file carried. <extractor_function_name> is
-# extract_plist_env_keys or extract_systemd_env_keys.
+# a freshly-rendered replacement; when the replacement would DROP a key the
+# installed file carried, warn (listing the keys) AND -- by default -- carry
+# the installed VALUE forward into <new_file> in place so the drop never
+# actually happens (#5344). <keys_extractor_fn> is extract_plist_env_keys or
+# extract_systemd_env_keys; <value_extractor_fn> is its single-key VALUE
+# sibling (extract_plist_env_value / extract_systemd_env_value);
+# <injector_fn> is the matching writer (inject_one_plist_env_entry /
+# inject_one_systemd_env_entry).
 #
 #   - A missing old_file (first-ever install -- nothing installed yet) is not a
-#     drop: returns silently, no warning.
-#   - --force-env (FORCE_ENV=true) acknowledges an intentional narrowing (e.g.
-#     an explicit minimal re-render) and suppresses the warning.
+#     drop: returns silently, no warning, no merge.
+#   - --force-env (FORCE_ENV=true) acknowledges an INTENTIONAL narrowing (e.g.
+#     an explicit minimal re-render): the merge is skipped entirely and the
+#     dropped key(s) are actually absent from <new_file>, with no warning.
+#     This is the ONLY way to shrink the installed env now -- the default
+#     path can only ever widen or match it.
 #   - A dropped LOOM_SAFEHOUSE_* key gets a specific migration hint (the
-#     "safehouse" block in .loom/config.json + --from-config, #4353) instead of
-#     a generic warning.
+#     "safehouse" block in .loom/config.json + --from-config, #4353) alongside
+#     the generic warning.
 warn_dropped_env_keys() {
-    local old_file="$1" new_file="$2" extractor="$3"
+    local old_file="$1" new_file="$2" keys_extractor="$3" value_extractor="$4" injector="$5"
     [[ -f "$old_file" ]] || return 0
-    [[ "${FORCE_ENV:-false}" == "true" ]] && return 0
 
     local old_keys new_keys
-    old_keys="$("$extractor" "$old_file" 2>/dev/null || true)"
+    old_keys="$("$keys_extractor" "$old_file" 2>/dev/null || true)"
     [[ -z "$old_keys" ]] && return 0
-    new_keys="$("$extractor" "$new_file" 2>/dev/null || true)"
+    new_keys="$("$keys_extractor" "$new_file" 2>/dev/null || true)"
 
     local dropped=() k nk hit
     while IFS= read -r k; do
@@ -426,6 +499,12 @@ warn_dropped_env_keys() {
 
     [[ "${#dropped[@]}" -eq 0 ]] && return 0
 
+    # --force-env: acknowledge the intentional narrowing and let it stand --
+    # no merge, no warning. Checked here (after computing $dropped) rather
+    # than as an early return so both the merge and the warning share exactly
+    # the same "what would be dropped" computation above.
+    [[ "${FORCE_ENV:-false}" == "true" ]] && return 0
+
     warn ""
     warn "WARNING: re-rendering $new_file drops ${#dropped[@]} env key(s) present in the installed $old_file:"
     for k in "${dropped[@]}"; do
@@ -436,40 +515,79 @@ warn_dropped_env_keys() {
         fi
     done
     warn "This usually means this invocation ran without the operator's exported env (a watchdog / automated re-render / a bare re-run from a different shell)."
-    warn "Pass --force-env to acknowledge an intentional narrowing and suppress this warning."
+    warn "Carrying the installed value(s) of the key(s) above forward into $new_file so this invocation does not silently narrow it. Pass --force-env to acknowledge an intentional narrowing and actually drop them instead."
+
+    # Merge (#5344): carry each dropped key's INSTALLED value forward into
+    # $new_file so the file on disk after this call is never narrower than
+    # $old_file, matching the warning above.
+    local v
+    for k in "${dropped[@]}"; do
+        v="$("$value_extractor" "$old_file" "$k" 2>/dev/null || true)"
+        [[ -z "$v" ]] && continue
+        "$injector" "$new_file" "$k" "$v"
+    done
 }
 
-# ---------- silent autonomy-downgrade detection (#4693) ----------
+# ---------- silent autonomy-downgrade detection (#4693, hardened #5409) ----------
 # Incident 2026-07-30: a routine loom-daemon-start.sh run (no flags) silently
 # re-rendered the plist with LOOM_WORK_FINDER=0 -- downgrading a previously
 # autonomous daemon to FLAGS-OFF with NO warning. ~3h of dispatch outage (23
 # ready issues sat queued, "work availability is the limiter") before the
 # missing "work_finder: starting" log line was traced back to the plist env.
 #
-# The FLAGS-OFF default for a PLAIN start (#3911) is correct and stays
-# unchanged -- this only closes the SILENT part of a transition FROM
-# autonomous TO FLAGS-OFF. Advisory only, exactly like warn_dropped_env_keys
-# above: it never blocks the start.
+# Incident 2026-08-05 (#5409): the #4693 mitigation below (a WARNING, never
+# blocking) was NOT enough -- it recurred, on the RECOVERY path specifically:
+# an operator ran the exact command `loom-daemon status` itself recommends
+# ("Recover with: ./.loom/scripts/cli/loom-daemon-start.sh"), the WARNING
+# scrolled past in the recovery output, and the fleet host lost ~1h of
+# dispatch with a daemon reporting perfectly healthy the whole time. #5409
+# resolved the issue's own "asymmetry worth weighing" (a wrongly-preserved-on
+# daemon is trivially visible and reversible; a wrongly-silenced-off daemon
+# looks like a healthy, quiet fleet) in favor of erring toward NOT silently
+# downgrading: a DETECTED downgrade on a REAL start now REFUSES to proceed
+# (exit 1) rather than warn-and-continue, until the operator states the
+# desired value for THIS invocation explicitly. --print-plist / --print-unit
+# stay warn-only (see the $PRINT_PLIST/$PRINT_UNIT guard in
+# warn_autonomy_downgrade below) -- they are read-only preview modes with no
+# side effect to block, and refusing them would make it IMPOSSIBLE to inspect
+# what a real start would render.
+#
+# The FLAGS-OFF default for a PLAIN, GENUINELY FRESH start (#3911 -- no prior
+# plist/unit, no marker) is correct and stays completely unchanged -- this
+# only closes the SILENT part of a transition FROM autonomous TO FLAGS-OFF.
 #
 # Signals consulted (either alone is sufficient to flag a downgrade):
 #   1. the PRIOR installed plist/unit had the key ON (=1) -- direct evidence
 #      this daemon was running autonomously a moment ago.
-#   2. the autonomy-desired marker (#4011) is present but no prior plist/unit
-#      value could be read (e.g. the first Darwin start after a nohup-only
-#      history) -- the marker alone is recorded operator intent, and the
+#   1b. (#5437) when no plist/unit exists to consult (always true on the nohup
+#      fallback tier -- no plist/unit is EVER rendered there), fall back to the
+#      work_finder=/health_gate= fields write_intent_marker() persists into the
+#      marker itself on every successful start -- the actual prior flag value,
+#      not just "a daemon started here at some point". This is what lets a
+#      bare restart following a PRIOR bare start on that tier stay silent
+#      (old value was already "0" -- no transition) while a bare restart
+#      following a PRIOR autonomous start still correctly falls through to #2.
+#   2. the autonomy-desired marker (#4011) is present but NEITHER the prior
+#      plist/unit NOR the marker's own persisted fields yielded a value (e.g.
+#      the first Darwin start after a nohup-only history whose marker predates
+#      #5437) -- marker presence alone is recorded operator intent, and the
 #      issue explicitly calls this combination out.
 # When the prior value was already "0" (no transition) this stays silent --
 # a standing marker-vs-FLAGS-OFF mismatch with no fresh transition is
-# `loom-daemon status`'s job to flag (AC3), not this one-shot start-time check.
+# `loom-daemon status`'s job to flag (a non-OK/exit-code signal as of #5409),
+# not this one-shot start-time check.
 #
 # Deliberately NOT triggered by:
 #   - --from-config (control is explicitly handed to .loom/config.json --
 #     not a silent default; see the FROM_CONFIG guard in the caller),
 #   - an explicit --no-work-finder / --no-health-gate THIS invocation (an
-#     explicit ask is not silent),
+#     explicit ask is not silent -- this is precisely the "state it
+#     explicitly" escape hatch #5409 asks for),
 #   - an operator-exported LOOM_WORK_FINDER=0 / LOOM_MAIN_HEALTH_GATE=0 in the
 #     calling shell (also an explicit, non-default signal -- "Respected when
 #     already exported", see the Environment section in the help banner).
+AUTONOMY_DOWNGRADE_DETECTED=false
+
 check_autonomy_downgrade_key() {
     local key="$1" new_val="$2" want_flag="$3" pre_exported="$4"
     [[ "$new_val" == "0" ]] || return 0
@@ -484,29 +602,55 @@ check_autonomy_downgrade_key() {
     local marker_present=false
     [[ -f "$INTENT_MARKER" ]] && marker_present=true
 
+    # #5437: fall back to the actual prior value THIS SAME MARKER recorded on
+    # the last successful start (write_intent_marker's work_finder=/
+    # health_gate= fields) when the mechanism-specific file above yielded
+    # nothing. This is the ONLY signal available on the nohup fallback tier
+    # (PRIOR_AUTONOMY_FILE is always empty there -- no plist/unit is ever
+    # rendered) and is strictly more accurate than the marker-presence-only
+    # inference below: it distinguishes a PRIOR bare (FLAGS-OFF) start from a
+    # PRIOR autonomous one, instead of treating both identically. A marker
+    # written before this field existed (old format) still falls through to
+    # the presence-only check, preserving the original conservative refusal.
+    if [[ -z "$old_val" && "$marker_present" == "true" ]]; then
+        local marker_field=""
+        case "$key" in
+            LOOM_WORK_FINDER) marker_field="work_finder" ;;
+            LOOM_MAIN_HEALTH_GATE) marker_field="health_gate" ;;
+        esac
+        if [[ -n "$marker_field" ]]; then
+            old_val="$(grep -E "^${marker_field}=" "$INTENT_MARKER" 2>/dev/null | head -n1 | cut -d= -f2-)"
+        fi
+    fi
+
     if [[ "$old_val" == "1" ]]; then
+        AUTONOMY_DOWNGRADE_DETECTED=true
         warn ""
         warn "WARNING: autonomy downgrade -- $key: 1 -> 0"
         warn "  The previously installed daemon had $key=1 (autonomous); this plain start"
-        warn "  renders it OFF -- matching the FLAGS-OFF-by-default contract for a start with"
-        warn "  no explicit flags (#3911), but SILENTLY from an operator's point of view."
-        warn "  Remediation: pass --from-config (drive from .loom/config.json -> autonomous)"
-        warn "  or --work-finder / --health-gate to keep autonomy on."
+        warn "  would render it OFF -- matching the FLAGS-OFF-by-default contract for a start"
+        warn "  with no explicit flags (#3911), but SILENTLY from an operator's point of view."
+        warn "  Remediation: pass --from-config (drive from .loom/config.json -> autonomous),"
+        warn "  --work-finder / --health-gate to keep autonomy on, or --no-work-finder /"
+        warn "  --no-health-gate to confirm you want it off."
         return 0
     fi
 
     if [[ -z "$old_val" && "$marker_present" == "true" ]]; then
+        AUTONOMY_DOWNGRADE_DETECTED=true
         warn ""
         warn "WARNING: autonomy downgrade -- $key renders 0 this start, and no prior plist/unit"
         warn "  value could be read -- but the autonomy-desired marker ($INTENT_MARKER) is"
         warn "  present, meaning this host previously ran loom-daemon autonomously."
-        warn "  Remediation: pass --from-config (drive from .loom/config.json -> autonomous)"
-        warn "  or --work-finder / --health-gate to keep autonomy on."
+        warn "  Remediation: pass --from-config (drive from .loom/config.json -> autonomous),"
+        warn "  --work-finder / --health-gate to keep autonomy on, or --no-work-finder /"
+        warn "  --no-health-gate to confirm you want it off."
         return 0
     fi
 }
 
-# warn_autonomy_downgrade — evaluate both autonomy loops. Called once
+# warn_autonomy_downgrade — evaluate both autonomy loops, then (#5409) REFUSE
+# a real start outright if either flagged a downgrade. Called once
 # PRIOR_AUTONOMY_FILE/PRIOR_AUTONOMY_EXTRACTOR and INTENT_MARKER are resolved
 # (after platform detection, before the plist/unit gets overwritten -- and
 # also from the read-only --print-plist/--print-unit inspection paths, so an
@@ -517,6 +661,245 @@ warn_autonomy_downgrade() {
     [[ "$FROM_CONFIG" == "true" ]] && return 0
     check_autonomy_downgrade_key "LOOM_WORK_FINDER" "$LOOM_WORK_FINDER" "$WANT_WORK_FINDER" "$PRE_EXPORTED_WORK_FINDER"
     check_autonomy_downgrade_key "LOOM_MAIN_HEALTH_GATE" "$LOOM_MAIN_HEALTH_GATE" "$WANT_HEALTH_GATE" "$PRE_EXPORTED_MAIN_HEALTH_GATE"
+
+    # #5409 AC1: refuse a REAL start (never a pure inspection) rather than
+    # warn-and-continue. The two --print-plist/--print-unit inspection modes
+    # stay warn-only -- they render a preview with no side effect, and
+    # refusing them would make it impossible to see what a real start would
+    # do before committing to it.
+    if [[ "$AUTONOMY_DOWNGRADE_DETECTED" == "true" && "$PRINT_PLIST" != "true" && "$PRINT_UNIT" != "true" ]]; then
+        err ""
+        err "ERROR: refusing to start -- this would silently downgrade autonomy (see the"
+        err "WARNING(s) above). Pass an explicit --work-finder / --no-work-finder (and/or"
+        err "--health-gate / --no-health-gate) to state the desired value for THIS"
+        err "invocation, or --from-config to drive from .loom/config.json -> autonomous."
+        err "(This refusal fires only on a DETECTED downgrade -- prior plist/unit had the"
+        err "loop on, or the autonomy-desired marker is present. A genuinely fresh start"
+        err "with no prior signal, #3911, is unaffected and still defaults FLAGS-OFF.)"
+        exit 1
+    fi
+}
+
+# ---------- autonomy env resolution (shared: inspection + real start, #6387) ----------
+# Lifted VERBATIM out of the former inline block that sat BETWEEN the
+# already-running guard and the plist/unit render, so both callers resolve
+# byte-identical env:
+#   * the pure-inspection short-circuit (--print-plist / --print-unit), which
+#     #6387 moved ABOVE the already-running guard. It still needs every LOOM_*
+#     var exported here, because render_launchd_plist / render_systemd_unit
+#     harvest the PROCESS ENV to build EnvironmentVariables / Environment=.
+#   * the real start path, at the exact position the block always occupied.
+# Exactly one of the two runs per invocation (the inspection path exits).
+#
+# One deliberate difference between the two: under --print-plist/--print-unit
+# the informational autonomy line goes to STDERR (see _autonomy_echo), so an
+# inspection mode emits the plist/unit on stdout and NOTHING else -- which is
+# what --help promises ("Print the LaunchAgent plist that WOULD be installed")
+# and what every other advisory on that path (PATH drift, "Rendered plist
+# PATH: ...", the autonomy-downgrade warning) already does. A real start is
+# unchanged: the line still goes to stdout.
+_autonomy_echo() {
+    if [[ "$PRINT_PLIST" == "true" || "$PRINT_UNIT" == "true" ]]; then
+        echo -e "$1" >&2
+    else
+        echo -e "$1"
+    fi
+}
+
+resolve_autonomy_env() {
+    # ---------- autonomous-mode env ----------
+    # Precedence: an already-exported env var is always respected. Otherwise the
+    # default is FLAGS-OFF (#3911) — a plain start is a reliability daemon with both
+    # autonomous loops OFF, matching the ecosystem-wide opt-in / default-off contract
+    # (LOOM_WORK_FINDER unset => off, LOOM_MAIN_HEALTH_GATE unset => off). Opt in with
+    # --work-finder / --health-gate (force the var to 1), or pass --from-config to
+    # leave both unset so .loom/config.json -> autonomous drives.
+    #
+    # --from-config COMPOSES with --work-finder/--health-gate/--no-work-finder/
+    # --no-health-gate rather than ignoring them (#4353): --from-config alone still
+    # leaves both vars unset for config to drive (byte-for-byte the pre-#4353
+    # behavior — test case 6 asserts this stays green); pairing it with an
+    # explicit --work-finder / --no-work-finder additionally FORCES that one var
+    # (same env-var-wins-if-already-exported rule), while the loop with no
+    # explicit flag is still left to config. So `--from-config --work-finder`
+    # forces LOOM_WORK_FINDER=1 and leaves LOOM_MAIN_HEALTH_GATE unset.
+    export LOOM_WORKSPACE="${LOOM_WORKSPACE:-$REPO_ROOT}"
+
+    # ---------- guard-hook autonomy defaults (#3898) ----------
+    # The daemon dispatches headless /loom:sweep children under
+    # --dangerously-skip-permissions, where a guard ASK has no human to answer it
+    # and therefore BLOCKS — a silent stall. So autonomous runs get two guard
+    # defaults, both env-overridable (an already-exported value always wins):
+    #   * LOOM_GUARD_DECISION_LOG=1 — capture every guard DENY/ASK to
+    #     .loom/logs/guard-decisions.log so the standing per-trigger review policy
+    #     (see CLAUDE.md → "Autonomous guard defaults") can dedup by pattern and
+    #     file one issue per distinct trigger. Off by default outside autonomous
+    #     mode; here we opt it on so the feedback loop actually has data.
+    #   * LOOM_FORCE_SCOPE=protected — allow an agent to force-push / hard-reset its
+    #     OWN working branch without a stall, while force-push to a protected branch
+    #     (main/master/default) stays a hard DENY via ALWAYS_BLOCK_PATTERNS. This is
+    #     the Loom-recommended force-scope for autonomous repos.
+    # Children inherit these through the daemon's process environment. This is a
+    # DELIBERATE, agent-wide (not per-invocation) export: there is no mechanism to
+    # scope an env var to only the guard hook's own PreToolUse invocations without
+    # also handing it to every OTHER subprocess the dispatched agent spawns —
+    # `export`/`Command::env` inheritance is transitive to the whole child tree.
+    #
+    # KNOWN CONSEQUENCE (#5388): a dispatched agent that runs a *managed repo's
+    # own* guard-hook test suite (one that asserts the guard's FACTORY-DEFAULT
+    # force-push/reset-hard `ask` tier or decision-log-off behavior, e.g.
+    # `hooks/repo/tests/test-guard-destructive.sh`) will see these two ambient
+    # values override exactly the defaults under test — a clean shell run and a
+    # dispatched-agent run of the identical suite, on the identical commit, can
+    # disagree by dozens of failures. An agent that does not know its own
+    # environment is non-default has no way to distinguish "main is broken" from
+    # "my environment is lying to me" — this caused a Builder to close a valid
+    # issue as a false "already resolved" duplicate. The Builder role brief
+    # (defaults/roles/builder.md → "Build Verification") tells dispatched agents
+    # these two vars may be set and gives the remedy:
+    #   env -u LOOM_FORCE_SCOPE -u LOOM_GUARD_DECISION_LOG <test-suite-command>
+    export LOOM_GUARD_DECISION_LOG="${LOOM_GUARD_DECISION_LOG:-1}"
+    export LOOM_FORCE_SCOPE="${LOOM_FORCE_SCOPE:-protected}"
+
+    local FORCED_DESC=() FORCED_JOINED=""
+    if [[ "$FROM_CONFIG" == "true" ]]; then
+        # Compose (#4353): --from-config alone leaves BOTH vars unset for config to
+        # drive. An explicit --work-finder/--no-work-finder (or the health-gate
+        # equivalent) additionally FORCES that one var -- using the
+        # ${VAR:-default} form so an already-exported env var still wins over the
+        # CLI flag, exactly like the non-config branch below. The loop with no
+        # explicit flag is left untouched (stays unset, config drives it).
+        if [[ "$WANT_WORK_FINDER" == "on" ]]; then
+            export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-1}"
+            FORCED_DESC+=("work_finder=${LOOM_WORK_FINDER}")
+        elif [[ "$WANT_WORK_FINDER" == "off" ]]; then
+            export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-0}"
+            FORCED_DESC+=("work_finder=${LOOM_WORK_FINDER}")
+        fi
+        if [[ "$WANT_HEALTH_GATE" == "on" ]]; then
+            export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-1}"
+            FORCED_DESC+=("main_health_gate=${LOOM_MAIN_HEALTH_GATE}")
+        elif [[ "$WANT_HEALTH_GATE" == "off" ]]; then
+            export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-0}"
+            FORCED_DESC+=("main_health_gate=${LOOM_MAIN_HEALTH_GATE}")
+        fi
+        if [[ "${#FORCED_DESC[@]}" -eq 0 ]]; then
+            _autonomy_echo "${BOLD}Autonomous mode: driven by .loom/config.json -> autonomous (env not forced)${NC}"
+        else
+            FORCED_JOINED="$(IFS=', '; echo "${FORCED_DESC[*]}")"
+            _autonomy_echo "${BOLD}Autonomous mode: config-driven; forced: ${FORCED_JOINED}${NC}"
+        fi
+    else
+        # An already-exported env var always wins. Otherwise --work-finder /
+        # --health-gate force the loop ON (=1); the default (flags off) forces it
+        # OFF (=0), so a plain start is a reliability daemon that never auto-dispatches.
+        if [[ "$WANT_WORK_FINDER" == "on" ]]; then
+            export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-1}"
+        else
+            export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-0}"
+        fi
+        if [[ "$WANT_HEALTH_GATE" == "on" ]]; then
+            export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-1}"
+        else
+            export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-0}"
+        fi
+        if [[ "$LOOM_WORK_FINDER" == "0" && "$LOOM_MAIN_HEALTH_GATE" == "0" ]]; then
+            _autonomy_echo "${BOLD}Reliability daemon:${NC} work_finder=off main_health_gate=off (both loops OFF; opt in with --work-finder / --health-gate / --from-config)"
+        else
+            _autonomy_echo "${BOLD}Autonomous mode:${NC} work_finder=${LOOM_WORK_FINDER} main_health_gate=${LOOM_MAIN_HEALTH_GATE}"
+        fi
+    fi
+}
+
+# ---------- inspection-mode short-circuit body (--print-plist/--print-unit, #6387) ----------
+# The rendering half of the two pure-inspection modes, factored into a function
+# purely so the CALL SITE can sit as early as possible in the linear flow (see
+# the call, immediately after --heal-watchdog-only and BEFORE the
+# already-running guard). Everything it touches is read-only: it renders to a
+# scratch tempfile it deletes, and only ever READS an installed plist/unit.
+run_inspection_mode_and_exit() {
+    # ---------- prior installed plist/unit (autonomy-downgrade check, #4693) ----------
+    # The mechanism is decided by the INVOCATION, never by the host OS: these are
+    # pure inspection modes that render (and inspect) their mechanism's file
+    # regardless of the platform running them, exactly like the --print-plist
+    # PATH-drift (#4172) and dropped-env-key (#4522) checks below, which read
+    # $HOME/Library/LaunchAgents/<label>.plist unconditionally. That argv-only
+    # decision is also what lets this whole block run before platform detection
+    # -- and therefore before the already-running guard (#6387).
+    if [[ "$PRINT_PLIST" == "true" ]]; then
+        PRIOR_AUTONOMY_MECH="launchd"
+        PRIOR_AUTONOMY_FILE="$HOME/Library/LaunchAgents/$(resolve_launchd_label).plist"
+        PRIOR_AUTONOMY_EXTRACTOR="extract_plist_env_value"
+    else
+        PRIOR_AUTONOMY_MECH="systemd"
+        PRIOR_AUTONOMY_FILE=""
+        PRIOR_AUTONOMY_EXTRACTOR="extract_systemd_env_value"
+        if declare -f resolve_systemd_unit_path >/dev/null 2>&1; then
+            PRIOR_AUTONOMY_FILE="$(resolve_systemd_unit_path 2>/dev/null || true)"
+        fi
+    fi
+
+    # Run BEFORE the render below, so an operator sees the warning whether they
+    # are just inspecting or actually starting. Warn-only here by construction
+    # (see the $PRINT_PLIST/$PRINT_UNIT guard inside warn_autonomy_downgrade).
+    warn_autonomy_downgrade
+
+    # ---------- --print-plist: pure inspection, no side effects ----------
+    if [[ "$PRINT_PLIST" == "true" ]]; then
+        local _plist_rendered _plist_print_tmp _live_plist _live_path
+        _plist_rendered="$(render_launchd_plist "$(resolve_launchd_label)" "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG")"
+        # Render to a scratch file (never printed directly) so the dropped-env-key
+        # merge (#5344) below can carry forward any installed-but-missing key
+        # BEFORE printing -- the preview must match what a real install would
+        # actually write, not the pre-merge render.
+        _plist_print_tmp="$(mktemp "${TMPDIR:-/tmp}/loom-print-plist.XXXXXX")"
+        printf '%s\n' "$_plist_rendered" > "$_plist_print_tmp"
+        # PATH-drift check (#4172): if a live plist is already installed for this
+        # label, compare its PATH against the one just rendered and warn (stderr
+        # only -- READ-ONLY, no side effect) when they differ. This is what makes
+        # a PATH change from the live plist visible at inspection/roll time
+        # instead of silently swapping it out on the next real start/relaunch.
+        _live_plist="$HOME/Library/LaunchAgents/$(resolve_launchd_label).plist"
+        if [[ -f "$_live_plist" ]]; then
+            _live_path="$(extract_plist_path_value "$_live_plist" 2>/dev/null || true)"
+            if [[ -n "$_live_path" && "$_live_path" != "$PLIST_PATH_VALUE" ]]; then
+                {
+                    echo ""
+                    echo "PATH DRIFT DETECTED vs the installed plist ($_live_plist):"
+                    echo "- live: $_live_path"
+                    echo "+ new:  $PLIST_PATH_VALUE"
+                } >&2
+            fi
+            # Dropped-env-key check (#4522, merge #5344): read-only inspection
+            # counterpart of the same check the real install path below runs
+            # before overwriting -- carries dropped keys forward into
+            # $_plist_print_tmp in place (unless --force-env).
+            warn_dropped_env_keys "$_live_plist" "$_plist_print_tmp" extract_plist_env_keys extract_plist_env_value inject_one_plist_env_entry
+        fi
+        cat "$_plist_print_tmp"
+        rm -f "$_plist_print_tmp"
+        exit 0
+    fi
+
+    # ---------- --print-unit: pure inspection, no side effects (#4268) ----------
+    local _unit_rendered _unit_print_tmp _live_unit
+    _unit_rendered="$(render_systemd_unit "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG")"
+    # Render to a scratch file (never printed directly) so the dropped-env-key
+    # merge (#5344) below can carry forward any installed-but-missing key
+    # BEFORE printing -- see the --print-plist rationale above.
+    _unit_print_tmp="$(mktemp "${TMPDIR:-/tmp}/loom-print-unit.XXXXXX")"
+    printf '%s\n' "$_unit_rendered" > "$_unit_print_tmp"
+    # Dropped-env-key check (#4522, merge #5344): read-only inspection
+    # counterpart of the same check the real install path below runs before
+    # overwriting -- carries dropped keys forward into $_unit_print_tmp in
+    # place (unless --force-env).
+    _live_unit="$PRIOR_AUTONOMY_FILE"
+    if [[ -n "$_live_unit" && -f "$_live_unit" ]]; then
+        warn_dropped_env_keys "$_live_unit" "$_unit_print_tmp" extract_systemd_env_keys extract_systemd_env_value inject_one_systemd_env_entry
+    fi
+    cat "$_unit_print_tmp"
+    rm -f "$_unit_print_tmp"
+    exit 0
 }
 
 # render_launchd_plist <label> <daemon_bin> <workdir> <log_path>
@@ -684,6 +1067,11 @@ render_launchd_plist() {
 #     drags out the default 90s before landing the unit in `failed (Result:
 #     timeout)` -- the exact 2026-08-02 incident `loom-daemon-update.sh`'s
 #     #4950 restart-verification poll now detects and self-heals.
+#   * SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (#6129): a
+#     clean operator stop (SIGTERM->143, SIGINT->130, see ipc.rs's
+#     EXIT_SIGTERM/EXIT_SIGINT) was landing the unit in `failed`, not
+#     `inactive` -- see the printf site below for the full classification +
+#     safety rationale.
 #   * [Install] WantedBy=default.target + `systemctl --user enable` is the
 #     RunAtLoad=true analog: the service comes up on login (and, with
 #     `loginctl enable-linger`, after a reboot).
@@ -756,6 +1144,37 @@ render_systemd_unit() {
     # observe the failure and self-heal via `systemctl --user reset-failed &&
     # start`.
     printf 'TimeoutStopSec=20\n'
+    # SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (issue
+    # #6129): a clean operator `systemctl --user stop loom-daemon` was landing
+    # the unit in `failed` (not `inactive`), because `EXIT_SIGTERM`/
+    # `EXIT_SHUTDOWN` (143) and `EXIT_SIGINT` (130, see ipc.rs) are non-zero
+    # and Type=simple's default "clean exit" criterion is exit(0) or one of
+    # SIGHUP/SIGINT/SIGTERM/SIGPIPE *terminating the process by signal* --
+    # neither matches a `std::process::exit(143)` *exit code* (as opposed to
+    # dying BY the signal), so systemd classified it Result=exit-code and
+    # ActiveState=failed even though nothing crashed. Listing 143/130 in
+    # SuccessExitStatus= fixes the classification (Result=success,
+    # ActiveState=inactive) for both codes.
+    #
+    # This is deliberately paired with RestartPreventExitStatus=143 130,
+    # NOT left to rely on SuccessExitStatus= alone, even though
+    # systemd.service(5)'s own Restart= semantics already say "the death of
+    # the process is a result of systemd operation (e.g. service stop or
+    # restart)" is never restarted, regardless of exit status -- which is
+    # true for the supported path (this repo's own loom-daemon-stop.sh always
+    # goes through `systemctl --user disable --now`, a systemd-tracked stop).
+    # But SuccessExitStatus= widens what counts as "a clean exit" for
+    # Restart=on-success too: without the belt-and-braces
+    # RestartPreventExitStatus= entry, an operator who bypasses the script
+    # and sends a raw `kill -TERM <pid>` directly (not through systemctl) --
+    # untracked by systemd as an intentional stop -- would newly get an
+    # AUTOMATIC RELAUNCH after that raw kill, the opposite of "operator stop
+    # stays stopped" (#4054 Curator Finding 1). RestartPreventExitStatus=
+    # vetoes a restart on these codes unconditionally, independent of how
+    # the process died, closing that gap regardless of which door the
+    # operator used.
+    printf 'SuccessExitStatus=143 130\n'
+    printf 'RestartPreventExitStatus=143 130\n'
     printf '%b' "$env_lines"
     printf 'StandardOutput=append:%s\n' "$log_path"
     printf 'StandardError=append:%s\n' "$log_path"
@@ -779,6 +1198,18 @@ render_systemd_unit() {
 # plain-nohup fallback -- both previously wrote identical `use_launchd=false`
 # markers, leaving the watchdog with no way to probe `systemctl --user` for the
 # #4232-style bounded auto-remediation gate (see loom-daemon-watchdog.sh).
+#
+# work_finder/health_gate (#5437): persist THIS invocation's actual resolved
+# LOOM_WORK_FINDER / LOOM_MAIN_HEALTH_GATE values (both are exported, one way
+# or another, by every code path above this function -- see the autonomy-flag
+# resolution block preceding "persist invocation flags"). This is the only
+# durable record of "was the daemon most recently started autonomously?" on
+# the nohup fallback tier, which never renders a plist/unit for
+# check_autonomy_downgrade_key() to read back (see PRIOR_AUTONOMY_FILE below,
+# always empty on that tier). Without it, that check had no way to tell a
+# PRIOR bare (FLAGS-OFF) start apart from a PRIOR autonomous one -- both left
+# an identical "marker present, no readable prior value" signal -- so EVERY
+# bare restart following ANY prior start looked like a downgrade.
 write_intent_marker() {
     local use_launchd="$1" label="$2" use_systemd="${3:-false}" systemd_unit="${4:-}"
     mkdir -p "$LOOM_DIR" 2>/dev/null || true
@@ -800,6 +1231,8 @@ launchd_label=$label
 use_systemd=$use_systemd
 systemd_unit=$systemd_unit
 socket_path=$SOCKET_PATH
+work_finder=${LOOM_WORK_FINDER:-}
+health_gate=${LOOM_MAIN_HEALTH_GATE:-}
 EOF
     )
 }
@@ -1149,7 +1582,141 @@ provision_watchdog_job_systemd() {
 # $IS_DARWIN and $IS_LINUX_SYSTEMD true simultaneously.
 provision_watchdog_job_none() {
     warn "watchdog: no scheduled checker on this platform (nohup-fallback Linux / non-systemd host) — skipping (marker+heartbeat still active). Run loom-daemon-watchdog.sh by hand or wire it to cron."
+    escalate_watchdog_unprovisionable
     return 0
+}
+
+# ---------- watchdog escalation when NO scheduled mechanism exists (#5343 AC4) ----------
+# Called only from the nohup-fallback tier (provision_watchdog_job_none /
+# heal_watchdog_provisioning_gap's own "no mechanism" branch below):
+# non-systemd Linux, or an operator's explicit --no-launchd/--no-systemd escape
+# hatch. On that tier this tooling structurally cannot provision a scheduled
+# watchdog job at all (no StartInterval/OnUnitActiveSec-equivalent mechanism),
+# so "auto-provisioning is out of scope" (the issue's AC4 condition) applies
+# unconditionally here. Leaving that as a one-line stderr warning is exactly
+# the failure mode #5343 exists to close -- a host can run for months with the
+# gap and nothing surfaces it beyond a log line an operator has to go looking
+# for. File ONE tracking issue via ./.loom/scripts/create-issue.sh (never a
+# bare `gh issue create` — see this repo's own CLAUDE.md), deduped by a
+# persistent sentinel file so this never re-files on every subsequent
+# start/heal pass. Best-effort and NON-FATAL: any failure (no create-issue.sh
+# on this host, no forge auth, offline) is warned and swallowed — a daemon
+# (even an unprotected one) is strictly better than no daemon.
+escalate_watchdog_unprovisionable() {
+    [[ -f "$INTENT_MARKER" ]] || return 0
+
+    local sentinel="$LOOM_DIR/.watchdog-unprovisionable-escalated"
+    [[ -f "$sentinel" ]] && return 0
+
+    local issue_script="$REPO_ROOT/.loom/scripts/create-issue.sh"
+    [[ -f "$issue_script" ]] || issue_script="$REPO_ROOT/defaults/scripts/create-issue.sh"
+    if [[ ! -f "$issue_script" ]]; then
+        warn "watchdog: no scheduled checker on this platform, and create-issue.sh not found — cannot escalate (#5343)."
+        return 0
+    fi
+
+    local hostname_str; hostname_str="$(hostname 2>/dev/null || echo unknown-host)"
+    local body
+    body="$(cat <<EOF
+The autonomy-desired marker at \`$INTENT_MARKER\` is present on host \`$hostname_str\`,
+meaning a loom-daemon is EXPECTED to be running here — but this platform tier (no
+\`systemd --user\`, no launchd: a plain nohup-backgrounded daemon, or an explicit
+--no-launchd/--no-systemd start) has no OS-level scheduled-job mechanism this tooling
+can provision a watchdog timer onto.
+
+Nothing is scheduled to detect a future daemon death on this host. Auto-provisioning is
+out of scope here (issue #5343 AC4) — mitigate manually: run
+\`loom-daemon-watchdog.sh\` by hand, wire it to cron, or move this host onto a
+systemd/launchd-managed start.
+
+Filed automatically by the loom-daemon-start.sh watchdog escalation (#5343). Deduped by a
+sentinel file at \`$sentinel\` — delete it to allow re-filing after a genuine
+reconfiguration.
+EOF
+)"
+    if "$issue_script" \
+        --title "loom-daemon-watchdog cannot be scheduled on $hostname_str (no systemd/launchd) — crash protection absent" \
+        --body "$body" \
+        --label "loom:triage" >/dev/null 2>"$LOOM_DIR/logs/.watchdog-escalation-err"; then
+        mkdir -p "$LOOM_DIR" 2>/dev/null || true
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > "$sentinel" 2>/dev/null || true
+        warn "watchdog: filed a tracking issue for the unprovisionable watchdog gap on this host (#5343 AC4)."
+    else
+        warn "watchdog: could not file a tracking issue for the unprovisionable watchdog gap (create-issue.sh failed — see $LOOM_DIR/logs/.watchdog-escalation-err)."
+    fi
+}
+
+# ---------- watchdog self-heal for an ALREADY-RUNNING daemon (#5343) ----------
+# Root cause (#5343): the watchdog job/timer was previously provisioned ONLY as
+# a side effect of a FRESH loom-daemon-start.sh run reaching the
+# launchd/systemd install branch (the unconditional provision_watchdog_job_*
+# calls further down this file). Two paths leave the autonomy-desired marker
+# present with NO watchdog ever provisioned:
+#   1. `loom-daemon fleet add-worker` (loom-daemon/src/fleet/add_worker.rs)
+#      hand-installs the `loom-daemon.service` systemd --user unit directly
+#      (its own render_daemon_unit()) and never calls this script at all, so
+#      its watchdog-provisioning branch never runs.
+#   2. The daemon's own startup marker-healing (autonomy_marker.rs, #4331):
+#      whenever a supervised daemon starts (LOOM_DAEMON_SUPERVISOR set — which
+#      fleet add-worker's hand-rolled unit DOES set) with the marker absent, the
+#      DAEMON PROCESS ITSELF re-writes the marker — independent of, and with no
+#      knowledge of, the watchdog job.
+# Once armed that way, the "already-running guard" just above used to `exit 0`
+# immediately on ANY subsequent loom-daemon-start.sh invocation — including one
+# an operator runs BY HAND specifically to check/repair the install — without
+# ever reaching the watchdog-provisioning code below (which is unconditionally
+# skipped whenever the running-daemon guard fires first). So even a deliberate
+# re-run could not close the gap. This call makes that guard corrective instead
+# of a silent no-op: marker present + watchdog job missing -> provisions it now,
+# without touching the already-running daemon process at all (mirrors the
+# daemon's own startup marker-healing pattern, #4331, applied to the watchdog
+# side of the same "expected protection" contract).
+#
+# Non-fatal, and safe to call unconditionally:
+#   - marker absent -> no provisioning attempt (nothing was ever "desired").
+#   - marker present + job already present -> provision_watchdog_job_launchd /
+#     _systemd are already idempotent (the launchd branch skips the reload
+#     when already loaded and byte-identical; a bare `enable --now` on an
+#     already-active systemd timer is a verified no-op, #4862) — calling them
+#     again here never double-fires anything.
+#   - marker present + no scheduled-job mechanism on this platform tier (the
+#     nohup-fallback tier, or an explicit --no-launchd/--no-systemd escape
+#     hatch) -> escalates instead of silently reporting (AC4), same as the
+#     fresh-start nohup tier above.
+# Platform detection is duplicated (deliberately, not shared with the real
+# detection block below) because it must run BEFORE the already-running guard,
+# ahead of where the real platform-detection block executes today — keeping it
+# local avoids reordering the rest of this carefully-sequenced script.
+heal_watchdog_provisioning_gap() {
+    [[ -f "$INTENT_MARKER" ]] || return 0
+
+    local heal_is_darwin=false heal_use_launchd=false heal_is_systemd=false
+    [[ "$(uname -s)" == "Darwin" ]] && heal_is_darwin=true
+
+    if [[ "$heal_is_darwin" == "true" ]]; then
+        heal_use_launchd=true
+        [[ "${LOOM_DAEMON_LAUNCHD:-}" =~ ^(0|false|no)$ ]] && heal_use_launchd=false
+    fi
+    [[ "$NO_LAUNCHD" == "true" ]] && heal_use_launchd=false
+
+    if [[ "$heal_use_launchd" != "true" ]] \
+        && ! [[ "${LOOM_DAEMON_SYSTEMD:-}" =~ ^(0|false|no)$ ]] \
+        && [[ "$NO_SYSTEMD" != "true" ]] \
+        && declare -f is_linux_systemd >/dev/null 2>&1 && is_linux_systemd; then
+        heal_is_systemd=true
+    fi
+
+    # Deliberately no separate "is it already provisioned?" pre-check here —
+    # provision_watchdog_job_launchd/_systemd already probe that internally
+    # and are already idempotent (see their own doc comments), so a bare call
+    # is both simpler and cannot double-fire the job.
+    if [[ "$heal_use_launchd" == "true" ]]; then
+        provision_watchdog_job_launchd
+    elif [[ "$heal_is_systemd" == "true" ]]; then
+        provision_watchdog_job_systemd
+    else
+        escalate_watchdog_unprovisionable
+    fi
 }
 
 # ---------- args ----------
@@ -1176,11 +1743,23 @@ NO_LAUNCHD=false
 NO_SYSTEMD=false
 PRINT_PLIST=false
 PRINT_UNIT=false
-# --force-env (#4522): acknowledges an intentional narrower re-render and
-# suppresses warn_dropped_env_keys' warning. Script-only (like --print-plist),
-# not a daemon autonomy flag -- excluded from the persisted .daemon.flags file
-# below.
+# --force-env (#4522, inverted #5344): acknowledges an intentional narrower
+# re-render. By DEFAULT (this flag unset), warn_dropped_env_keys carries any
+# env key present in the installed unit/plist forward into the re-render, even
+# when this invocation's own env no longer has it -- a re-render can never
+# silently narrow. --force-env is the only way to actually drop a missing key.
+# Script-only (like --print-plist), not a daemon autonomy flag -- excluded
+# from the persisted .daemon.flags file below.
 FORCE_ENV=false
+# --heal-watchdog-only (#5405): a narrow, side-effect-scoped entry point that
+# performs ONLY the watchdog provisioning-gap heal (heal_watchdog_provisioning_gap,
+# #5343) and exits -- it never reaches the "already-running guard" (below) or
+# the daemon-start path at all, so it is safe for a host-resident periodic
+# caller (the daemon's own watchdog_provisioning_guard loop) to invoke
+# repeatedly without any risk of accidentally starting a second daemon if a
+# PID-file read were ever wrong. Script-only, not a daemon autonomy flag --
+# excluded from the persisted .daemon.flags file below.
+HEAL_WATCHDOG_ONLY=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) show_help; exit 0 ;;
@@ -1195,6 +1774,7 @@ while [[ $# -gt 0 ]]; do
         --print-plist) PRINT_PLIST=true; shift ;;
         --print-unit) PRINT_UNIT=true; shift ;;
         --force-env) FORCE_ENV=true; shift ;;
+        --heal-watchdog-only) HEAL_WATCHDOG_ONLY=true; shift ;;
         *) err "Unknown option '$1'"; echo "Use --help for usage" >&2; exit 1 ;;
     esac
 done
@@ -1242,8 +1822,14 @@ else
     exit 1
 fi
 
+# ---------- daemon-binary lookup ----------
+# Skipped (never fatal) under --heal-watchdog-only (#5405): that mode never
+# starts, stops, or even talks to a daemon process, so it must not fail just
+# because $DAEMON_BIN happens to be unresolvable on this host (e.g. a binary
+# that was later moved/removed after the daemon it belongs to was started --
+# the watchdog job/timer should still be re-provisionable independent of that).
 DAEMON_BIN=$(loom_locate_daemon_bin "$REPO_ROOT")
-if [[ -z "$DAEMON_BIN" ]]; then
+if [[ -z "$DAEMON_BIN" && "$HEAL_WATCHDOG_ONLY" != "true" ]]; then
     err "loom-daemon binary not found. Checked:"
     loom_daemon_bin_search_paths "$REPO_ROOT" | sed 's/^/  - /' >&2
     echo "Build it (cargo build --release -p loom-daemon), install it to one of the paths above, or set LOOM_DAEMON_BIN=/path/to/loom-daemon" >&2
@@ -1256,6 +1842,38 @@ fi
 # stderr exactly once per run rather than once per plist rendered.
 PLIST_PATH_VALUE="$(resolve_plist_path)"
 
+# ---------- pid-file derivation: DERIVED-ONLY BY DESIGN (#6420) ----------
+# Unlike loom-daemon-stop.sh / -update.sh / -watchdog.sh / daemon_pidfile.rs --
+# which all resolve an inbound LOOM_PID_FILE as TIER 1, ahead of this same
+# derivation (#6386, #5118) -- this script deliberately does NOT read
+# LOOM_PID_FILE. It WRITES it. The asymmetry is the point, not an oversight:
+#
+#   * One writer, N readers. `start` is the only end that CHOOSES where the pid
+#     file lives; every other end must resolve whatever `start` chose. That is
+#     what keeps "all ends mean the same file" true, and it is why the value is
+#     exported and baked into the plist/unit below rather than re-derived by
+#     each reader.
+#   * The blast radius runs the OTHER WAY here. For a reader, honoring an
+#     explicit LOOM_PID_FILE NARROWS what it touches -- that is precisely
+#     #6386's fix (a stop that was told which pid file to use must not wander
+#     onto the live one via $PWD). For `start`, honoring it WIDENS what it
+#     touches: this script reads the path for its already-running guard, `rm
+#     -f`s it, writes the new pid into it, and hands it to a daemon that claims
+#     it. And LOOM_PID_FILE is AMBIENT in any Loom agent session -- this very
+#     export lands in the daemon's env and is inherited by every sweep/agent
+#     child it spawns (observed on a worker host; see the header of
+#     defaults/scripts/tests/lib/live-state-sandbox.sh). Honoring it would mean
+#     a `start` run inside a scratch fixture silently claims, rewrites, and
+#     `rm -f`s the LIVE daemon's pid file -- incident #5179's exact shape, with
+#     the resulting FALSE `degraded` liveness verdict for the operator and a
+#     poisoned watchdog input.
+#   * Nothing is lost. A caller who needs the pid file somewhere else moves the
+#     STATE HOME (LOOM_MACHINE_CHECKOUT, or the repo root $PWD resolves to),
+#     which this script does honor -- an unambiguous, deliberate act rather
+#     than an inherited env var.
+#
+# Regression-pinned by test-loom-daemon-start.sh ("LOOM_PID_FILE is an OUTPUT")
+# so this contract cannot be "aligned" away silently.
 PID_FILE="$DAEMON_STATE_HOME/.daemon.pid"
 # Exported (#4774) so the daemon writes the SAME file this script does. Both
 # the plist and systemd-unit renderers harvest every exported LOOM_* var, so
@@ -1268,7 +1886,14 @@ PID_FILE="$DAEMON_STATE_HOME/.daemon.pid"
 export LOOM_PID_FILE="$PID_FILE"
 SOCKET_PATH="${LOOM_SOCKET_PATH:-$HOME/.loom/loom-daemon.sock}"
 START_LOG="$DAEMON_STATE_HOME/logs/daemon-start.log"
-mkdir -p "$DAEMON_STATE_HOME/logs"
+# Skipped for the two pure-inspection modes (#6387): they only ever render
+# $START_LOG as a STRING into the plist/unit preview and never open it, so
+# creating the directory would be a gratuitous filesystem write on a path that
+# advertises "no side effects". Every other mode (including
+# --heal-watchdog-only) still gets it, unchanged.
+if [[ "$PRINT_PLIST" != "true" && "$PRINT_UNIT" != "true" ]]; then
+    mkdir -p "$DAEMON_STATE_HOME/logs"
+fi
 
 # ---------- autonomy-desired marker + heartbeat paths (#4011) ----------
 # LOOM_DIR is the machine-level dir the daemon uses for its socket/log/heartbeat
@@ -1283,11 +1908,75 @@ HEARTBEAT_FILE="$LOOM_DIR/daemon.heartbeat"
 # watchdog's derived staleness threshold matches the real cadence.
 HEARTBEAT_INTERVAL_SECS="${LOOM_DAEMON_HEARTBEAT_INTERVAL_SECS:-60}"
 
+# ---------- --heal-watchdog-only short-circuit (#5405) ----------
+# A narrow, side-effect-scoped entry point: perform ONLY the watchdog
+# provisioning-gap heal (heal_watchdog_provisioning_gap, #5343 -- reused
+# verbatim, never reimplemented) and exit, using the SAME LOOM_DIR /
+# INTENT_MARKER / PID_FILE / PLIST_PATH_VALUE / SOCKET_PATH the normal
+# already-running-guard heal call below uses (so a launchd/systemd unit it
+# renders is byte-identical to one rendered from a real start). Placed BEFORE
+# the "already-running guard" so it can never fall through into the
+# guard's "stale PID file -> attempt to actually start a NEW daemon" branch --
+# the exact "disturb the running daemon" outcome #5405's AC2 forbids. This
+# lets a host-resident periodic caller (the daemon's own
+# watchdog_provisioning_guard loop, loom-daemon/src/watchdog_provisioning_guard.rs)
+# invoke this repeatedly and safely, independent of whether the PID file this
+# script itself manages happens to be present, stale, or absent.
+if [[ "$HEAL_WATCHDOG_ONLY" == "true" ]]; then
+    heal_watchdog_provisioning_gap
+    exit 0
+fi
+
+# ---------- --print-plist / --print-unit short-circuit (#6387) ----------
+# The two pure-inspection modes are decided from ARGV ALONE and return here,
+# BEFORE the already-running guard below -- and therefore before any state read
+# that can branch into provisioning, marker writes, or a launchctl/systemctl
+# call. Placement is the whole fix (#6387): these two exits used to sit ~300
+# lines further down, so a live PID file made the already-running guard fire
+# first and its heal_watchdog_provisioning_gap call `launchctl bootstrap` a REAL
+# watchdog job under whatever $LOOM_LAUNCHD_LABEL was set -- documented as "no
+# side effects", observed on 2026-08-16 bootstrapping two test-labelled watchdog
+# jobs that then ran for ~11h against the operator's real daemon state. Same
+# reasoning (and same position) as the --heal-watchdog-only short-circuit above:
+# a narrow mode must never fall through into a wider mode's side effects.
+#
+# resolve_autonomy_env must run first: render_launchd_plist/render_systemd_unit
+# harvest the process env, so the preview would otherwise silently omit the
+# autonomy vars a real start would bake in.
+if [[ "$PRINT_PLIST" == "true" || "$PRINT_UNIT" == "true" ]]; then
+    resolve_autonomy_env
+    run_inspection_mode_and_exit
+fi
+
 # ---------- already-running guard (PID file) ----------
 if [[ -f "$PID_FILE" ]]; then
     existing_pid=$(cat "$PID_FILE" 2>/dev/null || true)
     if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
         warn "loom-daemon already running (pid $existing_pid, per $PID_FILE)."
+        # #5409 secondary papercut: a --work-finder/--no-work-finder/
+        # --health-gate/--no-health-gate/--from-config passed to THIS
+        # invocation is silently ignored on this path -- the daemon is never
+        # touched, so none of them take effect. Before this, an operator
+        # could believe the flag applied (it was accepted, not rejected) and
+        # only discover otherwise by inspecting the live plist/unit. Say so
+        # explicitly instead of staying silent about it.
+        ignored_flags=()
+        [[ "$WANT_WORK_FINDER" == "on" ]] && ignored_flags+=("--work-finder")
+        [[ "$WANT_WORK_FINDER" == "off" ]] && ignored_flags+=("--no-work-finder")
+        [[ "$WANT_HEALTH_GATE" == "on" ]] && ignored_flags+=("--health-gate")
+        [[ "$WANT_HEALTH_GATE" == "off" ]] && ignored_flags+=("--no-health-gate")
+        [[ "$FROM_CONFIG" == "true" ]] && ignored_flags+=("--from-config")
+        if [[ "${#ignored_flags[@]}" -gt 0 ]]; then
+            ignored_joined="$(IFS=', '; echo "${ignored_flags[*]}")"
+            warn "Ignoring ${ignored_joined} -- the daemon is already running, and flags only"
+            warn "take effect on (re)start. To apply them, stop first:"
+        fi
+        unset ignored_flags ignored_joined
+        # #5343: self-heal a watchdog-provisioning gap even though the daemon
+        # itself is already running and this invocation is about to exit
+        # without touching it. See heal_watchdog_provisioning_gap's doc
+        # comment for why this guard used to be a dead end for that repair.
+        heal_watchdog_provisioning_gap
         if [[ "$MACHINE_MODE" == "true" ]]; then
             echo "To restart: loom restart  (or: loom stop && loom start)" >&2
         else
@@ -1306,91 +1995,45 @@ if [[ -x "$SLEEP_CHECK" ]]; then
     "$SLEEP_CHECK" || true
 fi
 
-# ---------- autonomous-mode env ----------
-# Precedence: an already-exported env var is always respected. Otherwise the
-# default is FLAGS-OFF (#3911) — a plain start is a reliability daemon with both
-# autonomous loops OFF, matching the ecosystem-wide opt-in / default-off contract
-# (LOOM_WORK_FINDER unset => off, LOOM_MAIN_HEALTH_GATE unset => off). Opt in with
-# --work-finder / --health-gate (force the var to 1), or pass --from-config to
-# leave both unset so .loom/config.json -> autonomous drives.
+# ---------- host-sleep prevention wrap, foreground mode only (#6311) ----------
+# Repo-level opt-in (`host.preventSleep`, see lib/host-sleep-config.sh — same
+# env > config > default-OFF precedence, and same Linux-only / never-`sudo`
+# guardrails as spawn-claude.sh's identical mechanism). Computed here,
+# consumed at the `--foreground` exec below.
 #
-# --from-config COMPOSES with --work-finder/--health-gate/--no-work-finder/
-# --no-health-gate rather than ignoring them (#4353): --from-config alone still
-# leaves both vars unset for config to drive (byte-for-byte the pre-#4353
-# behavior — test case 6 asserts this stays green); pairing it with an
-# explicit --work-finder / --no-work-finder additionally FORCES that one var
-# (same env-var-wins-if-already-exported rule), while the loop with no
-# explicit flag is still left to config. So `--from-config --work-finder`
-# forces LOOM_WORK_FINDER=1 and leaves LOOM_MAIN_HEALTH_GATE unset.
-export LOOM_WORKSPACE="${LOOM_WORKSPACE:-$REPO_ROOT}"
-
-# ---------- guard-hook autonomy defaults (#3898) ----------
-# The daemon dispatches headless /loom:sweep children under
-# --dangerously-skip-permissions, where a guard ASK has no human to answer it
-# and therefore BLOCKS — a silent stall. So autonomous runs get two guard
-# defaults, both env-overridable (an already-exported value always wins):
-#   * LOOM_GUARD_DECISION_LOG=1 — capture every guard DENY/ASK to
-#     .loom/logs/guard-decisions.log so the standing per-trigger review policy
-#     (see CLAUDE.md → "Autonomous guard defaults") can dedup by pattern and
-#     file one issue per distinct trigger. Off by default outside autonomous
-#     mode; here we opt it on so the feedback loop actually has data.
-#   * LOOM_FORCE_SCOPE=protected — allow an agent to force-push / hard-reset its
-#     OWN working branch without a stall, while force-push to a protected branch
-#     (main/master/default) stays a hard DENY via ALWAYS_BLOCK_PATTERNS. This is
-#     the Loom-recommended force-scope for autonomous repos.
-# Children inherit these through the daemon's process environment.
-export LOOM_GUARD_DECISION_LOG="${LOOM_GUARD_DECISION_LOG:-1}"
-export LOOM_FORCE_SCOPE="${LOOM_FORCE_SCOPE:-protected}"
-
-if [[ "$FROM_CONFIG" == "true" ]]; then
-    # Compose (#4353): --from-config alone leaves BOTH vars unset for config to
-    # drive. An explicit --work-finder/--no-work-finder (or the health-gate
-    # equivalent) additionally FORCES that one var -- using the
-    # ${VAR:-default} form so an already-exported env var still wins over the
-    # CLI flag, exactly like the non-config branch below. The loop with no
-    # explicit flag is left untouched (stays unset, config drives it).
-    FORCED_DESC=()
-    if [[ "$WANT_WORK_FINDER" == "on" ]]; then
-        export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-1}"
-        FORCED_DESC+=("work_finder=${LOOM_WORK_FINDER}")
-    elif [[ "$WANT_WORK_FINDER" == "off" ]]; then
-        export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-0}"
-        FORCED_DESC+=("work_finder=${LOOM_WORK_FINDER}")
-    fi
-    if [[ "$WANT_HEALTH_GATE" == "on" ]]; then
-        export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-1}"
-        FORCED_DESC+=("main_health_gate=${LOOM_MAIN_HEALTH_GATE}")
-    elif [[ "$WANT_HEALTH_GATE" == "off" ]]; then
-        export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-0}"
-        FORCED_DESC+=("main_health_gate=${LOOM_MAIN_HEALTH_GATE}")
-    fi
-    if [[ "${#FORCED_DESC[@]}" -eq 0 ]]; then
-        echo -e "${BOLD}Autonomous mode: driven by .loom/config.json -> autonomous (env not forced)${NC}"
-    else
-        FORCED_JOINED="$(IFS=', '; echo "${FORCED_DESC[*]}")"
-        echo -e "${BOLD}Autonomous mode: config-driven; forced: ${FORCED_JOINED}${NC}"
-    fi
-    unset FORCED_DESC FORCED_JOINED
-else
-    # An already-exported env var always wins. Otherwise --work-finder /
-    # --health-gate force the loop ON (=1); the default (flags off) forces it
-    # OFF (=0), so a plain start is a reliability daemon that never auto-dispatches.
-    if [[ "$WANT_WORK_FINDER" == "on" ]]; then
-        export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-1}"
-    else
-        export LOOM_WORK_FINDER="${LOOM_WORK_FINDER:-0}"
-    fi
-    if [[ "$WANT_HEALTH_GATE" == "on" ]]; then
-        export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-1}"
-    else
-        export LOOM_MAIN_HEALTH_GATE="${LOOM_MAIN_HEALTH_GATE:-0}"
-    fi
-    if [[ "$LOOM_WORK_FINDER" == "0" && "$LOOM_MAIN_HEALTH_GATE" == "0" ]]; then
-        echo -e "${BOLD}Reliability daemon:${NC} work_finder=off main_health_gate=off (both loops OFF; opt in with --work-finder / --health-gate / --from-config)"
-    else
-        echo -e "${BOLD}Autonomous mode:${NC} work_finder=${LOOM_WORK_FINDER} main_health_gate=${LOOM_MAIN_HEALTH_GATE}"
+# Deliberately NOT wired into the systemd-unit (`ExecStart=`) or nohup-
+# fallback launch paths further down: both persist `$daemon_pid` into
+# `$PID_FILE` / `systemctl show -p MainPID`, which every other lifecycle
+# script (stop, watchdog, `loom-daemon status`) assumes IS the daemon's own
+# pid. Prefixing either launch with `systemd-inhibit` would make that pid
+# belong to `systemd-inhibit` instead — an untested, high-blast-radius change
+# to already-load-bearing process-identity assumptions this issue's scope
+# does not justify. `--foreground` has neither a PID file nor a watchdog
+# consumer (it is Ctrl-C-driven), so it is a safe, useful increment on its
+# own — and every daemon-dispatched sweep/role-runner spawn already self-
+# wraps via spawn-claude.sh's identical mechanism, which (since `idle:sleep`
+# locks are host-wide, not per-process) keeps a systemd/nohup-launched daemon
+# awake too for as long as at least one spawn is in flight.
+DAEMON_SLEEP_INHIBIT_WRAP=()
+_daemon_sleep_inhibit_config_lib="$_LOOM_LAUNCHD_LIB_DIR/host-sleep-config.sh"
+if [[ -f "$_daemon_sleep_inhibit_config_lib" ]]; then
+    # shellcheck source=../lib/host-sleep-config.sh
+    source "$_daemon_sleep_inhibit_config_lib"
+    if declare -F loom_host_prevent_sleep_enabled >/dev/null 2>&1 \
+        && [[ "$(loom_host_prevent_sleep_enabled "$REPO_ROOT")" == "1" ]] \
+        && command -v systemd-inhibit >/dev/null 2>&1 \
+        && systemd-inhibit --what=idle:sleep --who=loom --why=probe -- true >/dev/null 2>&1; then
+        DAEMON_SLEEP_INHIBIT_WRAP=(systemd-inhibit --what=idle:sleep --who=loom --why=daemon --)
+        echo "Sleep inhibit:  host.preventSleep enabled — foreground mode will wrap in systemd-inhibit (issue #6311)"
     fi
 fi
+
+# ---------- autonomous-mode env + guard-hook autonomy defaults ----------
+# Body lives in resolve_autonomy_env() (defined with the other helpers above)
+# so the pure-inspection short-circuit (--print-plist/--print-unit, #6387) can
+# resolve the SAME env from its much earlier position, before the
+# already-running guard. Exactly one caller runs per invocation.
+resolve_autonomy_env
 
 # ---------- persist invocation flags (Issue #3968) ----------
 # `loom-daemon-update.sh` reads this file to restart with EXACTLY the same
@@ -1429,7 +2072,7 @@ fi
 # ---------- foreground mode ----------
 if [[ "$FOREGROUND" == "true" ]]; then
     echo "Starting loom-daemon in the foreground (Ctrl-C to stop)..."
-    exec "$DAEMON_BIN"
+    exec ${DAEMON_SLEEP_INHIBIT_WRAP[@]+"${DAEMON_SLEEP_INHIBIT_WRAP[@]}"} "$DAEMON_BIN"
 fi
 
 # ---------- platform detection (#3972) ----------
@@ -1473,29 +2116,20 @@ fi
 # ---------- prior installed plist/unit (autonomy-downgrade check, #4693) ----------
 # Resolved once here, now that platform detection has picked the mechanism
 # this invocation would use -- the SAME label/unit-path helpers the real
-# install below (and --print-plist/--print-unit) use, so "prior" always means
-# "whatever is installed under the identifier THIS invocation would overwrite".
-# Left empty on the nohup fallback tier (no rendered file exists there) -- the
-# autonomy-desired marker alone is the only available signal in that case
-# (see check_autonomy_downgrade_key above).
+# install below uses, so "prior" always means "whatever is installed under the
+# identifier THIS invocation would overwrite". Left empty on the nohup fallback
+# tier (no rendered file exists there) -- the autonomy-desired marker alone is
+# the only available signal in that case (see check_autonomy_downgrade_key
+# above).
 #
-# The mechanism this comparison targets is chosen by the INVOCATION, not by the
-# host OS: --print-plist / --print-unit are pure inspection modes that render
-# (and inspect) their mechanism's file regardless of the platform running them,
-# exactly like the pre-existing --print-plist PATH-drift (#4172) and
-# dropped-env-key (#4522) checks below, which read
-# $HOME/Library/LaunchAgents/<label>.plist unconditionally. Gating this
-# resolution on USE_LAUNCHD (Darwin-only) instead made the whole downgrade
-# warning silently unreachable under --print-plist on any Linux host -- the
-# exact silence this check exists to eliminate. Only when NEITHER inspection
-# flag is set does platform detection pick the mechanism, which keeps the real
-# install path (and its nohup-tier "leave empty" contract) byte-identical.
+# This is the REAL-START path only. --print-plist / --print-unit resolve the
+# same three variables from ARGV ALONE (never from platform detection, so the
+# downgrade warning is never silently unreachable under --print-plist on a
+# Linux host, #4693) and exit long before here -- see
+# run_inspection_mode_and_exit and its call site above the already-running
+# guard (#6387).
 PRIOR_AUTONOMY_MECH=""
-if [[ "$PRINT_PLIST" == "true" ]]; then
-    PRIOR_AUTONOMY_MECH="launchd"
-elif [[ "$PRINT_UNIT" == "true" ]]; then
-    PRIOR_AUTONOMY_MECH="systemd"
-elif [[ "$USE_LAUNCHD" == "true" ]]; then
+if [[ "$USE_LAUNCHD" == "true" ]]; then
     PRIOR_AUTONOMY_MECH="launchd"
 elif [[ "$IS_LINUX_SYSTEMD" == "true" ]]; then
     PRIOR_AUTONOMY_MECH="systemd"
@@ -1511,59 +2145,10 @@ elif [[ "$PRIOR_AUTONOMY_MECH" == "systemd" ]] && declare -f resolve_systemd_uni
     PRIOR_AUTONOMY_EXTRACTOR="extract_systemd_env_value"
 fi
 
-# Run BEFORE any of --print-plist / --print-unit / the real install below, so
-# an operator sees the warning whether they are just inspecting or actually
-# starting -- and before the prior file gets overwritten either way.
+# Run BEFORE the real install below, so the operator sees the warning before
+# the prior file gets overwritten. The inspection modes run their own
+# (warn-only) call from run_inspection_mode_and_exit, above.
 warn_autonomy_downgrade
-
-# ---------- --print-plist: pure inspection, no side effects ----------
-if [[ "$PRINT_PLIST" == "true" ]]; then
-    _plist_rendered="$(render_launchd_plist "$(resolve_launchd_label)" "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG")"
-    printf '%s\n' "$_plist_rendered"
-    # PATH-drift check (#4172): if a live plist is already installed for this
-    # label, compare its PATH against the one just rendered and warn (stderr
-    # only -- READ-ONLY, no side effect) when they differ. This is what makes
-    # a PATH change from the live plist visible at inspection/roll time
-    # instead of silently swapping it out on the next real start/relaunch.
-    _live_plist="$HOME/Library/LaunchAgents/$(resolve_launchd_label).plist"
-    if [[ -f "$_live_plist" ]]; then
-        _live_path="$(extract_plist_path_value "$_live_plist" 2>/dev/null || true)"
-        if [[ -n "$_live_path" && "$_live_path" != "$PLIST_PATH_VALUE" ]]; then
-            {
-                echo ""
-                echo "PATH DRIFT DETECTED vs the installed plist ($_live_plist):"
-                echo "- live: $_live_path"
-                echo "+ new:  $PLIST_PATH_VALUE"
-            } >&2
-        fi
-        # Dropped-env-key check (#4522): read-only inspection counterpart of
-        # the same check the real install path below runs before overwriting.
-        _plist_new_tmp="$(mktemp "${TMPDIR:-/tmp}/loom-print-plist.XXXXXX")"
-        printf '%s\n' "$_plist_rendered" > "$_plist_new_tmp"
-        warn_dropped_env_keys "$_live_plist" "$_plist_new_tmp" extract_plist_env_keys
-        rm -f "$_plist_new_tmp"
-    fi
-    exit 0
-fi
-
-# ---------- --print-unit: pure inspection, no side effects (#4268) ----------
-if [[ "$PRINT_UNIT" == "true" ]]; then
-    _unit_rendered="$(render_systemd_unit "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG")"
-    printf '%s\n' "$_unit_rendered"
-    # Dropped-env-key check (#4522): read-only inspection counterpart of the
-    # same check the real install path below runs before overwriting.
-    _live_unit=""
-    if declare -f resolve_systemd_unit_path >/dev/null 2>&1; then
-        _live_unit="$(resolve_systemd_unit_path 2>/dev/null || true)"
-    fi
-    if [[ -n "$_live_unit" && -f "$_live_unit" ]]; then
-        _unit_new_tmp="$(mktemp "${TMPDIR:-/tmp}/loom-print-unit.XXXXXX")"
-        printf '%s\n' "$_unit_rendered" > "$_unit_new_tmp"
-        warn_dropped_env_keys "$_live_unit" "$_unit_new_tmp" extract_systemd_env_keys
-        rm -f "$_unit_new_tmp"
-    fi
-    exit 0
-fi
 
 # ---------- background + PID file ----------
 : > "$START_LOG"
@@ -1595,10 +2180,12 @@ if [[ "$USE_LAUNCHD" == "true" ]]; then
 
     # Render to a scratch file first -- NOT directly over $PLIST_FILE -- so the
     # dropped-env-key check (#4522) below can compare against whatever
-    # $PLIST_FILE already contains before it gets clobbered.
+    # $PLIST_FILE already contains before it gets clobbered, and so the
+    # carry-forward merge (#5344) can rewrite $_PLIST_NEW_TMP in place BEFORE
+    # it is installed.
     _PLIST_NEW_TMP="$(mktemp "$PLIST_DIR/.${LAUNCHD_LABEL}.new.XXXXXX")"
     render_launchd_plist "$LAUNCHD_LABEL" "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG" > "$_PLIST_NEW_TMP"
-    warn_dropped_env_keys "$PLIST_FILE" "$_PLIST_NEW_TMP" extract_plist_env_keys
+    warn_dropped_env_keys "$PLIST_FILE" "$_PLIST_NEW_TMP" extract_plist_env_keys extract_plist_env_value inject_one_plist_env_entry
     mv "$_PLIST_NEW_TMP" "$PLIST_FILE"
 
     # Harden the rendered plist when it carries a forwarded credential
@@ -1753,10 +2340,12 @@ if [[ "$IS_LINUX_SYSTEMD" == "true" ]]; then
 
     # Render to a scratch file first -- NOT directly over $SYSTEMD_UNIT_PATH --
     # so the dropped-env-key check (#4522) below can compare against whatever
-    # $SYSTEMD_UNIT_PATH already contains before it gets clobbered.
+    # $SYSTEMD_UNIT_PATH already contains before it gets clobbered, and so the
+    # carry-forward merge (#5344) can rewrite $_UNIT_NEW_TMP in place BEFORE
+    # it is installed.
     _UNIT_NEW_TMP="$(mktemp "$SYSTEMD_UNIT_DIR/.${SYSTEMD_UNIT}.new.XXXXXX")"
     render_systemd_unit "$DAEMON_BIN" "$REPO_ROOT" "$START_LOG" > "$_UNIT_NEW_TMP"
-    warn_dropped_env_keys "$SYSTEMD_UNIT_PATH" "$_UNIT_NEW_TMP" extract_systemd_env_keys
+    warn_dropped_env_keys "$SYSTEMD_UNIT_PATH" "$_UNIT_NEW_TMP" extract_systemd_env_keys extract_systemd_env_value inject_one_systemd_env_entry
     mv "$_UNIT_NEW_TMP" "$SYSTEMD_UNIT_PATH"
 
     # Harden the rendered unit when it carries a forwarded credential (#4005

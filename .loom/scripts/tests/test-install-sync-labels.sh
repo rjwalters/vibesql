@@ -22,6 +22,11 @@
 #
 # Usage:
 #   ./defaults/scripts/tests/test-install-sync-labels.sh
+#
+# Source-tree-only by design (#6194/#6241): scripts/install/sync-labels.sh
+# lives at the repo root, not under defaults/, so it is never shipped into an
+# installed consumer repo. This suite SKIPs (exit 0) rather than errors when
+# run outside Loom's own checkout.
 
 set -uo pipefail
 
@@ -80,8 +85,8 @@ assert_not_contains() {
 }
 
 if [[ ! -x "$SLS" ]]; then
-    echo -e "${RED}FATAL${NC}: $SLS not found or not executable" >&2
-    exit 2
+    echo "SKIP: source-tree-only test, $SLS not found (not shipped into an installed repo)" >&2
+    exit 0
 fi
 
 TMP="$(mktemp -d)"

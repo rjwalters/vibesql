@@ -184,10 +184,31 @@ show_command_help() {
             local loom_daemon_bin=""
             if command -v loom-daemon &>/dev/null; then
                 loom_daemon_bin="$(command -v loom-daemon)"
-            elif [[ -n "$REPO_ROOT" && -x "$REPO_ROOT/loom-daemon/target/release/loom-daemon" ]]; then
-                loom_daemon_bin="$REPO_ROOT/loom-daemon/target/release/loom-daemon"
-            elif [[ -n "$REPO_ROOT" && -x "$REPO_ROOT/loom-daemon/target/debug/loom-daemon" ]]; then
-                loom_daemon_bin="$REPO_ROOT/loom-daemon/target/debug/loom-daemon"
+            elif [[ -n "$REPO_ROOT" ]]; then
+                # Reuse lib/locate-daemon-bin.sh's shared repo-local candidate
+                # generator (#6208) instead of only probing the two hardcoded
+                # loom-daemon/target/{release,debug} paths below -- it also
+                # honors a redirected $CARGO_TARGET_DIR / ~/.cargo/config.toml's
+                # build.target-dir (via `cargo metadata`). Falls back to the
+                # original two-candidate probe if the lib is missing (e.g. an
+                # unusually stale/partial checkout) so this help text never
+                # hard-fails on a missing dependency.
+                local _loom_help_locate_bin_lib _loom_help_repo_candidate
+                _loom_help_locate_bin_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)/locate-daemon-bin.sh"
+                if [[ -r "$_loom_help_locate_bin_lib" ]]; then
+                    # shellcheck source=../lib/locate-daemon-bin.sh
+                    source "$_loom_help_locate_bin_lib"
+                    while IFS= read -r _loom_help_repo_candidate; do
+                        if [[ -n "$_loom_help_repo_candidate" && -x "$_loom_help_repo_candidate" ]]; then
+                            loom_daemon_bin="$_loom_help_repo_candidate"
+                            break
+                        fi
+                    done < <(_loom_daemon_repo_candidates "$REPO_ROOT")
+                elif [[ -x "$REPO_ROOT/loom-daemon/target/release/loom-daemon" ]]; then
+                    loom_daemon_bin="$REPO_ROOT/loom-daemon/target/release/loom-daemon"
+                elif [[ -x "$REPO_ROOT/loom-daemon/target/debug/loom-daemon" ]]; then
+                    loom_daemon_bin="$REPO_ROOT/loom-daemon/target/debug/loom-daemon"
+                fi
             fi
             if [[ -n "$loom_daemon_bin" ]]; then
                 exec "$loom_daemon_bin" status --help

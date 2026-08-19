@@ -305,21 +305,58 @@ forge_split_nwo() {
 # --- Forge-Dispatched Operations ---
 
 # Merge a PR via the forge API.
-# Usage: forge_merge_pr NWO PR_NUMBER
+# Usage: forge_merge_pr NWO PR_NUMBER [EXPECTED_HEAD_SHA]
 # GitHub: PUT /repos/{nwo}/pulls/{n}/merge with merge_method=squash
 # Gitea: POST /repos/{owner}/{repo}/pulls/{n}/merge with Do=squash
+#
+# EXPECTED_HEAD_SHA (optional, #5579): an optimistic-concurrency precondition —
+# the SHA the PR's head branch must currently match for the merge to proceed.
+# Without it, both forges will happily squash-merge whatever the CURRENT head
+# is at the moment the request lands, even if it has commits the caller never
+# saw approved (silently stranding them — squash-merge makes this invisible to
+# an ancestry check afterward, since the new squash commit is not a descendant
+# of the stranded commits either way). Pass the freshest possible head-SHA read
+# (never a cached one) immediately before calling this.
+#
+# GitHub: REST's optional `sha` field. Verified (GitHub's public OpenAPI spec,
+# 2026-08-07) to fail with HTTP 409 and message "Head branch was modified.
+# Review and try the merge again." on a mismatch — a DIFFERENT string from the
+# existing "Base branch was modified" retry case handled elsewhere in
+# merge-pr.sh; callers must not conflate the two (that one means "rebase onto
+# base and retry"; this one means "the approved diff moved out from under us,
+# do not retry-and-merge-anyway").
+#
+# Gitea: the `head_commit_id` field on MergePullRequestOption (confirmed
+# present via Gitea/Forgejo's published swagger.v1.json and upstream
+# services/pull/merge_prepare.go, 2026-08-07). A mismatch raises
+# ErrSHADoesNotMatch, which routers/api/v1/repo/pull.go maps to HTTP 409 with
+# message "head out of date".
 forge_merge_pr() {
   local nwo="$1"
   local pr_number="$2"
+  local expected_head_sha="${3:-}"
 
   if [[ "$FORGE_TYPE" == "gitea" ]]; then
     forge_split_nwo "$nwo"
-    gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-      -d '{"Do":"squash","delete_branch_after_merge":false}'
+    if [[ -n "$expected_head_sha" ]]; then
+      gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
+        -d "$(jq -nc --arg sha "$expected_head_sha" \
+          '{"Do":"squash","delete_branch_after_merge":false,"head_commit_id":$sha}')"
+    else
+      gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
+        -d '{"Do":"squash","delete_branch_after_merge":false}'
+    fi
   else
-    gh api "repos/$nwo/pulls/$pr_number/merge" \
-      -X PUT \
-      -f merge_method=squash 2>&1
+    if [[ -n "$expected_head_sha" ]]; then
+      gh api "repos/$nwo/pulls/$pr_number/merge" \
+        -X PUT \
+        -f merge_method=squash \
+        -f sha="$expected_head_sha" 2>&1
+    else
+      gh api "repos/$nwo/pulls/$pr_number/merge" \
+        -X PUT \
+        -f merge_method=squash 2>&1
+    fi
   fi
 }
 
@@ -489,31 +526,62 @@ forge_delete_branch() {
 }
 
 # Enable auto-merge on a PR.
-# Usage: forge_auto_merge NWO PR_NUMBER
+# Usage: forge_auto_merge NWO PR_NUMBER [EXPECTED_HEAD_SHA]
 # GitHub: GraphQL enablePullRequestAutoMerge mutation (pure API, no
 #         working-tree dependency — `gh pr merge --auto` does a local
 #         checkout that collides with worktrees owning the head branch).
 # Gitea: POST /repos/{owner}/{repo}/pulls/{n}/merge with merge_when_checks_succeed
+#
+# EXPECTED_HEAD_SHA (optional, #5579): same optimistic-concurrency precondition
+# as forge_merge_pr's — see that function's comment for the general rationale
+# and the Gitea `head_commit_id` citation (identical here; Gitea's `/merge`
+# endpoint carries both the auto-merge poll flags and the mismatch guard).
+#
+# GitHub: the GraphQL mutation's `expectedHeadOid: GitObjectID` input field
+# (confirmed present in GitHub's public GraphQL schema, 2026-08-07). The exact
+# error string GitHub returns on a mismatch could NOT be verified against a
+# live incident or public documentation as of this writing (GraphQL validation
+# error text is not part of the published schema) — merge-pr.sh's classifier
+# for this path therefore matches a best-effort pattern and should be
+# tightened against the first real occurrence, the same way the CLEAN/UNSTABLE
+# classifiers elsewhere in this file were derived from live incident text.
 forge_auto_merge() {
   local nwo="$1"
   local pr_number="$2"
+  local expected_head_sha="${3:-}"
 
   if [[ "$FORGE_TYPE" == "gitea" ]]; then
     forge_split_nwo "$nwo"
-    gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-      -d '{"Do":"squash","merge_when_checks_succeed":true,"delete_branch_after_merge":true}'
+    if [[ -n "$expected_head_sha" ]]; then
+      gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
+        -d "$(jq -nc --arg sha "$expected_head_sha" \
+          '{"Do":"squash","merge_when_checks_succeed":true,"delete_branch_after_merge":true,"head_commit_id":$sha}')"
+    else
+      gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
+        -d '{"Do":"squash","merge_when_checks_succeed":true,"delete_branch_after_merge":true}'
+    fi
   else
     # Resolve PR node_id (required by GraphQL mutation).
     local node_id
     node_id=$(gh api "repos/$nwo/pulls/$pr_number" --jq '.node_id' 2>/dev/null) || return 1
     [[ -z "$node_id" ]] && return 1
 
-    local mutation='mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) { pullRequest { number autoMergeRequest { enabledAt } } } }'
+    if [[ -n "$expected_head_sha" ]]; then
+      local mutation_with_oid='mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!, $expectedHeadOid: GitObjectID) { enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid}) { pullRequest { number autoMergeRequest { enabledAt } } } }'
 
-    gh api graphql \
-      -f "query=$mutation" \
-      -F "pullRequestId=$node_id" \
-      -F "mergeMethod=SQUASH" 2>/dev/null
+      gh api graphql \
+        -f "query=$mutation_with_oid" \
+        -F "pullRequestId=$node_id" \
+        -F "mergeMethod=SQUASH" \
+        -F "expectedHeadOid=$expected_head_sha" 2>/dev/null
+    else
+      local mutation='mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) { pullRequest { number autoMergeRequest { enabledAt } } } }'
+
+      gh api graphql \
+        -f "query=$mutation" \
+        -F "pullRequestId=$node_id" \
+        -F "mergeMethod=SQUASH" 2>/dev/null
+    fi
   fi
 }
 
@@ -602,6 +670,70 @@ forge_get_commit_status() {
           target_url: .target_url
         }]
       }' 2>/dev/null
+  fi
+}
+
+# Get GitHub Actions workflow runs (or the Gitea Actions equivalent) for a
+# commit, independent of the Checks API.
+# Usage: forge_get_workflow_runs NWO COMMIT_SHA
+# Returns JSON: {"workflow_runs": [{"name": ..., "status": ..., "conclusion": ...}]}
+#
+# Why this exists (#5495): the Checks API (forge_get_check_runs, above) only
+# ever reports check-runs that already exist -- a workflow_run that is still
+# `queued` and has not yet dispatched a single job has ZERO check-runs, so it
+# is completely invisible to analyze_status()'s counts. If a handful of
+# other, faster/independent workflows for the same commit have already
+# completed, `success > 0 && pending == 0` was satisfied and the overall
+# status was reported as "success" even though the primary CI workflow
+# hadn't run a single job yet. This helper queries workflow-run state
+# directly (not check-run state) so a still-queued/in_progress run can be
+# folded into the pending count regardless of how many check-runs exist.
+#
+# GitHub: GET /repos/{nwo}/actions/runs?head_sha={sha} -- authoritative,
+#   filtered server-side by head_sha.
+# Gitea: GET /repos/{owner}/{repo}/actions/tasks -- Gitea's Actions task-list
+#   API has no head_sha filter, so this filters client-side over the
+#   (default first page of) returned tasks. This is best-effort: a commit
+#   whose task fell off the first page would not be found, degrading back to
+#   the pre-#5495 behavior for that commit rather than failing loudly. Any
+#   fetch/parse failure returns an empty list the same way, so callers can
+#   treat "no signal" identically to "definitely not pending" -- deliberately
+#   fail-open here (unlike e.g. forge_get_issue_state's fail-unsafe contract)
+#   because this only ever *adds* to the pending count; a false negative just
+#   reproduces the exact false-success bug this helper exists to fix, never
+#   a new failure mode.
+forge_get_workflow_runs() {
+  local nwo="$1"
+  local commit="$2"
+
+  if [[ "$FORGE_TYPE" == "gitea" ]]; then
+    forge_split_nwo "$nwo"
+    local tasks_json
+    tasks_json=$(gitea_api GET "repos/$FORGE_OWNER/$FORGE_REPO/actions/tasks" 2>/dev/null) || {
+      echo '{"workflow_runs": []}'
+      return 0
+    }
+    echo "$tasks_json" | jq --arg sha "$commit" '{
+      workflow_runs: [(.workflow_runs // [])[] | select(.head_sha == $sha) | {
+        name: (.name // .display_title // "workflow"),
+        status: .status,
+        conclusion: (.conclusion // null)
+      }]
+    }' 2>/dev/null || echo '{"workflow_runs": []}'
+  else
+    local runs_json
+    runs_json=$(gh api "repos/$nwo/actions/runs?head_sha=$commit&per_page=100" \
+      --header "Accept: application/vnd.github+json" 2>/dev/null) || {
+      echo '{"workflow_runs": []}'
+      return 0
+    }
+    echo "$runs_json" | jq '{
+      workflow_runs: [(.workflow_runs // [])[] | {
+        name: .name,
+        status: .status,
+        conclusion: .conclusion
+      }]
+    }' 2>/dev/null || echo '{"workflow_runs": []}'
   fi
 }
 
@@ -768,6 +900,283 @@ is_rate_limit_error() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# GitHub App installation-token permission-scope 403 escalation (#6074).
+#
+# A GitHub App installation token is minted with the permissions the
+# installation held AT MINT TIME and then reused from an on-disk cache for up
+# to ~1h. So there is a window -- after a permission grant has already
+# propagated on GitHub's side, before the cached token ages out -- where one
+# write scope is present and another is not. Observed live 2026-08-12
+# (example-org/fleet-repo#304): a Builder's `git push` SUCCEEDED (Contents:write was in
+# the cached token) and the very next `gh pr create` returned
+#
+#     HTTP 403: Resource not accessible by integration
+#
+# because Pull-requests:write was not. The sweep died with no PR, the issue
+# stayed ready, the daemon re-dispatched it, and the next Builder rebuilt the
+# identical work -- one full duplicate build per pass, plus an orphaned
+# pushed-but-PR-less `feature/issue-*` branch (tool-repo#205 rebuilt 3+
+# times before a human opened the PR by hand).
+#
+# This is a DIFFERENT failure from both neighbours it is easy to conflate with:
+#
+#   * NOT rate-limit exhaustion. `is_rate_limit_error` (above) and the sweep's
+#     "anything else is NOT exhaustion" rule both stay exactly as they are --
+#     a REST retry with the same token 403s identically. The remedy here is a
+#     different CREDENTIAL, not a different transport.
+#   * NOT a mint failure. `run_with_github_app` (credential_preflight.rs)
+#     already falls back to ambient `gh` auth when the token cannot be minted
+#     AT ALL. Here the mint succeeded; the token is valid and simply carries a
+#     stale permission set, so nothing upstream notices.
+#
+# The ladder below is therefore deliberately narrow -- it fires ONLY on this
+# one signature, and each rung is a strictly stronger credential:
+#
+#   1. the ambient credential (whatever `gh` already resolves)
+#   2. a FORCE-MINTED installation token (bypasses the ~1h cache, so an
+#      already-propagated grant is picked up immediately instead of waited out)
+#   3. a personal token -- `LOOM_PERSONAL_GH_TOKEN` if set, else the operator's
+#      own `gh auth login` credential, reached by dropping the daemon-owned
+#      `GH_CONFIG_DIR`/`GH_TOKEN` that shadow it (#4458)
+#
+# Every other failure -- including a 403 that is a genuine permission
+# misconfiguration on a personal token, or a 404, or a rate limit -- falls
+# straight through unretried, exactly as before.
+
+# is_app_permission_error <text> -> 0 when the text carries GitHub's
+# App-installation permission-scope rejection. Matched on the distinctive
+# "not accessible by integration" phrase (GitHub's wording for "this
+# credential is an App installation that lacks the required permission"),
+# which no rate-limit or generic-auth message contains.
+is_app_permission_error() {
+  local text
+  text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *"not accessible by integration"*) return 0 ;;
+  esac
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Forge-transient (outage) vs. credential/permission fault discrimination
+# (issue #6425).
+#
+# Incident, 2026-08-17: during a confirmed GitHub partial outage (Issues API
+# and Git ops degraded per githubstatus; the fleet's own claim_reconciliation
+# logged `HTTP 503: No server is currently available`), two sweeps hit forge
+# WRITE failures and wrote a confident CREDENTIAL diagnosis into their
+# operator-facing summaries -- "this needs operator attention, not a retry ...
+# the GitHub App installation token lacking write permission" -- with an
+# explicit "Action needed from you" line. Both were wrong: the first PR merged
+# normally 17 minutes later with no permission change, and the second repo's
+# writes resumed once GitHub recovered. One of the two summaries even recorded
+# that `gh api /user` ALSO 403'd on the same token (a signal that should have
+# pointed at an outage, since a permission-SCOPE gap does not usually take
+# down an unrelated read) and still concluded "permissions".
+#
+# The fix is two functions, used together by every write call site / summary
+# writer that would otherwise assert a credential diagnosis:
+#
+#   is_forge_transient_error <text>       -> 0 when the text is an outage
+#       signature (5xx, "No server is currently available", a network reset)
+#       that no retry-with-a-different-credential can fix; the correct
+#       response is "retry later", never an operator action item.
+#
+#   forge_write_permission_confirmed <write_error_text>
+#                                          -> 0 ONLY when there is POSITIVE
+#       evidence of a genuine, scoped permission fault: the write's own error
+#       is not itself a forge-transient signature, AND a cheap read
+#       (`gh api /rate_limit`) on the SAME credential context succeeds. A
+#       failing read is evidence of a broader outage/token problem, not a
+#       narrow scope gap, so it does NOT confirm a permission fault -- return
+#       1, the same as when the read is never run.
+#
+# Every caller (sweep.md's merge/write-failure narration, forge_gh_perm_safe's
+# ladder callers) must treat "not confirmed" as "forge writes failing
+# (possible GitHub incident) -- will retry", and must NEVER emit a "needs
+# operator attention" / permission diagnosis without citing that the
+# confirmation check ran and returned positive evidence. See sweep.md, "Forge
+# write failure diagnosis (#6425)".
+
+# is_forge_transient_error <text> -> 0 when the text is an outage-shaped
+# signature: an HTTP 5xx status, GitHub's own "No server is currently
+# available to service your request" 503 wording, a Bad
+# Gateway/Service-Unavailable/Gateway-Timeout phrase, or a connection-level
+# reset/refusal. These are NEVER a permission fault (a scope gap 403s
+# instantly and consistently; it does not surface as a 5xx or a dropped
+# connection), and retrying with a different credential cannot fix a 5xx
+# either -- the only correct remedy is "wait and retry the same call".
+#
+# Anchored on "http 5xx" (not a bare "500"/"502"/... substring) so an
+# unrelated numeral in the text -- an issue/PR number, a byte count -- cannot
+# false-positive; `gh` itself always renders forge HTTP failures as
+# "HTTP <code>: <message>".
+is_forge_transient_error() {
+  local text
+  text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *"http 500"*|*"http 502"*|*"http 503"*|*"http 504"*) return 0 ;;
+    *"internal server error"*) return 0 ;;
+    *"bad gateway"*) return 0 ;;
+    *"service unavailable"*) return 0 ;;
+    *"gateway timeout"*) return 0 ;;
+    *"no server is currently available"*) return 0 ;;
+    *"connection reset"*) return 0 ;;
+    *"econnreset"*) return 0 ;;
+    *"econnrefused"*) return 0 ;;
+    *"connection refused"*) return 0 ;;
+  esac
+  return 1
+}
+
+# forge_write_permission_confirmed <write_error_text> -> 0 only with positive
+# evidence of a genuine credential/permission fault; 1 (not confirmed)
+# otherwise -- including when the read probe itself fails, which is evidence
+# of an outage rather than a scoped permission gap. Callers must NOT assert a
+# permission diagnosis unless this returns 0.
+#
+# The probe is `gh api /rate_limit`: cheap, side-effect-free, and answerable
+# by any authenticated token regardless of its installation scopes (issue
+# guidance's own suggested check, alongside the equivalent `gh api /user`).
+forge_write_permission_confirmed() {
+  local write_error="$1"
+
+  # A forge-transient signature is never a permission fault, regardless of
+  # what the read probe does -- short-circuit without spending the API call.
+  if is_forge_transient_error "$write_error"; then
+    return 1
+  fi
+
+  local read_rc=0
+  gh api /rate_limit >/dev/null 2>&1 || read_rc=$?
+  if [[ $read_rc -ne 0 ]]; then
+    # The read ALSO failed on the same credential -- broader outage/token
+    # problem, not a scoped write-only gap. Do not confirm.
+    return 1
+  fi
+
+  # The read succeeded while the write failed on a non-transient error --
+  # positive evidence of a genuine, scoped permission fault.
+  return 0
+}
+
+# _forge_nwo_from_remote -> echoes owner/repo parsed from `git remote get-url
+# origin`, with ZERO API calls. Deliberately NOT forge_get_repo_nwo(), whose
+# GitHub branch tries `gh repo view` first -- that is GraphQL-backed, so it can
+# fail for unrelated reasons in the middle of the very recovery path that
+# exists because a `gh` call just failed (#4659's lesson, applied here).
+_forge_nwo_from_remote() {
+  local remote_url nwo
+  remote_url=$(git remote get-url origin 2>/dev/null || echo "")
+  [[ -n "$remote_url" ]] || return 1
+  nwo=$(printf '%s' "$remote_url" | sed -E 's|\.git$||; s|/$||; s|.*[:/]([^/]+/[^/]+)$|\1|')
+  [[ -n "$nwo" ]] || return 1
+  printf '%s' "$nwo"
+}
+
+# _forge_gh_app_fresh_token <owner/repo> -> echoes a FRESHLY minted
+# installation token (cache bypassed), or returns 1 when no GitHub App is
+# configured on this host / the mint failed. Returning 1 is the common,
+# expected case (most hosts have no App), and simply skips rung 2.
+#
+# LOOM_GITHUB_APP_SCRIPT overrides the minter's path (same test-seam
+# convention as LOOM_GITHUB_APP_CACHE_DIR in github-app-token.sh itself).
+_forge_gh_app_fresh_token() {
+  local nwo="$1" script resp
+  script="${LOOM_GITHUB_APP_SCRIPT:-$_LOOM_FORGE_HELPERS_LIB_DIR/github-app-token.sh}"
+  [[ -n "$nwo" && -r "$script" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  resp=$(bash "$script" get-token --force "$nwo" 2>/dev/null) || return 1
+  [[ "$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)" == "ok" ]] || return 1
+  local token
+  token=$(printf '%s' "$resp" | jq -r '.token // empty' 2>/dev/null)
+  [[ -n "$token" ]] || return 1
+  printf '%s' "$token"
+}
+
+# _forge_gh_attempt <mode> <token> <stdout_file> <stderr_file> <gh args...>
+# Runs one rung of the ladder. `env` (not a bash var-assignment prefix) does
+# the credential swap so the override is unambiguously in the child's
+# environment and nowhere else -- this shell's own env is never mutated.
+_forge_gh_attempt() {
+  local mode="$1" token="$2" out_file="$3" err_file="$4"
+  shift 4
+  local rc=0
+  case "$mode" in
+    ambient)
+      gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      ;;
+    app-token)
+      env GH_TOKEN="$token" gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      ;;
+    personal-token)
+      env -u GITHUB_TOKEN -u GH_CONFIG_DIR GH_TOKEN="$token" gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      ;;
+    personal-ambient)
+      env -u GH_TOKEN -u GITHUB_TOKEN -u GH_CONFIG_DIR gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      ;;
+  esac
+  return "$rc"
+}
+
+# Run `gh <args...>`, escalating the credential on -- and ONLY on -- an
+# App-installation permission-scope 403 (#6074). Every write call site that a
+# Builder depends on (PR create, issue comment, label edit) routes through
+# this.
+#
+# Usage: forge_gh_perm_safe pr create --title T --body B ...
+# Stdout: the wrapped call's stdout (e.g. the new PR's URL).
+# Returns the last attempt's exit code; stderr carries the last attempt's
+# error text so an outer rate-limit check still sees what `gh` actually said.
+forge_gh_perm_safe() {
+  local out_file err_file rc=0
+  out_file=$(mktemp)
+  err_file=$(mktemp)
+
+  _forge_gh_attempt ambient "" "$out_file" "$err_file" "$@" || rc=$?
+
+  if [[ $rc -ne 0 ]] && is_app_permission_error "$(cat "$err_file" "$out_file" 2>/dev/null)"; then
+    local nwo token
+    nwo=$(_forge_nwo_from_remote || echo "")
+
+    # Rung 2: force a fresh installation-token mint, bypassing the ~1h cache.
+    if token=$(_forge_gh_app_fresh_token "$nwo"); then
+      echo "forge: 403 'not accessible by integration' — retrying with a freshly minted installation token (#6074)" >&2
+      rc=0
+      _forge_gh_attempt app-token "$token" "$out_file" "$err_file" "$@" || rc=$?
+    fi
+
+    # Rung 3: a personal token. Only worth trying when it is actually a
+    # DIFFERENT credential from rung 1 -- with no App-delivered token in the
+    # environment, `personal-ambient` would re-run rung 1 verbatim.
+    if [[ $rc -ne 0 ]] && is_app_permission_error "$(cat "$err_file" "$out_file" 2>/dev/null)"; then
+      if [[ -n "${LOOM_PERSONAL_GH_TOKEN:-}" ]]; then
+        echo "forge: still 403 after a fresh mint — falling back to LOOM_PERSONAL_GH_TOKEN (#6074)" >&2
+        rc=0
+        _forge_gh_attempt personal-token "$LOOM_PERSONAL_GH_TOKEN" "$out_file" "$err_file" "$@" || rc=$?
+      elif [[ -n "${GH_CONFIG_DIR:-}${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+        echo "forge: still 403 after a fresh mint — falling back to the ambient personal gh credential (#6074)" >&2
+        rc=0
+        _forge_gh_attempt personal-ambient "" "$out_file" "$err_file" "$@" || rc=$?
+      fi
+    fi
+  fi
+
+  local out err
+  out=$(cat "$out_file" 2>/dev/null || true)
+  err=$(cat "$err_file" 2>/dev/null || true)
+  rm -f "$out_file" "$err_file"
+
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out"
+  fi
+  if [[ $rc -ne 0 && -n "$err" ]]; then
+    printf '%s\n' "$err" >&2
+  fi
+  return "$rc"
+}
+
 # Post a comment on an issue OR a pull request via `gh issue comment`, falling
 # back to the REST comments endpoint on a GraphQL rate-limit rejection. The
 # REST endpoint (`repos/{nwo}/issues/{n}/comments`) is shared by issues and
@@ -778,7 +1187,7 @@ is_rate_limit_error() {
 forge_gh_comment_rl_safe() {
   local nwo="$1" number="$2" body="$3"
   local out
-  if out=$(gh issue comment "$number" --repo "$nwo" --body "$body" 2>&1); then
+  if out=$(forge_gh_perm_safe issue comment "$number" --repo "$nwo" --body "$body" 2>&1); then
     return 0
   fi
   if is_rate_limit_error "$out"; then
@@ -821,7 +1230,7 @@ forge_gh_reopen_issue_rl_safe() {
 forge_gh_swap_label_rl_safe() {
   local nwo="$1" issue_num="$2" remove_label="$3" add_label="$4"
   local out
-  if out=$(gh issue edit "$issue_num" --repo "$nwo" \
+  if out=$(forge_gh_perm_safe issue edit "$issue_num" --repo "$nwo" \
       --remove-label "$remove_label" --add-label "$add_label" 2>&1); then
     return 0
   fi
@@ -834,6 +1243,36 @@ forge_gh_swap_label_rl_safe() {
       return 0
     fi
     echo "gh issue edit (label swap) rate-limited on #$issue_num, and the REST fallback also failed: $out" >&2
+    return 1
+  fi
+  echo "$out" >&2
+  return 1
+}
+
+# Remove a single label from an issue via `gh issue edit --remove-label`,
+# falling back to a REST DELETE on a GraphQL rate-limit rejection. Mirrors
+# forge_gh_swap_label_rl_safe's REST-fallback shape (#4856) minus the
+# add-label half — used where the target issue is closed and should NOT be
+# returned to any queue (#6199: stripping an orphaned `loom:building` claim
+# from an issue a merge just closed, as opposed to the swap-to-`loom:issue`
+# case for a still-open partial-increment issue).
+# Idempotent: `gh issue edit --remove-label` on a label the issue does not
+# carry, and the REST DELETE fallback on the same, both succeed as no-ops.
+# Usage: forge_gh_remove_label_rl_safe NWO ISSUE_NUMBER LABEL
+forge_gh_remove_label_rl_safe() {
+  local nwo="$1" issue_num="$2" label="$3"
+  local out
+  if out=$(forge_gh_perm_safe issue edit "$issue_num" --repo "$nwo" \
+      --remove-label "$label" 2>&1); then
+    return 0
+  fi
+  if is_rate_limit_error "$out"; then
+    local encoded_label
+    encoded_label="${label//:/%3A}"
+    if gh api "repos/$nwo/issues/$issue_num/labels/$encoded_label" -X DELETE >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "gh issue edit (label remove) rate-limited on #$issue_num, and the REST fallback also failed: $out" >&2
     return 1
   fi
   echo "$out" >&2
@@ -891,7 +1330,7 @@ forge_gh_create_issue_rl_safe() {
   # never returns gh's progress chatter as the URL.
   local err_file out err rc=0
   err_file=$(mktemp)
-  out=$(gh issue create "${create_args[@]}" 2>"$err_file") || rc=$?
+  out=$(forge_gh_perm_safe issue create "${create_args[@]}" 2>"$err_file") || rc=$?
   err=$(cat "$err_file" 2>/dev/null || true)
   rm -f "$err_file"
 

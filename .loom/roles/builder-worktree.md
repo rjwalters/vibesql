@@ -56,9 +56,13 @@ WORKTREE_ABS="$(cd .loom/worktrees/issue-84 && pwd)"
 #    - Bash:       git -C "$WORKTREE_ABS" ...  OR  cd "$WORKTREE_ABS" && <cmd>
 # ... work work work ...
 
-# 5. Push and create PR from the worktree
+# 5. Push and create PR from the worktree.
+#    ALWAYS ./.loom/scripts/create-pr.sh, never a bare `gh pr create` (#6074):
+#    it adopts an already-open PR for this branch instead of failing, and it
+#    survives the GitHub App permission window that made `git push` succeed
+#    while `gh pr create` returned 403 — see builder-pr.md § "Creating the PR".
 git -C "$WORKTREE_ABS" push -u origin feature/issue-84
-gh pr create --label "loom:review-requested"
+./.loom/scripts/create-pr.sh --title "fix: ..." --body "..." --label "loom:review-requested"
 
 # 6. Worktree cleanup is automatic - DO NOT manually delete worktrees
 # Worktrees are cleaned up automatically when PRs merge or by loom-clean

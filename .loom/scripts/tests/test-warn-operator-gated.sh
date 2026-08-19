@@ -93,6 +93,7 @@ fi
 # --- Stub gh on PATH ---
 #   gh issue view N --json body    -q .body                       -> cat $STUB_DIR/body-N.txt (or "")
 #   gh issue view N --json labels  -q '[.labels[].name] | join(",")' -> cat $STUB_DIR/labels-N.txt (or "")
+#   gh issue view N --json title   -q .title                      -> cat $STUB_DIR/title-N.txt (or "")
 STUB_DIR="$(mktemp -d)"
 trap 'rm -rf "$STUB_DIR" 2>/dev/null || true' EXIT
 
@@ -115,6 +116,10 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
       ;;
     labels)
       f="$STUB_DIR_FROM_ENV/labels-$num.txt"
+      if [[ -f "$f" ]]; then cat "$f"; else echo ""; fi
+      ;;
+    title)
+      f="$STUB_DIR_FROM_ENV/title-$num.txt"
       if [[ -f "$f" ]]; then cat "$f"; else echo ""; fi
       ;;
     *) echo "" ;;
@@ -154,6 +159,29 @@ assert_eq "" "$out" "bare 'credentials' substring does NOT match (avoids false p
 out="$(_operator_gate_phrase_match 'this step requires credentials from the vault')"
 assert_eq "requires credentials" "$out" "'requires credentials' (instruction-shaped) matches"
 
+# --- #6198: the most common operator-task phrasing ---
+
+out="$(_operator_gate_phrase_match '**Operator task — requires human action, not automation.**')"
+assert_eq "operator task" "$out" "the observed '#82' body matches ('operator task' wins declared order)"
+
+out="$(_operator_gate_phrase_match '**Operator task — requires human action (Amazon Associates enrollment).**')"
+assert_eq "operator task" "$out" "the observed '#83' body matches ('operator task' wins declared order)"
+
+out="$(_operator_gate_phrase_match 'Rotating the key requires human action before the sweep can proceed')"
+assert_eq "requires human action" "$out" "'requires human action' matches on its own (without 'operator task')"
+
+out="$(_operator_gate_phrase_match 'This needs human action: someone must accept the ToS in the console')"
+assert_eq "needs human action" "$out" "'needs human action' matches (symmetry with needs credentials)"
+
+out="$(_operator_gate_phrase_match 'the human-in-the-loop design keeps a human in the review path')" || true
+assert_eq "" "$out" "bare 'human' substring does NOT match (avoids false positive)"
+
+out="$(_operator_gate_phrase_match 'operator precedence in the expression parser is wrong')" || true
+assert_eq "" "$out" "'operator precedence' prose does NOT match (bare 'operator' still narrow)"
+
+out="$(_operator_gate_phrase_match 'the task list tracks operator handoffs for each release')" || true
+assert_eq "" "$out" "'task' and 'operator' apart do NOT match ('operator task' is a phrase, not two words)"
+
 # =====================================================================
 echo
 echo "--- Dependency parser: reuses Depends on / Requires vocabulary ---"
@@ -163,6 +191,34 @@ assert_eq "4" "$out" "parses Depends on #A"
 
 out="$(parse_operator_gate_deps 'Blocked by #200')"
 assert_eq "" "$out" "Blocked by is NOT parsed (belongs to loom:blocked machinery)"
+
+# =====================================================================
+echo
+echo "--- Title-prefix matcher: prefix at the true start, not a bare substring (#6391) ---"
+
+out="$(_operator_gate_title_prefix_match 'Operator: visit the county archive and photograph the 1850 census page')"
+assert_eq "Operator:" "$out" "title starting with 'Operator:' matches"
+
+out="$(_operator_gate_title_prefix_match 'operator: renew the physical library card in person')"
+assert_eq "Operator:" "$out" "matches case-insensitively (lowercase 'operator:')"
+
+out="$(_operator_gate_title_prefix_match 'Operator — renew the domain registration')"
+assert_eq "Operator —" "$out" "title starting with 'Operator —' (em dash) matches"
+
+out="$(_operator_gate_title_prefix_match 'Operator-only: rotate the leaked production credential')"
+assert_eq "Operator-only" "$out" "title starting with 'Operator-only' matches"
+
+out="$(_operator_gate_title_prefix_match '  **Operator:** rotate the leaked production credential')"
+assert_eq "Operator:" "$out" "leading whitespace/markdown decoration is stripped before matching"
+
+out="$(_operator_gate_title_prefix_match '# Operator: quarterly archive visit')"
+assert_eq "Operator:" "$out" "leading markdown heading marker is stripped before matching"
+
+out="$(_operator_gate_title_prefix_match 'Fix operator dashboard rendering')" || true
+assert_eq "" "$out" "'operator' mid-sentence (not a prefix) does NOT match"
+
+out="$(_operator_gate_title_prefix_match 'Operatorship changes for the new fiscal year')" || true
+assert_eq "" "$out" "'Operatorship' does NOT match (not followed by a declared prefix delimiter)"
 
 # =====================================================================
 echo
@@ -179,6 +235,25 @@ out="$(run_warn "65")"
 assert_contains "$out" $'65\t⚠ body declares operator-gating: "operator decision:"' \
     "#65 flagged for 'Operator decision:'"
 
+# #6198: the two bodies observed unflagged in the 2AMLogic/pickwell run.
+cat > "$STUB_DIR/body-82.txt" <<'BODY'
+**Operator task — requires human action, not automation.**
+
+Two live production credentials were pasted into the repo history and must be rotated.
+BODY
+out="$(run_warn "82")"
+assert_contains "$out" $'82\t⚠ body declares operator-gating: "operator task"' \
+    "#82 (credential rotation) flagged — was an unannotated 'would build' before #6198"
+
+cat > "$STUB_DIR/body-83.txt" <<'BODY'
+**Operator task — requires human action (Amazon Associates enrollment).**
+
+Enrollment must be completed by a person with the account.
+BODY
+out="$(run_warn "83")"
+assert_contains "$out" $'83\t⚠ body declares operator-gating: "operator task"' \
+    "#83 (Associates enrollment) flagged — was an unannotated 'would build' before #6198"
+
 # =====================================================================
 echo
 echo "--- Signal 2: dependency on a loom:operator-only issue annotates the candidate ---"
@@ -191,12 +266,49 @@ assert_contains "$out" $'88\t⚠ depends on #4, which is loom:operator-only' \
 
 # =====================================================================
 echo
+echo "--- Signal 2 (#5817): dependency on a loom:needs-capability issue annotates the candidate ---"
+
+echo 'Depends on #5 (waiting on a capability request)' > "$STUB_DIR/body-92.txt"
+echo 'loom:needs-capability' > "$STUB_DIR/labels-5.txt"
+out="$(run_warn "92")"
+assert_contains "$out" $'92\t⚠ depends on #5, which is loom:needs-capability' \
+    "candidate depending on a loom:needs-capability issue is flagged"
+
+# =====================================================================
+echo
 echo "--- Dependency on a NON-operator-only issue does NOT annotate ---"
 
 echo 'Depends on #9' > "$STUB_DIR/body-89.txt"
 echo 'loom:issue' > "$STUB_DIR/labels-9.txt"
 out="$(run_warn "89")"
 assert_eq "" "$out" "dependency without loom:operator-only produces no annotation"
+
+# =====================================================================
+echo
+echo "--- Signal 3: title-prefix match annotates the candidate (#6391) ---"
+
+# The exact shape from the incident: an unlabeled issue whose title opens
+# with 'Operator:' and whose body contains none of the PHRASES vocabulary —
+# previously invisible to this scan.
+echo 'Operator: visit the county records office and photograph the 1850 census page' > "$STUB_DIR/title-94.txt"
+echo 'The county archive is not digitized. Photograph page 12 of volume 3 in person.' > "$STUB_DIR/body-94.txt"
+out="$(run_warn "94")"
+assert_contains "$out" $'94\t⚠ title declares operator-gating: "Operator:"' \
+    "#94 (title-prefixed 'Operator:', ordinary body) flagged by the title signal"
+
+# Negative: the title merely contains the word "operator" mid-sentence — must
+# NOT match (same false-positive discipline as the body-phrase vocabulary).
+echo 'Fix operator dashboard rendering glitch' > "$STUB_DIR/title-95.txt"
+echo 'The dashboard mis-renders the operator queue count on narrow viewports.' > "$STUB_DIR/body-95.txt"
+out="$(run_warn "95")"
+assert_eq "" "$out" "#95 (title mentions 'operator' mid-sentence, ordinary body) produces no annotation"
+
+# Title signal fires even when the body is empty (checked independently of
+# the body's own early-return).
+echo 'Operator-only: rotate the leaked production credential' > "$STUB_DIR/title-96.txt"
+out="$(run_warn "96")"
+assert_contains "$out" $'96\t⚠ title declares operator-gating: "Operator-only"' \
+    "#96 (title-prefixed, empty body) still flagged by the title signal"
 
 # =====================================================================
 echo
@@ -211,9 +323,11 @@ echo
 echo "--- Zero matches across the whole candidate set -> zero lines of output ---"
 
 echo 'Nothing operator-related here at all.' > "$STUB_DIR/body-1.txt"
+echo 'Fix the flaky retry loop in the worker'  > "$STUB_DIR/title-1.txt"
 echo 'Just an ordinary bug fix.'             > "$STUB_DIR/body-2.txt"
+echo 'Improve error message for missing config' > "$STUB_DIR/title-2.txt"
 out="$(run_warn "1 2")"
-assert_eq "" "$out" "clean candidate set produces byte-for-byte empty output"
+assert_eq "" "$out" "clean candidate set (ordinary bodies + titles) produces byte-for-byte empty output"
 
 # =====================================================================
 echo
@@ -226,6 +340,18 @@ assert_contains "$out" $'90\t⚠ body declares operator-gating: "operator-gated"
     "#90 phrase signal present"
 assert_contains "$out" $'90\t⚠ depends on #4, which is loom:operator-only' \
     "#90 dependency signal also present"
+
+# =====================================================================
+echo
+echo "--- A dependency carrying BOTH labels prints one line per label (#5817) ---"
+
+echo 'Depends on #6' > "$STUB_DIR/body-93.txt"
+echo 'loom:operator-only,loom:needs-capability' > "$STUB_DIR/labels-6.txt"
+out="$(run_warn "93")"
+assert_contains "$out" $'93\t⚠ depends on #6, which is loom:operator-only' \
+    "#93 flagged for the loom:operator-only label on #6"
+assert_contains "$out" $'93\t⚠ depends on #6, which is loom:needs-capability' \
+    "#93 flagged for the loom:needs-capability label on #6"
 
 # =====================================================================
 echo

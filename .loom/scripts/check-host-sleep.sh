@@ -30,6 +30,22 @@
 #   - flip the sleep-manager's "allow system sleep when display is off" toggle
 #     to OFF (Amphetamine, Lungo, etc.).
 # We surface those as the recommended remediation, not `caffeinate`.
+#
+# Repo-level config (issue #6311): `host.preventSleep` in `.loom/config.json`
+# (env override `LOOM_HOST_PREVENT_SLEEP`) makes Linux/systemd orchestration
+# entry points (`spawn-claude.sh`, `loom-daemon-start.sh --foreground`)
+# self-wrap in `systemd-inhibit --what=idle:sleep` — no more re-applying the
+# mitigation above by hand every run. This script itself stays advisory-only
+# and unchanged when that lock IS active (the existing green "inhibitor is
+# active" path below already covers it); it adds ONE extra note when the
+# config says preventSleep=true but no lock is actually held (a session not
+# started through those entry points). NEVER invokes `sudo` — macOS has no
+# closable gap here (see the paragraph above), so this config knob is a
+# deliberate no-op on Darwin UNLESS `host.sleepMitigationAcknowledged` (a
+# freeform string) is also set, in which case the full warning below is
+# downgraded to a one-liner naming it — this never claims the host IS
+# protected, it only stops re-printing an already-evaluated, unactionable
+# warning on every run.
 
 set -uo pipefail  # NOTE: no -e — this script must never exit non-zero
 
@@ -57,7 +73,7 @@ for arg in "$@"; do
             QUIET=1
             ;;
         --help|-h)
-            sed -n '2,32p' "$0" | sed 's/^# //; s/^#//'
+            sed -n '2,48p' "$0" | sed 's/^# //; s/^#//'
             exit 0
             ;;
         *)
@@ -77,6 +93,39 @@ info_oneliner() {
         printf '%b\n' "$*" || true
     fi
 }
+
+# ---------- repo-level config (issue #6311) ----------
+# Best-effort and entirely additive: a repo with no `.loom/` directory (or a
+# host-sleep-config.sh that fails to source, e.g. a stale/partial install)
+# resolves to the exact same "0"/"" defaults this script has always used —
+# byte-for-byte unchanged output below.
+find_repo_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.loom" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "$PWD"
+}
+REPO_ROOT="$(find_repo_root)"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+HOST_SLEEP_CONFIG_LIB="${SCRIPT_DIR:-}/lib/host-sleep-config.sh"
+PREVENT_SLEEP_ENABLED="0"
+SLEEP_MITIGATION_ACK=""
+if [[ -n "$SCRIPT_DIR" && -f "$HOST_SLEEP_CONFIG_LIB" ]]; then
+    # shellcheck source=./lib/host-sleep-config.sh
+    source "$HOST_SLEEP_CONFIG_LIB" 2>/dev/null || true
+    if declare -F loom_host_prevent_sleep_enabled >/dev/null 2>&1; then
+        PREVENT_SLEEP_ENABLED="$(loom_host_prevent_sleep_enabled "$REPO_ROOT" || echo 0)"
+    fi
+    if declare -F loom_host_sleep_mitigation_acknowledged >/dev/null 2>&1; then
+        SLEEP_MITIGATION_ACK="$(loom_host_sleep_mitigation_acknowledged "$REPO_ROOT" 2>/dev/null || echo "")"
+    fi
+fi
 
 # ---------- platform detection ----------
 
@@ -119,6 +168,20 @@ case "$PLATFORM" in
             fi
 
             # AC sleep is non-zero → the host CAN sleep on AC power.
+            #
+            # #6311: an operator can record `host.sleepMitigationAcknowledged`
+            # (a freeform string naming their evaluated mitigation) to
+            # downgrade this from a full, unactionable-every-run banner to a
+            # one-liner. This NEVER invokes `sudo`, and never claims the host
+            # IS protected (macOS user-idle assertions are not reliable, see
+            # the header comment) — it only stops re-printing an
+            # already-evaluated warning. Absent that key, behavior below is
+            # byte-for-byte unchanged from before #6311.
+            if [[ -n "$SLEEP_MITIGATION_ACK" ]]; then
+                info_oneliner "${YELLOW}[sleep-check] macOS AC sleep timeout is ${sleep_minutes}m; host.sleepMitigationAcknowledged=\"${SLEEP_MITIGATION_ACK}\" (issue #6311) — skipping the full warning. This does not claim the host is protected; re-verify the mitigation still holds periodically.${NC}"
+                return 0
+            fi
+
             warn ""
             warn "${YELLOW}${BOLD}========================================================================${NC}"
             warn "${YELLOW}${BOLD}  WARNING: host may sleep during long-running orchestration (#3350)${NC}"
@@ -182,6 +245,19 @@ case "$PLATFORM" in
             warn "${YELLOW}If the host suspends mid-run, in-flight subagent sockets to${NC}"
             warn "${YELLOW}api.anthropic.com will be torn down and that work will be lost.${NC}"
             warn ""
+            if [[ "$PREVENT_SLEEP_ENABLED" == "1" ]]; then
+                # #6311: host.preventSleep=true IS configured, but this
+                # particular session shows no active lock. The self-wrap only
+                # engages inside spawn-claude.sh (headless /loom:sweep and
+                # role-runner dispatch) and loom-daemon-start.sh --foreground
+                # — an interactive/manual session needs its own wrap.
+                warn "${BOLD}Note:${NC} ${YELLOW}host.preventSleep is enabled in .loom/config.json, but no active"
+                warn "lock was found for THIS session. The self-wrap only applies to sessions"
+                warn "launched via .loom/scripts/spawn-claude.sh (headless /loom:sweep and"
+                warn "role-runner dispatch) or 'loom-daemon-start.sh --foreground'. A manually-"
+                warn "started interactive session still needs its own wrap — see below.${NC}"
+                warn ""
+            fi
             warn "${BOLD}Reliable defense on systemd Linux:${NC}"
             warn "  Wrap this whole session in:"
             warn "      ${BOLD}systemd-inhibit --what=idle:sleep --who=loom \\\\"

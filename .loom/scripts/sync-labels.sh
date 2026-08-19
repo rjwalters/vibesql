@@ -29,7 +29,7 @@
 # operation here is a `gh label` API call, no local checkout of the target repo
 # is needed — so one workspace can bring a whole fleet of repos online:
 #
-#   for r in owner/klayout-tools owner/gf180-ldo owner/sky130-bandgap; do
+#   for r in owner/tool-repo owner/analog-a owner/analog-b; do
 #     .loom/scripts/sync-labels.sh --repo "$r"
 #   done
 #

@@ -312,6 +312,109 @@ else
     fail "non-git dir expected exit 0, got $rc"
 fi
 
+# -------- Test 11: up-to-date but installed surfaces drifted from local
+# defaults/ -> exit 0, WARNS (#5874) --------
+# This is the exact blind spot #5874 reports: local main already has a merged
+# defaults/ change (so N == 0, A == 0 -- ordinary "behind/ahead" comparison
+# sees nothing), but the installed .claude/commands/loom/ copy was never
+# resynced from local defaults/.claude/commands/loom/. Version-based currency
+# checks report "current" here; this script must not.
+echo "Test 11: up-to-date but installed surfaces drifted from local defaults/ warns (#5874)"
+make_fixture
+clone="$WORKDIR/clone"
+mkdir -p "$clone/defaults/.claude/commands/loom" "$clone/.claude/commands/loom"
+echo "new prompt text" > "$clone/defaults/.claude/commands/loom/builder.md"
+echo "old prompt text" > "$clone/.claude/commands/loom/builder.md"
+git -C "$clone" add -A
+git -C "$clone" commit -q -m "merge a defaults/ role-prompt change (installed copy not resynced)"
+# Also advance origin to the same commit so N == 0 && A == 0 (truly up to date).
+git -C "$clone" push -q origin main
+stderr_out="$(cd "$clone" && "$SCRIPT" 2>&1 >/dev/null)"
+rc=$?
+if [[ "$rc" -eq 0 ]]; then
+    pass "drifted-but-up-to-date exit code is 0"
+else
+    fail "drifted-but-up-to-date expected exit 0, got $rc"
+fi
+if printf '%s' "$stderr_out" | grep -q "5874"; then
+    pass "drifted-but-up-to-date warning references issue #5874"
+else
+    fail "drifted-but-up-to-date warning missing #5874 reference. Got: $stderr_out"
+fi
+if printf '%s' "$stderr_out" | grep -q "installed roles/builder.md differs from defaults/roles/builder.md"; then
+    pass "drifted-but-up-to-date warning names the differing role-prompt file"
+else
+    fail "drifted-but-up-to-date warning missing the differing file. Got: $stderr_out"
+fi
+if printf '%s' "$stderr_out" | grep -q -- "resync-installed.sh"; then
+    pass "drifted-but-up-to-date warning suggests resync-installed.sh remediation"
+else
+    fail "drifted-but-up-to-date warning missing resync-installed.sh remediation"
+fi
+stdout_out="$(cd "$clone" && "$SCRIPT" 2>/dev/null)"
+if printf '%s' "$stdout_out" | grep -qi "installed surfaces differ"; then
+    pass "drifted-but-up-to-date prints a distinct one-liner to stdout"
+else
+    fail "drifted-but-up-to-date missing stdout one-liner. Got: $stdout_out"
+fi
+
+# -------- Test 12: truly up-to-date with no defaults/ or installed dirs still
+# gives the plain up-to-date result (no regression from Test 11's setup) --------
+echo "Test 12: plain up-to-date fixture (no defaults/ dirs) still gives a clean result"
+make_fixture
+stderr_out="$(cd "$WORKDIR/clone" && "$SCRIPT" 2>&1 >/dev/null)"
+if [[ -z "$stderr_out" ]]; then
+    pass "plain up-to-date fixture prints no stderr warning"
+else
+    fail "plain up-to-date fixture unexpectedly warned: $stderr_out"
+fi
+
+# -------- Test 13: behind, with no resync source tree available -> the
+# "run resync" remediation ALSO warns about the missing precondition (#6202) --------
+# This is the exact scenario reported in #6202: a plain consumer clone that
+# never ran install.sh has no defaults/hooks|scripts, no .loom/loom-source-path,
+# and no install-metadata.json "loom_source" — so following the standard
+# remediation ("run resync-installed.sh") fails on first use. The behind-branch
+# warning must now say so up front.
+echo "Test 13: behind + no resync source tree warns about the missing precondition (#6202)"
+make_fixture
+advance_origin
+clone="$WORKDIR/clone"
+rm -rf "$clone/defaults" "$clone/.loom"   # ensure no source tree is resolvable
+stderr_out="$(cd "$clone" && "$SCRIPT" 2>&1 >/dev/null)"
+if printf '%s' "$stderr_out" | grep -q "6202"; then
+    pass "behind-with-no-source-tree warning references issue #6202"
+else
+    fail "behind-with-no-source-tree warning missing #6202 reference. Got: $stderr_out"
+fi
+if printf '%s' "$stderr_out" | grep -q "loom-source-path"; then
+    pass "behind-with-no-source-tree warning names the loom-source-path sidecar fix"
+else
+    fail "behind-with-no-source-tree warning missing the loom-source-path fix. Got: $stderr_out"
+fi
+
+# -------- Test 14: behind, but a resync source tree IS resolvable via
+# .loom/loom-source-path -> no missing-precondition note (#6202) --------
+echo "Test 14: behind + resolvable .loom/loom-source-path prints no missing-precondition note (#6202)"
+make_fixture
+advance_origin
+clone="$WORKDIR/clone"
+rm -rf "$clone/defaults"
+src_clone="$WORKDIR/loom-source"
+mkdir -p "$src_clone/defaults/scripts" "$clone/.loom"
+printf '%s' "$src_clone" > "$clone/.loom/loom-source-path"
+stderr_out="$(cd "$clone" && "$SCRIPT" 2>&1 >/dev/null)"
+if printf '%s' "$stderr_out" | grep -qi "behind"; then
+    pass "behind-with-resolvable-source still prints the behind warning"
+else
+    fail "behind-with-resolvable-source lost the behind warning. Got: $stderr_out"
+fi
+if ! printf '%s' "$stderr_out" | grep -q "6202"; then
+    pass "behind-with-resolvable-source prints no missing-precondition note"
+else
+    fail "behind-with-resolvable-source unexpectedly warned about a missing precondition. Got: $stderr_out"
+fi
+
 # -------- Summary --------
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"

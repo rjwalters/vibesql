@@ -6,7 +6,7 @@
       "intervalSecs": 60,
       "maxConcurrent": 5
     },
-    "perTokenConcurrency": 4,
+    "exampleTierProbe": 4,
     "mainHealthGate": {
       "enabled": true
     }

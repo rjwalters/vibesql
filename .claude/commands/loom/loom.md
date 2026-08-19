@@ -57,6 +57,8 @@ This is advisory-only. The script always exits `0` and **must not block** orches
 
 If the user is starting an overnight run, they should heed the warning before walking away.
 
+**Making it persistent instead of advisory (`host.preventSleep`, #6311).** Set `{"host": {"preventSleep": true}}` in `.loom/config.json` (env override `LOOM_HOST_PREVENT_SLEEP`) to have Loom apply the Linux `systemd-inhibit` mitigation above automatically — `.loom/scripts/spawn-claude.sh` (every headless sweep/role-runner spawn) and `loom-daemon-start.sh --foreground` self-wrap, so the warning above should show a lock already active on a host that opted in via a daemon-dispatched run. It is a deliberate no-op on macOS (never invokes `sudo`); once you've evaluated and applied a manual macOS mitigation, `{"host": {"sleepMitigationAcknowledged": "<what you did>"}}` downgrades the banner to a one-liner instead of a full block on every run. See `.loom/docs/troubleshooting.md` → "Keeping the host awake" for the full precedence/fallback contract.
+
 ## Daemon Detection
 
 Before observing or dispatching, verify the daemon is reachable. Use this probe order — do not skip straight to declaring the daemon unreachable on an MCP failure, since an MCP failure can mean "no MCP tools registered" or "MCP bridge hung," neither of which means the daemon itself is down:
@@ -107,7 +109,7 @@ The `loom-daemon` binary talks to the same running daemon over the same Unix-soc
 
 | MCP tool | CLI equivalent | Notes |
 |---|---|---|
-| `mcp__loom__list_sweeps` | `loom-daemon status` [`--json`] [`--pipeline`] | Richer than `list_sweeps`: also reports the three dynamic-cap inputs (token-pool size, disk headroom, configured ceiling) + their `min`, the main-health-gate halt state, and per-token usage. `--pipeline` adds the forge-side `gh` snapshot (opt-in — extra API calls). |
+| `mcp__loom__list_sweeps` | `loom-daemon status` [`--json`] [`--pipeline`] | Richer than `list_sweeps`: also reports the three dynamic-cap inputs (disk headroom, ram headroom, configured ceiling) + their `min`, the main-health-gate halt state, and per-token usage. `--pipeline` adds the forge-side `gh` snapshot (opt-in — extra API calls). |
 | `mcp__loom__dispatch_sweep` | `loom-daemon dispatch <N>` [`--model`] [`--effort`] [`--depends-on`] [`--workspace`] | First-class non-MCP entry point (#3952) over the same IPC `DispatchSweep` request. Bounded client-side ack timeout — exits nonzero fast instead of hanging (built explicitly to avoid the #4043 MCP wedge). |
 | `mcp__loom__cancel_sweep` | `loom-daemon cancel <sweep-id>` \| `--issue <N>` [`--grace`] [`--workspace`] | First-class non-MCP entry point (#4980) over the same IPC `CancelSweep` request — the `dispatch` sibling, usable over ssh. **Do NOT `kill -TERM <pid>` from `loom-daemon status` instead** (the pre-#4980 fallback): the daemon tracks the *wrapper* pid, so killing it leaves the underlying `claude` agent alive — on 2026-08-03 that survivor relaunched its workload against an issue whose claim had already been returned to the queue. The CLI signals the whole process group. `.loom/sweep-checkpoint/` still survives a cancel, so redispatch still resumes. |
 | `mcp__loom__get_sweep_status` | *(none, partial)* | `loom-daemon status` gives fleet-wide state, not one sweep's phase/blockers. `loom-daemon watch add <N>` (add `--pr` to watch a PR instead of an issue) registers a durable watch on that issue/PR's terminal state instead (persists to `~/.loom/watches.json`, survives a daemon restart, resolves to `~/.loom/logs/watch-results.log`). |

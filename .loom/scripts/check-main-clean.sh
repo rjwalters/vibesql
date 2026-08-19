@@ -14,12 +14,30 @@
 # worktree — via `git rev-parse --git-common-dir`, so it works whether invoked
 # from the repo root or from a worktree.
 #
+# Abandoned-conflict detection (#6162):
+#   Before any snapshot/baseline/plain/quarantine logic runs, this script also
+#   checks for an unmerged index entry (`git status --porcelain` XY in
+#   DD/AU/UD/UA/DU/AA/UU) with NO merge or rebase actually in progress
+#   (MERGE_HEAD, rebase-merge/, rebase-apply/ all absent) — an agent's merge
+#   or `git stash pop` hit a conflict and was walked away from instead of
+#   resolved or aborted (the #6162 incident: an abandoned stash-pop conflict
+#   left live `<<<<<<<`/`=======`/`>>>>>>>` markers in a script that a resync
+#   would have shipped fleet-wide). This is a DISTINCT, more urgent report
+#   than ordinary dirt (which already technically flags a `UU` line, but with
+#   a generic "dirty" message that doesn't name a working restore path) —
+#   see the "Abandoned-conflict detection" block below for the exact
+#   condition and remediation. It is never safe to --baseline away or
+#   --quarantine (an unmerged index entry breaks `git stash push`), so it
+#   always hard-exits (EXIT_MAIN_DIRTY) rather than flowing into either.
+#
 # Usage:
 #   ./.loom/scripts/check-main-clean.sh                  # check main worktree, exit 3 if dirty
 #   ./.loom/scripts/check-main-clean.sh --snapshot FILE  # record main's porcelain state to FILE, exit 0
 #   ./.loom/scripts/check-main-clean.sh --baseline FILE  # check main, ignoring dirt recorded in FILE
 #   ./.loom/scripts/check-main-clean.sh --baseline FILE --quarantine [--label TEXT] [--log FILE]
 #                                                        # ...and atomically stash any new dirt away
+#   ./.loom/scripts/check-main-clean.sh --list-quarantined [--json]
+#                                                        # report outstanding quarantine stashes
 #   ./.loom/scripts/check-main-clean.sh --help           # show usage
 #
 # Baseline mechanism (#3648):
@@ -66,6 +84,18 @@
 #   - `--log FILE` appends the same one-line JSON entry to FILE (best effort;
 #     never fails the check). Defaults to `<main>/.loom/logs/main-quarantine.log`
 #     when that directory exists.
+#   - Forge breadcrumb (#5691): on a SUCCESSFUL quarantine, if `--label` carries
+#     an `issue=N` field (the run-id/issue-number attribution every caller
+#     already passes, e.g. `run=$RUN_ID issue=$N`), a best-effort
+#     `gh issue comment N` is posted naming the stashed paths, the host, and the
+#     stash ref/commit — so an operator (or the issue's own history) has a
+#     forge-visible trail back to `stash@{N}` on a specific host, not just the
+#     structured log line. A missing/unauthenticated `gh`, a label with no
+#     `issue=` field (e.g. the post-wave `run=... wave=...` label), or a failed
+#     API call are all silent no-ops that never change this check's exit code;
+#     the attempt's own outcome is recorded as a distinct
+#     `"event":"main-clean.quarantine-comment"` log line. Opt out entirely with
+#     `LOOM_QUARANTINE_COMMENT=0`.
 #   - Exit 4 (not 3) on a SUCCESSFUL quarantine: main is provably back at the
 #     baseline, so the caller can log and continue rather than hard-blocking. If
 #     the quarantine could not be completed, the exit stays 3 (hard-block).
@@ -73,10 +103,51 @@
 #     in which case ALL non-Loom-owned dirt in main is quarantined (still a
 #     rescue ref, but with no notion of "pre-existing" to protect). It is a
 #     usage error with `--snapshot`.
+#   - Immediately before the `git stash push`, the offending path set is
+#     RE-DERIVED from a fresh `git status` (#5185). The first snapshot is taken
+#     earlier in the run, and on a busy host the dirt it describes can be
+#     resolved in between (a concurrent sweep, the builder's own commit, a
+#     cleanup pass). Pushing the stale pathspec anyway produced either a
+#     misattributed no-op — `git stash push` prints "No local changes to save",
+#     exits 0, creates nothing, and the old success path then reported the
+#     PREVIOUS entry's sha as the rescue ref — or, where git allowed it, an
+#     EMPTY stash entry carrying no information. Since `git stash` shares one
+#     reflog across every linked worktree, each such entry buries the real ones
+#     further down a stack nobody can safely prune. When the re-derivation finds
+#     nothing left to quarantine, NO stash is pushed and a distinct
+#     `"result":"no_op"` event is logged (exit 0 — main is provably at the
+#     baseline). A stash that is somehow still created empty is logged as
+#     `"result":"quarantined_empty"`, so the race stays visible instead of
+#     masquerading as an ordinary quarantine.
+#
+# Listing outstanding quarantine stashes (#5185):
+#   A quarantine is recorded in the structured log, but the rescue stash itself
+#   had no operator-facing surface — entries accumulated unreconciled (29 on one
+#   host, oldest 7 days) and were only ever noticed by accident. `--list-quarantined`
+#   is that surface: a read-only report of every Loom-produced stash entry
+#   outstanding in the MAIN worktree.
+#
+#     ./.loom/scripts/check-main-clean.sh --list-quarantined          # human-readable
+#     ./.loom/scripts/check-main-clean.sh --list-quarantined --json   # machine-readable
+#
+#   - Matches by stash MESSAGE, so it covers every Loom producer, not just this
+#     script (see LOOM_STASH_PATTERNS below — the Auditor's drift shelf uses its
+#     own prefix).
+#   - Reports each entry's commit sha (indices shift as the shared stack grows),
+#     relative age, producer, the `issue=`/`run=` attribution parsed out of the
+#     message, and whether the entry is EMPTY (nothing was actually captured).
+#   - Read-only: it never pops, drops, or otherwise mutates the shared stash
+#     stack. Exit 0 whether or not anything is outstanding — it is a report, not
+#     a gate, so `loom status` can surface the count without risking a failure.
+#   - `./.loom/bin/loom status` calls it to show a "Quarantined work" section, so
+#     an outstanding quarantine is discoverable without knowing one happened.
 #
 # Exit codes:
 #   0 - Main worktree is clean (or, in --baseline mode, only pre-existing dirt
-#       remains); or a --snapshot completed successfully.
+#       remains); or a --snapshot completed successfully; or a --quarantine
+#       found nothing left to quarantine and created no stash (the `no_op`
+#       result, #5185); or a --list-quarantined report completed (always 0 —
+#       it is a report, not a gate).
 #   2 - Usage error or could not resolve the main worktree (not a git repo).
 #   3 - Main worktree is DIRTY: uncommitted changes detected (the contamination
 #       this guard exists to catch). In --baseline mode, only NEW changes count.
@@ -140,6 +211,34 @@ LOOM_OWNED_PREFIXES=(
     ".loom-managed"
 )
 
+# ---- Loom-owned stash producers (#5185) ----------------------------------
+# Stash MESSAGE fragments that identify an entry created by Loom automation
+# rather than by a human. `git stash list` always prefixes an entry with
+# "On <branch>: " regardless of the -m message, so these are matched as
+# substrings, not anchors. Keep in sync with the producers documented above:
+# any new automation that pushes to the shared stash stack must add its prefix
+# here, or its entries stay invisible to `--list-quarantined` (and therefore to
+# `loom status`) exactly like quarantine stashes were before this surface.
+LOOM_STASH_PATTERNS=(
+    "loom-quarantine:|quarantine"              # this script's --quarantine rescue ref
+    "auditor-tmp-drift-stash-|auditor-drift"   # Auditor role's temporary drift shelf
+)
+
+# stash_producer <stash-subject> -> the producer name for a Loom-produced stash
+# entry, or empty if the subject is not one of ours.
+stash_producer() {
+    local subject="$1" entry pattern name
+    for entry in "${LOOM_STASH_PATTERNS[@]}"; do
+        pattern="${entry%%|*}"
+        name="${entry##*|}"
+        if [[ "$subject" == *"$pattern"* ]]; then
+            printf '%s' "$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # is_loom_owned <repo-relative-path> -> 0 if the path is a Loom-owned transient.
 is_loom_owned() {
     local path="$1" prefix
@@ -195,12 +294,33 @@ unquote_path() {
     printf '%s' "$p"
 }
 
+# Portable sha256 (sha256sum on Linux, shasum on macOS) - same fallback shape
+# the rest of the repo's scripts use (see detect-dependency-cycle.sh).
+_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256
+    else cksum; fi
+}
+
+# json_escape <text> -> the text, escaped for embedding in a JSON string.
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\n'/\\n}"
+    printf '%s' "$s"
+}
+
 # ---- Argument parsing ----------------------------------------------------
 # Modes: plain (no args, legacy back-compat), snapshot, baseline.
 # Flags:  --quarantine [--label TEXT] [--log FILE]  (#4380)
 MODE="plain"
 MODE_FILE=""
 QUARANTINE=0
+LIST_QUARANTINED=0
+LIST_JSON=0
 QUARANTINE_LABEL="${LOOM_QUARANTINE_LABEL:-}"
 QUARANTINE_LOG="${LOOM_QUARANTINE_LOG:-}"
 
@@ -235,6 +355,14 @@ while [[ $# -gt 0 ]]; do
             QUARANTINE=1
             shift
             ;;
+        --list-quarantined)
+            LIST_QUARANTINED=1
+            shift
+            ;;
+        --json)
+            LIST_JSON=1
+            shift
+            ;;
         --label)
             require_value "--label" "${2:-}"
             QUARANTINE_LABEL="$2"
@@ -259,6 +387,21 @@ if [[ "$QUARANTINE" -eq 1 && "$MODE" == "snapshot" ]]; then
     exit "$EXIT_USAGE"
 fi
 
+# --list-quarantined is a standalone read-only report: it inspects the stash
+# stack, never the working tree, so combining it with a check/snapshot mode
+# would silently discard one of the two requests.
+if [[ "$LIST_QUARANTINED" -eq 1 ]] && { [[ "$MODE" != "plain" ]] || [[ "$QUARANTINE" -eq 1 ]]; }; then
+    echo "check-main-clean.sh: --list-quarantined is a standalone report; it cannot be combined with --snapshot/--baseline/--quarantine" >&2
+    echo "Run with --help for usage." >&2
+    exit "$EXIT_USAGE"
+fi
+
+if [[ "$LIST_JSON" -eq 1 && "$LIST_QUARANTINED" -eq 0 ]]; then
+    echo "check-main-clean.sh: --json is only valid with --list-quarantined" >&2
+    echo "Run with --help for usage." >&2
+    exit "$EXIT_USAGE"
+fi
+
 [[ -n "$QUARANTINE_LABEL" ]] || QUARANTINE_LABEL="unattributed"
 
 # ---- Resolve the main worktree root --------------------------------------
@@ -279,12 +422,157 @@ if [[ ! -d "$main_root" ]]; then
     exit "$EXIT_USAGE"
 fi
 
+# ---- List mode: report outstanding Loom stash entries (#5185) ------------
+# Read-only: inspects the stash stack of the MAIN worktree and never touches
+# the working tree, so it runs before any status/baseline logic and exits 0
+# regardless of what it finds.
+
+# stash_is_empty <stash-ref-or-sha> -> 0 when the entry captured nothing.
+# `git stash show --name-only` alone reports nothing for an untracked-ONLY
+# entry (those files live in the stash's third parent), which would misreport a
+# perfectly good rescue ref as empty — so the --include-untracked form is tried
+# first, falling back for git versions that predate it (< 2.32).
+stash_is_empty() {
+    local ref="$1" files=""
+    files=$(git -C "$main_root" stash show --include-untracked --name-only "$ref" 2>/dev/null) \
+        || files=$(git -C "$main_root" stash show --name-only "$ref" 2>/dev/null) \
+        || files=""
+    [[ -z "${files//[[:space:]]/}" ]]
+}
+
+# stash_field <message> <key> -> the value of a `key=value` token in a stash
+# message (e.g. `issue=5137`), or empty when absent. Used to surface the
+# quarantine's own attribution so an operator can check liveness (is that sweep
+# still running? is that issue still open?) without decoding the message by eye.
+stash_field() {
+    local msg="$1" key="$2" rest
+    [[ "$msg" == *"$key="* ]] || return 0
+    rest="${msg##*"$key="}"
+    rest="${rest%% *}"
+    printf '%s' "$rest"
+}
+
+if [[ "$LIST_QUARANTINED" -eq 1 ]]; then
+    entries=$(git -C "$main_root" stash list --format='%gd%x09%H%x09%cr%x09%gs' 2>/dev/null || true)
+
+    count=0
+    json_items=""
+    human_rows=""
+    empty_count=0
+    while IFS=$'\t' read -r ref sha age subject; do
+        [[ -z "$ref" ]] && continue
+        producer=$(stash_producer "$subject") || continue
+        empty="false"
+        if stash_is_empty "$sha"; then
+            empty="true"
+            empty_count=$((empty_count + 1))
+        fi
+        issue=$(stash_field "$subject" "issue")
+        run=$(stash_field "$subject" "run")
+        count=$((count + 1))
+        human_rows+="$ref"$'\t'"$sha"$'\t'"$age"$'\t'"$producer"$'\t'"$empty"$'\t'"$subject"$'\n'
+        [[ -n "$json_items" ]] && json_items+=","
+        json_items+="{\"ref\":\"$(json_escape "$ref")\",\"commit\":\"$(json_escape "$sha")\",\"age\":\"$(json_escape "$age")\",\"producer\":\"$(json_escape "$producer")\",\"empty\":$empty,\"issue\":$( [[ -n "$issue" ]] && printf '"%s"' "$(json_escape "$issue")" || printf 'null' ),\"run\":$( [[ -n "$run" ]] && printf '"%s"' "$(json_escape "$run")" || printf 'null' ),\"message\":\"$(json_escape "$subject")\"}"
+    done <<< "$entries"
+
+    if [[ "$LIST_JSON" -eq 1 ]]; then
+        printf '{"main":"%s","count":%d,"empty_count":%d,"stashes":[%s]}\n' \
+            "$(json_escape "$main_root")" "$count" "$empty_count" "$json_items"
+        exit "$EXIT_OK"
+    fi
+
+    if [[ "$count" -eq 0 ]]; then
+        echo "check-main-clean.sh: no outstanding Loom stash entries in $main_root"
+        exit "$EXIT_OK"
+    fi
+
+    echo "check-main-clean.sh: $count outstanding Loom stash entr$( [[ "$count" -eq 1 ]] && echo "y" || echo "ies" ) in $main_root"
+    echo ""
+    while IFS=$'\t' read -r ref sha age producer empty subject; do
+        [[ -z "$ref" ]] && continue
+        marker=""
+        [[ "$empty" == "true" ]] && marker="  [EMPTY — nothing was captured]"
+        echo "  $ref  ${sha:0:12}  $age  ($producer)$marker"
+        echo "      $subject"
+    done <<< "$human_rows"
+    echo ""
+    echo "  Inspect one (resolve by COMMIT, not by index — stash@{N} shifts as the"
+    echo "  shared stack grows, and every linked worktree pushes onto the same stack):"
+    echo "    git -C \"$main_root\" stash show -p --include-untracked <commit>"
+    echo ""
+    echo "  Reconcile before dropping: an entry naming a LIVE sweep run or an OPEN"
+    echo "  issue may still be the only copy of that work."
+    exit "$EXIT_OK"
+fi
+
 status=$(git -C "$main_root" status --porcelain 2>/dev/null || true)
 
 # Exclude Loom-owned transient state paths regardless of the consumer's
 # .gitignore currency (#3778) — applied before snapshot/baseline/plain logic so
 # every mode sees a consistently-filtered view.
 status=$(filter_loom_owned "$status")
+
+# ---- Abandoned-conflict detection (#6162 AC3) -----------------------------
+#
+# An unmerged index entry (porcelain XY in DD/AU/UD/UA/DU/AA/UU — the seven
+# combinations git uses for an unmerged path) with NO merge/rebase actually
+# in progress (MERGE_HEAD, rebase-merge/, rebase-apply/ all absent from the
+# git dir) means an agent popped a stash / attempted a merge, hit a conflict,
+# and walked away without resolving OR aborting — exactly the #6162
+# incident: an abandoned `git stash pop` conflict left live `<<<<<<<` /
+# `=======` / `>>>>>>>` markers in defaults/scripts/spawn-claude.sh, which
+# `resync-installed.sh` would then have shipped fleet-wide.
+#
+# Generic `git status --porcelain` dirty-detection already technically
+# covers this — a `UU ` line is not excluded by is_loom_owned, so it would
+# already trip the plain/baseline "dirty" path below — but a bare "main
+# worktree is dirty" message does not tell an operator this is a stuck
+# conflict, nor that the standard "git checkout -- <path>" restore does not
+# work on an unmerged path. This block reports it as its own, more specific
+# and more urgent condition, with remediation that actually applies.
+#
+# Runs unconditionally for every mode that reaches this point (snapshot,
+# baseline, plain, quarantine — --list-quarantined already returned above,
+# since it is a read-only stash report unrelated to the working tree) and
+# BEFORE any baseline/quarantine logic: an abandoned conflict is never safe
+# to baseline away (it is never "pre-existing dirt" worth ignoring) or to
+# quarantine automatically (`git stash push` against an unmerged index entry
+# is unreliable), so it hard-exits directly rather than flowing into either.
+unmerged=$(printf '%s\n' "$status" | grep -E '^(DD|AU|UD|UA|DU|AA|UU) ' || true)
+if [[ -n "$unmerged" ]]; then
+    merge_in_progress=0
+    [[ -f "$abs_common/MERGE_HEAD" ]] && merge_in_progress=1
+    [[ -d "$abs_common/rebase-merge" ]] && merge_in_progress=1
+    [[ -d "$abs_common/rebase-apply" ]] && merge_in_progress=1
+    if [[ "$merge_in_progress" -eq 0 ]]; then
+        echo "ERROR: MAIN worktree has an ABANDONED CONFLICT STATE (unmerged index entries, no merge/rebase in progress)." >&2
+        echo "       Main worktree: $main_root" >&2
+        echo "" >&2
+        echo "       This usually means a merge / cherry-pick / 'git stash pop' hit a" >&2
+        echo "       conflict and was walked away from instead of resolved or aborted" >&2
+        echo "       (#6162). The path(s) below likely still contain literal" >&2
+        echo "       '<<<<<<<' / '=======' / '>>>>>>>' conflict markers and will NOT" >&2
+        echo "       parse or behave as valid source." >&2
+        echo "" >&2
+        echo "       Unmerged path(s):" >&2
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            echo "         $line" >&2
+        done <<< "$unmerged"
+        echo "" >&2
+        echo "       This is NOT safe to restore with a plain 'git checkout -- <path>'" >&2
+        echo "       (it will refuse on an unmerged path) and is NOT auto-quarantined" >&2
+        echo "       ('git stash push' against an unmerged index entry is unreliable)." >&2
+        echo "       Resolve manually:" >&2
+        echo "         - finish the merge for each path, then 'git add <path>'; or" >&2
+        echo "         - restore a known-good version: 'git checkout <good-ref> -- <path>'" >&2
+        echo "           (stages the restored content and clears the conflict for that" >&2
+        echo "           path — the exact remediation used in the #6162 incident); or" >&2
+        echo "         - discard the whole conflicted operation and return to HEAD with" >&2
+        echo "           'git reset --merge'." >&2
+        exit "$EXIT_MAIN_DIRTY"
+    fi
+fi
 
 # ---- Snapshot mode: record and exit --------------------------------------
 if [[ "$MODE" == "snapshot" ]]; then
@@ -330,17 +618,6 @@ fi
 # Runs only when contamination was actually detected. Everything below is a
 # no-op for callers that did not pass --quarantine.
 
-# json_escape <text> -> the text, escaped for embedding in a JSON string.
-json_escape() {
-    local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//\"/\\\"}"
-    s="${s//$'\t'/\\t}"
-    s="${s//$'\r'/\\r}"
-    s="${s//$'\n'/\\n}"
-    printf '%s' "$s"
-}
-
 # emit_quarantine_log <json-line>
 # Writes EXACTLY ONE structured entry: to stderr always, and appended to the
 # quarantine log file when one is configured/derivable (best effort — a failed
@@ -360,6 +637,74 @@ emit_quarantine_log() {
     fi
 }
 
+# post_quarantine_breadcrumb <label> <stash-sha> (#5691)
+# Best-effort forge breadcrumb: posts a comment on the issue named by the
+# label's `issue=` field (the run-id/issue-number attribution every
+# check-main-clean.sh caller already carries in its --label, e.g.
+# "run=$RUN_ID issue=$N" — see sweep.md's wave-lifecycle backstop) stating
+# which paths were stashed, on which host, and as which stash ref. Reads the
+# offending path list from the global OFFENDING_PATHS array populated by
+# collect_offending_paths just before this is called.
+#
+# This is PURELY additive: nothing here can change the check's exit code or
+# verdict. A label with no `issue=` field (e.g. the post-wave `run=...
+# wave=...` label — nothing to comment on), a missing/unauthenticated `gh`
+# binary, LOOM_QUARANTINE_COMMENT=0, or a failed API call are all silent
+# no-ops from the caller's perspective; the outcome is only ever recorded (via
+# emit_quarantine_log, reusing the same structured log file rather than a new
+# one) as its own "main-clean.quarantine-comment" event, distinct from the
+# "main-clean.quarantine" event this augments.
+post_quarantine_breadcrumb() {
+    local label="$1" stash_sha="$2"
+    local issue_num
+    issue_num=$(stash_field "$label" "issue")
+    [[ -n "$issue_num" ]] || return 0
+    [[ "${LOOM_QUARANTINE_COMMENT:-1}" != "0" ]] || return 0
+    command -v gh >/dev/null 2>&1 || return 0
+
+    local host
+    host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "")
+    [[ -n "$host" ]] || host="unknown-host"
+
+    # The raw hostname must never reach a *public* forge comment (#6189): a
+    # consumer repo's quarantine breadcrumb is world-readable, and combined
+    # with the fleet-hardware detail already shipped in
+    # .loom/docs/daemon-reference.md it is more identifying of the operator
+    # than either piece alone. Derive a short, stable, non-reversible
+    # identifier from the hostname for the comment body instead; the
+    # structured log below still records the raw `$host` since that file
+    # stays on the operator's own machine.
+    local host_public
+    host_public="host-$(printf '%s' "$host" | _sha256 | cut -c1-8)"
+
+    local paths_display="" p
+    for p in "${OFFENDING_PATHS[@]}"; do
+        [[ -n "$paths_display" ]] && paths_display+=", "
+        paths_display+="\`$p\`"
+    done
+    [[ -n "$paths_display" ]] || paths_display="(no paths recorded)"
+
+    local body
+    body=$(cat <<EOF
+Quarantine: uncommitted changes to ${paths_display} were stashed on \`${host_public}\` as \`stash@{0}\` (commit \`${stash_sha:0:12}\`) by \`check-main-clean.sh --quarantine\`.
+
+Nothing was discarded — recover the diff on that host with \`git stash show -p ${stash_sha}\`, or list every outstanding quarantine with \`./.loom/scripts/check-main-clean.sh --list-quarantined\`.
+
+<!-- loom:quarantine-breadcrumb stash=${stash_sha} -->
+EOF
+)
+
+    local comment_ts comment_err rc=0
+    comment_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+    comment_err=$(gh issue comment "$issue_num" --body "$body" 2>&1) || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        emit_quarantine_log "{\"event\":\"main-clean.quarantine-comment\",\"ts\":\"$comment_ts\",\"result\":\"posted\",\"issue\":\"$(json_escape "$issue_num")\",\"host\":\"$(json_escape "$host")\",\"stash_commit\":\"$stash_sha\"}"
+    else
+        emit_quarantine_log "{\"event\":\"main-clean.quarantine-comment\",\"ts\":\"$comment_ts\",\"result\":\"failed\",\"issue\":\"$(json_escape "$issue_num")\",\"host\":\"$(json_escape "$host")\",\"stash_commit\":\"$stash_sha\",\"reason\":\"$(json_escape "$(printf '%s' "$comment_err" | tr '\n' ' ')")\"}"
+    fi
+    return 0
+}
+
 # Collect the offending (NEW) paths from the porcelain lines. Rename lines
 # ("old -> new") contribute BOTH sides so the rename is undone as a whole.
 collect_offending_paths() {
@@ -376,11 +721,43 @@ collect_offending_paths() {
 }
 
 if [[ -n "$effective_status" && "$QUARANTINE" -eq 1 ]]; then
-    OFFENDING_PATHS=()
-    collect_offending_paths
-
     ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
     stash_msg="loom-quarantine: $QUARANTINE_LABEL"
+
+    # Re-derive the offending set from a FRESH status immediately before the
+    # push (#5185). `effective_status` was computed from a snapshot taken
+    # earlier in this run; on a busy host the dirt it describes can be resolved
+    # in between by a concurrent sweep, the builder's own commit, or a cleanup
+    # pass. Quarantining a stale pathspec is never right: at best it is a no-op
+    # `git stash push` that creates nothing (yet exits 0, so the old code below
+    # then read the PREVIOUS entry's sha out of refs/stash and reported someone
+    # else's stash as this run's rescue ref); at worst it is an EMPTY stash
+    # entry that carries no information and pushes the real entries further
+    # down a shared stack nobody can safely prune.
+    recheck_status=$(filter_loom_owned "$(git -C "$main_root" status --porcelain 2>/dev/null || true)")
+    if [[ "$MODE" == "baseline" && -r "$MODE_FILE" ]]; then
+        recheck_status=$(comm -13 \
+            <(sort "$MODE_FILE") \
+            <(printf '%s\n' "$recheck_status" | sort) \
+            | sed '/^$/d')
+    fi
+    effective_status="$recheck_status"
+
+    OFFENDING_PATHS=()
+    if [[ -n "$effective_status" ]]; then
+        collect_offending_paths
+    fi
+
+    if [[ "${#OFFENDING_PATHS[@]}" -eq 0 ]]; then
+        # Nothing left to rescue. Emit this as its OWN structured result rather
+        # than a silent no-op or a misleading "quarantined" line — an empty
+        # quarantine attempt means something else resolved the contamination
+        # concurrently, which is exactly the race worth seeing in the log.
+        emit_quarantine_log "{\"event\":\"main-clean.quarantine\",\"ts\":\"$ts\",\"result\":\"no_op\",\"label\":\"$(json_escape "$QUARANTINE_LABEL")\",\"main\":\"$(json_escape "$main_root")\",\"reason\":\"offending paths were resolved between detection and the stash push; no stash created\",\"paths\":[],\"count\":0}"
+        echo "check-main-clean.sh: contamination resolved before it could be quarantined — no stash created." >&2
+        echo "       Main worktree: $main_root (now matches the baseline)" >&2
+        exit "$EXIT_OK"
+    fi
 
     # Build the JSON path array once — reused by the success and failure entries.
     paths_json=""
@@ -410,13 +787,21 @@ if [[ -n "$effective_status" && "$QUARANTINE" -eq 1 ]]; then
         stash_pathspecs+=(":(literal,top)$p")
     done
 
+    # Remember the stack top BEFORE pushing. `git stash push` exits 0 and
+    # creates NOTHING when the pathspec resolves to no local changes ("No local
+    # changes to save"), so `refs/stash` alone cannot distinguish "our rescue
+    # ref" from "the previous entry, still on top" — comparing the two is what
+    # makes the difference detectable (#5185).
+    stash_sha_before=$(git -C "$main_root" rev-parse --verify --quiet refs/stash 2>/dev/null || true)
+
     stash_err=$(git -C "$main_root" stash push --include-untracked \
         -m "$stash_msg" -- "${stash_pathspecs[@]}" 2>&1) || \
         quarantine_fail "git stash push failed: $(printf '%s' "$stash_err" | tr '\n' ' ')"
 
     stash_sha=$(git -C "$main_root" rev-parse --verify --quiet refs/stash 2>/dev/null || true)
-    if [[ -z "$stash_sha" ]]; then
-        quarantine_fail "git stash push reported success but no stash ref exists"
+    stash_created=1
+    if [[ -z "$stash_sha" || "$stash_sha" == "$stash_sha_before" ]]; then
+        stash_created=0
     fi
 
     # Verify the rescue was COMPLETE: re-run the same detection and require that
@@ -434,13 +819,44 @@ if [[ -n "$effective_status" && "$QUARANTINE" -eq 1 ]]; then
         quarantine_fail "residual dirt remains after stash: $(printf '%s' "$post_effective" | tr '\n' ';')"
     fi
 
+    # No new entry was created, yet main came back clean: the contamination was
+    # resolved concurrently in the window the re-derivation above narrowed but
+    # cannot close. Report the same distinct no_op result (never a bogus
+    # "quarantined" naming a stash this run did not create).
+    if [[ "$stash_created" -eq 0 ]]; then
+        emit_quarantine_log "{\"event\":\"main-clean.quarantine\",\"ts\":\"$ts\",\"result\":\"no_op\",\"label\":\"$(json_escape "$QUARANTINE_LABEL")\",\"main\":\"$(json_escape "$main_root")\",\"reason\":\"git stash push created no new entry ($(json_escape "$(printf '%s' "$stash_err" | tr '\n' ' ')")); main is already at the baseline\",\"paths\":[$paths_json],\"count\":${#OFFENDING_PATHS[@]}}"
+        echo "check-main-clean.sh: nothing was left to quarantine — no stash created." >&2
+        echo "       Main worktree: $main_root (matches the baseline)" >&2
+        exit "$EXIT_OK"
+    fi
+
+    # A stash WAS created but captured nothing. This should be unreachable
+    # after the re-derivation above (and modern git refuses to create an empty
+    # stash at all), so log it as its own result rather than letting it pass as
+    # an ordinary quarantine: an empty entry is pure noise on the shared stack
+    # and its existence means the race is still live somewhere.
+    if stash_is_empty "$stash_sha"; then
+        emit_quarantine_log "{\"event\":\"main-clean.quarantine\",\"ts\":\"$ts\",\"result\":\"quarantined_empty\",\"label\":\"$(json_escape "$QUARANTINE_LABEL")\",\"main\":\"$(json_escape "$main_root")\",\"stash_ref\":\"stash@{0}\",\"stash_commit\":\"$stash_sha\",\"stash_message\":\"$(json_escape "$stash_msg")\",\"reason\":\"stash entry was created but captured nothing (race between detection and push)\",\"paths\":[$paths_json],\"count\":${#OFFENDING_PATHS[@]}}"
+        echo "WARNING: check-main-clean.sh: the quarantine stash captured NOTHING (empty entry)." >&2
+        echo "       Main worktree: $main_root (matches the baseline)" >&2
+        echo "       Empty ref:     $stash_sha  (\"$stash_msg\")" >&2
+        echo "       It is safe to drop, and is listed by:" >&2
+        echo "         ./.loom/scripts/check-main-clean.sh --list-quarantined" >&2
+        exit "$EXIT_QUARANTINED"
+    fi
+
     emit_quarantine_log "{\"event\":\"main-clean.quarantine\",\"ts\":\"$ts\",\"result\":\"quarantined\",\"label\":\"$(json_escape "$QUARANTINE_LABEL")\",\"main\":\"$(json_escape "$main_root")\",\"stash_ref\":\"stash@{0}\",\"stash_commit\":\"$stash_sha\",\"stash_message\":\"$(json_escape "$stash_msg")\",\"paths\":[$paths_json],\"count\":${#OFFENDING_PATHS[@]}}"
+
+    # Best-effort breadcrumb: never affects this check's verdict (#5691).
+    post_quarantine_breadcrumb "$QUARANTINE_LABEL" "$stash_sha"
 
     echo "check-main-clean.sh: QUARANTINED ${#OFFENDING_PATHS[@]} contaminating path(s) from the main worktree." >&2
     echo "       Main worktree: $main_root (now matches the baseline)" >&2
     echo "       Rescue ref:    stash@{0} = $stash_sha  (\"$stash_msg\")" >&2
     echo "       Nothing was discarded — recover the diff with:" >&2
     echo "         git -C \"$main_root\" stash show -p $stash_sha" >&2
+    echo "       This entry stays outstanding until someone reconciles it; it is listed by" >&2
+    echo "       './.loom/scripts/check-main-clean.sh --list-quarantined' and by 'loom status'." >&2
     exit "$EXIT_QUARANTINED"
 fi
 

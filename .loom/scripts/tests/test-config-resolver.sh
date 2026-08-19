@@ -59,10 +59,10 @@ new_repo() {
 echo "Test 1: only .loom/config.json present -> byte-for-byte behavior preservation"
 repo=$(new_repo)
 mkdir -p "$repo/.loom"
-echo '{"nextAgentNumber": 3, "autonomous": {"perTokenConcurrency": 2}}' > "$repo/.loom/config.json"
+echo '{"nextAgentNumber": 3, "autonomous": {"exampleTierProbe": 2}}' > "$repo/.loom/config.json"
 
 actual=$(loom_resolve_config "$repo")
-expected=$(jq -c -n '{"nextAgentNumber": 3, "autonomous": {"perTokenConcurrency": 2}}')
+expected=$(jq -c -n '{"nextAgentNumber": 3, "autonomous": {"exampleTierProbe": 2}}')
 assert_eq "$actual" "$expected" "legacy-only repo resolves to exactly the legacy file's content"
 rm -rf "$repo"
 
@@ -115,10 +115,10 @@ echo "Test 6: nested object (autonomous block) merges recursively across tiers"
 repo=$(new_repo)
 mkdir -p "$repo/.loom" "$repo/.loom-local"
 echo '{"autonomous": {"workFinder": {"enabled": true}}}' > "$repo/.loom/config.json"
-echo '{"autonomous": {"perTokenConcurrency": 4}}' > "$repo/.loom-local/local.json"
+echo '{"autonomous": {"exampleTierProbe": 4}}' > "$repo/.loom-local/local.json"
 
 actual=$(loom_resolve_config "$repo")
-expected=$(jq -c -n '{"autonomous": {"workFinder": {"enabled": true}, "perTokenConcurrency": 4}}')
+expected=$(jq -c -n '{"autonomous": {"workFinder": {"enabled": true}, "exampleTierProbe": 4}}')
 assert_eq "$actual" "$expected" "nested autonomous block merges recursively, not overwritten wholesale"
 rm -rf "$repo"
 

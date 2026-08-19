@@ -85,8 +85,13 @@ Full policy, TTL/invalidation semantics, and manual verification steps:
 
 ## Verdict-State Janitor (run FIRST, before the 6 safety criteria)
 
-**Every `loom:pr` PR must pass this janitor step before any of the 6 safety
-criteria below are evaluated.** It is a fail-safe against a real race
+**Every `loom:pr` PR must pass BOTH parts of this janitor step before any of
+the 6 safety criteria below are evaluated.** Part 1 resolves a *contradictory*
+verdict state; Part 2 resolves an *out-of-date* one.
+
+### Part 1: Contradictory verdict labels (#4570)
+
+It is a fail-safe against a real race
 (#4570, PR #4560 incident, 2026-07-30): two Judges reviewing the same PR
 concurrently can leave it carrying **both** `loom:pr` and
 `loom:changes-requested` simultaneously — an off-graph state the label
@@ -114,7 +119,11 @@ if echo "$LABELS" | grep -qw "loom:changes-requested"; then
   # tick doesn't re-post while the contradiction is being resolved.
   # Cached ("$GH_READ") — a marker grep only answers "did I already post
   # this?", and your own `--clear-cache` after posting keeps it honest.
-  if "$GH_READ" pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$JANITOR_MARKER"; then
+  # `startswith`, not a bare substring match: a genuine notice always emits
+  # the marker as its literal first line, but a later comment can quote it
+  # in prose while discussing the notice without being the notice itself
+  # (#5371) — a substring match would then wrongly suppress the real post.
+  if [ "$("$GH_READ" pr view "$PR_NUMBER" --json comments --jq "[.comments[].body] | any(startswith(\"$JANITOR_MARKER\"))")" = "true" ]; then
     echo "Verdict-janitor notice already posted for #$PR_NUMBER — skipping (still not eligible to merge)"
   else
     gh pr comment "$PR_NUMBER" --body "$JANITOR_MARKER
@@ -140,6 +149,48 @@ fi
 though the janitor just removed `loom:pr`, a fresh Judge pass on the
 corrected state (which re-adds `loom:pr` if it approves) is what makes the PR
 eligible again, not this loop continuing on to the 6 criteria below.
+
+### Part 2: Stale approval — the verdict predates the current head (#5686)
+
+Part 1 catches a **contradictory** verdict. This part catches an
+**out-of-date** one, which is the more dangerous failure: `loom:pr` means
+"*this tree* is approved", but before #5686 the label survived any change to
+the head SHA. A PR that was approved, then rebased or force-pushed, kept its
+approval — and Champion would happily auto-merge a tree **no Judge ever
+reviewed**. Nothing in the 6 criteria below catches this: `updatedAt` and CI
+status re-evaluate against the *new* head, but the *approval* is never
+re-checked against it.
+
+Judge now stamps every verdict comment with `<!-- loom:verdict-sha sha=<head>
+verdict=approved|changes-requested -->` (see `judge.md` → "Verdict SHA
+Marker"). Run the guard on every candidate `loom:pr` PR, after Part 1 and
+before criterion 1:
+
+```bash
+PR_NUMBER=<number>
+./.loom/scripts/verdict-staleness-guard.sh "$PR_NUMBER" --clear
+VERDICT_RC=$?
+"$GH_READ" --clear-cache   # the guard may have rewritten labels
+```
+
+| Exit | Meaning | Action |
+|------|---------|--------|
+| `0` | **FRESH** — the approval was rendered against the current head SHA | Proceed to criterion 1. |
+| `10` | No verdict label (raced away between listing and now) | **Skip this PR** — it is no longer merge-eligible. |
+| `11` | **UNVERIFIABLE** — no marker for this verdict: approved before the marker convention shipped, by a host still running the older prompt, or (most often in practice, #6319) because the Judge simply dropped the marker | Proceed to criterion 1. The guard fails **safe** (verdict kept) rather than force-clearing every unmarked approval; this is the pre-#5686 risk posture, so it is a real exposure, not just a rollout artifact. Since #6319 both Judge's Stale-Verdict Sweep (`--anchor`) and `loom-daemon`'s periodic `reconcile_pr_verdicts` stamp the missing marker at the then-current head, so this state should be rare and short-lived — a PR that keeps reporting `11` is either on an explicit hold or something is wrong; say so in the completion summary rather than passing over it silently. |
+| `12` | **STALE** — the approval covers a tree that is gone | **Do NOT merge.** The guard already removed `loom:pr`, re-queued the PR as `loom:review-requested`, and posted a comment naming both SHAs. `continue` to the next PR. |
+| any other | `gh`/environment error | **Do NOT merge.** Treat exactly like any other `gh` failure in this document — skip the PR this pass and retry next tick. Never read an error as "the approval is fine". |
+
+**Exit 12 is not a rejection of the PR** — it is a statement that no verdict
+currently applies to it. Do not post a rejection comment, do not count it as a
+failure in the completion summary, and do not re-add `loom:pr` yourself. A
+fresh Judge pass on the current head is the only thing that makes it eligible
+again.
+
+`loom:blocked` / `loom:operator` / `loom:operator-only` PRs are reported STALE
+but deliberately **not** cleared by the guard (it will not un-park a PR a human
+or the capped-PR recovery pass deliberately held). They are still not merge-
+eligible: exit 12 means do not merge, cleared or not.
 
 ---
 
@@ -169,6 +220,7 @@ For each `loom:pr` PR, verify ALL 6 safety criteria. If ANY criterion fails, do 
 
 ### 1. Label Check
 - [ ] PR has `loom:pr` label (Judge approval)
+- [ ] That approval is **not stale** — the Verdict-State Janitor's Part 2 above returned `0` (FRESH) or `11` (UNVERIFIABLE), never `12` (STALE). A `loom:pr` label rendered against a head SHA that has since moved is not an approval of the tree you are about to merge (#5686).
 
 **Verification command**:
 ```bash
@@ -273,8 +325,15 @@ HOLD_MARKER="<!-- champion:merge-risk-hold -->"
 # releases it. One call serves the whole precheck.
 PR_JSON=$(gh pr view "$PR_NUMBER" --json comments,commits,labels,headRefOid)
 
+# `startswith`, not `contains`: a genuine hold comment always emits the
+# marker as its literal first line, but a *later* comment (e.g. a Judge
+# approval) can legitimately quote or discuss the marker in prose without
+# being the hold's owning comment. `contains` + `last` would then select
+# that discussing comment instead of the real hold — HOLD_HEAD extraction
+# comes up empty and the release logic silently degrades to the less
+# precise fallback path (#5371).
 HOLD_BODY=$(jq -r --arg m "$HOLD_MARKER" \
-  '[.comments[] | select(.body | contains($m))] | last | .body // ""' <<<"$PR_JSON")
+  '[.comments[] | select(.body | startswith($m))] | last | .body // ""' <<<"$PR_JSON")
 
 if [ -z "$HOLD_BODY" ]; then
   PRIOR_HOLD=false          # never held — today's behavior, unchanged
@@ -283,7 +342,7 @@ else
   PRIOR_HOLD=true
   HOLD_OVERRIDE=false
   HOLD_AT=$(jq -r --arg m "$HOLD_MARKER" \
-    '[.comments[] | select(.body | contains($m))] | last | .createdAt' <<<"$PR_JSON")
+    '[.comments[] | select(.body | startswith($m))] | last | .createdAt' <<<"$PR_JSON")
   # Persisted state written by the hold template below:
   #   <!-- champion:hold-state head=<sha> -->
   # Empty for legacy holds posted before that line existed — the timestamp
@@ -437,6 +496,15 @@ else
 fi
 ```
 
+`$HOLD_REVERSAL_BLOCK` non-empty is also the exact signal that gates the
+`loom:operator` label removal (#5502) — this precheck already distinguishes
+"never held", "held and still bound" (which bails out at the STICKY HOLD
+branch above and never reaches here with a merge decision), and "held and
+genuinely released", so the label reuses that same computation instead of a
+second state-tracking mechanism. The actual `gh pr edit --remove-label` call
+lives in Step 2 below, in the same pass that posts this block's text — see
+"Step 2: Add Pre-Merge Comment".
+
 "Seems fine now", "re-evaluated, looks OK", or any restatement that would read
 the same against the original diff is **not** an acceptable flip rationale — if
 you cannot name what changed, the precheck should not have released the hold.
@@ -459,7 +527,11 @@ HEAD_SHA=$(jq -r '.headRefOid' <<<"$PR_JSON")
 # operator clearing comment, a new push, or a new Judge review — never by a
 # fresh re-read of the same diff.
 # Cached ("$GH_READ") — idempotency-marker grep; see "Cached forge reads".
-if "$GH_READ" pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$HOLD_MARKER"; then
+# `startswith`, not a bare substring match — same rationale as the
+# sticky-hold precheck above (#5371): a later comment quoting this marker
+# in prose must never be mistaken for the hold notice's own comment, or
+# the real notice silently never gets posted.
+if [ "$("$GH_READ" pr view "$PR_NUMBER" --json comments --jq "[.comments[].body] | any(startswith(\"$HOLD_MARKER\"))")" = "true" ]; then
   echo "Merge-risk hold already posted for #$PR_NUMBER — hold stands, no comment"
 else
   gh pr comment "$PR_NUMBER" --body "$HOLD_MARKER
@@ -484,6 +556,17 @@ Keeping \`loom:pr\`. This PR stays in the queue and is re-checked each tick agai
 ---
 *Automated by Champion role*"
 fi
+
+# loom:operator (#5502): the first-class "engine will not act further, a
+# human is the only transition out" pipeline state, applied alongside the
+# marker above (whether freshly posted this tick or already standing from an
+# earlier one — `--add-label` is idempotent, so it is safe to reassert every
+# tick the hold binds). UNLIKE loom:operator-only, this must NOT make
+# sweep/shepherd skip the PR — loom:pr is kept (see above) and the PR stays
+# in the normal re-evaluation queue precisely so the release precheck
+# (loom:auto-merge-ok / operator comment / new push / new Judge review, all
+# above) can still fire and clear it. Never applied in place of loom:pr.
+gh pr edit "$PR_NUMBER" --add-label "loom:operator" 2>/dev/null || true
 # Skip this PR for this pass — do not merge.
 ```
 
@@ -508,7 +591,7 @@ the honored override, so the merge is not silent (#4742).
 **Migration note (retired config knob)**: `champion.auto_merge_max_lines` is **no longer read**. If your repo's `.loom/config.json` sets it, the key is now inert — delete it (leaving it does no harm, but it no longer has any effect). Repos that used a low value to keep Champion conservative should instead rely on this criterion's conservative bias, hold individual PRs by removing `loom:pr`, or stop running Champion's auto-merge pass. Repos that set a high value to work *around* the ceiling can simply drop the key.
 
 ### 3. Critical File Exclusion Check
-- [ ] No changes to critical configuration or infrastructure files
+- [ ] No changes to critical configuration or infrastructure files, **except** a version-only diff hunk in one of the 6 version-bearing files (see "Version-only diff carve-out" below)
 
 **Critical file patterns** (do NOT auto-merge if PR modifies any of these):
 - `Cargo.toml` - root dependency changes
@@ -517,7 +600,8 @@ the honored override, so the merge is not silent (#4742).
 - `package.json` - npm dependency changes
 - `.github/workflows/*` - CI/CD pipeline changes
 - `*.sql` - database schema changes
-- `*migration*` - database migration files
+- `*migrations/*` - database migration directories (e.g. Django/Alembic/Rails-style `migrations/` folders, including a root-level `migrations/` dir such as Alembic/Flask-Migrate's default `migrations/versions/*.py` layout — the pattern has no leading `/`, so it matches both root-level and nested directories) — **not** a bare `migration` substring, which false-positived on the intentional `docs/migration/` documentation directory (#5723)
+- `*_migration.py` - single-file suffix-style migration scripts
 
 **Verification command**:
 ```bash
@@ -546,8 +630,57 @@ CRITICAL_PATTERNS=(
   "package.json"
   ".github/workflows/"
   ".sql"
-  "migration"
+  "migrations/"
+  "_migration.py"
 )
+
+# Version-only diff carve-out (#6147): `scripts/version.sh bump` — which CI's
+# "defaults/ Changes Require a VERSION Bump" check forces on every PR
+# touching `defaults/` — mechanically rewrites exactly these 6 files with
+# nothing but a version-string change, no matter what the rest of the PR
+# does. Without this carve-out, every one of them trips a CRITICAL_PATTERNS
+# entry above on every single defaults/-touching, Judge-approved PR — a
+# 100%-reproducing false positive confirmed on 7 separate PRs (#6018, #6092,
+# #6114, #6118, #6137, #6142, #6146) that permanently blocked auto-merge with
+# no override (`loom:auto-merge-ok` overrides only criterion #2, not #3).
+# This function returns success (0) ONLY when $file is one of the exact 6
+# paths below (`==`, never a substring match — a hypothetical
+# `some-crate/Cargo.toml` is NOT in scope for this carve-out) AND every
+# changed (+/-) content line in that file's diff matches the version-line
+# pattern for its format. Any other change to the file's content — a real
+# dependency bump, a new field, a changed description, anything — makes it
+# return failure, and the file fails criterion #3 exactly as it did before
+# this carve-out existed.
+version_only_diff() {
+  local file="$1" number="$2"
+  local pattern
+  case "$file" in
+    package.json|mcp-loom/package.json|mcp-loom/package-lock.json)
+      # JSON: `  "version": "X.Y.Z",` at any indentation.
+      pattern='^[+-][[:space:]]*"version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+",?[[:space:]]*$'
+      ;;
+    loom-daemon/Cargo.toml|loom-api/Cargo.toml|Cargo.lock)
+      # TOML: `version = "X.Y.Z"`. Cargo.lock repeats this line once per
+      # touched [[package]] block (loom-api and loom-daemon bump together),
+      # so more than one changed pair is expected and still eligible as long
+      # as every pair matches.
+      pattern='^[+-]version = "[0-9]+\.[0-9]+\.[0-9]+"[[:space:]]*$'
+      ;;
+    *)
+      return 1  # not one of the 6 version-bearing files — never eligible
+      ;;
+  esac
+
+  # Every +/- content line in the file's diff must match $pattern. Diff
+  # metadata lines (+++/---) are excluded; unchanged context lines never
+  # start with +/- so they are already excluded by the first grep.
+  local bad_lines
+  bad_lines=$(gh api "repos/{owner}/{repo}/pulls/$number/files" --paginate \
+    --jq --arg f "$file" '.[] | select(.filename == $f) | .patch' \
+    | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE "$pattern")
+
+  [ -z "$bad_lines" ]
+}
 
 # Check each file against patterns. This loop MUST actually run over the full
 # $FILES list above — do not skip straight to "PASS" or "no critical-file
@@ -560,20 +693,40 @@ CRITICAL_PATTERNS=(
 for file in $FILES; do
   for pattern in "${CRITICAL_PATTERNS[@]}"; do
     if [[ "$file" == *"$pattern"* ]]; then
-      echo "FAIL: Critical file modified: $file"
-      exit 1
+      if version_only_diff "$file" <number>; then
+        echo "PASS (version-only carve-out): $file"
+      else
+        echo "FAIL: Critical file modified: $file"
+        exit 1
+      fi
+      continue 2
     fi
   done
 done
 
-echo "PASS: No critical files modified"
+echo "PASS: No critical files modified (or only version-only carve-out files)"
 ```
+
+**Version-only diff carve-out (#6147)**: the carve-out is a deterministic,
+textual check — it never becomes a judgment call. It applies file-by-file:
+a PR that touches `loom-api/Cargo.toml` with only the version bump AND
+`package.json` with a real new dependency still fails criterion #3 overall
+(on `package.json`), even though `loom-api/Cargo.toml` alone would have
+passed. The carve-out is independent of criterion #2 — it only ever removes
+this one criterion's veto on the mechanical version-sync files; the PR's
+actual substantive changes (in whichever other files it touches) still go
+through criterion #2's normal merge-risk judgment as usual. Do **not**
+generalize this pattern to any other critical file or any other kind of
+"trivial-looking" diff — it is scoped to exactly these 6 filenames and
+exactly a version-string line change.
 
 **Rationale**: Changes to these files require careful human review due to high impact.
 
 This criterion is deliberately kept **in addition to** the merge-risk judgment in criterion #2, not folded into it: it is a deterministic, wording-independent floor that hard-fails on a known list of filenames no matter how the judgment call goes. Criterion #2 is the open-ended complement — it covers the high-blast-radius surfaces this list does not enumerate (see Edge Case 10 in `champion-reference.md`: the pattern list is known to miss new critical files). Neither replaces the other, and `loom:auto-merge-ok` overrides only #2.
 
 **Regression note (#4613, PR #4611 incident, 2026-07-30)**: a concurrent Champion evaluation of a 117-changed-file PR posted a comment claiming "no critical-file changes" while the PR actually removed a `.github/workflows/*.yml` file matching this criterion's own pattern list. The evaluation used `gh pr view --json files`, which truncates at 100 files with no error, and/or asserted the pass without re-running the loop above. Always fetch files via the paginated `gh api .../pulls/<number>/files --paginate` command shown above, and never assert this criterion's result in prose without having just executed that loop against the full file list.
+
+**Verified against PR #6118 (#6147)**: PR #6118's `scripts/version.sh bump` commit touched `Cargo.lock`, `loom-api/Cargo.toml`, `loom-daemon/Cargo.toml`, `mcp-loom/package.json`, `mcp-loom/package-lock.json`, and `package.json` — every changed line in each of those 6 files' diffs was confirmed to match the version-line patterns above, so `version_only_diff` returns success for all 6 and the carve-out applies. The same PR's substantive change (a fix to `defaults/scripts/merge-pr.sh` and its tests) touches no critical-file pattern at all, so it was never subject to this criterion in the first place — it went through criterion #2's judgment as normal, unaffected by this carve-out.
 
 ### 4. Merge Conflict Check
 - [ ] PR is mergeable (no conflicts with base branch)
@@ -642,23 +795,73 @@ echo "PASS: Recently updated ($HOURS_AGO hours ago)"
 # Get all CI checks. `gh pr checks --json` exposes `bucket` (the rolled-up
 # pass/fail/pending/skipping/cancel state) and `name` — there is NO `conclusion`
 # or `status` field (those were invalid and made this gate silently vacuous).
-# Capture stdout ONLY: when a PR has no checks, gh prints "no checks reported..."
-# to STDERR and exits non-zero with EMPTY stdout, so an empty result is the
-# robust no-checks signal (do not grep error text).
 # Plain `gh` — NOT "$GH_READ": CI status is the read the merge is gated on,
 # and a cached green can predate the push that broke the build. (`gh pr checks`
 # is passthrough inside the wrapper anyway; this is belt-and-suspenders.)
-CHECKS=$(gh pr checks <number> --json bucket,name 2>/dev/null)
+#
+# #6211: empty stdout from `gh pr checks --json` is NOT, by itself, proof "no
+# CI checks are configured". `gh pr checks` can ALSO return empty stdout
+# during a transient forge failure (e.g. an intermittent TLS handshake error,
+# the same failure mode #6169 hit — observed ~1 call in 3 on one host), and
+# with stderr discarded and the exit code unchecked, the two cases were
+# indistinguishable. This is Champion's auto-merge gate, so trusting the
+# wrong one is a real false-positive path: a PR with genuinely pending/unrun
+# CI could get merged. The genuine no-checks case has a documented, stable
+# signature — EMPTY stdout, NONZERO exit, and stderr containing "no checks
+# reported" — only THAT combination is trusted as "no checks exist". Any
+# other empty read (including a swallowed/blank stderr) is ambiguous and
+# retried once before failing closed. Note the genuine no-checks case never
+# waits: its signature matches on the very first read, so the common
+# checkless-repo case (e.g. quickstart repos) is not artificially delayed —
+# only an ambiguous read pays the one retry.
+read_ci_checks() {
+  local number="$1" attempt out err_file err rc
+  for attempt in 1 2; do
+    err_file=$(mktemp)
+    out=$(gh pr checks "$number" --json bucket,name 2>"$err_file")
+    rc=$?
+    err=$(cat "$err_file"); rm -f "$err_file"
 
-# Handle case where no checks exist (empty stdout, or an empty JSON array).
-# NOTE: pipe raw `gh --json` output to jq via `printf '%s\n' "$VAR" | jq`, never
-# `echo "$VAR" | jq` — zsh's `echo` builtin reinterprets `\n`/`\t` escape
-# sequences by default, turning a literal two-char `\n` inside a JSON string
-# value into a raw newline and corrupting the JSON before jq ever parses it
-# (#5094).
-if [ -z "$CHECKS" ] || [ "$(printf '%s\n' "$CHECKS" | jq 'length')" = "0" ]; then
+    # Non-empty stdout with real content: checks exist, use them. NOTE: pipe
+    # raw `gh --json` output to jq via `printf '%s\n' "$VAR" | jq`, never
+    # `echo "$VAR" | jq` — zsh's `echo` builtin reinterprets `\n`/`\t` escape
+    # sequences by default, turning a literal two-char `\n` inside a JSON
+    # string value into a raw newline and corrupting the JSON before jq ever
+    # parses it (#5094).
+    if [ -n "$out" ] && [ "$(printf '%s\n' "$out" | jq 'length')" != "0" ]; then
+      CHECKS="$out"; NO_CHECKS="false"
+      return 0
+    fi
+
+    # Confirmed genuine "no checks" signature — trust it immediately.
+    if [ "$rc" -ne 0 ] && printf '%s' "$err" | grep -qi "no checks reported"; then
+      CHECKS=""; NO_CHECKS="true"
+      return 0
+    fi
+
+    # Ambiguous empty read (unrecognized or empty stderr) — retry once
+    # before giving up; a real forge blip almost always clears on retry.
+    [ "$attempt" -eq 1 ] && sleep 3
+  done
+
+  # Still ambiguous after a retry: do NOT default to "no checks". Fail
+  # closed — the caller treats this exactly like "pending" (skip this pass,
+  # re-evaluate next tick) rather than risk an auto-merge on a false
+  # no-checks read.
+  CHECKS=""; NO_CHECKS="unknown"
+  return 1
+}
+
+read_ci_checks <number>
+
+if [ "$NO_CHECKS" = "true" ]; then
   echo "PASS: No CI checks required"
   exit 0
+fi
+
+if [ "$NO_CHECKS" = "unknown" ]; then
+  echo "SKIP: gh pr checks returned an ambiguous empty read twice in a row (not the confirmed no-checks signature) — treating as unresolved, not merge-safe"
+  exit 1
 fi
 
 # Parse checks by bucket. Buckets: pass, fail, pending, skipping, cancel.
@@ -684,12 +887,13 @@ echo "PASS: All CI checks passing"
 ```
 
 **Edge cases handled**:
-- **No CI checks**: Passes (allows merge) — detected via empty stdout, not error text
+- **No CI checks**: Passes (allows merge) — detected via the confirmed `rc!=0` + "no checks reported" stderr signature, not bare empty stdout (#6211)
+- **Ambiguous empty read** (ordinary empty stdout without the no-checks stderr signature — e.g. a transient forge failure): retried once, then fails closed as SKIP rather than being trusted as "no checks" (#6211)
 - **Pending checks**: Skips (waits for completion) — `bucket == "pending"`
 - **Failed checks**: Fails (blocks merge) — `bucket == "fail"` or `"cancel"`
 - **Skipped checks**: Passes — `bucket == "skipping"` is not a failure
 
-**Rationale**: Only merge when all automated checks pass or no checks are configured
+**Rationale**: Only merge when all automated checks pass or no checks are configured. A read that cannot confirm either state must not be treated as safe to merge.
 
 ---
 
@@ -750,10 +954,21 @@ UPDATED_TS=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$UPDATED_AT" +%s 2>/dev/null || \
 NOW_TS=$(date +%s)
 HOURS_AGO=$(( (NOW_TS - UPDATED_TS) / 3600 ))
 
-# Check CI status (empty stdout = no checks; see criterion #6 above)
-CHECKS=$(gh pr checks "$PR_NUMBER" --json bucket,name 2>/dev/null)
-if [ -z "$CHECKS" ] || [ "$(printf '%s\n' "$CHECKS" | jq 'length')" = "0" ]; then
+# Check CI status — re-read fresh in THIS pass rather than reusing criterion
+# #6's result (same "never restate from memory" discipline as every other
+# bullet here). Uses read_ci_checks() from criterion #6 above (empty stdout
+# alone is NOT proof of "no checks" — see that section's #6211 rationale for
+# why NO_CHECKS is only ever "true" on the confirmed no-checks signature).
+read_ci_checks "$PR_NUMBER"
+if [ "$NO_CHECKS" = "true" ]; then
   CI_STATUS="No CI checks required"
+elif [ "$NO_CHECKS" = "unknown" ]; then
+  # Should not happen: criterion #6 already gated entry to this step and
+  # would have SKIPed on the same ambiguous-empty-read outcome. Fail closed
+  # defensively rather than post a comment claiming a status we never
+  # confirmed.
+  echo "ERROR: CI status re-read came back ambiguous after criterion #6 already passed — do not merge this pass; skip and retry next tick" >&2
+  exit 1
 else
   CI_STATUS="All CI checks passing"
 fi
@@ -788,6 +1003,16 @@ EOF
   echo "Pre-merge comment failed for #$PR_NUMBER — NOT merging this pass"
   exit 1
 }
+
+# loom:operator removal (#5502) — the reversal companion to the hold-post
+# label add in criterion #2's "Hold behavior". Gated on the SAME
+# $HOLD_REVERSAL_BLOCK the comment above just posted (non-empty only when
+# PRIOR_HOLD=true AND the precheck found a genuine release — see "Reversal is
+# one mandatory comment" above), so this never fires on the never-held path
+# and always fires in the same pass as the reversal comment.
+if [ -n "$HOLD_REVERSAL_BLOCK" ]; then
+  gh pr edit "$PR_NUMBER" --remove-label "loom:operator" 2>/dev/null || true
+fi
 "$GH_READ" --clear-cache   # your own write must not be masked by your own cache
 ```
 
@@ -812,10 +1037,35 @@ git checkout main 2>/dev/null || true
 
 # Use merge-pr.sh for worktree-safe merge via GitHub API
 # --auto enables auto-merge if ruleset requires wait
-./.loom/scripts/merge-pr.sh "$PR_NUMBER" --auto || {
+#
+# merge-pr.sh reads the PR's head SHA itself (a fresh, uncached read — see
+# "Cached forge reads" above) immediately before merging, and passes it
+# through to the forge's merge API as an optimistic-concurrency precondition
+# (#5579). Capture the exit code rather than using a bare `||`: exit 3 is a
+# DISTINCT outcome from exit 1 and must not be handled as a failure (below).
+MERGE_RC=0
+./.loom/scripts/merge-pr.sh "$PR_NUMBER" --auto || MERGE_RC=$?
+
+if [ "$MERGE_RC" -eq 3 ]; then
+  # #5579: the PR's head branch moved past the SHA this merge attempt gated
+  # on — most commonly a session pushing new commits to an open, loom:pr
+  # branch while Champion was running. This is NOT a merge failure: the PR
+  # is still Judge-approved, its diff just changed underneath it.
+  #
+  # Do NOT follow the failure steps below for this outcome — see the "Exit
+  # code 3" exception in "Error Handling".
+  #
+  # Note: merge-pr.sh's output for this case now includes both the stale SHA
+  # (the one the merge attempt gated on) and the current head SHA, making it
+  # easier to diagnose which commits raced in. These values are in the
+  # merge-pr.sh output and logged to stderr; they are NOT posted as a PR
+  # comment (that design decision is documented in the "Exit code 3" exception
+  # section below).
+  echo "PR #$PR_NUMBER head moved during merge attempt — re-queuing for a fresh pass instead of failing"
+elif [ "$MERGE_RC" -ne 0 ]; then
   echo "Merge failed for PR #$PR_NUMBER"
   # Post failure comment (see Error Handling section)
-}
+fi
 ```
 
 **Merge strategy**:
@@ -823,6 +1073,9 @@ git checkout main 2>/dev/null || true
 - **Squash merge**: Combines all commits into single commit (clean history)
 - **`--auto`**: Enables GitHub's auto-merge if ruleset requires wait
 - Branch deleted automatically after merge
+- **Head-moved guard (#5579)**: `merge-pr.sh` refuses to merge (exit 3, not a
+  failure) if the PR's head branch advanced past the SHA it read immediately
+  before merging — see "Exit code 3" in "Error Handling" below
 
 ### Step 4: Verify Issue Auto-Close
 
@@ -913,7 +1166,7 @@ for blocked in $BLOCKED_ISSUES; do
   # `extract_blocker_refs` from champion-common.md → "Epic-Aware Blocker Check"
   # Step 1: it generalizes the old two-stage `#N`-only pipeline (#4508) to ALSO
   # capture an optional `owner/repo` prefix ahead of the `#N`, so a cross-repo
-  # epic blocker (the marketing#56 → klayout-tools#391 incident shape) is not
+  # epic blocker (the downstream-repo#101 → tool-repo#202 incident shape) is not
   # misread as same-repo. It stays tolerant of markdown emphasis/colon and
   # extracts every reference on a dependency line. An empty ALL_DEPS here would
   # silently remove loom:blocked with no confirmation gate, so under-parsing is
@@ -1310,7 +1563,7 @@ fi
 
 If ANY safety criterion fails, do NOT merge. How the failure is handled depends on whether it is **transient** (clears on its own or on the next push — pending CI, conflicts being resolved, `UNKNOWN` mergeability), **terminal** (the PR has gone stale and cannot clear without a rebase), or a **merge-risk hold** (criterion #2 judged the PR to need a human merge).
 
-**Merge-risk holds** keep `loom:pr` like a transient failure, but comment **once** behind the `<!-- champion:merge-risk-hold -->` idempotency marker because the condition does not clear on its own. Unlike a transient failure, the hold is **sticky**: later ticks re-check it against the release conditions (`loom:auto-merge-ok`, an explicit operator clearing comment, a new push, a new Judge review) rather than re-deriving it from a fresh axis read, and any merge that reverses one carries a mandatory reversal comment (#4742). The exact commands live with the criterion itself — see "Safety Criteria → 2. Merge-Risk Judgment → Sticky holds / Hold behavior"; do not duplicate them here.
+**Merge-risk holds** keep `loom:pr` like a transient failure, but comment **once** behind the `<!-- champion:merge-risk-hold -->` idempotency marker because the condition does not clear on its own, and additionally carry `loom:operator` (#5502) — the first-class "engine will not act further, a human is the only transition out" state, added alongside the marker and removed alongside its reversal, kept **filterable** without making sweep/shepherd skip the PR (see [`.loom/docs/label-state-machine.md`](../../../.loom/docs/label-state-machine.md)). Unlike a transient failure, the hold is **sticky**: later ticks re-check it against the release conditions (`loom:auto-merge-ok`, an explicit operator clearing comment, a new push, a new Judge review) rather than re-deriving it from a fresh axis read, and any merge that reverses one carries a mandatory reversal comment (#4742). The exact commands live with the criterion itself — see "Safety Criteria → 2. Merge-Risk Judgment → Sticky holds / Hold behavior"; do not duplicate them here.
 
 ### Transient failures — keep `loom:pr`, retry next tick
 
@@ -1413,7 +1666,10 @@ STALE_MARKER="<!-- champion:stale-pr-notice -->"
 # Idempotency guard: only comment + relabel once. If a prior tick already
 # posted the stale notice, do nothing (prevents per-tick comment spam).
 # Cached ("$GH_READ") — idempotency-marker grep.
-if "$GH_READ" pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$STALE_MARKER"; then
+# `startswith`, not a bare substring match — a later comment discussing or
+# quoting this marker must never be mistaken for the notice's own comment
+# and wrongly suppress the real post (#5371).
+if [ "$("$GH_READ" pr view "$PR_NUMBER" --json comments --jq "[.comments[].body] | any(startswith(\"$STALE_MARKER\"))")" = "true" ]; then
   echo "Stale-PR notice already posted for #$PR_NUMBER — skipping"
 else
   gh pr comment "$PR_NUMBER" --body "$STALE_MARKER
@@ -1429,6 +1685,14 @@ This PR has not been updated within the recency window (24h), so it has been rou
 *Automated by Champion role*"
   # Route to Doctor: leave the auto-merge queue.
   gh pr edit "$PR_NUMBER" --remove-label "loom:pr" --add-label "loom:changes-requested"
+  # loom:operator reversal (#5802): this path unconditionally exits the
+  # merge-risk hold — the PR leaves the auto-merge queue either way (see
+  # "Merge-Risk Judgment → Sticky holds / Hold behavior") — so clear
+  # loom:operator here too if present, mirroring the merge-success reversal
+  # above. Unlike that reversal, this is NOT gated on $HOLD_REVERSAL_BLOCK
+  # (only set on the merge-success path): a PR that never held loom:operator
+  # is already covered by the `2>/dev/null || true` no-op below.
+  gh pr edit "$PR_NUMBER" --remove-label "loom:operator" 2>/dev/null || true
   echo "Routed stale PR #$PR_NUMBER to Doctor (loom:pr → loom:changes-requested)"
 fi
 ```
@@ -1479,8 +1743,11 @@ Read the **whole** thread — that complete post-mortem view is the entire reaso
 
 ```bash
 # How many extra cycles this pass has already granted (0 for a first-time decision).
+# `startswith`, not a bare substring match — a comment that merely quotes
+# this marker while discussing a grant must not be double-counted as a
+# genuine grant (#5371).
 PRIOR_GRANTS=$("$GH_READ" pr view "$PR_NUMBER" --json comments \
-  --jq '[.comments[] | select(.body | contains("champion:capped-pr-grant"))] | length')
+  --jq '[.comments[] | select(.body | startswith("<!-- champion:capped-pr-grant -->"))] | length')
 ```
 
 The two comments the decision turns on are the **latest** Judge rejection and the **immediately preceding** one.
@@ -1558,7 +1825,10 @@ LATEST_REJECTION_ID=$(gh pr view "$PR_NUMBER" --json comments \
 PARK_MARKER="<!-- champion:capped-pr-parked:$LATEST_REJECTION_ID -->"
 
 # Cached ("$GH_READ") — idempotency-marker grep.
-if "$GH_READ" pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$PARK_MARKER"; then
+# `startswith`, not a bare substring match — a later comment quoting this
+# marker in prose must never be mistaken for the verdict's own comment and
+# wrongly suppress the real post (#5371).
+if [ "$("$GH_READ" pr view "$PR_NUMBER" --json comments --jq "[.comments[].body] | any(startswith(\"$PARK_MARKER\"))")" = "true" ]; then
   echo "Keep-parked verdict already posted for #$PR_NUMBER on this rejection — skipping"
 else
   gh pr comment "$PR_NUMBER" --body "$PARK_MARKER
@@ -1580,14 +1850,17 @@ fi
 
 ### Step 4c: Outcome — recommend closing (route to the operator)
 
-Use this when the history shows the **approach itself** is not viable — repeated rejections on the design, a superseded change, or a PR whose premise a merged change invalidated. **Champion is the router here, not the closer**: do not close the PR. Add `loom:operator-only` (keeping `loom:blocked` + `loom:changes-requested`) so the PR leaves the automation queue for good — Mode C pre-flight hard-skips `loom:operator-only` PRs — and state the recommendation plainly for the human.
+Use this when the history shows the **approach itself** is not viable — repeated rejections on the design, a superseded change, or a PR whose premise a merged change invalidated. **Champion is the router here, not the closer**: do not close the PR. Add `loom:operator-only` plus its `loom:operator-decision` sub-kind (#5671 — a genuine human ruling is needed here, not a self-clearing wait; see `.loom/docs/label-state-machine.md` "operator-only sub-kinds") (keeping `loom:blocked` + `loom:changes-requested`) so the PR leaves the automation queue for good — Mode C pre-flight hard-skips `loom:operator-only` PRs — and state the recommendation plainly for the human.
 
 ```bash
 PR_NUMBER=<number>
 CLOSE_MARKER="<!-- champion:capped-pr-close-recommended -->"
 
 # Cached ("$GH_READ") — idempotency-marker grep.
-if "$GH_READ" pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$CLOSE_MARKER"; then
+# `startswith`, not a bare substring match — a later comment quoting this
+# marker in prose must never be mistaken for the recommendation's own
+# comment and wrongly suppress the real post (#5371).
+if [ "$("$GH_READ" pr view "$PR_NUMBER" --json comments --jq "[.comments[].body] | any(startswith(\"$CLOSE_MARKER\"))")" = "true" ]; then
   echo "Close recommendation already posted for #$PR_NUMBER — skipping"
 else
   gh pr comment "$PR_NUMBER" --body "$CLOSE_MARKER
@@ -1603,7 +1876,7 @@ Added \`loom:operator-only\` so automation stops re-evaluating this PR. A human 
 
 ---
 *Automated by Champion role*"
-  gh pr edit "$PR_NUMBER" --add-label "loom:operator-only"
+  gh pr edit "$PR_NUMBER" --add-label "loom:operator-only,loom:operator-decision"
   echo "Routed #$PR_NUMBER to the operator with a close recommendation"
 fi
 ```
@@ -1650,6 +1923,50 @@ This PR met all safety criteria but the merge operation failed. A human will nee
 ---
 *Automated by Champion role*"
 ```
+
+### Exception: exit code 3 — head moved, re-queue, not a failure (#5579)
+
+`merge-pr.sh` exits **3** (distinct from the generic failure exit **1**) when
+the PR's head branch changed between the fresh head-SHA read it took
+immediately before merging and the actual merge call — most commonly because
+a session pushed new commits to an open, `loom:pr`-labeled branch while
+Champion was running. **Do not follow the 5 failure steps above for this
+outcome:**
+
+- Do **not** post the "Merge Failed" comment — the PR is still Judge-approved,
+  its diff just moved out from under the merge attempt.
+- Do **not** count it as an error in the completion summary.
+- Leave `loom:pr` in place and move on to the next PR in the queue. A later
+  Champion pass will pick this PR up fresh — its safety criteria (including
+  `updatedAt` and CI status) will naturally re-evaluate the new head before
+  merging it.
+
+**Diagnostic output:** When this occurs, `merge-pr.sh` logs to stderr both the
+stale SHA (the one it gated the merge on) and the current head SHA, making it
+easy to see which commits raced in. These values appear in the merge-pr.sh
+output and Champion's run log. They are **not** posted as a PR comment; the
+no-comment design decision reflects the fact that an exit-3 re-queue is a normal
+operational event (a session pushing mid-merge) and posting a comment on every
+such occurrence would be noisy for an ordinary race condition.
+
+**Leaving `loom:pr` in place here does NOT mean the approval still applies to
+the new head (#5686).** The head moving is exactly the condition that
+invalidates a verdict — this exception only says "don't treat the failed merge
+as an error", not "the new tree is approved". The next pass's Verdict-State
+Janitor Part 2 is what resolves that: if the Judge's approval was stamped
+against the old SHA, it returns `12` (STALE), clears `loom:pr`, and re-queues
+the PR for review rather than merging the tree that raced in. Do not
+short-circuit that by re-merging on a later tick without re-running Part 2.
+
+**Squash-merge detection trap.** If you ever need to manually verify whether a
+re-queued (or, worse, an already-merged-before-this-fix) PR's commits actually
+landed vs. were silently stranded, `git merge-base --is-ancestor <commit>
+origin/main` is **not reliable evidence either way**: a squash merge produces
+a brand-new commit SHA on `main` that is not a git-ancestry descendant of any
+commit on the original PR branch, regardless of whether that commit's content
+made it into the squash or was left behind. There is no cheap ancestry check
+for "squashed-and-landed" vs. "stranded" — verification requires diffing the
+actual file content on `main` against the branch/commit in question.
 
 ---
 

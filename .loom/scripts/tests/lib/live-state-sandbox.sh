@@ -7,7 +7,7 @@
 # The daemon lifecycle suites deliberately execute the REAL
 # loom-daemon-start.sh / loom-daemon-stop.sh / loom-daemon-update.sh (not
 # mocks), so every state path those scripts resolve is a path the test can
-# write. Three separate incidents were each fixed by enumerating ONE more
+# write. Four separate incidents were each fixed by enumerating ONE more
 # surface after it leaked:
 #
 #   1. #4078/#4087 — a daemon test booted out the operator's PRODUCTION daemon
@@ -17,6 +17,12 @@
 #   3. #5179 — the live `.daemon.pid` was rewritten under a running daemon,
 #      producing a FALSE `degraded` liveness verdict for the operator and
 #      poisoning the watchdog's (#5118/#5126) primary input.
+#   4. #5501 — a harness fully sandboxed on every STATE PATH still stopped the
+#      operator's real daemon, because it deliberately pointed LOOM_LAUNCHD_LABEL
+#      at the real `com.rjwalters.loom-daemon` label (to prove "default label =
+#      the operator's real stop" was unchanged) — sandboxing paths does not
+#      sandbox SUPERVISOR IDENTITY, which is a different axis entirely. See
+#      "Supervisor IDENTITY" below.
 #
 # The recurring root cause is not "one more variable was forgotten"; it is that
 # a Loom agent session EXPORTS the live paths into every child process it
@@ -43,20 +49,42 @@
 #                             resolve its OWN fixture repo root instead)
 #   LOOM_MACHINE_CHECKOUT  -> UNSET  (pid-file tier 2 + the scripts' machine
 #                             mode, whose state home is the real $HOME/.loom)
+#   $PWD                   -> <dir>  (#6386: NOT an env override — the OTHER
+#                             resolution tier. `find_repo_root` walks up from
+#                             the cwd, so a suite run from the live checkout
+#                             hands every un-`cd`-ed sub-invocation the LIVE
+#                             `.loom` as its state home. <dir> is given its own
+#                             `.loom/` so it is a valid workspace root.)
 #
-# Supervisor IDENTITY (launchd label, systemd unit, the LOOM_DAEMON_LAUNCHD /
-# LOOM_DAEMON_SYSTEMD knobs) is intentionally NOT handled here — those are not
-# filesystem state paths and are already owned by lib/launchd-sandbox.sh and
-# the per-suite systemd/launchd knobs.
+# Supervisor IDENTITY (launchd label, systemd unit) is NOT a filesystem state
+# path, so it is not fingerprinted the way the paths above are — the syscall-
+# level stubbing lives in lib/launchd-sandbox.sh. But `live_state_sandbox_init`
+# / `live_state_sandbox_assert_untouched` DO assert it, below: a sandbox that
+# only isolated paths would have missed #5501 (a harness clean on every path
+# still stopped the real daemon via a real-looking LOOM_LAUNCHD_LABEL). See
+# `live_state_sandbox_assert_supervisor_scoped`.
 #
 # ## The guard
 #
-# Isolation alone is unfalsifiable — the previous three fixes all *looked*
+# Isolation alone is unfalsifiable — the previous fixes all *looked*
 # complete. `live_state_sandbox_snapshot` fingerprints every live state path
 # reachable from the AMBIENT environment BEFORE the sandbox is installed, and
 # `live_state_sandbox_assert_untouched` re-fingerprints them at the end of the
 # run, so a write to a real `.loom` state path (or the CREATION of one that was
 # absent) fails the suite LOUDLY instead of being discovered in production.
+# `live_state_sandbox_init` and `live_state_sandbox_assert_untouched` ALSO call
+# `live_state_sandbox_assert_supervisor_scoped` — sandboxing paths is
+# necessary but not sufficient (#5501): a test whose LOOM_LAUNCHD_LABEL /
+# LOOM_WATCHDOG_LABEL resolve to the real production identity is not
+# sandboxed, no matter how clean its state paths are.
+#
+# A test that genuinely needs to prove "default label = the operator's real
+# stop, behaviour unchanged" must NOT do it by pointing this sandbox at the
+# real label — that IS the #5501 incident shape. Use the
+# `LOOM_DAEMON_STOP_DRYRUN=1` seam in loom-daemon-stop.sh instead: it resolves
+# the real label/unit for inspection but never issues the real `launchctl
+# bootout` / `systemctl --user disable --now` / `kill` against whatever it
+# finds, so the assertion below is deliberately bypassed while it is active.
 #
 # Only files a healthy daemon does NOT continuously rewrite are guarded
 # (see LIVE_STATE_SANDBOX_GUARDED_FILES): `daemon.heartbeat`, `daemon.log`,
@@ -75,6 +103,13 @@
 # State files that identify/steer a daemon and are written only at lifecycle
 # transitions — safe to compare before/after even while a real daemon runs.
 LIVE_STATE_SANDBOX_GUARDED_FILES=".daemon.pid .daemon.flags autonomy-desired"
+
+# The real production supervisor identities (#5501). ANY test that resolves
+# either of these while a live-state sandbox is active can reach out and
+# stop/disable the operator's REAL supervised job — see
+# live_state_sandbox_assert_supervisor_scoped below.
+LIVE_STATE_SANDBOX_PRODUCTION_LAUNCHD_LABEL="com.rjwalters.loom-daemon"
+LIVE_STATE_SANDBOX_PRODUCTION_WATCHDOG_LABEL="com.rjwalters.loom-daemon-watchdog"
 
 # Newline-separated "<path><TAB><fingerprint>" records captured by
 # live_state_sandbox_snapshot. Empty until the snapshot runs.
@@ -173,6 +208,50 @@ _lss_enumerate_live_paths() {
     done
 }
 
+# Fail loudly (rc 1) when LOOM_LAUNCHD_LABEL / LOOM_WATCHDOG_LABEL resolve to
+# the REAL production supervisor identity (#5501) — the axis a path-only
+# sandbox cannot see: nothing writes to a `.loom` path when the damage is done
+# through `launchctl bootout` / `systemctl --user disable --now` against a
+# label, not a file.
+#
+# Args (both optional; default to the CURRENT ambient value of each var, which
+# is what a harness that `export`s them ahead of live_state_sandbox_init — the
+# exact #5501 incident shape — will trip): [<launchd_label>] [<watchdog_label>].
+#
+# Bypassed while LOOM_DAEMON_STOP_DRYRUN is truthy: that seam never issues the
+# real bootout/disable/kill no matter what label it resolves, so exercising
+# default-label semantics under it is the SUPPORTED path, not the incident.
+#
+# Deliberately does NOT fail merely because a label is unset — most call sites
+# in this repo never export LOOM_LAUNCHD_LABEL into their own shell at all,
+# scoping it per-invocation instead (`LOOM_LAUNCHD_LABEL="$FAKE_LABEL" bash
+# "$STOP_SCRIPT"`), which this function cannot observe from the parent
+# process. Only a label that is VISIBLY the real one is something this helper
+# can catch — see the header comment for the seam that closes the rest.
+# shellcheck disable=SC2120  # OK that in-repo callers pass args; test files source this lib and pass their own.
+live_state_sandbox_assert_supervisor_scoped() {
+    local label="${1-${LOOM_LAUNCHD_LABEL:-}}"
+    local wd_label="${2-${LOOM_WATCHDOG_LABEL:-}}"
+    if [[ "${LOOM_DAEMON_STOP_DRYRUN:-}" =~ ^(1|true|yes|on)$ ]]; then
+        return 0
+    fi
+    local bad=0
+    if [[ "$label" == "$LIVE_STATE_SANDBOX_PRODUCTION_LAUNCHD_LABEL" ]]; then
+        echo "live-state-sandbox: LOOM_LAUNCHD_LABEL is set to the REAL production launchd label '$LIVE_STATE_SANDBOX_PRODUCTION_LAUNCHD_LABEL' while a sandbox is active (#5501)." >&2
+        echo "  Sandboxing state PATHS does not sandbox supervisor IDENTITY -- this can reach out and" >&2
+        echo "  'launchctl bootout'/kill the operator's REAL daemon. Use a scratch label (see" >&2
+        echo "  lib/launchd-sandbox.sh's launchd_sandbox_new_label), or, to prove default-label" >&2
+        echo "  semantics are unchanged, set LOOM_DAEMON_STOP_DRYRUN=1 on the loom-daemon-stop.sh" >&2
+        echo "  invocation under test instead of pointing this at the real label." >&2
+        bad=1
+    fi
+    if [[ -n "$wd_label" && "$wd_label" == "$LIVE_STATE_SANDBOX_PRODUCTION_WATCHDOG_LABEL" ]]; then
+        echo "live-state-sandbox: LOOM_WATCHDOG_LABEL is set to the REAL production watchdog label '$LIVE_STATE_SANDBOX_PRODUCTION_WATCHDOG_LABEL' while a sandbox is active (#5501)." >&2
+        bad=1
+    fi
+    return "$bad"
+}
+
 # ---------------------------------------------------------------------------
 # public API
 # ---------------------------------------------------------------------------
@@ -193,10 +272,23 @@ live_state_sandbox_snapshot() {
 # Redirect every live state path into <dir>. Exports are inherited by every
 # sub-invocation, so a call site that forgets to sandbox something still cannot
 # reach a production path.
+#
+# ALSO `cd`s the calling shell into <dir> (#6386). Env exports only cover the
+# paths a script reads from the environment; the lifecycle scripts' OTHER
+# resolution tier is `find_repo_root`, which walks up from $PWD. A suite
+# launched from the live checkout (an Auditor running the CI suites in-place is
+# the normal case) therefore leaves every sub-invocation that forgets its own
+# `cd` resolving REPO_ROOT — and so `DAEMON_STATE_HOME="$REPO_ROOT/.loom"` —
+# straight onto the LIVE checkout. That is how #6386's 11h fleet-dispatcher
+# outage happened. <dir> gets its own `.loom/` so it IS a valid workspace root:
+# find_repo_root stops there, the scripts resolve a scratch state home instead
+# of refusing, and a forgotten `cd` can no longer escape. Cases that
+# deliberately exercise a fixture still `cd` into it themselves (a per-case
+# `cd` always wins over this default, same as a per-invocation env pin).
 live_state_sandbox_init() {
     local dir="$1"
     [[ -n "$dir" ]] || { echo "live_state_sandbox_init: missing <dir>" >&2; return 1; }
-    mkdir -p "$dir" "$dir/logs" "$dir/machine-level-bin-sandbox"
+    mkdir -p "$dir" "$dir/logs" "$dir/machine-level-bin-sandbox" "$dir/.loom"
 
     export LOOM_PID_FILE="$dir/.daemon.pid"
     export LOOM_AUTONOMY_MARKER="$dir/autonomy-desired"
@@ -211,6 +303,23 @@ live_state_sandbox_init() {
     unset LOOM_WORKSPACE
     unset LOOM_MACHINE_CHECKOUT
     unset LOOM_DAEMON_BIN
+
+    # Leave the caller standing in the sandbox (#6386) — see the header comment
+    # above. Done AFTER the exports so a failure here cannot leave a half-armed
+    # sandbox, and reported loudly (rather than silently ignored) because a
+    # failed `cd` means the cwd tier is still pointed at wherever the suite was
+    # launched from.
+    if ! cd "$dir"; then
+        echo "live-state-sandbox: could not cd into the sandbox root '$dir' — \$PWD still resolves to $PWD, so find_repo_root can escape to the live checkout (#6386)." >&2
+        return 1
+    fi
+
+    # Supervisor identity (#5501): catches a harness that `export`ed the real
+    # LOOM_LAUNCHD_LABEL / LOOM_WATCHDOG_LABEL BEFORE calling init — the exact
+    # #5501 incident shape. Loud, but non-fatal here (the caller decides
+    # whether to treat a non-zero return as fatal), consistent with every
+    # other function in this file.
+    live_state_sandbox_assert_supervisor_scoped
 }
 
 # Print the sandboxed values (one `NAME=value` per line) — handy in CI logs and
@@ -252,5 +361,12 @@ live_state_sandbox_assert_untouched() {
             printf '    after:  %s\n' "$after" >&2
         fi
     done <<< "$_LSS_SNAPSHOT"
+    # Supervisor identity (#5501): re-checked here too, in case a case set the
+    # real label sometime AFTER live_state_sandbox_init (paths staying clean
+    # says nothing about whether a label-scoped launchctl/systemctl call
+    # reached the real job).
+    if ! live_state_sandbox_assert_supervisor_scoped; then
+        dirty=1
+    fi
     return "$dirty"
 }

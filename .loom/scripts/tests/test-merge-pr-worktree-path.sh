@@ -116,6 +116,16 @@ assert_grep "Preserving discovered worktree at" "$MERGE_PR" \
 assert_grep "forge_get_issue_state" "$FORGE_HELPERS" \
     "forge-helpers.sh defines forge_get_issue_state"
 
+# --- Test 2c: co-existing Judge review worktree cleanup (#6264) source surface ---
+assert_grep "JUDGE_PR_WT_PATH" "$MERGE_PR" \
+    "merge-pr.sh declares JUDGE_PR_WT_PATH for the co-existing pr-<N> check"
+assert_grep 'JUDGE_PR_WT_PATH="\$WT_ROOT_DIR/pr-\$PR_NUMBER"' "$MERGE_PR" \
+    "JUDGE_PR_WT_PATH is set to pr-\$PR_NUMBER only on the feature/issue-<N> branch"
+assert_grep "Found co-existing Judge/Doctor review worktree" "$MERGE_PR" \
+    "co-existing pr-<N> removal logs a clear reason (#6264)"
+assert_grep "Preserving Judge/Doctor review worktree at" "$MERGE_PR" \
+    "co-existing pr-<N> preserved-worktree case logs a clear reason (#6264)"
+
 # --- Test 3: Precedence — --no-cleanup-worktree warns when combined ---
 echo ""
 echo "Test 3: --no-cleanup-worktree wins over --worktree-path"
@@ -351,6 +361,92 @@ if [[ "$result" == "preserve:discovered-open-issue" ]]; then
     pass "case N: discovered-path gate also preserves for a non-target open issue"
 else
     fail "case N: expected 'preserve:discovered-open-issue', got '$result'"
+fi
+
+# --- Test 6: co-existing Judge review worktree (pr-<N> alongside issue-<N>, #6264) ---
+echo ""
+echo "Test 6: co-existing pr-<N> Judge review worktree cleanup (#6264)"
+
+# Replicates the independent JUDGE_PR_WT_PATH check added by #6264: it runs
+# ONLY when PR_BRANCH matched feature/issue-<N> (issue_num non-empty is the
+# precondition here — the external-fork branch never sets JUDGE_PR_WT_PATH at
+# all, see Case R below), keyed purely by whether the pr-$PR_NUMBER path
+# EXISTS on disk — independent of the issue-<N> path's own outcome above it,
+# and independent of whether the branch checked out inside it is attached or
+# detached (a detached pr-<N> worktree has no branch line for the discovery
+# fallback's porcelain search to match, which is exactly the gap #6264 closes
+# by checking the path directly instead).
+simulate_judge_pr_cleanup() {
+    # Args:
+    #   $1 issue_num        (string or "")      # "" models the external-fork
+    #      branch, where JUDGE_PR_WT_PATH is never set
+    #   $2 pr_wt_exists     ("true"/"false")     # does pr-$PR_NUMBER exist?
+    #   $3 is_close_target  ("true"/"false", default "false")
+    #   $4 issue_state      ("OPEN"/"CLOSED"/"", default "")
+    local issue_num="$1" pr_wt_exists="$2" is_close_target="${3:-false}" issue_state="${4:-}"
+
+    if [[ -z "$issue_num" ]]; then
+        echo "skip:not-applicable"
+        return 0
+    fi
+    if [[ "$pr_wt_exists" != "true" ]]; then
+        echo "skip:no-pr-worktree"
+        return 0
+    fi
+    if [[ "$is_close_target" == "true" ]] || [[ "$issue_state" == "CLOSED" ]]; then
+        echo "remove:judge-pr-worktree"
+    else
+        echo "preserve:judge-pr-worktree-open-issue"
+    fi
+}
+
+# Case O: a co-existing pr-<N> Judge review worktree exists for a close-target
+# issue and gets removed — deliberately independent of whether the issue-<N>
+# worktree handled elsewhere in the script also existed (this is the whole
+# point of #6264's fix: the real code's JUDGE_PR_WT_PATH check never
+# consults DEFAULT_WT_PATH's own outcome). Covers BOTH incident shapes: (a)
+# `git worktree list` showing both an issue-<N> AND a detached pr-<N> entry
+# (the exact incident from the issue body), and (b) only pr-<N> existing
+# locally at all (e.g. a standalone Judge pass with no local builder
+# worktree) — the simulation is identical either way, which is the property
+# under test.
+result=$(simulate_judge_pr_cleanup 42 true true)
+if [[ "$result" == "remove:judge-pr-worktree" ]]; then
+    pass "case O: co-existing pr-<N> removed when its issue is a close target (regardless of issue-<N> presence)"
+else
+    fail "case O: expected 'remove:judge-pr-worktree', got '$result'"
+fi
+
+# Case Q: partial-increment shape — issue is NOT a close target and its live
+# state is OPEN — preserve the Judge review worktree too, mirroring the
+# issue-<N> path's own #4186 gate (a future merge that closes the issue will
+# retry cleanup).
+result=$(simulate_judge_pr_cleanup 42 true false "OPEN")
+if [[ "$result" == "preserve:judge-pr-worktree-open-issue" ]]; then
+    pass "case Q: non-target open issue preserves the co-existing pr-<N> worktree too"
+else
+    fail "case Q: expected 'preserve:judge-pr-worktree-open-issue', got '$result'"
+fi
+
+# Case R: external-fork / ad-hoc branch (#3358) — JUDGE_PR_WT_PATH is never
+# set (issue_num is empty), so this check is a no-op regardless of whether a
+# pr-<N> worktree exists; that worktree is exactly DEFAULT_WT_PATH and is
+# already handled unchanged by the pre-existing pr-<N>-as-default-path logic
+# (Cases A-N above, with issue_num=""). Confirms #6264 introduces no new
+# behavior on the external-fork path.
+result=$(simulate_judge_pr_cleanup "" true true)
+if [[ "$result" == "skip:not-applicable" ]]; then
+    pass "case R: external-fork branch (#3358) is unaffected — no JUDGE_PR_WT_PATH check runs"
+else
+    fail "case R: expected 'skip:not-applicable', got '$result'"
+fi
+
+# Case S: nothing to do — no co-existing pr-<N> worktree on disk.
+result=$(simulate_judge_pr_cleanup 42 false)
+if [[ "$result" == "skip:no-pr-worktree" ]]; then
+    pass "case S: no pr-<N> worktree present is a quiet no-op"
+else
+    fail "case S: expected 'skip:no-pr-worktree', got '$result'"
 fi
 
 # --- Summary ---

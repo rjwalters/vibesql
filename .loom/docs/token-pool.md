@@ -46,7 +46,10 @@ does not open, parse, copy, serialize, or log that file. Operators should keep
 profile directories `0700` and `auth.json` `0600`.
 
 Selected accounts expose the non-secret observability identity
-`LOOM_ACCOUNT_PROVIDER` and `LOOM_ACCOUNT_NAME`. Claude selections also retain
+`LOOM_ACCOUNT_PROVIDER` and `LOOM_ACCOUNT_NAME`, plus `LOOM_ACCOUNT_UPSTREAM_ID`
+when the storage backend that produced the selection tracks one (issue #5609
+— today only a Claude selection whose `index.json` row carries an
+`upstream_id`; see "Provider selection" below). Claude selections also retain
 `LOOM_TOKEN_NAME`; Codex selections bind `CODEX_HOME` and never expose an
 equivalent credential variable. Raw provider capacity counts enabled inventory
 candidates only. Quota health, cooldown, ranking, and failover are layered on
@@ -209,6 +212,21 @@ falls back to this CLI's own native probe when one isn't present; `monitor`
 never falls back (an empty report when claude-monitor has nothing fresh);
 `probe` always uses the native probe, ignoring claude-monitor entirely.
 
+**Provider-dispatched probing (issue #5608).** `--source probe` resolves each
+account's provider from `index.json` (a `.token` file with no manifest row is
+treated as `claude`) and only ever sends a `claude` credential to Anthropic's
+API. An account recorded under any other provider (design
+`docs/design/token-pool-provider-identity.md`) reports `status: "unsupported"`
+with `error: "no_probe_adapter:<provider>"` and every utilization/reset field
+unset — it is **never** reported `exhausted`. `unsupported` rows are omitted
+from `.ranking` (that file's contract stays "Claude accounts the selector may
+pick") but still show up in `--json` and the human table, so an operator can
+see *why* a recorded account is absent from the pool instead of it looking
+like ordinary exhaustion. The `--source auto|monitor` path applies the
+equivalent scoping on claude-monitor's `ranking.json` join, so a non-Claude
+account sharing an email with a healthy Claude account can no longer override
+that account's reported status.
+
 **After adding a new account** (via `bootstrap` or `import-from-monitor`), run
 `loom-daemon tokens check --ranking --source probe` once. Under the `auto`
 default, a fresh claude-monitor `ranking.json` short-circuits the whole probe
@@ -242,8 +260,8 @@ and parses rate-limit response headers. The header parser matches by **suffix**
 `anthropic-ratelimit-tokens-*` prefix still work; the full header set is logged on
 the first probe of each run.
 
-Status assignment: `available` (utilizations < 95%), `exhausted`
-(`7d_utilization >= 0.95`), `rate_limited` (current 429), `blocked` (401 auth
+Status assignment: `available` (utilizations < 99%), `exhausted`
+(`7d_utilization >= 0.99`), `rate_limited` (current 429), `blocked` (401 auth
 failure or token listed in `.bad_tokens`). Probe failures (network, timeout, 5xx)
 are logged and skipped — one bad account does not abort the run.
 
@@ -268,6 +286,26 @@ process). Cron example (probe every 10 minutes):
 ```cron
 */10 * * * * cd /path/to/repo && ./.loom/scripts/probe-tokens.sh --ranking >> .loom/logs/probe-tokens.log 2>&1
 ```
+
+### Consumer: Guide's pool-pressure backoff (#6135)
+
+Guide's Document Maintenance phase reads `.loom/tokens/.ranking` directly
+(a plain file read, **never** its own `tokens check --ranking` probe) before
+filing a WORK_LOG/WORK_PLAN docs-maintenance PR, so it can defer to a later
+tick when the pool is under pressure instead of competing with substantive
+Builder/Judge/Doctor work for the fleet's scarcest capacity — the sweep queue
+tends to run dry at exactly the moments the pool is most exhausted, and Guide
+still ticks every 15-30 minutes regardless. `pool_pressure_fraction()`
+reduces the ranking file to "fraction of accounts NOT `available`" and
+compares it against `guide.docsMaintenance.poolPressureThreshold` (default
+`0.70`, config precedence env > `.loom/config.json` > default, same as
+`buildGate.loadThreshold`); once at/above threshold, filing is deferred until
+either pressure clears or `guide.docsMaintenance.poolPressureMaxDeferSecs`
+(default `14400` = 4h) has elapsed since the last docs-maintenance PR merged
+— the "never starves permanently" ceiling. Missing/empty/unparseable ranking
+data fails open (proceeds as if there is no pressure). Full mechanism:
+`defaults/.claude/commands/loom/guide.md` → "Step 4b: Check Token-Pool
+Pressure".
 
 ## Token rotation setup (per-task spawn)
 
@@ -337,6 +375,29 @@ CLAUDE_CODE_OAUTH_TOKEN=...` / `export LOOM_TOKEN_NAME=...` lines (plus a
 non-exported `LOOM_TOKEN_MODE=...`) so callers `eval` the output directly
 instead of round-tripping through a JSON parser; `--auto-unpin` runs the
 pinned-account auto-recovery pre-flight (see below) before selecting.
+
+### `.ranking` status exclusions reach every tier (issue #5629)
+
+The `.ranking` file feeds **two** exclusion sets into the allowlist and random
+tiers, with deliberately different strengths:
+
+| Set | Sourced from | Applies when | Dropped by the fail-safe? |
+|---|---|---|---|
+| **Hard** — `exhausted`, `blocked` | any `.ranking`, fresh or stale | always | **No** |
+| **Advisory** — other non-healthy statuses (e.g. `rate_limited`) | a *stale* `.ranking` only (#3894) | ranking age ≥ 10 min | Yes, if they would empty the pool |
+
+Before #5629 only the advisory set existed below tier 1, so a **fresh**
+`.ranking` whose eligible rows were all `exhausted` produced *no* tier-1
+candidate **and** an empty exclusion set — and tier 3 (`mode=random`, which
+consults only `.bad_tokens`) handed back the very account the ranking had just
+ruled out. Observed 2026-08-07: a role tick spawned with `mode=random` onto a
+spend-limited account and burned ~17 minutes retrying it.
+
+A durable, account-scoped refusal is never worth "fail-safing" into a spawn, so
+when hard exclusions empty the pool, selection now **fails fast** with exit `78`
+rather than dispatching a known-dead account. Recover by re-probing:
+`loom-daemon tokens check --ranking` (the running daemon also self-refreshes
+`.ranking`, see below).
 
 ### Ranking format: 5h-load field + soft gate (issue #4195)
 
@@ -413,9 +474,56 @@ pick, so adding it cannot perturb which account is chosen. Its consumer is
 feeds the dashboard's per-account reset countdown, its burn-curve segmentation
 and forecasts, and the pool-level "capacity returns at" aggregate.
 
+### Provider selection: `--provider`, runtime manifests, and the fail-open default (issue #5609)
+
+`loom-daemon tokens select --provider <name>` (default `claude`) is parsed
+through `AccountProvider`'s `FromStr`/`Display` implementation
+(`loom-daemon/src/tokens_pool/account_registry.rs`) — the whole provider
+vocabulary (`claude`, `codex`) lives in one place
+(`AccountProvider::ALL`), so `--provider bogus` fails with a message that
+enumerates the valid values, and adding a provider means adding a variant
+there, not editing the CLI parser. `identity_env` (the source of
+`LOOM_ACCOUNT_PROVIDER`, above) uses the same `Display` impl rather than a
+second hand-rolled match.
+
+**Provider is derived from the runtime binding, never configured
+separately.** `spawn-<runtime>.sh` resolves its own account provider from
+its own runtime manifest (`defaults/runtimes/<name>.json`'s
+`"accountProvider"` field — `"claude"` for `claude.json`, `"codex"` for
+`codex.json`) and passes that value to `tokens select --provider`, instead of
+hardcoding it. The full resolved chain is:
+
+```
+role  ──►  runtime                                        ──►  provider            ──►  pool
+       LOOM_RUNTIME_<ROLE> > LOOM_RUNTIME >              runtime manifest        tokens select
+       runtimes.roles.<role> > runtimes.default > claude  "accountProvider"       --provider <p>
+```
+
+A `runtimes.roles.judge = "codex"` binding therefore implies the Codex
+account pool automatically — there is no second `runtimes`-shaped map to keep
+in sync (that would only reproduce the runtime/model mismatch class #5001
+fixed for the model axis). A **missing** `accountProvider` field — an
+un-resynced install whose `.loom/runtimes/<name>.json` predates this issue,
+or the bundled `include_str!` fallback (#5002) for a runtime with no on-disk
+manifest at all — defaults to `"claude"` rather than failing closed, so a
+partially-upgraded fleet keeps dispatching.
+
+**Enforcement in the Claude selector.** `select::select_token` skips any
+`.token` file whose `index.json` row names a provider other than `claude`
+(defense-in-depth: under the storage-layer design in
+`docs/design/token-pool-provider-identity.md` §4 D4, no non-Claude row is
+ever materialized as a `.token` file, so this is the assertion that keeps a
+stale pre-upgrade pool directory from becoming exploitable, not the primary
+mechanism). A `.token` file with **no** manifest row at all — a
+hand-provisioned pool, or one bootstrapped before #5607 — is fail-open,
+treated as `claude`, exactly like every other provider-aware reader in this
+document.
+
 ## Bad-token tracking (`loom-daemon tokens mark-bad`)
 
-When a token returns `TOKEN_EXPIRED` or `TOKEN_EXHAUSTED`, callers append an entry
+When a token returns `TOKEN_EXPIRED`, `TOKEN_EXHAUSTED`, or
+`MODEL_CREDITS_EXHAUSTED` (#5687 — treated exactly like `TOKEN_EXHAUSTED` here),
+callers append an entry
 to `.loom/tokens/.bad_tokens` via `loom-daemon tokens mark-bad <name> --reason
 <text>` (native Rust, `loom-daemon/src/tokens_pool/bad_tokens.rs`, exposed as a
 CLI subcommand in #4228 — the historical Python `loom_tools.tokens.bad_tokens`
@@ -435,10 +543,21 @@ below.
 ## Error classification (`.loom/scripts/lib/classify-error.sh`)
 
 The `classify_error <output> <exit_code>` function returns one of `SUCCESS`,
-`TIMEOUT`, `CWD_DELETED`, `TOKEN_EXPIRED`, `TOKEN_EXHAUSTED`, `RECOVERABLE`.
+`TIMEOUT`, `CWD_DELETED`, `TOKEN_EXPIRED`, `TOKEN_EXHAUSTED`,
+`MODEL_CREDITS_EXHAUSTED`, `SESSION_LIMIT`, `MODEL_REFUSAL`, `RECOVERABLE`,
+`FATAL`.
 Critical fix from #3233: exit code is checked **before** output substring
 matching — clean exits (`exit_code == 0`) always return `SUCCESS` regardless of
 stdout content.
+
+`MODEL_CREDITS_EXHAUSTED` (#5687, "You're out of usage credits") is a
+per-model-**tier** credit exhaustion, not an account death. **Every pool
+mechanism treats it exactly like `TOKEN_EXHAUSTED`** — same rotation, same
+`.bad_tokens` entry, same cooldown, same retryability — because the pool tracks
+account health, not per-model account state. The distinct name exists for the
+in-session `/loom:sweep` orchestrator, which has no pool to rotate through and
+instead re-dispatches one model rung down (`sweep.md` → "Credit-exhaustion
+fallback").
 
 ## Worktree handling
 
@@ -715,12 +834,17 @@ and the cooldown remaining — plus the **identity of the binary that decided**
 (version, build commit, build timestamp):
 
 ```
-error: All 2 tokens in ~/.loom/tokens are marked bad or empty.
+error: All 3 tokens in ~/.loom/tokens are marked bad, empty, or .ranking-excluded.
   - agent-1: bad-marked [exhaustion, TTL] at 2026-07-30T16:58:32Z — "exhausted: hit your weekly limit"; clears in 5h48m
   - agent-2: bad-marked [auth, permanent] at 2026-07-29T21:33:41Z — "401 unauthorized"; needs `loom-daemon tokens unblock agent-2`
+  - agent-3: hard-excluded by .ranking status (exhausted) — never readmitted by the fail-safe; re-probe with `loom-daemon tokens check --ranking`
   deciding binary: loom-daemon 0.16.0 (commit 105f9c12, built 2026-07-30T05:23:19Z)
   exhaustion cooldown: 21600s (override LOOM_TOKEN_EXHAUSTION_COOLDOWN_SECS); auth entries never expire …
 ```
+
+The `hard-excluded by .ranking status` line is the #5629 exclusion set above:
+that account is not in `.bad_tokens` at all, so `tokens unblock` will not help —
+the `.ranking` file is what rules it out, and re-probing is the recovery.
 
 `spawn-claude.sh` additionally logs the resolved daemon binary path and its
 `--version` at token-selection time, on every spawn:
@@ -781,8 +905,9 @@ Terminal policy is intentionally conservative:
 
 - `TOKEN_EXPIRED` requires an explicit verified-reauth clear and never expires
   merely because time passed or an ordinary success was observed.
-- `TOKEN_EXHAUSTED` cools down for
-  `LOOM_CODEX_EXHAUSTED_COOLDOWN_SECS` (default five hours).
+- `TOKEN_EXHAUSTED` and `MODEL_CREDITS_EXHAUSTED` cool down for
+  `LOOM_CODEX_EXHAUSTED_COOLDOWN_SECS` (default five hours) — the same arm, by
+  design (#5687).
 - `RECOVERABLE` and `SESSION_LIMIT` apply short temporary backoffs.
 - Success records freshness and clears transient counters.
 - Timeouts, fatal/configuration failures, refusals, and deleted-cwd outcomes do
