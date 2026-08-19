@@ -59,7 +59,7 @@ cp test_results/benchmark_results-TIMESTAMP.db \
 ## Related Scripts
 
 - `scripts/backup_test_results.sh` - Create backups
-- `scripts/process_benchmark_results.py` - Process raw benchmark output
+- `scripts/process_results.py` - Process raw benchmark output
 - `scripts/query_benchmark_results.py` - Query and display results
 - `scripts/process_test_results.py` - Process SQLLogicTest results
 - `scripts/generate_punchlist.py` - Generate test failure reports

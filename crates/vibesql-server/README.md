@@ -105,6 +105,7 @@ Client → TCP Connection → SSL Negotiation (optional)
 - Phase 1: Basic TCP server
 - Phase 2: Startup handshake and authentication
 - Phase 3: Simple query protocol (Query message)
+- Phase 4: Extended query protocol (Parse/Bind/Describe/Execute/Close/Sync/Flush; prepared statements and portals)
 - Row description and data row messages
 - Error handling and responses
 

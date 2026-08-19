@@ -91,7 +91,7 @@ Document your test results:
 
 ## Known Limitations
 
-- ❌ Prepared statements not yet supported (extended query protocol planned)
+- ✅ Prepared statements supported (extended query protocol: Parse/Bind/Describe/Execute; parameters are substituted server-side as literals rather than natively typed)
 - ✅ Simple queries work
 - ✅ Transactions work
 - ❌ SSL/TLS not yet supported

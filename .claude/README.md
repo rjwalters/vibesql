@@ -1,13 +1,14 @@
 # Claude Code Settings
 
-This directory contains Claude Code configuration for the Loom project.
+This directory contains Claude Code configuration for the VibeSQL project.
 
 ## Files
 
 - **`settings.json`**: Team-wide permissions and settings (committed to git)
 - **`settings.local.json`**: Personal preferences (gitignored, create if needed)
-- **`../.mcp.json`**: MCP server configuration (at project root, committed to git)
 - **`agents/`**: Custom subagent definitions for Loom roles (see below)
+- **`skills/`**: Installed skill packages — currently `skills/repo/` (Repo Skills), managed by its installer
+- **`commands/repo/`**: Repo Skills slash commands (`/repo:<command>`, 18 files) — managed by the Repo Skills installer; edit outside its markers only
 
 ## Pre-approved Commands
 
@@ -64,9 +65,9 @@ Local settings override team settings for that specific configuration key.
 
 ## MCP Server
 
-Loom provides a single **unified `mcp-loom` MCP server** (configured in
-`.mcp.json`) that consolidates log monitoring, terminal management, and UI/state
-control. It replaces the historical trio of separate `loom-logs` /
+Loom provides a single **unified `mcp-loom` MCP server** (registered by the
+Loom installation; there is no `.mcp.json` at this repo's root) that
+consolidates log monitoring, terminal management, and UI/state control. It replaces the historical trio of separate `loom-logs` /
 `loom-terminals` / `loom-ui` servers. Representative tools by category:
 
 **Log tools**:

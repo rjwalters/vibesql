@@ -17,9 +17,6 @@
 # Claude Code
 .claude/settings.local.json
 
-# Loom worktree-ownership marker
-.loom-managed
-
 # Testing
 *.profdata
 *.profraw
@@ -57,6 +54,7 @@ eggs/
 .eggs/
 lib/
 !.loom/scripts/lib/
+!.loom/scripts/tests/lib/
 lib64/
 parts/
 sdist/

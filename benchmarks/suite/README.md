@@ -6,7 +6,7 @@ Performance benchmarking tools for the VibeSQL database engine.
 
 ### Run Full Suite Benchmark
 
-Benchmark all 623 SQLLogicTest files:
+Benchmark all 622 SQLLogicTest files:
 
 ```bash
 cd benchmarks/suite
@@ -50,9 +50,12 @@ Full SQLLogicTest suite benchmark (VibeSQL only)
 ### `head-to-head.sh` (In Progress)
 Interleaved VibeSQL vs SQLite comparison
 
-**Planned features:**
-- Alternating engine execution (V-S-V-S-V-S...)
+**Implemented:**
 - Adaptive repetition count based on test speed
+
+**Planned features:**
+- Alternating engine execution (V-S-V-S-V-S...) — SQLite runs are currently
+  skipped (recorded as `"skipped": true`) pending Rust test harness integration
 - Control for thermal throttling and system load
 - Statistical comparison
 
@@ -63,8 +66,6 @@ Load benchmark results into VibeSQL database
 ```bash
 ./analyze.py ../target/benchmarks/comparison_20251112_030627.json --notes "Baseline run"
 ```
-
-**Status:** Blocked by SQL limitations (requires VIEW, INDEX, AUTO_INCREMENT support)
 
 ### `schema.sql`
 Database schema for storing benchmark results

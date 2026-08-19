@@ -15,8 +15,6 @@
     "fmt": "cargo fmt --all",
     "fmt:check": "cargo fmt -- --check",
     "lint": "cargo clippy --all-targets --all-features -- -D warnings",
-    "clean": "cargo clean",
-    "analyze:failures": "./scripts/update_failure_analysis.sh",
-    "analyze:failures:cached": "./scripts/update_failure_analysis.sh --reprocess"
+    "clean": "cargo clean"
   }
 }

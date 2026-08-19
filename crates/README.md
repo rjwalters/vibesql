@@ -109,7 +109,7 @@ cargo test
 cargo test -p vibesql-types
 
 # Run SQLLogicTest suite
-cargo test -p sqllogictest
+cargo test --test sqllogictest_suite
 
 # Check without building (fast!)
 cargo check

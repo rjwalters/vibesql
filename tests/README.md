@@ -51,10 +51,34 @@ Tests are organized into feature-based subdirectories that mirror the crate stru
 
 ### Compliance Tests
 
-- **`compliance/`** - SQL standard conformance
+- **`z_compliance/`** - SQL standard conformance
   - SQLLogicTest suite (`sqllogictest_suite.rs`, `sqllogictest_basic.rs`)
   - SQL:1999 conformance (`sqltest_conformance.rs`)
   - Benchmark tests (`sqllogictest_benchmark.rs`)
+  - PostgreSQL regression harness (`pgsql_regress.rs`)
+
+### Conformance Suites and Fixtures
+
+- **`sqllogictest/`** - SQLLogicTest runner infrastructure (execution, scheduling, reporting, db adapters)
+- **`sqllogictest-files/`** - `.slt`/`.test` files organized by feature (`dml/`, `functions/`, `identifiers/`, `order/`, `select/`)
+- **`pgsql/`** - PostgreSQL-style regression tests adapted from PostgreSQL's `src/test/regress/sql/`
+- **`sql1999/`** - SQL:1999 conformance tests from the sqltest suite
+- **`dialect/`** - Dialect-difference tests (MySQL vs SQLite modes)
+- **`vibesql/`** - VibeSQL-specific `.test` files
+- **`benchmarks/`** - Benchmark-oriented `.slt` files
+
+### Client Compatibility Tests
+
+- **`jdbc/`** - JDBC driver compatibility tests (Java, PostgreSQL wire protocol)
+- **`odbc/`** - ODBC driver compatibility tests
+
+### Data Type Tests
+
+- **`e2e_data_types/`** - End-to-end data type coverage (numeric, character, etc.)
+
+### Error Handling Tests
+
+- **`test_error_handling/`** - Error types and messages (catalog, executor, storage)
 
 ### Integration Tests
 
@@ -76,6 +100,13 @@ Tests are organized into feature-based subdirectories that mirror the crate stru
   - Error handling (`error_handling.rs`)
   - Comments and directives (`directive_comments.rs`)
   - Identifiers (`delimited_identifiers.rs`)
+
+### Support and Miscellaneous
+
+- **`common/`** - Shared fixtures and helpers used across test files
+- **`debug/`** - Ad-hoc debugging `.test` files
+- **`select5_samples/`** - Minimal table extracts for select5 debugging
+- **`issue-*/`** - Manual repro fixtures for closed issues
 
 ## Running Tests
 

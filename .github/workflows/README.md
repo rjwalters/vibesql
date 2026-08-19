@@ -4,125 +4,94 @@ This directory contains CI/CD workflows for the vibesql project.
 
 ## Workflows
 
-### `ci-and-deploy.yml` - Main CI/CD Pipeline
+### `ci.yml` - CI (Pull Requests)
 
-**Trigger**: On every push to `main`
+**Trigger**: On pull requests to `main` (plus manual dispatch)
 
-**Purpose**:
-- Runs all unit and integration tests
-- Runs sqltest conformance suite (SQL:1999 Core)
-- Generates SQLLogicTest punchlist from manual test results
-- Runs benchmarks
-- Generates badges and documentation
-- Deploys to GitHub Pages
+**Purpose**: Fast CI optimized for PR feedback speed
+- Verifies TPC-H/TPC-DS benchmark queries haven't been modified
+- Guards against web-demo lockfile drift (`pnpm install --frozen-lockfile`)
+- Runs unit and integration tests in release mode (SQLLogicTest suite skipped)
+- Checks the wasm32 build of `vibesql-wasm-bindings` (catches wasm-only breakage)
+- Checks `vibesql-storage` with `--features storage-all` (catches opendal-gated breakage)
 
-**SQLLogicTest Strategy**:
-- Uses systematic punchlist approach (not random sampling)
-- Punchlist generated from `target/sqllogictest_cumulative.json` (manual test results)
-- Badge shows: `{passed}✓ {failed}✗ {untested}? ({pass_rate}%)`
-- Progress reflects actual systematic testing, not random coverage
+Extended validation (TPC-DS, SQLLogicTest, PostgreSQL, TCL) lives in `ci-extended.yml`.
 
-### `deploy-pages.yml` - GitHub Pages Deployment
+### `ci-main.yml` - CI (main)
 
-**Trigger**: Called by `ci-and-deploy.yml` workflow
+**Trigger**: On every push to `main` (plus manual dispatch)
 
 **Purpose**:
-- Builds web demo (optional, controlled by input)
-- Downloads historical data from GitHub Pages
-- Merges new test results (sqltest, punchlist, benchmarks)
-- Generates badge JSON files
-- Deploys everything to GitHub Pages
+- Runs unit tests in release mode (SQLLogicTest suite skipped)
+- Runs the sqltest conformance suite (informational, `continue-on-error`)
 
-**Inputs**:
-- `artifact-name`: Name of artifact with test results to deploy
-- `benchmark-artifact-name`: Name of artifact with benchmark results
-- `rebuild-web-demo`: Whether to rebuild web demo from scratch (default: true)
+Note: the web demo is **not** deployed by CI — deployment is manual via
+`cd web-demo && wrangler deploy` (see CLAUDE.md).
 
-### `label-external-contributors.yml` - PR Labeling
+### `ci-extended.yml` - Extended Validation
 
-**Trigger**: On pull requests
+**Trigger**: Manual only (workflow_dispatch), with boolean inputs to select suites
 
-**Purpose**: Automatically labels PRs from external contributors
+**Purpose**: On-demand, informational validation before merging significant PRs
+(extracted from PR CI to save ~90 min per PR):
+- TPC-DS validation (correctness check against DuckDB)
+- SQLLogicTest sample
+- PostgreSQL regression tests
+- SQLite TCL tests
+- `scripts/` Python test suite (builds Python bindings)
+- Summary job aggregating results
 
-### `redeploy-web-demo.yml` - Manual Web Demo Redeploy
+Run with: `gh workflow run ci-extended.yml`
 
-**Trigger**: Manual (workflow_dispatch)
+### `fuzz.yml` - Fuzz Testing
 
-**Purpose**: Redeploys the web demo without running tests (useful for fixing deployment issues)
+**Trigger**: Weekly schedule (Sunday 3 AM UTC) and manual dispatch (with a
+`duration` input, default 300s)
 
-## SQLLogicTest Punchlist Strategy
+**Purpose**: Runs `cargo-fuzz` (nightly toolchain) across a matrix of targets:
+`sql_parser`, `expr_eval`, `type_convert`, `differential_sqlite`. When crashes
+are found, it files (or comments on) a GitHub issue labeled `bug`/`fuzzing`
+with the crash inputs and reproduction steps.
 
-The project uses a **systematic punchlist approach** to achieve 100% SQLLogicTest conformance:
+### `miri.yml` - MIRI Undefined Behavior Detection
 
-### How It Works
+**Trigger**: Weekly schedule (Sunday 4 AM UTC, after fuzzing) and manual dispatch
 
-1. **Test Corpus**: 623 test files, ~5.9 million individual SQL tests
-2. **Punchlist Generation**: `scripts/generate_punchlist.py` scans all test files and categorizes them
-3. **Manual Testing**: Use `scripts/test_one_file.sh` to test individual files and identify root causes
-4. **Progress Tracking**: Results tracked in `target/sqllogictest_cumulative.json`
-5. **Badge**: Shows `{passed}✓ {failed}✗ {untested}? ({pass_rate}%)`
+**Purpose**: Runs MIRI (nightly toolchain) on `vibesql-storage` Row tests and a
+sample of `vibesql-executor` tests (pure-algorithm tests without file I/O) to
+detect undefined behavior. Run manually before releases or when modifying
+unsafe code: `gh workflow run miri.yml`
 
-### Current Status (as of last punchlist generation)
+### `i18n-check.yml` - i18n Validation
 
-| Category | Total | Passing | Pass Rate |
-|----------|-------|---------|-----------|
-| index    | 214   | 75      | 35.0%     |
-| evidence | 12    | 6       | 50.0%     |
-| random   | 391   | 2       | 0.5%      |
-| ddl      | 1     | 0       | 0.0%      |
-| other    | 5     | 0       | 0.0%      |
-| **TOTAL**| **623**| **83** | **13.3%** |
+**Trigger**: On pull requests touching translation-related paths
+(`crates/vibesql-l10n/`, `web-demo/src/i18n/resources/`, the translation-check
+scripts, or the workflow itself)
 
-### Development Workflow
+**Purpose**: Validates Fluent translation files:
+- CLI Fluent syntax check (`check-ftl`)
+- CLI translation completeness
+- Web translation completeness
+- Strict check
 
-1. **Test a file**: `./scripts/test_one_file.sh index/delete/10/slt_good_0.test`
-2. **Read error**: Identify what's missing or broken
-3. **Fix code**: Implement the missing feature or fix the bug
-4. **Test again**: Verify the fix works
-5. **Update results**: Run the file multiple times to ensure stability
-6. **Regenerate punchlist**: `python3 scripts/generate_punchlist.py`
-7. **Commit changes**: Results automatically reflected in badge on next CI run
+### `release-crates.yml` - Release to crates.io
 
-### Files
+**Trigger**: On push of a `v*` tag; manual dispatch supports a `dry_run` input
 
-- **Punchlist JSON**: `target/sqllogictest_punchlist.json` (generated locally, uploaded to gh-pages)
-- **Punchlist CSV**: `target/sqllogictest_punchlist.csv` (human-readable, sortable)
-- **Strategy Guide**: `PUNCHLIST_100_CONFORMANCE.md` (comprehensive strategic guide)
-- **Quick Start**: `QUICK_START.md` (2-minute overview)
+**Purpose**: Verifies the workspace `Cargo.toml` version matches the tag, then
+builds and publishes the `vibesql-*` crates to crates.io.
 
-### Published Resources
+### `release-pypi.yml` - Release to PyPI
 
-- **Punchlist Results**: `https://vibesql.org/badges/sqllogictest_punchlist.json`
-- **Badge Endpoint**: `https://img.shields.io/endpoint?url=https://vibesql.org/badges/sqllogictest.json`
-- **Conformance Report**: `https://vibesql.org/conformance.html`
+**Trigger**: On push of a `v*` tag; manual dispatch supports a `dry_run` input
 
-## Maintenance
+**Purpose**: Builds Python wheels across a platform matrix (Linux x86_64 and
+aarch64, macOS x86_64 and Apple Silicon, Windows x86_64) plus an sdist, then
+publishes to PyPI via trusted publishing (OIDC).
 
-### Updating Test Results
+### `label-external-contributors.yml` - Issue Labeling
 
-After fixing issues and testing files:
+**Trigger**: On issues opened (plus manual dispatch)
 
-```bash
-# Regenerate punchlist with updated results
-python3 scripts/generate_punchlist.py
-
-# Commit the updated cumulative results
-git add target/sqllogictest_cumulative.json
-git commit -m "Update SQLLogicTest results"
-
-# Push to trigger CI (updates badge automatically)
-git push
-```
-
-### Troubleshooting
-
-**Badge not updating**:
-- Check that `target/sqllogictest_punchlist.json` is being generated in CI
-- Verify badge JSON is being created by `generate_badges.sh`
-- Check that deployment to gh-pages succeeded
-- Clear browser cache and check badge endpoint directly
-
-**Punchlist generation fails**:
-- Ensure `third_party/sqllogictest/test/` directory exists
-- Check that `target/sqllogictest_cumulative.json` has valid JSON
-- Run `python3 scripts/generate_punchlist.py` locally to see errors
+**Purpose**: Automatically labels issues from external (non-collaborator)
+authors with `external` and posts a welcome comment.

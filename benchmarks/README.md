@@ -14,7 +14,7 @@ VibeSQL uses **two complementary benchmark systems** that measure different aspe
 - **Purpose**: Industry-standard real-world analytical queries
 - **Overhead**: Zero - native Rust APIs only
 - **Run in CI**: ✅ Yes (quick mode: Q1, Q3, Q6)
-- **Web Demo**: ✅ Yes - powers https://vibesql.dev/benchmarks.html
+- **Web Demo**: ✅ Yes - powers https://vibesql.org/benchmarks.html
 
 ### 2. **Python Benchmarks** (this directory) - *Development Tool*
 - **Location**: This directory (`benchmarks/`)
@@ -36,8 +36,11 @@ benchmarks/
 ├── conftest.py     # pytest-benchmark configuration
 ├── requirements.txt # Python dependencies
 ├── utils/          # Helper utilities for benchmarks
+├── cli/            # CLI-based TPC-H benchmarks (vibesql vs sqlite3/duckdb CLIs)
+│   ├── tpch/       # TPC-H schema, data generator, and 22 query files
+│   └── README.md   # Detailed documentation
 └── suite/          # Full SQLLogicTest suite benchmarks
-    ├── suite.sh    # Run all 623 test files
+    ├── suite.sh    # Run all 622 test files
     ├── head-to-head.sh  # VibeSQL vs SQLite comparison
     ├── analyze.py  # Load results into database
     └── README.md   # Detailed documentation
@@ -88,7 +91,7 @@ pytest test_insert.py test_select.py --benchmark-only
 
 ### Full Suite Benchmark
 
-Run all 623 SQLLogicTest files:
+Run all 622 SQLLogicTest files:
 
 ```bash
 cd suite
@@ -137,11 +140,11 @@ Results saved to `../target/benchmarks/comparison_YYYYMMDD_HHMMSS.json`
 
 **Use for:**
 - Comprehensive conformance + performance testing
-- Tracking overall performance trends across 623 test files
+- Tracking overall performance trends across 622 test files
 - Pre-release performance validation
 
 **Tools:**
-- `suite.sh` - Full 623-file benchmark (VibeSQL only)
+- `suite.sh` - Full 622-file benchmark (VibeSQL only)
 - `head-to-head.sh` - Interleaved comparison (VibeSQL vs SQLite)
 - `analyze.py` - Store results in database for analysis
 
@@ -150,7 +153,7 @@ Results saved to `../target/benchmarks/comparison_YYYYMMDD_HHMMSS.json`
 - **TPC-H benchmarks**: See [crates/vibesql-executor/benches/TPCH_README.md](../crates/vibesql-executor/benches/TPCH_README.md)
 - **Suite benchmarks**: See [suite/README.md](suite/README.md)
 - **General benchmarking**: See [docs/performance/BENCHMARKING.md](../docs/development/BENCHMARKING.md)
-- **Web demo**: See benchmarks at https://vibesql.dev/benchmarks.html
+- **Web demo**: See benchmarks at https://vibesql.org/benchmarks.html
 
 ## Recent Performance
 

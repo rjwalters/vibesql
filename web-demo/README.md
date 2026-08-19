@@ -221,17 +221,32 @@ pnpm format:check # Check formatting
 ```
 web-demo/
 ├── src/
-│   ├── components/     # UI components (Results, HelpModal)
+│   ├── app/           # Demo app modules (database/editor managers, init, query execution)
+│   ├── components/    # UI components (Results, HelpModal)
+│   ├── data/          # Example queries, sample databases, compliance data
 │   ├── db/            # WASM database interface
 │   ├── editor/        # SQL validation
+│   ├── examples/      # Interactive example usage
+│   ├── i18n/          # Localization (Fluent resources)
 │   ├── showcase/      # Feature showcase
 │   ├── styles/        # Tailwind CSS
-│   ├── main.ts        # Application entry point
+│   ├── utils/         # Shared utilities (formatting, benchmark stats)
+│   ├── workers/       # Web workers (Monaco editor)
+│   ├── homepage.ts    # Homepage entry point (index.html)
+│   ├── main.ts        # Demo app entry point (demo.html)
+│   ├── benchmarks.ts  # Benchmarks page entry point (benchmarks.html)
+│   ├── conformance.ts # Conformance page entry point (conformance.html)
+│   ├── trends.ts      # Trends page entry point (trends.html)
+│   ├── challenge.ts   # Challenge page entry point
 │   └── theme.ts       # Dark/light mode
 ├── public/
 │   ├── pkg/           # WASM bindings (generated)
-│   └── examples/      # Sample SQL files
-├── index.html         # HTML entry point
+│   ├── badges/        # Badge JSON endpoints
+│   ├── benchmarks/    # Exported benchmark JSON
+│   ├── conformance/   # Conformance report data
+│   └── data/          # Dashboard JSON
+├── examples/          # Sample SQL files
+├── index.html         # Homepage (plus demo.html, benchmarks.html, conformance.html, trends.html)
 └── vite.config.ts     # Build configuration
 ```
 
@@ -315,13 +330,6 @@ cd web-demo
 pnpm build                       # Creates optimized dist/ folder
 pnpm preview                     # Serves at http://localhost:4173/vibesql/
 ```
-
-### Manual Deployment
-
-You can trigger a manual deployment from GitHub Actions:
-1. Go to Actions → "Deploy to GitHub Pages"
-2. Click "Run workflow"
-3. Optionally provide a reason for the deployment
 
 ---
 
