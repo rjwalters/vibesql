@@ -104,9 +104,7 @@ Tests are organized into feature-based subdirectories that mirror the crate stru
 ### Support and Miscellaneous
 
 - **`common/`** - Shared fixtures and helpers used across test files
-- **`debug/`** - Ad-hoc debugging `.test` files
 - **`select5_samples/`** - Minimal table extracts for select5 debugging
-- **`issue-*/`** - Manual repro fixtures for closed issues
 
 ## Running Tests
 

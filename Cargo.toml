@@ -457,6 +457,14 @@ path = "tests/regression/issue_4530_correlated_subquery_no_from.rs"
 name = "issue_4638_join_on_integer"
 path = "tests/regression/issue_4638_join_on_integer.rs"
 
+[[test]]
+name = "issue_1863_case_aggregate_in"
+path = "tests/regression/issue_1863_case_aggregate_in.rs"
+
+[[test]]
+name = "issue_4493_nested_correlated_subquery"
+path = "tests/regression/issue_4493_nested_correlated_subquery.rs"
+
 # Parser tests - SQL parsing and syntax
 [[test]]
 name = "coverage_improvements"
