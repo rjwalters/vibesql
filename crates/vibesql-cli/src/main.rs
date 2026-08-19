@@ -460,5 +460,6 @@ fn execute_stdin(
 
 fn is_stdin_piped() -> bool {
     // Check if stdin is a pipe/file (not a terminal)
-    !atty::is(atty::Stream::Stdin)
+    use std::io::IsTerminal;
+    !std::io::stdin().is_terminal()
 }
