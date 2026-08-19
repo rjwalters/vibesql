@@ -48,6 +48,21 @@
 #         so a hand-edited settings.json that routes "clear"/"compact"/"fork"
 #         here still no-ops. A /clear is not a process relaunch and the note has
 #         not been touched, so repeating the banner there is pure noise.
+#
+# AUDIENCE GATING (issue #389): the /repo:handoff note is written for the
+#         operator's next interactive session, not for autonomous Loom role
+#         agents that also start via "startup"/"resume". Two layers guard
+#         against a role agent consuming (and, per the one-shot contract,
+#         deleting) a note that was never meant for it:
+#           Layer 2 - if ${LOOM_ROLE:-} is non-empty (set on daemon-spawned
+#             role sessions - see .loom/hooks/methodology-inject.sh), this
+#             hook exits silently before reading the note at all.
+#           Layer 1 - LOOM_ROLE only covers daemon-spawned sessions, not an
+#             interactive `/loom:<role>` invocation, so the injected
+#             additionalContext itself conditions the one-shot deletion
+#             directive on the reader being the operator's interactive
+#             session; an autonomous/role reader is told to leave the note and
+#             its MEMORY.md pointer untouched.
 # =============================================================================
 
 # Age thresholds (hours). STALE_HOURS is the ">7d" line handoff.md warns about.
@@ -100,6 +115,17 @@ case "$SOURCE" in
     startup|resume) ;;
     *) exit 0 ;;
 esac
+
+# Layer 2 (issue #389): autonomous/role sessions are never the intended
+# recipient of a handoff note - the one-shot deletion directive below is
+# written for a human operator's interactive session and is destructive if a
+# role agent obeys it. LOOM_ROLE is set on daemon-spawned role sessions (see
+# .loom/hooks/methodology-inject.sh's identical check), so when present we
+# skip emitting the banner entirely rather than rely on the reader correctly
+# interpreting Layer 1's conditional wording.
+if [[ -n "${LOOM_ROLE:-}" ]]; then
+    exit 0
+fi
 
 # Resolve the repo root from cwd (handles worktrees). Fall back to cwd itself
 # when it is not a git repo, mirroring the original proposal's
@@ -182,9 +208,16 @@ fi
 
 CONTEXT="$CONTEXT
 
-Read the note in full before doing anything else. Per the /repo:handoff one-shot
+Read the note in full before doing anything else.
+
+If you are the operator's interactive session: per the /repo:handoff one-shot
 contract, once you have absorbed it, delete both the note and its pointer line
-in the memory index - promote anything durable into real memory files or issues."
+in the memory index - promote anything durable into real memory files or issues.
+
+If you are an autonomous or role agent (a Loom role, a headless/scripted run, a
+subagent) rather than the operator's interactive session: do NOT act on this
+note and do NOT delete it or its pointer - leave both in place for the
+operator's next interactive session to absorb."
 
 OUTPUT=$(jq -cn --arg ctx "$CONTEXT" \
     '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' 2>/dev/null) || OUTPUT=""
