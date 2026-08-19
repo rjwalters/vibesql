@@ -5,3 +5,5 @@ overrides:
   rollup: '>=4.59.0'
 onlyBuiltDependencies:
   - esbuild
+allowBuilds:
+  esbuild: true

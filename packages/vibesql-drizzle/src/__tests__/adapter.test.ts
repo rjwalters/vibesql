@@ -160,9 +160,16 @@ describe('createDrizzle', () => {
 
     const db = createDrizzle(mockClient);
 
-    await expect(
-      db.run(sql`SELECT * FROM nonexistent`)
-    ).rejects.toThrow('Database error');
+    // drizzle-orm >= 0.44 wraps client errors in DrizzleQueryError,
+    // keeping the original error as `cause`
+    const error = await db
+      .run(sql`SELECT * FROM nonexistent`)
+      .then(() => {
+        throw new Error('expected query to reject');
+      })
+      .catch((e: Error) => e);
+    expect(error.message).toContain('Failed query');
+    expect((error.cause as Error | undefined)?.message).toBe('Database error');
   });
 });
 
