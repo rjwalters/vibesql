@@ -12,12 +12,13 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from typing import Dict, List, Tuple
 from collections import defaultdict
 
-# Import our VibeSQL helper module
-sys.path.insert(0, 'scripts')
+# Import our VibeSQL helper module (works from any cwd)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vibesql_db import get_connection
 
 
@@ -104,7 +105,8 @@ def print_timeline(data: List[Tuple], engine: str, unit: str = 'ns'):
 
     divisor = 1_000_000 if unit == 'ms' else 1_000 if unit == 'us' else 1
 
-    print(f"\n{'Run':<6} {'DateTime':<18} {'Commit':<10} {'Total ({unit})':<14} {'Tests':<6} {'Status'}")
+    total_header = f"Total ({unit})"
+    print(f"\n{'Run':<6} {'DateTime':<18} {'Commit':<10} {total_header:<14} {'Tests':<6} {'Status'}")
     print("-" * 70)
 
     prev_time = None
@@ -134,9 +136,18 @@ def main():
 
     db, cursor = get_connection()
 
+    # Accumulates change events across all analyzed suites; stays empty when
+    # there is no data, so the summary degrades gracefully instead of raising
+    # NameError.
+    changes = []
+
     # Analyze Sysbench
     print(f"=== {args.engine.upper()} Sysbench Aggregate Timeline ===")
-    sysbench_data = get_sysbench_aggregate(cursor, args.engine)
+    try:
+        sysbench_data = get_sysbench_aggregate(cursor, args.engine)
+    except Exception as e:
+        print(f"Could not query sysbench results ({e}).")
+        sysbench_data = []
 
     if sysbench_data:
         print_timeline(sysbench_data, args.engine, unit='us')
@@ -156,15 +167,20 @@ def main():
     if args.tpch:
         print("\n" + "="*70)
         print("=== TPC-H Aggregate Timeline ===")
-        tpch_data = get_tpch_aggregate(cursor)
+        try:
+            tpch_data = get_tpch_aggregate(cursor)
+        except Exception as e:
+            print(f"Could not query TPC-H results ({e}).")
+            tpch_data = []
 
         if tpch_data:
             print_timeline(tpch_data, 'vibesql', unit='ms')
 
-            changes = detect_changes(tpch_data, args.threshold)
-            if changes:
+            tpch_changes = detect_changes(tpch_data, args.threshold)
+            changes.extend(tpch_changes)
+            if tpch_changes:
                 print(f"\n=== TPC-H Significant Changes (>{args.threshold*100:.0f}%) ===\n")
-                for c in changes:
+                for c in tpch_changes:
                     print(f"Run {c['prev_run_id']} → {c['run_id']}: {c['direction']} by {abs(c['pct_change'])*100:.1f}%")
                     print(f"  Commits: {c['prev_commit']} → {c['commit']}")
                     print()
@@ -176,9 +192,9 @@ def main():
     print("=== Recommendation ===")
 
     if changes:
-        last_stable_run = min(c['run_id'] for c in changes) - 1
-        print(f"\nFirst significant change detected at run {changes[0]['run_id']}")
-        print(f"Consider keeping data from run {last_stable_run + 1} onwards if that")
+        first_change_run = min(c['run_id'] for c in changes)
+        print(f"\nFirst significant change detected at run {first_change_run}")
+        print(f"Consider keeping data from run {first_change_run} onwards if that")
         print("represents when the benchmark infrastructure stabilized.")
     else:
         print("\nNo significant changes detected - data appears stable.")

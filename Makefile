@@ -1,7 +1,7 @@
 # VibeSQL Makefile
 # Convenience targets for common development tasks
 
-.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster test-scripts fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-hnsw benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
+.PHONY: all all-bg logs status build build-all build-wasm build-python test test-unit test-workspace test-sqllogictest test-sqllogictest-halting test-tcl test-tcl-all test-tcl-file test-tcl-status test-cluster test-scripts fuzz fuzz-parser fuzz-expr fuzz-type-convert fuzz-query fuzz-type-coercion fuzz-differential fuzz-list benchmark benchmark-quick benchmark-smoke benchmark-all benchmark-all-bg benchmark-logs benchmark-status benchmark-embedded-all benchmark-server-all benchmark-tpch benchmark-tpch-quick benchmark-tpch-profile benchmark-tpch-server benchmark-tpcc benchmark-tpcc-server benchmark-tpcds benchmark-sysbench benchmark-hnsw benchmark-sysbench-server benchmark-vibesql benchmark-sqlite benchmark-duckdb benchmark-cli benchmark-cli-prep benchmark-cli-quick fmt fmt-check clean help analyze-tests analyze-benchmarks analyze-benchmark-stability conformance-summary analyze profile-tpch profile-tpcc profile-sysbench profile-select profile-query bench-storage bench-executor bench-types website mysql-start mysql-stop mysql-status strip-quarantine
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -174,6 +174,8 @@ help:
 	@echo "  make analyze            - Show test and benchmark analysis"
 	@echo "  make analyze-tests      - Show SQLLogicTest analysis from database"
 	@echo "  make analyze-benchmarks - Show TPC-H benchmark analysis from database"
+	@echo "  make analyze-benchmark-stability - Show aggregate benchmark timing stability over time"
+	@echo "  make conformance-summary - Show SQL:1999 + SQLLogicTest conformance summary"
 	@echo ""
 	@echo "MySQL Docker targets:"
 	@echo "  make mysql-start        - Start MySQL Docker container for benchmarks"
@@ -602,6 +604,10 @@ analyze-tests:
 	fi
 	@echo ""
 
+# Show SQL:1999 + SQLLogicTest conformance summary (reads target/*.json written by CI/test runs)
+conformance-summary:
+	@./scripts/conformance_summary.sh
+
 # Show all benchmark analysis from database
 analyze-benchmarks:
 	@echo ""
@@ -626,6 +632,15 @@ analyze-benchmarks:
 	@echo "Sysbench OLTP Analysis"
 	@echo "=========================================="
 	@./scripts/query_benchmark_results.py --sysbench 2>/dev/null || echo "Run 'make benchmark-sysbench' first to generate benchmark data"
+	@echo ""
+
+# Show benchmark stability analysis (aggregate timing changes across runs)
+analyze-benchmark-stability:
+	@echo ""
+	@echo "=========================================="
+	@echo "Benchmark Stability Analysis"
+	@echo "=========================================="
+	@python3 scripts/analyze_benchmark_stability.py --tpch || echo "Run 'make benchmark-sysbench' first to generate benchmark data"
 	@echo ""
 
 #

@@ -4,6 +4,11 @@ Helper scripts for testing, benchmarking, and result processing. This README
 covers only the **Python test suite** (`test_*.py`); the individual scripts are
 documented in their own headers.
 
+## Analysis entry points
+
+- `analyze_benchmark_stability.py` — flags significant shifts in aggregate sysbench/TPC-H timings across benchmark runs (`make analyze-benchmark-stability`).
+- `conformance_summary.sh` — one-screen SQL:1999 + SQLLogicTest conformance summary read from `target/*.json` (`make conformance-summary`).
+
 ## The `test_*.py` suite
 
 Pytest collects these files (configured in the root `pyproject.toml` under
