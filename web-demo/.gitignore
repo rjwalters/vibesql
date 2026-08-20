@@ -27,28 +27,28 @@ npm-debug.log*
 # NOTE: this does NOT shadow the real test suite. Vitest specs are named
 # `*.test.ts` and live under src/**/__tests__/, so the `test-*` prefix patterns
 # below cannot match them.
-debug-*.ts
-inspect-*.ts
-test-*.ts
-diagnose-*.ts
-find-*.ts
-perf-*.ts
-debug-screenshot*.png
-test-*-screenshot.png
+/debug-*.ts
+/inspect-*.ts
+/test-*.ts
+/diagnose-*.ts
+/find-*.ts
+/perf-*.ts
+/debug-screenshot*.png
+/test-*-screenshot.png
 
 # Same, compiled/plain-JS and ESM variants
-debug-*.js
-inspect-*.js
-test-*.js
-diagnose-*.js
-find-*.js
-check-*.js
-perf-*.js
-perf-*.cjs
-debug-*.mjs
-inspect-*.mjs
-test-*.mjs
-check-*.mjs
+/debug-*.js
+/inspect-*.js
+/test-*.js
+/diagnose-*.js
+/find-*.js
+/check-*.js
+/perf-*.js
+/perf-*.cjs
+/debug-*.mjs
+/inspect-*.mjs
+/test-*.mjs
+/check-*.mjs
 
 # Playwright run artifacts
 test-results/

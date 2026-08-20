@@ -6,17 +6,20 @@ This directory contains `.slt` (SQLLogicTest) test files for comprehensive SQL c
 
 ```
 sqllogictest-files/
-├── select/          # SELECT queries and WHERE clauses
-│   ├── basic.slt    # Basic SELECT, INSERT, DROP
-│   ├── where.slt    # WHERE predicates (>, <, BETWEEN, IN)
-│   └── joins.slt    # INNER/LEFT JOIN operations
+├── select/          # SELECT queries and WHERE clauses (11 files: basic.slt,
+│                    # where.slt, joins.slt, grouping_sets.slt, plus subquery,
+│                    # join, and type-affinity edge-case regressions)
 ├── dml/             # Data Manipulation Language
 │   └── insert.slt   # INSERT operations (single, multi-row)
 ├── functions/       # Built-in functions
 │   ├── string.slt   # String functions (UPPER, LOWER, SUBSTRING, etc.)
 │   └── math.slt     # Math functions (ABS, FLOOR, CEILING, MOD)
-└── identifiers/     # Identifier handling
-    └── case_sensitivity.slt  # SQL:1999 case sensitivity tests
+├── identifiers/     # Identifier handling
+│   └── case_sensitivity.slt  # SQL:1999 case sensitivity tests
+├── order/           # Row ordering
+│   └── rowid_tiebreaker.test # Rowid tie-breaking for ORDER BY (issue #4893)
+├── focused_test.test  # VARBINARY / CREATE VIEW focused regression
+└── where_alias.test   # Column aliases in WHERE clause (issue #4446)
 ```
 
 ## Running Tests

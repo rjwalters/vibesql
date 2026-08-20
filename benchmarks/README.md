@@ -71,7 +71,7 @@ Run industry-standard TPC-H queries using the consolidated benchmark script:
 
 **Use this for**: Measuring SQL engine performance, comparing to other databases, web demo updates
 
-**Note**: For full documentation of all modes and options, see [docs/benchmarks/TPC-H_BENCHMARKING.md](../docs/performance/TPC-H_BENCHMARKING.md)
+**Note**: For full documentation of all modes and options, see [docs/performance/TPC-H_BENCHMARKING.md](../docs/performance/TPC-H_BENCHMARKING.md)
 
 ### Python Binding Benchmarks (PyO3 Overhead Measurement)
 
@@ -152,7 +152,7 @@ Results saved to `../target/benchmarks/comparison_YYYYMMDD_HHMMSS.json`
 
 - **TPC-H benchmarks**: See [crates/vibesql-executor/benches/TPCH_README.md](../crates/vibesql-executor/benches/TPCH_README.md)
 - **Suite benchmarks**: See [suite/README.md](suite/README.md)
-- **General benchmarking**: See [docs/performance/BENCHMARKING.md](../docs/development/BENCHMARKING.md)
+- **General benchmarking**: See [docs/development/BENCHMARKING.md](../docs/development/BENCHMARKING.md)
 - **Web demo**: See benchmarks at https://vibesql.org/benchmarks.html
 
 ## Recent Performance

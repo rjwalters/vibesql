@@ -7,7 +7,7 @@
 ## Quick Links
 
 - **Main Strategy**: [`TESTING.md`](../testing/TESTING_STRATEGY.md) - Comprehensive testing strategy and workflow
-- **Current Analysis**: [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md) - Detailed breakdown of all 500 failures
+- **Current Analysis**: `target/failure_pattern_analysis.md` (run-generated output, not checked in) - Detailed breakdown of all 500 failures
 - **GitHub Issues**: [#956-#963](https://github.com/rjwalters/vibesql/issues?q=is%3Aissue+is%3Aopen+956..963) - 8 high-impact fixes to implement
 
 ## Executive Summary
@@ -207,7 +207,7 @@ Schedule after implementing #956 and #957 (Quick Wins).
 ### Documentation
 
 - [`TESTING.md`](../testing/TESTING_STRATEGY.md) - Detailed testing strategy
-- [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md) - Current failure analysis
+- `target/failure_pattern_analysis.md` - Current failure analysis
 - This file - High-level roadmap and plan
 
 ### Scripts
@@ -243,7 +243,7 @@ All issues tagged with SQLLogicTest conformance work:
 **To begin work on conformance:**
 
 1. Read [`TESTING.md`](../testing/TESTING_STRATEGY.md) for detailed strategy
-2. Review [`target/failure_pattern_analysis.md`](./target/failure_pattern_analysis.md)
+2. Review `target/failure_pattern_analysis.md`
 3. Start with [#956](https://github.com/rjwalters/vibesql/issues/956) (Decimal formatting - easiest fix)
 4. Test and validate improvement
 5. Move to [#957](https://github.com/rjwalters/vibesql/issues/957) (Multi-row formatting)

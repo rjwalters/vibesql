@@ -93,7 +93,7 @@ Run benchmarks for all databases and compare:
 ./scripts/mysql-benchmark/run-benchmark.sh --output /tmp/mysql.json
 
 # VibeSQL
-./scripts/bench-tpch-isolated.sh 30 /tmp/vibesql.txt
+./scripts/bench-tpch.sh --mode isolated --timeout 30 --output /tmp/vibesql.txt
 
 # Compare results
 python3 -c "

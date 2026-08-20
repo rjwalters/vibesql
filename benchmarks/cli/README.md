@@ -63,11 +63,10 @@ cargo build --release -p vibesql-executor --bench prep_tpch_databases --features
 ```
 benchmarks/cli/
 ├── README.md           # This file
-├── tpch/
-│   ├── schema.sql      # TPC-H table definitions
-│   ├── queries/        # TPC-H queries (q01.sql - q22.sql)
-│   └── generate_data.py  # Python data generator (backup)
-└── tools/              # (empty, prep tool is a Rust benchmark)
+└── tpch/
+    ├── schema.sql      # TPC-H table definitions
+    ├── queries/        # TPC-H queries (q01.sql - q22.sql)
+    └── generate_data.py  # Python data generator (backup)
 ```
 
 ## Benchmark Options

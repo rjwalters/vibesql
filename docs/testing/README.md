@@ -20,8 +20,8 @@ This directory contains documentation for VibeSQL's testing infrastructure and c
 # Run SQL:1999 conformance tests
 cargo test --test sqltest_conformance --release
 
-# Generate conformance report
-./scripts/generate_compliance_report.sh
+# Show conformance summary (reads target/*.json written by the test runs)
+make conformance-summary
 ```
 
 ### SQLLogicTest Suite

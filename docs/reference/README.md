@@ -1,8 +1,27 @@
-# SQLite Source Code Reference
+# Reference Documentation
 
-This directory contains the SQLite source code as a reference for learning and optimization.
+This directory contains reference documents for VibeSQL — feature status, implementation comparisons, compatibility policies — plus the SQLite source code as a git submodule (`sqlite/`, described below).
 
-## Purpose
+## Documents
+
+| Document | Description |
+|----------|-------------|
+| [FEATURE_STATUS.md](FEATURE_STATUS.md) | Detailed breakdown of implemented SQL features |
+| [COMPARISONS.md](COMPARISONS.md) | Implementation comparisons between VibeSQL and SQLite: design decisions, lessons learned, optimization opportunities |
+| [PROCEDURES_FUNCTIONS.md](PROCEDURES_FUNCTIONS.md) | Guide to stored procedures and user-defined functions (SQL:1999 Feature P001) |
+| [TRIGGER_IMPLEMENTATION_STATUS.md](TRIGGER_IMPLEMENTATION_STATUS.md) | Implementation status of SQL trigger support (issue #1373) |
+| [SQLITE_NOTES.md](SQLITE_NOTES.md) | Performance analysis notes from studying SQLite's source code |
+| [SUMMARY.md](SUMMARY.md) | Summary of the reference materials and research resources in this directory |
+| [sql-compatibility-mysql-vs-sqlite.md](sql-compatibility-mysql-vs-sqlite.md) | Behavioral differences between MySQL and SQLite that affect VibeSQL |
+| [tcl-compatibility-metric.md](tcl-compatibility-metric.md) | Canonical definition of the "SQLite compatibility %" metric (epic #5779) |
+| [tcl-skip-policy.md](tcl-skip-policy.md) | TCL skip-honesty policy: Bucket-A/Bucket-B classification of every in-tree skip declaration |
+| [tcl-triage-report.md](tcl-triage-report.md) | TCL conformance failure triage report (non-certified local-run data) |
+
+## SQLite Source Code Reference (`sqlite/`)
+
+The `sqlite/` submodule contains the SQLite source code as a reference for learning and optimization.
+
+### Purpose
 
 SQLite is the **gold standard** for embedded SQL databases with decades of optimization experience. We include their source code as a reference to:
 
@@ -11,7 +30,7 @@ SQLite is the **gold standard** for embedded SQL databases with decades of optim
 3. **Compare approaches** - Validate our architectural decisions against battle-tested code
 4. **Get specific insights** - Answer questions like "How does SQLite implement COUNT(*)?"
 
-## License
+### License
 
 SQLite is in the **public domain** - it's not even open source, it's more permissive!
 
@@ -26,9 +45,9 @@ This means we can:
 
 **Note**: We're learning from SQLite, not copying code. This is a reference for understanding proven database implementation patterns.
 
-## Getting Started
+### Getting Started
 
-### First Time Setup
+#### First Time Setup
 
 If you just cloned the repository:
 
@@ -40,7 +59,7 @@ git clone --recurse-submodules https://github.com/rjwalters/vibesql.git
 git submodule update --init --recursive
 ```
 
-### Updating SQLite Reference
+#### Updating SQLite Reference
 
 To update to the latest SQLite version:
 
@@ -52,9 +71,9 @@ git add docs/reference/sqlite
 git commit -m "docs: Update SQLite reference to latest version"
 ```
 
-## Key Files to Study
+### Key Files to Study
 
-### 1. Aggregate Optimization (COUNT, SUM, AVG, MIN, MAX)
+#### 1. Aggregate Optimization (COUNT, SUM, AVG, MIN, MAX)
 
 **Files to study**:
 - `src/vdbe.c` - Virtual Database Engine (query execution)
@@ -66,7 +85,7 @@ git commit -m "docs: Update SQLite reference to latest version"
 - Do they have fast paths for simple aggregates?
 - How do they handle aggregate + GROUP BY?
 
-### 2. UPDATE Performance
+#### 2. UPDATE Performance
 
 **Files to study**:
 - `src/update.c` - UPDATE statement implementation
@@ -78,7 +97,7 @@ git commit -m "docs: Update SQLite reference to latest version"
 - What's their UPDATE execution flow?
 - How do they optimize primary key lookups?
 
-### 3. Expression Evaluation
+#### 3. Expression Evaluation
 
 **Files to study**:
 - `src/expr.c` - Expression evaluation
@@ -89,7 +108,7 @@ git commit -m "docs: Update SQLite reference to latest version"
 - What's their expression evaluation strategy?
 - How do they handle type coercion?
 
-### 4. Query Optimization
+#### 4. Query Optimization
 
 **Files to study**:
 - `src/where.c` - WHERE clause analysis and optimization
@@ -101,7 +120,7 @@ git commit -m "docs: Update SQLite reference to latest version"
 - What optimizations do they apply?
 - How do they handle index selection?
 
-### 5. Storage and Indexing
+#### 5. Storage and Indexing
 
 **Files to study**:
 - `src/btree.c` - B-tree implementation
@@ -113,9 +132,9 @@ git commit -m "docs: Update SQLite reference to latest version"
 - What indexing strategies do they use?
 - How do they maintain hash indexes?
 
-## Searching the SQLite Source
+### Searching the SQLite Source
 
-### Finding Specific Functions
+#### Finding Specific Functions
 
 ```bash
 # Search for a specific function
@@ -128,7 +147,7 @@ grep -r "Aggregate" docs/reference/sqlite/src/
 grep -r "optimization" docs/reference/sqlite/src/
 ```
 
-### Finding Specific Features
+#### Finding Specific Features
 
 ```bash
 # COUNT(*) optimization
@@ -141,13 +160,13 @@ grep -r "UPDATE" docs/reference/sqlite/src/update.c
 grep -r "hash.*join" docs/reference/sqlite/src/
 ```
 
-## Related Documentation
+### Related Documentation
 
 - **COMPARISONS.md** - Documents our implementation vs SQLite's approach
 - **SQLite Official Docs** - https://www.sqlite.org/docs.html
 - **SQLite Source Docs** - https://www.sqlite.org/src/doc/trunk/README.md
 
-## Benefits
+### Benefits
 
 1. **Immediate reference** - Can quickly grep/search SQLite code when investigating issues
 2. **Learning resource** - Team can study proven implementations
@@ -155,13 +174,13 @@ grep -r "hash.*join" docs/reference/sqlite/src/
 4. **Optimization ideas** - Discover techniques we haven't considered
 5. **Documentation** - Can link to specific SQLite code in our docs/issues
 
-## Non-Goals
+### Non-Goals
 
 - ❌ **Not copying code** - We're learning, not copying
 - ❌ **Not porting SQLite** - We're building our own DB with our own design
 - ❌ **Not benchmarking against SQLite internals** - Just studying implementation
 
-## Related Issues
+### Related Issues
 
 - #814 - COUNT(*) optimization
 - #815 - UPDATE optimization

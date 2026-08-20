@@ -773,7 +773,6 @@ home-explore-bench-text = Результати TPC-H, TPC-DS, TPC-C та Sysbenc
 home-footer = VibeSQL — SQL база даних на чистому Rust, створена для швидкості
 
 # Navigation
-nav-challenge = Виклик SQL Vibe Coding
 nav-trends = Тренди Продуктивності
 
 # Trends page

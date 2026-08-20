@@ -52,9 +52,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-!.loom/scripts/lib/
-!.loom/scripts/tests/lib/
+/lib/
 lib64/
 parts/
 sdist/

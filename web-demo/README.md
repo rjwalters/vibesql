@@ -237,7 +237,6 @@ web-demo/
 │   ├── benchmarks.ts  # Benchmarks page entry point (benchmarks.html)
 │   ├── conformance.ts # Conformance page entry point (conformance.html)
 │   ├── trends.ts      # Trends page entry point (trends.html)
-│   ├── challenge.ts   # Challenge page entry point
 │   └── theme.ts       # Dark/light mode
 ├── public/
 │   ├── pkg/           # WASM bindings (generated)

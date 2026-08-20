@@ -766,7 +766,6 @@ home-explore-bench-text = SQLite, DuckDB ve MySQL'e karşı TPC-H, TPC-DS, TPC-C
 home-footer = VibeSQL — Hız için tasarlanmış saf Rust SQL veritabanı
 
 # Navigation
-nav-challenge = SQL Vibe Kodlama Mücadelesi
 nav-trends = Performans Trendleri
 
 # Trends page
