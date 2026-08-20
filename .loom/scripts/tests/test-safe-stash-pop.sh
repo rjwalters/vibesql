@@ -429,6 +429,88 @@ assert_eq "the stash entry is still preserved" "1" \
     "$(git -C "$REPO" stash list | wc -l | tr -d ' ')"
 
 # ---------------------------------------------------------------------------
+echo "Test 19: a conflict on a non-ASCII path is reported (#6517)"
+# core.quotepath defaults to true, so `git diff --name-only` etc. would emit
+# "café.txt" (C-quoted, octal-escaped) rather than café.txt. Before the fix,
+# scan_new_marker_files()'s `[[ -f "$REPO/$path" ]]` test on the quoted form
+# fails and the path silently drops out of both conflictFiles and the report.
+mk_repo
+printf 'line1\n' > "$REPO/café.txt"
+git -C "$REPO" add café.txt
+git -C "$REPO" commit -q -m "add café.txt"
+stage_conflict "café.txt" 'STASHED\nline2\nline3\n' 'UPSTREAM\nline2\nline3\n'
+run_script --repo "$REPO"
+assert_eq "non-ASCII conflict path exits 3 (conflict, rolled back)" "3" "$RC"
+assert_contains "non-ASCII conflict path appears in the stderr report" "$ERR" "café.txt"
+assert_eq "the stash entry is preserved" "1" \
+    "$(git -C "$REPO" stash list | wc -l | tr -d ' ')"
+
+mk_repo
+printf 'line1\n' > "$REPO/café.txt"
+git -C "$REPO" add café.txt
+git -C "$REPO" commit -q -m "add café.txt"
+stage_conflict "café.txt" 'STASHED\nline2\nline3\n' 'UPSTREAM\nline2\nline3\n'
+run_script --repo "$REPO" --json --quiet
+assert_eq "non-ASCII conflict --json exits 3" "3" "$RC"
+assert_contains "non-ASCII conflict path appears in conflictFiles" "$OUT" 'café.txt'
+if command -v jq >/dev/null 2>&1; then
+    if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1; then
+        pass "non-ASCII conflict --json line is valid JSON"
+    else
+        fail "non-ASCII conflict --json line is not valid JSON: $OUT"
+    fi
+    assert_eq "jq extracts the exact non-ASCII path" "café.txt" \
+        "$(printf '%s' "$OUT" | jq -r '.conflictFiles[0]')"
+fi
+
+# ---------------------------------------------------------------------------
+echo "Test 20: a -u payload with a non-ASCII name is removed by the exit-3 rollback (#6517)"
+# The untracked-payload cleanup loop scans `git ls-tree -r --name-only` on the
+# stash's untracked tree; before the fix the quoted name fails the `-f` test
+# and `rm -f` on it is a silent no-op, leaving the payload as a stray file.
+mk_repo
+printf 'STASHED\nline2\nline3\n' > "$REPO/f.txt"
+printf 'payload\n' > "$REPO/café-payload.txt"
+git -C "$REPO" stash push -q -u -m wip
+printf 'UPSTREAM\nline2\nline3\n' > "$REPO/f.txt"
+git -C "$REPO" add f.txt
+git -C "$REPO" commit -q -m upstream
+run_script --repo "$REPO"
+assert_eq "conflicting pop with a non-ASCII untracked payload exits 3" "3" "$RC"
+if [[ -f "$REPO/café-payload.txt" ]]; then
+    fail "the non-ASCII untracked payload was left behind by the rollback"
+else
+    pass "the non-ASCII untracked payload was removed by the rollback"
+fi
+assert_eq "the untracked payload is still recoverable from the preserved entry" "1" \
+    "$(git -C "$REPO" stash list | wc -l | tr -d ' ')"
+
+# ---------------------------------------------------------------------------
+echo "Test 21: --json stays jq -e .-parseable for a path containing a literal backslash (#6517)"
+# emit_json() must escape a literal backslash BEFORE the quote-escape, or a
+# path with a `\` (which is exactly what core.quotepath's C-quoting of a
+# non-ASCII path also produces, \NNN-octal) yields an invalid JSON line.
+mk_repo
+BACKSLASH_NAME='back\slash.txt'
+printf 'line1\n' > "$REPO/$BACKSLASH_NAME"
+git -C "$REPO" add "$BACKSLASH_NAME"
+git -C "$REPO" commit -q -m "add backslash-named file"
+stage_conflict "$BACKSLASH_NAME" 'STASHED\nline2\nline3\n' 'UPSTREAM\nline2\nline3\n'
+run_script --repo "$REPO" --json --quiet
+assert_eq "backslash-path conflict --json exits 3" "3" "$RC"
+if command -v jq >/dev/null 2>&1; then
+    if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1; then
+        pass "backslash-path --json line is valid JSON"
+    else
+        fail "backslash-path --json line is not valid JSON: $OUT"
+    fi
+    assert_eq "jq extracts the exact backslash-containing path" "$BACKSLASH_NAME" \
+        "$(printf '%s' "$OUT" | jq -r '.conflictFiles[0]')"
+else
+    fail "jq is required to verify Test 21 (not found on PATH)"
+fi
+
+# ---------------------------------------------------------------------------
 echo ""
 echo "========================================"
 if [[ $TESTS_FAILED -eq 0 ]]; then

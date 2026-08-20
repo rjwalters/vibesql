@@ -119,6 +119,27 @@ fi
   or a feature-flag-specific job) — the extraction above only needs the
   general-purpose `--workspace` suite; it is not meant to replicate every job.
 
+**Before running `$TEST_CMD` directly on THIS host, route it through the
+nextest live-daemon guard if this repo has one (#6528)** — see Step D5 below
+for why: some nextest test groups can be as HOST-MUTATING as the shell suites
+already covered there.
+
+```bash
+NEXTEST_GUARD="defaults/scripts/tests/nextest-daemon-guard.sh"
+if [[ -n "${NEXTEST_CMD:-}" && -x "$NEXTEST_GUARD" ]]; then
+    # --resolve prints the command to actually run: unchanged when this host
+    # has no live-daemon evidence, or with the two host-mutating binaries
+    # excluded (-E 'not binary(...) and not binary(...)') when it does. Guard
+    # evidence (if any) is printed to stderr by the guard itself — surface
+    # it, don't swallow it.
+    TEST_CMD="$(bash "$NEXTEST_GUARD" --resolve "$TEST_CMD")"
+fi
+```
+
+If this repo has no `nextest-daemon-guard.sh` (i.e. it isn't the Loom repo
+itself), run the extracted `$TEST_CMD` as-is — this guard is specific to the
+`daemon-integration` test group defined in Loom's own `.config/nextest.toml`.
+
 **Step D2 — detect the launchable artifact (what does "run it" mean here?):**
 
 - CLI/daemon binary under `target/release/…` or a `bin`/`scripts` entrypoint →
@@ -159,13 +180,17 @@ build/launch" and stand down (or run only the cheap validation). Note the
 skipped heavy validation in your report so the gap is visible; do **not** file a
 bug just because heavy validation was skipped by policy.
 
-**Step D5 — some suites are HOST-MUTATING: never run them directly (#6386):**
+**Step D5 — some suites are HOST-MUTATING: never run them directly (#6386,
+#6528):**
 
 Most test suites are hermetic. A few are not: this repo's **daemon-lifecycle
 shell suites** (`test-loom-daemon-start.sh`, `-stop.sh`, `-update.sh`,
 `-quiesce.sh`, `-watchdog.sh`) execute the *real* `loom-daemon-{start,stop,
 update,quiesce}.sh`, so they `kill`, `rm -f` pid files, and `launchctl bootout` /
-`systemctl --user disable` whatever their invocations resolve.
+`systemctl --user disable` whatever their invocations resolve. The Rust
+`daemon-integration` nextest group (`integration_security.rs`,
+`integration_factory_reset.rs`) is the same hazard class from a second entry
+point — see the dedicated subsection below, after the shell-suite rules.
 
 **Two things make you, specifically, the dangerous caller:**
 
@@ -197,6 +222,62 @@ and the daemon was SIGTERM'd (#6386).
 - Treat the same way any suite in another repo that drives a service lifecycle,
   a supervisor (launchd/systemd), or a shared daemon: if you cannot show it is
   hermetic, do not run it on a host where that service is live.
+
+**The Rust `daemon-integration` nextest group is the same hazard class, from a
+second entry point (#6528):** `cargo nextest run --workspace --profile ci` —
+the exact command Step D1's Rust extraction hands you as `$TEST_CMD` — runs
+`integration_security.rs` and `integration_factory_reset.rs`, whose `setup()`
+calls `cleanup_all_loom_sessions()`. That kills **every** `loom-*` tmux
+session on the shared, host-global `-L loom` socket — including a live
+production `loom-daemon`'s own tracked sessions and any real agent sessions,
+not just other test binaries' (a reviewed, accepted-for-**CI** exception,
+#4622 — CI has no live daemon and no real sessions to lose, so that
+acceptance is unaffected; this is about YOU running the same command
+directly, on a live fleet host).
+
+- Step D1's Rust extraction already routes `$TEST_CMD` through
+  `defaults/scripts/tests/nextest-daemon-guard.sh --resolve` when that script
+  exists in this repo — **never bypass it** by hand-assembling and running
+  the raw `cargo nextest run --workspace …` line yourself. The guard uses the
+  same pid-file detection as the shell-suite guard above
+  (`defaults/scripts/lib/live-daemon-guard.sh`): when a daemon pid file
+  exists on this host, it excludes the two host-mutating binaries via `-E
+  'not binary(integration_security) and not binary(integration_factory_reset)'`
+  instead of running them; otherwise `$TEST_CMD` is returned unchanged.
+- An excluded-binaries run is a **correct outcome**, not a failure. Report
+  `integration_security`/`integration_factory_reset` as "not validated on
+  this host (live daemon present)" — do **not** file a bug, and do **not**
+  work around the guard by invoking those two binaries' package/binary
+  directly to "just check".
+- If `nextest-daemon-guard.sh` does not exist in a repo you are auditing (it
+  is Loom-specific), this subsection does not apply there — but apply the
+  same reasoning to any Rust test group in that repo whose setup/teardown
+  touches shared host state (a tmux/screen server, a real daemon, a shared
+  port or lock file): if you cannot show it is hermetic, do not run it
+  directly on a host where that state is live.
+
+**`npm run check:all` / `pnpm test` is a THIRD entry point to the same
+hazard (#6554) — Step D1's own Node+Rust guidance can walk you into it.**
+This repo's root `package.json` `test` script is the plain `cargo test
+--workspace ...` invocation, not nextest — Step D1's "package.json ->
+node/pnpm/npm build+test" fallback and CI's own "full-stack check" job both
+run it via `npm run check:all`, independently of whatever `$TEST_CMD` the
+Rust-extraction steps above computed. In THIS repo that script is now itself
+guarded: it is `defaults/scripts/tests/cargo-test-daemon-guard.sh "cargo test
+--workspace ..."`, which applies the same live-daemon detection and — when a
+daemon pid file is found — excludes `integration_security`/
+`integration_factory_reset` (splitting the invocation across
+`--exclude loom-daemon` plus a `-p loom-daemon` re-run with those two targets
+left out of an explicit `--test` allowlist, since plain `cargo test` has no
+nextest-style `-E` filter). So running `npm run check:all` / `pnpm test`
+directly in this repo is safe as shipped — you do not need to route it
+through anything yourself. **In another Node+Rust repo you are auditing**,
+this guard is Loom-specific and will not exist: before running that repo's
+own `package.json` `test`/`check:all` script, check whether it wraps `cargo
+test`/`cargo nextest` against a package with daemon/service/shared-state
+integration tests, the same way you would vet any other Rust test group in
+Step D5 above — a Node wrapper script is not evidence of hermeticity by
+itself.
 
 ### CI-Aware Validation
 

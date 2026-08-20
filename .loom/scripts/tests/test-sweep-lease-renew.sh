@@ -39,6 +39,18 @@
 #   (k) start's loop stops renewing (self-terminates) as soon as a
 #       renew-once cycle reports the own-yield guard (exit 4), without
 #       waiting for the watched PID to die
+#   (l) renew-once's two `gh api` call sites (comments-list read, PATCH)
+#       route through forge_gh_perm_safe's escalation ladder (#6541): a
+#       GitHub App-installation permission-scope 403 on either call site
+#       recovers via a freshly minted installation token and the renewal
+#       still succeeds; when the ladder is fully exhausted, renew-once still
+#       fails closed with the existing "ERROR: PATCH of lease comment ...
+#       failed" message (never silently-allow-through)
+#   (m) cmd_start's renewal loop emits a visible log line (Issue #6541) when
+#       a renew-once cycle genuinely FAILS, even though the loop's own I/O is
+#       unconditionally sent to /dev/null for detachment -- and does NOT log
+#       a "failure" line for the normal exit-2 (no lease) or exit-4
+#       (#6485 own-yield guard) outcomes, which are not failures
 #
 # Usage:
 #   ./.loom/scripts/tests/test-sweep-lease-renew.sh
@@ -108,9 +120,25 @@ trap 'rm -rf "$STUB_DIR" 2>/dev/null || true' EXIT
 # --- Stub gh on PATH ---------------------------------------------------
 #   gh api [-R repo] repos/{owner}/{repo}/issues/<N>/comments --paginate
 #       -> cat $STUB_DIR/comments.json (or "[]"; fails if comments-fail exists)
-#   gh api [-R repo] --method PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@-
-#       -> reads stdin into $STUB_DIR/patch-<id>-N.body, appends "<id>" to
+#          -- OR a 403 "not accessible by integration" if comments-403-always
+#          exists, or on the FIRST attempt only if comments-403-once exists
+#          (each attempt is counted in $D/comments-attempt-count)
+#   gh api [-R repo] --method PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@<path>
+#       -> reads the file the -F value's "@" prefix references into
+#          $STUB_DIR/patch-<id>-N.body, appends "<id>" to
 #          $STUB_DIR/patch-calls.log, prints "{}" (fails if patch-fail exists)
+#          -- OR a 403 "not accessible by integration" if patch-403-always
+#          exists, or on the FIRST attempt only if patch-403-once exists
+#          (each attempt for a given <id> is counted in $D/patch-count-<id>,
+#          the same counter the body-numbering below already used)
+#
+#   The 403 files (#6541) let a test drive forge_gh_perm_safe's escalation
+#   ladder deterministically: "*-403-once" simulates a transient App-token
+#   permission-scope 403 that a fresh mint recovers from; "*-403-always"
+#   simulates every rung failing (a fully exhausted ladder). Every attempt
+#   -- including escalated retries under a different credential -- reaches
+#   this SAME stub (PATH is overridden for the whole test process), so the
+#   attempt counters below see every rung, not just the first.
 #
 #   The stub deliberately distinguishes `-f`/`--raw-field` (real `gh api`
 #   semantics: the value is a LITERAL string -- `@-`/`@path` is NOT expanded,
@@ -147,18 +175,28 @@ if [[ "$1" == "api" ]]; then
       echo "stub gh: comments fetch failed" >&2
       exit 1
     fi
+    n=$(( $(cat "$D/comments-attempt-count" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$D/comments-attempt-count"
+    if [[ -f "$D/comments-403-always" ]] || { [[ -f "$D/comments-403-once" ]] && [[ "$n" -eq 1 ]]; }; then
+      echo "HTTP 403: Resource not accessible by integration" >&2
+      exit 1
+    fi
     canned="$D/comments.json"
     if [[ -f "$canned" ]]; then cat "$canned"; else echo "[]"; fi
     exit 0
   fi
   if [[ "$method" == "PATCH" && "$path" == repos/*/issues/comments/* ]]; then
+    id="${path##*/}"
+    n=$(( $(cat "$D/patch-count-$id" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$D/patch-count-$id"
     if [[ -f "$D/patch-fail" ]]; then
       echo "stub gh: patch failed" >&2
       exit 1
     fi
-    id="${path##*/}"
-    n=$(( $(cat "$D/patch-count-$id" 2>/dev/null || echo 0) + 1 ))
-    echo "$n" > "$D/patch-count-$id"
+    if [[ -f "$D/patch-403-always" ]] || { [[ -f "$D/patch-403-once" ]] && [[ "$n" -eq 1 ]]; }; then
+      echo "HTTP 403: Resource not accessible by integration" >&2
+      exit 1
+    fi
     val="${field_kv#*=}"
     if [[ "$field_flag" == "-F" && "$val" == "@-" ]]; then
       # -F/--field DOES expand "@-": read the real value from stdin.
@@ -183,12 +221,41 @@ exit 3
 STUB
 chmod +x "$STUB_DIR/gh"
 
+# A `github-app-token.sh` stub speaking the real JSON envelope (mirrors
+# test-app-permission-fallback.sh) -- lets tests (l1)/(l2) deterministically
+# force forge_gh_perm_safe's rung-2 fresh mint to succeed, and test (l3)
+# force it to report not_configured so the ladder has nothing to escalate
+# to beyond rung 1 (an exhausted-ladder scenario that does not depend on
+# whatever real GitHub App may or may not be configured on the host running
+# this test).
+cat > "$STUB_DIR/github-app-token.sh" <<'MINT'
+#!/usr/bin/env bash
+D="${LOOM_TEST_STUB_DIR:?stub github-app-token.sh: LOOM_TEST_STUB_DIR not set}"
+mode="$(cat "$D/mint-mode" 2>/dev/null || echo not-configured)"
+if [[ "$mode" == "ok" ]]; then
+  echo '{"status":"ok","token":"ghs_fresh_lease_renew_test","installation_id":"1","app_id":"2","expires_at":"2099-01-01T00:00:00Z"}'
+else
+  echo '{"status":"not_configured","message":"github app not configured"}'
+fi
+MINT
+chmod +x "$STUB_DIR/github-app-token.sh"
+
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+export LOOM_GITHUB_APP_SCRIPT="$STUB_DIR/github-app-token.sh"
 
 reset_state() {
     rm -f "$STUB_DIR"/comments.json "$STUB_DIR"/comments-fail "$STUB_DIR"/patch-fail
+    rm -f "$STUB_DIR"/comments-403-once "$STUB_DIR"/comments-403-always "$STUB_DIR"/comments-attempt-count
+    rm -f "$STUB_DIR"/patch-403-once "$STUB_DIR"/patch-403-always
     rm -f "$STUB_DIR"/patch-*.body "$STUB_DIR"/patch-count-* "$STUB_DIR"/patch-calls.log
+    echo "not-configured" > "$STUB_DIR/mint-mode"
+    # Ensure rung 3 (personal-token / personal-ambient) has nothing of ITS
+    # OWN to escalate to beyond whatever the real ambient host credential
+    # is -- tests that need a fully exhausted ladder set LOOM_PERSONAL_GH_TOKEN
+    # or drop ambient creds explicitly; this default just keeps unrelated
+    # tests from accidentally depending on an operator's real credential.
+    unset LOOM_PERSONAL_GH_TOKEN 2> /dev/null || true
     # Strip ambient dispatch-time identity env vars (#6485): a Builder session
     # running THIS test suite is itself a daemon-dispatched sweep, so
     # $LOOM_TERMINAL_ID/$LOOM_HOST_ID are routinely already set in the real
@@ -455,6 +522,137 @@ kill "$WATCH_PID_K" 2> /dev/null || true
 wait "$WATCH_PID_K" 2> /dev/null || true
 kill "$LOOP_PID_K" 2> /dev/null || true
 assert_true "$([[ ! -f "$STUB_DIR/patch-55-1.body" ]] && echo true || echo false)" "(k) the yielded lease was never PATCHed"
+
+# --- (l) forge_gh_perm_safe escalation-ladder routing (#6541) -------------
+echo ""
+echo "--- (l) forge_gh_perm_safe escalation-ladder routing on both gh api call sites ---"
+
+# (l1) comments-list read: a transient App-token 403 on the FIRST attempt
+# recovers via a freshly minted installation token, and the renewal still
+# succeeds end to end.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=studio-host sweep=sweep-issue-6180-1000 -->\nLease acquired."}
+]
+JSON
+touch "$STUB_DIR/comments-403-once"
+echo "ok" > "$STUB_DIR/mint-mode"
+run_script renew-once 6180
+assert_eq "0" "$RC" "(l1) a transient 403 on the comments-list read recovers via the escalation ladder"
+assert_contains "$ERR" "forge:" "(l1) forge_gh_perm_safe's escalation diagnostic is visible on stderr"
+assert_true "$([[ -f "$STUB_DIR/patch-42-1.body" ]] && echo true || echo false)" "(l1) the renewal still PATCHes the lease comment after the escalated read"
+
+# (l2) PATCH call: a transient App-token 403 on the FIRST attempt recovers
+# via a freshly minted installation token, and the PATCH still lands with
+# the correct renewed body (proving the switch from a stdin pipe to a temp
+# file survives a retried attempt -- a stdin pipe would be empty by then).
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=studio-host sweep=sweep-issue-6180-1000 -->\nLease acquired."}
+]
+JSON
+touch "$STUB_DIR/patch-403-once"
+echo "ok" > "$STUB_DIR/mint-mode"
+run_script renew-once 6180
+assert_eq "0" "$RC" "(l2) a transient 403 on the PATCH call recovers via the escalation ladder"
+assert_contains "$ERR" "forge:" "(l2) forge_gh_perm_safe's escalation diagnostic is visible on stderr for the PATCH call too"
+BODY_L2="$(cat "$STUB_DIR/patch-42-2.body" 2>/dev/null || echo MISSING)"
+assert_contains "$BODY_L2" "<!-- loom:lease host=studio-host sweep=sweep-issue-6180-1000 -->" "(l2) the escalated retry's PATCH body still preserves the marker byte-for-byte"
+assert_contains "$BODY_L2" "<!-- loom:lease-renewed " "(l2) the escalated retry's PATCH body still carries the renewed trailer"
+
+# (l3) PATCH call: a FULLY EXHAUSTED escalation ladder (every rung 403s)
+# still fails closed -- non-zero exit, the existing "ERROR: PATCH of lease
+# comment ... failed" message -- never silently-allow-through.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=studio-host sweep=sweep-issue-6180-1000 -->\nLease acquired."}
+]
+JSON
+touch "$STUB_DIR/patch-403-always"
+run_script renew-once 6180
+assert_eq "1" "$RC" "(l3) an exhausted escalation ladder on the PATCH call still fails closed (non-zero exit)"
+assert_contains "$ERR" "ERROR: PATCH of lease comment 42 on issue #6180 failed" "(l3) the existing fail-closed error message is preserved verbatim"
+assert_true "$(! ls "$STUB_DIR"/patch-42-*.body > /dev/null 2>&1 && echo true || echo false)" "(l3) no PATCH body was ever successfully written when the ladder is exhausted"
+
+# (l4) comments-list read: a FULLY EXHAUSTED escalation ladder also fails
+# closed -- renew-once never silently proceeds as if there were no comments.
+reset_state
+touch "$STUB_DIR/comments-403-always"
+run_script renew-once 6180
+assert_eq "1" "$RC" "(l4) an exhausted escalation ladder on the comments-list read still fails closed"
+assert_contains "$ERR" "escalation ladder exhausted" "(l4) the failure message explains the read failed after escalation"
+
+# --- (m) cmd_start's loop logs a visible failure line (#6541) -------------
+echo ""
+echo "--- (m) cmd_start's renewal loop logs a visible line on a genuine failure ---"
+
+# (m1) a genuine renewal failure (escalation ladder exhausted on the PATCH
+# call) is logged to the loop's saved stderr, even though the loop's own
+# I/O is otherwise unconditionally sent to /dev/null for detachment -- the
+# exact silent-403-for-a-whole-lease-lifetime failure mode this issue
+# reports.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=m-host sweep=m-sweep -->\nprose"}
+]
+JSON
+touch "$STUB_DIR/patch-403-always"
+sleep 5 &
+WATCH_PID_M=$!
+LOOP_PID_M="$("$SCRIPT" start 6180 --interval 1 --watch-pid "$WATCH_PID_M" --host m-host --sweep-id m-sweep 2> "$STUB_DIR/start-m-stderr.log")"
+sleep 2.5
+kill "$WATCH_PID_M" 2> /dev/null || true
+wait "$WATCH_PID_M" 2> /dev/null || true
+sleep 0.5
+kill "$LOOP_PID_M" 2> /dev/null || true
+M_ERR="$(cat "$STUB_DIR/start-m-stderr.log" 2> /dev/null || true)"
+assert_contains "$M_ERR" "FAILED" "(m1) a genuinely failing renewal cycle logs a visible FAILED line"
+assert_contains "$M_ERR" "issue #6180" "(m1) the failure log line identifies which issue's renewal failed"
+
+# (m2) the normal exit-2 "no matching lease comment" outcome is NOT logged
+# as a failure -- it is a documented, expected no-op for any sweep with no
+# daemon-written lease at all (e.g. manual /loom:sweep, GH Actions cron).
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[{"id": 1, "body": "nothing to see here"}]
+JSON
+sleep 5 &
+WATCH_PID_M2=$!
+LOOP_PID_M2="$("$SCRIPT" start 6180 --interval 1 --watch-pid "$WATCH_PID_M2" 2> "$STUB_DIR/start-m2-stderr.log")"
+sleep 2.5
+kill "$WATCH_PID_M2" 2> /dev/null || true
+wait "$WATCH_PID_M2" 2> /dev/null || true
+sleep 0.5
+kill "$LOOP_PID_M2" 2> /dev/null || true
+M2_ERR="$(cat "$STUB_DIR/start-m2-stderr.log" 2> /dev/null || true)"
+assert_true "$([[ "$M2_ERR" != *FAILED* ]] && echo true || echo false)" "(m2) exit-2 'no lease comment' does not log a FAILED line"
+
+# (m3) the #6485 exit-4 own-yield-guard path is UNCHANGED: the loop still
+# self-terminates immediately, and it does NOT log a FAILED line either --
+# a controlled stand-down is not a failure.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 55, "body": "<!-- loom:lease host=m3-host sweep=m3-sweep -->\nprose"},
+  {"id": 56, "body": "<!-- loom:lease-yield host=m3-host sweep=m3-sweep earliest_host=other-host earliest_sweep=other-sweep -->\nprose"}
+]
+JSON
+sleep 8 &
+WATCH_PID_M3=$!
+LOOP_PID_M3="$("$SCRIPT" start 6485 --interval 1 --watch-pid "$WATCH_PID_M3" --host m3-host --sweep-id m3-sweep 2> "$STUB_DIR/start-m3-stderr.log")"
+sleep 1.8
+LOOP_ALIVE_M3="false"
+kill -0 "$LOOP_PID_M3" 2> /dev/null && LOOP_ALIVE_M3="true"
+assert_true "$([[ "$LOOP_ALIVE_M3" == "false" ]] && echo true || echo false)" "(m3) the #6485 own-yield-guard exit-4 path still self-terminates the loop immediately (unchanged)"
+kill "$WATCH_PID_M3" 2> /dev/null || true
+wait "$WATCH_PID_M3" 2> /dev/null || true
+kill "$LOOP_PID_M3" 2> /dev/null || true
+M3_ERR="$(cat "$STUB_DIR/start-m3-stderr.log" 2> /dev/null || true)"
+assert_true "$([[ "$M3_ERR" != *FAILED* ]] && echo true || echo false)" "(m3) the own-yield-guard outcome (exit 4) does not log a FAILED line"
 
 # --- Contract checks (mirrors test-check-quarantine-stashes.sh's style) ---
 "$SCRIPT" --help > "$STUB_DIR/help.out" 2>&1

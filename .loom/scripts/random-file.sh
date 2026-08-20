@@ -154,7 +154,11 @@ get_matching_files() {
 
 # Use fd for fast file finding (if available)
 get_files_with_fd() {
-    local fd_args=("--type" "f" "--hidden" "--no-ignore-vcs")
+    # Deliberately no --no-ignore-vcs: fd's native gitignore handling (which
+    # correctly supports top-level directory patterns and `!`-negation) is
+    # left enabled, rather than disabled-then-reimplemented by a hand-rolled
+    # parser (#6537).
+    local fd_args=("--type" "f" "--hidden")
 
     # Add include patterns
     if [[ ${#INCLUDE_PATTERNS[@]} -gt 0 ]]; then
@@ -175,9 +179,10 @@ get_files_with_fd() {
 
     debug "Running: fd ${fd_args[*]}"
 
-    # Get files and filter by gitignore
+    # fd already respects .gitignore natively (see fd_args above), so no
+    # further gitignore filtering is needed here.
     local files
-    files=$(fd "${fd_args[@]}" . 2>/dev/null | filter_by_gitignore)
+    files=$(fd "${fd_args[@]}" . 2>/dev/null)
     echo "$files"
 }
 
@@ -195,13 +200,27 @@ get_files_with_find() {
                 files+="$found"$'\n'
             fi
         done
+
+        # Bash globbing does not consult .gitignore at all, so it must still
+        # be filtered explicitly (via git's own machinery, see
+        # filter_by_gitignore below — not a hand-rolled parser).
+        files=$(echo "$files" | apply_exclusions | filter_by_gitignore)
     else
-        # Find all files
-        files=$(find . -type f 2>/dev/null | sed 's|^\./||')
+        # No include patterns: let git enumerate tracked + untracked files,
+        # which respects .gitignore (including top-level directory patterns
+        # and `!`-negation) correctly and natively (#6537). Falls back to a
+        # plain `find` only when WORKSPACE_ROOT is not inside a git repo.
+        if command -v git &>/dev/null && git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree &>/dev/null; then
+            files=$(git -C "$WORKSPACE_ROOT" ls-files --cached --others --exclude-standard)
+        else
+            files=$(find . -type f 2>/dev/null | sed 's|^\./||')
+        fi
+
+        # git ls-files --exclude-standard already applied .gitignore; only the
+        # script's own DEFAULT_EXCLUDES / --exclude patterns remain.
+        files=$(echo "$files" | apply_exclusions)
     fi
 
-    # Apply exclusions
-    files=$(echo "$files" | apply_exclusions | filter_by_gitignore)
     echo "$files"
 }
 
@@ -283,90 +302,40 @@ glob_to_regex() {
     echo "$regex"
 }
 
-# Filter files by .gitignore
+# Filter a newline-delimited file list by .gitignore, using git's own
+# gitignore engine (`git check-ignore`) rather than a hand-rolled
+# glob-to-regex parser. This correctly handles top-level directory patterns
+# (e.g. `build/`) and `!`-negation re-inclusion lines, which the previous
+# regex-based implementation mishandled (#6537).
+#
+# Only needed for file lists gathered via bash globbing (see
+# get_files_with_find's --include path), which does not consult .gitignore at
+# all. The fd path and the git-ls-files path already apply .gitignore
+# natively upstream of this function.
 filter_by_gitignore() {
     local input
     input=$(cat)
 
-    local gitignore="$WORKSPACE_ROOT/.gitignore"
+    [[ -z "$input" ]] && return 0
 
-    if [[ ! -f "$gitignore" ]]; then
+    if ! command -v git &>/dev/null || ! git -C "$WORKSPACE_ROOT" rev-parse --is-inside-work-tree &>/dev/null; then
         echo "$input"
         return
     fi
 
-    # Read gitignore patterns (skip comments and empty lines)
-    local patterns=()
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$line" || "$line" == \#* ]] && continue
-        # Trim whitespace
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        [[ -n "$line" ]] && patterns+=("$line")
-    done < "$gitignore"
+    # `git check-ignore --stdin` prints the subset of input paths that are
+    # ignored (silently dropping the rest), so a plain diff against the
+    # original list yields exactly the non-ignored files.
+    local ignored
+    ignored=$(printf '%s\n' "$input" | git -C "$WORKSPACE_ROOT" check-ignore --stdin 2>/dev/null || true)
 
-    if [[ ${#patterns[@]} -eq 0 ]]; then
+    if [[ -z "$ignored" ]]; then
         echo "$input"
         return
     fi
 
-    # Build regex from gitignore patterns
-    local exclude_regex=""
-    for pattern in "${patterns[@]}"; do
-        # Handle negation patterns (!)
-        [[ "$pattern" == !* ]] && continue
-
-        # Convert gitignore pattern to regex
-        local regex
-        regex=$(gitignore_to_regex "$pattern")
-        [[ -n "$regex" ]] && exclude_regex+="|$regex"
-    done
-
-    exclude_regex="${exclude_regex#|}"
-
-    if [[ -n "$exclude_regex" ]]; then
-        debug "Gitignore regex: $exclude_regex"
-        echo "$input" | grep -v -E "$exclude_regex" || true
-    else
-        echo "$input"
-    fi
-}
-
-# Convert gitignore pattern to regex
-gitignore_to_regex() {
-    local pattern="$1"
-
-    # Handle directory-only patterns (ending with /)
-    if [[ "$pattern" == */ ]]; then
-        pattern="${pattern%/}"
-        local regex
-        regex=$(glob_to_regex "$pattern")
-        echo "/$regex(/|$)"
-        return
-    fi
-
-    # Handle patterns starting with /
-    if [[ "$pattern" == /* ]]; then
-        pattern="${pattern#/}"
-        local regex
-        regex=$(glob_to_regex "$pattern")
-        echo "^$regex"
-        return
-    fi
-
-    # Handle patterns containing /
-    if [[ "$pattern" == */* ]]; then
-        local regex
-        regex=$(glob_to_regex "$pattern")
-        echo "(^|/)$regex"
-        return
-    fi
-
-    # Simple pattern - match anywhere
-    local regex
-    regex=$(glob_to_regex "$pattern")
-    echo "(^|/)$regex(/|$)"
+    debug "Gitignore-excluded (git check-ignore): $(printf '%s' "$ignored" | tr '\n' ' ')"
+    printf '%s\n' "$input" | grep -v -F -x -f <(printf '%s\n' "$ignored") || true
 }
 
 # Pick a random file from the list

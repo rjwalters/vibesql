@@ -559,6 +559,17 @@ in-session `/loom:sweep` orchestrator, which has no pool to rotate through and
 instead re-dispatches one model rung down (`sweep.md` → "Credit-exhaustion
 fallback").
 
+A **monthly spend-limit kill** ("You've hit your monthly spend limit", issue
+#5631/#6518) classifies as plain `TOKEN_EXHAUSTED` — it is not, and does not
+need to be, its own category here: the pool-rotation remedy on this subprocess
+path is already correct and unchanged. The in-session `/loom:sweep`
+orchestrator has its own reactive text match for this phrase (`sweep.md` →
+"Spend-limit fallback") because, like credit exhaustion, it has no subprocess
+to run this classifier through — but unlike credit exhaustion, its first-line
+remedy is re-dispatching with the `model` param omitted (inheriting the
+session default), not a cost-ladder walk, because a spend cap's scope
+(account-wide vs. per-tier) is not knowable from the signature alone.
+
 ## Worktree handling
 
 When invoked from a worktree, `spawn-claude.sh` resolves the canonical repo root

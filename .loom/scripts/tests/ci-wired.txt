@@ -33,9 +33,11 @@ test-bounded-run.sh
 test-build-gate-timeout.sh
 test-build-rs-watchset.sh
 test-build-slot.sh
+test-cargo-test-daemon-guard.sh
 test-champion-ci-checks-no-checks-signal.sh
 test-champion-critical-file-check.sh
 test-check-ci-status.sh
+test-check-config-no-host-paths.sh
 test-check-duplicate.sh
 test-check-conflict-markers.sh
 test-check-git-identity.sh
@@ -124,12 +126,14 @@ test-merge-pr-unstable-fallback.sh
 test-merge-pr-worktree-awk.sh
 test-merge-pr-worktree-path.sh
 test-merge-pr-worktree-remove-diagnosis.sh
+test-nextest-daemon-guard.sh
 test-operator-only-subkind.sh
 test-pr-worktree-isolation.sh
 test-probe-tokens-fallback.sh
 test-provision-codex-hooks.sh
 test-provision-hooks.sh
 test-provision-skills.sh
+test-random-file.sh
 test-rebase-stacked-children.sh
 test-recover-orphaned-shepherds-diagnostics.sh
 test-reconcile-stack.sh

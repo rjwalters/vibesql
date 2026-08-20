@@ -88,6 +88,12 @@
 #         immediately rather than waiting for the watched PID to die. A
 #         stood-down dispatcher must not keep a live-looking lease on work it
 #         is not doing.
+#     A genuinely FAILING renewal cycle (any `renew-once` exit other than 0,
+#     2 "no lease comment", or 4 the own-yield guard -- e.g. a `gh api` 403
+#     with an exhausted escalation ladder, Issue #6541) is logged with one
+#     line identifying the issue and the exit code, so a failure is visible
+#     instead of vanishing for the sweep's entire lease lifetime; the loop
+#     itself still does not stop for it (same best-effort contract as before).
 #     If --host/--sweep-id are NOT given explicitly, `start` first tries to
 #     resolve them itself -- `--sweep-id` from `$LOOM_TERMINAL_ID` (set by
 #     `loom-daemon` to `daemon-<sweep-id>` for every child it spawns, Issue
@@ -167,6 +173,15 @@ DEFAULT_INTERVAL_SECS="${SWEEP_LEASE_RENEW_INTERVAL_SECS:-300}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+
+# forge_gh_perm_safe (Issue #6541): escalation-ladder-aware `gh` wrapper --
+# retries a GitHub App-installation permission-scope 403 ("not accessible by
+# integration") with a freshly minted installation token, then a personal
+# token, before giving up. Both `gh api` call sites in cmd_renew_once() below
+# route through it so a mid-lease-lifetime 403 escalates and recovers instead
+# of failing closed for the sweep's entire lease lifetime.
+# shellcheck source=./lib/forge-helpers.sh
+source "$SCRIPT_DIR/lib/forge-helpers.sh"
 
 usage() {
     awk 'NR < 3 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
@@ -373,9 +388,17 @@ cmd_renew_once() {
         exit 1
     fi
 
+    # Routed through forge_gh_perm_safe (Issue #6541) so a GitHub
+    # App-installation permission-scope 403 escalates through a fresh
+    # installation-token mint, then a personal token, instead of failing this
+    # (and every subsequent) renewal cycle silently. stdout/stderr are kept
+    # separate here (unlike a plain `2>&1` capture) -- forge_gh_perm_safe
+    # writes its own escalation-ladder diagnostics to stderr even on an
+    # eventual SUCCESS, and merging those into $comments_json would corrupt
+    # the JSON this function is about to parse.
     local comments_json
-    if ! comments_json="$(gh api "${repo_args[@]}" "repos/{owner}/{repo}/issues/${issue}/comments" --paginate 2>&1)"; then
-        echo "ERROR: 'gh api .../issues/${issue}/comments --paginate' failed: $comments_json" >&2
+    if ! comments_json="$(forge_gh_perm_safe api "${repo_args[@]}" "repos/{owner}/{repo}/issues/${issue}/comments" --paginate)"; then
+        echo "ERROR: 'gh api .../issues/${issue}/comments --paginate' failed (escalation ladder exhausted)" >&2
         exit 1
     fi
 
@@ -435,12 +458,26 @@ cmd_renew_once() {
     new_body="$(printf '%s\n\n%sat=%s by=sweep-lease-renew.sh (#6180) -->\n' \
         "$stripped_body" "$RENEWED_MARKER_PREFIX" "$now_iso")"
 
-    if ! printf '%s' "$new_body" \
-        | gh api "${repo_args[@]}" --method PATCH "repos/{owner}/{repo}/issues/comments/${candidate_id}" -F body=@- \
+    # Routed through forge_gh_perm_safe (Issue #6541), same rationale as the
+    # comments-list read above. The renewed body is written to a temp file
+    # and referenced via `-F body=@<path>` rather than piped through stdin
+    # (`-F body=@-`, the pre-#6541 shape): forge_gh_perm_safe's escalation
+    # ladder can re-run this `gh api` call up to three times (ambient, fresh
+    # App token, personal token), and a stdin pipe is only readable ONCE --
+    # a retry after the first rung's 403 would see empty stdin and PATCH the
+    # lease comment's body to empty. A file survives every rung. `-F` (not
+    # `-f`) is still required to expand the `@<path>` reference (#6357).
+    local patch_body_file
+    patch_body_file="$(mktemp)"
+    printf '%s' "$new_body" > "$patch_body_file"
+    if ! forge_gh_perm_safe api "${repo_args[@]}" --method PATCH "repos/{owner}/{repo}/issues/comments/${candidate_id}" \
+        -F "body=@${patch_body_file}" \
         > /dev/null; then
+        rm -f "$patch_body_file"
         echo "ERROR: PATCH of lease comment ${candidate_id} on issue #${issue} failed" >&2
         exit 1
     fi
+    rm -f "$patch_body_file"
 
     echo "renewed lease comment ${candidate_id} for issue #${issue} at ${now_iso}" >&2
 }
@@ -527,13 +564,30 @@ cmd_start() {
     [[ -n "$host" ]] && extra_args+=(--host "$host")
     [[ -n "$sweep_id" ]] && extra_args+=(--sweep-id "$sweep_id")
 
+    # Save the ORIGINAL stderr (Issue #6541) on a private fd BEFORE the
+    # detach redirect below sends the loop's own stdout/stderr to /dev/null.
+    # `exec 9>&2` duplicates whatever fd 2 already resolved to at the moment
+    # `start` was invoked (a sweep's own log file, a terminal, or /dev/null
+    # if the caller redirected it there itself) onto fd 9. The background
+    # subshell inherits that duplicate untouched by its own `2>&1` -- so a
+    # renewal failure can still be logged even though the loop's ordinary
+    # I/O is unconditionally discarded for detachment. Without this, a
+    # gh 403 (or any other failure) vanished with zero trace until a
+    # downstream lease-fence check caught it, for the entire lease lifetime.
+    exec 9>&2
+
     # Detached loop: sleeps first (dispatch already wrote a fresh lease right
     # before spawning this sweep, so the first renewal isn't due for a full
-    # interval), then renews, then re-checks watch-PID liveness. Failures
-    # from a single renew-once call are swallowed (`|| true`) -- exactly the
-    # same best-effort contract #6179's write-on-dispatch path uses; a
-    # transient `gh` hiccup must never kill the loop or the sweep. The ONE
-    # exception (Issue #6485): exit 4 from renew-once means this dispatcher's
+    # interval), then renews, then re-checks watch-PID liveness. An ordinary
+    # transient failure from a single renew-once call does not kill the loop
+    # or the sweep (`|| renew_rc=$?` catches it under `set -e`) -- exactly
+    # the same best-effort contract #6179's write-on-dispatch path uses --
+    # but (Issue #6541) it now ALSO logs one line to the saved fd 9 so the
+    # failure is visible instead of silently discarded. Exit 2 ("no matching
+    # lease comment" -- the normal, expected outcome for any sweep with no
+    # daemon-written lease at all) and exit 4 (the own-yield guard below) are
+    # NOT failures and are not logged as such. The ONE exception to the
+    # swallow (Issue #6485): exit 4 from renew-once means this dispatcher's
     # own lease target has itself posted a `loom:lease-yield` standdown
     # record -- the loop stops renewing immediately rather than waiting for
     # the watched PID to die, since renewing further would only keep a
@@ -543,13 +597,17 @@ cmd_start() {
             sleep "$interval"
             pid_is_live "$watch_pid" || break
             renew_rc=0
-            "$SELF" renew-once "$issue" "${extra_args[@]}" > /dev/null 2>&1 || renew_rc=$?
+            renew_err="$("$SELF" renew-once "$issue" "${extra_args[@]}" 2>&1 > /dev/null)" || renew_rc=$?
+            if [[ "$renew_rc" -ne 0 && "$renew_rc" -ne 2 && "$renew_rc" -ne 4 ]]; then
+                echo "sweep-lease-renew: renewal cycle for issue #${issue} FAILED (renew-once exit ${renew_rc}): ${renew_err}" >&9
+            fi
             if [[ "$renew_rc" -eq 4 ]]; then
                 break
             fi
         done
     ) < /dev/null > /dev/null 2>&1 &
     local loop_pid=$!
+    exec 9>&-
     disown "$loop_pid" 2> /dev/null || true
     echo "$loop_pid"
 }

@@ -2768,7 +2768,7 @@ parse_force_ops() {
 # false-NEGATIVE direction out of this issue's scope) — only a `cd <dir>`
 # prefix is.
 resolve_stash_cwd() {
-    printf '%s' "$1" | awk -v startcwd="$2" -v home="$HOME" "$_QSPLIT_AWK""$_CDEXPAND_AWK""$_CDQUOTE_AWK"'
+    printf '%s' "$1" | awk -v startcwd="$2" -v home="$HOME" "$_QSPLIT_AWK""$_CDEXPAND_AWK""$_CDQUOTE_AWK""$_MASKWS_AWK"'
     BEGIN { curcwd = startcwd; found = 0 }
     {
         $0 = qsplit($0)   # quote-aware segmentation (#3755)
@@ -2779,8 +2779,22 @@ resolve_stash_cwd() {
             sub(/^sudo[ \t]+/, "", seg)
             sub(/^[ \t]+/, "", seg)
             if (seg == "") continue
-            m = split(seg, toks, /[ \t]+/)
+            # Quote-aware whitespace masking (#6552, same technique as
+            # extract_write_targets()'"'"'s #4934/mask_ws() fix): mask a
+            # space/tab INSIDE a quoted span with a non-whitespace
+            # placeholder before the plain `/[ \t]+/` split runs, so a
+            # quoted `cd` argument containing a literal space (e.g. `cd
+            # "/Users/me/Real Estate CRM/wt"`) yields exactly ONE token
+            # instead of truncating at the first embedded space and being
+            # misclassified as relative (which fed a bogus cwd join and a
+            # spurious cd-unresolved ask). unmask_ws() restores the real
+            # whitespace bytes afterward, so toks[] still carries the RAW,
+            # quote-intact text -- preserving the #5372 contract that
+            # curcwd is built from the raw cdarg, not an early-unquoted copy.
+            wseg = mask_ws(seg)
+            m = split(wseg, toks, /[ \t]+/)
             if (m == 0) continue
+            for (j = 1; j <= m; j++) toks[j] = unmask_ws(toks[j])
             # Thread a `cd <dir>` prefix through LATER segments of this same
             # compound command (mirrors parse_force_ops above). Classification
             # uses strip_cd_quoting() (#5363/#5372) so a fully or partially
@@ -4498,6 +4512,112 @@ extract_rm_targets() {
 }
 
 # =============================================================================
+# rm-scope SAME-COMMAND mktemp RESOLUTION (#6520)
+#
+# The `rm-scope-unresolved-var` deny (below) fails closed on ANY expandable
+# `$` in an rm target, including the extremely common scratch-dir idiom
+#   tmpdir=$(mktemp -d) && ... && rm -rf "$tmpdir"
+# whose value is, in fact, provably rooted under /tmp (or $TMPDIR) — mktemp's
+# own contract with no output-redirecting flags. This is a NEW resolution
+# step, deliberately NOT built on resolve_var()/record_assign() (#4881,
+# #6152): that pair only ever substitutes the LITERAL text following `=`
+# (after quote-stripping), so a command-substitution RHS like `$(mktemp -d)`
+# would still start with `$` and stay unresolved even if this path called it.
+#
+# rm_scope_mktemp_same_command_safe() returns success (0) ONLY when:
+#   1. The rm target, after stripping at most one layer of surrounding quotes,
+#      is a BARE `$NAME` or `${NAME}` reference — nothing else in the token
+#      (a suffix like `$NAME/sub` is deliberately excluded; fail closed).
+#   2. Scanning every ;/&/&&/||-separated segment of the SAME command text
+#      for a `NAME=...` assignment whose entire segment is EXACTLY
+#      `NAME=$(mktemp -d)` or `NAME=$(mktemp)` (optionally the same forms
+#      double-quoted) — the plain, default-temp-root-rooted invocations only.
+#      A custom template/prefix (`mktemp -d /other/dir/XXXXXX`,
+#      `mktemp --tmpdir=/other/dir`, …) never matches this exact-string test,
+#      so it is excluded from the fast path and falls through to today's
+#      fail-closed deny (routine complexity: prefer excluding an unusual
+#      mktemp shape over guessing its output root, #6520).
+#   3. Exactly ONE assignment to NAME exists anywhere in the command, and it
+#      is the safe form above. TWO OR MORE assignments to NAME — even a
+#      second, differently-shaped one appearing AFTER the safe mktemp
+#      assignment — poison the resolution and fail closed: the guard cannot
+#      tell which assignment's value the shell will see at the `rm` word, so
+#      ambiguity must never resolve to an allow.
+#
+# On success, the caller treats the target as a proven /tmp-or-$TMPDIR-rooted
+# path and skips BOTH the unresolved-var deny AND the string-prefix scope
+# check below it — the raw `$CWD/$target` concatenation used by that check
+# still contains the literal, un-substituted `$NAME` text (this is a
+# tokenizer, not a shell evaluator) and cannot be trusted for anything beyond
+# the narrow proof made here.
+#
+# DECOY-HEREDOC BYPASS (#6549): the awk body below processes its `cmdtext`
+# argument one PHYSICAL LINE at a time with no heredoc-body awareness of its
+# own, so passing it the raw (heredoc-unmasked) command text let an attacker
+# set the REAL value of `NAME` via a shape this scan's exact `NAME=` prefix
+# match never sees (e.g. `export NAME=$(malicious_command)`), issue a live
+# `rm -rf "$NAME"`, then plant an inert, never-executed decoy
+# `NAME=$(mktemp -d)` line inside a heredoc body later in the same command
+# purely to make `total == 1 && safe == 1` come out true. The caller
+# (rm-scope SCOPE CHECK, below) now passes a heredoc-body-masked working
+# copy — see its own `COMMAND_RM_MKTEMP_SCAN` comment for why it masks
+# unconditionally (every heredoc shape, including an interpreter-fed one)
+# rather than reusing `COMMAND_ASK_SCAN`'s narrower, interpreter-aware
+# masking.
+# =============================================================================
+_rm_scope_bare_var_name() {
+    local tok="$1" t c1 c2
+    t="$tok"
+    if [[ ${#t} -ge 2 ]]; then
+        c1="${t:0:1}"
+        c2="${t: -1}"
+        if [[ ("$c1" == '"' && "$c2" == '"') || ("$c1" == "'" && "$c2" == "'") ]]; then
+            t="${t:1:${#t}-2}"
+        fi
+    fi
+    if [[ "$t" =~ ^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    if [[ "$t" =~ ^\$([A-Za-z_][A-Za-z0-9_]*)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    return 1
+}
+
+rm_scope_mktemp_same_command_safe() {
+    local target="$1" cmdtext="$2" varname verdict
+    varname=$(_rm_scope_bare_var_name "$target") || return 1
+    [[ -n "$varname" ]] || return 1
+    verdict=$(printf '%s' "$cmdtext" | awk -v varname="$varname" "$_QSPLIT_AWK"'
+    {
+        $0 = qsplit($0)
+        n = split($0, segs, "\n")
+        for (i = 1; i <= n; i++) {
+            seg = segs[i]
+            sub(/^[ \t]+/, "", seg)
+            sub(/[ \t]+$/, "", seg)
+            prefix = varname "="
+            plen = length(prefix)
+            if (length(seg) > plen && substr(seg, 1, plen) == prefix) {
+                rhs = substr(seg, plen + 1)
+                total++
+                if (rhs == "$(mktemp -d)" || rhs == "$(mktemp)" || \
+                    rhs == "\"$(mktemp -d)\"" || rhs == "\"$(mktemp)\"") {
+                    safe++
+                }
+            }
+        }
+    }
+    END {
+        if (total == 1 && safe == 1) print "SAFE"
+        else print "UNSAFE"
+    }')
+    [[ "$verdict" == "SAFE" ]]
+}
+
+# =============================================================================
 # extract_write_targets() — Bash-tool write-idiom target extraction (#4178).
 #
 # Emits one "<cwd>\t<target>" line (TAB-separated, US separator 0x1f — mirrors
@@ -5236,26 +5356,51 @@ expand_leading_tilde() {
     esac
 }
 
-# SCANS COMMAND_NO_LITERAL_TEXT, NOT RAW $COMMAND (#5216). extract_rm_targets()
-# segments with qsplit(), which — like every quote-tracking scan in this file —
-# is driven one PHYSICAL LINE at a time and has no memory of a `"` opened on an
-# earlier line. So a heredoc BODY line inside `--body "$(cat <<'EOF' … EOF)"`
-# was segmented as if it were live shell: the prose
-# `Example payload: \`owner/name; rm -rf /\`` split on its `;` into a segment
-# whose command word is `rm`, manufacturing the target ``/` `` and hard-denying a
-# Judge comment that deletes nothing (observed on PR #4357). Same failure family
-# as #5000's phantom write targets, and the reason fixing only the
-# ALWAYS_BLOCK_PATTERNS scan above leaves the reported command still denied.
-# The literal-redacted copy blanks exactly the quoted flag-value text (including
-# #5216's provably-inert `$(cat <<QDELIMQ … )` heredoc bodies) and nothing else,
-# so a REAL `rm -rf /` — bare, sudo-prefixed, after a `&&`, or smuggled through
-# `bash -c '…'` / `-m "$(rm -rf /)"` (neither of which is ever redacted) — still
-# reaches this check unchanged.
+# SCANS COMMAND_ASK_SCAN, NOT COMMAND_NO_LITERAL_TEXT (#5216, widened #6519).
+# extract_rm_targets() segments with qsplit(), which — like every
+# quote-tracking scan in this file — is driven one PHYSICAL LINE at a time and
+# has no memory of a `"` opened on an earlier line. So a heredoc BODY line
+# inside `--body "$(cat <<'EOF' … EOF)"` was segmented as if it were live
+# shell: the prose `Example payload: \`owner/name; rm -rf /\`` split on its
+# `;` into a segment whose command word is `rm`, manufacturing the target
+# ``/` `` and hard-denying a Judge comment that deletes nothing (observed on
+# PR #4357). Same failure family as #5000's phantom write targets.
+#
+# #5216 closed that ONE shape (a `<flag> "$(cat <<'EOF' … EOF)"` value
+# directly following a text-carrying flag) by scanning COMMAND_NO_LITERAL_TEXT
+# — narrow on purpose at the time, mirroring the catastrophic
+# ALWAYS_BLOCK_PATTERNS scan's own copy. But it left a SIBLING shape open
+# (#6519): `cat <<'EOF' > /tmp/x.md … EOF` writing an inert example to a file,
+# referenced LATER via `--body-file /tmp/x.md` (or any other non-substitution
+# consumer) — no flag ever sits directly before the heredoc opener, so neither
+# strip_literal_text() nor its mask_flag_cat_heredocs() helper ever sees it,
+# and a heredoc body line whose own first word happens to be `rm` (e.g. a
+# standalone "rm -rf /opt/vendor/important" example line in acceptance-
+# criteria prose) still manufactured a phantom local `rm` segment and
+# hard-denied a write that deletes nothing (reproduced against rjwalters/
+# anvil#1073's shape). This is the exact same failure family
+# parse_force_ops()/lifecycle_or_cloud_reason() already fixed by reading
+# COMMAND_ASK_SCAN (comment-stripped AND heredoc-body-masked via
+# mask_heredoc_bodies_selective()/mask_unquoted_cat_heredoc_bodies(), gated
+# only on heredoc/flag PRESENCE, not on a specific flag+substitution shape) —
+# extract_rm_targets() now matches that established pattern instead of
+# growing its own narrower one. mask_heredoc_bodies_selective() masks ONLY a
+# CLOSED, quoted-delimiter heredoc BODY and deliberately leaves an
+# INTERPRETER-fed heredoc (`bash <<EOF`, `sh -s <<EOF`, `cat <<EOF | sh`, …)
+# and everything OUTSIDE the heredoc untouched, so a REAL `rm -rf /` — bare,
+# sudo-prefixed, after a `&&`, chained after a heredoc closes, inside an
+# interpreter-fed heredoc, or smuggled through `bash -c '…'` / `-m "$(rm -rf
+# /)"` — still reaches this check unchanged; only inert, provably-non-executing
+# heredoc-body prose is newly excluded. Both `rm-protected-path` (unconditional)
+# and `rm-scope-outside-repo` (guards.rmScope-gated) consume the same
+# RM_TARGETS list built below, so this widening applies to both — matching
+# lifecycle_or_cloud_reason()'s precedent of an unconditional deny already
+# reading COMMAND_ASK_SCAN for the identical reason.
 #
 # Cheap pre-check keeps awk off the hot path for the ~99% of commands that have
 # no recursive/force rm at all.
-if echo "$COMMAND_NO_LITERAL_TEXT" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]'; then
-    RM_TARGETS=$(extract_rm_targets "$COMMAND_NO_LITERAL_TEXT" | head -20)
+if echo "$COMMAND_ASK_SCAN" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]'; then
+    RM_TARGETS=$(extract_rm_targets "$COMMAND_ASK_SCAN" | head -20)
 
     for target in $RM_TARGETS; do
         # Skip empty targets
@@ -5342,6 +5487,48 @@ if echo "$COMMAND_NO_LITERAL_TEXT" | grep -qE 'rm[[:space:]]+-[a-zA-Z]*[rf]'; th
                 mark_expandable_dollars "$target"
                 _rm_marked="$_MARKED_TOKEN"
                 if [[ "$_rm_marked" == $'\001'* || "$_rm_marked" == /$'\001'* ]]; then
+                    # Narrow escape hatch (#6520): a same-command
+                    # `NAME=$(mktemp -d)`/`NAME=$(mktemp)` assignment proves
+                    # this variable is /tmp-or-$TMPDIR-rooted, even though the
+                    # raw token is unexpanded. See
+                    # rm_scope_mktemp_same_command_safe()'s own doc comment
+                    # (above extract_rm_targets()) for the exact, deliberately
+                    # narrow conditions. On success this target is fully
+                    # vetted — skip the string-prefix scope check below too,
+                    # since $ABS_PATH still holds the un-substituted literal
+                    # `$NAME` text and cannot be trusted for anything else.
+                    #
+                    # HEREDOC-BODY-MASKED SCAN (#6549): scans
+                    # $COMMAND_RM_MKTEMP_SCAN (lazily built just below, cached
+                    # across loop iterations), NOT the raw $COMMAND_NO_LITERAL_TEXT
+                    # -- see that variable's own definition for why. Unlike this
+                    # decision's earlier precedent (#6519's extract_rm_targets()
+                    # widening, and COMMAND_ASK_SCAN generally), this dedicated
+                    # copy masks EVERY heredoc body unconditionally, including an
+                    # interpreter-fed one (`bash <<EOF`) and an unquoted-delimiter
+                    # one whose `$(...)` the outer shell does expand while
+                    # building the body: a heredoc body is never itself a
+                    # top-level statement in the CURRENT shell -- it is either
+                    # data handed to the consuming command's stdin, or (for an
+                    # interpreter-fed opener) a script handed to a CHILD process
+                    # -- so no heredoc body line, of any shape, can ever be the
+                    # live assignment this function is trying to prove exists.
+                    # Masking it here can therefore only narrow (turn a
+                    # decoy-inflated ambiguous/false SAFE into the correct
+                    # fail-closed UNSAFE), never widen: a real, live top-level
+                    # `NAME=$(mktemp -d)` sitting outside every heredoc in the
+                    # same command is completely unaffected.
+                    if [[ -z "${COMMAND_RM_MKTEMP_SCAN+x}" ]]; then
+                        COMMAND_RM_MKTEMP_SCAN="$COMMAND_NO_LITERAL_TEXT"
+                        if [[ "$COMMAND_RM_MKTEMP_SCAN" == *"<<"* ]]; then
+                            COMMAND_RM_MKTEMP_SCAN=$(printf '%s' "$COMMAND_RM_MKTEMP_SCAN" | awk "$_MASKHEREDOC_AWK"'
+                            { buf = buf (NR > 1 ? "\n" : "") $0 }
+                            END { printf "%s", mask_heredoc_bodies(buf) }')
+                        fi
+                    fi
+                    if rm_scope_mktemp_same_command_safe "$target" "$COMMAND_RM_MKTEMP_SCAN"; then
+                        continue
+                    fi
                     deny "BLOCKED: rm target '${target}' is an unexpanded shell variable from the path root down, so this guard cannot tell where it resolves at runtime (guards.rmScope=repo). Unresolvable rm targets fail closed (mirrors rjwalters/repo#244, fixing #239). Use an explicit literal path." "rm-scope-unresolved-var"
                 fi
 

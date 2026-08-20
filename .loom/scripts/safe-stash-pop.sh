@@ -125,10 +125,16 @@ say_ok() { [[ "$QUIET" == true ]] || echo -e "${GREEN}OK${NC}: $*" >&2; }
 # $1 = result keyword, $2 = exit code.
 emit_json() {
     [[ "$EMIT_JSON" == true ]] || return 0
-    local files_json="" f
+    local files_json="" f f_escaped
     while IFS= read -r f; do
         [[ -n "$f" ]] || continue
-        files_json+="${files_json:+,}\"${f//\"/\\\"}\""
+        # Escape backslash FIRST, then quote — otherwise a quote-escape's own
+        # backslash would itself need escaping. This matters for any literal
+        # `\` in a path, and for core.quotepath's C-quoted (`\NNN`-octal)
+        # rendering of non-ASCII/control-char paths reaching here.
+        f_escaped="${f//\\/\\\\}"
+        f_escaped="${f_escaped//\"/\\\"}"
+        files_json+="${files_json:+,}\"${f_escaped}\""
     done <<< "$CONFLICT_FILES"
     printf '{"event":"safe-stash-pop","result":"%s","repo":"%s","stashRef":"%s","stashSha":"%s","popStatus":%s,"conflictFiles":[%s],"snapshotRef":"%s","exitCode":%s}\n' \
         "$1" "$REPO" "$STASH_REF" "$STASH_SHA" "${POP_STATUS:-null}" "$files_json" "$SNAPSHOT_REF" "$2"
@@ -266,27 +272,50 @@ content_is_preexisting_blob() {
 # this pop actually produced. Scans everything differing from HEAD (staged or
 # unstaged, including staged adds) plus every unmerged path.
 scan_new_marker_files() {
-    local candidates path seen=""
-    candidates="$(
-        {
-            git -C "$REPO" diff --name-only HEAD 2>/dev/null
-            git -C "$REPO" diff --name-only --diff-filter=U 2>/dev/null
-        } | sort -u
-    )"
-    while IFS= read -r path; do
+    local path
+    local -a seen=()
+    local already s
+    # `-z`, read via NUL-delimited `read -r -d ''`, NOT `-c core.quotepath=false`:
+    # quotepath only suppresses quoting of non-ASCII/control-byte paths — git
+    # ALWAYS C-quotes a path containing a literal `\` or `"` regardless of that
+    # setting, so quotepath alone still fails the `[[ -f "$REPO/$path" ]]` test
+    # below for such names. `-z` disables quoting unconditionally and emits the
+    # verbatim path, which handles non-ASCII, control chars, `"`, AND `\` in one
+    # move (also incidentally embedded-newline-safe) — see #6517.
+    while IFS= read -r -d '' path; do
         [[ -n "$path" ]] || continue
-        case "$seen" in *"|$path|"*) continue ;; esac
-        seen+="|$path|"
+        already=false
+        for s in "${seen[@]:-}"; do
+            [[ "$s" == "$path" ]] && { already=true; break; }
+        done
+        [[ "$already" == true ]] && continue
+        seen+=("$path")
         [[ -f "$REPO/$path" ]] || continue
         file_has_markers "$REPO/$path" || continue
         content_is_preexisting_blob "$path" && continue
         printf '%s\n' "$path"
-    done <<< "$candidates"
+    done < <(
+        {
+            git -C "$REPO" diff --name-only -z HEAD 2>/dev/null
+            git -C "$REPO" diff --name-only -z --diff-filter=U 2>/dev/null
+        }
+    )
 }
 
 # --- pre-pop snapshot --------------------------------------------------------
 DIRTY_PRE="$(git -C "$REPO" status --porcelain --untracked-files=no 2>/dev/null)"
-UNTRACKED_PRE="$(git -C "$REPO" ls-files --others --exclude-standard 2>/dev/null)"
+# NUL-delimited (`-z` + `read -r -d ''`), not a newline-joined string: this is
+# compared byte-for-byte against the untracked-payload tree below (also `-z`)
+# to decide whether a path pre-dates the pop. A quoted/unquoted mismatch
+# between the two sides would make a pre-existing non-ASCII/`\`/`"`-containing
+# untracked path fail to match and be misidentified as "new" (i.e. part of the
+# stash payload) — which would make the cleanup loop delete an operator's own
+# untracked file (#6517). Collecting into an array (rather than grep -qxF on a
+# newline-joined string) also sidesteps any embedded-newline path.
+UNTRACKED_PRE_ARR=()
+while IFS= read -r -d '' _pre; do
+    [[ -n "$_pre" ]] && UNTRACKED_PRE_ARR+=("$_pre")
+done < <(git -C "$REPO" ls-files --others --exclude-standard -z 2>/dev/null)
 
 if [[ "$DRY_RUN" == true ]]; then
     say_ok "Dry run: would pop ${BOLD}$STASH_REF${NC} ($STASH_SHA) in $REPO"
@@ -424,13 +453,17 @@ fi
 # the only line in the script that removes a file; it stays maximally narrow.
 STASH_UNTRACKED_TREE="$(git -C "$REPO" rev-parse --verify --quiet "${STASH_SHA}^3" 2>/dev/null)" || STASH_UNTRACKED_TREE=""
 if [[ -n "$STASH_UNTRACKED_TREE" ]]; then
-    while IFS= read -r _u; do
+    while IFS= read -r -d '' _u; do
         [[ -n "$_u" ]] || continue
-        printf '%s\n' "$UNTRACKED_PRE" | grep -qxF "$_u" && continue
+        _u_pre_existing=false
+        for _pre in "${UNTRACKED_PRE_ARR[@]:-}"; do
+            [[ "$_pre" == "$_u" ]] && { _u_pre_existing=true; break; }
+        done
+        [[ "$_u_pre_existing" == true ]] && continue
         git -C "$REPO" cat-file -e "HEAD:$_u" 2>/dev/null && continue
         [[ -f "$REPO/$_u" ]] || continue
         rm -f "$REPO/$_u" 2>/dev/null || true
-    done < <(git -C "$REPO" ls-tree -r --name-only "$STASH_UNTRACKED_TREE" 2>/dev/null)
+    done < <(git -C "$REPO" ls-tree -r -z --name-only "$STASH_UNTRACKED_TREE" 2>/dev/null)
 fi
 
 # Verify the rollback actually landed: no unmerged entries, no leftover

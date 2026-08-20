@@ -257,6 +257,7 @@ Local verification:
 - [ ] Relevant tests pass
 - [ ] Each criterion has explicit verification (not "I think it works")
 - [ ] If this diff touches anything under `defaults/`, either `scripts/version.sh` was run to bump `VERSION` (and its five synced files), or the PR body/a commit message includes `<!-- loom:no-surface-change -->` (see `defaults/scripts/check-defaults-version-bump.sh` for the exact rule)
+- [ ] If this diff touched **any** version-bearing file for **any** reason — not only a `defaults/`-triggered bump, and whether you ran `scripts/version.sh bump`/`set` or hand-edited a file directly — run `./scripts/version.sh check` yourself and confirm it prints "All versions in sync" before opening the PR. `scripts/version.sh bump`/`set` now self-verify and fail loudly on a partial update (#6536), but that only covers runs made *through* the script; a hand-edit of one file (e.g. reverting just `Cargo.lock`) bypasses that gate entirely, and this is the exact failure mode that has repeatedly reached CI as "Installer Integration Tests" Test 63 (`'version.sh check' regressed`) instead of being caught locally
 ```
 
 ### Step 4: Document Verification in PR Description
