@@ -216,6 +216,8 @@ See [Benchmarking Guide](docs/development/BENCHMARKING.md) for details on parame
 
 ## Development
 
+New to the repo? Run `./install.sh` to install all macOS dev-environment prerequisites (Rust, wasm-pack, maturin, pnpm, etc. — see `./install.sh --check` to preview what's missing) before `make all`.
+
 ```bash
 # Full build + test (foreground by default)
 make all            # Build, test, and run TCL tests (foreground)
@@ -229,6 +231,8 @@ make test           # Run all tests (unit + integration + sqllogictest)
 make benchmark      # Run TPC-H/TPC-C/TPC-DS/Sysbench benchmarks
 make help           # Show all targets
 ```
+
+This repo also uses [Loom](https://github.com/rjwalters/loom) for AI-powered development orchestration; `./loom.sh` is a convenience wrapper to start the Loom daemon from the repository root (see `./loom.sh --help`).
 
 ## Documentation
 

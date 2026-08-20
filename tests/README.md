@@ -104,7 +104,7 @@ Tests are organized into feature-based subdirectories that mirror the crate stru
 ### Support and Miscellaneous
 
 - **`common/`** - Shared fixtures and helpers used across test files
-- **`select5_samples/`** - Minimal table extracts for select5 debugging
+- **`select5_samples/`** - Minimal table extracts for select5 debugging; regenerate `select5_minimal.test` with `select5_samples/extract_minimal_tables.sh` (one-shot fixture generator, run from the repo root)
 
 ## Running Tests
 

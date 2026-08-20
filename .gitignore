@@ -25,7 +25,6 @@ conformance_test_output.log
 validation_run.log
 *.dSYM/
 tf_*.tcl
-test.db
 test*.db
 testdb
 # WAL-mode durability siblings left behind by TCL test runs (#5843):
@@ -73,12 +72,17 @@ htmlcov/
 
 # Node.js
 node_modules/
+*.tsbuildinfo
+coverage/
+logs/
+# Lock files - only pnpm-lock.yaml should be committed for packages/ (workspace root has no lockfile of its own)
+package-lock.json
+yarn.lock
 
 # Benchmark results
 benchmark_results.json
 !web-demo/public/benchmarks/benchmark_results.json
 conformance-report.html
-target/benchmarks/
 benchmarks.db
 benchmarks/suite/results/
 
@@ -108,7 +112,6 @@ profile-*.json.gz
 # Secrets — never commit
 .env
 .env.*
-!.env.example
 
 tcl-baseline-*/
 
