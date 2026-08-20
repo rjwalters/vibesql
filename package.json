@@ -2,6 +2,7 @@
   "name": "nistmemsql",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.22.0",
   "description": "SQL Conformance Testing Database - pnpm helper scripts for Cargo commands",
   "scripts": {
     "check:all": "cargo fmt -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --all && cargo build --all",
