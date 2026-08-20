@@ -343,8 +343,7 @@ All benchmark results are automatically stored in SQLite databases for analysis 
 # SQLite database with all benchmark results
 target/benchmarks.db
 
-# Schema files
-scripts/benchmark_results_schema.sql
+# Schema file
 scripts/benchmark_results_schema_vibesql.sql
 ```
 

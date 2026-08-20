@@ -37,6 +37,10 @@ out.db
 out.wal
 out.lock
 out-checkpoints/
+# Generic WAL siblings for any .vbsql database opened ad hoc (name-scoped
+# rules above only cover test*/out* prefixes; no tracked file matches these)
+*.wal
+*-checkpoints/
 *.db.tmp*
 .*.tmp*
 

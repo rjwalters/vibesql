@@ -233,9 +233,9 @@ Once published, crates can be used by adding to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vibesql = "0.1"
-vibesql-types = "0.1"
-vibesql-parser = "0.1"
+vibesql-types = "0.2"
+vibesql-parser = "0.2"
+vibesql-executor = "0.2"
 # etc.
 ```
 
