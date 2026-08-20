@@ -247,7 +247,8 @@ impl Database {
         };
 
         // Schemas (excluding default and temp schemas which are auto-created)
-        // Skip all temp schemas (temp_1, temp_2, etc.) - they are session-scoped
+        // Skip all temp schemas (temp_1, temp_2, etc.) and attached schemas
+        // (#6310) - they are session-scoped
         let schemas = self
             .catalog
             .list_schemas()
@@ -255,6 +256,7 @@ impl Database {
             .filter(|name| {
                 name != vibesql_catalog::DEFAULT_SCHEMA
                     && !vibesql_catalog::Catalog::is_temp_schema(name)
+                    && !self.catalog.is_attached_schema(name)
             })
             .map(|name| JsonSchema { name })
             .collect();
@@ -285,6 +287,15 @@ impl Database {
                 !lower_name.starts_with("pk_")
                     && !lower_name.starts_with("sqlite_autoindex_")
                     && !lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            })
+            // Skip indexes on tables in ATTACHed schemas — session-scoped
+            // (#6310). Filter on `metadata.schema` (the owning schema resolved
+            // at CREATE INDEX time): an unqualified `CREATE INDEX i1 ON t(z)`
+            // that resolves to an attached table stores the bare `"t"` as
+            // table_name, so only the schema tag identifies it reliably.
+            .filter(|index_name| {
+                self.get_index(index_name)
+                    .is_none_or(|metadata| !self.catalog.is_attached_schema(&metadata.schema))
             })
             .filter_map(|index_name| {
                 self.get_index(&index_name).map(|metadata| JsonIndex {

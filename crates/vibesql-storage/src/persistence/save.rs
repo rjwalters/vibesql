@@ -108,6 +108,8 @@ impl Database {
             // Skip default schema and all temp schemas (temp_1, temp_2, etc.)
             if schema_name != vibesql_catalog::DEFAULT_SCHEMA
                 && !vibesql_catalog::Catalog::is_temp_schema(schema_name)
+                // Attached schemas are session-scoped (#6310) and never persisted.
+                && !self.catalog.is_attached_schema(schema_name)
             {
                 writeln!(writer, "CREATE SCHEMA {};", schema_name)
                     .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
@@ -134,8 +136,11 @@ impl Database {
         // We must NOT use get_table() which follows shadowing rules - temp tables would
         // incorrectly override main schema tables in the dump.
         for schema_name in &self.catalog.list_schemas() {
-            // Skip all temp schemas (temp_1, temp_2, etc.) - they are session-scoped
-            if vibesql_catalog::Catalog::is_temp_schema(schema_name) {
+            // Skip all temp schemas (temp_1, temp_2, etc.) and attached
+            // schemas (#6310) - they are session-scoped
+            if vibesql_catalog::Catalog::is_temp_schema(schema_name)
+                || self.catalog.is_attached_schema(schema_name)
+            {
                 continue;
             }
 
@@ -430,6 +435,15 @@ impl Database {
                 continue;
             }
             let metadata = self.get_index(&index_name).unwrap();
+            // Skip indexes on tables in attached schemas - session-scoped (#6310).
+            // Filter on `metadata.schema` (the owning schema resolved at CREATE
+            // INDEX time), not a qualifier embedded in `table_name`: an
+            // unqualified `CREATE INDEX i1 ON t(z)` that resolves to an attached
+            // table stores the bare `"t"` as table_name, so a name-prefix check
+            // would leak the index into the dump.
+            if self.catalog.is_attached_schema(&metadata.schema) {
+                continue;
+            }
             write!(writer, "CREATE")
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             if metadata.unique {
@@ -515,8 +529,20 @@ impl Database {
             if let Some(view_def) = self.catalog.get_view(&view_name) {
                 // Skip temp views (`CREATE TEMP VIEW`): they are session-scoped
                 // and must not survive into the next session via the SQL dump
-                // (issue #5940, Cluster A).
-                if view_def.is_temp() {
+                // (issue #5940, Cluster A). Views in attached schemas are
+                // likewise session-scoped (#6310).
+                if view_def.is_temp()
+                    || view_def
+                        .schema
+                        .as_deref()
+                        .is_some_and(|s| self.catalog.is_attached_schema(s))
+                    // The schema may also be embedded in the stored name
+                    // (`CREATE VIEW aux.v1` stores the qualified name).
+                    || view_def
+                        .name
+                        .split_once('.')
+                        .is_some_and(|(s, _)| self.catalog.is_attached_schema(s))
+                {
                     continue;
                 }
                 // Use stored SQL definition if available, otherwise create a minimal definition
@@ -553,8 +579,14 @@ impl Database {
         for trigger_def in self.catalog.iter_triggers() {
             // Skip temp triggers (`CREATE TEMP TRIGGER`): they are
             // session-scoped and must not survive into the next session via
-            // the SQL dump (issue #5940, Cluster A).
-            if trigger_def.is_temp() {
+            // the SQL dump (issue #5940, Cluster A). Triggers in attached
+            // schemas are likewise session-scoped (#6310).
+            if trigger_def.is_temp()
+                || trigger_def
+                    .schema
+                    .as_deref()
+                    .is_some_and(|s| self.catalog.is_attached_schema(s))
+            {
                 continue;
             }
             match trigger_def.sql_definition.as_ref() {

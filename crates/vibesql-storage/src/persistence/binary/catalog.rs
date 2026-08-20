@@ -17,7 +17,10 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         .list_schemas()
         .into_iter()
         .filter(|s| {
-            s != vibesql_catalog::DEFAULT_SCHEMA && !vibesql_catalog::Catalog::is_temp_schema(s)
+            s != vibesql_catalog::DEFAULT_SCHEMA
+                && !vibesql_catalog::Catalog::is_temp_schema(s)
+                // Attached schemas are session-scoped (#6310) and never persisted.
+                && !db.catalog.is_attached_schema(s)
         })
         .collect();
 
@@ -147,7 +150,24 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     }
 
     // Write indexes
-    let index_names = db.list_indexes();
+    //
+    // Indexes on tables in ATTACHed database schemas are session-scoped
+    // (#6310) and are filtered out. Filter on `metadata.schema` — the owning
+    // schema resolved at CREATE INDEX time — NOT on a qualifier embedded in
+    // `metadata.table_name`: an unqualified `CREATE INDEX i1 ON t(z)` that
+    // resolves to an attached table stores the bare `"t"` as table_name, so a
+    // name-prefix check would leak the index into the checkpoint and brick the
+    // main database on reload (the index's table doesn't exist there). The
+    // count and the write loop iterate the same filtered list so they stay in
+    // lockstep.
+    let index_names: Vec<String> = db
+        .list_indexes()
+        .into_iter()
+        .filter(|name| {
+            db.get_index(name)
+                .is_none_or(|metadata| !db.catalog.is_attached_schema(&metadata.schema))
+        })
+        .collect();
     write_u32(writer, index_names.len() as u32)?;
 
     for index_name in index_names {
@@ -245,7 +265,19 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         .catalog
         .list_views()
         .into_iter()
-        .filter(|name| db.catalog.get_view(name).is_some_and(|v| !v.is_temp()))
+        .filter(|name| {
+            // Views in ATTACHed database schemas are session-scoped (#6310),
+            // like temp views. The schema may be carried as a tag or embedded
+            // in the stored (qualified) view name.
+            let name_in_attached_schema = name
+                .split_once('.')
+                .is_some_and(|(schema, _)| db.catalog.is_attached_schema(schema));
+            !name_in_attached_schema
+                && db.catalog.get_view(name).is_some_and(|v| {
+                    !v.is_temp()
+                        && !v.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
+                })
+        })
         .collect();
     write_u32(writer, view_names.len() as u32)?;
 
@@ -311,8 +343,16 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // name-only `get_trigger` could return the temp namesake of a main trigger;
     // collecting definitions keeps every non-temp trigger and keeps the count in
     // lockstep with the write loop below.
-    let triggers: Vec<&vibesql_catalog::TriggerDefinition> =
-        db.catalog.iter_triggers().filter(|t| !t.is_temp()).collect();
+    // Triggers in ATTACHed database schemas are session-scoped (#6310), like
+    // temp triggers.
+    let triggers: Vec<&vibesql_catalog::TriggerDefinition> = db
+        .catalog
+        .iter_triggers()
+        .filter(|t| {
+            !t.is_temp()
+                && !t.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
+        })
+        .collect();
     write_u32(writer, triggers.len() as u32)?;
 
     for trigger in triggers {

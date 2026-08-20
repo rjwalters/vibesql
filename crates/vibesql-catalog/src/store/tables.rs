@@ -238,9 +238,26 @@ impl super::Catalog {
             }
 
             // Then check current schema
-            self.schemas
+            if let Some(table) = self
+                .schemas
                 .get(&self.current_schema)
                 .and_then(|schema| schema.get_table_by_identifier(identifier))
+            {
+                return Some(table);
+            }
+
+            // Finally, check attached databases in attachment order (SQLite
+            // searches temp, then main, then each ATTACHed database).
+            for attached in &self.attached_databases {
+                if let Some(table) = self
+                    .schemas
+                    .get(&attached.name)
+                    .and_then(|schema| schema.get_table_by_identifier(identifier))
+                {
+                    return Some(table);
+                }
+            }
+            None
         }
     }
 
@@ -276,9 +293,22 @@ impl super::Catalog {
             }
 
             // Then check current schema
-            self.schemas.get(&self.current_schema).and_then(|schema| {
+            if let Some(table) = self.schemas.get(&self.current_schema).and_then(|schema| {
                 schema.get_table(&normalized_table, self.case_sensitive_identifiers)
-            })
+            }) {
+                return Some(table);
+            }
+
+            // Finally, check attached databases in attachment order (SQLite
+            // searches temp, then main, then each ATTACHed database).
+            for attached in &self.attached_databases {
+                if let Some(table) = self.schemas.get(&attached.name).and_then(|schema| {
+                    schema.get_table(&normalized_table, self.case_sensitive_identifiers)
+                }) {
+                    return Some(table);
+                }
+            }
+            None
         }
     }
 
@@ -534,11 +564,24 @@ impl super::Catalog {
             }
         }
 
-        self.schemas.get(&self.current_schema).and_then(|schema| {
+        if let Some(found) = self.schemas.get(&self.current_schema).and_then(|schema| {
             schema
                 .get_table(&normalized_table, self.case_sensitive_identifiers)
                 .map(|_| self.current_schema.clone())
-        })
+        }) {
+            return Some(found);
+        }
+
+        // Finally, check attached databases in attachment order (SQLite
+        // searches temp, then main, then each ATTACHed database — #6310).
+        for attached in &self.attached_databases {
+            if self.schemas.get(&attached.name).is_some_and(|schema| {
+                schema.get_table(&normalized_table, self.case_sensitive_identifiers).is_some()
+            }) {
+                return Some(attached.name.clone());
+            }
+        }
+        None
     }
 
     /// Check if table exists using SQL:1999 identifier semantics.
@@ -579,9 +622,21 @@ impl super::Catalog {
             }
 
             // Then check current schema
-            self.schemas
+            if self
+                .schemas
                 .get(&self.current_schema)
                 .is_some_and(|schema| schema.table_exists_by_identifier(identifier))
+            {
+                return true;
+            }
+
+            // Finally, check attached databases in attachment order (SQLite
+            // searches temp, then main, then each ATTACHed database — #6310).
+            self.attached_databases.iter().any(|attached| {
+                self.schemas
+                    .get(&attached.name)
+                    .is_some_and(|schema| schema.table_exists_by_identifier(identifier))
+            })
         }
     }
 

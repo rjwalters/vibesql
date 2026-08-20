@@ -38,6 +38,23 @@ impl TriggerExecutor {
         stmt: &CreateTriggerStmt,
         original_sql: Option<&str>,
     ) -> Result<String, ExecutorError> {
+        // A schema qualifier must name `main`, `temp`, or an existing
+        // (e.g. ATTACHed — #6310) schema. The parser defers this check to
+        // execution because only the catalog knows the attached databases;
+        // SQLite reports `unknown database <name>` at prepare time
+        // (trigger7-1.2), echoing the qualifier as written.
+        if let Some(schema) = stmt.schema.as_deref() {
+            if !schema.eq_ignore_ascii_case("main")
+                && !schema.eq_ignore_ascii_case("temp")
+                && !db.catalog.schema_exists(schema)
+                && !db.catalog.schema_exists(&schema.to_ascii_lowercase())
+            {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "unknown database {}",
+                    schema
+                )));
+            }
+        }
         // SQLite scopes trigger names *per schema* (like tables), so the
         // "already exists" check must be scoped to the schema the new trigger
         // will live in — not global. `CREATE TRIGGER temp.tr1` must succeed even
@@ -252,6 +269,33 @@ impl TriggerExecutor {
         db: &mut Database,
         stmt: &DropTriggerStmt,
     ) -> Result<String, ExecutorError> {
+        // A schema-qualified drop (`DROP TRIGGER main.tr1` / `temp.tr1` /
+        // `<attached>.tr1` — #6310) targets exactly that schema, never falling
+        // through to a same-named trigger elsewhere. An unknown qualifier is
+        // SQLite's `unknown database <name>`.
+        if let Some(schema) = stmt.schema.as_deref() {
+            if !schema.eq_ignore_ascii_case("main")
+                && !schema.eq_ignore_ascii_case("temp")
+                && !db.catalog.schema_exists(schema)
+                && !db.catalog.schema_exists(&schema.to_ascii_lowercase())
+            {
+                return Err(ExecutorError::SqliteCompatError(format!(
+                    "unknown database {}",
+                    schema
+                )));
+            }
+
+            let qualified_display = format!("{}.{}", schema, stmt.trigger_name);
+            if db.catalog.get_trigger_in_schema(&stmt.trigger_name, Some(schema)).is_none() {
+                if stmt.if_exists {
+                    return Ok(format!("Trigger '{}' does not exist, skipping", qualified_display));
+                }
+                return Err(ExecutorError::TriggerNotFound(qualified_display));
+            }
+            db.catalog.drop_trigger_in_schema(&stmt.trigger_name, Some(schema))?;
+            return Ok(format!("Trigger '{}' dropped successfully", qualified_display));
+        }
+
         // Check if trigger exists
         if db.catalog.get_trigger(&stmt.trigger_name).is_none() {
             // `DROP TRIGGER IF EXISTS` on a missing trigger is a no-op

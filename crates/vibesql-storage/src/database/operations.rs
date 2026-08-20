@@ -169,6 +169,15 @@ impl Operations {
                     return Ok(tables.get_mut(&qualified_normalized).unwrap());
                 }
             }
+
+            // Try 6: Attached databases in attachment order (SQLite searches
+            // temp, then main, then each ATTACHed database — #6310).
+            for attached in catalog.attached_databases() {
+                let attached_qualified = format!("{}.{}", attached.name, normalized_name);
+                if tables.contains_key(&attached_qualified) {
+                    return Ok(tables.get_mut(&attached_qualified).unwrap());
+                }
+            }
         }
 
         Err(StorageError::TableNotFound(table_name.to_string()))
@@ -525,9 +534,19 @@ impl Operations {
             } else {
                 let current_schema = catalog.get_current_schema();
                 let qualified_name = format!("{}.{}", current_schema, normalized_name);
-                tables
-                    .get(&qualified_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                if let Some(tbl) = tables.get(&qualified_name) {
+                    tbl
+                } else {
+                    // Attached databases in attachment order (SQLite searches
+                    // temp, then main, then each ATTACHed database — #6310).
+                    catalog
+                        .attached_databases()
+                        .iter()
+                        .find_map(|attached| {
+                            tables.get(&format!("{}.{}", attached.name, normalized_name))
+                        })
+                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                }
             }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));
@@ -1158,9 +1177,19 @@ impl Operations {
             } else {
                 let current_schema = catalog.get_current_schema();
                 let qualified_name = format!("{}.{}", current_schema, normalized_name);
-                tables
-                    .get(&qualified_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                if let Some(tbl) = tables.get(&qualified_name) {
+                    tbl
+                } else {
+                    // Attached databases in attachment order (SQLite searches
+                    // temp, then main, then each ATTACHed database — #6310).
+                    catalog
+                        .attached_databases()
+                        .iter()
+                        .find_map(|attached| {
+                            tables.get(&format!("{}.{}", attached.name, normalized_name))
+                        })
+                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                }
             }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));
@@ -1282,9 +1311,19 @@ impl Operations {
             } else {
                 let current_schema = catalog.get_current_schema();
                 let qualified_name = format!("{}.{}", current_schema, normalized_name);
-                tables
-                    .get(&qualified_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                if let Some(tbl) = tables.get(&qualified_name) {
+                    tbl
+                } else {
+                    // Attached databases in attachment order (SQLite searches
+                    // temp, then main, then each ATTACHed database — #6310).
+                    catalog
+                        .attached_databases()
+                        .iter()
+                        .find_map(|attached| {
+                            tables.get(&format!("{}.{}", attached.name, normalized_name))
+                        })
+                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                }
             }
         } else {
             return Err(StorageError::TableNotFound(table_name.clone()));

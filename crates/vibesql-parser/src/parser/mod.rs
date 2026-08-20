@@ -13,6 +13,7 @@ pub const MAX_ORDER_BY_TERMS: usize = 2000;
 
 mod advanced_objects;
 mod alter;
+mod attach;
 mod create;
 mod cursor;
 mod delete;
@@ -667,6 +668,17 @@ impl Parser {
             Token::Keyword { keyword: Keyword::Pragma, .. } => {
                 let pragma_stmt = self.parse_pragma_statement()?;
                 Ok(vibesql_ast::Statement::Pragma(pragma_stmt))
+            }
+            // ATTACH / DETACH are dispatched on a leading identifier rather
+            // than a lexer keyword so that `attach` / `detach` remain usable
+            // as ordinary identifiers everywhere else (see parser/attach.rs).
+            Token::Identifier(word) if word.eq_ignore_ascii_case("ATTACH") => {
+                let attach_stmt = self.parse_attach_statement()?;
+                Ok(vibesql_ast::Statement::Attach(attach_stmt))
+            }
+            Token::Identifier(word) if word.eq_ignore_ascii_case("DETACH") => {
+                let detach_stmt = self.parse_detach_statement()?;
+                Ok(vibesql_ast::Statement::Detach(detach_stmt))
             }
             _ => Err(ParseError { message: self.peek().syntax_error() }),
         }

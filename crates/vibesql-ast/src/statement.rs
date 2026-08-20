@@ -3,21 +3,21 @@
 //! This module defines the Statement enum that represents all possible SQL statements.
 
 use crate::{
-    AlterCronStmt, AlterSequenceStmt, AlterTableStmt, AlterTriggerStmt, AnalyzeStmt, BeginStmt,
-    CallStmt, CancelScheduleStmt, CloseCursorStmt, CommitStmt, CreateAssertionStmt,
+    AlterCronStmt, AlterSequenceStmt, AlterTableStmt, AlterTriggerStmt, AnalyzeStmt, AttachStmt,
+    BeginStmt, CallStmt, CancelScheduleStmt, CloseCursorStmt, CommitStmt, CreateAssertionStmt,
     CreateCharacterSetStmt, CreateCollationStmt, CreateCronStmt, CreateDomainStmt,
     CreateFunctionStmt, CreateIndexStmt, CreateProcedureStmt, CreateRoleStmt, CreateSchemaStmt,
     CreateSequenceStmt, CreateTableStmt, CreateTranslationStmt, CreateTriggerStmt, CreateTypeStmt,
-    CreateViewStmt, DeallocateStmt, DeclareCursorStmt, DeleteStmt, DescribeStmt, DropAssertionStmt,
-    DropCharacterSetStmt, DropCollationStmt, DropCronStmt, DropDomainStmt, DropFunctionStmt,
-    DropIndexStmt, DropProcedureStmt, DropRoleStmt, DropSchemaStmt, DropSequenceStmt,
-    DropTableStmt, DropTranslationStmt, DropTriggerStmt, DropTypeStmt, DropViewStmt, ExecuteStmt,
-    ExplainStmt, FetchStmt, GrantStmt, InsertStmt, OpenCursorStmt, PragmaStmt, PrepareStmt,
-    ReindexStmt, ReleaseSavepointStmt, RevokeStmt, RollbackStmt, RollbackToSavepointStmt,
-    SavepointStmt, ScheduleAfterStmt, ScheduleAtStmt, SelectStmt, SetCatalogStmt, SetNamesStmt,
-    SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt, SetVariableStmt, ShowColumnsStmt,
-    ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt, TruncateTableStmt,
-    UpdateStmt, VacuumStmt,
+    CreateViewStmt, DeallocateStmt, DeclareCursorStmt, DeleteStmt, DescribeStmt, DetachStmt,
+    DropAssertionStmt, DropCharacterSetStmt, DropCollationStmt, DropCronStmt, DropDomainStmt,
+    DropFunctionStmt, DropIndexStmt, DropProcedureStmt, DropRoleStmt, DropSchemaStmt,
+    DropSequenceStmt, DropTableStmt, DropTranslationStmt, DropTriggerStmt, DropTypeStmt,
+    DropViewStmt, ExecuteStmt, ExplainStmt, FetchStmt, GrantStmt, InsertStmt, OpenCursorStmt,
+    PragmaStmt, PrepareStmt, ReindexStmt, ReleaseSavepointStmt, RevokeStmt, RollbackStmt,
+    RollbackToSavepointStmt, SavepointStmt, ScheduleAfterStmt, ScheduleAtStmt, SelectStmt,
+    SetCatalogStmt, SetNamesStmt, SetSchemaStmt, SetTimeZoneStmt, SetTransactionStmt,
+    SetVariableStmt, ShowColumnsStmt, ShowCreateTableStmt, ShowDatabasesStmt, ShowIndexStmt,
+    ShowTablesStmt, TruncateTableStmt, UpdateStmt, VacuumStmt,
 };
 
 // ============================================================================
@@ -112,4 +112,8 @@ pub enum Statement {
     CancelSchedule(CancelScheduleStmt),
     // SQLite compatibility
     Pragma(PragmaStmt),
+    /// ATTACH [DATABASE] 'filename' AS schema_name (SQLite compatibility)
+    Attach(AttachStmt),
+    /// DETACH [DATABASE] schema_name (SQLite compatibility)
+    Detach(DetachStmt),
 }

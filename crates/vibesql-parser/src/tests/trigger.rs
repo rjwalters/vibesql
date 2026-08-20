@@ -676,17 +676,26 @@ fn test_create_temp_trigger_with_non_temp_schema_rejected() {
 }
 
 #[test]
-fn test_create_trigger_temporary_qualifier_is_unknown_database() {
+fn test_create_trigger_temporary_qualifier_parses_with_verbatim_schema() {
     // `TEMPORARY` is only a keyword synonym for `TEMP` in
-    // `CREATE TEMPORARY TRIGGER` syntax — it is NOT a valid `schema.object`
-    // qualifier. Real sqlite3 (3.51.0) rejects `CREATE TRIGGER temporary.r1 ...`
-    // with `unknown database temporary`, exactly as it rejects any other
-    // unrecognized qualifier. It must not be accepted as an alias of `temp`.
-    let err = Parser::parse_sql(
+    // `CREATE TEMPORARY TRIGGER` syntax — it is NOT an alias of `temp` as a
+    // `schema.object` qualifier. Since ATTACH (#6310), an unrecognized
+    // qualifier can only be validated against the catalog at execution time,
+    // so the parser accepts it and carries the schema spelling verbatim; the
+    // executor then rejects it with SQLite's `unknown database temporary`
+    // (trigger7-1.2) unless a database of that name is attached.
+    let stmt = Parser::parse_sql(
         "CREATE TRIGGER temporary.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;",
     )
-    .expect_err("CREATE TRIGGER temporary.r1 must be rejected as unknown database");
-    assert_eq!(err.message, "unknown database temporary", "got: {}", err.message);
+    .expect("CREATE TRIGGER temporary.r1 must parse (validated at execution)");
+    match stmt {
+        Statement::CreateTrigger(trigger) => {
+            // Verbatim source spelling preserved for the executor's
+            // "unknown database <name>" echo.
+            assert_eq!(trigger.schema.as_deref(), Some("temporary"));
+        }
+        other => panic!("Expected CreateTrigger, got {:?}", other),
+    }
 }
 
 #[test]

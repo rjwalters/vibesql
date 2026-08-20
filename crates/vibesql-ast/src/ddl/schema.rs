@@ -191,6 +191,10 @@ pub enum TriggerAction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropTriggerStmt {
     pub trigger_name: String,
+    /// Optional schema qualifier (`DROP TRIGGER main.tr1` / `temp.tr1` /
+    /// `<attached>.tr1` — #6310). `None` for an unqualified name, which is
+    /// resolved in SQLite search order (temp, then main, then attached).
+    pub schema: Option<String>,
     pub cascade: bool,
     /// `DROP TRIGGER IF EXISTS` — when true, dropping a non-existent trigger
     /// is a no-op instead of an error (SQLite / SQL:2008 semantics).
@@ -462,4 +466,39 @@ pub enum PragmaValue {
     Number(String),
     /// Signed number (negative numbers)
     SignedNumber(String),
+}
+
+/// ATTACH DATABASE statement (SQLite compatibility)
+///
+/// Attaches another database to the current connection under a schema name,
+/// making its objects addressable as `schema_name.object`.
+///
+/// Syntax:
+/// - ATTACH [DATABASE] 'filename' AS schema_name;
+///
+/// Phase 1 (#6310) accepts a string-literal filename only (SQLite allows a
+/// general expression). `':memory:'` and paths to nonexistent/empty files
+/// create an empty session-scoped schema; attaching an existing non-empty
+/// database file is rejected until file-backed attachments land (#6362).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttachStmt {
+    /// The database filename as written (string literal), e.g. `:memory:`
+    /// or `test.db2`.
+    pub filename: String,
+    /// The schema name the database is attached as (as written; database
+    /// names are compared case-insensitively).
+    pub schema_name: String,
+}
+
+/// DETACH DATABASE statement (SQLite compatibility)
+///
+/// Detaches a previously attached database from the current connection.
+///
+/// Syntax:
+/// - DETACH [DATABASE] schema_name;
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetachStmt {
+    /// The schema name to detach (as written; database names are compared
+    /// case-insensitively).
+    pub schema_name: String,
 }

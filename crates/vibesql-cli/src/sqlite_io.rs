@@ -361,7 +361,10 @@ pub fn export_sqlite<P: AsRef<Path>>(db: &Database, path: P) -> anyhow::Result<E
 
     // Iterate all tables in the database
     for schema_name in &db.catalog.list_schemas() {
-        if vibesql_catalog::Catalog::is_temp_schema(schema_name) {
+        if vibesql_catalog::Catalog::is_temp_schema(schema_name)
+            // Attached schemas are session-scoped (#6310) and not exported.
+            || db.catalog.is_attached_schema(schema_name)
+        {
             continue;
         }
 
@@ -577,6 +580,13 @@ fn export_indexes(db: &Database, conn: &Connection, warnings: &mut Vec<String>) 
             continue;
         }
         let Some(metadata) = db.get_index(&index_name) else { continue };
+        // Indexes on tables in ATTACHed schemas are session-scoped (#6310) and
+        // not exported. Filter on `metadata.schema` (the owning schema resolved
+        // at CREATE INDEX time) — an unqualified `CREATE INDEX i1 ON t(z)` that
+        // resolves to an attached table stores the bare `"t"` as table_name.
+        if db.catalog.is_attached_schema(&metadata.schema) {
+            continue;
+        }
         let unique = if metadata.unique { "UNIQUE " } else { "" };
         let cols: Vec<String> = metadata
             .columns
