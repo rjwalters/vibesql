@@ -24,7 +24,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
+    "test": "vitest run",
     "test:watch": "vitest --watch",
     "lint": "eslint src --ext .ts,.tsx",
     "type-check": "tsc --noEmit"

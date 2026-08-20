@@ -47,6 +47,32 @@ jobs:
         working-directory: web-demo
 
   # ============================================================================
+  # Build, test, and lint the npm packages in packages/* (root pnpm workspace).
+  # The root `pnpm install --frozen-lockfile` also guards against root-workspace
+  # manifest/lockfile drift — the sibling gap to #5251's web-demo guard.
+  # Before this job, breaking npm bumps got green checkmarks. See issue #6386.
+  # ============================================================================
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - name: Verify root workspace lockfile is in sync
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Test all packages
+        run: pnpm -r test
+
+      - name: Lint vibesql-client-ts
+        run: pnpm -C packages/vibesql-client-ts lint
+
+  # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
   # ============================================================================
   test:
