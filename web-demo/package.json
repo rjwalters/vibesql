@@ -6,11 +6,6 @@
   "overrides": {
     "dompurify": ">=3.3.2"
   },
-  "pnpm": {
-    "overrides": {
-      "dompurify": ">=3.3.2"
-    }
-  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
