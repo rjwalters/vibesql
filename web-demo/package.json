@@ -2,7 +2,7 @@
   "name": "vibesql-web-demo",
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@11.22.0",
   "overrides": {
     "dompurify": ">=3.3.2"
   },

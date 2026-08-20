@@ -6,3 +6,5 @@
 # file pins web-demo as its own single-project workspace root.
 packages:
   - .
+allowBuilds:
+  esbuild: set this to true or false
