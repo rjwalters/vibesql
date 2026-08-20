@@ -1,23 +1,16 @@
-# Dependencies
-node_modules/
+# Dependencies (node_modules/ already covered by root .gitignore)
 
 # Lock files - only pnpm-lock.yaml should be committed
 package-lock.json
 yarn.lock
 
-# Build output
-dist/
+# Build output (dist/ already covered by root .gitignore)
 
 # Logs
 *.log
 npm-debug.log*
 
-# Editor directories
-.vscode/
-.idea/
-
-# OS files
-.DS_Store
+# (.vscode/, .idea/, .DS_Store already covered by root .gitignore)
 
 # Ad-hoc debug/scratch scripts at the web-demo root — local development only,
 # never commit these. (A batch of stale Playwright one-offs was committed here
