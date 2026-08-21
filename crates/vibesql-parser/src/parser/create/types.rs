@@ -797,12 +797,23 @@ impl Parser {
 
             match self.peek() {
                 Token::Number(n) => {
-                    let value = n.parse::<i64>().map_err(|_| ParseError {
-                        message: format!("Invalid numeric type argument: {}", n),
-                    })?;
-                    let value = if negate { -value } else { value };
-                    if first.is_none() {
-                        first = Some(value);
+                    // SQLite's type-name grammar accepts any signed integer
+                    // *or float* literal here (e.g. `var(+14, -22.3)`,
+                    // `var(1.0e10)` — table-8.10/e_createtable-0.1.1.7/.8).
+                    // The values are not semantically meaningful for
+                    // unrecognized/uninterpreted types, so a non-integer
+                    // literal is accepted and simply not tracked as the
+                    // "first" declared-length argument rather than
+                    // rejected outright.
+                    if let Ok(value) = n.parse::<i64>() {
+                        let value = if negate { -value } else { value };
+                        if first.is_none() {
+                            first = Some(value);
+                        }
+                    } else if n.parse::<f64>().is_err() {
+                        return Err(ParseError {
+                            message: format!("Invalid numeric type argument: {}", n),
+                        });
                     }
                     self.advance();
                 }

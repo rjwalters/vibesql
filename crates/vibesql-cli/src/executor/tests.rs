@@ -853,6 +853,23 @@ fn test_pragma_database_list_temp_trigger_adds_temp_row() {
 }
 
 #[test]
+fn test_pragma_database_list_temp_row_sticky_after_drop() {
+    // Once the temp database has been touched, it stays reported even after
+    // every temp object created in it is dropped — verified against real
+    // sqlite3 3.51.0 (`CREATE TEMP TABLE t1(...); DROP TABLE temp.t1;` still
+    // reports a `temp` row). See #6406 / e_createtable-1.3..1.6, which
+    // create-then-drop temp objects across a test group and still expect
+    // `X(temp)` present (as an empty list) in every later `table_list`
+    // snapshot.
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TEMP TABLE t1(x INT)").unwrap();
+    executor.execute("DROP TABLE temp.t1").unwrap();
+    let result = executor.execute("PRAGMA database_list").unwrap();
+    assert_eq!(result.row_count, 2, "temp row must stick around after drop");
+    assert_eq!(result.rows[1][1].as_deref(), Some("temp"));
+}
+
+#[test]
 fn test_pragma_database_list_persistent_objects_no_temp_row() {
     // Persistent tables/views must NOT cause the temp database to appear.
     let mut executor = SqlExecutor::new(None).unwrap();

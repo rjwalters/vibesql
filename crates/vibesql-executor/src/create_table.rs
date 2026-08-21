@@ -147,12 +147,33 @@ impl CreateTableExecutor {
         // Parse qualified table name (schema.table or just table)
         // For TEMP tables, use the session-specific temp schema (SQLite compatibility)
         let (schema_name, table_name, identifier) = if stmt.temporary {
-            // Temporary table - use session-specific temp schema
-            // Each session gets its own temp schema (e.g., "temp_1", "temp_2")
-            // for isolation between database connections
-            let temp_schema = database.catalog.temp_schema_name();
-            let id = TableIdentifier::qualified(temp_schema, false, &stmt.table_name, stmt.quoted);
-            (temp_schema.to_string(), stmt.table_name.clone(), id)
+            // EVIDENCE-OF (R-23976-43329, verified against sqlite3 3.51.0): it is
+            // an error to specify both a schema-name and the TEMP/TEMPORARY
+            // keyword, unless the schema-name is "temp" (e.g. `CREATE TEMP
+            // TABLE main.t1(...)` -> "temporary table name must be
+            // unqualified"; `CREATE TEMP TABLE temp.t1(...)` is fine — the
+            // schema-name IS temp). Without this check a schema-qualified
+            // name after TEMP silently became a temp table literally named
+            // "main.t1" (dot and all) instead of erroring
+            // (e_createtable-1.5.1.1/.2/.3/.4, #6173/#6406).
+            if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
+                if !schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                    return Err(ExecutorError::SqliteCompatError(
+                        "temporary table name must be unqualified".to_string(),
+                    ));
+                }
+                let temp_schema = database.catalog.temp_schema_name();
+                let id = TableIdentifier::qualified(temp_schema, false, table_part, stmt.quoted);
+                (temp_schema.to_string(), table_part.to_string(), id)
+            } else {
+                // Temporary table - use session-specific temp schema
+                // Each session gets its own temp schema (e.g., "temp_1", "temp_2")
+                // for isolation between database connections
+                let temp_schema = database.catalog.temp_schema_name();
+                let id =
+                    TableIdentifier::qualified(temp_schema, false, &stmt.table_name, stmt.quoted);
+                (temp_schema.to_string(), stmt.table_name.clone(), id)
+            }
         } else if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them
