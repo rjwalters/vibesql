@@ -1363,16 +1363,24 @@ fn test_attach_nonexistent_file_behaves_like_memory() {
 }
 
 #[test]
-fn test_attach_existing_nonempty_file_rejected() {
+fn test_attach_existing_invalid_file_errors_and_rolls_back() {
+    // Phase 2 (#6362) removed the Phase 1 "not yet supported" guard: an
+    // existing non-empty file is now loaded. A file that isn't a recognized
+    // VibeSQL/SQLite/SQL-dump format surfaces a load error instead — and the
+    // failed attachment must roll back cleanly (no half-registered schema
+    // left behind; the name is free to retry).
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("real.db");
-    std::fs::write(&path, b"not empty").unwrap();
+    std::fs::write(&path, b"not a recognized database format").unwrap();
     let mut ex = attach_test_executor();
     let err = ex.execute(&format!("ATTACH '{}' AS aux", path.display())).unwrap_err();
     assert!(
-        err.to_string().contains("attaching existing database files is not yet supported"),
-        "got: {err}"
+        !err.to_string().contains("not yet supported"),
+        "Phase 1 guard message should be gone: {err}"
     );
+    // No half-registered schema survives the failed load.
+    assert!(ex.execute("SELECT * FROM aux.t").is_err());
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
 }
 
 #[test]
@@ -1670,4 +1678,139 @@ fn test_attached_table_index_not_persisted_to_main_snapshot() {
         // The name is free to attach again.
         ex.execute("ATTACH ':memory:' AS aux").unwrap();
     }
+}
+
+// ============================================================================
+// ATTACH DATABASE / DETACH DATABASE (#6362, Phase 2 — file-backed load/persist)
+// ============================================================================
+
+#[test]
+fn test_attach_save_exit_reattach_round_trip_with_own_file() {
+    // Core Phase 2 acceptance scenario: session A attaches a real file,
+    // creates and populates a table, and exits cleanly; a fresh session B
+    // attaches the same file and reads the row back.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        // Session A.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE keep(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO keep VALUES (42)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+        // Clean exit: the main database and every file-backed attachment
+        // are saved.
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    assert!(aux_path.exists(), "clean exit must have written the attached file");
+
+    {
+        // Session B: a fresh executor, both files reopened independently.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        let result = ex.execute("SELECT x FROM keep").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("42".to_string())]]);
+        // aux isn't attached yet in this fresh session.
+        assert!(ex.execute("SELECT * FROM aux.t").is_err());
+
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x FROM aux.t").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("1".to_string())]]);
+    }
+
+    // No cross-contamination in either direction: the aux file must not
+    // contain main's table, and the main file must not contain aux's.
+    let aux_contents = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(!aux_contents.to_lowercase().contains("keep"), "aux file leaked main's table");
+    let main_contents = std::fs::read_to_string(&main_path).unwrap();
+    assert!(!main_contents.to_lowercase().contains("aux"), "main file leaked the attachment");
+}
+
+#[test]
+fn test_detach_flushes_pending_state_before_removing_schema() {
+    // DETACH itself must persist the attached schema's data before removing
+    // it — without a prior explicit `\save`, the data must still survive.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("aux_detach.vbsql");
+    let path_str = path.to_str().unwrap().to_string();
+
+    let mut ex = attach_test_executor();
+    ex.execute(&format!("ATTACH '{}' AS aux", path_str)).unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (11)").unwrap();
+    // No explicit save_database call: DETACH itself must flush.
+    ex.execute("DETACH aux").unwrap();
+
+    assert!(path.exists(), "DETACH must have written the attached file");
+
+    // Re-attach (same session) and confirm the data survived the flush.
+    ex.execute(&format!("ATTACH '{}' AS aux", path_str)).unwrap();
+    let result = ex.execute("SELECT x FROM aux.t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("11".to_string())]]);
+}
+
+#[test]
+fn test_attach_newer_format_version_is_hard_error() {
+    // Attaching a file written by a newer VibeSQL binary must hard-error via
+    // the existing recovery failure policy — never silently present an empty
+    // schema (see CLAUDE.md "Recovery failure policy").
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("future.vbsql");
+    let path_str = path.to_str().unwrap().to_string();
+
+    {
+        // `save_binary` (not `save`, which defaults to zstd-compressed
+        // output via the `compression` feature) so the on-disk file starts
+        // with the uncompressed 16-byte header (5-byte "VBSQL" magic + 1-byte
+        // version) that the byte patch below targets.
+        let mut builder = SqlExecutor::new(None).unwrap();
+        builder.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        builder.db.save_binary(&path_str).unwrap();
+    }
+    // Patch the format-version byte (offset 5, right after the 5-byte magic)
+    // to simulate a file written by a newer VibeSQL binary — mirrors
+    // `persistence::binary::format`'s own
+    // `test_read_header_forward_version_is_typed_error`.
+    {
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[5] = bytes[5].wrapping_add(1);
+        std::fs::write(&path, bytes).unwrap();
+    }
+
+    let mut ex = attach_test_executor();
+    let err = ex.execute(&format!("ATTACH '{}' AS aux", path_str)).unwrap_err();
+    assert!(err.to_string().contains("newer version of VibeSQL"), "got: {err}");
+    // Rolled back cleanly: the name is free to attach again.
+    ex.execute("ATTACH ':memory:' AS aux").unwrap();
+}
+
+#[test]
+fn test_pragma_database_list_canonicalizes_existing_attached_file_path() {
+    // A file-backed attachment that actually exists on disk reports its
+    // canonicalized absolute path, matching the `main` precedent.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("aux_canon.vbsql");
+    let path_str = path.to_str().unwrap().to_string();
+    {
+        let mut ex = SqlExecutor::new(Some(path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.save_database(&path_str).unwrap();
+    }
+
+    let mut ex = attach_test_executor();
+    ex.execute(&format!("ATTACH '{}' AS aux", path_str)).unwrap();
+    let result = ex.execute("PRAGMA database_list").unwrap();
+    let expected = std::fs::canonicalize(&path).unwrap().to_str().unwrap().to_string();
+    assert_eq!(
+        result.rows,
+        vec![
+            vec![Some("0".to_string()), Some("main".to_string()), Some(String::new())],
+            vec![Some("2".to_string()), Some("aux".to_string()), Some(expected)],
+        ]
+    );
 }
