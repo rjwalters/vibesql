@@ -220,6 +220,14 @@ pub enum AlterTriggerAction {
 pub struct CreateIndexStmt {
     pub if_not_exists: bool,
     pub index_name: String,
+    /// Optional schema qualifier on the index name (`CREATE INDEX
+    /// [schema.]index_name ON table ...`). SQLite's CREATE INDEX grammar
+    /// qualifies the *index* name with the schema, not the table name — the
+    /// target table is then resolved within that schema. `None` means no
+    /// qualifier was written, and the target table's owning schema is used
+    /// (temp shadows main, matching the pre-existing unqualified behavior).
+    /// See issue #6366.
+    pub schema: Option<String>,
     pub table_name: String,
     pub index_type: IndexType,
     pub columns: Vec<IndexColumn>,
@@ -388,6 +396,11 @@ impl IndexColumn {
 pub struct DropIndexStmt {
     pub if_exists: bool,
     pub index_name: String,
+    /// Optional schema qualifier (`DROP INDEX [schema.]index_name`). `None`
+    /// means no qualifier was written, so resolution falls back to the
+    /// pre-existing temp-shadows-main search across all schemas. See issue
+    /// #6366.
+    pub schema: Option<String>,
 }
 
 /// REINDEX statement

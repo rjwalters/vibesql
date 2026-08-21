@@ -48,6 +48,7 @@ impl CreateIndexExecutor {
     ///
     /// let stmt = CreateIndexStmt {
     ///     index_name: "idx_users_email".to_string(),
+    ///     schema: None,
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -201,6 +202,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -231,6 +233,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email_unique".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: true },
@@ -255,6 +258,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email_name".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -286,6 +290,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -314,6 +319,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_nonexistent".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "nonexistent_table".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -338,6 +344,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_nonexistent".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -362,6 +369,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: true,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -391,6 +399,7 @@ mod tests {
         // First creation
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -407,6 +416,7 @@ mod tests {
         // Second creation with IF NOT EXISTS should succeed
         let stmt_with_if_not_exists = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: true,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -431,6 +441,7 @@ mod tests {
         // Create index using schema-qualified table name (with default main schema)
         let index_stmt = CreateIndexStmt {
             index_name: "idx_users_email_qualified".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "main.users".to_string(), // Explicitly qualify with main schema
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -498,6 +509,7 @@ mod tests {
     fn index_on_b(index_name: &str, table_name: &str) -> CreateIndexStmt {
         CreateIndexStmt {
             index_name: index_name.to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: table_name.to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -578,6 +590,7 @@ mod tests {
         // Try to create index on non-existent table
         let index_stmt = CreateIndexStmt {
             index_name: "idx_nonexistent".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "test_schema.nonexistent_table".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -658,6 +671,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_embedding".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -688,6 +702,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_cosine".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -715,6 +730,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_ip".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -743,6 +759,7 @@ mod tests {
         // Try to create IVFFlat index on a non-vector column
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_content".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -771,6 +788,7 @@ mod tests {
         // IVFFlat indexes must be on exactly one column
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_multi".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -806,6 +824,7 @@ mod tests {
 
         let stmt = CreateIndexStmt {
             index_name: "idx_documents_embedding".to_string(),
+            schema: None,
             if_not_exists: true,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -884,6 +903,7 @@ mod tests {
         // Create IVFFlat index (should build on existing data)
         let stmt = CreateIndexStmt {
             index_name: "idx_embedding".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -927,6 +947,7 @@ mod tests {
         // Create IVFFlat index
         let stmt = CreateIndexStmt {
             index_name: "idx_vec".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -962,6 +983,7 @@ mod tests {
         // Create IVFFlat index
         let stmt = CreateIndexStmt {
             index_name: "idx_probes".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "documents".to_string(),
             index_type: vibesql_ast::IndexType::IVFFlat {
@@ -1013,6 +1035,7 @@ mod tests {
         // Create expression index on LOWER(email)
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email_lower".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -1098,6 +1121,7 @@ mod tests {
         // Create expression index on (price - discount)
         let stmt = CreateIndexStmt {
             index_name: "idx_products_net_price".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "products".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -1140,6 +1164,7 @@ mod tests {
         // Create unique expression index on LOWER(email)
         let stmt = CreateIndexStmt {
             index_name: "idx_users_email_lower_unique".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: true },
@@ -1169,6 +1194,7 @@ mod tests {
         // Try to create expression index on RANDOM() - should fail
         let stmt = CreateIndexStmt {
             index_name: "idx_users_random".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -1196,6 +1222,7 @@ mod tests {
         // Try to create expression index with non-existent column
         let stmt = CreateIndexStmt {
             index_name: "idx_users_bad_col".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -1236,6 +1263,7 @@ mod tests {
         // Create expression index on LOWER(name) - should handle NULL
         let stmt = CreateIndexStmt {
             index_name: "idx_users_name_lower".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },

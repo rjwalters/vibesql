@@ -548,6 +548,7 @@ mod tests {
         // Create indexes on the table
         let index1_stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -563,6 +564,7 @@ mod tests {
 
         let index2_stmt = CreateIndexStmt {
             index_name: "idx_users_id".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -644,6 +646,7 @@ mod tests {
         // Create index
         let index_stmt = CreateIndexStmt {
             index_name: "idx_products_name".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "products".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
