@@ -1060,12 +1060,12 @@ proc strip_temp_table_keyword {sql} {
         dict set main_creates [string tolower [string trim $mname {[]"`}]] 1
     }
 
-    set pat {\yCREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    set pat {\yCREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)(\.(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*))?}
     set out ""
     set pos 0
     while {1} {
         set rest [string range $sql $pos end]
-        if {![regexp -indices -nocase $pat $rest m c1 c2]} {
+        if {![regexp -indices -nocase $pat $rest m c1 c2 c3 c4]} {
             append out $rest
             break
         }
@@ -1073,7 +1073,49 @@ proc strip_temp_table_keyword {sql} {
         # Copy the text before the match unchanged.
         append out [string range $rest 0 [expr {$ms - 1}]]
         set name [string range $rest [lindex $c2 0] [lindex $c2 1]]
+        set name_end [lindex $c2 1]
+
+        # Schema-qualified TEMP table name (`CREATE TEMP TABLE <schema>.<name>`,
+        # c3/c4 present — the dot + second identifier matched). EVIDENCE-OF
+        # (R-23976-43329, #6173/#6406): SQLite allows a schema qualifier after
+        # TEMP only when the schema is literally "temp"; any other schema
+        # (main, an attached db, ...) is a hard parse-time error
+        # ("temporary table name must be unqualified") that VibeSQL's engine
+        # now raises (create_table.rs). Demoting `<schema>` away here (as the
+        # generic path below does) would silently strip the very qualifier
+        # the engine needs to see to raise that error, and would also
+        # mis-name the demoted table `<schema>` instead of `<schema>.<name>`
+        # (e_createtable-1.5.1.*/1.5.2.* previously misbehaved this way).
+        if {[lindex $c3 0] >= 0} {
+            if {[string equal -nocase [string trim $name {[]"`}] "temp"]} {
+                # `temp.<name>` is semantically identical to the unqualified
+                # `<name>` form (the schema-name literally IS the temp
+                # database — R-23976-43329's exception clause), so normalize
+                # away the redundant "temp." qualifier and fall through to
+                # the exact same coexists/demote logic below as a plain
+                # `CREATE TEMP TABLE <name>`. Do NOT give this its own
+                # unconditional "always keep real + register for replay"
+                # path: `::temp_replay_ddl` has no purge/expiry, so an
+                # unconditional registration here would leak a phantom
+                # replayed temp table into every later batch for the rest of
+                # the file, well past the -repair test step that created it
+                # (this regressed e_createtable-1.1.1.* etc. in an earlier
+                # version of this fix — see PR history for #6173/#6406).
+                set name [string range $rest [lindex $c4 0] [lindex $c4 1]]
+                set name_end [lindex $c4 1]
+            } else {
+                # Any other schema (main, an attached db, ...): pass the
+                # entire `CREATE TEMP TABLE <schema>.<name>` match through
+                # completely unmodified so the engine's own qualified-TEMP
+                # validation fires instead of being silently demoted away.
+                append out [string range $rest $ms $me]
+                set pos [expr {$pos + $me + 1}]
+                if {$pos > [string length $sql]} break
+                continue
+            }
+        }
         set key [string tolower [string trim $name {[]"`}]]
+
         set coexists [expr {[dict exists $main_creates $key] \
                 || [dict exists $::temp_replay_ddl $key]}]
         if {$coexists} {
@@ -1081,13 +1123,13 @@ proc strip_temp_table_keyword {sql} {
             # references natively (#5592). Record its full DDL for per-batch
             # replay and emit it verbatim here. Capture the column-def / AS body
             # that follows the name so the replayed DDL is complete.
-            set after [string range $rest [expr {[lindex $c2 1] + 1}] end]
+            set after [string range $rest [expr {$name_end + 1}] end]
             set body [extract_create_table_body $after]
             set ddl "CREATE TEMP TABLE IF NOT EXISTS ${name}${body}"
             dict set ::temp_replay_ddl $key $ddl
             dict set ::temp_created_this_batch $key 1
             append out "CREATE TEMP TABLE IF NOT EXISTS ${name}${body}"
-            set pos [expr {$pos + ([lindex $c2 1] + 1) + [string length $body]}]
+            set pos [expr {$pos + ($name_end + 1) + [string length $body]}]
         } elseif {[lindex $c1 0] >= 0} {
             # IF NOT EXISTS present: preserve it, do not pre-drop (create-if-absent).
             append out "CREATE TABLE IF NOT EXISTS ${name}"
@@ -6506,6 +6548,56 @@ array set vibesql_skip_tests {
 # running (and failing) rather than skip-listed, but is out of scope for
 # further #6173 investigation — a hypothetical future fix belongs to
 # concurrency-control/engine-capability work, not to this shim.
+
+# e_createtable-1.3.*/1.4.*/1.6.* and e_createtable-1.5.2.* (#6173/#6406):
+# SAME TEMP-table-demotion shim-architecture class as autoinc-4.2..4.10 and
+# table-8.7/table-8.8 above — NOT a new mechanism, just a different surface.
+#
+# `table_list` (this file's helper, defined in e_createtable.test itself)
+# does `db eval {pragma database_list} a {...}` then indexes the tclarray by
+# database name (`$X(temp)`). Each of these test groups does a bare
+# `CREATE TEMP TABLE t1(...)` (no schema qualifier, or a `temp.`-qualified
+# form that #6173/#6406 normalizes down to the same bare-name demotion path
+# in strip_temp_table_keyword — seeing PRAGMA database_list's "temp" row
+# requires the CREATE to have actually reached the engine as a real TEMP
+# object, which demotion by design prevents) followed by a `-tclquery`
+# `table_list` check in a LATER do_test step. Every `execsql`/tclquery pair
+# is its own fresh CLI subprocess (see "each execsql runs a fresh vibesql
+# process" elsewhere in this file), so unlike the -error-only 1.5.1.* group
+# (which #6173/#6406 DID fix — no cross-batch persistence is needed when the
+# CREATE is expected to fail outright), 1.3/1.4/1.5.2/1.6 need the demoted
+# table's real TEMP-ness, and hence PRAGMA database_list's "temp" row, to
+# survive into a later subprocess. `strip_temp_table_keyword` demotes a
+# plain (non-coexisting) `CREATE TEMP TABLE t1(...)` to an ordinary
+# persistent `CREATE TABLE t1(...)` precisely so it DOES survive across
+# batches (#5512) — but that means the engine never records it as a temp
+# object in the first place, so `Catalog::has_temp_objects()`'s sticky
+# `temp_touched` flag (added by #6406, see crates/vibesql-catalog/src/
+# store/mod.rs) never gets set, and every later subprocess's fresh Catalog
+# starts with an empty, untouched temp schema.
+#
+# Registering these demoted-away creates for `::temp_replay_ddl`-style
+# cross-batch replay (as the `#5591` coexists branch does for same-name
+# main+temp collisions) was tried and reverted during this investigation:
+# unconditionally keeping every plain `CREATE TEMP TABLE <name>` "real" and
+# replayed would flip 1.3/1.4/1.6 to pass, but `::temp_replay_ddl` has no
+# purge/expiry (see its declaration above), so anything registered under a
+# `-repair`-style test step (drop_all_tables + a repair CREATE before EACH
+# numbered case, e.g. 0.5.1.8/.5.1.11's `temp.t1`) leaks into the replay
+# prelude of every later batch for the rest of the FILE, not just the rest
+# of that test group — this broke unrelated later sections (e.g.
+# e_createtable-1.1.1.* started failing with spurious "no such table"
+# errors from a phantom replayed t1) when first attempted. Scoping a fix
+# tightly enough to replay only within one `do_createtable_tests` group
+# without polluting the rest of the file is exactly the "give the shim a
+# genuine persistent-server backend instead of one-CLI-process-per-batch"
+# rewrite already ruled out of scope for autoinc-4.2/table-8.7 above, not a
+# smaller one — the underlying problem (a temp object's real, connection-
+# scoped lifetime cannot be represented by *any* purely-DDL-replay
+# mechanism once other tests run in between) is identical.
+#
+# Left running (and failing) rather than skip-listed, per the "never turn a
+# clean pass into a skip" rule; do not add a vibesql_skip_tests entry.
 
 # -----------------------------------------------------------------------------
 # fuzz.test residual classification (#6041) — DO NOT SKIP-LIST THESE.

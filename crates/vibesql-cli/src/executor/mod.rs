@@ -2746,9 +2746,12 @@ impl SqlExecutor {
     /// sqlite3:
     ///   - seq 0, name `main`, file = the backing file path (absolute) or "" for
     ///     an in-memory / no-path session.
-    ///   - seq 1, name `temp`, file = "" (always empty) — emitted only once a
-    ///     temp object has materialized this session's temp schema, mirroring
-    ///     sqlite3 3.51.0, which omits the `temp` row until a temp object exists.
+    ///   - seq 1, name `temp`, file = "" (always empty) — emitted once this
+    ///     session has ever created a temp table, view, or trigger, mirroring
+    ///     sqlite3 3.51.0, which lazily attaches `temp` on first use and then
+    ///     keeps reporting it for the rest of the connection's lifetime even
+    ///     after every temp object has since been dropped (verified against
+    ///     3.51.0; see `Catalog::has_temp_objects`'s doc and #6406).
     ///   - seq 2+, one row per ATTACHed database in attachment order (#6310),
     ///     file = the declared path ("" for `:memory:`). Attachments start at
     ///     seq 2 whether or not the `temp` row is present, mirroring sqlite3's

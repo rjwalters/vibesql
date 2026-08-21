@@ -113,6 +113,23 @@ pub struct Catalog {
     pub(crate) creation_seq: HashMap<String, u64>,
     /// Next value to hand out from [`Catalog::record_creation_seq`].
     pub(crate) next_creation_seq: u64,
+    /// Sticky flag: has this session's temp database ever been touched by
+    /// creating a temp table, view, or trigger?
+    ///
+    /// Real sqlite3 (verified against 3.51.0) lazily attaches the `temp`
+    /// database on first use and then keeps it attached — and reported by
+    /// `PRAGMA database_list` — for the rest of the connection's lifetime,
+    /// even after every temp object created in it has since been dropped
+    /// (`CREATE TEMP TABLE t1(...); DROP TABLE temp.t1;` still reports a
+    /// `temp` row afterward). A plain "does the temp schema currently have
+    /// any objects" check (as `has_temp_objects`'s doc used to describe)
+    /// would flip back to false after a drop and disagree with sqlite3 — see
+    /// e_createtable-1.3..1.6 (#6406), which create then drop temp objects
+    /// across a test group and still expect `X(temp)` to be present (as an
+    /// empty list) in every subsequent `table_list` snapshot. Set once, in
+    /// [`Catalog::record_creation_seq`], and never cleared; never persisted
+    /// (temp objects themselves are session-only and never persisted either).
+    pub(crate) temp_touched: bool,
 }
 
 impl Catalog {
@@ -161,6 +178,7 @@ impl Catalog {
             suppress_temp_shadowing: false,
             creation_seq: HashMap::new(),
             next_creation_seq: 0,
+            temp_touched: false,
         };
 
         // Create the default schema (SQLite uses "main")
@@ -194,29 +212,20 @@ impl Catalog {
         self.session_id
     }
 
-    /// Returns true if this session has materialized any temporary object
-    /// (temp table, temp view, or temp trigger).
+    /// Returns true if this session has ever materialized a temporary object
+    /// (temp table, temp view, or temp trigger) — even if it has since been
+    /// dropped.
     ///
     /// SQLite lazily attaches the `temp` database the first time a temp object
-    /// is created; before that, `PRAGMA database_list` reports only `main`.
-    /// VibeSQL creates the `temp_<session_id>` schema eagerly at connection
-    /// open, so schema existence alone cannot stand in for "has a temp object" —
-    /// this checks for actual contents instead. Temp tables live in the
-    /// session temp schema; temp views/triggers carry `schema = Some("temp")`.
+    /// is created, then keeps it attached (and reported by `PRAGMA
+    /// database_list`) for the rest of the connection's lifetime regardless of
+    /// whether temp objects still exist (verified against sqlite3 3.51.0:
+    /// `CREATE TEMP TABLE t1(...); DROP TABLE temp.t1;` still reports a `temp`
+    /// row afterward — see #6406). This reads the sticky `temp_touched`
+    /// session flag (set once and never cleared, see its field doc), not a
+    /// live "does the temp schema currently have contents" check.
     pub fn has_temp_objects(&self) -> bool {
-        // Temp tables: any table in the session's temp schema.
-        if self.schemas.get(&self.temp_schema_name).is_some_and(|schema| !schema.is_empty()) {
-            return true;
-        }
-        // Temp views.
-        if self.views.values().any(|v| v.is_temp()) {
-            return true;
-        }
-        // Temp triggers.
-        if self.triggers.values().any(|t| t.is_temp()) {
-            return true;
-        }
-        false
+        self.temp_touched
     }
 
     /// Check if a schema name is a temp schema (matches "temp_*" pattern).
@@ -241,7 +250,18 @@ impl Catalog {
     /// with the same name overwrites its ordinal with a fresh (later) value,
     /// matching SQLite where a dropped-and-recreated object moves to the end of
     /// the schema table.
+    ///
+    /// This is also the single chokepoint every temp table/view/trigger
+    /// creation passes through, so it doubles as the setter for the sticky
+    /// `temp_touched` flag (see its field doc and [`Catalog::has_temp_objects`]).
+    /// `schema` is the session-specific temp schema name (e.g. "temp_12345")
+    /// for temp tables, or the literal "temp" for temp views/triggers.
     pub fn record_creation_seq(&mut self, schema: &str, name: &str) {
+        if !self.temp_touched
+            && (schema.eq_ignore_ascii_case(crate::TEMP_SCHEMA) || Self::is_temp_schema(schema))
+        {
+            self.temp_touched = true;
+        }
         let seq = self.next_creation_seq;
         self.next_creation_seq += 1;
         self.creation_seq.insert(Self::creation_seq_key(schema, name), seq);

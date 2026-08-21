@@ -412,12 +412,15 @@ impl Parser {
             match self.peek() {
                 Token::Keyword { keyword: Keyword::Default, .. } => {
                     // DEFAULT clause may appear interleaved with column constraints
-                    // (SQLite grammar). Capture the expression and continue parsing.
-                    if name.is_some() {
-                        return Err(ParseError {
-                            message: "DEFAULT cannot follow CONSTRAINT name".to_string(),
-                        });
-                    }
+                    // (SQLite grammar), and SQLite also permits a preceding
+                    // `CONSTRAINT <name>` on a DEFAULT clause (e.g.
+                    // `c1 text CONSTRAINT "1 2" DEFAULT (1+1)` —
+                    // e_createtable-0.2.1.5.6 / #6406). VibeSQL does not
+                    // currently model a named DEFAULT constraint downstream
+                    // (the default expression is stored unconditionally, not
+                    // as a `ColumnConstraint`), so the name is accepted
+                    // syntactically and discarded here, matching how an
+                    // unnamed DEFAULT is handled.
                     self.advance(); // consume DEFAULT
                     let default_start = self.current_position();
                     let expr = self.parse_expression()?;
