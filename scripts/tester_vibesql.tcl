@@ -350,6 +350,26 @@ set ::temp_vt_created_this_batch [dict create] ;# temp view/trigger names create
 # catchsql re-registers only on success (errorcode 0). (#5940)
 set ::suppress_temp_registration 0
 
+# ATTACH / DETACH DATABASE session-state replay (#6363, Phase 3 of #6310).
+#
+# VibeSQL's ATTACH is session-scoped (Phase 1, #6310/PR #6367) and an attached
+# file's contents now persist to disk across reopens (Phase 2, #6362/PR
+# #6427), but the shim still spawns a FRESH VibeSQL CLI process per SQL batch,
+# so an alias attached in one batch is gone before the next batch's process
+# starts — real SQLite, by contrast, keeps ATTACH state for the whole life of
+# the connection. Mirror the temp-view/temp-trigger replay pattern above:
+# record each `ATTACH ... AS <alias>` statement (and forget it on the
+# matching `DETACH <alias>`) and replay every still-attached alias's ATTACH
+# statement as a prelude in build_pragma_prefix, ahead of the temp table/view/
+# trigger replay, so a later batch's CLI process re-attaches before running
+# its own statements. Attaching a path that no longer exists (e.g. after a
+# test helper's `forcedelete test.db2`) is valid — VibeSQL creates a fresh
+# empty attached database, matching real SQLite's ATTACH-creates-if-missing
+# semantics — so replay composes correctly with the common
+# `db close; forcedelete test.db test.db2; sqlite3 db test.db` reopen idiom.
+set ::attach_replay_ddl [dict create]         ;# lowercase alias -> verbatim ATTACH statement text (replayed)
+set ::attach_created_this_batch [dict create] ;# aliases ATTACHed in the CURRENT batch (skip redundant replay)
+
 # SQLite configuration variables (used by tests)
 set ::AUTOVACUUM 0       ;# Auto-vacuum not supported
 set ::TEMP_STORE 0       ;# Temp storage in file
@@ -1275,6 +1295,111 @@ proc forget_temp_dependents_on {name_key} {
     }
 }
 
+# Scan a SQL batch for top-level ATTACH/DETACH statements, updating
+# ::attach_replay_ddl so build_pragma_prefix can replay the net attachment set
+# in every later per-batch CLI process (#6363). Statements are processed IN
+# ORDER (via split_sql_statements, which already masks CREATE TRIGGER bodies
+# so their internal `;` doesn't fragment the split) so a `DETACH x` later in
+# THIS SAME batch correctly cancels an `ATTACH ... AS x` earlier in it.
+#
+# DETACH handling always runs, even under $::suppress_temp_registration,
+# mirroring purge_temp_drops's unconditional DROP handling above: a catchsql
+# block that later fails may still have run a successful DETACH first. ATTACH
+# registration is gated on $::suppress_temp_registration, mirroring
+# register_temp_views_triggers: a CREATE-adjacent ATTACH inside a catchsql
+# block may be *expected to fail*, and registering it would make the replay
+# prelude replay it into a later batch and abort the file. catchsql
+# re-registers only after confirming the whole block succeeded.
+#
+# Registration itself is further gated to files in vibesql_attach_replay_files
+# (defined near uses_sqlite_internals below). Deliberately conservative: VibeSQL's
+# ATTACH engine support (#6310/#6362) does not yet expose `<alias>.sqlite_master`
+# introspection (verified during #6363 — `SELECT ... FROM aux.sqlite_master`
+# errors "Table 'aux.sqlite_master' not found" even in a single unbroken CLI
+# session, no shim involved), so files whose helpers walk PRAGMA database_list
+# and query every attached db's sqlite_master (e_dropview.test's list_all_views/
+# list_all_data, e_droptrigger.test's list_all_triggers) would regress from a
+# graceful "list mismatch" FAIL to a hard file-scope-aborting error if ATTACH
+# genuinely persisted across batches. Gating registration itself — not just the
+# uses_sqlite_internals skip below — means a file NOT in the allow-list sees
+# ZERO behavior change from this whole mechanism: ::attach_replay_ddl simply
+# stays empty for it, exactly matching pre-#6363 behavior.
+proc register_attach_state {sql} {
+    if {![info exists ::current_test_file_basename]} { return }
+    variable vibesql_attach_replay_files
+    if {![info exists vibesql_attach_replay_files($::current_test_file_basename)]} {
+        return
+    }
+
+    # Reset per-batch tracking so the prelude does not redundantly re-attach
+    # an alias THIS batch already attaches itself.
+    set ::attach_created_this_batch [dict create]
+
+    set attach_pat {^ATTACH(?:\s+DATABASE)?\s+.+\s+AS\s+(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
+    set detach_pat {^DETACH(?:\s+DATABASE)?\s+(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
+
+    foreach stmt [split_sql_statements $sql] {
+        set t [string trim $stmt]
+        if {[regexp -nocase $detach_pat $t - alias]} {
+            set key [string tolower [string trim $alias {[]"`}]]
+            dict unset ::attach_replay_ddl $key
+            dict unset ::attach_created_this_batch $key
+            continue
+        }
+        if {$::suppress_temp_registration} { continue }
+        if {[regexp -nocase $attach_pat $t - alias]} {
+            set key [string tolower [string trim $alias {[]"`}]]
+            dict set ::attach_replay_ddl $key $t
+            dict set ::attach_created_this_batch $key 1
+        }
+    }
+}
+
+# Forget all replayed ATTACH state (connection-lifetime reset). Called on `db
+# close`, `reset_db`, and (re)opening the PRIMARY "db" connection in `proc
+# sqlite3` — all three end (or restart) the logical SQLite connection whose
+# ATTACHed databases would not survive in real SQLite either (#6363, mirrors
+# clear_temp_view_trigger_replay's #5940 rationale).
+proc clear_attach_replay {} {
+    set ::attach_replay_ddl [dict create]
+    set ::attach_created_this_batch [dict create]
+}
+
+# Track schema-qualified `CREATE TABLE temp.<name>(...)` statements for
+# per-batch replay (#6363; gated to vibesql_attach_replay_files, same as
+# register_attach_state — see vibesql_attach_ok's doc comment near
+# uses_sqlite_internals for the discovery that motivated this).
+# strip_temp_table_keyword only recognizes the UNQUALIFIED `CREATE TEMP
+# TABLE <name>` form; a test that instead writes the schema-qualified
+# `CREATE TABLE temp.<name>` form (trigger1-10.1's `CREATE TABLE
+# temp.t4(a, b, c)`) creates a genuine VibeSQL session-scoped temp table that
+# is NOT demoted and does NOT survive the shim's per-batch CLI process
+# boundary — so a later batch referencing `temp.<name>` sees "no such table"
+# (trigger1-10.2's `CREATE TEMP TRIGGER trig2 ... ON temp.t4`). Reuses the
+# EXISTING ::temp_replay_ddl dict/replay machinery in build_pragma_prefix:
+# schema-only replay, same lossy-but-sufficient trade-off as the unqualified
+# form already documented above it — sufficient here because nothing SELECTs
+# temp.t4's own row data across a batch boundary, only INSERTs into it that
+# fire a trigger writing to a MAIN table (which persists normally).
+proc register_qualified_temp_tables {sql} {
+    if {![info exists ::current_test_file_basename]} { return }
+    variable vibesql_attach_replay_files
+    if {![info exists vibesql_attach_replay_files($::current_test_file_basename)]} {
+        return
+    }
+
+    set pat {\yCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?temp\s*\.\s*(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    foreach {m name} [regexp -all -inline -indices -nocase $pat $sql] {
+        lassign $m ms me
+        set nm [string range $sql [lindex $name 0] [lindex $name 1]]
+        set key [string tolower [string trim $nm {[]"`}]]
+        set after [string range $sql [expr {[lindex $name 1] + 1}] end]
+        set body [extract_create_table_body $after]
+        dict set ::temp_replay_ddl $key "CREATE TEMP TABLE IF NOT EXISTS ${nm}${body}"
+        dict set ::temp_created_this_batch $key 1
+    }
+}
+
 #-----------------------------------------------------------------------------
 # Core SQL execution
 #-----------------------------------------------------------------------------
@@ -1654,6 +1779,18 @@ proc build_pragma_prefix {} {
     set prefix ""
     # Always set SQLite mode for TCL tests (integer division, etc.)
     append prefix "SET sql_mode='sqlite';\n"
+    # Replay ATTACH for every still-attached alias (#6363) so a later batch's
+    # fresh CLI process can resolve aux.*-qualified references before this
+    # batch's own SQL runs. Placed FIRST among the replayed state — ahead of
+    # the temp table/view/trigger replay below — because a replayed CREATE
+    # TEMP TRIGGER/VIEW may itself reference an aux-qualified object (e.g.
+    # trigger1-10.2's `CREATE TEMP TRIGGER ... ON aux.t4`).
+    if {[dict size $::attach_replay_ddl] > 0} {
+        dict for {alias ddl} $::attach_replay_ddl {
+            if {[dict exists $::attach_created_this_batch $alias]} { continue }
+            append prefix "${ddl};\n"
+        }
+    }
     # For expression mode to work (both OFF), we need to set both PRAGMAs
     # even when they have "default" values, because the combination matters
     if {$::pragma_full_column_names != 0 || $::pragma_short_column_names != 1} {
@@ -1790,6 +1927,9 @@ proc build_pragma_prefix {} {
     # final word before the test's own statement runs.
     if {[info exists ::pragma_schema_version_cookie($::db_file)]} {
         append prefix "PRAGMA schema_version=$::pragma_schema_version_cookie($::db_file);\n"
+    }
+    if {[info exists ::env(VIBESQL_SHIM_DEBUG)]} {
+        puts stderr "DEBUG-PREFIX>>>${prefix}<<<DEBUG-PREFIX"
     }
     return $prefix
 }
@@ -3179,6 +3319,17 @@ proc execsql {sql {db ""}} {
     # session-scoped in VibeSQL and would otherwise vanish between batches.
     register_temp_views_triggers $sql
 
+    # Record ATTACH/DETACH statements so build_pragma_prefix can replay the net
+    # attachment set in every later per-batch CLI process (#6363). ATTACHed
+    # aliases are session-scoped in VibeSQL and would otherwise vanish between
+    # batches, same rationale as the temp view/trigger replay above.
+    register_attach_state $sql
+
+    # Record schema-qualified `CREATE TABLE temp.<name>` statements for replay
+    # too (#6363) — a form strip_temp_table_keyword's demotion does not
+    # recognize. No-op outside vibesql_attach_replay_files.
+    register_qualified_temp_tables $sql
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -4138,6 +4289,11 @@ proc execsql_with_headers {sql {db ""}} {
     # session-scoped in VibeSQL and would otherwise vanish between batches.
     register_temp_views_triggers $sql
 
+    # Record ATTACH/DETACH statements so build_pragma_prefix can replay the net
+    # attachment set in every later per-batch CLI process (#6363).
+    register_attach_state $sql
+    register_qualified_temp_tables $sql
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -4185,6 +4341,11 @@ proc execsql2 {sql {db ""}} {
     # replay them in every per-batch CLI process (#5940). Temp views/triggers are
     # session-scoped in VibeSQL and would otherwise vanish between batches.
     register_temp_views_triggers $sql
+
+    # Record ATTACH/DETACH statements so build_pragma_prefix can replay the net
+    # attachment set in every later per-batch CLI process (#6363).
+    register_attach_state $sql
+    register_qualified_temp_tables $sql
 
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
@@ -4264,6 +4425,10 @@ proc catchsql {sql {db ""}} {
         # Block succeeded: NOW it is safe to record any temp view/trigger DDL it
         # created (and honor any DROPs) for cross-batch replay.
         register_temp_views_triggers $sql
+        # Same "only after confirmed success" gating for ATTACH/DETACH replay
+        # (#6363) — execsql already suppressed registration above via the
+        # shared $::suppress_temp_registration flag.
+        register_attach_state $sql
         return [list 0 $result]
     }
 }
@@ -6489,6 +6654,75 @@ array set vibesql_temp_master_ok {
     autoinc-4.2 1
 }
 
+# Files where ATTACH/DETACH session-state replay (#6363, Phase 3 of #6310)
+# has been verified to make the file's ATTACH-dependent tests genuinely
+# runnable — both gating registration (register_attach_state above, so an
+# unlisted file sees zero behavior change from this whole mechanism) AND
+# bypassing the blanket ATTACH/DETACH/aux.*-schema skip in
+# uses_sqlite_internals below (see the file-scoped `attach_file_ok` check
+# there). Deliberately narrower than #6404's proposed blanket un-skip across
+# all ~131 ATTACH-touching files in the suite.
+#
+# e_droptrigger.test and e_dropview.test were investigated for this list and
+# deliberately EXCLUDED: both drive `PRAGMA database_list` then query every
+# attached database's `<name>.sqlite_master` via shared helpers
+# (list_all_triggers / list_all_views / list_all_data). VibeSQL's ATTACH
+# engine support (#6310/#6362) does not yet implement `<alias>.sqlite_master`
+# introspection at all — confirmed directly against a single unbroken CLI
+# session, no shim involved:
+#   $ vibesql t.db -c "ATTACH 't.db2' AS aux; SELECT name FROM aux.sqlite_master;"
+#   Error executing statement 2: Table 'aux.sqlite_master' not found
+# Adding either file here made genuinely-replayed ATTACH state reach that
+# engine gap, converting previously-graceful "list omits the aux entries, one
+# assertion mismatches" failures into hard errors that cascade into file-scope
+# aborts (e_dropview.test regressed 21/43 pass -> 15/44 pass in local testing).
+# e_droptrigger.test has a SECOND, independent blocker even setting aux.*
+# aside: its droptrigger_reopen_db helper creates a TEMP table `t1` with no
+# coexisting main-schema `t1`, so the shim's strip_temp_table_keyword demotes
+# it to a real persistent table (#5591) — the trigger `CREATE TRIGGER tr1 ...
+# ON t1` this same helper then declares therefore lands in the MAIN trigger
+# namespace instead of TEMP, colliding with the file's other `CREATE TRIGGER
+# tr1 ... ON t2` ("Trigger 'tr1' already exists"), on literally the file's
+# first setup call — same class of TEMP-table-demotion limitation already
+# documented for table.test/autoinc.test in #6429. Both are tracked as
+# follow-up issues rather than fixed here (engine-level work, out of scope for
+# a TCL-shim-only issue).
+variable vibesql_attach_replay_files
+array set vibesql_attach_replay_files {
+    trigger1 1
+}
+
+# Individual tests within a vibesql_attach_replay_files file that are verified
+# safe to actually un-skip (#6363). Narrower than the file-level list above on
+# purpose: trigger1.test's `ifcapable tempdb&&attach` block (trigger1-10.0
+# through 10.11) mixes ATTACH-safe setup (10.0 ATTACHes; 10.1 creates
+# main.t4/temp.t4/aux.t4/insert_log — both verified to pass with ATTACH
+# replay) with a DIFFERENT, unrelated shim gap starting at 10.2
+# (`CREATE TEMP TRIGGER trig2 ... ON temp.t4`): `temp.t4` was created via the
+# schema-qualified `CREATE TABLE temp.t4` form, which
+# strip_temp_table_keyword's demotion regex does not recognize (it only
+# matches the unqualified `CREATE TEMP TABLE name` form), so temp.t4 is a
+# genuine VibeSQL session-scoped temp table that vanishes before 10.2's batch
+# — "no such table: temp.t4". Worse, register_temp_views_triggers registers
+# CREATE TEMP TRIGGER DDL for replay unconditionally, from the SQL text alone,
+# with no check that the CREATE actually succeeded (unlike catchsql's
+# success-gated re-registration) — so trig2's failed create still gets queued
+# for replay and poisons every later batch's prefix in the file (verified: it
+# cascaded 12 previously-PASSING tests, trigger1-11.1..19.1, into failures in
+# local testing). trigger1-20.1 hits a THIRD, independent gap: even in a
+# single unbroken CLI session (no shim involved), `DETACH aux` after a
+# `CREATE TEMP TRIGGER ... ON <table-in-aux>` leaves the trigger undroppable
+# ("Trigger 'r20_3' not found" on the following `DROP TRIGGER r20_3`) — an
+# ATTACH+DETACH+TEMP-trigger engine interaction gap. Only the two tests
+# verified clean are listed; 10.2-10.11 and 20.1 stay skipped (their existing,
+# non-cascading, non-regressing behavior) pending the follow-up issues
+# tracking each of these three distinct gaps.
+variable vibesql_attach_ok
+array set vibesql_attach_ok {
+    trigger1-10.0 1
+    trigger1-10.1 1
+}
+
 # Check if a test should be skipped based on VibeSQL-specific exclusions
 # Returns a list: {should_skip reason} where should_skip is 0/1
 proc vibesql_should_skip {name} {
@@ -6588,16 +6822,40 @@ proc uses_sqlite_internals {script {name ""}} {
         return [list 1 "uses sqlite3_exec_hex (SQLite test helper)"]
     }
 
-    # ATTACH/DETACH DATABASE - multi-database feature not supported
-    if {[regexp -nocase {ATTACH\s} $script]} {
-        return [list 1 "uses ATTACH DATABASE (multi-database feature)"]
+    # ATTACH/DETACH DATABASE - multi-database feature. VibeSQL now supports
+    # session-scoped ATTACH (#6310) with file-backed persistence (#6362) and
+    # the shim replays ATTACH/DETACH state across its per-batch CLI processes
+    # (#6363). Bypassing this skip needs BOTH: the file must be in
+    # vibesql_attach_replay_files (broad — the replay machinery is safe to run
+    # for the file at all) AND the specific test must be in vibesql_attach_ok
+    # (narrow — this exact test was individually verified not to hit one of
+    # the several distinct ATTACH-adjacent shim/engine gaps discovered while
+    # implementing #6363; see the doc comments on both arrays above). Elsewhere
+    # this skip stays in force — un-skipping the remaining ATTACH-touching
+    # files/tests needs its own case-by-case validation (tracked separately in
+    # #6404), not a blanket removal.
+    variable vibesql_attach_replay_files
+    variable vibesql_attach_ok
+    set attach_test_ok 0
+    if {[info exists ::current_test_file_basename]
+            && [info exists vibesql_attach_replay_files($::current_test_file_basename)]} {
+        set attach_test_ok [info exists vibesql_attach_ok($name)]
+        if {!$attach_test_ok && [info exists ::testprefix] && $::testprefix ne ""} {
+            set attach_prefixed_name "${::testprefix}-${name}"
+            set attach_test_ok [info exists vibesql_attach_ok($attach_prefixed_name)]
+        }
     }
-    if {[regexp -nocase {DETACH\s} $script]} {
-        return [list 1 "uses DETACH DATABASE (multi-database feature)"]
-    }
-    # Multi-database schema references (aux1.table, aux.table) - requires ATTACH
-    if {[regexp -nocase {aux\d*\.\w+} $script]} {
-        return [list 1 "uses attached database schema (requires ATTACH)"]
+    if {!$attach_test_ok} {
+        if {[regexp -nocase {ATTACH\s} $script]} {
+            return [list 1 "uses ATTACH DATABASE (multi-database feature)"]
+        }
+        if {[regexp -nocase {DETACH\s} $script]} {
+            return [list 1 "uses DETACH DATABASE (multi-database feature)"]
+        }
+        # Multi-database schema references (aux1.table, aux.table) - requires ATTACH
+        if {[regexp -nocase {aux\d*\.\w+} $script]} {
+            return [list 1 "uses attached database schema (requires ATTACH)"]
+        }
     }
 
     # EXPLAIN on DDL statements (CREATE, DROP, ALTER) - not supported
@@ -7177,11 +7435,31 @@ proc do_test {name script expected} {
             if {[string trim $stripped] ne ""} {
                 set rescued_script [lreplace $script 1 1 $stripped]
                 incr ::nTest
+                # Suppress temp view/trigger (and ATTACH/DETACH, #6363) replay
+                # registration during the TRIAL run, mirroring catchsql's
+                # pattern: the stripped remainder may still reference an object
+                # that does not actually exist in THIS fresh CLI process (e.g.
+                # trigger1-10.2's rescued `CREATE TEMP TRIGGER trig2 ... ON
+                # temp.t4` — temp.t4 was created via schema-qualified DDL in an
+                # earlier batch and does not survive the shim's per-batch
+                # process boundary), so the rescue attempt can itself fail.
+                # Registering that failed CREATE anyway would poison
+                # ::temp_trigger_replay_ddl (or ::attach_replay_ddl) with DDL
+                # that errors every later batch's prefix in this file — a real
+                # regression discovered while implementing #6363 (12
+                # previously-passing trigger1.test assertions cascaded to
+                # failure before this guard). Re-register from the stripped SQL
+                # only after confirming the rescue actually succeeded.
+                set rescue_saved_suppress $::suppress_temp_registration
+                set ::suppress_temp_registration 1
                 set rescue_rc [catch {uplevel 1 $rescued_script} rescue_result]
+                set ::suppress_temp_registration $rescue_saved_suppress
                 if {$rescue_rc == 0
                         && [normalize_result $rescue_result] eq [normalize_result $expected]} {
                     incr ::nPass
                     emit_test_detail passed $name
+                    register_temp_views_triggers $stripped
+                    register_attach_state $stripped
                     if {$::verbose} { puts "  $name... ok (attach-setup rescue)" }
                 } else {
                     # The main-db remainder errored or produced unexpected
@@ -8799,6 +9077,11 @@ proc sqlite3 {db args} {
         set ::dqs_dml_mode 0  ;# Reset DQS mode for new database
         set ::dqs_ddl_mode 0  ;# Reset DQS mode for new database
         set ::last_insert_rowid 0  ;# Fresh connection: last_insert_rowid() is 0 (#5843)
+        # ATTACH is purely connection-scoped state in real SQLite — never
+        # persisted to any file header — so a fresh "db" connection (even one
+        # reopened against the SAME underlying file) starts with nothing
+        # attached, unlike the file-header cookies above (#6363).
+        clear_attach_replay
     }
 
     # Create/refresh the "$db" command as an alias to the shared master
@@ -8918,6 +9201,10 @@ proc ::tcltest_db_master {cmd args} {
             # tables that no longer carry the temp objects (view.test view-26.x
             # regressed on a stale v1temp replay). (#5940)
             clear_temp_view_trigger_replay
+            # Closing the connection also DETACHes every attached database in
+            # real SQLite — forget the replayed ATTACH state so it is not
+            # re-injected into whatever connection reopens next (#6363).
+            clear_attach_replay
             # Closing the connection also discards any still-open transaction
             # (SQLite rolls it back). Scoped to the SAVEPOINT-opened case this
             # shim now tracks (#6170) so a `SAVEPOINT sp1` followed by
@@ -9229,6 +9516,10 @@ proc reset_db {} {
     # the test expects gone (e.g. trigger1-22.10's temp trigger bleeding into the
     # reset_db'd trigger1-23.1). (#5940)
     clear_temp_view_trigger_replay
+    # Same rationale for replayed ATTACH state — reset_db wipes the database,
+    # so a stale replayed `ATTACH 'test.db2' AS aux` would attach whatever
+    # happens to exist at that path now rather than nothing (#6363).
+    clear_attach_replay
 }
 
 # Forget all replayed temp view/trigger state (connection-lifetime reset). Called
