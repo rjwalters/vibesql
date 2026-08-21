@@ -19,7 +19,8 @@ use crate::{
     schema::CombinedSchema,
     select::cte::CteResult,
     sqlite_schema::{
-        get_sqlite_schema_table_schema, is_sqlite_schema_table, is_sqlite_temp_schema_table,
+        get_sqlite_schema_table_schema, is_sqlite_temp_schema_table,
+        resolve_sqlite_schema_query_scope,
     },
 };
 
@@ -227,9 +228,12 @@ fn compute_single_select_column_count(
                         continue;
                     }
                 }
-                // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables.
+                // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables,
+                // including `<alias>.sqlite_master` for an attached database (#6436).
                 // #5513: sqlite_temp_master shares the same column shape.
-                if is_sqlite_schema_table(qualifier) || is_sqlite_temp_schema_table(qualifier) {
+                if resolve_sqlite_schema_query_scope(&database.catalog, qualifier).is_some()
+                    || is_sqlite_temp_schema_table(qualifier)
+                {
                     count += get_sqlite_schema_table_schema().columns.len();
                     continue;
                 }
@@ -283,9 +287,12 @@ fn count_columns_in_from_clause(
                     return Ok(schema.columns.len());
                 }
             }
-            // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables.
+            // Issue #4577: Check for sqlite_schema/sqlite_master virtual tables,
+            // including `<alias>.sqlite_master` for an attached database (#6436).
             // #5513: sqlite_temp_master shares the same column shape.
-            if is_sqlite_schema_table(name) || is_sqlite_temp_schema_table(name) {
+            if resolve_sqlite_schema_query_scope(&database.catalog, name).is_some()
+                || is_sqlite_temp_schema_table(name)
+            {
                 return Ok(get_sqlite_schema_table_schema().columns.len());
             }
             // #6019: pragma_compile_options eponymous system table.
