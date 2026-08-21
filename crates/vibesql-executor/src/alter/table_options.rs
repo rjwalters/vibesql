@@ -1,6 +1,7 @@
 //! Table-level operation executors for ALTER TABLE
 
 use vibesql_ast::{RenameTableStmt, TriggerAction};
+use vibesql_catalog::TriggerDefinition;
 use vibesql_storage::Database;
 
 use crate::{
@@ -79,6 +80,23 @@ pub(super) fn execute_rename_table(
         None => new_table.schema_mut().invalidate_sql_source(),
     }
 
+    // `database.drop_table` below cascade-drops every trigger whose `ON <table>`
+    // target is the table being dropped (the correct behavior for a genuine
+    // `DROP TABLE`, per SQL standard R-37808-62273). RENAME TABLE, however, is
+    // implemented here as drop-old + create-new, and SQLite's RENAME TABLE does
+    // *not* drop such triggers — it rewrites their `ON`-target (and any body
+    // references) to the new name and keeps them (issue #6174, alter-21.2/21.4).
+    // Snapshot those triggers before the drop so they can be restored into the
+    // catalog afterward, before `rewrite_triggers_for_rename` runs (which
+    // performs the actual on-target/body rewrite over whatever triggers are in
+    // the catalog at that point).
+    let triggers_on_renamed_table: Vec<TriggerDefinition> = database
+        .catalog
+        .iter_triggers()
+        .filter(|t| t.table_name.eq_ignore_ascii_case(&stmt.table_name))
+        .cloned()
+        .collect();
+
     // Drop old table and create new one with the renamed schema
     // This handles indexes and spatial indexes via CASCADE
     database
@@ -88,6 +106,13 @@ pub(super) fn execute_rename_table(
     database
         .create_table(new_table.schema.clone())
         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+    // Restore the triggers cascade-dropped above so `rewrite_triggers_for_rename`
+    // (below) can rewrite their `ON`-target/body to the new table name instead of
+    // losing them permanently.
+    for trigger in triggers_on_renamed_table {
+        let _ = database.catalog.create_trigger(trigger);
+    }
 
     // Restore the data by getting the new table and setting its rows
     let restored_table = database
