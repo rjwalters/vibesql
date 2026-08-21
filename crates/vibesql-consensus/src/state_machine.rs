@@ -23,10 +23,12 @@
 //! - The crash-recovery WAL replay (`vibesql-storage::wal::recovery`) that the issue proposed
 //!   reusing as the apply function is a **stub** for DML — `apply_op` counts Insert/Update/Delete
 //!   entries but does not apply them (it has no `table_id → table` resolution).
-//! - The only write-set the storage layer captures per transaction is `TransactionChange` (kept for
-//!   savepoint undo). It records DML only — no DDL — and replaying it would bypass the executor's
-//!   index and constraint maintenance, which has no row-level "apply with index upkeep" entry point
-//!   today.
+//! - The storage layer captures no per-transaction write-set at all. Rollback (whole-transaction,
+//!   named `SAVEPOINT`, and the implicit statement savepoint alike) restores a wholesale
+//!   `catalog`/`tables`/`operations` snapshot rather than replaying a row-level undo log (#6278),
+//!   so there is nothing to ship as an effects batch. Even a reinstated row-level log would bypass
+//!   the executor's index and constraint maintenance, which has no row-level "apply with index
+//!   upkeep" entry point today.
 //!
 //! **Determinism (#5377)**: statement batches are deterministic only if
 //! the statements are — so non-deterministic expressions are **frozen
