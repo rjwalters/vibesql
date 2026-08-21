@@ -79,12 +79,6 @@ class TestVibesqlPunchlist(unittest.TestCase):
 
         db.close()
 
-    # KNOWN BUG (#6359): the bindings' statement cache replays the FIRST
-    # execution's parameter values for repeated identical parameterized SQL,
-    # so the second insert spuriously fails with "UNIQUE constraint failed".
-    # When #6359 is fixed this test will report an UNEXPECTED SUCCESS —
-    # remove the decorator then.
-    @unittest.expectedFailure
     def test_insert_test_results(self):
         """Test inserting test file records."""
         db = self.vibesql.connect()
@@ -202,11 +196,6 @@ class TestVibesqlPunchlist(unittest.TestCase):
 
         db2.close()
 
-    # KNOWN BUG (#6359): repeated identical parameterized INSERTs replay the
-    # first execution's values (statement-cache bug), so this fails with a
-    # spurious "UNIQUE constraint failed". Remove the decorator when #6359 is
-    # fixed (this test will report an UNEXPECTED SUCCESS then).
-    @unittest.expectedFailure
     def test_summary_queries_match_old_format(self):
         """Test that SQL queries produce same stats as old JSON format."""
         db = self.vibesql.connect()

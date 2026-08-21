@@ -485,6 +485,64 @@ def test_statement_cache_invalidation():
     db.close()
 
 
+def test_statement_cache_hit_reuses_new_params_not_first_call():
+    """Regression test for #6359.
+
+    A cache HIT on repeated identical parameterized SQL text must bind THIS
+    call's params, not silently replay the AST baked with the FIRST call's
+    literal values. Prior to the fix, the second INSERT below wrote ('a',
+    '1') again instead of ('b', '2'), because the cached AST already had the
+    first call's literals substituted in.
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE u (k VARCHAR(50), v VARCHAR(50))")
+
+    # First call: cache miss, parses and caches the (unbound) AST.
+    cursor.execute("INSERT INTO u VALUES (?, ?)", ("a", "1"))
+    # Second call: identical SQL text -> cache HIT. Must bind these params,
+    # not replay the first call's ("a", "1").
+    cursor.execute("INSERT INTO u VALUES (?, ?)", ("b", "2"))
+
+    hits, misses, _ = cursor.cache_stats()
+    assert hits >= 1, f"Expected the second call to hit the statement cache, got hits={hits}"
+
+    cursor.execute("SELECT * FROM u ORDER BY k")
+    rows = cursor.fetchall()
+    assert rows == [("a", "1"), ("b", "2")], (
+        f"Expected distinct rows for distinct params, got {rows} "
+        "(second insert replayed the first call's params - see #6359)"
+    )
+
+    cursor.close()
+    db.close()
+
+
+def test_statement_cache_hit_reuses_new_params_for_select():
+    """Regression test for #6359: cache HIT on a repeated parameterized
+    SELECT must use the new call's params, not the first call's."""
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE users (id INTEGER, name VARCHAR(50))")
+    cursor.execute("INSERT INTO users VALUES (1, 'Alice')")
+    cursor.execute("INSERT INTO users VALUES (2, 'Bob')")
+
+    cursor.execute("SELECT name FROM users WHERE id = ?", (1,))
+    first = cursor.fetchall()
+    assert first == [("Alice",)]
+
+    # Same SQL text, different param -> cache HIT, must bind id=2 this time.
+    cursor.execute("SELECT name FROM users WHERE id = ?", (2,))
+    second = cursor.fetchall()
+    assert second == [("Bob",)], (
+        f"Expected id=2 to resolve to Bob, got {second} (cache HIT replayed "
+        "the first call's params - see #6359)"
+    )
+
+    cursor.close()
+    db.close()
+
+
 def test_statement_cache_performance():
     """Test that cache provides performance improvement for repeated queries"""
     import time
