@@ -281,6 +281,29 @@ the object to be reindexed" but the shim strips `REINDEX` to a no-op), which is
 kept visible as an in-scope failure and tracked in its own linked engine issue
 (#6232) rather than hidden.
 
+**ATTACH/DETACH — narrow, per-test un-skip (#6363, Phase 3 of #6310).** The
+blanket ATTACH/DETACH/`aux.*`-schema skip in `uses_sqlite_internals` remains the
+default everywhere: VibeSQL's `ATTACH` state is per-connection, and the TCL
+shim's per-batch spawn-a-fresh-CLI-process architecture (see
+`scripts/tester_vibesql.tcl` ~line 278) means an alias attached in one batch is
+gone before the next, so the skip stays a legitimate harness-architecture
+limitation for the vast majority of the ~131 ATTACH-touching files in the suite
+(tracked broadly by #6404). #6363 added a narrow, opt-in exception: a per-batch
+ATTACH/DETACH state-replay mechanism (mirroring the existing temp-view/trigger
+replay), gated to an explicit allow-list (`vibesql_attach_replay_files`) of
+files verified not to hit either of two distinct, still-open engine gaps
+discovered during that work — `<alias>.sqlite_master` introspection is not yet
+implemented (blocks `e_droptrigger.test`/`e_dropview.test`, which walk
+`PRAGMA database_list` and query every attached database's `sqlite_master`),
+and the shim's TEMP-table-demotion limitation (#6429) independently blocks
+`e_droptrigger.test`. Only `trigger1.test` is on the allow-list today, and only
+its `trigger1-10.0`/`trigger1-10.1` tests are individually verified safe to
+un-skip (a second, narrower `vibesql_attach_ok` allow-list); the remaining
+`trigger1.test` ATTACH-adjacent tests (10.2–10.11, 20.1) stay skipped or
+visibly failing pending their own follow-up. This is a Bucket-A-adjacent
+per-test carve-out, not a bucket reclassification — the skip declaration and
+its rationale are unchanged for every file not on the allow-list.
+
 **Certified by-category denominator (run_id=1, `tcl_test_results`).** After
 reclassification the certified 7,123 detail-table failures (incl. markers)
 partition exactly as: Bucket A **3,206** (A1 769, A2 1,790, A3 39, A4 149, A5 2,
