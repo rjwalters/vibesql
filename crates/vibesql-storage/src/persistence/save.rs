@@ -196,215 +196,7 @@ impl Database {
                     }
                 }
 
-                write!(writer, "CREATE TABLE {} (", &quoted_output_name)
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-
-                for (i, col) in schema.columns.iter().enumerate() {
-                    if i > 0 {
-                        write!(writer, ", ").map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                    }
-                    // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
-                    let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
-                    write!(writer, "{} {}", quote_identifier(&col.name), type_str)
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-
-                    // Handle generated columns (AS expression syntax)
-                    if let Some(ref generated_expr) = col.generated_expr {
-                        use vibesql_ast::pretty_print::ToSql;
-                        write!(writer, " AS ({})", generated_expr.to_sql()).map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                    } else {
-                        // Only non-generated columns can have DEFAULT, COLLATE, NOT NULL
-                        // Add DEFAULT clause if present
-                        if let Some(ref default_expr) = col.default_value {
-                            use vibesql_ast::pretty_print::ToSql;
-                            write!(writer, " DEFAULT {}", default_expr.to_sql()).map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        // Add COLLATE clause if present
-                        if let Some(ref collation) = col.collation {
-                            write!(writer, " COLLATE {}", collation).map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        if !col.nullable {
-                            write!(writer, " NOT NULL").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                    }
-                }
-
-                // Add PRIMARY KEY constraint if present
-                if let Some(pk_cols) = &schema.primary_key {
-                    let quoted_pk: Vec<String> =
-                        pk_cols.iter().map(|c| quote_identifier(c)).collect();
-                    write!(writer, ", PRIMARY KEY ({})", quoted_pk.join(", "))
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                }
-
-                // Add UNIQUE constraints
-                for unique_cols in &schema.unique_constraints {
-                    let quoted_uniq: Vec<String> =
-                        unique_cols.iter().map(|c| quote_identifier(c)).collect();
-                    write!(writer, ", UNIQUE ({})", quoted_uniq.join(", "))
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                }
-
-                // Add CHECK constraints
-                // We always output CONSTRAINT <name> CHECK (<expr>) to preserve user-provided names.
-                // For unnamed constraints, the name equals the expression text, which will be
-                // re-derived when the table is reloaded.
-                for (constraint_name, check_expr) in &schema.check_constraints {
-                    use vibesql_ast::pretty_print::ToSql;
-                    let expr_text = check_expr.to_sql();
-                    // An unnamed CHECK's stored "name" is the verbatim source
-                    // text of its expression (whitespace preserved), so it
-                    // differs from `to_sql()` only by operator spacing (e.g.
-                    // `d > 0` vs `d>0`). Compare with all whitespace removed to
-                    // recognize that case; otherwise a spaced source form would
-                    // be misread as a user-provided name and emitted as a bogus
-                    // `CONSTRAINT d > 0` identifier.
-                    let strip_ws = |s: &str| s.split_whitespace().collect::<String>();
-                    if strip_ws(constraint_name) != strip_ws(&expr_text) {
-                        // User-provided name: emit it with the re-rendered expr.
-                        write!(writer, ", CONSTRAINT {} CHECK ({})", constraint_name, expr_text)
-                            .map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                    } else {
-                        // Unnamed: emit the verbatim source text so the reloaded
-                        // constraint's violation message round-trips byte-exact.
-                        write!(writer, ", CHECK ({})", constraint_name).map_err(|e| {
-                            StorageError::NotImplemented(format!("Write error: {}", e))
-                        })?;
-                    }
-                }
-
-                // Add FOREIGN KEY constraints
-                for fk in &schema.foreign_keys {
-                    let fk_cols: Vec<String> =
-                        fk.column_names.iter().map(|c| quote_identifier(c)).collect();
-
-                    // Filter out empty parent column names (unresolved references)
-                    let non_empty_parent_cols: Vec<String> = fk
-                        .parent_column_names
-                        .iter()
-                        .filter(|c| !c.is_empty())
-                        .map(|c| quote_identifier(c))
-                        .collect();
-
-                    if non_empty_parent_cols.is_empty() {
-                        // No resolved parent columns - omit column list (defaults to PK)
-                        write!(
-                            writer,
-                            ", FOREIGN KEY ({}) REFERENCES {}",
-                            fk_cols.join(", "),
-                            quote_identifier(&fk.parent_table)
-                        )
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                    } else {
-                        write!(
-                            writer,
-                            ", FOREIGN KEY ({}) REFERENCES {} ({})",
-                            fk_cols.join(", "),
-                            quote_identifier(&fk.parent_table),
-                            non_empty_parent_cols.join(", ")
-                        )
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                    }
-
-                    // Add ON DELETE clause if not NO ACTION
-                    match &fk.on_delete {
-                        vibesql_catalog::ReferentialAction::NoAction => {}
-                        vibesql_catalog::ReferentialAction::Cascade => {
-                            write!(writer, " ON DELETE CASCADE").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::SetNull => {
-                            write!(writer, " ON DELETE SET NULL").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::SetDefault => {
-                            write!(writer, " ON DELETE SET DEFAULT").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::Restrict => {
-                            write!(writer, " ON DELETE RESTRICT").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                    }
-
-                    // Add ON UPDATE clause if not NO ACTION
-                    match &fk.on_update {
-                        vibesql_catalog::ReferentialAction::NoAction => {}
-                        vibesql_catalog::ReferentialAction::Cascade => {
-                            write!(writer, " ON UPDATE CASCADE").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::SetNull => {
-                            write!(writer, " ON UPDATE SET NULL").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::SetDefault => {
-                            write!(writer, " ON UPDATE SET DEFAULT").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                        vibesql_catalog::ReferentialAction::Restrict => {
-                            write!(writer, " ON UPDATE RESTRICT").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                    }
-
-                    // Emit DEFERRABLE clause so deferred-FK semantics survive
-                    // a persistence round-trip. Without this, `.vbsql` dump
-                    // and reload would lose `INITIALLY DEFERRED` and the TCL
-                    // shim's batched-process model would degrade fkey6 tests
-                    // back to immediate enforcement.
-                    if fk.is_deferrable {
-                        if fk.initially_deferred {
-                            write!(writer, " DEFERRABLE INITIALLY DEFERRED").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        } else {
-                            write!(writer, " DEFERRABLE INITIALLY IMMEDIATE").map_err(|e| {
-                                StorageError::NotImplemented(format!("Write error: {}", e))
-                            })?;
-                        }
-                    }
-                }
-
-                // Close the column definitions
-                write!(writer, ")")
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-
-                // Add WITHOUT ROWID / STRICT clauses for SQLite compatibility
-                // (Issue #4803, #5837). SQLite accepts both together, comma-
-                // separated: `) WITHOUT ROWID, STRICT`.
-                if schema.without_rowid {
-                    write!(writer, " WITHOUT ROWID")
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                }
-                if schema.strict {
-                    let sep = if schema.without_rowid { "," } else { "" };
-                    write!(writer, "{} STRICT", sep)
-                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-                }
-
-                writeln!(writer, ";")
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                write_create_table_ddl(&mut writer, &quoted_output_name, schema)?;
 
                 // INSERT statements for data (only live/non-deleted rows).
                 // Shared with the verbatim-source path via write_table_data so
@@ -619,6 +411,330 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Failed to flush buffer: {}", e)))?;
 
         // Get the underlying file to sync it to disk
+        let file = writer
+            .into_inner()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to get file: {}", e)))?;
+        file.sync_all()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to sync file: {}", e)))?;
+
+        Ok(())
+    }
+}
+
+/// Emit a reconstructed `CREATE TABLE <quoted_output_name> (...);` statement
+/// from a `TableSchema`'s columns and constraints.
+///
+/// Extracted from [`Database::write_sql_dump_to_file`]'s per-table loop so
+/// [`Database::save_attached_schema_sql_dump`] (#6362) can reuse the exact
+/// same column/constraint/FK formatting without duplicating it. Unlike the
+/// whole-database dump, this reconstruction path is always used for an
+/// attached schema's own file (never the `sql_source`-verbatim shortcut,
+/// which — for a schema-qualified table like `aux.t` — would still contain
+/// the `aux.` qualifier baked into the original CREATE TABLE text and fail to
+/// reload as a standalone database).
+fn write_create_table_ddl<W: Write>(
+    writer: &mut W,
+    quoted_output_name: &str,
+    schema: &vibesql_catalog::TableSchema,
+) -> Result<(), StorageError> {
+    write!(writer, "CREATE TABLE {} (", quoted_output_name)
+        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+    for (i, col) in schema.columns.iter().enumerate() {
+        if i > 0 {
+            write!(writer, ", ")
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+        // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
+        let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
+        write!(writer, "{} {}", quote_identifier(&col.name), type_str)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        // Handle generated columns (AS expression syntax)
+        if let Some(ref generated_expr) = col.generated_expr {
+            use vibesql_ast::pretty_print::ToSql;
+            write!(writer, " AS ({})", generated_expr.to_sql())
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        } else {
+            // Only non-generated columns can have DEFAULT, COLLATE, NOT NULL
+            // Add DEFAULT clause if present
+            if let Some(ref default_expr) = col.default_value {
+                use vibesql_ast::pretty_print::ToSql;
+                write!(writer, " DEFAULT {}", default_expr.to_sql())
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            // Add COLLATE clause if present
+            if let Some(ref collation) = col.collation {
+                write!(writer, " COLLATE {}", collation)
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            if !col.nullable {
+                write!(writer, " NOT NULL")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+        }
+    }
+
+    // Add PRIMARY KEY constraint if present
+    if let Some(pk_cols) = &schema.primary_key {
+        let quoted_pk: Vec<String> = pk_cols.iter().map(|c| quote_identifier(c)).collect();
+        write!(writer, ", PRIMARY KEY ({})", quoted_pk.join(", "))
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+
+    // Add UNIQUE constraints
+    for unique_cols in &schema.unique_constraints {
+        let quoted_uniq: Vec<String> = unique_cols.iter().map(|c| quote_identifier(c)).collect();
+        write!(writer, ", UNIQUE ({})", quoted_uniq.join(", "))
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+
+    // Add CHECK constraints
+    // We always output CONSTRAINT <name> CHECK (<expr>) to preserve user-provided names.
+    // For unnamed constraints, the name equals the expression text, which will be
+    // re-derived when the table is reloaded.
+    for (constraint_name, check_expr) in &schema.check_constraints {
+        use vibesql_ast::pretty_print::ToSql;
+        let expr_text = check_expr.to_sql();
+        // An unnamed CHECK's stored "name" is the verbatim source
+        // text of its expression (whitespace preserved), so it
+        // differs from `to_sql()` only by operator spacing (e.g.
+        // `d > 0` vs `d>0`). Compare with all whitespace removed to
+        // recognize that case; otherwise a spaced source form would
+        // be misread as a user-provided name and emitted as a bogus
+        // `CONSTRAINT d > 0` identifier.
+        let strip_ws = |s: &str| s.split_whitespace().collect::<String>();
+        if strip_ws(constraint_name) != strip_ws(&expr_text) {
+            // User-provided name: emit it with the re-rendered expr.
+            write!(writer, ", CONSTRAINT {} CHECK ({})", constraint_name, expr_text)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        } else {
+            // Unnamed: emit the verbatim source text so the reloaded
+            // constraint's violation message round-trips byte-exact.
+            write!(writer, ", CHECK ({})", constraint_name)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+    }
+
+    // Add FOREIGN KEY constraints
+    for fk in &schema.foreign_keys {
+        let fk_cols: Vec<String> = fk.column_names.iter().map(|c| quote_identifier(c)).collect();
+
+        // Filter out empty parent column names (unresolved references)
+        let non_empty_parent_cols: Vec<String> = fk
+            .parent_column_names
+            .iter()
+            .filter(|c| !c.is_empty())
+            .map(|c| quote_identifier(c))
+            .collect();
+
+        if non_empty_parent_cols.is_empty() {
+            // No resolved parent columns - omit column list (defaults to PK)
+            write!(
+                writer,
+                ", FOREIGN KEY ({}) REFERENCES {}",
+                fk_cols.join(", "),
+                quote_identifier(&fk.parent_table)
+            )
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        } else {
+            write!(
+                writer,
+                ", FOREIGN KEY ({}) REFERENCES {} ({})",
+                fk_cols.join(", "),
+                quote_identifier(&fk.parent_table),
+                non_empty_parent_cols.join(", ")
+            )
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+
+        // Add ON DELETE clause if not NO ACTION
+        match &fk.on_delete {
+            vibesql_catalog::ReferentialAction::NoAction => {}
+            vibesql_catalog::ReferentialAction::Cascade => {
+                write!(writer, " ON DELETE CASCADE")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::SetNull => {
+                write!(writer, " ON DELETE SET NULL")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::SetDefault => {
+                write!(writer, " ON DELETE SET DEFAULT")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::Restrict => {
+                write!(writer, " ON DELETE RESTRICT")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+        }
+
+        // Add ON UPDATE clause if not NO ACTION
+        match &fk.on_update {
+            vibesql_catalog::ReferentialAction::NoAction => {}
+            vibesql_catalog::ReferentialAction::Cascade => {
+                write!(writer, " ON UPDATE CASCADE")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::SetNull => {
+                write!(writer, " ON UPDATE SET NULL")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::SetDefault => {
+                write!(writer, " ON UPDATE SET DEFAULT")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            vibesql_catalog::ReferentialAction::Restrict => {
+                write!(writer, " ON UPDATE RESTRICT")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+        }
+
+        // Emit DEFERRABLE clause so deferred-FK semantics survive
+        // a persistence round-trip. Without this, `.vbsql` dump
+        // and reload would lose `INITIALLY DEFERRED` and the TCL
+        // shim's batched-process model would degrade fkey6 tests
+        // back to immediate enforcement.
+        if fk.is_deferrable {
+            if fk.initially_deferred {
+                write!(writer, " DEFERRABLE INITIALLY DEFERRED")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            } else {
+                write!(writer, " DEFERRABLE INITIALLY IMMEDIATE")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+        }
+    }
+
+    // Close the column definitions
+    write!(writer, ")")
+        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+    // Add WITHOUT ROWID / STRICT clauses for SQLite compatibility
+    // (Issue #4803, #5837). SQLite accepts both together, comma-
+    // separated: `) WITHOUT ROWID, STRICT`.
+    if schema.without_rowid {
+        write!(writer, " WITHOUT ROWID")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+    if schema.strict {
+        let sep = if schema.without_rowid { "," } else { "" };
+        write!(writer, "{} STRICT", sep)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    }
+
+    writeln!(writer, ";")
+        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+    Ok(())
+}
+
+impl Database {
+    /// Persist an attached schema's tables (definitions + live row data) to
+    /// its own file, in the reconstructed-DDL SQL-dump format (#6362).
+    ///
+    /// Attached-database persistence is deliberately snapshot-only regardless
+    /// of whether the *main* database is WAL-active (see the ATTACH DATABASE
+    /// issue's Scope note): each attachment gets its own independent
+    /// `.vbsql`-style dump, written and reloaded through the same SQL-dump
+    /// machinery as a normal snapshot-only database. The written file is a
+    /// standalone, self-contained database — when re-loaded (e.g. by a later
+    /// `ATTACH` of the same path) its tables land in the loader's own default
+    /// schema, exactly like any other `.vbsql` file; the caller is
+    /// responsible for re-homing them into the attachment's schema name in
+    /// the live session.
+    ///
+    /// Scope (#6362 Phase 2): only tables (schema + row data) round-trip
+    /// through attached-database persistence. Views, triggers, and indexes
+    /// defined inside an attached schema are intentionally not persisted
+    /// here — unlike a default-schema table, their stored SQL text /
+    /// qualifiers are entangled with the attachment's schema name (e.g. a
+    /// captured `CREATE VIEW aux.v1` text cannot be replayed unqualified into
+    /// a standalone reload target without a schema-name rewrite this phase
+    /// does not attempt). This is a disclosed, deliberate limitation,
+    /// analogous to the per-attached-DB WAL/checkpoint lifecycle also being
+    /// out of scope for this phase — tracked as a follow-up in issue #6407.
+    pub fn save_attached_schema_sql_dump<P: AsRef<Path>>(
+        &self,
+        schema_name: &str,
+        path: P,
+    ) -> Result<(), StorageError> {
+        let path_ref = path.as_ref();
+
+        let temp_path = {
+            let parent = path_ref.parent().unwrap_or(Path::new("."));
+            let file_name = path_ref.file_name().map(|s| s.to_string_lossy().to_string());
+            let temp_name = format!(
+                ".{}.tmp.{}",
+                file_name.unwrap_or_else(|| "database".to_string()),
+                std::process::id()
+            );
+            parent.join(temp_name)
+        };
+
+        let result = self.write_attached_schema_dump_to_file(schema_name, &temp_path);
+        if let Err(e) = &result {
+            let _ = fs::remove_file(&temp_path);
+            return Err(e.clone());
+        }
+
+        fs::rename(&temp_path, path_ref).map_err(|e| {
+            let _ = fs::remove_file(&temp_path);
+            StorageError::NotImplemented(format!("Failed to rename temp file to target: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    fn write_attached_schema_dump_to_file(
+        &self,
+        schema_name: &str,
+        path: &Path,
+    ) -> Result<(), StorageError> {
+        let file = File::create(path).map_err(|e| {
+            StorageError::NotImplemented(format!("Failed to create temp file: {}", e))
+        })?;
+        let mut writer = BufWriter::new(file);
+
+        writeln!(writer, "-- VibeSQL Attached Database Dump")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        writeln!(writer, "-- Generated: {}", chrono::Utc::now())
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        let table_names = self
+            .catalog
+            .get_schema(schema_name)
+            .map(|schema| schema.list_tables())
+            .unwrap_or_default();
+
+        for table_name in &table_names {
+            let Some(table_schema) =
+                self.catalog.get_schema(schema_name).and_then(|s| s.get_table(table_name, true))
+            else {
+                continue;
+            };
+            let qualified_name = format!("{}.{}", schema_name, table_name);
+            let Some(table) = self.tables.get(&qualified_name) else {
+                continue;
+            };
+
+            // The output file is standalone (reloaded as an ordinary
+            // database), so table names are always unqualified — the
+            // attachment schema name is not part of the on-disk DDL.
+            let original_name = &table_schema.name;
+            let quoted_output_name = quote_identifier(original_name);
+
+            write_create_table_ddl(&mut writer, &quoted_output_name, table_schema)?;
+            write_table_data(&mut writer, table, table_schema, &quoted_output_name)?;
+            writeln!(writer)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+
+        writer
+            .flush()
+            .map_err(|e| StorageError::NotImplemented(format!("Failed to flush buffer: {}", e)))?;
         let file = writer
             .into_inner()
             .map_err(|e| StorageError::NotImplemented(format!("Failed to get file: {}", e)))?;

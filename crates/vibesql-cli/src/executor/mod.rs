@@ -1187,7 +1187,14 @@ impl SqlExecutor {
     /// this writes a checkpoint at the current LSN and truncates the WAL up to
     /// it (the WAL-active durability mechanism). Otherwise it falls back to the
     /// default full-state SQL dump snapshot at `path`.
+    ///
+    /// File-backed attached databases (#6362) are persisted first,
+    /// unconditionally: attachment persistence is deliberately snapshot-only
+    /// regardless of whether the *main* database is WAL-active, so this one
+    /// call covers both branches below rather than being duplicated into each.
     pub fn save_database(&mut self, path: &str) -> anyhow::Result<()> {
+        self.save_attached_schemas()?;
+
         if let Some(wal_state) = self.wal_state.as_mut() {
             return wal_state
                 .checkpoint(&self.db)
@@ -1197,6 +1204,32 @@ impl SqlExecutor {
         self.db
             .save_sql_dump(path)
             .map_err(|e| anyhow::anyhow!("Failed to save database to {}: {}", path, e))
+    }
+
+    /// Persist every file-backed attached schema to its own file (#6362).
+    ///
+    /// `:memory:` and the empty path (session-scoped, never-yet-saved
+    /// attachments) are skipped — matching Phase 1's "nothing about
+    /// `:memory:` is ever persisted" semantics and SQLite's own per-connection
+    /// ATTACH scoping (only the attached file's *contents* persist; the
+    /// attachment registry itself never does).
+    fn save_attached_schemas(&self) -> anyhow::Result<()> {
+        for attached in self.db.catalog.attached_databases() {
+            if attached.path == ":memory:" || attached.path.is_empty() {
+                continue;
+            }
+            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(
+                |e| {
+                    anyhow::anyhow!(
+                        "Failed to save attached database '{}' to {}: {}",
+                        attached.name,
+                        attached.path,
+                        e
+                    )
+                },
+            )?;
+        }
+        Ok(())
     }
 
     /// Execute SHOW TABLES statement
@@ -2554,31 +2587,30 @@ impl SqlExecutor {
         }
     }
 
-    /// Execute `ATTACH [DATABASE] 'filename' AS schema-name` (#6310, Phase 1).
+    /// Execute `ATTACH [DATABASE] 'filename' AS schema-name` (#6310 Phase 1,
+    /// #6362 Phase 2).
     ///
-    /// Phase 1 attachments are session-scoped: the attached database is an
-    /// empty catalog schema plus a registry entry; nothing about it is
-    /// persisted (persistence writers and WAL emission skip attached schemas).
-    /// `':memory:'`, the empty filename, and paths to nonexistent or empty
-    /// files are accepted; attaching an existing non-empty database file is
-    /// rejected until file-backed attachments land (#6362) — never silently
-    /// presenting a real database file as an empty schema.
+    /// `':memory:'` and the empty filename create a session-scoped empty
+    /// schema (nothing about it is ever persisted, matching SQLite's
+    /// per-connection ATTACH semantics). A nonexistent file path likewise
+    /// starts empty — it becomes real only once something is saved into it.
+    /// An existing non-empty file is loaded via [`load_attached_schema_from_file`]
+    /// (format auto-detection, and the existing recovery failure policy: a
+    /// newer-format-version file is a hard error, never silently empty).
+    ///
+    /// [`load_attached_schema_from_file`]: Self::load_attached_schema_from_file
     fn execute_attach(&mut self, stmt: &vibesql_ast::AttachStmt) -> anyhow::Result<()> {
         // SQLite rejects ATTACH inside an explicit transaction.
         if self.db.in_transaction() {
             return Err(anyhow::anyhow!("cannot ATTACH database within transaction"));
         }
 
-        // Phase 1 guard: an existing non-empty file is a real database we
-        // cannot load yet (see #6362).
-        if stmt.filename != ":memory:" && !stmt.filename.is_empty() {
-            let path = std::path::Path::new(&stmt.filename);
-            if path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
-                return Err(anyhow::anyhow!(
-                    "attaching existing database files is not yet supported (see #6362)"
-                ));
-            }
-        }
+        let existing_nonempty = stmt.filename != ":memory:"
+            && !stmt.filename.is_empty()
+            && {
+                let path = std::path::Path::new(&stmt.filename);
+                path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+            };
 
         self.db.catalog.attach_database(&stmt.schema_name, &stmt.filename).map_err(
             |e| match e {
@@ -2589,12 +2621,82 @@ impl SqlExecutor {
                 }
                 other => anyhow::anyhow!("{}", other),
             },
-        )
+        )?;
+
+        if existing_nonempty {
+            let canonical = stmt.schema_name.to_ascii_lowercase();
+            if let Err(e) = self.load_attached_schema_from_file(&canonical, &stmt.filename) {
+                // Roll back the just-created (possibly partially populated)
+                // attachment so a failed load never leaves a half-registered
+                // schema behind — mirrors execute_detach's own cleanup order
+                // (tables first, then the registry entry).
+                for table in self.db.catalog.attached_table_names(&canonical) {
+                    let _ = self.db.drop_table(&format!("{}.{}", canonical, table));
+                }
+                let _ = self.db.catalog.detach_database(&canonical);
+                return Err(e);
+            }
+        }
+
+        Ok(())
     }
 
-    /// Execute `DETACH [DATABASE] schema-name` (#6310, Phase 1).
+    /// Load an existing on-disk database file into a newly-attached schema
+    /// (#6362 Phase 2).
     ///
-    /// Drops the attached schema's tables from storage, then removes the
+    /// Loads `path` via [`load_database_file`] (format auto-detection: SQL
+    /// dump, binary/JSON snapshot, or SQLite import) into a standalone
+    /// `Database`, then re-homes each of its default-schema tables
+    /// (definition + live row data) into `schema_name` of the live session.
+    /// `schema_name` must already be an empty, freshly-attached schema (the
+    /// caller creates it via `Catalog::attach_database` first).
+    ///
+    /// Scope: only tables round-trip through ATTACH. Views, triggers, and
+    /// indexes present in the loaded file's default schema are not currently
+    /// re-homed — see `Database::save_attached_schema_sql_dump` in
+    /// vibesql-storage for the matching writer-side limitation and rationale
+    /// (tracked as a follow-up in issue #6407).
+    fn load_attached_schema_from_file(
+        &mut self,
+        schema_name: &str,
+        path: &str,
+    ) -> anyhow::Result<()> {
+        let mut loaded = load_database_file(path)?;
+
+        let table_names = loaded
+            .catalog
+            .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
+            .map(|s| s.list_tables())
+            .unwrap_or_default();
+
+        for table_name in table_names {
+            let Some(table_schema) = loaded
+                .catalog
+                .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
+                .and_then(|s| s.get_table(&table_name, true))
+                .cloned()
+            else {
+                continue;
+            };
+
+            self.db
+                .catalog
+                .create_table_in_schema(schema_name, table_schema)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            let src_key = format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, table_name);
+            if let Some(table) = loaded.tables.remove(&src_key) {
+                self.db.tables.insert(format!("{}.{}", schema_name, table_name), table);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute `DETACH [DATABASE] schema-name` (#6310 Phase 1, #6362 Phase 2).
+    ///
+    /// Flushes the attached schema's pending state to its own file (if
+    /// file-backed), drops the schema's tables from storage, then removes the
     /// schema, its views/triggers/indexes, and the registry entry.
     fn execute_detach(&mut self, stmt: &vibesql_ast::DetachStmt) -> anyhow::Result<()> {
         // SQLite rejects DETACH inside an explicit transaction.
@@ -2607,9 +2709,29 @@ impl SqlExecutor {
             return Err(anyhow::anyhow!("no such database: {}", name));
         }
 
-        // Drop the schema's tables from storage first (row data lives there);
-        // WAL emission is already suppressed for attached-schema tables.
         let canonical = name.to_ascii_lowercase();
+
+        // Persist BEFORE dropping tables (#6362): the drop loop below removes
+        // row data from in-memory storage, so it must run after the flush or
+        // there would be nothing left to persist.
+        if let Some(attached) =
+            self.db.catalog.attached_databases().iter().find(|a| a.name == canonical)
+        {
+            if attached.path != ":memory:" && !attached.path.is_empty() {
+                let path = attached.path.clone();
+                self.db.save_attached_schema_sql_dump(&canonical, &path).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to save attached database '{}' to {}: {}",
+                        canonical,
+                        path,
+                        e
+                    )
+                })?;
+            }
+        }
+
+        // Drop the schema's tables from storage (row data lives there); WAL
+        // emission is already suppressed for attached-schema tables.
         for table in self.db.catalog.attached_table_names(&canonical) {
             let qualified = format!("{}.{}", canonical, table);
             self.db.drop_table(&qualified).map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -2656,13 +2778,17 @@ impl SqlExecutor {
         }
 
         // ATTACHed databases in attachment order, starting at seq 2 (#6310).
-        // Phase 1 attachments are session-scoped, so the file column reports
-        // the declared path as written ("" for `:memory:`).
+        // File-backed attachments report the canonicalized absolute path
+        // (#6362), matching the `main` precedent above; `:memory:` and the
+        // empty (session-scoped, unsaved) path report "".
         for (i, attached) in self.db.catalog.attached_databases().iter().enumerate() {
-            let file = if attached.path == ":memory:" {
+            let file = if attached.path == ":memory:" || attached.path.is_empty() {
                 String::new()
             } else {
-                attached.path.clone()
+                std::fs::canonicalize(&attached.path)
+                    .ok()
+                    .and_then(|p| p.to_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| attached.path.clone())
             };
             rows.push(vec![
                 Some((2 + i).to_string()),

@@ -1,11 +1,19 @@
-//! Attached-database registry (SQLite `ATTACH DATABASE` support, Phase 1).
+//! Attached-database registry (SQLite `ATTACH DATABASE` support).
 //!
 //! Phase 1 (#6310) implements *session-scoped* attachments: `ATTACH` creates
 //! an ordinary catalog schema plus a registry entry recording the attachment
-//! order and the declared file path. Nothing about an attached schema is ever
-//! persisted — persistence writers skip attached schemas exactly like temp
-//! schemas, and WAL emission is suppressed for tables inside them. File-backed
-//! attachments (loading/saving a real database file) are Phase 2 (#6362).
+//! order and the declared file path. The *registry entry itself* is never
+//! persisted (a fresh session always starts with no attachments, matching
+//! SQLite's per-connection ATTACH semantics), and WAL emission is always
+//! suppressed for tables inside an attached schema.
+//!
+//! Phase 2 (#6362) adds file-backed attachment *contents*: `ATTACH
+//! 'file.vbsql' AS aux` where the file exists loads its tables into `aux`
+//! (`SqlExecutor::load_attached_schema_from_file` in vibesql-cli), and each
+//! attached schema's tables are written back to their own file on
+//! `\save`/exit/`DETACH` (`Database::save_attached_schema_sql_dump` in
+//! vibesql-storage) — independent of the *registry entry*, which still never
+//! persists.
 //!
 //! Attachment names are stored ASCII-lowercased, matching how SQLite compares
 //! database names case-insensitively and how VibeSQL canonicalizes unquoted
