@@ -118,6 +118,45 @@ pub struct SqlExecutor {
     /// sessions. Declared last so it drops AFTER `db` (and `wal_state`),
     /// keeping the lock held through the exit-time checkpoint/save.
     _db_lock: Option<vibesql_storage::DatabaseLock>,
+    /// PRAGMA automatic_index session setting (SQLite-compatible, default ON).
+    /// SQLite's query planner may build a transient in-memory index for the
+    /// duration of a single query when no suitable index exists; VibeSQL's
+    /// planner does not implement this optimization, but the setting is
+    /// parsed, stored and echoed like SQLite so introspection round-trips
+    /// (pragma4.test pragma4-1.2, #6175).
+    automatic_index: bool,
+    /// PRAGMA cell_size_check session setting (SQLite-compatible, default
+    /// OFF). A B-tree page/cell integrity sanity check with no VibeSQL
+    /// equivalent (no page-based storage); stored and echoed only
+    /// (pragma4.test pragma4-1.6, #6175).
+    cell_size_check: bool,
+    /// PRAGMA checkpoint_fullfsync session setting (SQLite-compatible,
+    /// default OFF). Controls whether WAL checkpoint fsyncs use F_FULLFSYNC
+    /// on macOS; VibeSQL's WAL implementation has no equivalent knob, so the
+    /// value is stored and echoed only (pragma4.test pragma4-1.7, #6175).
+    checkpoint_fullfsync: bool,
+    /// PRAGMA empty_result_callbacks session setting (SQLite-compatible,
+    /// default OFF). Legacy C-API knob controlling whether the row callback
+    /// fires once for a zero-row result; no SQL-visible effect, stored and
+    /// echoed only (pragma4.test pragma4-1.11, #6175).
+    empty_result_callbacks: bool,
+    /// PRAGMA fullfsync session setting (SQLite-compatible, default OFF).
+    /// Controls whether ordinary (non-checkpoint) fsyncs use F_FULLFSYNC on
+    /// macOS; VibeSQL's WAL implementation has no equivalent knob, so the
+    /// value is stored and echoed only (pragma4.test pragma4-1.15, #6175).
+    fullfsync: bool,
+    /// PRAGMA query_only session setting (SQLite-compatible, default OFF).
+    /// When ON, real SQLite rejects any data-modifying statement with
+    /// "attempt to write a readonly database". VibeSQL stores and echoes the
+    /// flag (pragma4.test pragma4-1.20, #6175); enforcing the write-rejection
+    /// behavior is deferred follow-up work, not exercised by the covered
+    /// test files.
+    query_only: bool,
+    /// PRAGMA read_uncommitted session setting (SQLite-compatible, default
+    /// OFF). Controls SQLite's shared-cache isolation level; VibeSQL has no
+    /// shared-cache mode, so the value is stored and echoed only
+    /// (pragma4.test pragma4-1.21, #6175).
+    read_uncommitted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -537,6 +576,13 @@ impl SqlExecutor {
                     wal_state: Some(wal_state),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
+                    automatic_index: true,
+                    cell_size_check: false,
+                    checkpoint_fullfsync: false,
+                    empty_result_callbacks: false,
+                    fullfsync: false,
+                    query_only: false,
+                    read_uncommitted: false,
                 });
             }
         }
@@ -589,6 +635,13 @@ impl SqlExecutor {
             wal_state: None,
             db_path,
             _db_lock: db_lock,
+            automatic_index: true,
+            cell_size_check: false,
+            checkpoint_fullfsync: false,
+            empty_result_callbacks: false,
+            fullfsync: false,
+            query_only: false,
+            read_uncommitted: false,
         })
     }
 
@@ -1770,6 +1823,101 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "AUTOMATIC_INDEX" => {
+                    // SQLite-compatible PRAGMA automatic_index set (pragma4.test
+                    // pragma4-1.2, #6175). VibeSQL's planner does not build
+                    // transient automatic indices, so the value is stored and
+                    // echoed only.
+                    self.automatic_index = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CELL_SIZE_CHECK" => {
+                    // SQLite-compatible PRAGMA cell_size_check set (pragma4.test
+                    // pragma4-1.6, #6175). VibeSQL has no B-tree page/cell layer
+                    // to validate, so the value is stored and echoed only.
+                    self.cell_size_check = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CHECKPOINT_FULLFSYNC" => {
+                    // SQLite-compatible PRAGMA checkpoint_fullfsync set
+                    // (pragma4.test pragma4-1.7, #6175). VibeSQL's WAL
+                    // checkpoint has no F_FULLFSYNC knob, so the value is
+                    // stored and echoed only.
+                    self.checkpoint_fullfsync = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "EMPTY_RESULT_CALLBACKS" => {
+                    // SQLite-compatible PRAGMA empty_result_callbacks set
+                    // (pragma4.test pragma4-1.11, #6175). Legacy C-API knob
+                    // with no SQL-visible effect; stored and echoed only.
+                    self.empty_result_callbacks = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "FULLFSYNC" => {
+                    // SQLite-compatible PRAGMA fullfsync set (pragma4.test
+                    // pragma4-1.15, #6175). VibeSQL's WAL writer has no
+                    // F_FULLFSYNC knob, so the value is stored and echoed only.
+                    self.fullfsync = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "QUERY_ONLY" => {
+                    // SQLite-compatible PRAGMA query_only set (pragma4.test
+                    // pragma4-1.20, #6175). Stored and echoed; enforcing the
+                    // "attempt to write a readonly database" rejection on DML
+                    // is deferred follow-up work (not exercised by the
+                    // covered test files).
+                    self.query_only = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "READ_UNCOMMITTED" => {
+                    // SQLite-compatible PRAGMA read_uncommitted set (pragma4.test
+                    // pragma4-1.21, #6175). VibeSQL has no shared-cache mode, so
+                    // the value is stored and echoed only.
+                    self.read_uncommitted = bool_value;
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "AUTO_VACUUM" => {
                     // SQLite-compatible PRAGMA auto_vacuum set (pragma.test
                     // pragma-17). VibeSQL has no pager auto-vacuum, but it
@@ -2124,6 +2272,90 @@ impl SqlExecutor {
                     let value = if self.db.ignore_check_constraints() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["ignore_check_constraints".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "AUTOMATIC_INDEX" => {
+                    // SQLite-compatible PRAGMA automatic_index read
+                    // (pragma4.test pragma4-1.2, #6175). Defaults to 1 (ON).
+                    let value = if self.automatic_index { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["automatic_index".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CELL_SIZE_CHECK" => {
+                    // SQLite-compatible PRAGMA cell_size_check read
+                    // (pragma4.test pragma4-1.6, #6175). Defaults to 0 (OFF).
+                    let value = if self.cell_size_check { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["cell_size_check".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "CHECKPOINT_FULLFSYNC" => {
+                    // SQLite-compatible PRAGMA checkpoint_fullfsync read
+                    // (pragma4.test pragma4-1.7, #6175). Defaults to 0 (OFF).
+                    let value = if self.checkpoint_fullfsync { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["checkpoint_fullfsync".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "EMPTY_RESULT_CALLBACKS" => {
+                    // SQLite-compatible PRAGMA empty_result_callbacks read
+                    // (pragma4.test pragma4-1.11, #6175). Defaults to 0 (OFF).
+                    let value = if self.empty_result_callbacks { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["empty_result_callbacks".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "FULLFSYNC" => {
+                    // SQLite-compatible PRAGMA fullfsync read (pragma4.test
+                    // pragma4-1.15, #6175). Defaults to 0 (OFF).
+                    let value = if self.fullfsync { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["fullfsync".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "QUERY_ONLY" => {
+                    // SQLite-compatible PRAGMA query_only read (pragma4.test
+                    // pragma4-1.20, #6175). Defaults to 0 (OFF).
+                    let value = if self.query_only { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["query_only".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "READ_UNCOMMITTED" => {
+                    // SQLite-compatible PRAGMA read_uncommitted read
+                    // (pragma4.test pragma4-1.21, #6175). Defaults to 0 (OFF).
+                    let value = if self.read_uncommitted { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["read_uncommitted".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
