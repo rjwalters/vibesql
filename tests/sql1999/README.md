@@ -37,7 +37,7 @@ Test results are saved to `target/sqltest_results.json` after each run, showing:
 
 ## Adding More Tests
 
-To include additional test series, edit the glob patterns in `tests/sqltest_conformance.rs`:
+To include additional test series, edit the glob patterns in `tests/z_compliance/sqltest_conformance.rs`:
 
 ```rust
 let patterns = vec![

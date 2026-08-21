@@ -12,15 +12,8 @@ This directory contains tests for verifying ODBC driver compatibility with VibeS
 
 ### Basic Connectivity Tests
 
-- `test_connection.sh` - Test basic connection to VibeSQL
-- `test_queries.py` - Test various SQL queries via ODBC (Python)
-- `test_crud.py` - Test CRUD operations via ODBC (Python)
-
-### Application Integration Tests
-
-- `test_excel.md` - Manual testing guide for Excel integration
-- `test_powerbi.md` - Manual testing guide for Power BI integration
-- `test_tableau.md` - Manual testing guide for Tableau integration
+- `test_connection.sh` - Test basic connection to VibeSQL via `isql` (unixODBC)
+- `test_queries.py` - Test various SQL queries via ODBC (Python, requires `pyodbc`)
 
 ## Running Tests
 
@@ -42,7 +35,6 @@ pip install pyodbc
 
 # Run tests
 python test_queries.py
-python test_crud.py
 ```
 
 ## Expected Results
@@ -60,9 +52,6 @@ Document your test results:
 |------|--------|-------|
 | test_connection.sh | | |
 | test_queries.py | | |
-| test_crud.py | | |
-| Excel integration | | |
-| Power BI integration | | |
 
 ## Reporting Issues
 

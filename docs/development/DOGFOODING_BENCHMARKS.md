@@ -302,14 +302,14 @@ for row in cursor.fetchall():
     print(f"  {row}")
 ```
 
-**Important**: The web dashboard (`generate_web_dashboard.py`) filters by `git_branch = 'main'`
+**Important**: The web dashboard export (`scripts/export_website_data.py`) filters by `git_branch = 'main'`
 to ensure consistent reporting. Always use main-branch data when updating tracking issues.
 
 ### Export Results
 
 ```bash
-# Generate web dashboard (filters by main branch)
-./scripts/generate_web_dashboard.py
+# Export all website data incl. the dashboard (filters by main branch)
+python3 ./scripts/export_website_data.py
 
 # Export results via Python (dogfooding VibeSQL)
 python3 -c "

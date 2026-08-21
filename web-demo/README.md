@@ -389,8 +389,8 @@ pnpm format  # Auto-fix formatting
 
 ## Features in Development
 
-- [ ] Multiple example databases (Northwind, etc.)
-- [ ] SQL:1999 feature showcase
+- [x] Multiple example databases (Northwind, etc.)
+- [x] SQL:1999 feature showcase
 - [ ] Query history
 - [ ] Save/load queries
 - [ ] Schema explorer sidebar

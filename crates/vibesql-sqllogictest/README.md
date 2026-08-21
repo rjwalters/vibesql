@@ -33,8 +33,8 @@ See the original repository: https://github.com/risinglightdb/sqllogictest-rs
 
 ### What we've customized:
 - (In progress) Performance optimizations for rowsort
-- (Planned) Enhanced parallel test execution
-- (Planned) Built-in result storage and analysis
+- (Done) Enhanced parallel test execution (`src/executor/parallel.rs`, `run_parallel_async`)
+- (Done) Built-in result storage and analysis (`src/result_updater.rs` + `scripts/process_test_results.py`)
 
 ### Upstream version:
 Based on sqllogictest-rs v0.28.4

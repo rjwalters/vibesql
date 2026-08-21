@@ -78,13 +78,13 @@ Based on `benches/columnar_execution.rs`:
    let prices: Vec<&SqlValue> = scan.column(2).collect();
    ```
 
-2. **`filter.rs`**: Predicate evaluation with selection bitmaps
+2. **`filter/`**: Predicate evaluation with selection bitmaps
    ```rust
    let predicates = vec![ColumnPredicate::LessThan { column_idx: 0, value: SqlValue::Integer(24) }];
    let bitmap = create_filter_bitmap(&scan, &predicates)?;
    ```
 
-3. **`aggregate.rs`**: Type-specialized aggregate computation
+3. **`aggregate/`**: Type-specialized aggregate computation
    ```rust
    let result = compute_columnar_aggregate(&scan, column_idx, AggregateOp::Sum, Some(&bitmap))?;
    ```

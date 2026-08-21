@@ -174,13 +174,17 @@ Goodbye!
 The CLI is organized into modules:
 
 - `main.rs` - Entry point, CLI argument parsing, and mode selection
+- `lib.rs` - Library entry point (exposes `sqlite_io`)
 - `repl.rs` - Interactive REPL implementation
-- `executor.rs` - SQL execution wrapper (SELECT, CREATE, INSERT, UPDATE, DELETE)
+- `executor/` - SQL execution wrapper (SELECT, CREATE, INSERT, UPDATE, DELETE), plus `\copy` handling, display, validation, and WAL integration
 - `formatter.rs` - Result formatting (table, CSV, JSON)
 - `commands.rs` - Meta-command parsing and handling
 - `script.rs` - Batch SQL execution from files and stdin
 - `data_io.rs` - Data import/export utilities (CSV, JSON)
-- `error.rs` - CLI-specific error types
+- `sqlite_io.rs` - SQLite import/export support
+- `codegen.rs` - TypeScript code generation from database schema
+- `config.rs` - `~/.vibesqlrc` config file loading
+- `util.rs` - Small helpers (e.g. in-memory database path detection)
 
 ## Dependencies
 

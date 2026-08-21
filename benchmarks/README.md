@@ -34,7 +34,14 @@ benchmarks/
 ├── test_*.py       # Python binding benchmarks (PyO3 + SQL engine)
 ├── profile_*.py    # Python profiling tools
 ├── conftest.py     # pytest-benchmark configuration
+├── pytest.ini      # pytest discovery settings
 ├── requirements.txt # Python dependencies
+├── assertion_helpers.py   # Result validation / data integrity checks
+├── backend_setup.py       # Backend init, table creation, data insertion (SQLite, VibeSQL, DuckDB)
+├── benchmark_scenarios.py # Reusable INSERT/UPDATE/DELETE/SELECT/aggregate scenarios
+├── check_regression.py    # Compare current vs baseline results; non-zero exit on regression
+├── python_overhead.py     # Measure Python-binding overhead vs native Rust
+├── phase2_results.md      # Phase 2 optimization benchmark/validation report (#777)
 ├── utils/          # Helper utilities for benchmarks
 ├── cli/            # CLI-based TPC-H benchmarks (vibesql vs sqlite3/duckdb CLIs)
 │   ├── tpch/       # TPC-H schema, data generator, and 22 query files

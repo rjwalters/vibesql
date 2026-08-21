@@ -189,16 +189,16 @@ Due to path dependencies, crates must be published sequentially in this order:
 4. **Execution Layer**:
    - `vibesql-executor`
 
-5. **Interface Layer**:
-   - `vibesql-consensus`
-   - `vibesql-l10n`
-   - `vibesql-bench-common`
+5. **Root Package**:
+   - `vibesql`
+
+6. **Interface Layer**:
    - `vibesql-cli`
+   - `vibesql-server`
    - `vibesql-wasm-bindings`
    - `vibesql-python-bindings`
 
-6. **Root Package**:
-   - `vibesql`
+**Note**: `scripts/publish-crates.sh` is the source of truth for the publish list and order above. `vibesql-consensus`, `vibesql-l10n`, and `vibesql-bench-common` are publishable (no `publish = false`) but are not currently in the script's list.
 
 **Note**: The `sqllogictest` crate is marked `publish = false` as it contains vibesql-specific patches and is used only for internal testing.
 

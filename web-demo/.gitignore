@@ -1,8 +1,6 @@
 # Dependencies (node_modules/ already covered by root .gitignore)
 
-# Lock files - only pnpm-lock.yaml should be committed
-package-lock.json
-yarn.lock
+# (package-lock.json / yarn.lock already covered by root .gitignore)
 
 # Build output (dist/ already covered by root .gitignore)
 

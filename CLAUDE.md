@@ -151,7 +151,7 @@ LIMIT 10;
 
 > **Canonical "SQLite compatibility %" claim.** The raw headline above **is** the canonical "SQLite compatibility %" metric — its exact denominator (in-scope tests = all tests minus the out-of-scope Bucket-A skips), the honest claim sentence with its scope/exclusions clause, its relationship to epic #5779's 72.3% baseline, and its frozen inclusion rules are defined in **[docs/reference/tcl-compatibility-metric.md](docs/reference/tcl-compatibility-metric.md)**. The out-of-scope exclusion taxonomy lives in **[docs/reference/tcl-skip-policy.md](docs/reference/tcl-skip-policy.md)**. `make test-tcl-status` prints this metric (raw headline + honest claim sentence + Bucket-A category breakdown) via `cmd_status()` in `scripts/tcltest`. The raw-row inclusion rules here, in that doc, and in `cmd_status()` are the same frozen rules and must never drift apart.
 
-> **Source-of-truth note:** `make test-tcl-status` reads the `tcl_test_runs` summary table for the headline numbers. Any per-file or per-test analysis must query the `tcl_test_results` detail table using the queries above. The two reconcile because every run (native-TCL and static) now writes both. If a detail-row insert fails, `tcl_runner.py` logs it to stderr, counts it, and exits non-zero when more than 5% of inserts fail — so silent divergence between the tables cannot recur unnoticed.
+> **Source-of-truth note:** `make test-tcl-status` reads the `tcl_test_runs` summary table for the headline numbers. Any per-file or per-test analysis must query the `tcl_test_results` detail table using the queries above. The two reconcile because every run (native-TCL and static) now writes both. If a detail-row insert fails, `scripts/tcl_runner.py` logs it to stderr, counts it, and exits non-zero when more than 5% of inserts fail — so silent divergence between the tables cannot recur unnoticed.
 
 ### Exporting Results
 
@@ -203,7 +203,7 @@ Run `/repo:release` from this repo to drive a v0.X.Y cut interactively. (This re
 - Semver decision + CHANGELOG entry drafting
 - Atomic bump across the four version sources: workspace `Cargo.toml`, `Cargo.lock`, root `pyproject.toml`, `crates/vibesql-python-bindings/pyproject.toml`
 - Bulk-bump all internal `vibesql-* = { version = "..." }` pins so published artifacts carry self-consistent requirements
-- Commit + annotated tag; pushing the tag triggers `release-crates.yml` (crates.io) and `release-pypi.yml` (PyPI) in parallel
+- Commit + annotated tag; pushing the tag triggers `.github/workflows/release-crates.yml` (crates.io) and `.github/workflows/release-pypi.yml` (PyPI) in parallel
 - Final GitHub Release with the CHANGELOG block as notes
 
 ## Benchmarking and Website Updates

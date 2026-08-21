@@ -1,1 +1,0 @@
-I need to update the remaining methods in schema.rs. Let me use a script approach.

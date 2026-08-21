@@ -450,7 +450,7 @@ async function init(): Promise<void> {
   if (!data) {
     showNoDataMessage(
       'tpch-chart',
-      'No trend data available. Run scripts/export_trend_json.py to generate data.'
+      'No trend data available. Run scripts/export_website_data.py to generate data.'
     )
     showNoDataMessage('tpcds-chart', 'No trend data available.')
     showNoDataMessage('tpcc-chart', 'No trend data available.')

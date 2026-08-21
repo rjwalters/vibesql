@@ -125,5 +125,5 @@ Potential areas to add tests:
 ## References
 
 - **SQLLogicTest Documentation**: https://sqlite.org/sqllogictest/doc/trunk/about.wiki
-- **Test Runner**: `tests/sqllogictest_suite.rs`
+- **Test Runner**: `tests/z_compliance/sqllogictest_suite.rs`
 - **Rust Library**: https://github.com/risinglightdb/sqllogictest-rs

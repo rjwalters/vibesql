@@ -163,5 +163,5 @@ To add a new operation benchmark:
 - `morsel_scaling.rs` - TPC-H based scaling benchmarks
 - `hash_join_parallel.rs` - Detailed hash join benchmarks
 - `parallel_sort.rs` - Detailed sort benchmarks
-- `crates/vibesql-executor/src/select/morsel.rs` - Morsel primitives
+- `crates/vibesql-executor/src/select/morsel/` - Morsel primitives (`mod.rs`, `config.rs`, `join.rs`, `parallel.rs`, `sort.rs`)
 - `crates/vibesql-executor/src/select/parallel.rs` - Parallel config

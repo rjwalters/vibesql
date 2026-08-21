@@ -204,13 +204,13 @@ ast::Expression::Literal(_) => true,
 ast::Expression::ColumnRef { .. } => false, // Fixed!
 ```
 
-**See**: `crates/executor/src/evaluator/expression_hash.rs:138`
+**See**: `crates/vibesql-executor/src/evaluator/expression_hash.rs:138`
 
 ## Testing
 
 ### Unit Tests
 
-Located in `crates/executor/src/select/iterator.rs`:
+Located in `crates/vibesql-executor/src/select/iterator/tests/`:
 
 ```bash
 cargo test --package executor --lib iterator::tests
@@ -346,10 +346,10 @@ To enable iterator execution for more query patterns:
 
 ## References
 
-- **Main Implementation**: `crates/executor/src/select/iterator.rs`
-- **Integration Point**: `crates/executor/src/select/executor/nonagg.rs`
-- **Benchmarks**: `crates/executor/benches/iterator_execution.rs`
-- **CSE Fix**: `crates/executor/src/evaluator/expression_hash.rs`
+- **Main Implementation**: `crates/vibesql-executor/src/select/iterator/` (`mod.rs`, `scan.rs`, `filter.rs`, `join.rs`, `projection.rs`)
+- **Integration Point**: `crates/vibesql-executor/src/select/executor/nonagg/iterator.rs`
+- **Benchmarks**: `crates/vibesql-executor/benches/iterator_execution.rs`
+- **CSE Fix**: `crates/vibesql-executor/src/evaluator/expression_hash.rs`
 - **Related Issue**: [#1123](https://github.com/rjwalters/vibesql/issues/1123)
 
 ## Contributing
