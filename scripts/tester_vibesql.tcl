@@ -185,6 +185,33 @@ set ::last_insert_rowid 0
 set ::sql_batch {}
 set ::in_transaction 0
 
+# --- SAVEPOINT-as-transaction tracking (Part of #6170) -------------------
+#
+# EVIDENCE-OF R-42129-25925 / R-56142-24940: "If the SAVEPOINT statement
+# occurs outside of a BEGIN...COMMIT then it behaves the same as a BEGIN
+# DEFERRED TRANSACTION", and "RELEASE ... of the outermost savepoint (the
+# savepoint that started the transaction) ... causes the transaction to
+# commit" — including running the deferred-foreign-key check that a COMMIT
+# would run (R-37736-42616).
+#
+# The shim's whole transaction model keys off BEGIN/COMMIT/ROLLBACK because
+# no engine state survives its per-batch process spawn. A top-level
+# `SAVEPOINT x` therefore used to run as its own autocommit batch, and the
+# later `RELEASE x` hit a FRESH process with nothing to release ("Storage
+# error: Failed to release savepoint: ... No active transaction"). VibeSQL's
+# engine itself already implements the documented semantics correctly inside
+# a single process (verified: SAVEPOINT opens a transaction, RELEASE of the
+# outermost commits and raises "FOREIGN KEY constraint failed" on an
+# outstanding deferred violation) — only the shim's batching was missing it.
+#
+# $::savepoint_stack holds the names of the savepoints currently open in the
+# batched transaction, outermost first (lowercased; SQLite matches savepoint
+# names case-insensitively). $::txn_opened_by_savepoint is 1 only when the
+# open transaction was started by a top-level SAVEPOINT rather than an
+# explicit BEGIN — only then does emptying the stack close the transaction.
+set ::savepoint_stack {}
+set ::txn_opened_by_savepoint 0
+
 # Maximum batch size for which we perform the FULL-REPLAY per-statement
 # in-transaction "trial check" (see trial_check_in_transaction). The full
 # trial re-executes the ENTIRE accumulated batch + the new statement +
@@ -2280,6 +2307,89 @@ proc is_script_failed_summary {line} {
     return [regexp {^Error:\s+[0-9]} $line]
 }
 
+proc normalize_savepoint_name {name} {
+    # SQLite savepoint names are identifiers: they may be quoted with "", '',
+    # `` or [] and are compared case-insensitively.
+    set n [string trim $name]
+    set n [string trimright $n ";"]
+    set n [string trim $n]
+    if {[string length $n] >= 2} {
+        set first [string index $n 0]
+        set last [string index $n end]
+        if {($first eq "\"" && $last eq "\"") || ($first eq "'" && $last eq "'")
+            || ($first eq "`" && $last eq "`") || ($first eq "\[" && $last eq "\]")} {
+            set n [string range $n 1 end-1]
+        }
+    }
+    return [string tolower $n]
+}
+
+proc scan_savepoint_ops {sql} {
+    # Return the statement-level SAVEPOINT / RELEASE / ROLLBACK TO commands in
+    # $sql as an ordered list of {kind name} pairs (kind is open / release /
+    # rollbackto). $sql is expected to already have trigger bodies masked (the
+    # same input the BEGIN/COMMIT counting regexes use), so a `CREATE TRIGGER
+    # ... BEGIN ... END` body can never contribute a spurious match.
+    #
+    # Only whole statements count. A `SAVEPOINT` appearing inside a longer
+    # statement (a string literal, a column name) is not a savepoint command,
+    # so each ';'-delimited segment must match the command form exactly.
+    set ops {}
+    foreach seg [split $sql ";"] {
+        set s [string trim $seg]
+        if {$s eq ""} {
+            continue
+        }
+        if {[regexp -nocase {^SAVEPOINT\s+(\S+)$} $s -> name]} {
+            lappend ops [list open [normalize_savepoint_name $name]]
+        } elseif {[regexp -nocase {^RELEASE\s+(?:SAVEPOINT\s+)?(\S+)$} $s -> name]} {
+            lappend ops [list release [normalize_savepoint_name $name]]
+        } elseif {[regexp -nocase {^ROLLBACK(?:\s+TRANSACTION)?\s+TO\s+(?:SAVEPOINT\s+)?(\S+)$} $s -> name]} {
+            lappend ops [list rollbackto [normalize_savepoint_name $name]]
+        }
+    }
+    return $ops
+}
+
+proc apply_savepoint_ops {stack ops} {
+    # Fold $ops over $stack and return the resulting savepoint stack.
+    #
+    # EVIDENCE-OF R-43804-49851: RELEASE removes the named savepoint AND every
+    # savepoint opened after it. EVIDENCE-OF R-56966-15376: ROLLBACK TO keeps
+    # the named savepoint open (only the ones opened after it are removed), so
+    # it can be rolled back to again. An op naming a savepoint that is not on
+    # the stack is left to the engine to reject ("no such savepoint") and does
+    # not change the tracked stack here.
+    foreach op $ops {
+        lassign $op kind name
+        switch -exact -- $kind {
+            open {
+                lappend stack $name
+            }
+            release {
+                # Innermost match wins.
+                set idx -1
+                for {set i [expr {[llength $stack] - 1}]} {$i >= 0} {incr i -1} {
+                    if {[lindex $stack $i] eq $name} { set idx $i; break }
+                }
+                if {$idx >= 0} {
+                    set stack [lrange $stack 0 [expr {$idx - 1}]]
+                }
+            }
+            rollbackto {
+                set idx -1
+                for {set i [expr {[llength $stack] - 1}]} {$i >= 0} {incr i -1} {
+                    if {[lindex $stack $i] eq $name} { set idx $i; break }
+                }
+                if {$idx >= 0} {
+                    set stack [lrange $stack 0 $idx]
+                }
+            }
+        }
+    }
+    return $stack
+}
+
 proc is_bare_transaction_closer {sql} {
     # True when every top-level statement in $sql is a bare transaction closer
     # (COMMIT / COMMIT TRANSACTION / END / END TRANSACTION / ROLLBACK /
@@ -2316,9 +2426,15 @@ proc is_bare_transaction_closer {sql} {
             }
             set saw_stmt 1
             set seg_upper [string toupper $seg]
+            # A savepoint command (SAVEPOINT / RELEASE / ROLLBACK TO) never
+            # produces result rows either, so a body made only of those (the
+            # `RELEASE outer` that closes a SAVEPOINT-opened transaction —
+            # fkey2-2.43/2.49/2.58) must also return {} rather than the
+            # replayed batch dump. (Part of #6170.)
             if {$seg_upper ne "COMMIT" && $seg_upper ne "COMMIT TRANSACTION" &&
                 $seg_upper ne "END" && $seg_upper ne "END TRANSACTION" &&
-                $seg_upper ne "ROLLBACK" && $seg_upper ne "ROLLBACK TRANSACTION"} {
+                $seg_upper ne "ROLLBACK" && $seg_upper ne "ROLLBACK TRANSACTION" &&
+                ![regexp -nocase {^(?:SAVEPOINT\s+\S+|RELEASE\s+(?:SAVEPOINT\s+)?\S+|ROLLBACK(?:\s+TRANSACTION)?\s+TO\s+(?:SAVEPOINT\s+)?\S+)$} $seg]} {
                 return 0
             }
         }
@@ -3200,7 +3316,44 @@ proc execsql {sql {db ""}} {
                          [regexp -all -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s*$)} $count_sql]}]
     set net_begin [expr {$begin_count - $end_count}]
 
-    if {$net_begin > 0} {
+    # --- SAVEPOINT-as-transaction bookkeeping (Part of #6170) -------------
+    #
+    # A top-level `SAVEPOINT x` behaves exactly like `BEGIN DEFERRED`, and the
+    # `RELEASE x` that empties the savepoint stack commits that transaction
+    # (running the deferred-FK check). Fold this SQL's savepoint commands over
+    # the tracked stack to decide whether it opens or closes such a
+    # transaction; the resulting stack is committed to $::savepoint_stack only
+    # on the paths that actually accept the statement into the batch.
+    set sp_ops [scan_savepoint_ops $count_sql]
+    set sp_stack_before $::savepoint_stack
+    set sp_txn_by_savepoint_before $::txn_opened_by_savepoint
+    set sp_stack_after $::savepoint_stack
+    set sp_opens_txn 0
+    set sp_closes_txn 0
+    if {[llength $sp_ops] > 0} {
+        set sp_stack_after [apply_savepoint_ops $::savepoint_stack $sp_ops]
+        if {!$::in_transaction && $begin_count == 0 && $end_count == 0
+                && [llength $sp_stack_after] > 0} {
+            # Not in a transaction and this body leaves a savepoint open: it
+            # starts one. (A self-contained `SAVEPOINT x; ...; RELEASE x` body
+            # leaves the stack empty and still runs as one autocommit batch.)
+            #
+            # Requiring begin_count == end_count == 0 keeps a body that carries
+            # its OWN transaction control — e.g. `BEGIN; ...; SAVEPOINT one;
+            # ...; ROLLBACK TO one; ...; ROLLBACK;` (savepoint-17.1) — on the
+            # existing balanced-BEGIN/COMMIT direct-execution path, where it is
+            # already self-contained within a single CLI process.
+            set sp_opens_txn 1
+        } elseif {$::in_transaction && $::txn_opened_by_savepoint && $end_count == 0
+                  && $net_begin == 0 && [llength $sp_stack_before] > 0
+                  && [llength $sp_stack_after] == 0} {
+            # The outermost savepoint — the one that started the transaction —
+            # was released, so this statement commits the transaction.
+            set sp_closes_txn 1
+        }
+    }
+
+    if {$net_begin > 0 || $sp_opens_txn} {
         # SQL opens a transaction (e.g., "BEGIN" or "CREATE TABLE...; BEGIN;")
         # Trial-run the SQL with an appended ROLLBACK so any error fires now
         # (at the test boundary that submitted this SQL) instead of being
@@ -3225,16 +3378,20 @@ proc execsql {sql {db ""}} {
         if {[catch {trial_check_in_transaction $sql} trial_err]} {
             if {$::txn_survived_trial_error} {
                 set ::in_transaction 1
+                set ::txn_opened_by_savepoint $sp_opens_txn
+                set ::savepoint_stack $sp_stack_after
                 set ::txn_had_tolerated_error 1
                 lappend ::sql_batch $sql
             }
             error $trial_err
         }
         set ::in_transaction 1
+        set ::txn_opened_by_savepoint $sp_opens_txn
+        set ::savepoint_stack $sp_stack_after
         set ::txn_had_tolerated_error 0
         lappend ::sql_batch $sql
         return {}
-    } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0)} {
+    } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0) || $sp_closes_txn} {
         # SQL closes a transaction (e.g., "COMMIT" or has more COMMITs than BEGINs)
         # Flush the entire batch including this statement.
         #
@@ -3291,6 +3448,11 @@ proc execsql {sql {db ""}} {
 
         lappend ::sql_batch $sql
         set ::in_transaction 0
+        # The transaction ends here, so its savepoint stack goes with it. Both
+        # "close failed but the transaction survives" recovery paths below
+        # restore $sp_stack_before along with $::in_transaction. (#6170.)
+        set ::savepoint_stack {}
+        set ::txn_opened_by_savepoint 0
         # Did this transaction already surface an aborting error (RAISE(ABORT) /
         # RAISE(FAIL) / constraint) at its submitting test that left the txn
         # open (#5478)? If so the replayed batch will re-emit that same "Error
@@ -3347,6 +3509,13 @@ proc execsql {sql {db ""}} {
                         # statements (including a retried close) replay
                         # correctly from scratch at the next flush.
                         set ::in_transaction 1
+                        # EVIDENCE-OF R-37736-42616: "the nested savepoints
+                        # remain open" when a COMMIT / transaction-SAVEPOINT
+                        # RELEASE fails on a deferred FK violation — restore
+                        # the stack exactly as it stood before this close
+                        # (fkey2-2.40/2.41, fkey2-2.54/2.55). (#6170.)
+                        set ::savepoint_stack $sp_stack_before
+                        set ::txn_opened_by_savepoint $sp_txn_by_savepoint_before
                         # `error` unwinds straight out of execsql, past the
                         # cleanup a few lines below, so free the pre-flush
                         # snapshot here or it leaks on this survival path
@@ -3422,6 +3591,10 @@ proc execsql {sql {db ""}} {
                             # NEXT flush of this (still-open) transaction
                             # must keep tolerating its re-fired error too.
                             set ::in_transaction 1
+                            # Same "nested savepoints remain open" restore as
+                            # the untolerated-error branch above (#6170).
+                            set ::savepoint_stack $sp_stack_before
+                            set ::txn_opened_by_savepoint $sp_txn_by_savepoint_before
                             set ::txn_had_tolerated_error 1
                             # `error` unwinds straight out of execsql, past the
                             # cleanup a few lines below, so free the pre-flush
@@ -3491,15 +3664,21 @@ proc execsql {sql {db ""}} {
         if {[catch {trial_check_in_transaction $sql} trial_err]} {
             if {$::txn_survived_trial_error} {
                 set ::txn_had_tolerated_error 1
+                set ::savepoint_stack $sp_stack_after
                 lappend ::sql_batch $sql
             } else {
                 set ::in_transaction 0
                 set ::sql_batch {}
                 set ::txn_had_tolerated_error 0
+                set ::savepoint_stack {}
+                set ::txn_opened_by_savepoint 0
                 teardown_txn_trial_db
             }
             error $trial_err
         }
+        # A nested SAVEPOINT / RELEASE / ROLLBACK TO inside the open
+        # transaction moves the tracked stack without ending it (#6170).
+        set ::savepoint_stack $sp_stack_after
         lappend ::sql_batch $sql
         # PRAGMA count_changes=ON: surface the affected-row count computed by
         # trial_check_in_transaction's success path (see its doc comment)
@@ -4389,6 +4568,14 @@ array set vibesql_skip_tests {
     fkey2-15.1.3 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc (fkey2.test-local helper around the same SQLite internal B-tree step counters as select2/minmax3 above); VibeSQL always returns 0. Part of #6170."
     fkey2-15.1.6 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc; VibeSQL always returns 0 for these SQLite-internal B-tree step counters. Part of #6170."
     fkey2-15.1.7 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc; VibeSQL always returns 0 for these SQLite-internal B-tree step counters. Part of #6170."
+    fkey2-18.2 "Bucket-A A1 (C-API / statement-handle surface unreachable from the SQL CLI). The whole fkey2-18.* block is gated on `ifcapable auth` and registers a TCL authorization callback via `db auth` (sqlite3_set_authorizer); the test asserts the exact sequence of SQLITE_INSERT/SQLITE_READ authorization events recorded by that callback while FK processing runs. VibeSQL has no query-time authorization hook to invoke the callback, so the recorded event list is always empty. Same unimplemented-hook limitation as the fkey7-1.2..1.5 skips above. Part of #6170."
+    fkey2-18.3 "Bucket-A A1: asserts the `db auth` (sqlite3_set_authorizer) event sequence for an insert on the child table of an immediate FK; same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
+    fkey2-18.4 "Bucket-A A1: asserts the `db auth` (sqlite3_set_authorizer) event sequence for an insert on the child table of a deferred FK; same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
+    fkey2-18.5 "Bucket-A A1: asserts the `db auth` (sqlite3_set_authorizer) event sequence for an ON UPDATE CASCADE action; same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
+    fkey2-18.7 "Bucket-A A1: asserts the `db auth` (sqlite3_set_authorizer) event sequence for an insert against an INTEGER PRIMARY KEY parent; same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
+    fkey2-18.8 "Bucket-A A1: requires the registered `db auth` callback to return SQLITE_IGNORE for reads of the parent table, which is what makes this INSERT fail with 'FOREIGN KEY constraint failed'. With no authorization hook to consult, VibeSQL reads the parent normally and the INSERT correctly succeeds against the real data — the divergence is the missing sqlite3_set_authorizer surface, not FK enforcement. Same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
+    fkey2-18.10 "Bucket-A A1: cascades from the skipped fkey2-18.8 — it asserts the contents of `short` on the assumption that 18.8's INSERT was suppressed by the SQLITE_IGNORE authorization callback. Part of #6170."
+    fkey2-18.11 "Bucket-A A1: requires the registered `db auth` callback to return SQLITE_IGNORE for reads of the parent table so this UPDATE fails; same unimplemented-hook limitation as fkey2-18.8 above. Part of #6170."
     minmax3-1.0 "hexio byte-manipulation (set_file_format 4 -> hexio_write, no shim stub) plus db close/reopen to change file format. SQL correctness covered by minmax3 §2/§3; §4 is the real engine bug tracked in #5842. (#5844.)"
     minmax3-1.1.1 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
     minmax3-1.1.2 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
@@ -6841,6 +7028,8 @@ proc reconcile_skipped_txn_state {script} {
         set ::sql_batch {}
         set ::in_transaction 0
         set ::txn_had_tolerated_error 0
+        set ::savepoint_stack {}
+        set ::txn_opened_by_savepoint 0
         teardown_txn_trial_db
     }
 }
@@ -8729,6 +8918,21 @@ proc ::tcltest_db_master {cmd args} {
             # tables that no longer carry the temp objects (view.test view-26.x
             # regressed on a stale v1temp replay). (#5940)
             clear_temp_view_trigger_replay
+            # Closing the connection also discards any still-open transaction
+            # (SQLite rolls it back). Scoped to the SAVEPOINT-opened case this
+            # shim now tracks (#6170) so a `SAVEPOINT sp1` followed by
+            # `db close` does not leave a phantom batched transaction that the
+            # next connection's statements get folded into (savepoint-1.3 →
+            # savepoint-1.4.1). A BEGIN-opened batch keeps its pre-existing
+            # behavior.
+            if {$::txn_opened_by_savepoint} {
+                set ::sql_batch {}
+                set ::in_transaction 0
+                set ::txn_had_tolerated_error 0
+                set ::savepoint_stack {}
+                set ::txn_opened_by_savepoint 0
+                teardown_txn_trial_db
+            }
         }
         nullvalue {
             # Sets the string used for NULL values
