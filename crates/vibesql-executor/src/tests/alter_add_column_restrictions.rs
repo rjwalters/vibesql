@@ -125,6 +125,23 @@ fn add_column_check_satisfied_by_all_rows_is_allowed() {
 }
 
 #[test]
+fn add_column_check_is_persisted_and_enforced_on_later_insert() {
+    // Issue #6241: the CHECK added by `ADD COLUMN c CHECK(...)` must be
+    // persisted into the schema, not just validated once against the rows
+    // present at ALTER time. A later INSERT that violates it must be rejected,
+    // matching CREATE TABLE column-CHECK behavior.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), (3, 4)").unwrap();
+    assert!(exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN c CHECK(c!=99)").is_ok());
+    // Existing rows are unaffected (c defaults to NULL, which passes CHECK).
+    assert!(exec_sql(&mut db, "INSERT INTO t1 VALUES(5, 6, 1)").is_ok());
+    // A later row violating the added CHECK must now be rejected.
+    let err = exec_sql(&mut db, "INSERT INTO t1 VALUES(7, 8, 99)").unwrap_err();
+    assert!(err.contains("CHECK constraint failed"), "got: {err}");
+}
+
+#[test]
 fn add_generated_not_null_column_null_value_is_rejected() {
     // alter3-9.5: a generated NOT NULL column is permitted (no static NULL-default
     // rejection), but its computed value is validated per existing row. Row

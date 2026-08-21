@@ -1,5 +1,6 @@
 //! Column operation executors for ALTER TABLE
 
+use vibesql_ast::pretty_print::ToSql;
 use vibesql_ast::*;
 use vibesql_catalog::ColumnSchema;
 use vibesql_storage::Database;
@@ -244,19 +245,31 @@ pub(super) fn execute_add_column(
     // Rows are scanned in order and CHECK is evaluated before NOT NULL within a
     // row, matching sqlite3 3.51.0 (alter3-9.6 reports the CHECK failure even
     // though a later row would also fail NOT NULL).
-    let added_check_exprs: Vec<Expression> = stmt
+    // Carry the constraint name alongside each added CHECK expression so it can
+    // be persisted into `schema.check_constraints` below, using the same naming
+    // convention CREATE TABLE's column-level CHECK uses (explicit name, else
+    // the verbatim CHECK source text, else the re-rendered expression) --
+    // see `ConstraintValidator::process_constraints` in `constraint_validator.rs`.
+    let added_checks: Vec<(String, Expression)> = stmt
         .column_def
         .constraints
         .iter()
         .filter_map(|c| match &c.kind {
-            ColumnConstraintKind::Check { expr, .. } => Some((**expr).clone()),
+            ColumnConstraintKind::Check { expr, source_text } => {
+                let name = c
+                    .name
+                    .clone()
+                    .or_else(|| source_text.clone())
+                    .unwrap_or_else(|| expr.to_sql());
+                Some((name, (**expr).clone()))
+            }
             _ => None,
         })
         .collect();
     let needs_not_null_check =
         !stmt.column_def.nullable && stmt.column_def.generated_expr.is_some();
 
-    if !added_check_exprs.is_empty() || needs_not_null_check {
+    if !added_checks.is_empty() || needs_not_null_check {
         let schema_snapshot = table.schema.clone();
         let new_col_index = schema_snapshot.columns.len() - 1;
         let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
@@ -264,7 +277,7 @@ pub(super) fn execute_add_column(
 
         let mut violation: Option<ExecutorError> = None;
         for row in table.rows_mut() {
-            for expr in &added_check_exprs {
+            for (_, expr) in &added_checks {
                 if evaluator.eval(expr, row)? == SqlValue::Boolean(false) {
                     // SQLite emits the bare message (no constraint name) for the
                     // ADD COLUMN existing-row validation path.
@@ -286,6 +299,31 @@ pub(super) fn execute_add_column(
             }
         }
 
+        // Existing rows all satisfy the added CHECK(s): persist them into the
+        // schema so later INSERT/UPDATE enforce them too, matching CREATE
+        // TABLE column-CHECK behavior (issue #6241). Previously the CHECK was
+        // only ever evaluated once here, against the rows present at ALTER
+        // time, and a subsequent violating INSERT went unrejected.
+        //
+        // Track which constraint names were actually persisted so a failure
+        // partway through (e.g. a duplicate name on a later CHECK in the same
+        // `ADD COLUMN` clause) can be rolled back precisely below -- a CHECK
+        // need not reference the newly added column at all (e.g. `ADD COLUMN
+        // c CHECK(a!=1)`), so `remove_column`'s column-reference filter alone
+        // cannot be relied on to strip it.
+        let mut persisted_check_names: Vec<String> = Vec::new();
+        if violation.is_none() {
+            for (name, expr) in &added_checks {
+                match table.schema_mut().add_check_constraint(name.clone(), expr.clone()) {
+                    Ok(()) => persisted_check_names.push(name.clone()),
+                    Err(e) => {
+                        violation = Some(ExecutorError::from(e));
+                        break;
+                    }
+                }
+            }
+        }
+
         if let Some(err) = violation {
             // Roll back the schema + row mutations so the rejected ALTER leaves
             // the table exactly as it was (SQLite is atomic here).
@@ -293,6 +331,9 @@ pub(super) fn execute_add_column(
                 let _ = row.remove_value(new_col_index);
             }
             let _ = table.schema_mut().remove_column(new_col_index);
+            for name in &persisted_check_names {
+                let _ = table.schema_mut().drop_check_constraint(name);
+            }
             if added_strict_type.is_some() {
                 table.schema_mut().strict_types.pop();
             }
