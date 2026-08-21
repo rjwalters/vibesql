@@ -1051,13 +1051,14 @@ impl SelectExecutor<'_> {
         // Handle set operations (UNION, INTERSECT, EXCEPT)
         // Process operations left-to-right to ensure correct associativity
         if let Some(set_op) = &stmt.set_operation {
-            // Extract collations from the leftmost SELECT list for set operation comparisons
-            // Use schema-aware lookup to get column collations from CREATE TABLE definitions
-            let collations = Self::extract_collations_from_select_list_with_schema(
-                &stmt.select_list,
-                Some(self.database),
-                stmt.from.as_ref(),
-            );
+            // Resolve the collating sequence for each result column of this compound
+            // SELECT by walking all arms left-to-right and using the first arm whose
+            // expression has a defined collation (explicit COLLATE, or a bare column
+            // reference which always has at least a default BINARY collation) --
+            // mirroring SQLite's multiSelectCollSeq() (#6305). This is used for both
+            // set-operation dedup comparisons (UNION/INTERSECT/EXCEPT) and ORDER BY
+            // sorting below.
+            let collations = Self::extract_compound_collations(stmt, self.database);
             // Issue #4602: Compute left column count from AST for schema-level validation
             // This is needed when the left result set is empty (table has no rows)
             // Issue #4922: Must propagate errors (not use .ok()) to catch column count mismatches

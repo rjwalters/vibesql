@@ -21,9 +21,21 @@ impl SelectExecutor<'_> {
     /// Extract collation information from a SELECT list.
     ///
     /// Returns a Vec of Option<String> where each element corresponds to a SELECT item.
-    /// Collation is determined by:
-    /// 1. Explicit COLLATE clause in the SELECT expression (e.g., `a COLLATE NOCASE`)
-    /// 2. Column's schema collation if the expression is a simple column reference
+    /// The result is **tri-state**, mirroring SQLite's `sqlite3ExprCollSeq()`: `None` means
+    /// the expression has *no defined collating sequence at all* (e.g. a computed expression
+    /// like `a || ''`), while `Some(_)` means the expression *does* have a defined collation —
+    /// which is a defined-ness signal, not just "an explicit COLLATE was written". Concretely:
+    ///
+    /// 1. An explicit `COLLATE` clause in the SELECT expression (e.g., `a COLLATE NOCASE`)
+    ///    always yields `Some(<that collation>)`.
+    /// 2. A bare column reference **always** has a defined collating sequence — its schema
+    ///    `COLLATE` if the column was declared with one, otherwise the SQL default `BINARY` —
+    ///    so it always yields `Some(_)`, never `None`. This tri-state distinction is what lets
+    ///    `extract_compound_collations` below implement SQLite's `multiSelectCollSeq()`
+    ///    leftmost-arm-with-a-defined-collation walk: only a `None` here allows the walk to
+    ///    fall through to a later compound arm.
+    /// 3. Anything else (function calls, concatenation, literals, arithmetic, ...) has no
+    ///    defined collation and yields `None`.
     ///
     /// The optional `database` and `from_clause` parameters enable schema-based collation lookup.
     pub(super) fn extract_collations_from_select_list_with_schema(
@@ -40,7 +52,10 @@ impl SelectExecutor<'_> {
                         expr: vibesql_ast::Expression::Collate { collation, .. },
                         ..
                     } => Some(collation.clone()),
-                    // Check if it's a column reference - look up schema collation
+                    // A bare column reference always has a defined collating sequence: its
+                    // schema COLLATE if declared, otherwise the SQL default BINARY. Never
+                    // return None for a ColumnRef -- that would incorrectly let a later
+                    // compound arm's explicit COLLATE override this arm's (implicit) one.
                     vibesql_ast::SelectItem::Expression {
                         expr: vibesql_ast::Expression::ColumnRef(col_id),
                         ..
@@ -54,7 +69,11 @@ impl SelectExecutor<'_> {
                                 if let Some(table) = db.get_table(table_name) {
                                     for col in &table.schema.columns {
                                         if col.name.eq_ignore_ascii_case(column_name) {
-                                            return col.collation.clone();
+                                            return Some(
+                                                col.collation.clone().unwrap_or_else(|| {
+                                                    "BINARY".to_string()
+                                                }),
+                                            );
                                         }
                                     }
                                 }
@@ -69,12 +88,67 @@ impl SelectExecutor<'_> {
                                 }
                             }
                         }
-                        None
+                        // Schema unavailable (or column not resolvable in it) but this is
+                        // still a bare column reference -- default to BINARY rather than
+                        // reporting "no defined collation".
+                        Some("BINARY".to_string())
                     }
                     _ => None,
                 }
             })
             .collect()
+    }
+
+    /// Resolve the collating sequence used for each result column of a compound SELECT
+    /// (`UNION [ALL] | INTERSECT | EXCEPT` chain), mirroring SQLite's `multiSelectCollSeq()`.
+    ///
+    /// For each result column, walk the constituent SELECTs **left to right** and use the
+    /// first arm whose corresponding expression has a defined collating sequence (per
+    /// [`extract_collations_from_select_list_with_schema`]'s tri-state result), falling
+    /// through to later arms when an earlier arm's expression has none. This is distinct from
+    /// (and must not be confused with) the leftmost-only extraction that call sites used
+    /// before -- an explicit `COLLATE` on a non-leftmost arm can only win when *no earlier*
+    /// arm has any defined collation for that column at all.
+    ///
+    /// Each arm's collation is resolved against *that arm's own* FROM clause, since a bare
+    /// column reference's schema collation depends on which table it refers to in that arm.
+    pub(super) fn extract_compound_collations(
+        stmt: &vibesql_ast::SelectStmt,
+        database: &vibesql_storage::Database,
+    ) -> Vec<Option<String>> {
+        let mut collations = Self::extract_collations_from_select_list_with_schema(
+            &stmt.select_list,
+            Some(database),
+            stmt.from.as_ref(),
+        );
+
+        let mut current_set_op = stmt.set_operation.as_ref();
+        while let Some(set_op) = current_set_op {
+            // Stop early once every column has a defined collation -- no later arm can
+            // change the outcome for any column.
+            if collations.iter().all(Option::is_some) {
+                break;
+            }
+
+            let right = &set_op.right;
+            let right_collations = Self::extract_collations_from_select_list_with_schema(
+                &right.select_list,
+                Some(database),
+                right.from.as_ref(),
+            );
+
+            for (i, slot) in collations.iter_mut().enumerate() {
+                if slot.is_none() {
+                    if let Some(rc) = right_collations.get(i) {
+                        *slot = rc.clone();
+                    }
+                }
+            }
+
+            current_set_op = right.set_operation.as_ref();
+        }
+
+        collations
     }
 
     /// Find a column's collation by searching through a FROM clause
