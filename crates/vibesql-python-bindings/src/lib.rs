@@ -97,6 +97,14 @@ fn disable_profiling() {
 /// Registers all public types and functions with the Python module.
 #[pymodule]
 fn vibesql(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Package version, sourced from the crate's Cargo.toml (kept in sync with
+    // the workspace version by scripts/version.sh). Installed wheels ship no
+    // Python-source package (see #6360), so this is the only place
+    // `vibesql.__version__` can come from — a hardcoded literal here would
+    // silently drift across releases just like the `Database.version()`
+    // string this same issue fixes.
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+
     // DB-API 2.0 module-level attributes
     m.add("apilevel", "2.0")?;
     m.add("threadsafety", 1)?;

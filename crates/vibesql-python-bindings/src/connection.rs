@@ -71,9 +71,12 @@ impl Database {
     /// Get version string
     ///
     /// # Returns
-    /// A string containing the version identifier.
+    /// A string containing the version identifier, derived from the crate's
+    /// Cargo.toml version (kept in sync with the workspace version by
+    /// scripts/version.sh) rather than a hardcoded literal that drifts
+    /// silently across releases (see #6360).
     fn version(&self) -> String {
-        "vibesql-py 0.1.0".to_string()
+        format!("vibesql-py {}", env!("CARGO_PKG_VERSION"))
     }
 
     /// Save database to SQL dump file
