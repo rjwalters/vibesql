@@ -177,20 +177,20 @@ EOF
             TIMING=$(grep "TOTAL:" "$QUERY_OUTPUT" | head -1 | awk '{print $2}')
             if echo "$TIMING" | grep -q "TIMEOUT"; then
                 echo -e "${YELLOW}TIMEOUT${NC}"
-                ((TIMEOUT++))
+                TIMEOUT=$((TIMEOUT+1))
             else
                 echo -e "${GREEN}${TIMING}${NC}"
-                ((PASSED++))
+                PASSED=$((PASSED+1))
             fi
         else
             # Check exit status
             EXIT_CODE=$?
             if [ $EXIT_CODE -eq 124 ]; then
                 echo -e "${YELLOW}TIMEOUT (wallclock)${NC}"
-                ((TIMEOUT++))
+                TIMEOUT=$((TIMEOUT+1))
             else
                 echo -e "${RED}CRASHED (exit $EXIT_CODE)${NC}"
-                ((CRASHED++))
+                CRASHED=$((CRASHED+1))
             fi
         fi
 
