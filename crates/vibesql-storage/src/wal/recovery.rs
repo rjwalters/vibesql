@@ -165,22 +165,37 @@ struct TransactionTracker {
     /// Operations buffered for each in-flight transaction
     /// Key: txn_id, Value: list of (lsn, op)
     buffered_ops: HashMap<u64, Vec<(Lsn, WalOp)>>,
+    /// Named-savepoint marks within each in-flight transaction's buffered-op
+    /// stream (issue #6170): `Key: txn_id, Value: {savepoint name -> buffered_ops
+    /// length at SAVEPOINT time}`. A later `ROLLBACK TO <name>` truncates the
+    /// transaction's buffered ops back to that length, discarding everything
+    /// recorded after the savepoint — mirroring the live engine's wholesale
+    /// snapshot restore (`Database::rollback_to_savepoint`, #6278) so recovery
+    /// reproduces the same in-memory undo instead of replaying every buffered
+    /// DML op unconditionally at commit.
+    savepoint_marks: HashMap<u64, HashMap<String, usize>>,
 }
 
 impl TransactionTracker {
     fn new() -> Self {
-        Self { states: HashMap::new(), buffered_ops: HashMap::new() }
+        Self {
+            states: HashMap::new(),
+            buffered_ops: HashMap::new(),
+            savepoint_marks: HashMap::new(),
+        }
     }
 
     /// Begin tracking a transaction
     fn begin_transaction(&mut self, txn_id: u64) {
         self.states.insert(txn_id, TransactionState::InFlight);
         self.buffered_ops.insert(txn_id, Vec::new());
+        self.savepoint_marks.insert(txn_id, HashMap::new());
     }
 
     /// Mark a transaction as committed and return its buffered operations
     fn commit_transaction(&mut self, txn_id: u64) -> Vec<(Lsn, WalOp)> {
         self.states.insert(txn_id, TransactionState::Committed);
+        self.savepoint_marks.remove(&txn_id);
         self.buffered_ops.remove(&txn_id).unwrap_or_default()
     }
 
@@ -188,12 +203,35 @@ impl TransactionTracker {
     fn rollback_transaction(&mut self, txn_id: u64) {
         self.states.insert(txn_id, TransactionState::RolledBack);
         self.buffered_ops.remove(&txn_id);
+        self.savepoint_marks.remove(&txn_id);
     }
 
     /// Buffer an operation for a transaction
     fn buffer_op(&mut self, txn_id: u64, lsn: Lsn, op: WalOp) {
         if let Some(ops) = self.buffered_ops.get_mut(&txn_id) {
             ops.push((lsn, op));
+        }
+    }
+
+    /// Record a named savepoint at the transaction's current buffered-op
+    /// position. A savepoint name created again later (e.g. `SAVEPOINT x`
+    /// reused after an earlier `RELEASE x`) simply overwrites its mark, same
+    /// as the live engine's stack-based model.
+    fn mark_savepoint(&mut self, txn_id: u64, name: String) {
+        let mark = self.buffered_ops.get(&txn_id).map(|ops| ops.len()).unwrap_or(0);
+        self.savepoint_marks.entry(txn_id).or_default().insert(name, mark);
+    }
+
+    /// Roll back to a named savepoint: truncate the transaction's buffered
+    /// ops to the length recorded when that savepoint was marked. A rollback
+    /// naming a savepoint this tracker never saw (e.g. logged before this
+    /// transaction's `TxnBegin`, which cannot happen, or a WAL entry from an
+    /// older version with no marker) is a no-op — nothing to truncate.
+    fn rollback_to_savepoint(&mut self, txn_id: u64, name: &str) {
+        if let Some(&mark) = self.savepoint_marks.get(&txn_id).and_then(|m| m.get(name)) {
+            if let Some(ops) = self.buffered_ops.get_mut(&txn_id) {
+                ops.truncate(mark);
+            }
         }
     }
 
@@ -583,6 +621,19 @@ impl RecoveryManager {
                                 current_txn_id = None;
                             }
                         }
+                        WalOp::Savepoint { name } => {
+                            // Standalone SAVEPOINT (outside any transaction) has
+                            // no buffered ops to mark against and nothing to
+                            // undo later — only meaningful inside a transaction.
+                            if let Some(txn_id) = current_txn_id {
+                                tracker.mark_savepoint(txn_id, name.clone());
+                            }
+                        }
+                        WalOp::RollbackToSavepoint { name } => {
+                            if let Some(txn_id) = current_txn_id {
+                                tracker.rollback_to_savepoint(txn_id, name);
+                            }
+                        }
                         WalOp::CheckpointBegin { .. } | WalOp::CheckpointComplete { .. } => {
                             // Skip checkpoint markers during replay
                         }
@@ -827,6 +878,11 @@ impl RecoveryManager {
             }
             WalOp::TxnBegin { .. } | WalOp::TxnCommit { .. } | WalOp::TxnRollback { .. } => {
                 // These are handled by the transaction tracker
+            }
+            WalOp::Savepoint { .. } | WalOp::RollbackToSavepoint { .. } => {
+                // Intercepted and consumed by the transaction tracker
+                // (`mark_savepoint`/`rollback_to_savepoint`) before ops are
+                // ever buffered — never reaches apply_op in normal operation.
             }
             WalOp::CheckpointBegin { .. } | WalOp::CheckpointComplete { .. } => {
                 // Skip checkpoint markers
@@ -1461,8 +1517,10 @@ mod tests {
     // from the on-disk WAL and assert that row *data* — not just schema —
     // is restored.
 
-    use crate::wal::{PersistenceConfig, PersistenceEngine};
-    use crate::Database;
+    use crate::{
+        wal::{PersistenceConfig, PersistenceEngine},
+        Database,
+    };
 
     /// Build a simple `id INTEGER, name VARCHAR` schema.
     fn simple_schema(name: &str) -> TableSchema {
@@ -1512,8 +1570,8 @@ mod tests {
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         let wal_path = temp_dir.path().join("test.wal");
 
-        // 1. Write a table + rows through a persistence-enabled Database so the
-        //    WAL captures real CreateTable + Insert ops.
+        // 1. Write a table + rows through a persistence-enabled Database so the WAL captures real
+        //    CreateTable + Insert ops.
         {
             let mut db = Database::new();
             let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
@@ -1558,8 +1616,7 @@ mod tests {
 
     #[test]
     fn test_recovery_replays_update_and_delete() {
-        use crate::wal::entry::WalEntry;
-        use crate::wal::writer::WalWriter;
+        use crate::wal::{entry::WalEntry, writer::WalWriter};
 
         let temp_dir = TempDir::new().unwrap();
         let checkpoint_dir = temp_dir.path().join("checkpoints");
@@ -1862,6 +1919,68 @@ mod tests {
     }
 
     #[test]
+    fn test_recovery_discards_rows_after_rollback_to_savepoint() {
+        // Regression for #6170 (fkey2-2.60): a row inserted after a named
+        // SAVEPOINT and then undone by ROLLBACK TO must NOT reappear when a
+        // *later* process recovers from WAL — even though the transaction
+        // that contained it went on to COMMIT successfully via some other
+        // statement (mirrors SQLite's `RELEASE` of the outermost savepoint).
+        //
+        // Before the WalOp::Savepoint/RollbackToSavepoint markers, recovery's
+        // buffer-until-commit replay applied every DML op logged inside a
+        // committed transaction unconditionally, resurrecting the
+        // already-rolled-back row.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+
+            db.begin_transaction().unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("kept")),
+                ]),
+            )
+            .unwrap();
+
+            db.create_savepoint("sp".to_string()).unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+                ]),
+            )
+            .unwrap();
+
+            db.rollback_to_savepoint("sp".to_string()).unwrap();
+
+            db.commit_transaction().unwrap();
+            db.sync_persistence().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+
+        assert_eq!(
+            live_row_count(&db, "main.t"),
+            1,
+            "row inserted after the savepoint and rolled back must not survive recovery"
+        );
+        let table = db.get_table("main.t").unwrap();
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
     fn test_recovery_tolerates_truncated_wal_tail() {
         // A WAL whose final entry was only partially written (e.g. the process
         // died mid-flush) must recover every complete entry before the
@@ -1904,9 +2023,9 @@ mod tests {
         file.set_len(original_len - 1).unwrap();
         drop(file);
 
-        // 3. Recovery must tolerate the truncated tail: it detects corruption,
-        //    stops, and keeps the rows from the complete entries. The last
-        //    (now-torn) Insert is dropped, leaving exactly one row.
+        // 3. Recovery must tolerate the truncated tail: it detects corruption, stops, and keeps the
+        //    rows from the complete entries. The last (now-torn) Insert is dropped, leaving exactly
+        //    one row.
         let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
         let (db, stats) = manager.recover().unwrap();
 
@@ -2394,8 +2513,7 @@ mod tests {
     /// older binary) still recovers — without constraints, as before #5883.
     #[test]
     fn test_create_table_replay_accepts_legacy_blob() {
-        use crate::wal::entry::WalEntry;
-        use crate::wal::writer::WalWriter;
+        use crate::wal::{entry::WalEntry, writer::WalWriter};
 
         let temp_dir = TempDir::new().unwrap();
         let checkpoint_dir = temp_dir.path().join("checkpoints");
@@ -2430,8 +2548,7 @@ mod tests {
     /// checkpoint load path, #5833/#5834).
     #[test]
     fn test_create_table_replay_bad_sql_source_fails_loudly() {
-        use crate::wal::entry::WalEntry;
-        use crate::wal::writer::WalWriter;
+        use crate::wal::{entry::WalEntry, writer::WalWriter};
 
         let temp_dir = TempDir::new().unwrap();
         let checkpoint_dir = temp_dir.path().join("checkpoints");

@@ -31,18 +31,21 @@ pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 
 /// Current WAL format version.
 ///
-/// - v1: original format; DML ops (`Insert`/`Update`/`Delete`) carried only a
-///   numeric `table_id`, so row data could not be routed to a table during
-///   crash recovery (DML replay was a no-op).
-/// - v2: DML ops carry an inline `table_name`, enabling correct DML replay.
-///   Older v1 logs are still readable (the table name is parsed as absent and
-///   such DML entries are skipped during replay).
-/// - v3: `Insert` ops carry the row's effective SQLite rowid (present-flag +
-///   u64, after the values), so crash recovery can restore each replayed
-///   row's rowid instead of silently renumbering it by physical position
-///   (issue #5835). Older v2 logs are still readable (the rowid is parsed as
-///   absent and replayed rows fall back to physical renumbering).
-pub const WAL_VERSION: u32 = 3;
+/// - v1: original format; DML ops (`Insert`/`Update`/`Delete`) carried only a numeric `table_id`,
+///   so row data could not be routed to a table during crash recovery (DML replay was a no-op).
+/// - v2: DML ops carry an inline `table_name`, enabling correct DML replay. Older v1 logs are still
+///   readable (the table name is parsed as absent and such DML entries are skipped during replay).
+/// - v3: `Insert` ops carry the row's effective SQLite rowid (present-flag + u64, after the
+///   values), so crash recovery can restore each replayed row's rowid instead of silently
+///   renumbering it by physical position (issue #5835). Older v2 logs are still readable (the rowid
+///   is parsed as absent and replayed rows fall back to physical renumbering).
+/// - v4: adds `Savepoint`/`RollbackToSavepoint` marker ops so crash recovery correctly discards DML
+///   buffered after a `ROLLBACK TO SAVEPOINT` inside a transaction that goes on to commit some
+///   other way (issue #6170) — without them, recovery replayed every DML op logged in a committed
+///   transaction unconditionally, resurrecting rows a savepoint rollback had already undone in
+///   memory. Older v1-v3 logs contain no such markers and are still readable (replay behaves
+///   exactly as before: nothing to reconcile).
+pub const WAL_VERSION: u32 = 4;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;
