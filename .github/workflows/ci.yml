@@ -69,8 +69,8 @@ jobs:
       - name: Test all packages
         run: pnpm -r test
 
-      - name: Lint vibesql-client-ts
-        run: pnpm -C packages/vibesql-client-ts lint
+      - name: Lint all packages
+        run: pnpm -r lint
 
   # ============================================================================
   # Fast CI for branches/PRs - optimized for speed

@@ -225,8 +225,11 @@ export async function migrate(
       if (useTransactions) {
         await client.query('ROLLBACK');
       }
-      throw new Error(
-        `Migration failed: ${migration.name}\n${error instanceof Error ? error.message : String(error)}`
+      throw Object.assign(
+        new Error(
+          `Migration failed: ${migration.name}\n${error instanceof Error ? error.message : String(error)}`
+        ),
+        { cause: error }
       );
     }
   }
