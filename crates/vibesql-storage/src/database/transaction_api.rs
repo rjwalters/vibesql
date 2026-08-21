@@ -5,11 +5,12 @@
 // This module provides transaction management methods for the Database struct.
 // Methods are implemented via an impl block on the Database type.
 
-use super::transactions::DeferredFkViolation;
-use super::Database;
-use crate::mvcc::TxnSnapshot;
-use crate::wal::{DurabilityMode, TransactionDurability, WalOp};
-use crate::StorageError;
+use super::{transactions::DeferredFkViolation, Database};
+use crate::{
+    mvcc::TxnSnapshot,
+    wal::{DurabilityMode, TransactionDurability, WalOp},
+    StorageError,
+};
 
 impl Database {
     // ============================================================================
@@ -218,12 +219,10 @@ impl Database {
     ///
     /// # Semantics
     ///
-    /// 1. Compute the GC horizon (see
-    ///    [`TransactionManager::compute_gc_horizon`]).
+    /// 1. Compute the GC horizon (see [`TransactionManager::compute_gc_horizon`]).
     /// 2. For each table, call [`Table::gc_old_versions(horizon)`].
-    /// 3. If any table reclaimed rows, rebuild its user-defined indexes
-    ///    (B-tree indexes managed at the Database level) to keep them
-    ///    consistent with the now-compacted row vector.
+    /// 3. If any table reclaimed rows, rebuild its user-defined indexes (B-tree indexes managed at
+    ///    the Database level) to keep them consistent with the now-compacted row vector.
     ///
     /// # Refused while a transaction is active
     ///
@@ -307,11 +306,18 @@ impl Database {
         let tables = self.tables.clone();
         let operations = self.operations.clone();
         self.lifecycle.transaction_manager_mut().create_savepoint(
-            name,
+            name.clone(),
             &catalog,
             &tables,
             &operations,
-        )
+        )?;
+
+        // #6170: mark this savepoint's position in the WAL op stream so a
+        // later ROLLBACK TO can tell recovery which buffered ops to discard
+        // (see WalOp::Savepoint's doc comment).
+        self.emit_wal_op(WalOp::Savepoint { name });
+
+        Ok(())
     }
 
     /// Rollback to a named savepoint, restoring the wholesale snapshot taken
@@ -321,7 +327,7 @@ impl Database {
         let mut tables = std::mem::take(&mut self.tables);
         let mut operations = std::mem::take(&mut self.operations);
         let result = self.lifecycle.transaction_manager_mut().rollback_to_savepoint(
-            name,
+            name.clone(),
             &mut catalog,
             &mut tables,
             &mut operations,
@@ -337,6 +343,12 @@ impl Database {
         // before it — just drop the whole columnar cache rather than track
         // per-table invalidation.
         self.clear_columnar_cache();
+
+        // #6170: record the rollback in the WAL so crash/process-boundary
+        // recovery discards the same buffered ops this in-memory restore just
+        // discarded, instead of replaying them unconditionally at commit
+        // (see WalOp::RollbackToSavepoint's doc comment; fkey2-2.60).
+        self.emit_wal_op(WalOp::RollbackToSavepoint { name });
 
         Ok(())
     }

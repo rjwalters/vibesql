@@ -98,6 +98,30 @@ pub enum WalOp {
     /// Rollback a transaction
     TxnRollback { txn_id: u64 },
 
+    // Savepoint Operations (WAL format v4, issue #6170)
+    //
+    // A `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` pair inside an open transaction is
+    // recorded so crash recovery can reproduce the same in-memory undo the live
+    // engine performs (`Database::rollback_to_savepoint`, #6278's wholesale
+    // catalog/tables/operations snapshot restore). Without these markers,
+    // recovery's buffer-until-commit replay (`TransactionTracker`) had no way
+    // to know that operations logged between a `SAVEPOINT` and its later
+    // `ROLLBACK TO` were undone before the transaction ultimately committed —
+    // it replayed every buffered DML op in the transaction unconditionally, so
+    // a row inserted and then rolled back via `ROLLBACK TO SAVEPOINT` (with the
+    // transaction going on to commit some *other* way, e.g. `RELEASE` of the
+    // outermost savepoint) reappeared after a fresh process re-opened the
+    // database from WAL (fkey2-2.60).
+    /// Mark a named savepoint at the current position in the transaction's
+    /// operation stream.
+    Savepoint { name: String },
+    /// Roll back to a previously marked savepoint: recovery discards every
+    /// buffered operation recorded after the matching `Savepoint` marker (the
+    /// marker itself, and everything before it, survives — mirroring
+    /// `Database::rollback_to_savepoint`'s "the named savepoint itself
+    /// survives" semantics).
+    RollbackToSavepoint { name: String },
+
     // Checkpoint Operations
     /// Begin a checkpoint
     CheckpointBegin { checkpoint_id: u64 },
@@ -119,6 +143,8 @@ pub enum WalOpTag {
     TxnBegin = 0x20,
     TxnCommit = 0x21,
     TxnRollback = 0x22,
+    Savepoint = 0x23,
+    RollbackToSavepoint = 0x24,
     CheckpointBegin = 0x30,
     CheckpointComplete = 0x31,
 }
@@ -136,6 +162,8 @@ impl WalOpTag {
             0x20 => Ok(WalOpTag::TxnBegin),
             0x21 => Ok(WalOpTag::TxnCommit),
             0x22 => Ok(WalOpTag::TxnRollback),
+            0x23 => Ok(WalOpTag::Savepoint),
+            0x24 => Ok(WalOpTag::RollbackToSavepoint),
             0x30 => Ok(WalOpTag::CheckpointBegin),
             0x31 => Ok(WalOpTag::CheckpointComplete),
             _ => Err(StorageError::IoError(format!("Unknown WAL op tag: 0x{:02X}", tag))),
@@ -271,6 +299,18 @@ impl WalOp {
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_u64(writer, *txn_id)?;
             }
+            WalOp::Savepoint { name } => {
+                writer
+                    .write_all(&[WalOpTag::Savepoint as u8])
+                    .map_err(|e| StorageError::IoError(e.to_string()))?;
+                write_string(writer, name)?;
+            }
+            WalOp::RollbackToSavepoint { name } => {
+                writer
+                    .write_all(&[WalOpTag::RollbackToSavepoint as u8])
+                    .map_err(|e| StorageError::IoError(e.to_string()))?;
+                write_string(writer, name)?;
+            }
             WalOp::CheckpointBegin { checkpoint_id } => {
                 writer
                     .write_all(&[WalOpTag::CheckpointBegin as u8])
@@ -387,6 +427,14 @@ impl WalOp {
             WalOpTag::TxnRollback => {
                 let txn_id = read_u64(reader)?;
                 Ok(WalOp::TxnRollback { txn_id })
+            }
+            WalOpTag::Savepoint => {
+                let name = read_string(reader)?;
+                Ok(WalOp::Savepoint { name })
+            }
+            WalOpTag::RollbackToSavepoint => {
+                let name = read_string(reader)?;
+                Ok(WalOp::RollbackToSavepoint { name })
             }
             WalOpTag::CheckpointBegin => {
                 let checkpoint_id = read_u64(reader)?;
@@ -595,6 +643,24 @@ mod tests {
         let entries = vec![
             WalEntry::new(9, 1234567898, WalOp::CheckpointBegin { checkpoint_id: 1 }),
             WalEntry::new(10, 1234567899, WalOp::CheckpointComplete { checkpoint_id: 1, lsn: 8 }),
+        ];
+
+        for entry in entries {
+            let mut buf = Vec::new();
+            entry.serialize(&mut buf).unwrap();
+
+            let mut reader = &buf[..];
+            let decoded = WalEntry::deserialize(&mut reader).unwrap();
+
+            assert_eq!(entry, decoded);
+        }
+    }
+
+    #[test]
+    fn test_wal_entry_roundtrip_savepoint_ops() {
+        let entries = vec![
+            WalEntry::new(11, 1234567900, WalOp::Savepoint { name: "outer".to_string() }),
+            WalEntry::new(12, 1234567901, WalOp::RollbackToSavepoint { name: "outer".to_string() }),
         ];
 
         for entry in entries {
