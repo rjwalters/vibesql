@@ -39,9 +39,10 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use tokio::sync::RwLock;
 use tracing::{debug, error};
-use vibesql_storage::{BlobId, BlobStorageConfig, BlobStorageService, Database};
+use vibesql_storage::{
+    shared_metadata_db, BlobId, BlobStorageConfig, BlobStorageService, Database, SharedMetadataDb,
+};
 
 use super::rest::{execution_error_response, get_database_name, HttpState};
 use super::types::*;
@@ -64,8 +65,13 @@ pub const MAX_REPLICATED_BLOB_BYTES: usize = 8 * 1024 * 1024;
 pub struct StorageState {
     /// Database registry for shared database access
     pub registry: DatabaseRegistry,
-    /// Legacy database reference for backwards compatibility (blob storage)
-    pub db: Arc<RwLock<Database>>,
+    /// Database handle backing the standalone blob metadata surface.
+    ///
+    /// This is the **same** shared handle held by [`Self::blob_service`], not a
+    /// separate copy: blob metadata written by the service (the
+    /// `vibesql_storage` system table) is immediately visible through this
+    /// field, and vice versa. See [`SharedMetadataDb`].
+    pub db: SharedMetadataDb,
     /// Blob storage service
     pub blob_service: Arc<BlobStorageService>,
 }
@@ -73,26 +79,37 @@ pub struct StorageState {
 impl StorageState {
     /// Create storage state from database and registry
     pub fn new(db: Arc<Database>, registry: DatabaseRegistry) -> Self {
-        // Create blob service with the database reference
-        let blob_service = Arc::new(BlobStorageService::new_default(db.clone()));
-        // Wrap Database in RwLock for safe concurrent access
-        let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        let db = Arc::new(RwLock::new(db_inner));
-        Self { registry, db, blob_service }
+        Self::with_config(BlobStorageConfig::default(), db, registry)
     }
 
     /// Create storage state with custom config
-    #[allow(dead_code)]
     pub fn with_config(
         config: BlobStorageConfig,
         db: Arc<Database>,
         registry: DatabaseRegistry,
     ) -> Self {
-        // Create blob service with the database reference
-        let blob_service = Arc::new(BlobStorageService::new(config, db.clone()));
-        // Wrap Database in RwLock for safe concurrent access
+        // Wrap the database in a shared, lock-guarded handle **once** and give
+        // the blob service a clone of that same handle, so metadata the
+        // service persists is visible through `self.db` (and to anything else
+        // holding a clone).
+        //
+        // Previously the service was handed `db.clone()` and internally did
+        // `Arc::try_unwrap(...).unwrap_or_else(|arc| (*arc).clone())`. Because
+        // this constructor kept its own `db` alive, the strong count was never
+        // 1, so that always produced a private `Database` clone — and
+        // `Database::clone()` resets `persistence_engine`/`change_sender` to
+        // `None`, so blob metadata went into a disconnected copy nothing else
+        // could see (PR #6446 review).
+        //
+        // The single `try_unwrap`-or-clone below is the pre-existing boundary
+        // between the caller's lock-free `Arc<Database>` (`HttpState::db`) and
+        // the lock-guarded handle this state needs in order to write at all.
+        // Removing it means making the standalone HTTP database a shared
+        // lock-guarded handle end to end (`HttpState`, subscriptions, the
+        // registry) — tracked in #6448.
         let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        let db = Arc::new(RwLock::new(db_inner));
+        let db = shared_metadata_db(db_inner);
+        let blob_service = Arc::new(BlobStorageService::new(config, Arc::clone(&db)));
         Self { registry, db, blob_service }
     }
 }
@@ -602,19 +619,25 @@ mod tests {
 
     use super::*;
 
-    fn create_test_router() -> Router {
+    fn create_test_state() -> StorageState {
         let db = Arc::new(Database::new());
         let registry = DatabaseRegistry::new();
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let state = StorageState::with_config(config, db, registry);
+        StorageState::with_config(config, db, registry)
+    }
 
+    fn router_for(state: StorageState) -> Router {
         Router::new()
             .route("/upload", post(upload_blob))
             .route("/{blob_id}", get(download_blob))
             .route("/{blob_id}", delete(delete_blob))
             .route("/{blob_id}/metadata", get(get_blob_metadata))
             .with_state(state)
+    }
+
+    fn create_test_router() -> Router {
+        router_for(create_test_state())
     }
 
     #[tokio::test]
@@ -758,6 +781,59 @@ mod tests {
         let metadata_after_delete_response =
             router.oneshot(metadata_after_delete_request).await.unwrap();
         assert_eq!(metadata_after_delete_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Regression test for PR #6446's review finding: an upload through the
+    /// HTTP surface must write blob metadata into the database handle
+    /// `StorageState` itself holds — the shared instance — not into a private
+    /// `Database` clone owned by the blob service.
+    ///
+    /// This is the production shape: `StorageState` keeps `state.db` alive
+    /// while the blob service holds a clone of the same handle, so the handle
+    /// always has multiple live references. Under the previous
+    /// `Arc::try_unwrap(...).unwrap_or_else(clone)` constructor the service
+    /// silently operated on its own disconnected copy and this assertion would
+    /// fail (the caller's database never even grew the `vibesql_storage`
+    /// table).
+    #[tokio::test]
+    async fn test_upload_persists_metadata_into_shared_state_database() {
+        let state = create_test_state();
+        // The service and `state.db` must be the same underlying instance.
+        assert!(Arc::strong_count(&state.db) >= 2);
+        let caller_db = Arc::clone(&state.db);
+        let router = router_for(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/upload")
+            .header("content-type", "text/plain")
+            .body(Body::from("Hello, shared state!"))
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let uploaded: BlobUploadResponse = serde_json::from_slice(&body).unwrap();
+
+        // Read the metadata back through the caller's handle.
+        let db = caller_db.read();
+        let table = db
+            .get_table("vibesql_storage")
+            .expect("shared state database must see the vibesql_storage metadata table");
+        let ids: Vec<String> = table
+            .scan()
+            .iter()
+            .filter_map(|row| match row.get(0) {
+                Some(vibesql_types::SqlValue::Varchar(v)) => Some(v.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            ids.contains(&uploaded.id),
+            "uploaded blob id {} missing from shared state database (found {:?})",
+            uploaded.id,
+            ids
+        );
     }
 
     #[test]

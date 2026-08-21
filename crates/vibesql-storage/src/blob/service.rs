@@ -1,9 +1,17 @@
+// Platform-specific synchronization primitives: `parking_lot` is only declared
+// as a dependency for `cfg(not(target_arch = "wasm32"))` in this crate's
+// Cargo.toml, so the import must be cfg-gated exactly like `database/core.rs`
+// and `columnar_cache.rs` do it. An unconditional `use parking_lot::RwLock;`
+// breaks the wasm32 build with E0432.
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 #[cfg(feature = "opendal")]
 use opendal::{services, Operator};
+#[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
 use vibesql_types::{DataType, SqlValue};
 
@@ -23,42 +31,98 @@ use crate::{
 /// `store_metadata()` call. See issue #3482 / #6443.
 const BLOB_METADATA_TABLE: &str = "vibesql_storage";
 
+/// Shared, lock-guarded handle to the [`Database`] that holds blob metadata.
+///
+/// The blob service must persist metadata into the **same** `Database` instance
+/// its caller keeps using — not a private copy. `Database` needs `&mut self` to
+/// create a table or insert a row, while every public method on
+/// [`BlobStorageService`] takes `&self` (the service is shared via `Arc` across
+/// concurrent HTTP handlers), so the shared instance is handed over already
+/// wrapped in an `Arc<RwLock<_>>` that caller and service both hold.
+///
+/// This deliberately replaces the earlier
+/// `Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone())` shape: in
+/// production the caller always keeps its own handle alive, so the `Arc` strong
+/// count is never 1, `try_unwrap` always fell through to `Database::clone()` —
+/// and `Database::clone()` explicitly resets `persistence_engine` and
+/// `change_sender` to `None` (see `database/constructors.rs`). Metadata
+/// therefore landed in a disconnected, never-persisted copy that nothing else
+/// could see. See issue #6443 and PR #6446's review.
+pub type SharedMetadataDb = Arc<RwLock<Database>>;
+
+/// Wrap an owned [`Database`] in the shared handle expected by
+/// [`BlobStorageService::new`].
+///
+/// Provided so callers do not have to name the platform-specific lock type
+/// (`parking_lot::RwLock` on native targets, `std::sync::RwLock` on wasm32).
+/// Clone the returned handle to keep a caller-side reference to the *same*
+/// database the blob service writes metadata into.
+pub fn shared_metadata_db(db: Database) -> SharedMetadataDb {
+    Arc::new(RwLock::new(db))
+}
+
+/// Acquire a read guard on the shared metadata database.
+///
+/// `parking_lot`'s guard is infallible; `std::sync`'s is poisonable, so the
+/// wasm32 path recovers the inner value rather than panicking (a poisoned
+/// metadata lock must not take down the whole storage surface).
+#[cfg(not(target_arch = "wasm32"))]
+fn read_db(db: &RwLock<Database>) -> parking_lot::RwLockReadGuard<'_, Database> {
+    db.read()
+}
+
+/// Acquire a read guard on the shared metadata database (wasm32).
+#[cfg(target_arch = "wasm32")]
+fn read_db(db: &RwLock<Database>) -> std::sync::RwLockReadGuard<'_, Database> {
+    db.read().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Acquire a write guard on the shared metadata database.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_db(db: &RwLock<Database>) -> parking_lot::RwLockWriteGuard<'_, Database> {
+    db.write()
+}
+
+/// Acquire a write guard on the shared metadata database (wasm32).
+#[cfg(target_arch = "wasm32")]
+fn write_db(db: &RwLock<Database>) -> std::sync::RwLockWriteGuard<'_, Database> {
+    db.write().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Blob storage service for file/blob operations
 pub struct BlobStorageService {
     #[cfg(feature = "opendal")]
     operator: Option<Operator>,
     config: BlobStorageConfig,
-    /// Metadata database, guarded for interior mutability.
+    /// Shared handle to the metadata database (see [`SharedMetadataDb`]).
     ///
-    /// `store_metadata`/`get_metadata`/`delete()` need `&mut Database` to
-    /// create the `vibesql_storage` system table and insert/delete rows in
-    /// it, but every public method on this service (`store`, `get`,
-    /// `delete`, ...) takes `&self` (the service is shared via `Arc` across
-    /// concurrent HTTP handlers). A `parking_lot::RwLock` gives interior
-    /// mutability without making every call site `&mut self`; the guard is
-    /// always dropped before any `.await` point, so it never blocks across
-    /// suspension.
-    db: RwLock<Database>,
+    /// This is the caller's database, not a private copy: everything written
+    /// through `store_metadata()` is immediately visible through any other
+    /// clone of the same handle. The lock guard is always dropped before any
+    /// `.await` point, so it never blocks across suspension.
+    db: SharedMetadataDb,
 }
 
 impl BlobStorageService {
     /// Create a new blob storage service
+    ///
+    /// `db` is a *shared* handle (see [`SharedMetadataDb`] /
+    /// [`shared_metadata_db`]): the caller keeps its own clone and observes
+    /// every metadata row this service writes.
     #[cfg(feature = "opendal")]
-    pub fn new(config: BlobStorageConfig, db: Arc<Database>) -> Self {
+    pub fn new(config: BlobStorageConfig, db: SharedMetadataDb) -> Self {
         let operator = Self::create_operator(&config).ok();
-        let db = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        Self { operator, config, db: RwLock::new(db) }
+        Self { operator, config, db }
     }
 
     /// Create a new blob storage service (non-opendal build)
     #[cfg(not(feature = "opendal"))]
-    pub fn new(config: BlobStorageConfig, db: Arc<Database>) -> Self {
-        let db = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        Self { config, db: RwLock::new(db) }
+    pub fn new(config: BlobStorageConfig, db: SharedMetadataDb) -> Self {
+        Self { config, db }
     }
 
     /// Create with default configuration (local filesystem)
-    pub fn new_default(db: Arc<Database>) -> Self {
+    pub fn new_default(db: SharedMetadataDb) -> Self {
         Self::new(BlobStorageConfig::default(), db)
     }
 
@@ -268,7 +332,7 @@ impl BlobStorageService {
     /// Returns an error if the table doesn't exist yet (nothing has ever been
     /// stored) or no row matches `id`.
     pub async fn get_metadata(&self, id: &BlobId) -> StorageResult<BlobMetadata> {
-        let db = self.db.read();
+        let db = read_db(&self.db);
         let Some(table) = db.get_table(BLOB_METADATA_TABLE) else {
             return Err(StorageError::Other(format!("blob metadata not found: {}", id)));
         };
@@ -376,9 +440,12 @@ impl BlobStorageService {
     ///
     /// Auto-creates the `vibesql_storage` system table on first use, then
     /// inserts a row for `metadata`. See issue #3482 / #6443.
-    #[allow(dead_code)]
+    ///
+    /// Only reachable from the `opendal`-gated `store()`; the non-opendal stub
+    /// build never stores a blob in the first place.
+    #[cfg_attr(not(feature = "opendal"), allow(dead_code))]
     async fn store_metadata(&self, metadata: &BlobMetadata) -> StorageResult<()> {
-        let mut db = self.db.write();
+        let mut db = write_db(&self.db);
 
         if db.get_table(BLOB_METADATA_TABLE).is_none() {
             let schema = vibesql_catalog::TableSchema::new(
@@ -434,9 +501,9 @@ impl BlobStorageService {
     ///
     /// Only called from the `opendal`-gated `delete()`; the non-opendal
     /// stub build never stores metadata in the first place.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "opendal"), allow(dead_code))]
     fn delete_metadata(&self, id: &BlobId) {
-        let mut db = self.db.write();
+        let mut db = write_db(&self.db);
         let Some(table) = db.get_table_mut(BLOB_METADATA_TABLE) else {
             return;
         };
@@ -599,7 +666,7 @@ mod tests {
     #[test]
     fn test_blob_url_generation_fs() {
         let config = BlobStorageConfig::default();
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -616,7 +683,7 @@ mod tests {
                 "region": "us-east-1"
             }),
         };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -632,7 +699,7 @@ mod tests {
                 "bucket": "my-gcs-bucket"
             }),
         };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -649,7 +716,7 @@ mod tests {
                 "account_name": "myaccount"
             }),
         };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -660,7 +727,7 @@ mod tests {
     #[test]
     fn test_backend_accessor() {
         let config = BlobStorageConfig { backend: "s3".to_string(), config: serde_json::json!({}) };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         assert_eq!(service.backend(), "s3");
@@ -671,7 +738,7 @@ mod tests {
     async fn test_memory_backend_store_and_get() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         assert!(service.is_initialized());
@@ -699,7 +766,7 @@ mod tests {
     async fn test_metadata_store_get_delete_round_trip() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let data = Bytes::from("Hello, metadata!");
@@ -720,12 +787,95 @@ mod tests {
         assert!(err.to_string().contains("not found"));
     }
 
+    /// Regression test for PR #6446's review finding: metadata must land in
+    /// the **caller's** database, not a private copy.
+    ///
+    /// This mirrors the production call shape (`StorageState::new`): the
+    /// caller constructs the shared handle, keeps its own reference alive, and
+    /// hands a *clone* to the service — so the handle has multiple live
+    /// references for the whole test. The previous
+    /// `Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone())` constructor
+    /// deterministically took the `.clone()` branch under exactly this shape
+    /// (strong count ≥ 2), writing metadata into a disconnected `Database`
+    /// whose `persistence_engine` had been reset to `None`. Every assertion
+    /// below reads through the *caller's* handle, so that failure mode cannot
+    /// silently return.
+    #[cfg(all(feature = "opendal", feature = "storage-memory"))]
+    #[tokio::test]
+    async fn test_metadata_lands_in_caller_shared_database() {
+        let config =
+            BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
+        let caller_db = shared_metadata_db(Database::new());
+        let service = BlobStorageService::new(config, Arc::clone(&caller_db));
+
+        // Production shape: the caller's own handle is still alive, so the
+        // strong count is never 1 while the service runs.
+        assert!(Arc::strong_count(&caller_db) >= 2);
+
+        let data = Bytes::from("Hello, shared database!");
+        let id = service.store(data.clone(), "text/plain".to_string()).await.unwrap();
+        assert!(Arc::strong_count(&caller_db) >= 2);
+
+        // The caller — not just the service — must see the metadata table and
+        // the row that was just written.
+        {
+            let db = read_db(&caller_db);
+            let table = db
+                .get_table(BLOB_METADATA_TABLE)
+                .expect("caller's database must see the vibesql_storage metadata table");
+            let id_str = id.to_string();
+            let row = table
+                .scan()
+                .iter()
+                .find(
+                    |row| matches!(row.get(0), Some(SqlValue::Varchar(v)) if v.as_str() == id_str),
+                )
+                .expect("caller's database must see the blob's metadata row");
+            assert_eq!(row.get(1), Some(&SqlValue::Bigint(data.len() as i64)));
+        }
+
+        // ...and must see the row disappear again on delete.
+        service.delete(&id).await.unwrap();
+        {
+            let db = read_db(&caller_db);
+            let table = db.get_table(BLOB_METADATA_TABLE).expect("table still exists after delete");
+            let id_str = id.to_string();
+            assert!(table.scan().iter().all(
+                |row| !matches!(row.get(0), Some(SqlValue::Varchar(v)) if v.as_str() == id_str)
+            ));
+        }
+    }
+
+    /// Same invariant as above, exercised without the OpenDAL byte store so it
+    /// also runs in default-feature builds: a write through the service is
+    /// visible through the caller's clone of the shared handle, and a write
+    /// through the caller's clone is visible to the service.
+    #[tokio::test]
+    async fn test_shared_handle_is_bidirectional() {
+        let caller_db = shared_metadata_db(Database::new());
+        let service = BlobStorageService::new(BlobStorageConfig::default(), Arc::clone(&caller_db));
+
+        let id = BlobId::new();
+        service
+            .store_metadata(&BlobMetadata::new(id.clone(), 99, "text/plain".to_string()))
+            .await
+            .unwrap();
+
+        // Service -> caller.
+        assert!(read_db(&caller_db).get_table(BLOB_METADATA_TABLE).is_some());
+
+        // Caller -> service: a mutation made through the caller's handle is
+        // observed by the service's reads.
+        write_db(&caller_db).get_table_mut(BLOB_METADATA_TABLE).unwrap().rows_mut().clear();
+        assert!(service.get_metadata(&id).await.is_err());
+    }
+
     /// Metadata for a never-uploaded blob is not found (table may not even
     /// exist yet).
     #[tokio::test]
     async fn test_get_metadata_nonexistent_blob() {
         let config = BlobStorageConfig::default();
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -736,7 +886,7 @@ mod tests {
     #[tokio::test]
     async fn test_store_metadata_creates_table_and_round_trips() {
         let config = BlobStorageConfig::default();
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -746,7 +896,7 @@ mod tests {
         service.store_metadata(&metadata).await.unwrap();
 
         // Table auto-created on first store.
-        assert!(service.db.read().get_table(BLOB_METADATA_TABLE).is_some());
+        assert!(read_db(&service.db).get_table(BLOB_METADATA_TABLE).is_some());
 
         let retrieved = service.get_metadata(&id).await.unwrap();
         assert_eq!(retrieved.size, 2048);
@@ -757,7 +907,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_metadata_is_idempotent() {
         let config = BlobStorageConfig::default();
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
@@ -781,7 +931,7 @@ mod tests {
     async fn test_memory_backend_not_found() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = Arc::new(Database::new());
+        let db = shared_metadata_db(Database::new());
         let service = BlobStorageService::new(config, db);
 
         let id = BlobId::new();
