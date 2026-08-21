@@ -27,6 +27,43 @@ pub struct ValidationResult {
     pub table_schema: TableSchema,
 }
 
+/// Resolve the schema a CREATE INDEX statement's new index (and its target
+/// table) belongs to, WITHOUT validating that the schema actually exists.
+///
+/// - When `stmt.schema` is present (`CREATE INDEX schema.i1 ON t(x)`), SQLite
+///   qualifies the *index* name with the schema, not the table name — the
+///   target table is then resolved within that exact schema, with no
+///   temp-shadows-main search. `temp` maps to this session's temp schema
+///   (`CREATE INDEX temp.i1` behaves like `CREATE INDEX i1` on a table
+///   already known to live in temp). See issue #6366.
+/// - Otherwise, `stmt.table_name` may still itself carry a legacy embedded
+///   `schema.table` spelling from the pre-#6366 (non-parser) construction
+///   path some direct-executor tests use.
+/// - With neither, fall back to the pre-existing unqualified resolution
+///   (temp shadows main).
+///
+/// Callers that must reject an unrecognized `stmt.schema` qualifier with
+/// SQLite's `unknown database <name>` wording do so themselves — this helper
+/// only resolves the *target* schema so it can be shared with the "does an
+/// index with this name already exist" checks, which must not error out
+/// early for an IF NOT EXISTS-style probe.
+fn resolve_index_target_schema(stmt: &CreateIndexStmt, database: &Database) -> String {
+    if let Some(explicit_schema) = &stmt.schema {
+        if explicit_schema.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+            database.catalog.temp_schema_name().to_string()
+        } else {
+            explicit_schema.clone()
+        }
+    } else if let Some((schema_part, _)) = stmt.table_name.split_once('.') {
+        schema_part.to_string()
+    } else {
+        database
+            .catalog
+            .resolve_table_schema_name(&stmt.table_name)
+            .unwrap_or_else(|| database.catalog.get_current_schema().to_string())
+    }
+}
+
 /// Validate a CREATE INDEX statement before execution.
 ///
 /// Performs all pre-creation checks:
@@ -42,23 +79,34 @@ pub fn validate_create_index(
     stmt: &CreateIndexStmt,
     database: &Database,
 ) -> Result<ValidationResult, ExecutorError> {
-    // Parse qualified table name (schema.table or just table).
-    //
-    // For an UNqualified name we must follow SQLite name resolution: the
-    // session temp schema shadows `main`, so an unqualified table that names a
-    // TEMP table resolves to the temp schema. Previously this hard-coded the
-    // current (main) schema, so `CREATE INDEX ix ON t` where `t` is a TEMP
-    // table failed with `Table 'main.t' not found`. See issue #5505.
-    let (schema_name, table_name) =
-        if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
-            (schema_part.to_string(), table_part.to_string())
-        } else {
-            let resolved_schema = database
-                .catalog
-                .resolve_table_schema_name(&stmt.table_name)
-                .unwrap_or_else(|| database.catalog.get_current_schema().to_string());
-            (resolved_schema, stmt.table_name.clone())
-        };
+    // Resolve the schema this index (and its target table) belongs to, and
+    // the target table's unqualified name. See `resolve_index_target_schema`
+    // for the full resolution-order rationale (issue #6366).
+    let schema_name = resolve_index_target_schema(stmt, database);
+
+    // An explicit `schema.` qualifier on the index name must name an
+    // existing (or ATTACHed, #6310) schema; otherwise SQLite rejects it with
+    // `unknown database <name>`, echoing the qualifier exactly as written.
+    if let Some(explicit_schema) = &stmt.schema {
+        if !database.catalog.schema_exists(&schema_name) {
+            return Err(ExecutorError::SqliteCompatError(format!(
+                "unknown database {}",
+                explicit_schema
+            )));
+        }
+    }
+
+    let table_name = if stmt.schema.is_some() {
+        // The real parser never produces a dotted `ON table` when the index
+        // name itself carries a schema qualifier (`ON` always parses a bare
+        // identifier) — SQLite's grammar does not allow a schema-qualified
+        // table name in CREATE INDEX at all.
+        stmt.table_name.clone()
+    } else if let Some((_, table_part)) = stmt.table_name.split_once('.') {
+        table_part.to_string()
+    } else {
+        stmt.table_name.clone()
+    };
 
     // Check if target is sqlite_master/sqlite_schema (read-only system table)
     if is_sqlite_schema_table(&table_name) {
@@ -310,20 +358,11 @@ fn check_namespace_collision(index_name: &str, database: &Database) -> Result<()
 ///
 /// Schema-aware (#5540): scoped to the target table's owning schema so a temp
 /// index does not short-circuit on a same-named main index (and vice versa).
+/// An explicit `schema.` qualifier on the index name (#6366) is honored the
+/// same way `validate_create_index` resolves it.
 pub fn index_already_exists(stmt: &CreateIndexStmt, database: &Database) -> bool {
     let index_name = &stmt.index_name;
-
-    // Resolve the target table's owning schema (temp shadows main for an
-    // unqualified name; an explicit `schema.table` is honored).
-    let schema_name = if let Some((schema_part, _)) = stmt.table_name.split_once('.') {
-        schema_part.to_string()
-    } else {
-        database
-            .catalog
-            .resolve_table_schema_name(&stmt.table_name)
-            .unwrap_or_else(|| database.catalog.get_current_schema().to_string())
-    };
-
+    let schema_name = resolve_index_target_schema(stmt, database);
     let qualified = format!("{}.{}", schema_name, index_name);
     database.get_index(&qualified).is_some() || database.spatial_index_exists(&qualified)
 }

@@ -177,6 +177,7 @@ mod tests {
         // Create index
         let create_stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -205,6 +206,7 @@ mod tests {
         // Create an index on the table
         let create_stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },

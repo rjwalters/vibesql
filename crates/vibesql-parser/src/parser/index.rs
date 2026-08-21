@@ -73,11 +73,11 @@ impl Parser {
             false
         };
 
-        // Parse index name. SQLite fallback keywords are legal index names
-        // (keyword1.test: `CREATE INDEX abort ON t1(a)`). Bare `IF` is still
-        // consumed by the IF NOT EXISTS check above and errors, matching
-        // SQLite (the test quotes `"if"` here).
-        let index_name = self.parse_identifier_or_fallback_keyword()?;
+        // Parse the (optionally schema-qualified) index name. SQLite fallback
+        // keywords are legal index names (keyword1.test: `CREATE INDEX abort
+        // ON t1(a)`). Bare `IF` is still consumed by the IF NOT EXISTS check
+        // above and errors, matching SQLite (the test quotes `"if"` here).
+        let (schema, index_name) = self.parse_index_name_with_optional_schema()?;
 
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
@@ -92,10 +92,10 @@ impl Parser {
             // Parse index method
             if self.peek_keyword(Keyword::Ivfflat) {
                 self.advance(); // consume IVFFLAT
-                return self.parse_ivfflat_index(if_not_exists, index_name, table_name);
+                return self.parse_ivfflat_index(if_not_exists, schema, index_name, table_name);
             } else if self.peek_keyword(Keyword::Hnsw) {
                 self.advance(); // consume HNSW
-                return self.parse_hnsw_index(if_not_exists, index_name, table_name);
+                return self.parse_hnsw_index(if_not_exists, schema, index_name, table_name);
             } else {
                 // Unknown index method - could extend for BTREE, HASH, etc.
                 return Err(ParseError {
@@ -122,11 +122,48 @@ impl Parser {
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
+            schema,
             table_name,
             index_type: vibesql_ast::IndexType::BTree { unique: false },
             columns,
             where_clause,
         })
+    }
+
+    /// Parse an index name, optionally schema-qualified (`schema.name`).
+    ///
+    /// SQLite's CREATE/DROP INDEX grammar is `[schema-name .] index-name` —
+    /// the schema qualifies the *index* name, not the target table (issue
+    /// #6366). The schema position must accept keywords (`temp` is a
+    /// keyword, e.g. `CREATE INDEX temp.i1 ON t(x)`), mirroring the
+    /// `PRAGMA schema.name` qualifier position. The index-name position
+    /// (unqualified, or the part after `.`) keeps the narrower "fallback
+    /// keyword" allowance it always had (SQLite's `%fallback` mechanism —
+    /// `CREATE INDEX abort ON t1(a)`, keyword1.test).
+    ///
+    /// A schema qualifier is detected only when the token *after* the first
+    /// name-like token is a `.`, so a bare fallback-keyword index name (e.g.
+    /// `abort`) is parsed exactly as before when no `.` follows. Schema
+    /// existence (including the `unknown database <name>` rejection) is
+    /// validated at execution time — only the catalog knows about ATTACHed
+    /// databases.
+    fn parse_index_name_with_optional_schema(
+        &mut self,
+    ) -> Result<(Option<String>, String), ParseError> {
+        let first_is_name_like = matches!(
+            self.peek(),
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::Keyword { .. }
+        );
+
+        if first_is_name_like && self.peek_at_offset(1) == &Token::Symbol('.') {
+            let schema = self.parse_identifier_or_keyword()?;
+            self.expect_token(Token::Symbol('.'))?;
+            let index_name = self.parse_identifier_or_fallback_keyword()?;
+            Ok((Some(schema), index_name))
+        } else {
+            let index_name = self.parse_identifier_or_fallback_keyword()?;
+            Ok((None, index_name))
+        }
     }
 
     /// Parse IVFFlat index specifics
@@ -136,6 +173,7 @@ impl Parser {
     fn parse_ivfflat_index(
         &mut self,
         if_not_exists: bool,
+        schema: Option<String>,
         index_name: String,
         table_name: String,
     ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
@@ -227,6 +265,7 @@ impl Parser {
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
+            schema,
             table_name,
             index_type: vibesql_ast::IndexType::IVFFlat { metric, lists },
             columns,
@@ -241,6 +280,7 @@ impl Parser {
     fn parse_hnsw_index(
         &mut self,
         if_not_exists: bool,
+        schema: Option<String>,
         index_name: String,
         table_name: String,
     ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
@@ -353,6 +393,7 @@ impl Parser {
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
+            schema,
             table_name,
             index_type: vibesql_ast::IndexType::Hnsw { metric, m, ef_construction },
             columns,
@@ -693,8 +734,10 @@ impl Parser {
             false
         };
 
-        // Parse index name (SQLite fallback keywords allowed, keyword1.test)
-        let index_name = self.parse_identifier_or_fallback_keyword()?;
+        // Parse the (optionally schema-qualified) index name (SQLite fallback
+        // keywords allowed in the index-name position, keyword1.test; the
+        // schema position accepts keywords too — issue #6366).
+        let (schema, index_name) = self.parse_index_name_with_optional_schema()?;
 
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
@@ -721,6 +764,7 @@ impl Parser {
         Ok(vibesql_ast::CreateIndexStmt {
             if_not_exists,
             index_name,
+            schema,
             table_name,
             index_type,
             columns,
@@ -731,7 +775,7 @@ impl Parser {
     /// Parse DROP INDEX statement
     ///
     /// Syntax:
-    ///   DROP INDEX [IF EXISTS] index_name
+    ///   DROP INDEX [IF EXISTS] [schema.]index_name
     pub(super) fn parse_drop_index_statement(
         &mut self,
     ) -> Result<vibesql_ast::DropIndexStmt, ParseError> {
@@ -750,10 +794,12 @@ impl Parser {
             false
         };
 
-        // Parse index name (SQLite fallback keywords allowed, keyword1.test)
-        let index_name = self.parse_identifier_or_fallback_keyword()?;
+        // Parse the (optionally schema-qualified) index name (SQLite
+        // fallback keywords allowed, keyword1.test; schema qualifier issue
+        // #6366).
+        let (schema, index_name) = self.parse_index_name_with_optional_schema()?;
 
-        Ok(vibesql_ast::DropIndexStmt { if_exists, index_name })
+        Ok(vibesql_ast::DropIndexStmt { if_exists, index_name, schema })
     }
 
     /// Parse REINDEX statement

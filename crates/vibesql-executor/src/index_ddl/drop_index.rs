@@ -20,6 +20,13 @@ impl DropIndexExecutor {
     ///
     /// Success message or error
     pub fn execute(stmt: &DropIndexStmt, database: &mut Database) -> Result<String, ExecutorError> {
+        // An explicit `schema.` qualifier (issue #6366) scopes resolution to
+        // exactly that schema — no temp-shadows-main search — matching
+        // sqlite3's `DROP INDEX schema.name` semantics.
+        if let Some(explicit_schema) = &stmt.schema {
+            return Self::execute_schema_qualified(stmt, database, explicit_schema);
+        }
+
         let index_name = &stmt.index_name;
 
         // Find which table/schema this index belongs to. With schema-aware
@@ -90,6 +97,65 @@ impl DropIndexExecutor {
             Ok(format!("Index '{}' does not exist (skipped)", index_name))
         } else {
             Err(ExecutorError::IndexNotFound(index_name.clone()))
+        }
+    }
+
+    /// Execute `DROP INDEX schema.index_name`, scoping resolution to exactly
+    /// the named schema (no temp-shadows-main search).
+    ///
+    /// `temp` maps to this session's temp schema, matching the CREATE INDEX
+    /// side (issue #6366). sqlite3 3.51.0 does not distinguish an unknown
+    /// schema qualifier from an unknown index here — both surface as
+    /// `no such index: schema.name` — so no separate schema-existence check
+    /// is needed: a bogus schema simply never matches any index below.
+    fn execute_schema_qualified(
+        stmt: &DropIndexStmt,
+        database: &mut Database,
+        explicit_schema: &str,
+    ) -> Result<String, ExecutorError> {
+        let index_name = &stmt.index_name;
+
+        let resolved_schema = if explicit_schema.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA)
+        {
+            database.catalog.temp_schema_name().to_string()
+        } else {
+            explicit_schema.to_string()
+        };
+
+        let all_indexes = database.catalog.list_all_indexes();
+        let index_metadata = all_indexes
+            .iter()
+            .find(|idx| idx.name == *index_name && idx.schema() == resolved_schema);
+
+        if let Some(metadata) = index_metadata {
+            let qualified_table = format!("{}.{}", resolved_schema, metadata.table_name);
+            let qualified_index = format!("{}.{}", resolved_schema, index_name);
+
+            // Emit WAL entry for persistence BEFORE dropping
+            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+
+            // Drop from catalog (schema-qualified table so the exact index goes)
+            database
+                .catalog
+                .drop_index(&qualified_table, index_name)
+                .map_err(|e| ExecutorError::Other(format!("Catalog error: {}", e)))?;
+
+            if database.spatial_index_exists(&qualified_index) {
+                database.drop_spatial_index(&qualified_index)?;
+            }
+
+            if database.index_exists(&qualified_index) {
+                database.drop_index(&qualified_index)?;
+            }
+
+            return Ok(format!("Index '{}' dropped successfully", index_name));
+        }
+
+        if stmt.if_exists {
+            // IF EXISTS: silently succeed if index doesn't exist in this schema
+            Ok(format!("Index '{}' does not exist (skipped)", index_name))
+        } else {
+            Err(ExecutorError::IndexNotFound(format!("{}.{}", explicit_schema, index_name)))
         }
     }
 }
@@ -170,6 +236,7 @@ mod tests {
         // Create index
         let create_stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -184,8 +251,11 @@ mod tests {
         CreateIndexExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop index
-        let drop_stmt =
-            DropIndexStmt { index_name: "idx_users_email".to_string(), if_exists: false };
+        let drop_stmt = DropIndexStmt {
+            index_name: "idx_users_email".to_string(),
+            if_exists: false,
+            schema: None,
+        };
         let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "Index 'idx_users_email' dropped successfully");
@@ -198,8 +268,11 @@ mod tests {
     fn test_drop_nonexistent_index() {
         let mut db = Database::new();
 
-        let drop_stmt =
-            DropIndexStmt { index_name: "nonexistent_index".to_string(), if_exists: false };
+        let drop_stmt = DropIndexStmt {
+            index_name: "nonexistent_index".to_string(),
+            if_exists: false,
+            schema: None,
+        };
         let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_err());
         assert!(matches!(result, Err(ExecutorError::IndexNotFound(_))));
@@ -213,6 +286,7 @@ mod tests {
         // Create index
         let create_stmt = CreateIndexStmt {
             index_name: "idx_users_email".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -227,8 +301,11 @@ mod tests {
         CreateIndexExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop with IF EXISTS should succeed
-        let drop_stmt =
-            DropIndexStmt { index_name: "idx_users_email".to_string(), if_exists: true };
+        let drop_stmt = DropIndexStmt {
+            index_name: "idx_users_email".to_string(),
+            if_exists: true,
+            schema: None,
+        };
         let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "Index 'idx_users_email' dropped successfully");
@@ -240,8 +317,11 @@ mod tests {
         let mut db = Database::new();
 
         // Drop non-existent index with IF EXISTS should succeed
-        let drop_stmt =
-            DropIndexStmt { index_name: "nonexistent_index".to_string(), if_exists: true };
+        let drop_stmt = DropIndexStmt {
+            index_name: "nonexistent_index".to_string(),
+            if_exists: true,
+            schema: None,
+        };
         let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
         // Silently succeeds when index doesn't exist
@@ -255,6 +335,7 @@ mod tests {
         // Create index with lowercase name
         let create_stmt = CreateIndexStmt {
             index_name: "idx_test".to_string(),
+            schema: None,
             if_not_exists: false,
             table_name: "users".to_string(),
             index_type: vibesql_ast::IndexType::BTree { unique: false },
@@ -269,7 +350,8 @@ mod tests {
         CreateIndexExecutor::execute(&create_stmt, &mut db).unwrap();
 
         // Drop with uppercase name should work (normalized to uppercase)
-        let drop_stmt = DropIndexStmt { index_name: "IDX_TEST".to_string(), if_exists: false };
+        let drop_stmt =
+            DropIndexStmt { index_name: "IDX_TEST".to_string(), if_exists: false, schema: None };
         let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
         assert!(result.is_ok());
         assert!(!db.index_exists("idx_test"));

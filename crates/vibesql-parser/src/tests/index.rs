@@ -760,6 +760,120 @@ fn test_drop_index_with_fallback_keyword_name() {
     }
 }
 
+// ========================================================================
+// Schema-qualified index names (`CREATE/DROP INDEX [schema.]name`, #6366)
+// ========================================================================
+
+#[test]
+fn test_create_index_schema_qualified() {
+    let stmt = Parser::parse_sql("CREATE INDEX main.i1 ON t(x)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.schema.as_deref(), Some("main"));
+            assert_eq!(stmt.index_name, "i1");
+            assert_eq!(stmt.table_name, "t");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_temp_schema_qualified() {
+    // `temp` is a keyword — the schema position must still accept it.
+    let stmt = Parser::parse_sql("CREATE INDEX temp.i1 ON t(x)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.schema.as_deref(), Some("temp"));
+            assert_eq!(stmt.index_name, "i1");
+            assert_eq!(stmt.table_name, "t");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_schema_qualified_if_not_exists() {
+    let stmt =
+        Parser::parse_sql("CREATE INDEX IF NOT EXISTS main.i1 ON t(x)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => {
+            assert!(stmt.if_not_exists);
+            assert_eq!(stmt.schema.as_deref(), Some("main"));
+            assert_eq!(stmt.index_name, "i1");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_schema_qualified_fallback_keyword_name() {
+    // The index-name part after the dot still allows SQLite fallback
+    // keywords, matching the unqualified case.
+    let stmt = Parser::parse_sql("CREATE INDEX main.abort ON t1(a)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.schema.as_deref(), Some("main"));
+            assert_eq!(stmt.index_name, "abort");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_no_schema_qualifier_is_none() {
+    // Regression: an unqualified index name must not spuriously pick up a
+    // schema qualifier.
+    let stmt = Parser::parse_sql("CREATE INDEX i1 ON t(x)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => assert_eq!(stmt.schema, None),
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+
+    // A bare fallback-keyword index name (no dot) must also stay unaffected.
+    let stmt = Parser::parse_sql("CREATE INDEX temp ON t1(a)").expect("parse");
+    match stmt {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.schema, None);
+            assert_eq!(stmt.index_name, "temp");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_drop_index_schema_qualified() {
+    let stmt = Parser::parse_sql("DROP INDEX main.i1").expect("parse");
+    match stmt {
+        Statement::DropIndex(stmt) => {
+            assert_eq!(stmt.schema.as_deref(), Some("main"));
+            assert_eq!(stmt.index_name, "i1");
+        }
+        other => panic!("Expected DropIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_drop_index_temp_schema_qualified_if_exists() {
+    let stmt = Parser::parse_sql("DROP INDEX IF EXISTS temp.i1").expect("parse");
+    match stmt {
+        Statement::DropIndex(stmt) => {
+            assert!(stmt.if_exists);
+            assert_eq!(stmt.schema.as_deref(), Some("temp"));
+            assert_eq!(stmt.index_name, "i1");
+        }
+        other => panic!("Expected DropIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_drop_index_no_schema_qualifier_is_none() {
+    let stmt = Parser::parse_sql("DROP INDEX i1").expect("parse");
+    match stmt {
+        Statement::DropIndex(stmt) => assert_eq!(stmt.schema, None),
+        other => panic!("Expected DropIndex, got: {:?}", other),
+    }
+}
+
 #[test]
 fn test_indexed_by_with_fallback_keyword_name() {
     // keyword1.test .2 shape: `SELECT b FROM t1 INDEXED BY abort WHERE a=2`,

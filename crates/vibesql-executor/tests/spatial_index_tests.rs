@@ -55,6 +55,7 @@ fn test_create_spatial_index_basic() {
     // Create spatial index
     let create_index_stmt = CreateIndexStmt {
         index_name: "idx_location".to_string(),
+        schema: None,
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
@@ -130,6 +131,7 @@ fn test_spatial_index_multiple_columns_error() {
     // Try to create spatial index on multiple columns (should fail)
     let create_index_stmt = CreateIndexStmt {
         index_name: "idx_location".to_string(),
+        schema: None,
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
@@ -201,6 +203,7 @@ fn test_drop_spatial_index() {
     // Create spatial index
     let create_index_stmt = CreateIndexStmt {
         index_name: "idx_location".to_string(),
+        schema: None,
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
@@ -217,8 +220,11 @@ fn test_drop_spatial_index() {
     assert!(db.spatial_index_exists("idx_location"));
 
     // Drop spatial index
-    let drop_stmt =
-        vibesql_ast::DropIndexStmt { index_name: "idx_location".to_string(), if_exists: false };
+    let drop_stmt = vibesql_ast::DropIndexStmt {
+        index_name: "idx_location".to_string(),
+        if_exists: false,
+        schema: None,
+    };
 
     let result = DropIndexExecutor::execute(&drop_stmt, &mut db);
     assert!(result.is_ok(), "Failed to drop spatial index: {:?}", result.err());
@@ -272,6 +278,7 @@ fn test_spatial_index_if_not_exists() {
     // Create spatial index
     let create_index_stmt = CreateIndexStmt {
         index_name: "idx_location".to_string(),
+        schema: None,
         if_not_exists: false,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
@@ -289,6 +296,7 @@ fn test_spatial_index_if_not_exists() {
     // Try to create again with IF NOT EXISTS (should succeed)
     let create_index_stmt2 = CreateIndexStmt {
         index_name: "idx_location".to_string(),
+        schema: None,
         if_not_exists: true,
         table_name: "places".to_string(),
         index_type: vibesql_ast::IndexType::Spatial,
