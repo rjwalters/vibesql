@@ -32,6 +32,18 @@
 //!   "Parameter count mismatch".
 //!
 //! See #6359 / PR #6411, where `SELECT ... LIMIT ?` hit the second case.
+//!
+//! Both `walk_expression` and the `bind_*_mut` matches below are exhaustive over
+//! `Expression`, so a *missing variant* cannot slip through. The remaining way to
+//! break the invariant is a `..` rest-pattern inside an otherwise-complete struct
+//! pattern, which silently swallows a newly added `Option<Box<Expression>>` field
+//! — that is exactly how `AggregateFunction { filter }`,
+//! `WindowFunctionSpec::Aggregate { filter }`, and `Like`/`Glob` `{ escape }`
+//! escaped both passes. When adding an expression-bearing field to an AST node,
+//! update the `walk_*` function, the `transform_*` function, and the two
+//! `bind_*_mut` twins together, and add a row to
+//! `test_count_and_bind_stay_in_lockstep` below — that test asserts both
+//! directions mechanically.
 
 #[cfg(test)]
 use std::collections::HashMap;
@@ -437,9 +449,19 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             }
         }
 
-        Expression::AggregateFunction { args, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 bind_expression_mut(arg, params);
+            }
+            // `walk_expression` counts placeholders in both the intra-aggregate
+            // ORDER BY and the FILTER predicate, so both must be bound here.
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    bind_expression_mut(&mut item.expr, params);
+                }
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_mut(filter_expr, params);
             }
         }
 
@@ -513,10 +535,15 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. }
-        | Expression::Glob { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             bind_expression_mut(inner, params);
             bind_expression_mut(pattern, params);
+            // `LIKE ? ESCAPE ?` parses, and `walk_expression` counts the ESCAPE
+            // operand, so it must be bound here too.
+            if let Some(escape_expr) = escape {
+                bind_expression_mut(escape_expr, params);
+            }
         }
 
         Expression::Exists { subquery, .. } => {
@@ -545,8 +572,16 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
 
 fn bind_window_function_spec_mut(spec: &mut vibesql_ast::WindowFunctionSpec, params: &[SqlValue]) {
     match spec {
-        vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
-        | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+        vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+            for arg in args {
+                bind_expression_mut(arg, params);
+            }
+            // `walk_window_function` counts the FILTER predicate, so bind it.
+            if let Some(filter_expr) = filter {
+                bind_expression_mut(filter_expr, params);
+            }
+        }
+        vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
         | vibesql_ast::WindowFunctionSpec::Value { args, .. } => {
             for arg in args {
                 bind_expression_mut(arg, params);
@@ -955,9 +990,17 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             }
         }
 
-        Expression::AggregateFunction { args, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 bind_expression_named_mut(arg, params);
+            }
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    bind_expression_named_mut(&mut item.expr, params);
+                }
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_named_mut(filter_expr, params);
             }
         }
 
@@ -1031,10 +1074,13 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             bind_expression_named_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. }
-        | Expression::Glob { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             bind_expression_named_mut(inner, params);
             bind_expression_named_mut(pattern, params);
+            if let Some(escape_expr) = escape {
+                bind_expression_named_mut(escape_expr, params);
+            }
         }
 
         Expression::Exists { subquery, .. } => {
@@ -1067,8 +1113,15 @@ fn bind_window_function_spec_named_mut(
     params: &HashMap<String, SqlValue>,
 ) {
     match spec {
-        vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
-        | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+        vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+            for arg in args {
+                bind_expression_named_mut(arg, params);
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_named_mut(filter_expr, params);
+            }
+        }
+        vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
         | vibesql_ast::WindowFunctionSpec::Value { args, .. } => {
             for arg in args {
                 bind_expression_named_mut(arg, params);
@@ -1371,6 +1424,15 @@ mod tests {
             ("UPDATE t SET a = ? WHERE b = ? RETURNING a + ?", 3),
             ("DELETE FROM t WHERE a = ? ORDER BY b LIMIT ? OFFSET ?", 3),
             ("DELETE FROM t WHERE a = ? RETURNING a + ?", 2),
+            // Aggregate sub-clauses: FILTER and the intra-aggregate ORDER BY are
+            // both positions the parser emits placeholders into.
+            ("SELECT count(*) FILTER (WHERE a > ?) FROM t", 1),
+            ("SELECT group_concat(b ORDER BY ?) FROM t", 1),
+            // Same FILTER position, reached through a window function instead.
+            ("SELECT count(*) FILTER (WHERE a > ?) OVER () FROM t", 1),
+            // The ESCAPE operand of LIKE / GLOB is an arbitrary expression.
+            ("SELECT * FROM t WHERE b LIKE ? ESCAPE ?", 2),
+            ("SELECT * FROM t WHERE b GLOB ? ESCAPE ?", 2),
         ];
 
         for (sql, expected_params) in cases {

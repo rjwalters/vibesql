@@ -263,7 +263,7 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             VisitResult::Continue
         }
 
-        Expression::AggregateFunction { args, order_by, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 let result = walk_expression(visitor, arg);
                 if result.should_stop() {
@@ -277,6 +277,15 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
                     if result.should_stop() {
                         return VisitResult::Stop;
                     }
+                }
+            }
+            // ...and the FILTER (WHERE ...) predicate. `transform_expression`
+            // rewrites this position, so skipping it here would leave the
+            // count/transform passes out of lockstep (see `walk_statement`).
+            if let Some(filter_expr) = filter {
+                let result = walk_expression(visitor, filter_expr);
+                if result.should_stop() {
+                    return VisitResult::Stop;
                 }
             }
             VisitResult::Continue
@@ -384,20 +393,26 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::Extract { expr: inner, .. } => walk_expression(visitor, inner),
 
-        Expression::Like { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             let result = walk_expression(visitor, inner);
             if result.should_stop() {
                 return VisitResult::Stop;
             }
-            walk_expression(visitor, pattern)
-        }
-
-        Expression::Glob { expr: inner, pattern, .. } => {
-            let result = walk_expression(visitor, inner);
+            let result = walk_expression(visitor, pattern);
             if result.should_stop() {
                 return VisitResult::Stop;
             }
-            walk_expression(visitor, pattern)
+            // The ESCAPE operand is an arbitrary expression (`LIKE ? ESCAPE ?`
+            // parses), and `transform_expression` rewrites it — so it must be
+            // visited here too, or count and transform fall out of lockstep.
+            if let Some(escape_expr) = escape {
+                let result = walk_expression(visitor, escape_expr);
+                if result.should_stop() {
+                    return VisitResult::Stop;
+                }
+            }
+            VisitResult::Continue
         }
 
         Expression::Exists { subquery, .. } => {
@@ -484,13 +499,22 @@ fn walk_window_function<V: ExpressionVisitor>(
     visitor: &mut V,
     spec: &WindowFunctionSpec,
 ) -> VisitResult {
-    let args = match spec {
-        WindowFunctionSpec::Aggregate { args, .. }
-        | WindowFunctionSpec::Ranking { args, .. }
-        | WindowFunctionSpec::Value { args, .. } => args,
+    let (args, filter) = match spec {
+        WindowFunctionSpec::Aggregate { args, filter, .. } => (args, filter.as_deref()),
+        WindowFunctionSpec::Ranking { args, .. } | WindowFunctionSpec::Value { args, .. } => {
+            (args, None)
+        }
     };
     for arg in args {
         let result = walk_expression(visitor, arg);
+        if result.should_stop() {
+            return VisitResult::Stop;
+        }
+    }
+    // `COUNT(*) FILTER (WHERE ?) OVER (...)`: the FILTER predicate is rewritten
+    // by `transform_window_function`, so it must be visited here as well.
+    if let Some(filter_expr) = filter {
+        let result = walk_expression(visitor, filter_expr);
         if result.should_stop() {
             return VisitResult::Stop;
         }
@@ -908,6 +932,13 @@ pub trait StatementVisitor: ExpressionVisitor {
 /// a spurious "Parameter count mismatch" (counted but never bound, or bound
 /// but never counted), or a hard "Unbound placeholder" error at execution
 /// time. See issue #6359 / PR #6411 for the `LIMIT ?` regression this caused.
+///
+/// The practical hazard is the `..` rest-pattern: `walk_expression` matches
+/// `Expression` exhaustively, so a missing *variant* is a compile error, but a
+/// `..` inside a struct pattern silently drops an expression-bearing *field*.
+/// `AggregateFunction { filter }`, `WindowFunctionSpec::Aggregate { filter }`
+/// and `Like`/`Glob` `{ escape }` were all lost that way. When adding such a
+/// field, touch the `walk_*` and `transform_*` pair together.
 pub fn walk_statement<V: StatementVisitor>(visitor: &mut V, stmt: &Statement) {
     match stmt {
         Statement::Select(select) => walk_select(visitor, select),

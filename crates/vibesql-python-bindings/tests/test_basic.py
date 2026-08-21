@@ -588,6 +588,54 @@ def test_parameterized_limit_offset():
     db.close()
 
 
+def test_parameterized_aggregate_subclauses_and_escape():
+    """Placeholders in aggregate sub-clauses and in LIKE/GLOB ESCAPE.
+
+    Regression test for the second round of PR #6411 review. These positions
+    live behind a `..` rest-pattern in the AST walk/bind struct patterns, so
+    they were counted-but-not-bound (hard "Unbound placeholder") or
+    bound-but-not-counted (spurious "Parameter count mismatch"):
+
+    - ``AggregateFunction.filter``  — ``count(*) FILTER (WHERE a > ?)``
+    - ``AggregateFunction.order_by`` — ``group_concat(b ORDER BY ?)``
+    - ``WindowFunctionSpec::Aggregate.filter`` — the same FILTER over a window
+    - ``Like.escape`` / ``Glob.escape`` — ``LIKE ? ESCAPE ?``
+
+    Each is run twice with different values to exercise the cache-HIT path.
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE agg (a INTEGER, b TEXT)")
+    for i in range(1, 6):
+        cursor.execute("INSERT INTO agg VALUES (?, ?)", (i, f"v{i}"))
+
+    # FILTER (WHERE ?) inside an aggregate.
+    cursor.execute("SELECT count(*) FILTER (WHERE a > ?) FROM agg", (2,))
+    assert cursor.fetchall() == [(3,)]
+
+    cursor.execute("SELECT count(*) FILTER (WHERE a > ?) FROM agg", (4,))
+    assert cursor.fetchall() == [(1,)], (
+        "FILTER (WHERE ?) on a cache HIT must use this call's parameter"
+    )
+
+    # ORDER BY ? inside an aggregate.
+    cursor.execute("SELECT group_concat(b ORDER BY ?) FROM agg", (1,))
+    assert cursor.fetchall() == [("v1,v2,v3,v4,v5",)]
+
+    cursor.execute("SELECT group_concat(b ORDER BY ?) FROM agg", (1,))
+    assert cursor.fetchall() == [("v1,v2,v3,v4,v5",)]
+
+    # LIKE ? ESCAPE ? — the ESCAPE operand is an arbitrary expression.
+    cursor.execute("SELECT a FROM agg WHERE b LIKE ? ESCAPE ? ORDER BY a", ("v1", "\\"))
+    assert cursor.fetchall() == [(1,)]
+
+    cursor.execute("SELECT a FROM agg WHERE b LIKE ? ESCAPE ? ORDER BY a", ("v3", "\\"))
+    assert cursor.fetchall() == [(3,)]
+
+    cursor.close()
+    db.close()
+
+
 def test_statement_cache_performance():
     """Test that cache provides performance improvement for repeated queries"""
     import time
