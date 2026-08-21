@@ -6782,7 +6782,22 @@ array set vibesql_temp_master_ok {
 variable vibesql_attach_replay_files
 array set vibesql_attach_replay_files {
     trigger1 1
+    e_expr 1
 }
+
+# e_expr.test's ATTACH usage (#6172) is a single unconditional
+# `ATTACH 'test.db2' AS dbname; CREATE TABLE dbname.tblname(cname);` at
+# file-scope (line ~668, before any do_test), with no DETACH and no TEMP
+# tables anywhere in the file — the simplest possible shape for the replay
+# mechanism, unlike trigger1.test's TEMP-trigger/DETACH interactions above.
+# None of e_expr's do_test bodies contain literal "ATTACH "/"DETACH " text
+# (that text appears only in the raw `execsql` setup block above, which is
+# never routed through uses_sqlite_internals's skip check), so no
+# vibesql_attach_ok entries are needed here: enabling the file for replay is
+# sufficient by itself to make the ~184 e_expr-12.3.*/e_expr-12.4.* tests that
+# reference `tblname`/`dbname.tr$tn` in later batches see the attached
+# database and its table, instead of "unknown database dbname" / a bare
+# table-not-found failure in every batch after the one that ran the ATTACH.
 
 # Individual tests within a vibesql_attach_replay_files file that are verified
 # safe to actually un-skip (#6363). Narrower than the file-level list above on
