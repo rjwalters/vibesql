@@ -1836,7 +1836,7 @@ fn execute_recursive_queue<E, M>(
     base_rows: Vec<vibesql_storage::Row>,
     expand: &E,
     order_by: &[vibesql_ast::OrderByItem],
-    order_indices: &[usize],
+    order_indices: &[(usize, Option<String>)],
     seen_rows: &mut Option<HashSet<vibesql_storage::RowValues>>,
     total_cap: Option<usize>,
     memory_check: &M,
@@ -1852,13 +1852,20 @@ where
 
     // Sort the queue by the ORDER BY terms, reading values at the resolved
     // output-column positions. A stable sort preserves insertion order among
-    // equal keys, matching SQLite's FIFO tie-break.
+    // equal keys, matching SQLite's FIFO tie-break. An explicit `COLLATE` on
+    // the term (e.g. `ORDER BY 3 COLLATE nocase`, with1.test 10.8.1-10.8.3) is
+    // applied via the same NOCASE/RTRIM/BINARY comparator ordinary ORDER BY
+    // uses, instead of always falling back to a byte-order comparison.
     let sort_queue = |queue: &mut Vec<vibesql_storage::Row>| {
         queue.sort_by(|a, b| {
-            for (term, &idx) in order_by.iter().zip(order_indices.iter()) {
-                let va = a.values.get(idx).unwrap_or(&vibesql_types::SqlValue::Null);
-                let vb = b.values.get(idx).unwrap_or(&vibesql_types::SqlValue::Null);
-                let ord = super::grouping::compare_sql_values(va, vb);
+            for (term, (idx, collation)) in order_by.iter().zip(order_indices.iter()) {
+                let va = a.values.get(*idx).unwrap_or(&vibesql_types::SqlValue::Null);
+                let vb = b.values.get(*idx).unwrap_or(&vibesql_types::SqlValue::Null);
+                let ord = super::grouping::compare_sql_values_with_collation(
+                    va,
+                    vb,
+                    collation.as_deref(),
+                );
                 let ord = match term.direction {
                     vibesql_ast::OrderDirection::Asc => ord,
                     vibesql_ast::OrderDirection::Desc => ord.reverse(),
@@ -1911,7 +1918,8 @@ where
 }
 
 /// Resolve each ORDER BY term of a recursive CTE's recursive term to a 0-based
-/// output-column index.
+/// output-column index, paired with an effective `COLLATE` name if one applies
+/// (`ORDER BY 3 COLLATE nocase` -> `(2, Some("nocase"))`).
 ///
 /// SQLite resolves the ORDER BY against the compound query's result columns:
 /// - A positive integer literal `N` selects output column `N` (1-based).
@@ -1919,26 +1927,40 @@ where
 ///   (with1.test 10.7.2 uses the base-term alias `b`, 10.7.3 the recursive-term alias `c`). A name
 ///   that matches neither is an error (with1.test 10.7.1: `ORDER BY a` where the output is aliased
 ///   `b`/`c`).
+///
+/// The collating sequence follows SQLite's `multiSelectCollSeq` rule: an
+/// explicit `COLLATE` on the ORDER BY term itself always wins (with1.test
+/// 10.8.1); otherwise the compound's arms are searched left-to-right — base
+/// (seed) term first, then recursive term — for the first select-list
+/// expression at that output position carrying an *explicit* `COLLATE`
+/// (with1.test 10.8.2, 10.8.3). A plain column reference's own *declared*
+/// (implicit) column collation does not count here, matching
+/// `view_select_list_collations`'s explicit-only propagation rule.
 fn resolve_recursive_order_indices(
     order_by: &[vibesql_ast::OrderByItem],
     recursive_term: &vibesql_ast::SelectStmt,
     base_query: &vibesql_ast::SelectStmt,
-) -> Result<Vec<usize>, ExecutorError> {
+) -> Result<Vec<(usize, Option<String>)>, ExecutorError> {
     let col_count = recursive_term.select_list.len();
     let mut indices = Vec::with_capacity(order_by.len());
     for (term_index, item) in order_by.iter().enumerate() {
         // A COLLATE wrapper attaches a collation to the sort key but does not
         // change which column the term selects: `ORDER BY 3 COLLATE nocase`
         // still orders by output column 3 (with1.test 10.8.1). Unwrap it before
-        // position/name resolution. (The collation itself is not yet applied in
-        // the priority-queue comparator.)
-        let expr = match &item.expr {
-            vibesql_ast::Expression::Collate { expr, .. } => expr.as_ref(),
-            other => other,
+        // position/name resolution, but remember the collation name so the
+        // priority-queue comparator can apply it (with1.test 10.8.1-10.8.3).
+        let (expr, collation) = match &item.expr {
+            vibesql_ast::Expression::Collate { expr, collation } => {
+                (expr.as_ref(), Some(collation.clone()))
+            }
+            other => (other, None),
         };
         match super::order::extract_column_position(expr) {
             super::order::ColumnPositionResult::Position(pos) => {
-                indices.push(super::order::validate_column_position(pos, col_count, term_index)?);
+                let idx = super::order::validate_column_position(pos, col_count, term_index)?;
+                let collation = collation
+                    .or_else(|| arm_select_list_collation(base_query, recursive_term, idx));
+                indices.push((idx, collation));
             }
             super::order::ColumnPositionResult::Negative(pos) => {
                 return Err(ExecutorError::OrderByOutOfRange {
@@ -1961,7 +1983,11 @@ fn resolve_recursive_order_indices(
                         .or_else(|| select_output_index(&base_query.select_list, n))
                 });
                 match idx {
-                    Some(i) => indices.push(i),
+                    Some(i) => {
+                        let collation = collation
+                            .or_else(|| arm_select_list_collation(base_query, recursive_term, i));
+                        indices.push((i, collation));
+                    }
                     None => {
                         return Err(ExecutorError::SqliteCompatError(format!(
                             "{}{} ORDER BY term does not match any column in the result set",
@@ -1974,6 +2000,35 @@ fn resolve_recursive_order_indices(
         }
     }
     Ok(indices)
+}
+
+/// Look up the effective collation of output column `idx` by checking the
+/// compound's arms left-to-right — base (seed) term first, then recursive
+/// term — for an *explicit* `COLLATE` on that arm's select-list expression
+/// (SQLite's `multiSelectCollSeq`, with1.test 10.8.2/10.8.3). Returns `None`
+/// when neither arm's expression at `idx` carries an explicit `COLLATE`.
+fn arm_select_list_collation(
+    base_query: &vibesql_ast::SelectStmt,
+    recursive_term: &vibesql_ast::SelectStmt,
+    idx: usize,
+) -> Option<String> {
+    select_item_explicit_collation(&base_query.select_list, idx)
+        .or_else(|| select_item_explicit_collation(&recursive_term.select_list, idx))
+}
+
+/// Explicit `COLLATE` (anywhere in the expression's subtree) of the select-list
+/// item at 0-based position `idx`, or `None` for a non-`Expression` item
+/// (wildcard) or an out-of-range index.
+fn select_item_explicit_collation(
+    select_list: &[vibesql_ast::SelectItem],
+    idx: usize,
+) -> Option<String> {
+    match select_list.get(idx) {
+        Some(vibesql_ast::SelectItem::Expression { expr, .. }) => {
+            crate::evaluator::collation::explicit_collation_of(expr)
+        }
+        _ => None,
+    }
 }
 
 /// Find the 0-based output index of a SELECT-list item whose alias or bare
