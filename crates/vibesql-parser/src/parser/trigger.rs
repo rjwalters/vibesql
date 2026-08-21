@@ -631,7 +631,11 @@ impl Parser {
 
     /// Is this token a bound parameter / variable reference (not a NEW/OLD
     /// pseudo-column or any other identifier)?
-    fn token_is_variable(token: &Token) -> bool {
+    ///
+    /// Hoisted to `pub(super)` so [`super::view`]'s `CREATE VIEW` placeholder
+    /// rejection (issue #6304) can reuse the same variable-token predicate
+    /// used here for `CREATE TRIGGER`, rather than duplicating the match.
+    pub(super) fn token_is_variable(token: &Token) -> bool {
         matches!(
             token,
             Token::Placeholder
