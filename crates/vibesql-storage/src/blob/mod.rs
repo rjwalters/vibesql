@@ -9,7 +9,7 @@ pub mod id;
 pub mod service;
 
 pub use id::BlobId;
-pub use service::BlobStorageService;
+pub use service::{shared_metadata_db, BlobStorageService, SharedMetadataDb};
 
 /// Metadata for a stored blob
 #[derive(Debug, Clone, Serialize, Deserialize)]
