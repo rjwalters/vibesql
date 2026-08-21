@@ -149,12 +149,122 @@ fn find_from_less_column_ref(expr: &vibesql_ast::Expression, count_pseudo: bool)
     }
 }
 
+/// Check whether an expression contains a subquery (scalar subquery, EXISTS,
+/// IN-subquery, or quantified comparison) anywhere in its tree.
+///
+/// Used only for FROM-less SELECT WHERE-clause *routing* (issue #6306): a
+/// column reference living inside a nested subquery — e.g. `WHERE (SELECT
+/// c)` — is invisible to [`find_from_less_column_ref`] because that helper
+/// deliberately treats subqueries as their own scope (needed for accurate
+/// "no such column" error reporting on the SELECT list). But the outer
+/// alias-binding WHERE path still needs to be engaged in that case, since
+/// `c` can only resolve to a select-list alias. This helper is intentionally
+/// coarse: it does not distinguish whether the subquery's *own* references
+/// bind to an outer alias or to its own inner scope — over-routing to the
+/// alias-binding path is benign because that path binds aliases as outer
+/// context and subqueries still resolve their own inner scope first
+/// (innermost-scope-first, #5880).
+fn expression_contains_subquery(expr: &vibesql_ast::Expression) -> bool {
+    let contains = expression_contains_subquery;
+    match expr {
+        vibesql_ast::Expression::ScalarSubquery(_)
+        | vibesql_ast::Expression::Exists { .. }
+        | vibesql_ast::Expression::In { .. }
+        | vibesql_ast::Expression::QuantifiedComparison { .. } => true,
+
+        vibesql_ast::Expression::Literal(_)
+        | vibesql_ast::Expression::CollatedLiteral { .. }
+        | vibesql_ast::Expression::Wildcard
+        | vibesql_ast::Expression::CurrentDate
+        | vibesql_ast::Expression::CurrentTime { .. }
+        | vibesql_ast::Expression::CurrentTimestamp { .. }
+        | vibesql_ast::Expression::NextValue { .. }
+        | vibesql_ast::Expression::SessionVariable { .. }
+        | vibesql_ast::Expression::PseudoVariable { .. }
+        | vibesql_ast::Expression::Default
+        | vibesql_ast::Expression::DuplicateKeyValue { .. }
+        | vibesql_ast::Expression::ColumnRef(_)
+        | vibesql_ast::Expression::Placeholder(_)
+        | vibesql_ast::Expression::NumberedPlaceholder(_)
+        | vibesql_ast::Expression::NamedPlaceholder(_) => false,
+
+        vibesql_ast::Expression::BinaryOp { left, right, .. } => contains(left) || contains(right),
+        vibesql_ast::Expression::UnaryOp { expr, .. } => contains(expr),
+        vibesql_ast::Expression::Function { args, .. }
+        | vibesql_ast::Expression::AggregateFunction { args, .. } => args.iter().any(contains),
+        vibesql_ast::Expression::IsNull { expr, .. } => contains(expr),
+        vibesql_ast::Expression::IsDistinctFrom { left, right, .. } => {
+            contains(left) || contains(right)
+        }
+        vibesql_ast::Expression::IsTruthValue { expr, .. } => contains(expr),
+        vibesql_ast::Expression::InList { expr, values, .. } => {
+            contains(expr) || values.iter().any(contains)
+        }
+        vibesql_ast::Expression::Between { expr, low, high, .. } => {
+            contains(expr) || contains(low) || contains(high)
+        }
+        vibesql_ast::Expression::Cast { expr, .. } => contains(expr),
+        vibesql_ast::Expression::Interval { value, .. } => contains(value),
+        vibesql_ast::Expression::Position { substring, string, .. } => {
+            contains(substring) || contains(string)
+        }
+        vibesql_ast::Expression::Trim { removal_char, string, .. } => {
+            removal_char.as_ref().is_some_and(|e| contains(e)) || contains(string)
+        }
+        vibesql_ast::Expression::Extract { expr, .. } => contains(expr),
+        vibesql_ast::Expression::Like { expr, pattern, .. }
+        | vibesql_ast::Expression::Glob { expr, pattern, .. } => {
+            contains(expr) || contains(pattern)
+        }
+        vibesql_ast::Expression::Case { operand, when_clauses, else_result } => {
+            operand.as_ref().is_some_and(|e| contains(e))
+                || when_clauses.iter().any(|when_clause| {
+                    when_clause.conditions.iter().any(contains) || contains(&when_clause.result)
+                })
+                || else_result.as_ref().is_some_and(|e| contains(e))
+        }
+        vibesql_ast::Expression::WindowFunction { function, over } => {
+            let args_have_subquery = match function {
+                vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+                    args.iter().any(contains) || filter.as_ref().is_some_and(|f| contains(f))
+                }
+                vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+                | vibesql_ast::WindowFunctionSpec::Value { args, .. } => args.iter().any(contains),
+            };
+            args_have_subquery
+                || over.partition_by.as_ref().is_some_and(|exprs| exprs.iter().any(contains))
+                || over
+                    .order_by
+                    .as_ref()
+                    .is_some_and(|items| items.iter().any(|item| contains(&item.expr)))
+        }
+        vibesql_ast::Expression::MatchAgainst { search_modifier, .. } => contains(search_modifier),
+        vibesql_ast::Expression::Conjunction(children)
+        | vibesql_ast::Expression::Disjunction(children)
+        | vibesql_ast::Expression::RowValueConstructor(children) => children.iter().any(contains),
+        vibesql_ast::Expression::Collate { expr, .. } => contains(expr),
+        vibesql_ast::Expression::Raise { error_message, .. } => {
+            error_message.as_ref().is_some_and(|msg| contains(msg))
+        }
+    }
+}
+
 impl SelectExecutor<'_> {
     /// Check if an expression references a column (which requires FROM clause).
     ///
     /// NEW/OLD pseudo-variables count as column references here.
     pub(super) fn expression_references_column(&self, expr: &vibesql_ast::Expression) -> bool {
         find_from_less_column_ref(expr, true).is_some()
+    }
+
+    /// Check if an expression contains a subquery (scalar subquery, EXISTS,
+    /// IN-subquery, or quantified comparison) anywhere in its tree.
+    ///
+    /// Issue #6306: routing-only helper for the FROM-less SELECT WHERE-clause
+    /// alias-binding decision — see [`expression_contains_subquery`] for why
+    /// this is needed alongside [`Self::expression_references_column`].
+    pub(super) fn expression_contains_subquery(&self, expr: &vibesql_ast::Expression) -> bool {
+        expression_contains_subquery(expr)
     }
 
     /// Check if an expression references a *non-pseudo* column (i.e. a real

@@ -9,9 +9,11 @@ use super::builder::SelectExecutor;
 use crate::{
     errors::ExecutorError,
     evaluator::{CombinedExpressionEvaluator, ExpressionEvaluator},
-    select::cte::CteResult,
-    select::helpers::{apply_limit_offset, evaluate_limit, evaluate_offset},
-    select::window::{evaluate_window_functions, has_window_functions},
+    select::{
+        cte::CteResult,
+        helpers::{apply_limit_offset, evaluate_limit, evaluate_offset},
+        window::{evaluate_window_functions, has_window_functions},
+    },
 };
 
 impl SelectExecutor<'_> {
@@ -82,11 +84,25 @@ impl SelectExecutor<'_> {
             // #5445: inside a trigger body the WHERE can reference NEW/OLD
             // pseudo-variables, which resolve from the firing row rather than a
             // select-list alias; only divert non-pseudo column references to the
-            // alias-binding path.
+            // alias-binding path. The trigger-context arm is left exactly as it
+            // was — `execute_select_without_from_alias_where` does not thread
+            // `self.trigger_context`, so routing a trigger-body WHERE through it
+            // would silently drop NEW/OLD resolution; the #6306 subquery check
+            // below is therefore only added to the non-trigger branch.
             let references_alias_candidate = if self.trigger_context.is_some() {
                 self.expression_references_non_pseudo_column(where_clause)
             } else {
+                // #6306: a column reference to a select-list alias can also live
+                // *inside* a subquery nested in WHERE, e.g. `WHERE (SELECT c)` —
+                // `expression_references_column` deliberately does not look
+                // inside subqueries (they have their own scope), so it misses
+                // this case. Route to the alias-binding path whenever WHERE
+                // contains a subquery too; over-routing is benign (see the
+                // `expression_contains_subquery` doc comment) because the alias
+                // schema is threaded as outer context and subqueries still
+                // resolve their own inner scope first.
                 self.expression_references_column(where_clause)
+                    || self.expression_contains_subquery(where_clause)
             };
             if !has_outer_context
                 && !has_window_functions(&stmt.select_list)
