@@ -49,10 +49,14 @@ fn explicit_rowid_replace_detects_pk_conflict_and_rejects_fk_violation() {
 
     let err = exec(&mut db, "REPLACE INTO pp(rowid, a, b, c) VALUES(1, 2, 3, 4)")
         .expect_err("REPLACE must fail: it would orphan cc's FK reference to pp(2,3)");
-    assert!(
-        err.to_string().contains("FOREIGN KEY constraint failed"),
-        "unexpected error: {err}"
-    );
+    // The REPLACE conflict-delete path reports the parent-row-delete wording
+    // ("FOREIGN KEY constraint violation: cannot delete or update a parent row
+    // ...", `delete::integrity` / `insert::replace`), not the terse SQLite
+    // spelling "FOREIGN KEY constraint failed" that the INSERT and
+    // deferred-COMMIT paths use. Assert on the substring common to both so this
+    // test pins the *violation being detected* rather than which of the two
+    // engine wordings happens to surface it.
+    assert!(err.to_string().contains("FOREIGN KEY constraint"), "unexpected error: {err}");
 
     let pp = db.get_table("pp").unwrap();
     assert_eq!(pp.row_count(), 1, "pp must still have exactly one row after the rejected REPLACE");

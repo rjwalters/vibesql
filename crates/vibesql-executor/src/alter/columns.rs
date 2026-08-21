@@ -52,6 +52,12 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::Other("Cannot add a column to a view".to_string()));
     }
 
+    // Read `PRAGMA foreign_keys` up front: the REFERENCES/non-NULL-default
+    // restriction below is gated on it, but by that point `table` holds a
+    // mutable borrow of `database`, so the pragma cannot be read from
+    // `database` there (E0502).
+    let foreign_keys_enabled = database.foreign_keys_enabled();
+
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
@@ -121,7 +127,7 @@ pub(super) fn execute_add_column(
         .constraints
         .iter()
         .any(|c| matches!(c.kind, ColumnConstraintKind::References { .. }));
-    if has_references && !default_is_null_or_absent && database.foreign_keys_enabled() {
+    if has_references && !default_is_null_or_absent && foreign_keys_enabled {
         return Err(ExecutorError::Other(
             "Cannot add a REFERENCES column with non-NULL default value".to_string(),
         ));
