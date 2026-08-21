@@ -47,6 +47,5 @@ pub use indexes::{IndexData, IndexManager, IndexMetadata, OwnedStreamingRangeSca
 pub use operations::SpatialIndexMetadata as OperationsSpatialIndexMetadata;
 pub use resource_tracker::{IndexBackend, IndexStats, ResourceTracker};
 pub use transactions::{
-    DeferredFkViolation, DeferredFkViolationKind, Savepoint, TransactionChange, TransactionManager,
-    TransactionState,
+    DeferredFkViolation, DeferredFkViolationKind, Savepoint, TransactionManager, TransactionState,
 };

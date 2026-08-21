@@ -5,28 +5,7 @@
 use std::collections::HashMap;
 
 use super::operations::Operations;
-use crate::{mvcc::TxnSnapshot, row::TxnId, wal::TransactionDurability, Row, StorageError, Table};
-
-/// A single change made during a transaction
-#[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
-pub enum TransactionChange {
-    Insert { table_name: String, row: Row },
-    Update { table_name: String, old_row: Row, new_row: Row },
-    Delete { table_name: String, row: Row },
-}
-
-impl TransactionChange {
-    /// The table this change mutated. Used by savepoint rollback to invalidate
-    /// the affected table's columnar cache entry (#6199 Phase 3).
-    pub fn table_name(&self) -> &str {
-        match self {
-            TransactionChange::Insert { table_name, .. }
-            | TransactionChange::Update { table_name, .. }
-            | TransactionChange::Delete { table_name, .. } => table_name,
-        }
-    }
-}
+use crate::{mvcc::TxnSnapshot, row::TxnId, wal::TransactionDurability, StorageError, Table};
 
 /// A foreign-key violation that has been deferred until COMMIT.
 ///
@@ -67,16 +46,37 @@ pub enum DeferredFkViolationKind {
     ChildInsertOrUpdate,
 }
 
-/// A savepoint within a transaction
+/// A named `SAVEPOINT` within a transaction.
+///
+/// #6278: captures a **wholesale** `catalog`/`tables`/`operations` snapshot at
+/// `SAVEPOINT` time, mirroring the already-correct [`StatementSavepoint`]
+/// strategy `arm_statement_savepoint`/`rollback_statement_savepoint` use for
+/// the implicit per-statement savepoint. `ROLLBACK TO` restores this snapshot
+/// verbatim, so it correctly undoes INSERT *and* DELETE/UPDATE row data
+/// (including cascading FK actions and `INSERT ... OR REPLACE`), instead of
+/// the previous `TransactionChange`-based incremental undo log, which was only
+/// ever recorded for INSERT.
 #[derive(Debug, Clone)]
 pub struct Savepoint {
     pub name: String,
-    /// Index in the changes vector where this savepoint was created
-    pub snapshot_index: usize,
+    /// Catalog snapshot taken when the savepoint was created.
+    catalog: vibesql_catalog::Catalog,
+    /// Table snapshots taken when the savepoint was created.
+    tables: HashMap<String, Table>,
+    /// Index/spatial-index (`Operations`) snapshot taken when the savepoint
+    /// was created.
+    operations: Operations,
     /// Index in the deferred FK violation queue where this savepoint was
     /// created. ROLLBACK TO truncates the queue back to this index so
     /// that violations queued after the savepoint are discarded.
     pub deferred_fk_snapshot_index: usize,
+    /// Per-tree disk undo-log markers captured when the savepoint was created
+    /// (mirrors [`StatementSavepoint::disk_undo_markers`] — the wholesale
+    /// `operations` clone above shares the same `Arc<Mutex<BTreeIndex>>` as
+    /// any spilled (disk-backed) index, so restoring it is a no-op for their
+    /// key mutations; `ROLLBACK TO` instead reverses the disk undo-log suffix
+    /// recorded since this savepoint was created).
+    disk_undo_markers: HashMap<String, usize>,
 }
 
 /// An implicit statement-level savepoint (#5417).
@@ -99,9 +99,6 @@ pub struct StatementSavepoint {
     tables: HashMap<String, Table>,
     /// Index/spatial-index (`Operations`) snapshot taken at statement start.
     operations: Operations,
-    /// Length of the transaction's `changes` undo-log at statement start, so
-    /// the statement's own change-log entries can be truncated on rollback.
-    changes_len: usize,
     /// Length of the deferred-FK queue at statement start, so violations
     /// queued by the aborted statement are discarded on rollback.
     deferred_fk_len: usize,
@@ -171,8 +168,6 @@ pub enum TransactionState {
         statement_savepoint: Option<Box<StatementSavepoint>>,
         /// Stack of savepoints (newest at end)
         savepoints: Vec<Savepoint>,
-        /// All changes made since transaction start (for incremental undo)
-        changes: Vec<TransactionChange>,
         /// Durability hint for this transaction
         durability: TransactionDurability,
         /// Queue of deferred FK violations to re-check at COMMIT.
@@ -258,13 +253,6 @@ impl TransactionManager {
         }
     }
 
-    /// Record a change in the current transaction (if any)
-    pub fn record_change(&mut self, change: TransactionChange) {
-        if let TransactionState::Active { changes, .. } = &mut self.transaction_state {
-            changes.push(change);
-        }
-    }
-
     /// Begin a new transaction with default durability
     pub fn begin_transaction(
         &mut self,
@@ -345,7 +333,6 @@ impl TransactionManager {
                     original_operations: None,
                     statement_savepoint: None,
                     savepoints: Vec::new(),
-                    changes: Vec::new(),
                     durability,
                     deferred_fk_violations: Vec::new(),
                     snapshot,
@@ -654,17 +641,33 @@ impl TransactionManager {
         TxnSnapshot::new(next_id, next_id.saturating_sub(1), std::collections::HashSet::new())
     }
 
-    /// Create a savepoint within the current transaction
-    pub fn create_savepoint(&mut self, name: String) -> Result<(), StorageError> {
+    /// Create a savepoint within the current transaction.
+    ///
+    /// #6278: snapshots `catalog`/`tables`/`operations` wholesale (mirroring
+    /// [`Self::arm_statement_savepoint`]) so a later `ROLLBACK TO` correctly
+    /// undoes INSERT/UPDATE/DELETE row data, not just INSERT.
+    pub fn create_savepoint(
+        &mut self,
+        name: String,
+        catalog: &vibesql_catalog::Catalog,
+        tables: &HashMap<String, Table>,
+        operations: &Operations,
+    ) -> Result<(), StorageError> {
         match &mut self.transaction_state {
             TransactionState::None => {
                 Err(StorageError::TransactionError("No active transaction".to_string()))
             }
-            TransactionState::Active { savepoints, changes, deferred_fk_violations, .. } => {
+            TransactionState::Active { savepoints, deferred_fk_violations, .. } => {
                 let savepoint = Savepoint {
                     name,
-                    snapshot_index: changes.len(),
+                    catalog: catalog.clone(),
+                    tables: tables.clone(),
+                    operations: operations.clone(),
                     deferred_fk_snapshot_index: deferred_fk_violations.len(),
+                    // #5434-style: mark the disk-backed (spilled) index
+                    // undo-log position so `ROLLBACK TO` can reverse just this
+                    // savepoint's spilled-index mutations.
+                    disk_undo_markers: operations.mark_disk_undo_logs(),
                 };
                 savepoints.push(savepoint);
                 Ok(())
@@ -719,38 +722,53 @@ impl TransactionManager {
         }
     }
 
-    /// Rollback to a named savepoint - returns the changes that need to be undone
+    /// Rollback to a named savepoint, restoring the `catalog`/`tables`/
+    /// `operations` snapshot captured when the savepoint was created (#6278).
+    ///
+    /// The named savepoint itself survives (SQLite semantics: a further
+    /// statement may `ROLLBACK TO` it again, or `RELEASE` it) — only later
+    /// (nested) savepoints are destroyed.
     pub fn rollback_to_savepoint(
         &mut self,
         name: String,
-    ) -> Result<Vec<TransactionChange>, StorageError> {
+        catalog: &mut vibesql_catalog::Catalog,
+        tables: &mut HashMap<String, Table>,
+        operations: &mut Operations,
+    ) -> Result<(), StorageError> {
         match &mut self.transaction_state {
             TransactionState::None => {
                 Err(StorageError::TransactionError("No active transaction".to_string()))
             }
-            TransactionState::Active { savepoints, changes, deferred_fk_violations, .. } => {
+            TransactionState::Active { savepoints, deferred_fk_violations, .. } => {
                 // Find the savepoint
                 let savepoint_idx =
                     savepoints.iter().position(|sp| sp.name == name).ok_or_else(|| {
                         StorageError::TransactionError(format!("Savepoint '{}' not found", name))
                     })?;
 
-                let snapshot_index = savepoints[savepoint_idx].snapshot_index;
-                let deferred_fk_snapshot_index =
-                    savepoints[savepoint_idx].deferred_fk_snapshot_index;
+                // #5434-style: reverse this savepoint's disk-backed (spilled)
+                // index mutations *before* swapping in the wholesale snapshot
+                // below — the snapshot's `operations` clone shares the same
+                // `Arc<Mutex<BTreeIndex>>` as the live spilled index, so
+                // restoring the shallow clone alone is a no-op for disk-backed
+                // indexes; their mutations must be undone via the per-tree
+                // undo-log armed at BEGIN.
+                operations.rollback_disk_undo_logs_to(&savepoints[savepoint_idx].disk_undo_markers);
 
-                // Collect changes to undo (from snapshot_index to end)
-                let changes_to_undo: Vec<_> = changes.drain(snapshot_index..).collect();
+                *catalog = savepoints[savepoint_idx].catalog.clone();
+                *tables = savepoints[savepoint_idx].tables.clone();
+                *operations = savepoints[savepoint_idx].operations.clone();
 
                 // Discard deferred FK violations queued after the savepoint.
                 // Any violation pushed since the savepoint is rolled back along
                 // with the underlying child mutation.
-                deferred_fk_violations.truncate(deferred_fk_snapshot_index);
+                deferred_fk_violations
+                    .truncate(savepoints[savepoint_idx].deferred_fk_snapshot_index);
 
-                // Destroy later savepoints
+                // Destroy later (nested) savepoints; keep the target one live.
                 savepoints.truncate(savepoint_idx + 1);
 
-                Ok(changes_to_undo)
+                Ok(())
             }
         }
     }
@@ -837,14 +855,11 @@ impl TransactionManager {
     ) -> bool {
         match &mut self.transaction_state {
             TransactionState::None => false,
-            TransactionState::Active {
-                statement_savepoint, changes, deferred_fk_violations, ..
-            } => {
+            TransactionState::Active { statement_savepoint, deferred_fk_violations, .. } => {
                 *statement_savepoint = Some(Box::new(StatementSavepoint {
                     catalog: catalog.clone(),
                     tables: tables.clone(),
                     operations: operations.clone(),
-                    changes_len: changes.len(),
                     deferred_fk_len: deferred_fk_violations.len(),
                     // #5434: snapshot per-tree disk undo-log positions so a
                     // RAISE(ABORT) reverses only this statement's spilled-index
@@ -858,7 +873,7 @@ impl TransactionManager {
 
     /// Roll back to the armed statement savepoint, restoring the
     /// catalog/tables/operations captured by [`Self::arm_statement_savepoint`]
-    /// and truncating the change / deferred-FK logs back to statement start.
+    /// and truncating the deferred-FK log back to statement start.
     /// Consumes (disarms) the savepoint.
     ///
     /// Returns `true` when a savepoint was armed and restored, `false`
@@ -870,31 +885,30 @@ impl TransactionManager {
         operations: &mut Operations,
     ) -> bool {
         match &mut self.transaction_state {
-            TransactionState::Active {
-                statement_savepoint, changes, deferred_fk_violations, ..
-            } => match statement_savepoint.take() {
-                Some(sp) => {
-                    // #5434: reverse this statement's disk-backed (spilled)
-                    // index mutations *before* swapping in the wholesale
-                    // snapshot — mirroring `rollback_transaction`'s ordering.
-                    // The snapshot's `operations` clone shares the same live
-                    // `Arc<Mutex<BTreeIndex>>` as the spilled indexes, so the
-                    // clone restore is a no-op for them; reversing the undo-log
-                    // suffix on the live `operations` reverts the shared B+ tree
-                    // back to its pre-statement state, and the prefix (earlier
-                    // statements' mutations) stays in the enclosing txn's
-                    // undo-log for a potential outer ROLLBACK. No-op when no
-                    // disk-backed index was undo-logging at arm time.
-                    operations.rollback_disk_undo_logs_to(&sp.disk_undo_markers);
-                    *catalog = sp.catalog;
-                    *tables = sp.tables;
-                    *operations = sp.operations;
-                    changes.truncate(sp.changes_len);
-                    deferred_fk_violations.truncate(sp.deferred_fk_len);
-                    true
+            TransactionState::Active { statement_savepoint, deferred_fk_violations, .. } => {
+                match statement_savepoint.take() {
+                    Some(sp) => {
+                        // #5434: reverse this statement's disk-backed (spilled)
+                        // index mutations *before* swapping in the wholesale
+                        // snapshot — mirroring `rollback_transaction`'s ordering.
+                        // The snapshot's `operations` clone shares the same live
+                        // `Arc<Mutex<BTreeIndex>>` as the spilled indexes, so the
+                        // clone restore is a no-op for them; reversing the undo-log
+                        // suffix on the live `operations` reverts the shared B+ tree
+                        // back to its pre-statement state, and the prefix (earlier
+                        // statements' mutations) stays in the enclosing txn's
+                        // undo-log for a potential outer ROLLBACK. No-op when no
+                        // disk-backed index was undo-logging at arm time.
+                        operations.rollback_disk_undo_logs_to(&sp.disk_undo_markers);
+                        *catalog = sp.catalog;
+                        *tables = sp.tables;
+                        *operations = sp.operations;
+                        deferred_fk_violations.truncate(sp.deferred_fk_len);
+                        true
+                    }
+                    None => false,
                 }
-                None => false,
-            },
+            }
             TransactionState::None => false,
         }
     }

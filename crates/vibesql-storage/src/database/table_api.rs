@@ -5,7 +5,6 @@
 // This module provides table management methods for the Database struct.
 // Includes create, drop, insert, update operations.
 
-use super::transactions::TransactionChange;
 use super::Database;
 use crate::change_events::{ChangeEvent, ChangeEventPk};
 use crate::wal::WalOp;
@@ -407,11 +406,6 @@ impl Database {
         let row_index =
             self.operations.insert_row(&self.catalog, &mut self.tables, table_name, row.clone())?;
 
-        self.record_change(TransactionChange::Insert {
-            table_name: table_name.to_string(),
-            row: row.clone(),
-        });
-
         // Emit WAL entry for persistence (skip for temp tables)
         if !self.is_temp_table(table_name) {
             self.emit_wal_op(WalOp::Insert {
@@ -526,13 +520,8 @@ impl Database {
         // append.
         self.columnar_cache.append_rows(table_name, &rows);
 
-        // Record changes for transaction management, emit WAL entries, and broadcast events
+        // Emit WAL entries and broadcast events
         for (row, &row_index) in rows.into_iter().zip(row_indices.iter()) {
-            self.record_change(TransactionChange::Insert {
-                table_name: table_name.to_string(),
-                row: row.clone(),
-            });
-
             // Emit WAL entry for persistence (skip for temp tables)
             if !is_temp {
                 self.emit_wal_op(WalOp::Insert {

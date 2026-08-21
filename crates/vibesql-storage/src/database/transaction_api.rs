@@ -5,7 +5,7 @@
 // This module provides transaction management methods for the Database struct.
 // Methods are implemented via an impl block on the Database type.
 
-use super::transactions::{DeferredFkViolation, TransactionChange};
+use super::transactions::DeferredFkViolation;
 use super::Database;
 use crate::mvcc::TxnSnapshot;
 use crate::wal::{DurabilityMode, TransactionDurability, WalOp};
@@ -15,11 +15,6 @@ impl Database {
     // ============================================================================
     // Transaction Management
     // ============================================================================
-
-    /// Record a change in the current transaction (if any)
-    pub fn record_change(&mut self, change: TransactionChange) {
-        self.lifecycle.transaction_manager_mut().record_change(change);
-    }
 
     /// Begin a new transaction
     pub fn begin_transaction(&mut self) -> Result<(), StorageError> {
@@ -301,62 +296,48 @@ impl Database {
         Ok(total_reclaimed)
     }
 
-    /// Create a savepoint within the current transaction
+    /// Create a savepoint within the current transaction.
+    ///
+    /// #6278: snapshots `catalog`/`tables`/`operations` wholesale (mirroring
+    /// [`Self::arm_statement_savepoint`]) instead of relying on an INSERT-only
+    /// incremental undo log, so `ROLLBACK TO` correctly undoes DELETE/UPDATE
+    /// (including cascades and `INSERT ... OR REPLACE`) too.
     pub fn create_savepoint(&mut self, name: String) -> Result<(), StorageError> {
-        self.lifecycle.transaction_manager_mut().create_savepoint(name)
+        let catalog = self.catalog.clone();
+        let tables = self.tables.clone();
+        let operations = self.operations.clone();
+        self.lifecycle.transaction_manager_mut().create_savepoint(
+            name,
+            &catalog,
+            &tables,
+            &operations,
+        )
     }
 
-    /// Rollback to a named savepoint
+    /// Rollback to a named savepoint, restoring the wholesale snapshot taken
+    /// when it was created (#6278).
     pub fn rollback_to_savepoint(&mut self, name: String) -> Result<(), StorageError> {
-        let changes_to_undo =
-            self.lifecycle.transaction_manager_mut().rollback_to_savepoint(name)?;
+        let mut catalog = std::mem::take(&mut self.catalog);
+        let mut tables = std::mem::take(&mut self.tables);
+        let mut operations = std::mem::take(&mut self.operations);
+        let result = self.lifecycle.transaction_manager_mut().rollback_to_savepoint(
+            name,
+            &mut catalog,
+            &mut tables,
+            &mut operations,
+        );
+        self.catalog = catalog;
+        self.tables = tables;
+        self.operations = operations;
+        result?;
 
-        // #6199 Phase 3: collect the tables touched by the undone changes so we
-        // can drop their columnar cache entries after the row store is
-        // restored. Rows appended in place by `append_rows` during the undone
-        // window must not survive in the resident columnar copy.
-        let mut affected: Vec<String> = Vec::new();
-        for change in &changes_to_undo {
-            let table = change.table_name();
-            if !affected.iter().any(|n| n == table) {
-                affected.push(table.to_string());
-            }
-        }
+        // #6199 Phase 3 precedent: a wholesale restore has no cheap
+        // touched-table set (unlike the old INSERT-only incremental undo log),
+        // so — like `rollback_transaction` and `rollback_statement_savepoint`
+        // before it — just drop the whole columnar cache rather than track
+        // per-table invalidation.
+        self.clear_columnar_cache();
 
-        for change in changes_to_undo.into_iter().rev() {
-            self.undo_change(change)?;
-        }
-
-        for table_name in &affected {
-            self.invalidate_columnar_cache_for_rollback(table_name);
-        }
-
-        Ok(())
-    }
-
-    /// Undo a single transaction change
-    fn undo_change(&mut self, change: TransactionChange) -> Result<(), StorageError> {
-        match change {
-            TransactionChange::Insert { table_name, row } => {
-                let table = self
-                    .get_table_mut(&table_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
-                table.remove_row(&row)?;
-            }
-            TransactionChange::Update { table_name, old_row, new_row: _ } => {
-                let table = self
-                    .get_table_mut(&table_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
-                table.remove_row(&old_row)?;
-                table.insert(old_row)?;
-            }
-            TransactionChange::Delete { table_name, row } => {
-                let table = self
-                    .get_table_mut(&table_name)
-                    .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
-                table.insert(row)?;
-            }
-        }
         Ok(())
     }
 
