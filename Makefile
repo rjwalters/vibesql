@@ -647,15 +647,35 @@ analyze-benchmark-stability:
 # Utility Targets
 #
 
-# Format code using nightly rustfmt (required for all config options)
+# Pinned nightly rustfmt toolchain. rustfmt.toml sets several unstable
+# options (wrap_comments, imports_granularity, group_imports,
+# format_code_in_doc_comments) that only a NIGHTLY rustfmt honors -- a
+# stable-only rustfmt silently ignores them and, combined with
+# use_small_heuristics = "Max", produces different (more aggressive
+# single-line-collapsing) output than the style already committed in the
+# repo. Using a *floating* `+nightly` toolchain is also unsafe: rustfmt's
+# nightly-only formatting rules can change between nightly releases, so an
+# unpinned `+nightly` can silently reformat files differently depending on
+# which day's toolchain happens to be installed. Pinning to one dated
+# nightly here makes `make fmt` / `make fmt-check` deterministic and
+# reproducible, and makes an unavailable toolchain fail loudly (via rustup)
+# instead of silently falling back to stable formatting rules.
+#
+# Always use `make fmt` / `make fmt-check` -- never bare `cargo fmt` --
+# see CLAUDE.md "Code Formatting" for why (issue #6326).
+FMT_TOOLCHAIN := nightly-2025-12-03
+
+# Format code using the pinned nightly rustfmt (required for all config options)
 fmt:
-	@echo "Formatting code with nightly rustfmt..."
-	cargo +nightly fmt
+	@echo "Formatting code with $(FMT_TOOLCHAIN) rustfmt..."
+	@rustup toolchain list | grep -q "^$(FMT_TOOLCHAIN)" || rustup toolchain install $(FMT_TOOLCHAIN) --profile minimal --component rustfmt
+	cargo +$(FMT_TOOLCHAIN) fmt
 
 # Check formatting without making changes
 fmt-check:
-	@echo "Checking code formatting..."
-	cargo +nightly fmt --check
+	@echo "Checking code formatting with $(FMT_TOOLCHAIN) rustfmt..."
+	@rustup toolchain list | grep -q "^$(FMT_TOOLCHAIN)" || rustup toolchain install $(FMT_TOOLCHAIN) --profile minimal --component rustfmt
+	cargo +$(FMT_TOOLCHAIN) fmt --check
 
 # Clean build artifacts
 clean:
