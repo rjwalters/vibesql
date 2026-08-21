@@ -284,6 +284,7 @@ set ::pragma_cache_size_raw ""           ;# "" = default (-2000); otherwise the 
 set ::pragma_temp_store_directory ""     ;# "" = unset; otherwise the last value set via PRAGMA temp_store_directory=... . Real SQLite stores this as a single process-wide value (sqlite3_temp_directory), not per-database-file, so — unlike the cache_size/user_version cookies above — it is a plain global that survives every fresh CLI process AND every `db close`/reopen for the whole tclsh run (#6175).
 array set ::pragma_default_cache_size_cookie {} ;# db-file-path -> last raw text set via PRAGMA default_cache_size=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 array set ::pragma_user_version_cookie {}   ;# db-file-path -> last raw text set via PRAGMA user_version=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
+array set ::pragma_page_size_cookie {}      ;# db-file-path -> last accepted PRAGMA page_size=... . Real SQLite stores the page size in the file header, so it survives a `db close`/reopen against the SAME file (#6175)
 array set ::pragma_application_id_cookie {} ;# db-file-path -> last raw text set via PRAGMA application_id=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 array set ::pragma_schema_version_cookie {} ;# db-file-path -> running schema_version cookie: last explicit set PLUS every DDL/VACUUM auto-increment seen since (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 
@@ -1906,6 +1907,13 @@ proc build_pragma_prefix {} {
     # more recently, tracked separately below) applies on top of it — matching
     # SQLite's real chronological "last write wins" semantics for the common
     # case where `default_cache_size` is set once and not overridden again.
+    # Replay PRAGMA page_size FIRST: it is a file-header property in real
+    # SQLite, and the negative "KiB budget" forms of cache_size/cache_spill are
+    # resolved to page counts against it, so it must already be in effect when
+    # those replay lines run (pragma2.test pragma2-5.3, #6175).
+    if {[info exists ::pragma_page_size_cookie($::db_file)]} {
+        append prefix "PRAGMA page_size=$::pragma_page_size_cookie($::db_file);\n"
+    }
     if {[info exists ::pragma_default_cache_size_cookie($::db_file)]} {
         append prefix "PRAGMA default_cache_size=$::pragma_default_cache_size_cookie($::db_file);\n"
     }
@@ -2183,6 +2191,21 @@ proc track_pragma_setting {sql} {
     foreach {match value} $matches {
         set ::pragma_application_id_cookie($::db_file) $value
         set found 1
+    }
+
+    # Look for page_size settings (find all occurrences, use last one). Real
+    # SQLite writes the page size into the database file header, so — like the
+    # cookies above — it must survive a `db close` / reopen against the SAME
+    # file. Only a value SQLite would actually accept (a power of two in
+    # [512, 65536]) is recorded; anything else is a silent no-op there and must
+    # not be replayed as if it had taken effect (#6175).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?page_size\s*[=(]\s*(\d+)\s*[)]?} $sql]
+    foreach {match value} $matches {
+        scan $value %d n
+        if {$n >= 512 && $n <= 65536 && ($n & ($n - 1)) == 0} {
+            set ::pragma_page_size_cookie($::db_file) $n
+            set found 1
+        }
     }
 
     # Look for schema_version: an explicit `PRAGMA schema_version=N` (or
@@ -3393,7 +3416,7 @@ proc execsql {sql {db ""}} {
                 }
                 continue  ;# Check for more statements
             }
-            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|ignore_check_constraints|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill|user_version|application_id|schema_version|lock_status|filename)} [string trim $sql]]} {
+            if {[regexp -nocase {^PRAGMA\s+(?:\w+\.)?(full_column_names|short_column_names|case_sensitive_like|reverse_unordered_selects|integrity_check|foreign_key_list|foreign_key_check|foreign_keys|defer_foreign_keys|recursive_triggers|ignore_check_constraints|table_info|data_version|collation_list|index_list|index_xinfo|index_info|auto_vacuum|temp_store|encoding|synchronous|cache_size|default_cache_size|cache_spill|user_version|application_id|schema_version|lock_status|filename|page_size)} [string trim $sql]]} {
                 # This PRAGMA is supported (with =value) - stop stripping
                 break
             } else {
@@ -9100,6 +9123,7 @@ proc sqlite3 {db args} {
         unset -nocomplain ::pragma_user_version_cookie($new_file)
         unset -nocomplain ::pragma_application_id_cookie($new_file)
         unset -nocomplain ::pragma_schema_version_cookie($new_file)
+        unset -nocomplain ::pragma_page_size_cookie($new_file)
     }
 
     # Only the default "db" connection (and an empty/unspecified name) tracks
@@ -9603,6 +9627,7 @@ proc reset_db {} {
     unset -nocomplain ::pragma_user_version_cookie($::db_file)
     unset -nocomplain ::pragma_application_id_cookie($::db_file)
     unset -nocomplain ::pragma_schema_version_cookie($::db_file)
+    unset -nocomplain ::pragma_page_size_cookie($::db_file)
     set ::last_insert_rowid 0  ;# Connection closed: last_insert_rowid resets (#5843)
     # Drop all temp view/trigger replay state — reset_db wipes the database, so
     # replaying stale temp-object DDL into the fresh db would resurrect objects
