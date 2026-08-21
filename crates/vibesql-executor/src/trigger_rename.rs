@@ -366,19 +366,31 @@ struct TableRef {
     alias: Option<String>,
 }
 
-/// Apply replacement edits, replacing each span with the (unquoted) new column
-/// name. Spans are sorted defensively before application.
+/// Apply replacement edits, replacing each span with the new column name.
+/// Spans are sorted defensively before application.
+///
+/// The replacement is double-quoted whenever `new_column` is not a safe bare
+/// identifier (mirrors SQLite's `bQuote` rule for `RENAME COLUMN`, see
+/// `crate::alter_rewrite::emit_renamed_ident`) — e.g. renaming a column to a
+/// name containing a semicolon must quote every rewritten reference inside a
+/// trigger/view body, not just the `CREATE TABLE` column definition itself
+/// (altercol.test 8.4.1).
 fn apply_column_edits(sql: &str, edits: &[Span], new_column: &str) -> String {
+    let replacement = if crate::alter_rewrite::is_safe_bare_identifier(new_column) {
+        new_column.to_string()
+    } else {
+        crate::alter_rewrite::quote_ident(new_column)
+    };
     let mut sorted = edits.to_vec();
     sorted.sort_by_key(|s| s.start);
-    let mut out = String::with_capacity(sql.len() + sorted.len() * new_column.len());
+    let mut out = String::with_capacity(sql.len() + sorted.len() * replacement.len());
     let mut cursor = 0usize;
     for span in sorted {
         if span.start < cursor {
             continue;
         }
         out.push_str(&sql[cursor..span.start]);
-        out.push_str(new_column);
+        out.push_str(&replacement);
         cursor = span.end;
     }
     out.push_str(&sql[cursor..]);
@@ -635,6 +647,21 @@ mod tests {
         assert_eq!(
             got,
             "CREATE TRIGGER r1 INSERT ON t1 BEGIN \n      UPDATE t1 SET a='xyz' FROM t3, (SELECT 1 FROM t2 WHERE abc);\n    END"
+        );
+    }
+
+    /// altercol.test 8.4.1: renaming a column to a name that is not a safe
+    /// bare identifier (contains a semicolon) must double-quote every
+    /// rewritten reference inside a view/trigger body, not leave it bare.
+    #[test]
+    fn col_rename_to_unsafe_identifier_is_quoted() {
+        let sql = "CREATE VIEW vvv AS SELECT c+c || coalesce(c, c) FROM t2, t3 WHERE d=c GROUP BY c HAVING c>0";
+        let got =
+            rewrite_column_refs_in_trigger_sql(sql, "t2", "c", "a;b", &altertrig_schema, false)
+                .expect("rewrite should not be ambiguous in this fixture");
+        assert_eq!(
+            got,
+            "CREATE VIEW vvv AS SELECT \"a;b\"+\"a;b\" || coalesce(\"a;b\", \"a;b\") FROM t2, t3 WHERE d=\"a;b\" GROUP BY \"a;b\" HAVING \"a;b\">0"
         );
     }
 

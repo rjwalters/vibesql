@@ -785,7 +785,7 @@ fn replace_span(sql: &str, span: Span, replacement: &str) -> String {
 }
 
 /// Double-quote an identifier (SQLite escapes embedded `"` by doubling).
-fn quote_ident(name: &str) -> String {
+pub(crate) fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
@@ -804,7 +804,7 @@ fn quote_ident(name: &str) -> String {
 /// whether the lexer classifies it as a keyword, rather than a
 /// hand-maintained keyword list that could drift from the parser's actual
 /// keyword set.
-fn is_safe_bare_identifier(name: &str) -> bool {
+pub(crate) fn is_safe_bare_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
         Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
