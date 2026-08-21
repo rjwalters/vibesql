@@ -1957,8 +1957,7 @@ fn resolve_recursive_order_indices(
         };
         match super::order::extract_column_position(expr) {
             super::order::ColumnPositionResult::Position(pos) => {
-                let idx =
-                    super::order::validate_column_position(pos, col_count, term_index)?;
+                let idx = super::order::validate_column_position(pos, col_count, term_index)?;
                 let collation = collation
                     .or_else(|| arm_select_list_collation(base_query, recursive_term, idx));
                 indices.push((idx, collation));

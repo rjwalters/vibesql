@@ -754,7 +754,8 @@ fn test_recursive_cte_order_by_matches_select_alias() {
 fn test_recursive_cte_order_by_explicit_collate_nocase() {
     let mut db = vibesql_storage::Database::new();
     execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
-    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    for (id, parent, name) in
+        [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
     {
         execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
     }
@@ -807,7 +808,8 @@ fn test_recursive_cte_order_by_explicit_collate_nocase() {
 fn test_recursive_cte_order_by_collate_declared_on_base_term() {
     let mut db = vibesql_storage::Database::new();
     execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
-    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    for (id, parent, name) in
+        [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
     {
         execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
     }
@@ -838,7 +840,8 @@ fn test_recursive_cte_order_by_collate_declared_on_base_term() {
 fn test_recursive_cte_order_by_collate_declared_on_recursive_term() {
     let mut db = vibesql_storage::Database::new();
     execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
-    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    for (id, parent, name) in
+        [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
     {
         execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
     }
