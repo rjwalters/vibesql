@@ -194,7 +194,17 @@ impl CreateTableExecutor {
             // bare-name spelling. This guard is on the user-facing executor only;
             // the engine's internal sqlite_-prefixed objects are created via
             // dedicated catalog APIs and never pass through here (issue #5614).
-            if crate::sqlite_schema::is_reserved_object_name(&table_name) {
+            //
+            // EVIDENCE-OF (verified against sqlite3 3.51.0): `PRAGMA
+            // writable_schema=ON` lifts this restriction, letting an
+            // application manually recreate an internal-looking table such as
+            // `sqlite_stat1` (fkey1-8.1: `CREATE TABLE sqlite_stat1(...)
+            // WITHOUT ROWID` under writable_schema succeeds). Gated on the
+            // session pragma so the default (writable_schema=OFF) behavior —
+            // and every other reserved-name test above — is unchanged.
+            if crate::sqlite_schema::is_reserved_object_name(&table_name)
+                && !database.writable_schema()
+            {
                 return Err(ExecutorError::SqliteCompatError(format!(
                     "object name reserved for internal use: {}",
                     table_name

@@ -1917,6 +1917,7 @@ fn resolve_replace_conflicts_for_row(
         storage_table_name,
         schema,
         full_row_values,
+        if is_explicit { Some(reserved_rowid) } else { None },
     );
 
     // On error, ensure the reserved rowid is released and propagate the error.

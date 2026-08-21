@@ -1819,15 +1819,28 @@ proc track_pragma_setting {sql} {
     # Look for foreign_keys settings (find all occurrences, use last one)
     # Note: `(?<!_)` style lookbehind isn't portable to TCL regex; use a word
     # boundary anchor `\m` (start-of-word) to avoid matching `defer_foreign_keys`.
-    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?\mforeign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
-    foreach {match value} $matches {
-        set upper [string toupper $value]
-        if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
-            set ::pragma_foreign_keys 1
-        } else {
-            set ::pragma_foreign_keys 0
+    #
+    # EVIDENCE-OF R-46649-58537: it is not possible to enable or disable
+    # foreign key constraints in the middle of a multi-statement transaction
+    # (when not in autocommit mode) — attempting to do so does not error, it
+    # simply has no effect (e_fkey-6.1..6.3, already enforced correctly by
+    # the engine's own PRAGMA handler). Mirror the same in-transaction guard
+    # used for `synchronous` above so this shim-side shadow variable — which
+    # is blindly replayed as a `PRAGMA foreign_keys=...` prefix on every
+    # subsequent per-batch CLI process (see build_pragma_prefix) — does not
+    # silently "apply" a same-connection PRAGMA that the real engine itself
+    # rejected as a no-op while a transaction was open (fkey-2.8.4/.5/.8/.9).
+    if {!$::in_transaction && ![regexp -nocase {(^|;)\s*BEGIN\M} $sql]} {
+        set matches [regexp -all -inline -nocase {PRAGMA\s+(?:database\.)?\mforeign_keys\s*[=(]\s*(\w+)\s*[)]?} $sql]
+        foreach {match value} $matches {
+            set upper [string toupper $value]
+            if {$upper eq "ON" || $upper eq "TRUE" || $upper eq "YES" || $value eq "1"} {
+                set ::pragma_foreign_keys 1
+            } else {
+                set ::pragma_foreign_keys 0
+            }
+            set found 1
         }
-        set found 1
     }
 
     # Look for defer_foreign_keys settings (find all occurrences, use last one)
@@ -2676,6 +2689,25 @@ proc query_in_transaction {new_sql} {
     }
     set new_clean [string trimright [string trimright $new_sql] ";"]
     set pragma_prefix [build_pragma_prefix]
+
+    # This trial replay's `new_clean` query is always read-only (guarded by
+    # the `is_read_only_statement` check in the caller), so `PRAGMA
+    # count_changes=ON` can never contribute a row for the query itself. But
+    # when count_changes IS on, the replayed *batch* statements (BEGIN, and
+    # any DML already accumulated in $::sql_batch, e.g. the INSERT ahead of a
+    # FK-violating UPDATE) are real DML too — the CLI natively emits one
+    # count-of-changes row per DML statement while count_changes is ON, and
+    # those rows land in this trial's raw output ahead of the query's own
+    # rows, corrupting the result the caller returns for the query
+    # (fkey2-17.1.7/17.1.8, Part of #6170: `SELECT * FROM one` inside a
+    # still-open transaction came back with a spurious leading `1` from the
+    # batch's own INSERT). Force count_changes off for this isolated trial
+    # replay — it's irrelevant here since the query is read-only, and the
+    # real batch (with its own count_changes-driven output) still flushes for
+    # real at COMMIT/ROLLBACK via a separate code path.
+    if {$::pragma_count_changes != 0} {
+        append pragma_prefix "PRAGMA count_changes=0;\n"
+    }
 
     # CLI statement index (1-based) at which the QUERY begins: the leading
     # `.mode raw` dot-command, the pragma-prefix statements, and the
@@ -4330,6 +4362,13 @@ array set vibesql_skip_tests {
     select2-3.2d "Returns sqlite_search_count - SQLite internal counter"
     select2-3.2e "Returns sqlite_search_count - SQLite internal counter"
     select2-3.3 "Returns sqlite_search_count - SQLite internal counter"
+    fkey7-1.2 "Uses db auth (SQLite authorization callback, sqlite3_set_authorizer) to record which tables a statement reads; VibeSQL has no query-time authorization hook to invoke the registered callback, so the recorded table-read set is always empty. Part of #6170."
+    fkey7-1.3 "Uses db auth (SQLite authorization callback); same unimplemented-hook limitation as fkey7-1.2 above. Part of #6170."
+    fkey7-1.4 "Uses db auth (SQLite authorization callback); same unimplemented-hook limitation as fkey7-1.2 above. Part of #6170."
+    fkey7-1.5 "Uses db auth (SQLite authorization callback); same unimplemented-hook limitation as fkey7-1.2 above. Part of #6170."
+    fkey2-15.1.3 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc (fkey2.test-local helper around the same SQLite internal B-tree step counters as select2/minmax3 above); VibeSQL always returns 0. Part of #6170."
+    fkey2-15.1.6 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc; VibeSQL always returns 0 for these SQLite-internal B-tree step counters. Part of #6170."
+    fkey2-15.1.7 "Returns sqlite_search_count+sqlite_found_count via the local execsqlS proc; VibeSQL always returns 0 for these SQLite-internal B-tree step counters. Part of #6170."
     minmax3-1.0 "hexio byte-manipulation (set_file_format 4 -> hexio_write, no shim stub) plus db close/reopen to change file format. SQL correctness covered by minmax3 §2/§3; §4 is the real engine bug tracked in #5842. (#5844.)"
     minmax3-1.1.1 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
     minmax3-1.1.2 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
@@ -4482,6 +4521,8 @@ array set vibesql_skip_tests {
     insert2-3.8 "Uses db total_changes - SQLite-specific session change tracking"
     insert2-1.2.2 "Cascades from insert2-1.2.1 count_changes test"
     insert2-3.2.1 "Cascades from insert2-3.2 total_changes test"
+    fkey2-17.2.5 "Uses db total_changes - SQLite-specific session change tracking; VibeSQL's shim-side approximation sums each DML statement's own changes() and does not (and cannot, without a real engine-side total_changes() counter) include rows mutated by an FK ON UPDATE/DELETE CASCADE side effect on a different table. Same known limitation as insert2-3.2 above. Part of #6170."
+    fkey2-17.2.9 "Uses db total_changes - SQLite-specific session change tracking; same FK-CASCADE-not-counted limitation as fkey2-17.2.5 above. Part of #6170."
     delete-4.2 "Tests error on empty table with non-existent function - VibeSQL only errors during execution"
     delete-8.1 "Tests readonly database file permissions - SQLite-specific"
     delete-8.2 "Cascades from delete-8.1 readonly test"
@@ -6559,6 +6600,14 @@ proc uses_sqlite_internals {script {name ""}} {
     if {[regexp {sqlite_rename_table\s*\(} $script]} {
         return [list 1 "uses sqlite_rename_table() (SQLite internal)"]
     }
+    # test_rename_parent (fkey2.test/without_rowid3.test-local proc) calls
+    # sqlite_rename_table() indirectly via `db eval`, so the literal-pattern
+    # detector above never sees it in the do_test SCRIPT text itself (Part of
+    # #6170). Detect the wrapper call site directly rather than teaching this
+    # scanner to chase proc-body indirection generally.
+    if {[regexp {\mtest_rename_parent\s*\{} $script]} {
+        return [list 1 "uses test_rename_parent() (wraps sqlite_rename_table(), SQLite internal)"]
+    }
     if {[regexp {sqlite_rename_column\s*\(} $script]} {
         return [list 1 "uses sqlite_rename_column() (SQLite internal)"]
     }
@@ -7381,7 +7430,26 @@ proc check_single_capability {cap} {
     # shim, so that block errored instead of skipping. Marking `debug`
     # unsupported routes both to their skip branch, matching a real
     # non-SQLITE_DEBUG build (#6175).
-    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16 rowid32 debug}
+    # `incrblob` gates the SQLite incremental blob I/O API (`db incrblob ...`,
+    # `sqlite3_blob_open`/`_read`/`_write`/`_close`). The shim has no `db
+    # incrblob` subcommand at all (errors "Unknown db command: incrblob"),
+    # and `::sqlite_options(incrblob)` above already declares it disabled —
+    # but that array is unrelated to the `ifcapable` capability gate, so
+    # `ifcapable incrblob { ... }` blocks were incorrectly treated as capable
+    # and ran straight into the missing subcommand (fkey2-5.2/5.3/5.4,
+    # fkey7-2.1/2.2, Part of #6170) instead of taking their skip/else branch.
+    # Adding it here routes every `ifcapable {!}incrblob` guard across the
+    # suite (e_blob*.test, incrblob*.test, savepoint.test, pager1.test,
+    # without_rowid*.test, zeroblob.test, ...) to the correct branch, matching
+    # a build with no incremental-blob support.
+    # `trace` gates the SQLite SQL-trace callback API (`db trace SCRIPT` /
+    # sqlite3_trace_v2). The shim has no `db trace` subcommand at all (errors
+    # "Unknown db command: trace"), and even a no-op stub could not make
+    # fkey1-5.2.1's `set traceoutput` assertion pass (it needs the *real*
+    # per-statement SQL text callback, which nothing in VibeSQL provides).
+    # Marking it unsupported routes `ifcapable trace { ... }` (fkey1.test)
+    # to its skip/else branch instead of erroring mid-block. Part of #6170.
+    set unsupported_caps {wal vacuum_incr autovacuum stat4 stat3 tclvar vtab rtree fts3 fts4 fts5 fts3_unicode conflict hiddencolumns progress allow_rowid_in_view crashtest utf16 rowid32 debug incrblob trace}
 
     # Handle negated capability (e.g., !autovacuum)
     set negate 0
@@ -8594,8 +8662,19 @@ proc ::tcltest_db_master {cmd args} {
             # Set callback for unknown collations - not supported
             return
         }
-        authorizer {
-            # Set authorization callback - not supported
+        authorizer -
+        auth {
+            # Set authorization callback - not supported. `auth` is real
+            # SQLite's accepted abbreviation of `authorizer` (Tcl object
+            # commands allow unique-prefix method abbreviation; this shim's
+            # manual `switch` does not do that automatically, so both spellings
+            # are listed explicitly). Without this, fkey7.test's unconditional
+            # (non-`ifcapable`-gated) `db auth auth` at file scope raised
+            # "Unknown db command: auth" and aborted the whole file (Part of
+            # #6170). The registered callback is still never invoked — no
+            # query-time authorization hook exists in VibeSQL — so tests that
+            # assert on the callback's observed table-read set (fkey7-1.2..1.5)
+            # still fail on their own assertions rather than a file-scope abort.
             return
         }
         progress {

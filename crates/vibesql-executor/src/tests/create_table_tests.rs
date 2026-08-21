@@ -816,6 +816,26 @@ fn create_table_reserved_name_quoted_is_dequoted() {
 }
 
 #[test]
+fn create_table_writable_schema_allows_reserved_name() {
+    // fkey1-8.1 (Part of #6170): PRAGMA writable_schema=ON lifts the
+    // reserved-name restriction, matching sqlite3 3.51.0 — an application can
+    // manually recreate an internal-looking table such as `sqlite_stat1`.
+    let mut db = Database::new();
+    db.set_writable_schema(true);
+    exec_sql_collision(&mut db, "CREATE TABLE sqlite_stat1(tbl, idx)").unwrap();
+    assert!(db.catalog.table_exists("sqlite_stat1"));
+}
+
+#[test]
+fn create_table_writable_schema_off_still_rejects_reserved_name() {
+    // The default (writable_schema=OFF) behavior is unchanged.
+    let mut db = Database::new();
+    assert!(!db.writable_schema());
+    let err = exec_sql_collision(&mut db, "CREATE TABLE sqlite_stat1(tbl, idx)").unwrap_err();
+    assert_eq!(err, "object name reserved for internal use: sqlite_stat1");
+}
+
+#[test]
 fn create_index_rejects_reserved_sqlite_name() {
     // index-18.4: a user CREATE INDEX with a `sqlite_` prefix is reserved.
     let mut db = Database::new();
