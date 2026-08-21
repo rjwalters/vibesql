@@ -741,6 +741,127 @@ fn test_recursive_cte_order_by_matches_select_alias() {
     assert_eq!(ints(&by_recursive), vec![1, 2, 3, 4, 5]);
 }
 
+/// with1.test 10.8.1 — an explicit `COLLATE nocase` on a recursive CTE's
+/// `ORDER BY` term must be applied by the priority-queue traversal, not
+/// silently dropped in favor of a binary comparison.
+///
+/// Base rows are `(1, 'a')` and `(2, 'B')`. Binary/default ordering sorts
+/// `'B'` (0x42) before `'a'` (0x61); `COLLATE nocase` instead sorts `'a'`
+/// before `'B'` (case-insensitive alphabetical). The children (`'x'` under
+/// `'a'`, `'y'` under `'B'`) follow their parent through the priority queue,
+/// so the full emission order distinguishes the two collations unambiguously.
+#[test]
+fn test_recursive_cte_order_by_explicit_collate_nocase() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
+    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    {
+        execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
+    }
+
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE flat(id, name) AS (
+             SELECT id, name FROM node WHERE parent IS NULL
+             UNION ALL
+             SELECT node.id, node.name FROM node, flat WHERE node.parent = flat.id
+             ORDER BY 2 COLLATE nocase
+         )
+         SELECT name FROM flat",
+    )
+    .unwrap();
+    assert_eq!(
+        strs(&rows),
+        vec!["a", "B", "x", "y"],
+        "COLLATE nocase must order 'a' before 'B' (case-insensitive), not binary order"
+    );
+
+    // Sanity check: without the COLLATE override, the same query sorts by
+    // binary order at both levels ('B' before 'a' for the roots, 'x' before
+    // 'y' for the children — 'x' is 0x78 and 'y' is 0x79), confirming the
+    // collation is what flips the result rather than some other
+    // traversal-order artifact.
+    let rows_binary = execute_sql(
+        &mut db,
+        "WITH RECURSIVE flat(id, name) AS (
+             SELECT id, name FROM node WHERE parent IS NULL
+             UNION ALL
+             SELECT node.id, node.name FROM node, flat WHERE node.parent = flat.id
+             ORDER BY 2
+         )
+         SELECT name FROM flat",
+    )
+    .unwrap();
+    assert_eq!(strs(&rows_binary), vec!["B", "a", "x", "y"]);
+}
+
+/// with1.test 10.8.2 — a `COLLATE nocase` declared on the *base (seed) term's*
+/// select-list expression must apply to the recursive CTE's `ORDER BY`, even
+/// though the `ORDER BY` term itself has no `COLLATE` and the recursive
+/// term's own corresponding expression has none either.
+///
+/// Mirrors SQLite's `multiSelectCollSeq`: search the compound's arms
+/// left-to-right (base term first, then recursive term) for the first
+/// explicit `COLLATE` on that output column.
+#[test]
+fn test_recursive_cte_order_by_collate_declared_on_base_term() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
+    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    {
+        execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
+    }
+
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE flat(id, name) AS (
+             SELECT id, name COLLATE nocase FROM node WHERE parent IS NULL
+             UNION ALL
+             SELECT node.id, node.name FROM node, flat WHERE node.parent = flat.id
+             ORDER BY 2
+         )
+         SELECT name FROM flat",
+    )
+    .unwrap();
+    assert_eq!(
+        strs(&rows),
+        vec!["a", "B", "x", "y"],
+        "the seed term's declared COLLATE nocase must govern ORDER BY even without an explicit \
+         COLLATE on the ORDER BY term itself"
+    );
+}
+
+/// with1.test 10.8.3 — the mirror image of 10.8.2: `COLLATE nocase` declared
+/// on the *recursive term's* select-list expression (base term has none)
+/// still governs a bare `ORDER BY` with no explicit `COLLATE`.
+#[test]
+fn test_recursive_cte_order_by_collate_declared_on_recursive_term() {
+    let mut db = vibesql_storage::Database::new();
+    execute_sql(&mut db, "CREATE TABLE node(id INTEGER, parent INTEGER, name TEXT)").unwrap();
+    for (id, parent, name) in [(1, "NULL", "'a'"), (2, "NULL", "'B'"), (3, "1", "'x'"), (4, "2", "'y'")]
+    {
+        execute_sql(&mut db, &format!("INSERT INTO node VALUES({id}, {parent}, {name})")).unwrap();
+    }
+
+    let rows = execute_sql(
+        &mut db,
+        "WITH RECURSIVE flat(id, name) AS (
+             SELECT id, name FROM node WHERE parent IS NULL
+             UNION ALL
+             SELECT node.id, node.name COLLATE nocase FROM node, flat WHERE node.parent = flat.id
+             ORDER BY 2
+         )
+         SELECT name FROM flat",
+    )
+    .unwrap();
+    assert_eq!(
+        strs(&rows),
+        vec!["a", "B", "x", "y"],
+        "the recursive term's declared COLLATE nocase must govern ORDER BY even without an \
+         explicit COLLATE on the ORDER BY term itself"
+    );
+}
+
 /// Circular-reference detection and SQLite-compatible error messages.
 ///
 /// Mirrors with2.test 3.1-3.4 and with1.test 3.1: mutual and self circular
