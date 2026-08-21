@@ -9297,21 +9297,22 @@ proc ::tcltest_db_master {cmd args} {
             # real SQLite — forget the replayed ATTACH state so it is not
             # re-injected into whatever connection reopens next (#6363).
             clear_attach_replay
-            # Closing the connection also discards any still-open transaction
-            # (SQLite rolls it back). Scoped to the SAVEPOINT-opened case this
-            # shim now tracks (#6170) so a `SAVEPOINT sp1` followed by
-            # `db close` does not leave a phantom batched transaction that the
-            # next connection's statements get folded into (savepoint-1.3 →
-            # savepoint-1.4.1). A BEGIN-opened batch keeps its pre-existing
-            # behavior.
-            if {$::txn_opened_by_savepoint} {
-                set ::sql_batch {}
-                set ::in_transaction 0
-                set ::txn_had_tolerated_error 0
-                set ::savepoint_stack {}
-                set ::txn_opened_by_savepoint 0
-                teardown_txn_trial_db
-            }
+            # Closing the connection also discards any still-open transaction:
+            # sqlite3_close rolls back whatever the connection had open, so the
+            # uncommitted statements the shim is holding in $::sql_batch must be
+            # dropped rather than carried across the close. Originally scoped to
+            # the SAVEPOINT-opened case (#6170, savepoint-1.3 → savepoint-1.4.1);
+            # a BEGIN-opened batch left behind the same phantom transaction, and
+            # every statement issued after the reopen was silently folded into it
+            # and returned nothing (pragma2-4.8 leaves `BEGIN; UPDATE t2 ...`
+            # open, so pragma2-5.1..5.3 all came back empty — #6415/#6175).
+            # Unconditional now: when nothing is open this is a no-op reset.
+            set ::sql_batch {}
+            set ::in_transaction 0
+            set ::txn_had_tolerated_error 0
+            set ::savepoint_stack {}
+            set ::txn_opened_by_savepoint 0
+            teardown_txn_trial_db
         }
         nullvalue {
             # Sets the string used for NULL values
