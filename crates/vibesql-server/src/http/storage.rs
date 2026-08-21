@@ -689,6 +689,77 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
+    /// End-to-end round trip for issue #6443: upload a blob over HTTP,
+    /// confirm `GET /{id}/metadata` returns the real size/content_type
+    /// (previously always 404 "Blob not found", even right after a
+    /// successful upload), confirm `GET /{id}` preserves the uploaded
+    /// content type (previously always fell back to
+    /// application/octet-stream), then confirm metadata is gone after
+    /// `DELETE /{id}`.
+    #[tokio::test]
+    async fn test_upload_metadata_download_delete_round_trip() {
+        let router = create_test_router();
+
+        let upload_request = Request::builder()
+            .method("POST")
+            .uri("/upload")
+            .header("content-type", "text/plain")
+            .body(Body::from("Hello, metadata!"))
+            .unwrap();
+        let upload_response = router.clone().oneshot(upload_request).await.unwrap();
+        assert_eq!(upload_response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(upload_response.into_body(), usize::MAX).await.unwrap();
+        let uploaded: BlobUploadResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(uploaded.size, "Hello, metadata!".len() as i64);
+        assert_eq!(uploaded.content_type, "text/plain");
+
+        // GET /{id}/metadata should now return real metadata instead of 404.
+        let metadata_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}/metadata", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let metadata_response = router.clone().oneshot(metadata_request).await.unwrap();
+        assert_eq!(metadata_response.status(), StatusCode::OK);
+        let metadata_body =
+            axum::body::to_bytes(metadata_response.into_body(), usize::MAX).await.unwrap();
+        let metadata: BlobMetadataResponse = serde_json::from_slice(&metadata_body).unwrap();
+        assert_eq!(metadata.id, uploaded.id);
+        assert_eq!(metadata.size, "Hello, metadata!".len() as i64);
+        assert_eq!(metadata.content_type, "text/plain");
+        assert!(!metadata.created_at.is_empty());
+
+        // GET /{id} should preserve the real content type (not the
+        // application/octet-stream fallback).
+        let download_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let download_response = router.clone().oneshot(download_request).await.unwrap();
+        assert_eq!(download_response.status(), StatusCode::OK);
+        assert_eq!(download_response.headers().get(header::CONTENT_TYPE).unwrap(), "text/plain");
+
+        // DELETE /{id} removes both bytes and metadata.
+        let delete_request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/{}", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_response = router.clone().oneshot(delete_request).await.unwrap();
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+        let metadata_after_delete_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}/metadata", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let metadata_after_delete_response =
+            router.oneshot(metadata_after_delete_request).await.unwrap();
+        assert_eq!(metadata_after_delete_response.status(), StatusCode::NOT_FOUND);
+    }
+
     #[test]
     fn test_blob_literal_roundtrip_safe() {
         // Quotes/backslashes cannot break out of an X'' hex literal.
