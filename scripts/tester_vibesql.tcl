@@ -1310,6 +1310,26 @@ proc substitute_tcl_vars {sql} {
     # Absolute stack level of our caller, for the scope walk in resolve_subst_var
     set caller_abs [expr {[info level] - 1}]
 
+    # `:name`-style substitution emulates the sqlite3 TCL binding's db-eval
+    # sugar (a TCL variable of the same name is bound at *execution* time,
+    # after the statement has already been prepared). But CHECK, DEFAULT, and
+    # generated-column expressions are contexts where SQLite's parser rejects
+    # a bind parameter outright ("parameters prohibited in CHECK
+    # constraints" / "default value of column [x] is not constant") — prepare
+    # fails before any binding stage is ever reached, so no TCL variable is
+    # ever substituted for real SQLite. Eagerly text-substituting `:name` ->
+    # NULL before sending the statement to VibeSQL papers over that rejection
+    # (check-5.1/5.2, #6173) by turning a syntactically-illegal parameter
+    # into a syntactically-legal NULL constant before the engine ever sees
+    # it. A CREATE TABLE / ALTER TABLE statement never has a legitimate use
+    # for `:name`-as-bind-parameter (there is no execution/binding phase for
+    # DDL to defer to), so within those statements `:name` is left as a
+    # literal token for the engine's own parser to accept or reject — while
+    # `$var`/`${var}` substitution stays enabled, since dynamic table/column
+    # *names* via TCL variables (e.g. alter.test's `ALTER TABLE $::tbl_name
+    # ADD COLUMN $::col_name`) are common and unrelated to bind parameters.
+    set is_ddl_stmt [regexp -nocase {^\s*(CREATE\s+(TEMP(ORARY)?\s+)?TABLE|ALTER\s+TABLE)\M} $sql]
+
     set result ""
     set len [string length $sql]
     set i 0
@@ -1420,7 +1440,7 @@ proc substitute_tcl_vars {sql} {
 
         # ---- :varname named-placeholder references ----
         if {$ch eq ":"} {
-            if {[regexp {^:([a-zA-Z_][a-zA-Z0-9_]*)} [string range $sql $i end] match varname]} {
+            if {!$is_ddl_stmt && [regexp {^:([a-zA-Z_][a-zA-Z0-9_]*)} [string range $sql $i end] match varname]} {
                 lassign [resolve_subst_var $varname $caller_abs] found value
                 if {$found} {
                     append result [format_sql_value $value]
@@ -5836,6 +5856,16 @@ array set vibesql_skip_tests {
     date-8.18 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-8.19 "sqlite_current_time fake-clock hook not honored by VibeSQL binary ('now' uses real clock; harness limitation)"
     date-15.2 "sleeper TCL UDF registered via db func is not visible to the VibeSQL CLI subprocess (harness limitation)"
+    check-7.2 "myfunc TCL UDF registered via 'db func myfunc' at file scope (check.test line 454, outside any do_test body) so the per-test uses_sqlite_internals scan never sees the registration and cannot skip on it directly; the function is not visible to the VibeSQL CLI subprocess, so every later test that depends on it (7.2-7.8) genuinely errors with 'no such function: myfunc' (harness limitation, same class as date-15.2/window6-2.0/#5720)."
+    check-7.3 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    check-7.4 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    check-7.5 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    check-7.6 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    check-7.7 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    check-7.8 "Depends on the check-7.2 'db func myfunc' registration (harness limitation, see check-7.2)."
+    gencol1-15.10 "Uses 'db deserialize [decode_hexdb {...}]' to load a raw hand-crafted SQLite page image (regression fixture for a lookaside-memory bug in SQLite's own C implementation, sqlite3.c). decode_hexdb/db deserialize are SQLite C-API/TCL-harness helpers with no VibeSQL equivalent — VibeSQL has no page-image deserialization surface, and the fixture's payload targets a SQLite-internal memory-allocator bug not applicable to VibeSQL's architecture (harness limitation, same class as the capi3d/tkt2409 C-API skips, #6173)."
+    gencol1-15.20 "Depends on the gencol1-15.10 'db deserialize' page image (table t1) that harness limitations prevent loading; cascades to 'no such table: t1' (see gencol1-15.10)."
+    gencol1-23.3 "EXPLAIN <query> (bare VDBE bytecode dump, not EXPLAIN QUERY PLAN) asserts the opcode listing does NOT reference 'Column 0' as a covering-index proof. VibeSQL does not emit SQLite's VDBE opcode stream, so there is no bytecode listing to assert against (harness limitation; same class as the EXPLAIN QUERY PLAN output-format skips, but for bare EXPLAIN). The underlying covering-index optimization is verified functionally, not via bytecode inspection."
     table-13.2.1 "sqlite_current_time fake-clock hook not honored by VibeSQL binary: tests the CURRENT_TIME/CURRENT_DATE/CURRENT_TIMESTAMP column defaults against a frozen clock, so the stored TEXT values use the real clock and cannot match the expected fixed timestamps (harness limitation; same class as date-8.*). The underlying temporal-into-TEXT-column coercion bug (#5663) is fixed independently."
     table-13.2.2 "sqlite_current_time fake-clock hook not honored by VibeSQL binary (CURRENT_* defaults vs frozen clock; harness limitation, same class as date-8.*)."
     table-13.2.3 "sqlite_current_time fake-clock hook not honored by VibeSQL binary (CURRENT_* defaults vs frozen clock; harness limitation, same class as date-8.*)."
