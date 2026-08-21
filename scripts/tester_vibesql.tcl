@@ -6044,6 +6044,116 @@ array set vibesql_skip_tests {
 # against the real vibesql CLI correctly produces separate main/temp
 # sqlite_sequence rows in creation order. Left running (and failing) rather
 # than force-skipped, per the "never turn a clean pass into a skip" rule.
+#
+# CONFIRMED (#6173, 2026-08-21 re-verification pass): the single-session repro
+# above was actually re-run against a freshly built vibesql CLI (not just
+# asserted from a prior pass) as a single `vibesql db.vbsql <<EOF ... EOF`
+# invocation — i.e. one real connection, exactly like SQLite's TCL interface
+# holds for the whole test file, with no per-batch process boundary in the
+# middle. Transcript (abbreviated):
+#   CREATE TABLE t1(x INTEGER PRIMARY KEY AUTOINCREMENT, y);
+#   CREATE TEMP TABLE t3(a INTEGER PRIMARY KEY AUTOINCREMENT, b);
+#   SELECT name FROM sqlite_master WHERE type='table';       -> t1, sqlite_sequence
+#   SELECT name FROM sqlite_temp_master WHERE type='table';  -> t3, sqlite_sequence
+#   INSERT INTO t1 VALUES(10,1); INSERT INTO t3 VALUES(20,2);
+#   INSERT INTO t1 VALUES(NULL,3); INSERT INTO t3 VALUES(NULL,4);
+#   SELECT * FROM main.sqlite_sequence;  -> t1 11
+#   SELECT * FROM temp.sqlite_sequence;  -> t3 21
+# This is exactly SQLite's expected autoinc-4.2..4.5 output shape (separate
+# main/temp sqlite_master enumeration, separate main/temp sqlite_sequence
+# high-water marks). So the "suspected cause" is no longer merely suspected:
+# VibeSQL's own AUTOINCREMENT + TEMP-schema engine logic is correct end to
+# end in a genuine single-connection session. The autoinc-4.2..4.10 failures
+# are 100% attributable to this TCL shim's fresh-CLI-subprocess-per-batch
+# architecture (which cannot hold a real connection-scoped TEMP schema open
+# across batch boundaries the way SQLite's C API / TCL binding does), not to
+# any VibeSQL engine defect. See also the table-8.7/8.8 note below — the same
+# demotion mechanism (just the CREATE TABLE...AS SELECT form of TEMP table
+# creation, handled by the same strip_temp_table_keyword code path) produces
+# an analogous pair of residual failures in table.test.
+#
+# Why this is not realistically fixable within the current shim architecture
+# (so a future pass does not need to re-attempt it from scratch): doing so
+# would require the shim to track a genuine second "temp" schema namespace
+# that (a) persists in-memory across the shim's own per-batch CLI-subprocess
+# boundaries — i.e. some out-of-process persistence the CURRENT demoted/real
+# TEMP replay mechanism does not provide for DATA, only for re-issuing DDL
+# (see temp_replay_ddl above: it reconstructs empty TEMP tables via replayed
+# CREATE statements each batch, it does not carry row data forward), and (b)
+# is exposed through `sqlite_temp_master`/`temp.sqlite_sequence` as distinct
+# catalog objects from `sqlite_master`/`main.sqlite_sequence` even though both
+# resolve to the same underlying persistent VibeSQL database file on disk.
+# That is a substantially larger undertaking than a doc-only or regex-only
+# fix (effectively: either give the shim a genuine persistent-server backend
+# instead of one-CLI-process-per-batch, or teach VibeSQL's file format itself
+# to carry a separate on-disk temp/sequence namespace that a *demoted*
+# "TEMP" table could round-trip through) — out of scope for this partial
+# increment and, per three prior #6173 passes' judgment, not clearly worth
+# the shim-architecture rewrite it would require for an 11-test slice.
+
+# table-8.7/table-8.8 (#6173): SAME TEMP-table-demotion shim-architecture
+# class as autoinc-4.2..4.10 above, just triggered via the `CREATE
+# TEMPORARY TABLE ... AS SELECT` (CTAS) form instead of the column-def form.
+#
+# table-8.4 runs `CREATE TEMPORARY TABLE t5 AS SELECT count(*) AS [y'all]
+# FROM [t3"xyz]`. strip_temp_table_keyword demotes this exactly like any
+# other `CREATE TEMP TABLE` (extract_create_table_body's "AS SELECT" branch
+# just copies the tail verbatim; the demotion regex/rewrite itself doesn't
+# care whether the body is a column-def list or an AS-SELECT), so t5
+# becomes an ordinary persistent MAIN table that survives every later batch
+# — including across table-8.5's `db close` / `sqlite3 db test.db`
+# reopen, which in real SQLite is exactly the point where a TEMP table's
+# connection-scoped lifetime ends and it disappears.
+#
+# table-8.7 (`SELECT * FROM t5`, expects `1 {no such table: t5}`) instead
+# gets `0 1` — t5 demonstrably still exists and still holds its one row,
+# because it was never really TEMP in this shim's execution model.
+# table-8.8 (`CREATE TABLE t5 AS SELECT * FROM no_such_table`, expects
+# `1 {no such table: no_such_table}` — i.e. SQLite gets far enough to
+# resolve the FROM clause and fail on the *absent source table* before ever
+# creating t5) instead gets `1 {table t5 already exists}`, because the
+# demoted t5 from 8.4 is still sitting in the MAIN schema and the CREATE
+# fails on the name collision before the SELECT's FROM clause is ever
+# evaluated.
+#
+# Both are the identical root cause already fully diagnosed above for
+# autoinc, not a new mechanism: this shim has no way to make a "TEMP" table
+# actually vanish at connection-close/reopen while still surviving *within*
+# a connection's own later batches, because each batch already IS a
+# separate process boundary that a genuine TEMP table would not survive
+# even without an explicit `db close`. Left running (and failing) rather
+# than force-skipped, per the "never turn a clean pass into a skip" rule;
+# do not add a vibesql_skip_tests entry for either.
+#
+# table-14.2 (#6173): DIFFERENT class — NOT TEMP-table demotion. Do not
+# conflate this with the two residuals above if re-investigating this file.
+#
+# table-14.1/14.2 test SQLite's open-cursor table-locking behavior: while a
+# `db eval {SELECT ...}` cursor is still actively iterating on a connection,
+# a *nested* callback on that SAME connection tries to DROP the table the
+# cursor is reading from your very own db handle, and real SQLite's B-tree
+# layer refuses with "database table is locked" (a DROP is refused so the
+# live cursor's root page can't be yanked out from under it; a bare CREATE
+# TABLE from the same nested callback is fine, hence 14.1 passing with `0
+# {}`). This exercises two things VibeSQL/this shim have no model for at
+# all, not one: (1) the shim's per-batch execution has no notion of "an
+# open, still-iterating cursor on this connection" spanning a nested
+# statement — every batch just runs its statements to completion in order,
+# so there is no live cursor for a nested DROP to conflict with in the
+# first place; and (2) even given a way to express that nesting, `grep -rn
+# "database table is locked" crates/` finds zero hits — VibeSQL's storage
+# engine has no B-tree-cursor-based table-locking concept to enforce (it is
+# not a page/cursor-based btree engine the way SQLite's is; see the CLI
+# Durability / WAL docs for VibeSQL's actual storage model). Fixing (1)
+# alone (teaching the shim to interleave statements mid-cursor) would not
+# make this test pass without also inventing (2) from scratch — a genuine
+# concurrency-control feature, not a harness gap. Given the shim cannot
+# even pose the question without engine support that does not exist and is
+# unlikely to be prioritized (SQLite's own comment above this test notes
+# the DROP-side lock was already loosened once, in 2007), this is left
+# running (and failing) rather than skip-listed, but is out of scope for
+# further #6173 investigation — a hypothetical future fix belongs to
+# concurrency-control/engine-capability work, not to this shim.
 
 # -----------------------------------------------------------------------------
 # fuzz.test residual classification (#6041) — DO NOT SKIP-LIST THESE.
