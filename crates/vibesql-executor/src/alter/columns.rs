@@ -52,6 +52,12 @@ pub(super) fn execute_add_column(
         return Err(ExecutorError::Other("Cannot add a column to a view".to_string()));
     }
 
+    // Read `PRAGMA foreign_keys` up front: the REFERENCES/non-NULL-default
+    // restriction below is gated on it, but by that point `table` holds a
+    // mutable borrow of `database`, so the pragma cannot be read from
+    // `database` there (E0502).
+    let foreign_keys_enabled = database.foreign_keys_enabled();
+
     let table = database
         .get_table_mut(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
@@ -111,12 +117,17 @@ pub(super) fn execute_add_column(
     // non-constant (e.g. `f REFERENCES t1 DEFAULT CURRENT_TIME`,
     // fkey2-14.1.5) -- both restrictions apply, but SQLite surfaces this one
     // first.
+    //
+    // Gated on `PRAGMA foreign_keys` being ON (fkey2-14.1.6): SQLite's own
+    // restriction only fires when FK enforcement is active — with
+    // `foreign_keys=OFF` the same ALTER (e.g. `ADD COLUMN h DEFAULT 'text'
+    // REFERENCES t1`) succeeds verbatim (verified against sqlite3 3.51.0).
     let has_references = stmt
         .column_def
         .constraints
         .iter()
         .any(|c| matches!(c.kind, ColumnConstraintKind::References { .. }));
-    if has_references && !default_is_null_or_absent {
+    if has_references && !default_is_null_or_absent && foreign_keys_enabled {
         return Err(ExecutorError::Other(
             "Cannot add a REFERENCES column with non-NULL default value".to_string(),
         ));

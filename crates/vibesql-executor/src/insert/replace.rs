@@ -30,6 +30,7 @@ pub fn handle_replace_conflicts(
     _storage_table_name: &str,
     schema: &vibesql_catalog::TableSchema,
     row_values: &[vibesql_types::SqlValue],
+    explicit_rowid: Option<u64>,
 ) -> Result<(), ExecutorError> {
     // Build list of row values to match for deletion
     let mut pk_match: Option<Vec<vibesql_types::SqlValue>> = None;
@@ -93,6 +94,26 @@ pub fn handle_replace_conflicts(
                         should_delete = true;
                         break;
                     }
+                }
+            }
+        }
+
+        // Check if this row's own internal rowid collides with the new row's
+        // explicitly-supplied rowid (`REPLACE INTO t(rowid, ...) VALUES(id,
+        // ...)`, fkey2-13.1.2.*). This is independent of any declared
+        // PRIMARY KEY / UNIQUE constraint: a table whose PK is a composite
+        // key (or has none at all) still has a hidden internal rowid, and
+        // SQLite's REPLACE conflict resolution treats a rowid collision the
+        // same as any other UNIQUE-style conflict — the existing row must be
+        // deleted (and the FK/trigger machinery below run against it) rather
+        // than silently leaving two physical rows with the "same" rowid.
+        // When the table's rowid IS aliased by an INTEGER PRIMARY KEY column,
+        // this is redundant with the PK check above (harmless to re-check).
+        if !should_delete {
+            if let Some(target_rowid) = explicit_rowid {
+                let this_row_id = row.row_id.unwrap_or((row_index + 1) as u64);
+                if this_row_id == target_rowid {
+                    should_delete = true;
                 }
             }
         }
