@@ -1,5 +1,34 @@
 # VibeSQL
 
+## Code Formatting
+
+**Always format with `make fmt` / `make fmt-check` — never invoke bare `cargo fmt`.**
+
+`rustfmt.toml` sets several **nightly-only** options (`wrap_comments`,
+`imports_granularity`, `group_imports`, `format_code_in_doc_comments`). A
+stable-only rustfmt silently ignores these unstable options (with a warning)
+and, combined with `use_small_heuristics = "Max"`, falls back to different
+(more aggressive single-line-collapsing) formatting than the style already
+committed in the repo. Running plain `cargo fmt` in a sandbox that only has
+stable rustfmt installed — or an unpinned `cargo +nightly fmt` where the
+nightly's formatting rules have drifted since the code was last formatted —
+will incidentally reformat unrelated files with no logic change, bloating
+diffs and increasing merge-conflict surface (see #6326).
+
+`make fmt` and `make fmt-check` pin a specific dated nightly toolchain
+(`FMT_TOOLCHAIN` in the `Makefile`) and install it via `rustup` on demand, so
+formatting is deterministic and reproducible regardless of what toolchain
+happens to be preinstalled in a given sandbox:
+
+```bash
+make fmt         # format the workspace with the pinned nightly rustfmt
+make fmt-check   # check formatting without making changes (CI-safe)
+```
+
+If you ever run `cargo fmt` directly and see a "wide" diff across many
+unrelated files, do not commit it — that is this exact stable/nightly
+formatting-drift issue, not an intentional reformat.
+
 ## Performance Profiling
 
 When debugging performance issues, see **[docs/performance/CPU_PROFILING.md](docs/performance/CPU_PROFILING.md)** for a decision tree that helps you choose the right tool:
