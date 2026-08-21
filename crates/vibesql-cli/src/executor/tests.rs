@@ -1254,6 +1254,94 @@ fn test_pragma_cache_spill_default_and_toggle() {
 }
 
 #[test]
+fn test_pragma_page_size_default_and_set() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // Default is SQLITE_DEFAULT_PAGE_SIZE (4096).
+    let result = executor.execute("PRAGMA page_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("4096".to_string())]]);
+
+    // A valid power-of-two size in [512, 65536] is accepted.
+    executor.execute("PRAGMA page_size=16384").unwrap();
+    let result = executor.execute("PRAGMA page_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("16384".to_string())]]);
+
+    // Out-of-range / non-power-of-two sizes are silently ignored, exactly like
+    // SQLite's `sqlite3BtreeSetPageSize` guard (pragma4.test 1.18 vs 1.19).
+    for bad in ["511", "1000", "0", "131072"] {
+        executor.execute(&format!("PRAGMA page_size={bad}")).unwrap();
+        let result = executor.execute("PRAGMA page_size").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("16384".to_string())]],
+            "PRAGMA page_size={bad} should have been ignored"
+        );
+    }
+
+    // Setting the pragma returns no rows.
+    let result = executor.execute("PRAGMA page_size=512").unwrap();
+    assert_eq!(result.row_count, 0);
+    assert!(result.rows.is_empty());
+}
+
+#[test]
+fn test_pragma_cache_spill_reads_max_of_cache_pages_and_threshold() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // SQLite's `sqlite3PcacheSetSpillsize` returns
+    // `max(numberOfCachePages(cache_size), szSpill)`, so a spill threshold
+    // *below* the cache size reads back as the cache size
+    // (pragma2.test pragma2-4.5.3: cache_size=50, cache_spill=25 -> 50).
+    executor.execute("PRAGMA cache_size=50").unwrap();
+    executor.execute("PRAGMA cache_spill=25").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("50".to_string())]]);
+
+    // A threshold above the cache size wins (pragma2-4.5.2).
+    executor.execute("PRAGMA cache_spill=100000").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("100000".to_string())]]);
+}
+
+#[test]
+fn test_pragma_cache_spill_negative_argument_is_kib_scaled_by_page_size() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // pragma2.test pragma2-5.1..5.3, verbatim.
+    executor.execute("PRAGMA page_size=16384").unwrap();
+    executor.execute("PRAGMA cache_size=2").unwrap();
+    executor.execute("PRAGMA cache_spill=YES").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("2".to_string())]]);
+
+    executor.execute("PRAGMA cache_spill=NO").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+
+    // A negative argument is a KiB budget: -51 KiB / 16384 B per page = 3
+    // pages, which beats the 2-page cache size. It also re-enables spilling
+    // (SQLite's `sqlite3GetBoolean("-51", 1)` is true).
+    executor.execute("PRAGMA cache_spill(-51)").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("3".to_string())]]);
+}
+
+#[test]
+fn test_pragma_cache_spill_negative_cache_size_is_kib_scaled() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // A negative `cache_size` is likewise a KiB budget when cache_spill
+    // resolves it to a page count: -2000 KiB / 4096 B = 500 pages
+    // (SQLite's `numberOfCachePages`).
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("500".to_string())]]);
+
+    // ... but `PRAGMA cache_size` itself still echoes the raw signed value.
+    let result = executor.execute("PRAGMA cache_size").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("-2000".to_string())]]);
+}
+
+#[test]
 fn test_pragma_user_version_default_set_and_negative() {
     let mut executor = SqlExecutor::new(None).unwrap();
 

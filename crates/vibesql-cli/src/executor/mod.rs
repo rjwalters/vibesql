@@ -73,15 +73,31 @@ pub struct SqlExecutor {
     /// Bucket-A pager internal — it is a genuine SQL-visible value, just
     /// missing durable storage).
     default_cache_size_cookie: i64,
+    /// PRAGMA page_size session setting (SQLite-compatible; default 4096 —
+    /// `SQLITE_DEFAULT_PAGE_SIZE`). VibeSQL's storage is not paged, so nothing
+    /// is actually resized, but the value is stored and echoed exactly like
+    /// SQLite: a set is accepted only for a power of two in [512, 65536] and
+    /// silently ignored otherwise (`sqlite3BtreeSetPageSize`'s guard —
+    /// pragma4.test 1.18 vs 1.19). It is load-bearing beyond the echo:
+    /// `cache_spill` resolves its negative "KiB budget" arguments to page
+    /// counts by dividing by this value (pragma2-5.3).
+    ///
+    /// Known gap vs. real SQLite: SQLite refuses the change once the database
+    /// file already holds pages; VibeSQL has no page store to consult, so a
+    /// valid size is always accepted.
+    page_size: i64,
     /// PRAGMA cache_spill session setting (SQLite-compatible; default ON with
-    /// no explicit size, meaning the spill threshold mirrors `cache_size`).
-    /// VibeSQL has no pager to actually spill dirty pages, but it echoes the
-    /// get/set values like SQLite (pragma2.test pragma2-4.1/4.2):
-    /// `(enabled, explicit_size)` — when disabled, reads as 0 regardless of
-    /// `explicit_size`; when enabled with no explicit size, reads as the
-    /// current `cache_size`.
+    /// a spill threshold of 1 page, matching `sqlite3PcacheOpen`'s
+    /// `szSpill = 1`). VibeSQL has no pager to actually spill dirty pages, but
+    /// it reproduces SQLite's `sqlite3PcacheSetSpillsize` arithmetic so get/set
+    /// round-trips match (pragma2.test pragma2-4.*/5.*): when disabled it reads
+    /// as 0; otherwise it reads as
+    /// `max(numberOfCachePages(cache_size), cache_spill_size)`.
     cache_spill_enabled: bool,
-    cache_spill_explicit_size: Option<i64>,
+    /// The spill threshold in *pages* (SQLite's `PCache.szSpill`). A negative
+    /// `PRAGMA cache_spill=-N` argument is a KiB budget and is converted to a
+    /// page count against `page_size` at set time, exactly like SQLite.
+    cache_spill_size: i64,
     /// PRAGMA user_version session setting (SQLite-compatible, default 0).
     /// SQLite persists this as a raw signed 32-bit cookie in the database
     /// file header, available for application use; VibeSQL has no such
@@ -569,7 +585,8 @@ impl SqlExecutor {
                     cache_size: SQLITE_DEFAULT_CACHE_SIZE,
                     default_cache_size_cookie: 0,
                     cache_spill_enabled: true,
-                    cache_spill_explicit_size: None,
+                    cache_spill_size: SQLITE_DEFAULT_SPILL_PAGES,
+                    page_size: SQLITE_DEFAULT_PAGE_SIZE,
                     user_version: 0,
                     application_id: 0,
                     schema_version: 0,
@@ -628,7 +645,8 @@ impl SqlExecutor {
             cache_size: SQLITE_DEFAULT_CACHE_SIZE,
             default_cache_size_cookie: 0,
             cache_spill_enabled: true,
-            cache_spill_explicit_size: None,
+            cache_spill_size: SQLITE_DEFAULT_SPILL_PAGES,
+            page_size: SQLITE_DEFAULT_PAGE_SIZE,
             user_version: 0,
             application_id: 0,
             schema_version: 0,
@@ -2065,6 +2083,26 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "PAGE_SIZE" => {
+                    // SQLite-compatible PRAGMA page_size set (pragma2.test
+                    // pragma2-4.3/5.1, pragma4.test 1.18/1.19). Mirrors
+                    // `sqlite3BtreeSetPageSize`'s guard: only a power of two in
+                    // [512, SQLITE_MAX_PAGE_SIZE] is accepted, anything else is
+                    // silently ignored (no error). VibeSQL's storage is not
+                    // paged, so this only feeds the negative-KiB -> page-count
+                    // arithmetic of `cache_spill`.
+                    let requested = pragma_value_atoi(value);
+                    if is_valid_page_size(requested) {
+                        self.page_size = requested;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "CACHE_SIZE" => {
                     // SQLite-compatible PRAGMA cache_size set (pragma.test
                     // pragma-1.*). Session-only (SQLite's `pSchema->cache_size`
@@ -2102,19 +2140,24 @@ impl SqlExecutor {
                 }
                 "CACHE_SPILL" => {
                     // SQLite-compatible PRAGMA cache_spill set (pragma2.test
-                    // pragma2-4.1/4.2). VibeSQL has no pager to actually spill
-                    // dirty pages, but it echoes the enabled/size state like
-                    // SQLite: a numeric argument sets an explicit spill-size
-                    // threshold (and toggles enabled off only for `0`); a
-                    // keyword argument (ON/OFF/...) toggles enabled without
-                    // touching any previously-set explicit size.
-                    let text = pragma_value_text(value).trim();
-                    if let Ok(size) = text.parse::<i64>() {
-                        self.cache_spill_explicit_size = Some(size);
-                        self.cache_spill_enabled = size != 0;
-                    } else {
-                        self.cache_spill_enabled = pragma_value_to_bool(value);
+                    // pragma2-4.*/5.*). VibeSQL has no pager to actually spill
+                    // dirty pages, but it reproduces `pragma.c`'s exact
+                    // sequence: `sqlite3GetInt32` first (a nonzero integer sets
+                    // the spill threshold via `sqlite3PcacheSetSpillsize`, a
+                    // literal `0` leaves the threshold alone), then
+                    // `sqlite3GetBoolean(zRight, size != 0)` decides the
+                    // enabled flag — so a keyword argument (ON/OFF/YES/...)
+                    // toggles enabled without touching the threshold, and an
+                    // unrecognized keyword falls back to enabled.
+                    let text = pragma_value_text(value);
+                    let as_int = text.trim().parse::<i64>().ok();
+                    if let Some(size) = as_int {
+                        if size != 0 {
+                            self.cache_spill_size = spill_pages_from_arg(size, self.page_size);
+                        }
                     }
+                    self.cache_spill_enabled =
+                        pragma_value_to_bool_with_default(value, as_int.unwrap_or(1) != 0);
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -2492,6 +2535,18 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "PAGE_SIZE" => {
+                    // SQLite-compatible PRAGMA page_size read (pragma.test
+                    // pragma-3.2, pragma2.test pragma2-5.*). Default 4096
+                    // (SQLITE_DEFAULT_PAGE_SIZE).
+                    Ok(QueryResult {
+                        columns: vec!["page_size".to_string()],
+                        rows: vec![vec![Some(self.page_size.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "CACHE_SIZE" => {
                     // SQLite-compatible PRAGMA cache_size read (pragma.test
                     // pragma-1.*). Returns the raw signed session value;
@@ -2521,14 +2576,17 @@ impl SqlExecutor {
                 }
                 "CACHE_SPILL" => {
                     // SQLite-compatible PRAGMA cache_spill read (pragma2.test
-                    // pragma2-4.1/4.2). Disabled reads as 0 regardless of any
-                    // stored explicit size; enabled with no explicit size
-                    // mirrors the current `cache_size` (SQLite's spill
-                    // threshold defaults to the cache size until set).
+                    // pragma2-4.*/5.*). Disabled reads as 0; otherwise mirrors
+                    // `sqlite3PcacheSetSpillsize(pBt, 0)`'s return value, which
+                    // is `max(numberOfCachePages(cache_size), szSpill)` — so a
+                    // threshold below the cache size reads back as the cache
+                    // size (pragma2-4.5.3), and a negative `cache_size` is
+                    // resolved from its KiB budget to a page count first.
                     let value = if !self.cache_spill_enabled {
                         0
                     } else {
-                        self.cache_spill_explicit_size.unwrap_or(self.cache_size)
+                        number_of_cache_pages(self.cache_size, self.page_size)
+                            .max(self.cache_spill_size)
                     };
                     Ok(QueryResult {
                         columns: vec!["cache_spill".to_string()],
@@ -3711,6 +3769,38 @@ fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
     }
 }
 
+/// Mirrors SQLite's `sqlite3GetBoolean(z, dflt)` (util.c → `getSafetyLevel`)
+/// for the PRAGMAs whose enabled-flag falls back to a caller-supplied default
+/// rather than to `false`: a numeric spelling is its own truthiness, the
+/// recognized keywords `on`/`no`/`off`/`false`/`yes`/`true`/`extra` map to
+/// their table values, and **anything else returns `dflt`**.
+///
+/// `pragma_value_to_bool` above treats an unrecognized spelling as `false`,
+/// which is right for the plain on/off PRAGMAs but wrong for `cache_spill`
+/// (pragma2.test pragma2-5.3: `cache_spill(-51)` must leave spilling enabled).
+fn pragma_value_to_bool_with_default(value: &vibesql_ast::PragmaValue, dflt: bool) -> bool {
+    let text = pragma_value_text(value);
+    let trimmed = text.trim();
+    let mut chars = trimmed.chars();
+    let first = chars.next();
+    let numeric = match first {
+        Some(c) if c.is_ascii_digit() => true,
+        Some('-') => chars.next().is_some_and(|c| c.is_ascii_digit()),
+        _ => false,
+    };
+    if numeric {
+        // SQLite returns `(u8)sqlite3Atoi(z)`, i.e. the low byte of the parsed
+        // integer, then tests it against zero.
+        let parsed = pragma_value_atoi(value);
+        return (parsed as u8) != 0;
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "on" | "yes" | "true" | "extra" => true,
+        "no" | "off" | "false" => false,
+        _ => dflt,
+    }
+}
+
 /// Parse a numeric PRAGMA value into an `i64`, if it is integral.
 ///
 /// Used by integer-valued internal PRAGMAs such as `trigger_depth_limit`
@@ -3792,6 +3882,55 @@ const SQLITE_DEFAULT_SYNCHRONOUS: i64 = 2;
 /// `PRAGMA cache_size` / `PRAGMA default_cache_size` report when no explicit
 /// size has ever been set.
 const SQLITE_DEFAULT_CACHE_SIZE: i64 = -2000;
+
+/// SQLite's `SQLITE_DEFAULT_PAGE_SIZE` compile-time constant: the value
+/// `PRAGMA page_size` reports for a database whose page size has never been
+/// changed.
+const SQLITE_DEFAULT_PAGE_SIZE: i64 = 4096;
+
+/// SQLite's `SQLITE_MAX_PAGE_SIZE` compile-time constant — the upper bound
+/// `sqlite3BtreeSetPageSize` accepts.
+const SQLITE_MAX_PAGE_SIZE: i64 = 65536;
+
+/// The spill threshold (`PCache.szSpill`) a fresh connection starts with,
+/// matching `sqlite3PcacheOpen`'s `p->szSpill = 1`.
+const SQLITE_DEFAULT_SPILL_PAGES: i64 = 1;
+
+/// Mirrors `sqlite3BtreeSetPageSize`'s acceptance test: a page size must be a
+/// power of two between 512 and `SQLITE_MAX_PAGE_SIZE` inclusive. Anything
+/// else leaves the current page size untouched (SQLite reports no error).
+fn is_valid_page_size(size: i64) -> bool {
+    (512..=SQLITE_MAX_PAGE_SIZE).contains(&size) && (size & (size - 1)) == 0
+}
+
+/// Mirrors SQLite's `numberOfCachePages()` (pcache.c): a non-negative
+/// `cache_size` is already a page count, while a negative one is a KiB budget
+/// that must be divided by the page size to yield pages.
+fn number_of_cache_pages(cache_size: i64, page_size: i64) -> i64 {
+    if cache_size >= 0 {
+        cache_size
+    } else {
+        kib_budget_to_pages(cache_size, page_size)
+    }
+}
+
+/// Mirrors the negative-argument branch of `sqlite3PcacheSetSpillsize()`
+/// (pcache.c): `mxPage = (-1024 * (i64)mxPage) / (szPage + szExtra)`. A
+/// positive argument is already a page count and passes through unchanged.
+fn spill_pages_from_arg(arg: i64, page_size: i64) -> i64 {
+    if arg < 0 {
+        kib_budget_to_pages(arg, page_size)
+    } else {
+        arg
+    }
+}
+
+/// Converts a negative "KiB budget" PRAGMA argument (SQLite's convention for
+/// `cache_size` / `cache_spill`) into a page count against `page_size`.
+fn kib_budget_to_pages(kib_budget: i64, page_size: i64) -> i64 {
+    let page_size = if page_size > 0 { page_size } else { SQLITE_DEFAULT_PAGE_SIZE };
+    kib_budget.saturating_mul(-1024) / page_size
+}
 
 /// Mirrors SQLite's `getSafetyLevel()` (pragma.c) used by `PRAGMA
 /// synchronous = <value>`: a numeric string is parsed via a C-style
