@@ -394,3 +394,125 @@ fn test_create_view_values_without_column_list() {
         panic!("Expected CreateView statement");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Issue #6304: CREATE VIEW must reject bind-parameter placeholders at DDL
+// time with SQLite's verbatim message `parameters are not allowed in views`
+// (with4.test case 130). A view is read repeatedly with no bind context, so
+// SQLite rejects any `?`, `?NNN`, `:name`, `@name`, `$name` reference anywhere
+// in the view body -- select list, WHERE, subqueries, CTEs, set-operation
+// arms, LIMIT/OFFSET. `CREATE TRIGGER` already enforces the analogous
+// `trigger cannot use variables` check (see `tests/trigger.rs`); this suite
+// covers the `CREATE VIEW` side only. `CREATE TABLE ... AS SELECT` (CTAS) is
+// executed once at create time, so SQLite allows binds there and this suite
+// verifies VibeSQL does not overreach into CTAS.
+//
+// No `@name` case is included below: unlike `?`, `?NNN`, `:name`, and
+// `$name`, VibeSQL's expression grammar does not accept `@name` as a general
+// expression atom anywhere outside the MySQL-style `SELECT ... INTO @var`
+// procedural clause (`Token::UserVariable` is only consumed in
+// `parse_select_statement_after_with`/`select/statement.rs`'s `INTO` handling
+// -- see `grep -rn "Token::UserVariable" crates/vibesql-parser/src/parser`).
+// So `WHERE a = @x` is already rejected today, but with a generic
+// `near "@x": syntax error` from expression parsing itself -- the parse never
+// reaches this file's placeholder scan (unlike CREATE TRIGGER's check, which
+// lexes the raw body text and so never depends on the expression grammar
+// accepting the token). Making VibeSQL's expression grammar treat `@name` as
+// a bind parameter atom is a separate, pre-existing, unrelated gap (no
+// existing test anywhere, including the passing CREATE TRIGGER suite,
+// exercises `@name` in an ordinary expression position); fixing it is out of
+// scope for this issue.
+// ---------------------------------------------------------------------------
+
+/// SQLite verbatim wording (see with4.test `set msg`).
+const VIEW_VAR_ERR: &str = "parameters are not allowed in views";
+
+fn assert_view_rejected_as_variable(sql: &str) {
+    let result = Parser::parse_sql(sql);
+    let err = result.expect_err(&format!("expected rejection for: {sql}"));
+    assert_eq!(err.message, VIEW_VAR_ERR, "wrong message for: {sql}\n  got: {}", err.message);
+}
+
+fn assert_view_accepted(sql: &str) {
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "must be accepted: {sql}\n  err: {:?}", result.err());
+}
+
+#[test]
+fn test_create_view_rejects_numbered_placeholder_in_select_list() {
+    // Issue #6304 repro: CREATE VIEW v2 AS SELECT ?2, * FROM t1;
+    assert_view_rejected_as_variable("CREATE VIEW v2 AS SELECT ?2, * FROM t1;");
+}
+
+#[test]
+fn test_create_view_rejects_bare_placeholder() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT ? FROM t1;");
+}
+
+#[test]
+fn test_create_view_rejects_named_colon_placeholder() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 WHERE a = :x;");
+}
+
+#[test]
+fn test_create_view_rejects_named_dollar_placeholder() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 WHERE a = $x;");
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_where() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 WHERE a = ?;");
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_limit() {
+    // SQLite rejects binds in every clause of the view body, including LIMIT.
+    assert_view_rejected_as_variable("CREATE VIEW v3 AS SELECT * FROM t1 LIMIT ?;");
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_offset() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 LIMIT 1 OFFSET ?;");
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_subquery() {
+    assert_view_rejected_as_variable(
+        "CREATE VIEW v AS SELECT * FROM (SELECT * FROM t1 WHERE a = ?);",
+    );
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_set_operation() {
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT a FROM t1 UNION SELECT ? FROM t1;");
+}
+
+#[test]
+fn test_create_view_rejects_placeholder_in_cte() {
+    // with4.test case 130: CREATE VIEW v2 AS WITH v(m,n) AS (SELECT 5,?2) SELECT * FROM t1, v;
+    assert_view_rejected_as_variable(
+        "CREATE VIEW v2 AS WITH v(m,n) AS (SELECT 5,?2) SELECT * FROM t1, v;",
+    );
+}
+
+#[test]
+fn test_create_temp_view_rejects_placeholder() {
+    assert_view_rejected_as_variable("CREATE TEMP VIEW v AS SELECT ? FROM t1;");
+}
+
+#[test]
+fn test_create_view_if_not_exists_rejects_placeholder() {
+    assert_view_rejected_as_variable("CREATE VIEW IF NOT EXISTS v AS SELECT ? FROM t1;");
+}
+
+#[test]
+fn test_create_view_plain_still_accepted() {
+    assert_view_accepted("CREATE VIEW v AS SELECT * FROM t1;");
+}
+
+#[test]
+fn test_create_table_as_select_still_allows_placeholder() {
+    // CTAS is executed once at create time, so SQLite (and VibeSQL) permit
+    // binds there -- the CREATE VIEW rejection must not overreach into CTAS.
+    assert_view_accepted("CREATE TABLE t2 AS SELECT ?1 AS x;");
+}

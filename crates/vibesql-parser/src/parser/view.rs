@@ -92,7 +92,24 @@ impl Parser {
 
         // Parse the SELECT statement
         // Use embedded variant since WITH CHECK OPTION may follow
+        let body_start = self.current_position();
         let query = Box::new(self.parse_embedded_select_statement()?);
+        let body_end = self.current_position();
+
+        // SQLite rejects a bound-parameter / variable reference anywhere in a
+        // view body at CREATE VIEW time (a view has no bind context when it is
+        // later read), with the verbatim error "parameters are not allowed in
+        // views" -- see with4.test case 130. A token-range scan (rather than an
+        // AST walk) mirrors the CREATE TRIGGER precedent in `parser/trigger.rs`
+        // and naturally covers every clause of the body -- CTEs, WHERE,
+        // subqueries, set-operation arms, LIMIT/OFFSET -- without needing the
+        // AST visitor to be extended to visit every expression-bearing field.
+        // The scanned range is exactly the parsed SELECT body (after `AS`,
+        // before any trailing `WITH CHECK OPTION`), so the view name/column
+        // list and the check-option clause are correctly excluded.
+        if self.tokens[body_start..body_end].iter().any(Self::token_is_variable) {
+            return Err(ParseError { message: "parameters are not allowed in views".to_string() });
+        }
 
         // Check for optional WITH CHECK OPTION
         let with_check_option = if self.peek_keyword(Keyword::With) {
