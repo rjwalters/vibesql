@@ -66,9 +66,9 @@
 //! ```
 
 use crate::{
-    Assignment, DeleteStmt, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet,
-    InsertSource, InsertStmt, MixedGroupingItem, SelectItem, SelectStmt, Statement, UpdateStmt,
-    WhereClause, WindowFunctionSpec, WindowSpec,
+    Assignment, ConflictTargetItem, DeleteStmt, Expression, FromClause, GroupByClause,
+    GroupingElement, GroupingSet, InsertSource, InsertStmt, MixedGroupingItem, OnConflictAction,
+    SelectItem, SelectStmt, Statement, UpdateStmt, WhereClause, WindowFunctionSpec, WindowSpec,
 };
 
 // ============================================================================
@@ -263,7 +263,7 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
             VisitResult::Continue
         }
 
-        Expression::AggregateFunction { args, order_by, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 let result = walk_expression(visitor, arg);
                 if result.should_stop() {
@@ -277,6 +277,15 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
                     if result.should_stop() {
                         return VisitResult::Stop;
                     }
+                }
+            }
+            // ...and the FILTER (WHERE ...) predicate. `transform_expression`
+            // rewrites this position, so skipping it here would leave the
+            // count/transform passes out of lockstep (see `walk_statement`).
+            if let Some(filter_expr) = filter {
+                let result = walk_expression(visitor, filter_expr);
+                if result.should_stop() {
+                    return VisitResult::Stop;
                 }
             }
             VisitResult::Continue
@@ -384,20 +393,26 @@ pub fn walk_expression<V: ExpressionVisitor>(visitor: &mut V, expr: &Expression)
 
         Expression::Extract { expr: inner, .. } => walk_expression(visitor, inner),
 
-        Expression::Like { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             let result = walk_expression(visitor, inner);
             if result.should_stop() {
                 return VisitResult::Stop;
             }
-            walk_expression(visitor, pattern)
-        }
-
-        Expression::Glob { expr: inner, pattern, .. } => {
-            let result = walk_expression(visitor, inner);
+            let result = walk_expression(visitor, pattern);
             if result.should_stop() {
                 return VisitResult::Stop;
             }
-            walk_expression(visitor, pattern)
+            // The ESCAPE operand is an arbitrary expression (`LIKE ? ESCAPE ?`
+            // parses), and `transform_expression` rewrites it — so it must be
+            // visited here too, or count and transform fall out of lockstep.
+            if let Some(escape_expr) = escape {
+                let result = walk_expression(visitor, escape_expr);
+                if result.should_stop() {
+                    return VisitResult::Stop;
+                }
+            }
+            VisitResult::Continue
         }
 
         Expression::Exists { subquery, .. } => {
@@ -484,13 +499,22 @@ fn walk_window_function<V: ExpressionVisitor>(
     visitor: &mut V,
     spec: &WindowFunctionSpec,
 ) -> VisitResult {
-    let args = match spec {
-        WindowFunctionSpec::Aggregate { args, .. }
-        | WindowFunctionSpec::Ranking { args, .. }
-        | WindowFunctionSpec::Value { args, .. } => args,
+    let (args, filter) = match spec {
+        WindowFunctionSpec::Aggregate { args, filter, .. } => (args, filter.as_deref()),
+        WindowFunctionSpec::Ranking { args, .. } | WindowFunctionSpec::Value { args, .. } => {
+            (args, None)
+        }
     };
     for arg in args {
         let result = walk_expression(visitor, arg);
+        if result.should_stop() {
+            return VisitResult::Stop;
+        }
+    }
+    // `COUNT(*) FILTER (WHERE ?) OVER (...)`: the FILTER predicate is rewritten
+    // by `transform_window_function`, so it must be visited here as well.
+    if let Some(filter_expr) = filter {
+        let result = walk_expression(visitor, filter_expr);
         if result.should_stop() {
             return VisitResult::Stop;
         }
@@ -896,6 +920,25 @@ pub trait StatementVisitor: ExpressionVisitor {
 }
 
 /// Walk a statement, visiting all contained expressions
+///
+/// # Invariant: walking and transforming must stay in lockstep
+///
+/// The `walk_*` functions below must visit **every** expression position that
+/// the corresponding `transform_*` function rewrites (and vice versa).
+/// Parameter binding for prepared statements relies on this: the placeholder
+/// *count* comes from a walk (`count_placeholders`) while the placeholder
+/// *substitution* comes from a mutation/transform pass. A position visited by
+/// only one of the two produces a user-visible bug in one of two directions —
+/// a spurious "Parameter count mismatch" (counted but never bound, or bound
+/// but never counted), or a hard "Unbound placeholder" error at execution
+/// time. See issue #6359 / PR #6411 for the `LIMIT ?` regression this caused.
+///
+/// The practical hazard is the `..` rest-pattern: `walk_expression` matches
+/// `Expression` exhaustively, so a missing *variant* is a compile error, but a
+/// `..` inside a struct pattern silently drops an expression-bearing *field*.
+/// `AggregateFunction { filter }`, `WindowFunctionSpec::Aggregate { filter }`
+/// and `Like`/`Glob` `{ escape }` were all lost that way. When adding such a
+/// field, touch the `walk_*` and `transform_*` pair together.
 pub fn walk_statement<V: StatementVisitor>(visitor: &mut V, stmt: &Statement) {
     match stmt {
         Statement::Select(select) => walk_select(visitor, select),
@@ -951,6 +994,16 @@ pub fn walk_select<V: ExpressionVisitor>(visitor: &mut V, stmt: &SelectStmt) {
         }
     }
 
+    // Visit named window definitions (WINDOW w AS (...))
+    if let Some(defs) = &stmt.window_definitions {
+        for def in defs {
+            let result = walk_window_spec(visitor, &def.spec);
+            if result.should_stop() {
+                return;
+            }
+        }
+    }
+
     // Visit ORDER BY
     if let Some(order_by) = &stmt.order_by {
         for item in order_by {
@@ -961,9 +1014,37 @@ pub fn walk_select<V: ExpressionVisitor>(visitor: &mut V, stmt: &SelectStmt) {
         }
     }
 
+    // Visit LIMIT (may itself be a placeholder: `LIMIT ?`)
+    if let Some(limit) = &stmt.limit {
+        let result = walk_expression(visitor, limit);
+        if result.should_stop() {
+            return;
+        }
+    }
+
+    // Visit OFFSET (may itself be a placeholder: `OFFSET ?`)
+    if let Some(offset) = &stmt.offset {
+        let result = walk_expression(visitor, offset);
+        if result.should_stop() {
+            return;
+        }
+    }
+
     // Visit set operation
     if let Some(set_op) = &stmt.set_operation {
         walk_select(visitor, &set_op.right);
+    }
+
+    // Visit standalone VALUES rows (`VALUES (?), (?)`)
+    if let Some(rows) = &stmt.values {
+        for row in rows {
+            for expr in row {
+                let result = walk_expression(visitor, expr);
+                if result.should_stop() {
+                    return;
+                }
+            }
+        }
     }
 }
 
@@ -1055,6 +1136,13 @@ fn walk_mixed_grouping_item<V: ExpressionVisitor>(visitor: &mut V, item: &MixedG
 
 /// Walk an INSERT statement
 fn walk_insert<V: ExpressionVisitor>(visitor: &mut V, stmt: &InsertStmt) {
+    // Visit CTEs
+    if let Some(ctes) = &stmt.with_clause {
+        for cte in ctes {
+            walk_select(visitor, &cte.query);
+        }
+    }
+
     match &stmt.source {
         InsertSource::Values(rows) => {
             for row in rows {
@@ -1069,6 +1157,40 @@ fn walk_insert<V: ExpressionVisitor>(visitor: &mut V, stmt: &InsertStmt) {
         InsertSource::Select(select) => walk_select(visitor, select),
         InsertSource::DefaultValues => {
             // No expressions to visit for DEFAULT VALUES
+        }
+    }
+
+    // Walk ON CONFLICT clauses (target expressions, target WHERE, DO UPDATE SET)
+    for clause in &stmt.on_conflict {
+        if let Some(items) = &clause.conflict_target {
+            for item in items {
+                if let ConflictTargetItem::Expression(expr) = item {
+                    let result = walk_expression(visitor, expr);
+                    if result.should_stop() {
+                        return;
+                    }
+                }
+            }
+        }
+        if let Some(expr) = &clause.target_where {
+            let result = walk_expression(visitor, expr);
+            if result.should_stop() {
+                return;
+            }
+        }
+        if let OnConflictAction::DoUpdate { assignments, where_clause } = &clause.action {
+            for assignment in assignments {
+                let result = walk_expression(visitor, &assignment.value);
+                if result.should_stop() {
+                    return;
+                }
+            }
+            if let Some(expr) = where_clause {
+                let result = walk_expression(visitor, expr);
+                if result.should_stop() {
+                    return;
+                }
+            }
         }
     }
 
@@ -1096,6 +1218,13 @@ fn walk_insert<V: ExpressionVisitor>(visitor: &mut V, stmt: &InsertStmt) {
 
 /// Walk an UPDATE statement
 fn walk_update<V: ExpressionVisitor>(visitor: &mut V, stmt: &UpdateStmt) {
+    // Visit CTEs
+    if let Some(ctes) = &stmt.with_clause {
+        for cte in ctes {
+            walk_select(visitor, &cte.query);
+        }
+    }
+
     for assignment in &stmt.assignments {
         let result = walk_expression(visitor, &assignment.value);
         if result.should_stop() {
@@ -1110,6 +1239,28 @@ fn walk_update<V: ExpressionVisitor>(visitor: &mut V, stmt: &UpdateStmt) {
     }
     if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
         let result = walk_expression(visitor, expr);
+        if result.should_stop() {
+            return;
+        }
+    }
+    // Walk ORDER BY expressions
+    if let Some(order_by) = &stmt.order_by {
+        for item in order_by {
+            let result = walk_expression(visitor, &item.expr);
+            if result.should_stop() {
+                return;
+            }
+        }
+    }
+    // Walk LIMIT / OFFSET expressions
+    if let Some(limit) = &stmt.limit {
+        let result = walk_expression(visitor, limit);
+        if result.should_stop() {
+            return;
+        }
+    }
+    if let Some(offset) = &stmt.offset {
+        let result = walk_expression(visitor, offset);
         if result.should_stop() {
             return;
         }
@@ -1129,6 +1280,13 @@ fn walk_update<V: ExpressionVisitor>(visitor: &mut V, stmt: &UpdateStmt) {
 
 /// Walk a DELETE statement
 fn walk_delete<V: ExpressionVisitor>(visitor: &mut V, stmt: &DeleteStmt) {
+    // Visit CTEs
+    if let Some(ctes) = &stmt.with_clause {
+        for cte in ctes {
+            walk_select(visitor, &cte.query);
+        }
+    }
+
     if let Some(WhereClause::Condition(expr)) = &stmt.where_clause {
         walk_expression(visitor, expr);
     }
@@ -1214,8 +1372,8 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
                 })
                 .collect()
         }),
-        limit: stmt.limit,
-        offset: stmt.offset,
+        limit: stmt.limit.map(|e| transform_expression(visitor, e)),
+        offset: stmt.offset.map(|e| transform_expression(visitor, e)),
         set_operation: stmt.set_operation.map(|op| crate::SetOperation {
             op: op.op,
             all: op.all,

@@ -47,8 +47,18 @@ pub struct Cursor {
     db: Arc<Mutex<vibesql_storage::Database>>,
     last_result: Option<QueryResultData>,
     /// LRU cache for parsed SQL statements (max 1000 entries)
-    /// Key: SQL string with ? placeholders, Value: parsed AST
-    stmt_cache: Arc<Mutex<LruCache<String, vibesql_ast::Statement>>>,
+    ///
+    /// Key: raw SQL string, with `?` placeholders left *unsubstituted*.
+    /// Value: a [`vibesql_executor::PreparedStatement`] wrapping the parsed
+    /// AST, which still contains unbound `Placeholder` expression nodes.
+    ///
+    /// Caching the *unbound* AST (rather than an AST baked with one call's
+    /// literal parameter values) is what makes cache reuse across calls with
+    /// different `params` safe: every `execute()` call binds this call's
+    /// parameters into a fresh `Statement` via `PreparedStatement::bind()`,
+    /// so a cache HIT never silently replays a previous call's values (see
+    /// #6359).
+    stmt_cache: Arc<Mutex<LruCache<String, Arc<vibesql_executor::PreparedStatement>>>>,
     /// Cache for table schemas (max 100 tables per cursor)
     /// Key: table name, Value: cached schema
     schema_cache: Arc<Mutex<LruCache<String, vibesql_catalog::TableSchema>>>,
@@ -98,47 +108,57 @@ impl Cursor {
     ) -> PyResult<()> {
         let mut profiler = profiling::DetailedProfiler::new("execute()");
 
-        // Use the original SQL (with ? placeholders) as the cache key
+        // Use the original SQL (with ? placeholders left unsubstituted) as the cache key.
         let cache_key = sql.to_string();
         profiler.checkpoint("SQL string copied");
 
-        // Check if we have a cached parsed AST for this SQL
+        // Check if we have a cached parsed (but unbound) AST for this SQL
         let mut cache = self.stmt_cache.lock();
         profiler.checkpoint("Acquired cache lock");
-        let stmt = if let Some(cached_stmt) = cache.get(&cache_key) {
-            // Cache hit! Clone the cached AST before releasing lock
-            let cloned_stmt = cached_stmt.clone();
+        let prepared = if let Some(cached_prepared) = cache.get(&cache_key) {
+            // Cache hit! Clone the Arc (cheap) before releasing lock
+            let cloned_prepared = Arc::clone(cached_prepared);
             drop(cache); // Release cache lock before updating stats
             *self.cache_hits.lock() += 1;
-            profiler.checkpoint("Cache HIT - stmt cloned");
-            cloned_stmt
+            profiler.checkpoint("Cache HIT - prepared statement cloned");
+            cloned_prepared
         } else {
             // Cache miss - need to parse
             drop(cache); // Release cache lock before parsing
             *self.cache_misses.lock() += 1;
             profiler.checkpoint("Cache MISS - need to parse");
 
-            // Process SQL with parameter substitution if params are provided
-            let processed_sql = if let Some(params_tuple) = params {
-                Self::bind_parameters(py, sql, params_tuple)?
-            } else {
-                // No parameters provided, use SQL as-is
-                sql.to_string()
-            };
-
-            // Parse the processed SQL
-            let stmt = vibesql_parser::Parser::parse_sql(&processed_sql)
+            // Parse the RAW SQL, leaving any `?` placeholders as unbound
+            // Placeholder AST nodes. This is what allows the same cached AST
+            // to be safely reused with different `params` on every call.
+            let stmt = vibesql_parser::Parser::parse_sql(sql)
                 .map_err(|e| ProgrammingError::new_err(format!("Parse error: {:?}", e)))?;
             profiler.checkpoint("SQL parsed to AST");
 
-            // Store the parsed AST in cache for future reuse
+            let prepared =
+                Arc::new(vibesql_executor::PreparedStatement::new(sql.to_string(), stmt));
+
+            // Store the prepared (unbound) statement in cache for future reuse
             let mut cache = self.stmt_cache.lock();
-            cache.put(cache_key.clone(), stmt.clone());
+            cache.put(cache_key.clone(), Arc::clone(&prepared));
             drop(cache);
             profiler.checkpoint("AST cached");
 
-            stmt
+            prepared
         };
+
+        // Bind THIS call's parameters into a fresh Statement. Binding always
+        // happens after the cache lookup above, so a cache HIT can never
+        // reuse a different call's literal values.
+        let stmt = if let Some(params_tuple) = params {
+            let sql_values = convert_params_to_sql_values(py, params_tuple)?;
+            prepared.bind(&sql_values).map_err(|e| ProgrammingError::new_err(format!("{}", e)))?
+        } else {
+            // No parameters provided; use the (possibly still-unbound) statement as-is,
+            // matching prior behavior for callers that pass `?` without params.
+            prepared.statement().clone()
+        };
+        profiler.checkpoint("Parameters bound");
 
         profiler.checkpoint("Statement ready for execution");
 

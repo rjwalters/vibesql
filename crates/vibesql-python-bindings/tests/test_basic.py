@@ -485,6 +485,157 @@ def test_statement_cache_invalidation():
     db.close()
 
 
+def test_statement_cache_hit_reuses_new_params_not_first_call():
+    """Regression test for #6359.
+
+    A cache HIT on repeated identical parameterized SQL text must bind THIS
+    call's params, not silently replay the AST baked with the FIRST call's
+    literal values. Prior to the fix, the second INSERT below wrote ('a',
+    '1') again instead of ('b', '2'), because the cached AST already had the
+    first call's literals substituted in.
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE u (k VARCHAR(50), v VARCHAR(50))")
+
+    # First call: cache miss, parses and caches the (unbound) AST.
+    cursor.execute("INSERT INTO u VALUES (?, ?)", ("a", "1"))
+    # Second call: identical SQL text -> cache HIT. Must bind these params,
+    # not replay the first call's ("a", "1").
+    cursor.execute("INSERT INTO u VALUES (?, ?)", ("b", "2"))
+
+    hits, misses, _ = cursor.cache_stats()
+    assert hits >= 1, f"Expected the second call to hit the statement cache, got hits={hits}"
+
+    cursor.execute("SELECT * FROM u ORDER BY k")
+    rows = cursor.fetchall()
+    assert rows == [("a", "1"), ("b", "2")], (
+        f"Expected distinct rows for distinct params, got {rows} "
+        "(second insert replayed the first call's params - see #6359)"
+    )
+
+    cursor.close()
+    db.close()
+
+
+def test_statement_cache_hit_reuses_new_params_for_select():
+    """Regression test for #6359: cache HIT on a repeated parameterized
+    SELECT must use the new call's params, not the first call's."""
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE users (id INTEGER, name VARCHAR(50))")
+    cursor.execute("INSERT INTO users VALUES (1, 'Alice')")
+    cursor.execute("INSERT INTO users VALUES (2, 'Bob')")
+
+    cursor.execute("SELECT name FROM users WHERE id = ?", (1,))
+    first = cursor.fetchall()
+    assert first == [("Alice",)]
+
+    # Same SQL text, different param -> cache HIT, must bind id=2 this time.
+    cursor.execute("SELECT name FROM users WHERE id = ?", (2,))
+    second = cursor.fetchall()
+    assert second == [("Bob",)], (
+        f"Expected id=2 to resolve to Bob, got {second} (cache HIT replayed "
+        "the first call's params - see #6359)"
+    )
+
+    cursor.close()
+    db.close()
+
+
+def test_parameterized_limit_offset():
+    """`LIMIT ?` / `OFFSET ?` are ordinary DB-API pagination usage.
+
+    Regression test for PR #6411: binding at AST level must cover LIMIT and
+    OFFSET, not just WHERE. Before the binder/counter were made symmetric,
+    the placeholder in LIMIT was invisible to the parameter counter, so this
+    raised a spurious "Parameter count mismatch: expected 0, got 1".
+
+    Each query is run TWICE with different parameter values so the second run
+    exercises the statement-cache HIT path (the path #6359 was about).
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE page (a INTEGER)")
+    for i in range(1, 6):
+        cursor.execute("INSERT INTO page VALUES (?)", (i,))
+
+    # LIMIT ? — first call is a cache MISS, second an identical-SQL cache HIT
+    # with a different value.
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ?", (2,))
+    assert cursor.fetchall() == [(1,), (2,)]
+
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ?", (4,))
+    assert cursor.fetchall() == [(1,), (2,), (3,), (4,)], (
+        "LIMIT ? on a cache HIT must use this call's parameter, not the first call's"
+    )
+
+    # LIMIT ? OFFSET ? — same two-call pattern.
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ? OFFSET ?", (2, 1))
+    assert cursor.fetchall() == [(2,), (3,)]
+
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ? OFFSET ?", (3, 2))
+    assert cursor.fetchall() == [(3,), (4,), (5,)]
+
+    # Mixed: a WHERE placeholder and a LIMIT placeholder in one statement.
+    cursor.execute("SELECT a FROM page WHERE a > ? ORDER BY a LIMIT ?", (1, 2))
+    assert cursor.fetchall() == [(2,), (3,)]
+
+    cursor.execute("SELECT a FROM page WHERE a > ? ORDER BY a LIMIT ?", (3, 1))
+    assert cursor.fetchall() == [(4,)]
+
+    cursor.close()
+    db.close()
+
+
+def test_parameterized_aggregate_subclauses_and_escape():
+    """Placeholders in aggregate sub-clauses and in LIKE/GLOB ESCAPE.
+
+    Regression test for the second round of PR #6411 review. These positions
+    live behind a `..` rest-pattern in the AST walk/bind struct patterns, so
+    they were counted-but-not-bound (hard "Unbound placeholder") or
+    bound-but-not-counted (spurious "Parameter count mismatch"):
+
+    - ``AggregateFunction.filter``  — ``count(*) FILTER (WHERE a > ?)``
+    - ``AggregateFunction.order_by`` — ``group_concat(b ORDER BY ?)``
+    - ``WindowFunctionSpec::Aggregate.filter`` — the same FILTER over a window
+    - ``Like.escape`` / ``Glob.escape`` — ``LIKE ? ESCAPE ?``
+
+    Each is run twice with different values to exercise the cache-HIT path.
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE agg (a INTEGER, b TEXT)")
+    for i in range(1, 6):
+        cursor.execute("INSERT INTO agg VALUES (?, ?)", (i, f"v{i}"))
+
+    # FILTER (WHERE ?) inside an aggregate.
+    cursor.execute("SELECT count(*) FILTER (WHERE a > ?) FROM agg", (2,))
+    assert cursor.fetchall() == [(3,)]
+
+    cursor.execute("SELECT count(*) FILTER (WHERE a > ?) FROM agg", (4,))
+    assert cursor.fetchall() == [(1,)], (
+        "FILTER (WHERE ?) on a cache HIT must use this call's parameter"
+    )
+
+    # ORDER BY ? inside an aggregate.
+    cursor.execute("SELECT group_concat(b ORDER BY ?) FROM agg", (1,))
+    assert cursor.fetchall() == [("v1,v2,v3,v4,v5",)]
+
+    cursor.execute("SELECT group_concat(b ORDER BY ?) FROM agg", (1,))
+    assert cursor.fetchall() == [("v1,v2,v3,v4,v5",)]
+
+    # LIKE ? ESCAPE ? — the ESCAPE operand is an arbitrary expression.
+    cursor.execute("SELECT a FROM agg WHERE b LIKE ? ESCAPE ? ORDER BY a", ("v1", "\\"))
+    assert cursor.fetchall() == [(1,)]
+
+    cursor.execute("SELECT a FROM agg WHERE b LIKE ? ESCAPE ? ORDER BY a", ("v3", "\\"))
+    assert cursor.fetchall() == [(3,)]
+
+    cursor.close()
+    db.close()
+
+
 def test_statement_cache_performance():
     """Test that cache provides performance improvement for repeated queries"""
     import time

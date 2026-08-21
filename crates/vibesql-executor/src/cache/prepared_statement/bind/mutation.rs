@@ -18,13 +18,40 @@
 //! bind_statement_mut(&mut stmt, &params);
 //! // stmt now has placeholders replaced with literals
 //! ```
+//!
+//! ## Invariant: binding and counting must stay in lockstep
+//!
+//! Every expression position visited here MUST also be visited by the
+//! corresponding `walk_*` function in `vibesql_ast::visitor` (which backs
+//! [`super::count_placeholders`], the source of `PreparedStatement::param_count`),
+//! and vice versa. An asymmetry is a user-visible bug in one of two directions:
+//!
+//! - counted but not bound → the placeholder survives binding and the executor rejects it with
+//!   "Unbound placeholder ?N";
+//! - bound but not counted → `param_count` is too low and `bind()` rejects the call with a spurious
+//!   "Parameter count mismatch".
+//!
+//! See #6359 / PR #6411, where `SELECT ... LIMIT ?` hit the second case.
+//!
+//! Both `walk_expression` and the `bind_*_mut` matches below are exhaustive over
+//! `Expression`, so a *missing variant* cannot slip through. The remaining way to
+//! break the invariant is a `..` rest-pattern inside an otherwise-complete struct
+//! pattern, which silently swallows a newly added `Option<Box<Expression>>` field
+//! — that is exactly how `AggregateFunction { filter }`,
+//! `WindowFunctionSpec::Aggregate { filter }`, and `Like`/`Glob` `{ escape }`
+//! escaped both passes. When adding an expression-bearing field to an AST node,
+//! update the `walk_*` function, the `transform_*` function, and the two
+//! `bind_*_mut` twins together, and add a row to
+//! `test_count_and_bind_stay_in_lockstep` below — that test asserts both
+//! directions mechanically.
 
 #[cfg(test)]
 use std::collections::HashMap;
 
 use vibesql_ast::{
-    DeleteStmt, Expression, FromClause, GroupByClause, GroupingElement, GroupingSet, InsertSource,
-    InsertStmt, MixedGroupingItem, SelectItem, SelectStmt, Statement, UpdateStmt, WhereClause,
+    ConflictTargetItem, DeleteStmt, Expression, FromClause, GroupByClause, GroupingElement,
+    GroupingSet, InsertSource, InsertStmt, MixedGroupingItem, OnConflictAction, SelectItem,
+    SelectStmt, Statement, UpdateStmt, WhereClause,
 };
 use vibesql_types::SqlValue;
 
@@ -95,6 +122,13 @@ fn bind_select_mut(stmt: &mut SelectStmt, params: &[SqlValue]) {
         bind_expression_mut(having, params);
     }
 
+    // Named window definitions (WINDOW w AS (...))
+    if let Some(defs) = &mut stmt.window_definitions {
+        for def in defs {
+            bind_window_spec_mut(&mut def.spec, params);
+        }
+    }
+
     // ORDER BY
     if let Some(order_by) = &mut stmt.order_by {
         for item in order_by {
@@ -102,9 +136,26 @@ fn bind_select_mut(stmt: &mut SelectStmt, params: &[SqlValue]) {
         }
     }
 
+    // LIMIT / OFFSET (`LIMIT ? OFFSET ?`)
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_mut(offset, params);
+    }
+
     // Set operation (UNION, INTERSECT, EXCEPT)
     if let Some(set_op) = &mut stmt.set_operation {
         bind_select_mut(&mut set_op.right, params);
+    }
+
+    // Standalone VALUES rows (`VALUES (?), (?)`)
+    if let Some(rows) = &mut stmt.values {
+        for row in rows {
+            for expr in row {
+                bind_expression_mut(expr, params);
+            }
+        }
     }
 }
 
@@ -164,6 +215,13 @@ fn bind_grouping_set_mut(set: &mut GroupingSet, params: &[SqlValue]) {
 
 /// Bind parameters in an INSERT statement (in-place)
 fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_mut(&mut cte.query, params);
+        }
+    }
+
     match &mut stmt.source {
         InsertSource::Values(rows) => {
             for row in rows {
@@ -178,28 +236,117 @@ fn bind_insert_mut(stmt: &mut InsertStmt, params: &[SqlValue]) {
         }
     }
 
+    // ON CONFLICT clauses (target expressions, target WHERE, DO UPDATE SET)
+    for clause in &mut stmt.on_conflict {
+        if let Some(items) = &mut clause.conflict_target {
+            for item in items {
+                if let ConflictTargetItem::Expression(expr) = item {
+                    bind_expression_mut(expr, params);
+                }
+            }
+        }
+        if let Some(expr) = &mut clause.target_where {
+            bind_expression_mut(expr, params);
+        }
+        if let OnConflictAction::DoUpdate { assignments, where_clause } = &mut clause.action {
+            for assignment in assignments {
+                bind_expression_mut(&mut assignment.value, params);
+            }
+            if let Some(expr) = where_clause {
+                bind_expression_mut(expr, params);
+            }
+        }
+    }
+
     if let Some(updates) = &mut stmt.on_duplicate_key_update {
         for assignment in updates {
             bind_expression_mut(&mut assignment.value, params);
         }
     }
+
+    // RETURNING
+    bind_returning_mut(stmt.returning.as_mut(), params);
 }
 
 /// Bind parameters in an UPDATE statement (in-place)
 fn bind_update_mut(stmt: &mut UpdateStmt, params: &[SqlValue]) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_mut(&mut cte.query, params);
+        }
+    }
+
     for assignment in &mut stmt.assignments {
         bind_expression_mut(&mut assignment.value, params);
     }
 
+    // FROM clause (UPDATE ... FROM syntax)
+    if let Some(froms) = &mut stmt.from_clause {
+        for from in froms {
+            bind_from_clause_mut(from, params);
+        }
+    }
+
     if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
         bind_expression_mut(expr, params);
     }
+
+    // ORDER BY / LIMIT / OFFSET
+    if let Some(order_by) = &mut stmt.order_by {
+        for item in order_by {
+            bind_expression_mut(&mut item.expr, params);
+        }
+    }
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_mut(offset, params);
+    }
+
+    // RETURNING
+    bind_returning_mut(stmt.returning.as_mut(), params);
 }
 
 /// Bind parameters in a DELETE statement (in-place)
 fn bind_delete_mut(stmt: &mut DeleteStmt, params: &[SqlValue]) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_mut(&mut cte.query, params);
+        }
+    }
+
     if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
         bind_expression_mut(expr, params);
+    }
+
+    // ORDER BY / LIMIT / OFFSET (SQLite extension: DELETE ... ORDER BY ... LIMIT ?)
+    if let Some(order_by) = &mut stmt.order_by {
+        for item in order_by {
+            bind_expression_mut(&mut item.expr, params);
+        }
+    }
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_mut(offset, params);
+    }
+
+    // RETURNING
+    bind_returning_mut(stmt.returning.as_mut(), params);
+}
+
+/// Bind parameters in a RETURNING clause (in-place)
+fn bind_returning_mut(items: Option<&mut Vec<SelectItem>>, params: &[SqlValue]) {
+    if let Some(items) = items {
+        for item in items {
+            if let SelectItem::Expression { expr, .. } = item {
+                bind_expression_mut(expr, params);
+            }
+        }
     }
 }
 
@@ -302,9 +449,19 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             }
         }
 
-        Expression::AggregateFunction { args, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 bind_expression_mut(arg, params);
+            }
+            // `walk_expression` counts placeholders in both the intra-aggregate
+            // ORDER BY and the FILTER predicate, so both must be bound here.
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    bind_expression_mut(&mut item.expr, params);
+                }
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_mut(filter_expr, params);
             }
         }
 
@@ -378,10 +535,15 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
             bind_expression_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. }
-        | Expression::Glob { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             bind_expression_mut(inner, params);
             bind_expression_mut(pattern, params);
+            // `LIKE ? ESCAPE ?` parses, and `walk_expression` counts the ESCAPE
+            // operand, so it must be bound here too.
+            if let Some(escape_expr) = escape {
+                bind_expression_mut(escape_expr, params);
+            }
         }
 
         Expression::Exists { subquery, .. } => {
@@ -410,8 +572,16 @@ fn bind_expression_mut(expr: &mut Expression, params: &[SqlValue]) {
 
 fn bind_window_function_spec_mut(spec: &mut vibesql_ast::WindowFunctionSpec, params: &[SqlValue]) {
     match spec {
-        vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
-        | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+        vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+            for arg in args {
+                bind_expression_mut(arg, params);
+            }
+            // `walk_window_function` counts the FILTER predicate, so bind it.
+            if let Some(filter_expr) = filter {
+                bind_expression_mut(filter_expr, params);
+            }
+        }
+        vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
         | vibesql_ast::WindowFunctionSpec::Value { args, .. } => {
             for arg in args {
                 bind_expression_mut(arg, params);
@@ -494,6 +664,13 @@ fn bind_select_named_mut(stmt: &mut SelectStmt, params: &HashMap<String, SqlValu
         bind_expression_named_mut(having, params);
     }
 
+    // Named window definitions (WINDOW w AS (...))
+    if let Some(defs) = &mut stmt.window_definitions {
+        for def in defs {
+            bind_window_spec_named_mut(&mut def.spec, params);
+        }
+    }
+
     // ORDER BY
     if let Some(order_by) = &mut stmt.order_by {
         for item in order_by {
@@ -501,9 +678,26 @@ fn bind_select_named_mut(stmt: &mut SelectStmt, params: &HashMap<String, SqlValu
         }
     }
 
+    // LIMIT / OFFSET (`LIMIT :n OFFSET :m`)
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_named_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_named_mut(offset, params);
+    }
+
     // Set operation
     if let Some(set_op) = &mut stmt.set_operation {
         bind_select_named_mut(&mut set_op.right, params);
+    }
+
+    // Standalone VALUES rows
+    if let Some(rows) = &mut stmt.values {
+        for row in rows {
+            for expr in row {
+                bind_expression_named_mut(expr, params);
+            }
+        }
     }
 }
 
@@ -569,6 +763,13 @@ fn bind_grouping_set_named_mut(set: &mut GroupingSet, params: &HashMap<String, S
 
 #[cfg(test)]
 fn bind_insert_named_mut(stmt: &mut InsertStmt, params: &HashMap<String, SqlValue>) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_named_mut(&mut cte.query, params);
+        }
+    }
+
     match &mut stmt.source {
         InsertSource::Values(rows) => {
             for row in rows {
@@ -583,28 +784,118 @@ fn bind_insert_named_mut(stmt: &mut InsertStmt, params: &HashMap<String, SqlValu
         }
     }
 
+    // ON CONFLICT clauses
+    for clause in &mut stmt.on_conflict {
+        if let Some(items) = &mut clause.conflict_target {
+            for item in items {
+                if let ConflictTargetItem::Expression(expr) = item {
+                    bind_expression_named_mut(expr, params);
+                }
+            }
+        }
+        if let Some(expr) = &mut clause.target_where {
+            bind_expression_named_mut(expr, params);
+        }
+        if let OnConflictAction::DoUpdate { assignments, where_clause } = &mut clause.action {
+            for assignment in assignments {
+                bind_expression_named_mut(&mut assignment.value, params);
+            }
+            if let Some(expr) = where_clause {
+                bind_expression_named_mut(expr, params);
+            }
+        }
+    }
+
     if let Some(updates) = &mut stmt.on_duplicate_key_update {
         for assignment in updates {
             bind_expression_named_mut(&mut assignment.value, params);
         }
     }
+
+    bind_returning_named_mut(stmt.returning.as_mut(), params);
 }
 
 #[cfg(test)]
 fn bind_update_named_mut(stmt: &mut UpdateStmt, params: &HashMap<String, SqlValue>) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_named_mut(&mut cte.query, params);
+        }
+    }
+
     for assignment in &mut stmt.assignments {
         bind_expression_named_mut(&mut assignment.value, params);
     }
 
+    // FROM clause (UPDATE ... FROM syntax)
+    if let Some(froms) = &mut stmt.from_clause {
+        for from in froms {
+            bind_from_clause_named_mut(from, params);
+        }
+    }
+
     if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
         bind_expression_named_mut(expr, params);
     }
+
+    // ORDER BY / LIMIT / OFFSET
+    if let Some(order_by) = &mut stmt.order_by {
+        for item in order_by {
+            bind_expression_named_mut(&mut item.expr, params);
+        }
+    }
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_named_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_named_mut(offset, params);
+    }
+
+    bind_returning_named_mut(stmt.returning.as_mut(), params);
 }
 
 #[cfg(test)]
 fn bind_delete_named_mut(stmt: &mut DeleteStmt, params: &HashMap<String, SqlValue>) {
+    // CTEs
+    if let Some(ctes) = &mut stmt.with_clause {
+        for cte in ctes {
+            bind_select_named_mut(&mut cte.query, params);
+        }
+    }
+
     if let Some(WhereClause::Condition(expr)) = &mut stmt.where_clause {
         bind_expression_named_mut(expr, params);
+    }
+
+    // ORDER BY / LIMIT / OFFSET
+    if let Some(order_by) = &mut stmt.order_by {
+        for item in order_by {
+            bind_expression_named_mut(&mut item.expr, params);
+        }
+    }
+    if let Some(limit) = &mut stmt.limit {
+        bind_expression_named_mut(limit, params);
+    }
+    if let Some(offset) = &mut stmt.offset {
+        bind_expression_named_mut(offset, params);
+    }
+
+    bind_returning_named_mut(stmt.returning.as_mut(), params);
+}
+
+/// Bind named parameters in a RETURNING clause (in-place)
+#[cfg(test)]
+fn bind_returning_named_mut(
+    items: Option<&mut Vec<SelectItem>>,
+    params: &HashMap<String, SqlValue>,
+) {
+    if let Some(items) = items {
+        for item in items {
+            if let SelectItem::Expression { expr, .. } = item {
+                bind_expression_named_mut(expr, params);
+            }
+        }
     }
 }
 
@@ -699,9 +990,17 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             }
         }
 
-        Expression::AggregateFunction { args, .. } => {
+        Expression::AggregateFunction { args, order_by, filter, .. } => {
             for arg in args {
                 bind_expression_named_mut(arg, params);
+            }
+            if let Some(order_items) = order_by {
+                for item in order_items {
+                    bind_expression_named_mut(&mut item.expr, params);
+                }
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_named_mut(filter_expr, params);
             }
         }
 
@@ -775,10 +1074,13 @@ fn bind_expression_named_mut(expr: &mut Expression, params: &HashMap<String, Sql
             bind_expression_named_mut(inner, params);
         }
 
-        Expression::Like { expr: inner, pattern, .. }
-        | Expression::Glob { expr: inner, pattern, .. } => {
+        Expression::Like { expr: inner, pattern, escape, .. }
+        | Expression::Glob { expr: inner, pattern, escape, .. } => {
             bind_expression_named_mut(inner, params);
             bind_expression_named_mut(pattern, params);
+            if let Some(escape_expr) = escape {
+                bind_expression_named_mut(escape_expr, params);
+            }
         }
 
         Expression::Exists { subquery, .. } => {
@@ -811,8 +1113,15 @@ fn bind_window_function_spec_named_mut(
     params: &HashMap<String, SqlValue>,
 ) {
     match spec {
-        vibesql_ast::WindowFunctionSpec::Aggregate { args, .. }
-        | vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
+        vibesql_ast::WindowFunctionSpec::Aggregate { args, filter, .. } => {
+            for arg in args {
+                bind_expression_named_mut(arg, params);
+            }
+            if let Some(filter_expr) = filter {
+                bind_expression_named_mut(filter_expr, params);
+            }
+        }
+        vibesql_ast::WindowFunctionSpec::Ranking { args, .. }
         | vibesql_ast::WindowFunctionSpec::Value { args, .. } => {
             for arg in args {
                 bind_expression_named_mut(arg, params);
@@ -1048,6 +1357,102 @@ mod tests {
             }
         } else {
             panic!("Expected SELECT statement");
+        }
+    }
+
+    /// Regression test for the `LIMIT ?` / `OFFSET ?` gap (#6359, PR #6411):
+    /// LIMIT and OFFSET placeholders must be both counted and bound.
+    #[test]
+    fn test_bind_select_limit_offset_mut() {
+        use crate::cache::prepared_statement::bind::count_placeholders;
+
+        let sql = "SELECT * FROM t ORDER BY a LIMIT ? OFFSET ?";
+        let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+
+        // Counting side: both placeholders are visible to count_placeholders.
+        assert_eq!(count_placeholders(&stmt), 2);
+
+        // Binding side: both placeholders are replaced with literals.
+        let mut bound = stmt.clone();
+        bind_statement_mut(&mut bound, &[SqlValue::Integer(2), SqlValue::Integer(1)]);
+
+        if let Statement::Select(select) = &bound {
+            assert_eq!(select.limit, Some(Expression::Literal(SqlValue::Integer(2))));
+            assert_eq!(select.offset, Some(Expression::Literal(SqlValue::Integer(1))));
+        } else {
+            panic!("Expected SELECT statement");
+        }
+        assert_eq!(count_placeholders(&bound), 0);
+    }
+
+    /// DELETE ORDER BY / LIMIT / OFFSET placeholders were counted but never
+    /// bound, so they reached the executor as "Unbound placeholder" errors.
+    #[test]
+    fn test_bind_delete_limit_mut() {
+        use crate::cache::prepared_statement::bind::count_placeholders;
+
+        let sql = "DELETE FROM t WHERE a = ? ORDER BY b LIMIT ?";
+        let stmt = vibesql_parser::Parser::parse_sql(sql).unwrap();
+        assert_eq!(count_placeholders(&stmt), 2);
+
+        let mut bound = stmt.clone();
+        bind_statement_mut(&mut bound, &[SqlValue::Integer(7), SqlValue::Integer(3)]);
+
+        if let Statement::Delete(delete) = &bound {
+            assert_eq!(delete.limit, Some(Expression::Literal(SqlValue::Integer(3))));
+        } else {
+            panic!("Expected DELETE statement");
+        }
+        assert_eq!(count_placeholders(&bound), 0);
+    }
+
+    /// Counting (`walk_*`) and binding (`bind_*_mut`) must cover exactly the
+    /// same placeholder positions. For each statement below: the count must
+    /// match the number of parameters supplied, and after binding no
+    /// placeholder may survive.
+    #[test]
+    fn test_count_and_bind_stay_in_lockstep() {
+        use crate::cache::prepared_statement::bind::count_placeholders;
+
+        let cases: &[(&str, usize)] = &[
+            ("SELECT * FROM t WHERE a = ?", 1),
+            ("SELECT * FROM t ORDER BY a LIMIT ?", 1),
+            ("SELECT * FROM t ORDER BY a LIMIT ? OFFSET ?", 2),
+            ("SELECT ? FROM t WHERE a = ? LIMIT ?", 3),
+            ("VALUES (?, ?)", 2),
+            ("INSERT INTO t (a, b) VALUES (?, ?) RETURNING a + ?", 3),
+            ("UPDATE t SET a = ? WHERE b = ? RETURNING a + ?", 3),
+            ("DELETE FROM t WHERE a = ? ORDER BY b LIMIT ? OFFSET ?", 3),
+            ("DELETE FROM t WHERE a = ? RETURNING a + ?", 2),
+            // Aggregate sub-clauses: FILTER and the intra-aggregate ORDER BY are
+            // both positions the parser emits placeholders into.
+            ("SELECT count(*) FILTER (WHERE a > ?) FROM t", 1),
+            ("SELECT group_concat(b ORDER BY ?) FROM t", 1),
+            // Same FILTER position, reached through a window function instead.
+            ("SELECT count(*) FILTER (WHERE a > ?) OVER () FROM t", 1),
+            // The ESCAPE operand of LIKE / GLOB is an arbitrary expression.
+            ("SELECT * FROM t WHERE b LIKE ? ESCAPE ?", 2),
+            ("SELECT * FROM t WHERE b GLOB ? ESCAPE ?", 2),
+        ];
+
+        for (sql, expected_params) in cases {
+            let stmt = vibesql_parser::Parser::parse_sql(sql)
+                .unwrap_or_else(|e| panic!("failed to parse {sql}: {e:?}"));
+            assert_eq!(
+                count_placeholders(&stmt),
+                *expected_params,
+                "placeholder count mismatch for: {sql}"
+            );
+
+            let params: Vec<SqlValue> =
+                (0..*expected_params).map(|i| SqlValue::Integer(i as i64 + 1)).collect();
+            let mut bound = stmt.clone();
+            bind_statement_mut(&mut bound, &params);
+            assert_eq!(
+                count_placeholders(&bound),
+                0,
+                "placeholder survived binding (counted but not bound) for: {sql}"
+            );
         }
     }
 
