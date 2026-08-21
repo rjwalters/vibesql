@@ -3,13 +3,11 @@
 //! SQLite re-parses the entire schema twice when a column is dropped
 //! (`alter.c`, `renameTestSchema`):
 //!
-//! 1. **Pre-check** (`zWhen = ""`): any view or trigger that is *already*
-//!    broken — independent of the drop — aborts the ALTER with
-//!    `error in <type> <name>: <inner error>`.
-//! 2. **Post-check** (`zWhen = "after drop column"`): the schema as it would
-//!    look *after* the drop is re-resolved; a view/trigger/table-level CHECK
-//!    left dangling by the drop aborts with
-//!    `error in <type> <name> after drop column: <inner error>`.
+//! 1. **Pre-check** (`zWhen = ""`): any view or trigger that is *already* broken — independent of
+//!    the drop — aborts the ALTER with `error in <type> <name>: <inner error>`.
+//! 2. **Post-check** (`zWhen = "after drop column"`): the schema as it would look *after* the drop
+//!    is re-resolved; a view/trigger/table-level CHECK left dangling by the drop aborts with `error
+//!    in <type> <name> after drop column: <inner error>`.
 //!
 //! Both checks run before any mutation, so a failed DROP COLUMN leaves the
 //! schema and rows untouched (atomicity for free). See issue #5795 /
@@ -116,11 +114,27 @@ fn check_schema_objects(
 // ============================================================================
 
 /// Column resolution against the schema, optionally simulating the drop of
-/// one column from one table (the post-check view of the world).
+/// one column from one table (the post-check view of the world), OR a
+/// pending column rename that has not yet reached the *catalog* copy of the
+/// altered table's schema.
+///
+/// The rename case exists because `columns::execute_rename_column` mutates
+/// only the *storage* `Table` schema up front; the catalog copy (which
+/// `columns_of_relation` reads, since `sqlite_master`/DML resolution reads
+/// the catalog) is not re-synced until `sync_catalog_schema_from_storage`
+/// runs *after* the whole ALTER — including trigger/view rewriting — returns
+/// (`alter/mod.rs`). Without the `renamed` simulation, a post-rename
+/// re-validation (see [`find_ambiguous_column_in_query`]) would resolve the
+/// altered table's columns as they were *before* the rename, silently
+/// missing exactly the newly-introduced ambiguity it exists to catch
+/// (altercol.test 16.1.1).
 struct DropSimulation<'a> {
     db: &'a Database,
     /// `(canonical altered-table name, dropped column)`; `None` = pre-check.
     dropped: Option<(String, &'a str)>,
+    /// `(canonical altered-table name, old column, new column)`; `None` when
+    /// not simulating a rename.
+    renamed: Option<(String, &'a str, &'a str)>,
 }
 
 impl<'a> DropSimulation<'a> {
@@ -133,7 +147,18 @@ impl<'a> DropSimulation<'a> {
                 .unwrap_or_else(|| table.to_string());
             (canonical, column)
         });
-        DropSimulation { db, dropped }
+        DropSimulation { db, dropped, renamed: None }
+    }
+
+    /// Simulate `table`'s `old_col` as already renamed to `new_col`, ahead of
+    /// the catalog re-sync that only happens after the whole ALTER returns.
+    fn new_for_rename(db: &'a Database, table: &str, old_col: &'a str, new_col: &'a str) -> Self {
+        let canonical = db
+            .catalog
+            .get_table(table)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| table.to_string());
+        DropSimulation { db, dropped: None, renamed: Some((canonical, old_col, new_col)) }
     }
 
     /// The (possibly simulated) column names of a FROM-clause relation, or
@@ -146,6 +171,15 @@ impl<'a> DropSimulation<'a> {
             if let Some((altered, dropped_col)) = &self.dropped {
                 if schema.name.eq_ignore_ascii_case(altered) {
                     cols.retain(|c| !c.eq_ignore_ascii_case(dropped_col));
+                }
+            }
+            if let Some((altered, old_col, new_col)) = &self.renamed {
+                if schema.name.eq_ignore_ascii_case(altered) {
+                    for c in cols.iter_mut() {
+                        if c.eq_ignore_ascii_case(old_col) {
+                            *c = (*new_col).to_string();
+                        }
+                    }
                 }
             }
             return Some(cols);
@@ -262,6 +296,97 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
     None
 }
 
+/// First column reference in `query` that resolves *ambiguously* — matching
+/// more than one FROM-clause relation — against the **current** (live)
+/// schema. Used as a post-rename re-validation for views: SQLite re-resolves
+/// the entire view query after `ALTER TABLE ... RENAME COLUMN` rewrites it,
+/// and a reference that was perfectly unambiguous before the rename can
+/// become ambiguous once the renamed column duplicates a name already in
+/// scope elsewhere in the FROM clause (verified against sqlite3 3.51.0,
+/// altercol.test 16.1.1: `SELECT a, d FROM t1, t2` with `t2.d` renamed to
+/// `a` — the *original* `t1.a` reference becomes ambiguous too, not just the
+/// rewritten one).
+///
+/// Unlike [`find_missing_column_in_view`], this takes the query AST directly
+/// (the caller already has the freshly-rewritten, freshly-parsed view text).
+/// The rename has already been applied to the *storage* copy of `table`'s
+/// schema by the time this runs (see `columns::execute_rename_column`'s
+/// ordering: schema rename, then trigger rewrite, then view rewrite) — but
+/// NOT yet to the *catalog* copy, which is only re-synced after the whole
+/// ALTER (including this validation) returns. `table`/`old_column`/
+/// `new_column` drive a [`DropSimulation::new_for_rename`] so `table`'s
+/// columns resolve as they will look once synced, rather than the catalog's
+/// still-stale pre-rename list (without this, `table` would never appear to
+/// own `new_column`, and the ambiguity this function exists to catch could
+/// never be detected).
+pub(super) fn find_ambiguous_column_in_query(
+    query: &SelectStmt,
+    database: &Database,
+    table: &str,
+    old_column: &str,
+    new_column: &str,
+) -> Option<String> {
+    // Same conservative scope-shape restriction as `find_missing_column_in_view`.
+    if query.with_clause.is_some() || query.values.is_some() || query.set_operation.is_some() {
+        return None;
+    }
+    let from = query.from.as_ref()?;
+
+    let sim = DropSimulation::new_for_rename(database, table, old_column, new_column);
+    let mut sources = Vec::new();
+    if !collect_from_sources(from, &sim, &mut sources) {
+        return None;
+    }
+
+    let aliases: Vec<String> = query
+        .select_list
+        .iter()
+        .filter_map(|item| match item {
+            SelectItem::Expression { alias: Some(a), .. } => Some(a.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let scope = ViewScope { sources: &sources, aliases: &aliases };
+
+    for item in &query.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            if let Some(ambiguous) = first_ambiguous_in_expr(expr, &scope) {
+                return Some(ambiguous);
+            }
+        }
+    }
+    if let Some(ambiguous) = first_ambiguous_in_join_conditions(from, &scope) {
+        return Some(ambiguous);
+    }
+    if let Some(where_clause) = &query.where_clause {
+        if let Some(ambiguous) = first_ambiguous_in_expr(where_clause, &scope) {
+            return Some(ambiguous);
+        }
+    }
+    if let Some(group_by) = &query.group_by {
+        for expr in group_by.all_expressions() {
+            if let Some(ambiguous) = first_ambiguous_in_expr(expr, &scope) {
+                return Some(ambiguous);
+            }
+        }
+    }
+    if let Some(having) = &query.having {
+        if let Some(ambiguous) = first_ambiguous_in_expr(having, &scope) {
+            return Some(ambiguous);
+        }
+    }
+    if let Some(order_by) = &query.order_by {
+        for item in order_by {
+            if let Some(ambiguous) = first_ambiguous_in_expr(&item.expr, &scope) {
+                return Some(ambiguous);
+            }
+        }
+    }
+
+    None
+}
+
 /// Flatten a FROM tree into per-relation column sets. Returns `false` (skip
 /// the whole view) on derived tables, VALUES sources, or relations whose
 /// columns cannot be determined.
@@ -304,6 +429,24 @@ fn first_missing_in_join_conditions(from: &FromClause, scope: &ViewScope) -> Opt
                 return Some(missing);
             }
             condition.as_ref().and_then(|cond| first_missing_in_expr(cond, scope))
+        }
+        _ => None,
+    }
+}
+
+/// First *ambiguously*-resolving reference in any JOIN `ON` condition of the
+/// FROM tree. Mirrors [`first_missing_in_join_conditions`] but for the
+/// post-rename ambiguity re-check (see [`find_ambiguous_column_in_query`]).
+fn first_ambiguous_in_join_conditions(from: &FromClause, scope: &ViewScope) -> Option<String> {
+    match from {
+        FromClause::Join { left, right, condition, .. } => {
+            if let Some(ambiguous) = first_ambiguous_in_join_conditions(left, scope) {
+                return Some(ambiguous);
+            }
+            if let Some(ambiguous) = first_ambiguous_in_join_conditions(right, scope) {
+                return Some(ambiguous);
+            }
+            condition.as_ref().and_then(|cond| first_ambiguous_in_expr(cond, scope))
         }
         _ => None,
     }
@@ -380,6 +523,67 @@ fn first_missing_in_expr(expr: &Expression, scope: &ViewScope) -> Option<String>
     }
 }
 
+/// First *ambiguously*-resolving `ColumnRef` in `expr` (pre-order), or `None`.
+/// Mirrors [`first_missing_in_expr`]'s traversal shape exactly, but reports an
+/// unqualified reference that matches more than one FROM-clause relation
+/// instead of one that matches none — the post-rename re-check (see
+/// [`find_ambiguous_column_in_query`]).
+fn first_ambiguous_in_expr(expr: &Expression, scope: &ViewScope) -> Option<String> {
+    match expr {
+        Expression::ColumnRef(col) => check_column_ref_ambiguous(col, scope),
+        Expression::BinaryOp { left, right, .. } => {
+            first_ambiguous_in_expr(left, scope).or_else(|| first_ambiguous_in_expr(right, scope))
+        }
+        Expression::IsDistinctFrom { left, right, .. } => {
+            first_ambiguous_in_expr(left, scope).or_else(|| first_ambiguous_in_expr(right, scope))
+        }
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children.iter().find_map(|c| first_ambiguous_in_expr(c, scope))
+        }
+        Expression::UnaryOp { expr, .. }
+        | Expression::IsNull { expr, .. }
+        | Expression::IsTruthValue { expr, .. }
+        | Expression::Collate { expr, .. }
+        | Expression::Cast { expr, .. } => first_ambiguous_in_expr(expr, scope),
+        Expression::Function { args, .. } => {
+            args.iter().find_map(|a| first_ambiguous_in_expr(a, scope))
+        }
+        Expression::AggregateFunction { args, filter, .. } => args
+            .iter()
+            .find_map(|a| first_ambiguous_in_expr(a, scope))
+            .or_else(|| filter.as_ref().and_then(|f| first_ambiguous_in_expr(f, scope))),
+        Expression::Case { operand, when_clauses, else_result } => operand
+            .as_ref()
+            .and_then(|o| first_ambiguous_in_expr(o, scope))
+            .or_else(|| {
+                when_clauses.iter().find_map(|w| {
+                    w.conditions
+                        .iter()
+                        .find_map(|c| first_ambiguous_in_expr(c, scope))
+                        .or_else(|| first_ambiguous_in_expr(&w.result, scope))
+                })
+            })
+            .or_else(|| else_result.as_ref().and_then(|e| first_ambiguous_in_expr(e, scope))),
+        Expression::InList { expr, values, .. } => first_ambiguous_in_expr(expr, scope)
+            .or_else(|| values.iter().find_map(|e| first_ambiguous_in_expr(e, scope))),
+        Expression::Between { expr, low, high, .. } => first_ambiguous_in_expr(expr, scope)
+            .or_else(|| first_ambiguous_in_expr(low, scope))
+            .or_else(|| first_ambiguous_in_expr(high, scope)),
+        Expression::Like { expr, pattern, .. } => {
+            first_ambiguous_in_expr(expr, scope).or_else(|| first_ambiguous_in_expr(pattern, scope))
+        }
+        Expression::Glob { expr, pattern, .. } => {
+            first_ambiguous_in_expr(expr, scope).or_else(|| first_ambiguous_in_expr(pattern, scope))
+        }
+        Expression::RowValueConstructor(values) => {
+            values.iter().find_map(|v| first_ambiguous_in_expr(v, scope))
+        }
+        // Subqueries, window functions, and anything not enumerated above:
+        // do not descend (assume valid).
+        _ => None,
+    }
+}
+
 /// Resolve one column reference against the view scope. Returns the display
 /// name of the column when it is definitely unresolvable, `None` otherwise
 /// (resolved, or too ambiguous to judge).
@@ -416,6 +620,31 @@ fn check_column_ref(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String>
     }
 }
 
+/// Resolve one column reference against the view scope, reporting it as
+/// *ambiguous* when it is unqualified and matches columns owned by more than
+/// one FROM-clause relation. Schema-qualified references are never ambiguous
+/// (a qualifier picks a single relation by construction), matching
+/// `check_column_ref`'s treatment of the same case.
+fn check_column_ref_ambiguous(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String> {
+    if col.schema_canonical().is_some() || col.table_canonical().is_some() {
+        return None;
+    }
+    let name = col.column_canonical();
+    if is_rowid_pseudo(name) {
+        return None;
+    }
+    let match_count = scope
+        .sources
+        .iter()
+        .filter(|s| s.columns.iter().any(|c| c.eq_ignore_ascii_case(name)))
+        .count();
+    if match_count > 1 {
+        Some(col.column_display().to_string())
+    } else {
+        None
+    }
+}
+
 // ============================================================================
 // Trigger validation
 // ============================================================================
@@ -440,9 +669,8 @@ fn find_trigger_resolution_error(
     let TriggerAction::RawSql(sql) = &trigger.triggered_action;
     let statements = crate::trigger_execution::TriggerFirer::parse_trigger_sql(sql).ok()?;
 
-    // 1) A body statement that reads from / writes to a non-existent table
-    //    aborts the ALTER, matching SQLite's schema re-parse
-    //    (`error in trigger <name>: no such table: main.<t>`).
+    // 1) A body statement that reads from / writes to a non-existent table aborts the ALTER,
+    //    matching SQLite's schema re-parse (`error in trigger <name>: no such table: main.<t>`).
     if let Some(missing) = find_missing_table_in_statements(&statements, sim.db) {
         return Some(format!("no such table: {}", missing));
     }

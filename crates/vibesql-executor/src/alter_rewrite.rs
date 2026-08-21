@@ -6,20 +6,16 @@
 //! preserving the user's whitespace and formatting everywhere except the parts
 //! the ALTER touches (verified against sqlite3 3.51.0):
 //!
-//! - `ALTER TABLE t ADD COLUMN c INTEGER`
-//!   appends `, c INTEGER` immediately before the closing `)` of the column
-//!   list, leaving the rest of the text byte-for-byte unchanged.
-//! - `ALTER TABLE t RENAME TO t2`
-//!   rewrites the table name to the double-quoted new name (`"t2"`), preserving
-//!   everything else.
-//! - `ALTER TABLE t RENAME COLUMN b TO bb`
-//!   rewrites the column name in its definition position, preserving everything
-//!   else.
+//! - `ALTER TABLE t ADD COLUMN c INTEGER` appends `, c INTEGER` immediately before the closing `)`
+//!   of the column list, leaving the rest of the text byte-for-byte unchanged.
+//! - `ALTER TABLE t RENAME TO t2` rewrites the table name to the double-quoted new name (`"t2"`),
+//!   preserving everything else.
+//! - `ALTER TABLE t RENAME COLUMN b TO bb` rewrites the column name in its definition position,
+//!   preserving everything else.
 //!
-//! - `ALTER TABLE t DROP COLUMN c`
-//!   removes the column's definition span (the dropped column's name through the
-//!   start of the next column's name, or — for the last column — from the
-//!   preceding comma to the end of the column list), preserving everything else.
+//! - `ALTER TABLE t DROP COLUMN c` removes the column's definition span (the dropped column's name
+//!   through the start of the next column's name, or — for the last column — from the preceding
+//!   comma to the end of the column list), preserving everything else.
 //!
 //! This module implements those in-place edits at the token level (using the
 //! parser's lexer for span tracking, the same approach as
@@ -392,15 +388,14 @@ pub fn rename_column(
     // must not rewrite an identifier that merely *spells* the old column name but
     // occupies a type-name, function-name, or collation-name slot in the DDL.
     //
-    // - `expect_collation`: the identifier immediately after `COLLATE` names a
-    //   collating sequence (e.g. `COLLATE nocase`), never a column reference.
-    // - `at_def_start`: true at the first token of a top-level column/constraint
-    //   definition (right after the opening `(` and after each depth-1 `,`); the
-    //   first identifier there is the column *name* (a rewrite target), and marks
-    //   the following depth-1 identifier as this column's *type* name.
-    // - `saw_col_name`: set right after a depth-1 column-name identifier; the next
-    //   depth-1 bare identifier is the type name (e.g. the `foo` in `a foo`) and
-    //   must be skipped.
+    // - `expect_collation`: the identifier immediately after `COLLATE` names a collating sequence
+    //   (e.g. `COLLATE nocase`), never a column reference.
+    // - `at_def_start`: true at the first token of a top-level column/constraint definition (right
+    //   after the opening `(` and after each depth-1 `,`); the first identifier there is the column
+    //   *name* (a rewrite target), and marks the following depth-1 identifier as this column's
+    //   *type* name.
+    // - `saw_col_name`: set right after a depth-1 column-name identifier; the next depth-1 bare
+    //   identifier is the type name (e.g. the `foo` in `a foo`) and must be skipped.
     let mut expect_collation = false;
     let mut at_def_start = false;
     let mut saw_col_name = false;
@@ -707,10 +702,9 @@ pub fn drop_column(create_sql: &str, col: &str) -> Option<String> {
         // to its `addColOffset` — the point where ADD COLUMN would insert, which
         // is the comma preceding the first table-level constraint, or the
         // closing `)` when there are no constraints. So:
-        //   - end: if a table constraint follows, the comma just before it;
-        //     otherwise the closing `)`.
-        //   - start: walk back to the preceding `,` (matching SQLite's
-        //     `while(*z!=',') z--`).
+        //   - end: if a table constraint follows, the comma just before it; otherwise the closing
+        //     `)`.
+        //   - start: walk back to the preceding `,` (matching SQLite's `while(*z!=',') z--`).
         let end = match defs[di + 1..].first() {
             Some(constraint) => {
                 // Walk back from the constraint token over whitespace to the
@@ -796,15 +790,30 @@ fn quote_ident(name: &str) -> String {
 }
 
 /// Whether `name` can be emitted as a bare (unquoted) identifier: ASCII
-/// alphanumeric/underscore, not starting with a digit, and non-empty. Used so a
-/// plain column rename produces `bb` rather than `"bb"`.
+/// alphanumeric/underscore, not starting with a digit, non-empty, and not a
+/// reserved SQL keyword. Used so a plain column rename produces `bb` rather
+/// than `"bb"`.
+///
+/// A name that is otherwise shape-valid but lexes as a keyword (e.g. `where`,
+/// `select`) still cannot be emitted bare: `CREATE TABLE t(where INTEGER)`
+/// does not re-parse, because `where` occupies a keyword-token position there,
+/// not an identifier-token position — the same failure mode issue #5619's
+/// re-parseable-on-reload invariant exists to prevent (verified against
+/// sqlite3 3.51.0, altercol.test 6.2/6.3: `RENAME COLUMN a1 TO [where]` emits
+/// the quoted `"where"`). Detected by tokenizing `name` itself and checking
+/// whether the lexer classifies it as a keyword, rather than a
+/// hand-maintained keyword list that could drift from the parser's actual
+/// keyword set.
 fn is_safe_bare_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
         Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
         _ => return false,
     }
-    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    if !chars.all(|c| c == '_' || c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    !matches!(tokenize(name).as_deref(), Some([(Token::Keyword { .. }, _)]))
 }
 
 #[cfg(test)]
@@ -1028,6 +1037,27 @@ mod tests {
     fn rename_column_missing_returns_none() {
         let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
         assert!(rename_column(sql, "t", "zzz", "qqq").is_none());
+    }
+
+    #[test]
+    fn rename_column_to_reserved_keyword_is_quoted() {
+        // altercol 6.2/6.3: renaming a column to a name that lexes as a
+        // reserved keyword (`where`) must emit it quoted, or the persisted
+        // CREATE TABLE text fails to re-parse on the next reload/checkpoint.
+        let sql = "CREATE TABLE blob(a1 INTEGER PRIMARY KEY, rcvid INTEGER)";
+        let out = rename_column(sql, "blob", "a1", "where").unwrap();
+        assert_eq!(out, "CREATE TABLE blob(\"where\" INTEGER PRIMARY KEY, rcvid INTEGER)");
+        // The result must itself still be a valid, re-parseable CREATE TABLE.
+        assert!(tokenize(&out).is_some());
+    }
+
+    #[test]
+    fn rename_column_to_ordinary_name_stays_bare() {
+        // Regression guard: an ordinary safe name must NOT be over-quoted by
+        // the new keyword check.
+        let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
+        let out = rename_column(sql, "t", "a", "aa").unwrap();
+        assert_eq!(out, "CREATE TABLE t (aa INTEGER, b TEXT)");
     }
 
     // Constraint-reference rewriting (altercol.test group 1, sqlite3 3.51.0).
