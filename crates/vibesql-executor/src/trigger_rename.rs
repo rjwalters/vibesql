@@ -37,8 +37,37 @@ pub fn rewrite_table_refs_in_trigger_sql(sql: &str, old_table: &str, new_table: 
         Err(_) => return sql.to_string(),
     };
 
-    // Collect the spans of identifier tokens that should be rewritten.
-    let edits = collect_table_ref_spans(&tokens, old_table);
+    // Collect the spans of identifier tokens that should be rewritten. `true`
+    // enables the "first ON is the trigger's own header target" heuristic,
+    // which only applies to `CREATE TRIGGER ... ON <table> ...` text.
+    let edits = collect_table_ref_spans(&tokens, old_table, true);
+    if edits.is_empty() {
+        return sql.to_string();
+    }
+
+    apply_edits(sql, &edits, new_table)
+}
+
+/// Rewrite occurrences of `old_table` (case-insensitively) that are *table
+/// references* inside the given `CREATE VIEW` SQL text, replacing them with the
+/// double-quoted `new_table`.
+///
+/// Unlike [`rewrite_table_refs_in_trigger_sql`], this does **not** apply the
+/// "first `ON` keyword is a header target" heuristic — a `CREATE VIEW ... AS
+/// SELECT` body has no such header, and its first `ON` (if any) belongs to a
+/// `JOIN ... ON` condition, whose right-hand identifiers are columns, not table
+/// references (issue #6303).
+///
+/// Returns the rewritten SQL. If the text cannot be tokenized (it should always
+/// be tokenizable since it round-tripped through the parser already) the input
+/// is returned unchanged.
+pub fn rewrite_table_refs_in_view_sql(sql: &str, old_table: &str, new_table: &str) -> String {
+    let tokens = match Lexer::new(sql).tokenize_with_spans() {
+        Ok(t) => t,
+        Err(_) => return sql.to_string(),
+    };
+
+    let edits = collect_table_ref_spans(&tokens, old_table, false);
     if edits.is_empty() {
         return sql.to_string();
     }
@@ -67,7 +96,17 @@ fn apply_edits(sql: &str, edits: &[Span], new_table: &str) -> String {
 
 /// Walk the token stream and return the spans of identifier tokens that are
 /// references to `old_table` and should be rewritten.
-fn collect_table_ref_spans(tokens: &[(Token, Span)], old_table: &str) -> Vec<Span> {
+///
+/// `treat_first_on_as_header` enables the `CREATE TRIGGER ... ON <table>`
+/// header heuristic (the first `ON` keyword introduces the trigger's own
+/// subject table, not a JOIN condition). Callers rewriting non-trigger SQL
+/// (e.g. `CREATE VIEW` bodies, which have no such header) must pass `false` so
+/// a `JOIN ... ON` condition is not mistaken for a header target.
+fn collect_table_ref_spans(
+    tokens: &[(Token, Span)],
+    old_table: &str,
+    treat_first_on_as_header: bool,
+) -> Vec<Span> {
     let mut spans = Vec::new();
 
     // Per-paren-depth flag: are we currently inside a FROM list (so a comma
@@ -101,7 +140,7 @@ fn collect_table_ref_spans(tokens: &[(Token, Span)], old_table: &str) -> Vec<Spa
             }
             Token::Keyword { keyword, .. } => {
                 update_from_list_for_keyword(*keyword, &mut from_list_stack);
-                if *keyword == Keyword::On && !seen_header_on {
+                if treat_first_on_as_header && *keyword == Keyword::On && !seen_header_on {
                     seen_header_on = true;
                     expect_header_table = true;
                     continue;

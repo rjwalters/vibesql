@@ -5,7 +5,10 @@ use vibesql_storage::Database;
 
 use crate::{
     errors::ExecutorError,
-    trigger_rename::{rewrite_column_refs_in_trigger_sql, rewrite_table_refs_in_trigger_sql},
+    trigger_rename::{
+        rewrite_column_refs_in_trigger_sql, rewrite_table_refs_in_trigger_sql,
+        rewrite_table_refs_in_view_sql,
+    },
 };
 
 /// Execute RENAME TABLE
@@ -117,6 +120,16 @@ pub(super) fn execute_rename_table(
     // name — self-referential FKs on it are picked up by the same loop.
     rebind_child_foreign_keys(database, &stmt.table_name, &stmt.new_table_name);
 
+    // Propagate the rename into any dependent VIEW definitions that reference the
+    // old table name. SQLite (legacy_alter_table=OFF) rewrites view bodies the
+    // same way it rewrites trigger bodies and FK REFERENCES clauses on
+    // `ALTER TABLE ... RENAME TO`; without this, a view resolving the old name
+    // fails with a stale "table not found" lookup on the next read (issue
+    // #6303). Mirrors `rewrite_views_for_column_rename`'s two-phase compute/
+    // commit shape, but table-reference rewriting is purely lexical (see
+    // `rewrite_table_refs_in_view_sql`) so there is no ambiguity to abort on.
+    rewrite_views_for_table_rename(database, &stmt.table_name, &stmt.new_table_name);
+
     // Invalidate the database-level columnar cache for both old and new table names.
     // The old table name's cache is invalidated since the table no longer exists,
     // and the new table name's cache is invalidated to ensure fresh columnar data.
@@ -220,6 +233,72 @@ fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name
         // The trigger is known to exist (we just read it), so update_trigger
         // cannot fail; ignore the result defensively.
         let _ = database.catalog.update_trigger(updated);
+    }
+}
+
+/// Rewrite all VIEW definitions in the catalog that reference `old_name` as a
+/// table, replacing table references with `new_name`, when
+/// `ALTER TABLE <old_name> RENAME TO <new_name>` runs.
+///
+/// SQLite (`legacy_alter_table=OFF`) rewrites references to a renamed table
+/// inside dependent view bodies and updates the stored `sqlite_master.sql`
+/// text, mirroring what it does for trigger bodies
+/// ([`rewrite_triggers_for_rename`]) and child FK `REFERENCES` clauses
+/// ([`rebind_child_foreign_keys`]). VibeSQL materializes views by executing
+/// their stored `query` AST, so both the verbatim `sql_definition` and the
+/// parsed `query` are rewritten here (the latter by re-parsing the rewritten
+/// text) so the view keeps working after the rename — matching the shape used
+/// by `rewrite_views_for_column_rename`.
+///
+/// Unlike the column-rename cascade, a table-name rewrite is purely lexical
+/// (no schema-aware resolution of unqualified columns is involved), so there
+/// is no ambiguity case to abort on. A rewritten view body should always
+/// re-parse (only an identifier changed), but if it somehow doesn't, only the
+/// verbatim `sql_definition` is updated; the in-memory `query` AST is left
+/// untouched (still naming the old table) rather than risk leaving the view in
+/// a half-updated state. `sqlite_master.sql` reflects the rename either way, so
+/// a fresh load re-resolves the view correctly even in that unexpected case.
+fn rewrite_views_for_table_rename(database: &mut Database, old_name: &str, new_name: &str) {
+    let view_names = database.catalog.list_views();
+    let mut pending: Vec<(String, String)> = Vec::new();
+    for name in view_names {
+        let Some(view) = database.catalog.get_view(&name) else {
+            continue;
+        };
+        // Prefer the verbatim `CREATE VIEW` text; fall back to reconstructing it
+        // from the parsed query when a view was stored without captured source,
+        // so a view still tracks the rename either way.
+        let old_text = view.sql_definition.clone().unwrap_or_else(|| {
+            use vibesql_ast::pretty_print::ToSql;
+            let cols =
+                view.columns.as_ref().map(|c| format!("({})", c.join(", "))).unwrap_or_default();
+            format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
+        });
+        let new_text = rewrite_table_refs_in_view_sql(&old_text, old_name, new_name);
+        if new_text != old_text {
+            pending.push((name, new_text));
+        }
+    }
+
+    for (name, new_text) in pending {
+        match vibesql_parser::parse_with_arena_fallback(&new_text) {
+            Ok(vibesql_ast::Statement::CreateView(cv)) => {
+                if let Some(view) = database.catalog.get_view_mut(&name) {
+                    view.query = *cv.query;
+                    view.sql_definition = Some(new_text);
+                }
+            }
+            _ => {
+                // The rewritten text failed to (re)parse cleanly — extremely
+                // unlikely for a purely lexical identifier swap, but fall back
+                // to updating only the verbatim text so `sqlite_master` still
+                // reflects the rename; the in-memory `query` AST (which never
+                // referenced the table by name at this layer) keeps working.
+                if let Some(view) = database.catalog.get_view_mut(&name) {
+                    view.sql_definition = Some(new_text);
+                }
+            }
+        }
     }
 }
 
