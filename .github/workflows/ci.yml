@@ -73,6 +73,27 @@ jobs:
         run: pnpm -r lint
 
   # ============================================================================
+  # Rust formatting check - guards against the stable/nightly rustfmt drift
+  # described in issue #6326: rustfmt.toml sets several nightly-only options
+  # (wrap_comments, imports_granularity, group_imports,
+  # format_code_in_doc_comments) that a stable-only rustfmt silently ignores,
+  # producing different (more aggressive single-line-collapsing) output than
+  # the committed style. `make fmt-check` pins the exact nightly toolchain
+  # (FMT_TOOLCHAIN in the Makefile) and installs it via rustup if missing, so
+  # this check is deterministic regardless of what's preinstalled on the
+  # runner. Deliberately just a checkout + `make fmt-check` (no
+  # setup-rust/sccache/full toolchain) to keep this job fast.
+  # ============================================================================
+  fmt-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check Rust formatting
+        run: make fmt-check
+
+  # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
   # ============================================================================
   test:
