@@ -164,6 +164,22 @@ fn is_select_stmt_correlated_impl(
         }
     }
 
+    // Check standalone VALUES body (e.g. `VALUES(c)` as a subquery's entire
+    // body, not a FROM-clause VALUES). Issue #6306: without this, a
+    // standalone-VALUES subquery referencing an outer column was
+    // misclassified as non-correlated, executed with no outer context, and
+    // wrongly cached (a correctness hazard: the cached result could be
+    // reused across differing outer rows).
+    if let Some(values) = &stmt.values {
+        for row in values {
+            for expr in row {
+                if is_expression_correlated(expr, outer_schema, subquery_tables, database) {
+                    return true;
+                }
+            }
+        }
+    }
+
     // Check WITH clause (CTEs)
     if let Some(with_clause) = &stmt.with_clause {
         for cte in with_clause {
@@ -304,7 +320,8 @@ fn is_expression_correlated(
                 // catches the self-join case (inner table name == outer table name).
                 for subquery_table in subquery_tables {
                     // Check if this subquery table exists in outer schema
-                    // Compare using case-insensitive matching (lowercase subquery table vs canonical outer)
+                    // Compare using case-insensitive matching (lowercase subquery table vs
+                    // canonical outer)
                     let subquery_table_lower = subquery_table.to_lowercase();
                     if outer_schema
                         .table_schemas
@@ -847,6 +864,89 @@ mod tests {
             is_correlated(&subquery, &outer_schema, None),
             "window aggregate FILTER referencing an outer column must be correlated"
         );
+    }
+
+    /// Regression test for issue #6306: a standalone-VALUES subquery body
+    /// (`stmt.values`, e.g. `VALUES(c)` used as a subquery's entire body
+    /// rather than a FROM-clause VALUES) referencing an outer column must be
+    /// detected as correlated. Previously `is_select_stmt_correlated_impl`
+    /// never scanned `stmt.values`, so such a subquery was misclassified as
+    /// non-correlated, executed with no outer context, and (unsafely) cached.
+    ///
+    /// Models: `SELECT 1 AS c WHERE (SELECT (VALUES(c)))` — outer schema
+    /// exposes alias `c`; the inner subquery's body is `VALUES(c)`.
+    #[test]
+    fn test_standalone_values_subquery_referencing_outer_is_correlated() {
+        // Outer schema: a single-row alias table exposing column "c".
+        let outer_columns = vec![vibesql_catalog::ColumnSchema {
+            name: "c".to_string(),
+            data_type: vibesql_types::DataType::Integer,
+            nullable: true,
+            default_value: None,
+            generated_expr: None,
+            is_exact_integer_type: false,
+            collation: None,
+        }];
+        let outer_schema = CombinedSchema::from_table(
+            "".to_string(),
+            vibesql_catalog::TableSchema::new("".to_string(), outer_columns),
+        );
+
+        // Subquery: VALUES(c) — a standalone VALUES statement, not a FROM
+        // clause VALUES. `c` is not defined in the subquery's own scope
+        // (no FROM), so it must resolve to the outer alias.
+        let subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: Some(vec![vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                "c", false,
+            ))]]),
+        };
+
+        assert!(
+            is_correlated(&subquery, &outer_schema, None),
+            "standalone VALUES subquery referencing an outer alias must be correlated"
+        );
+    }
+
+    /// A standalone-VALUES subquery whose row values don't reference any
+    /// outer column must remain non-correlated (no false positives from the
+    /// new `stmt.values` scan).
+    #[test]
+    fn test_standalone_values_subquery_without_outer_reference_is_not_correlated() {
+        let outer_schema = make_outer_schema();
+
+        let subquery = SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![],
+            into_table: None,
+            into_variables: None,
+            from: None,
+            where_clause: None,
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: Some(vec![vec![Expression::Literal(vibesql_types::SqlValue::Integer(42))]]),
+        };
+
+        assert!(!is_correlated(&subquery, &outer_schema, None));
     }
 
     #[test]
