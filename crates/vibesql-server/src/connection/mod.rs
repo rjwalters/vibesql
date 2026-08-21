@@ -132,6 +132,26 @@ impl ConnectionHandler {
         subscription_manager: Arc<SubscriptionManager>,
         mutation_broadcast_tx: broadcast::Sender<TableMutationNotification>,
     ) -> Self {
+        // Disable Nagle's algorithm on the client-facing socket (#6247).
+        //
+        // Every simple-query response is written as two separate small TCP
+        // segments: `send_query_result` flushes RowDescription+DataRow(s)+
+        // CommandComplete, then `send_ready_for_query` flushes a second,
+        // independent ReadyForQuery message immediately after — with no read
+        // in between. With Nagle's algorithm enabled (the OS default), the
+        // second small write is held back until the first is ACKed; the
+        // client's TCP stack has nothing of its own to piggyback that ACK on
+        // (it's just waiting for the response) so it waits out its delayed-ACK
+        // timer (~40ms on common OSes) before ACKing. That produces a flat,
+        // ~40ms-per-round-trip stall on every statement — reads and writes
+        // alike — regardless of how cheap the underlying query actually is.
+        // The internal Raft transport (`vibesql-consensus/src/tcp.rs`)
+        // already disables Nagle for exactly this reason; the client-facing
+        // wire-protocol socket did not.
+        if let Err(e) = stream.set_nodelay(true) {
+            warn!("Failed to set TCP_NODELAY on client connection from {}: {}", peer_addr, e);
+        }
+
         // Split the TCP stream for async select! usage
         // This allows us to wait on both client messages and broadcast notifications simultaneously
         let (read_half, write_half) = stream.into_split();
