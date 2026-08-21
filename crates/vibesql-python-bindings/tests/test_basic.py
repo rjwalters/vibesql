@@ -543,6 +543,51 @@ def test_statement_cache_hit_reuses_new_params_for_select():
     db.close()
 
 
+def test_parameterized_limit_offset():
+    """`LIMIT ?` / `OFFSET ?` are ordinary DB-API pagination usage.
+
+    Regression test for PR #6411: binding at AST level must cover LIMIT and
+    OFFSET, not just WHERE. Before the binder/counter were made symmetric,
+    the placeholder in LIMIT was invisible to the parameter counter, so this
+    raised a spurious "Parameter count mismatch: expected 0, got 1".
+
+    Each query is run TWICE with different parameter values so the second run
+    exercises the statement-cache HIT path (the path #6359 was about).
+    """
+    db = vibesql.connect()
+    cursor = db.cursor()
+    cursor.execute("CREATE TABLE page (a INTEGER)")
+    for i in range(1, 6):
+        cursor.execute("INSERT INTO page VALUES (?)", (i,))
+
+    # LIMIT ? — first call is a cache MISS, second an identical-SQL cache HIT
+    # with a different value.
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ?", (2,))
+    assert cursor.fetchall() == [(1,), (2,)]
+
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ?", (4,))
+    assert cursor.fetchall() == [(1,), (2,), (3,), (4,)], (
+        "LIMIT ? on a cache HIT must use this call's parameter, not the first call's"
+    )
+
+    # LIMIT ? OFFSET ? — same two-call pattern.
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ? OFFSET ?", (2, 1))
+    assert cursor.fetchall() == [(2,), (3,)]
+
+    cursor.execute("SELECT a FROM page ORDER BY a LIMIT ? OFFSET ?", (3, 2))
+    assert cursor.fetchall() == [(3,), (4,), (5,)]
+
+    # Mixed: a WHERE placeholder and a LIMIT placeholder in one statement.
+    cursor.execute("SELECT a FROM page WHERE a > ? ORDER BY a LIMIT ?", (1, 2))
+    assert cursor.fetchall() == [(2,), (3,)]
+
+    cursor.execute("SELECT a FROM page WHERE a > ? ORDER BY a LIMIT ?", (3, 1))
+    assert cursor.fetchall() == [(4,)]
+
+    cursor.close()
+    db.close()
+
+
 def test_statement_cache_performance():
     """Test that cache provides performance improvement for repeated queries"""
     import time
