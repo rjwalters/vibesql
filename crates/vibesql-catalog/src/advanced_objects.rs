@@ -1,18 +1,5 @@
 //! Advanced SQL:1999 object definitions
-//! Minimal stub implementations for: DOMAIN, SEQUENCE, TYPE, COLLATION, CHARACTER SET, TRANSLATION
-
-/// Domain - User-defined data type with constraints
-#[derive(Debug, Clone, Default)]
-pub struct Domain {
-    pub name: String,
-    // TODO: Add base_type, constraints when implementing full functionality
-}
-
-impl Domain {
-    pub fn new(name: String) -> Self {
-        Domain { name }
-    }
-}
+//! Minimal stub implementations for: SEQUENCE, COLLATION, CHARACTER SET, TRANSLATION
 
 /// Sequence - Auto-incrementing number generator
 #[derive(Debug, Clone)]
@@ -108,19 +95,6 @@ impl Default for Sequence {
             current_value: 1,
             exhausted: false,
         }
-    }
-}
-
-/// User-defined Type (UDT)
-#[derive(Debug, Clone, Default)]
-pub struct UserDefinedType {
-    pub name: String,
-    // TODO: Add fields when implementing full functionality
-}
-
-impl UserDefinedType {
-    pub fn new(name: String) -> Self {
-        UserDefinedType { name }
     }
 }
 
