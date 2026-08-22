@@ -189,6 +189,15 @@
             "command": "${CLAUDE_PROJECT_DIR}/.loom/hooks/guard-loom-workflow.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.loom/hooks/guard-worktree-paths.sh"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
