@@ -374,18 +374,35 @@ impl Parser {
     /// Per SQLite docs (R-37916-47407, R-33693-50180) `X MATCH Y` and
     /// `X REGEXP Y` are pure syntactic sugar for the application-defined
     /// function calls `match(Y, X)` / `regexp(Y, X)` — note the swapped
-    /// argument order (pattern first, expr second). Unlike LIKE/GLOB there is
-    /// no ESCAPE clause for either operator. `fn_name` is used verbatim as the
-    /// function's *display* name (SQLite reports "no such function: REGEXP",
-    /// preserving the operator's case, when no such function is registered).
+    /// argument order (pattern first, expr second). `fn_name` is used
+    /// verbatim as the function's *display* name (SQLite reports "no such
+    /// function: REGEXP", preserving the operator's case, when no such
+    /// function is registered).
+    ///
+    /// SQLite's grammar shares a single `likeop` production across
+    /// LIKE/GLOB/REGEXP/MATCH, so `X MATCH Y ESCAPE Z` and
+    /// `X REGEXP Y ESCAPE Z` are syntactically legal even though MATCH/REGEXP
+    /// have no semantic use for an escape character: the escape expression is
+    /// appended as a third positional argument to the function call, just as
+    /// SQLite's parser does (`sqlite3ExprFunction(pList = [Y, X, E], ...)`).
+    /// Calling the built-in 2-arg `match()`/`regexp()` with three arguments
+    /// then errors at runtime like any other wrong-arity call — matching
+    /// SQLite's own behavior (e_expr-12.3.59/.61/.67/.69: the syntax must
+    /// parse even though the row-scoped table these tests run against never
+    /// actually evaluates the function).
     fn build_match_regexp_call(
         fn_name: &str,
         expr: vibesql_ast::Expression,
         pattern: vibesql_ast::Expression,
+        escape: Option<vibesql_ast::Expression>,
     ) -> vibesql_ast::Expression {
+        let mut args = vec![pattern, expr];
+        if let Some(escape) = escape {
+            args.push(escape);
+        }
         vibesql_ast::Expression::Function {
             name: vibesql_ast::FunctionIdentifier::new(fn_name),
-            args: vec![pattern, expr],
+            args,
             character_unit: None,
         }
     }
@@ -582,22 +599,42 @@ impl Parser {
                 } else if self.peek_keyword(Keyword::Match) {
                     // It's NOT MATCH. Per SQLite (R-37916-47407): "X MATCH Y" is
                     // syntactic sugar for the application-defined function call
-                    // "match(Y, X)" (argument order swapped), no ESCAPE clause.
+                    // "match(Y, X)" (argument order swapped). An optional ESCAPE
+                    // clause is syntactically legal (shared `likeop` grammar
+                    // production with LIKE/GLOB/REGEXP) though semantically
+                    // unused; see `build_match_regexp_call`.
                     self.consume_keyword(Keyword::Match)?;
                     let pattern = self.parse_relational_expression()?;
+                    let escape = if self.peek_keyword(Keyword::Escape) {
+                        self.consume_keyword(Keyword::Escape)?;
+                        Some(self.parse_relational_expression()?)
+                    } else {
+                        None
+                    };
                     left = vibesql_ast::Expression::UnaryOp {
                         op: vibesql_ast::UnaryOperator::Not,
-                        expr: Box::new(Self::build_match_regexp_call("MATCH", left, pattern)),
+                        expr: Box::new(Self::build_match_regexp_call(
+                            "MATCH", left, pattern, escape,
+                        )),
                     };
                     continue;
                 } else if self.peek_keyword(Keyword::Regexp) {
                     // It's NOT REGEXP. Per SQLite (R-33693-50180): "X REGEXP Y" is
-                    // syntactic sugar for the function call "regexp(Y, X)".
+                    // syntactic sugar for the function call "regexp(Y, X)". See
+                    // the MATCH arm above for the optional ESCAPE clause.
                     self.consume_keyword(Keyword::Regexp)?;
                     let pattern = self.parse_relational_expression()?;
+                    let escape = if self.peek_keyword(Keyword::Escape) {
+                        self.consume_keyword(Keyword::Escape)?;
+                        Some(self.parse_relational_expression()?)
+                    } else {
+                        None
+                    };
                     left = vibesql_ast::Expression::UnaryOp {
                         op: vibesql_ast::UnaryOperator::Not,
-                        expr: Box::new(Self::build_match_regexp_call("REGEXP", left, pattern)),
+                        expr: Box::new(Self::build_match_regexp_call(
+                            "REGEXP", left, pattern, escape,
+                        )),
                     };
                     continue;
                 } else if self.peek_keyword(Keyword::Null) {
@@ -844,17 +881,31 @@ impl Parser {
                 continue;
             } else if self.peek_keyword(Keyword::Match) {
                 // It's MATCH (not negated). Per SQLite (R-37916-47407): "X MATCH Y"
-                // is syntactic sugar for the function call "match(Y, X)".
+                // is syntactic sugar for the function call "match(Y, X)". See the
+                // NOT MATCH arm for the optional (semantically unused) ESCAPE clause.
                 self.consume_keyword(Keyword::Match)?;
                 let pattern = self.parse_relational_expression()?;
-                left = Self::build_match_regexp_call("MATCH", left, pattern);
+                let escape = if self.peek_keyword(Keyword::Escape) {
+                    self.consume_keyword(Keyword::Escape)?;
+                    Some(self.parse_relational_expression()?)
+                } else {
+                    None
+                };
+                left = Self::build_match_regexp_call("MATCH", left, pattern, escape);
                 continue;
             } else if self.peek_keyword(Keyword::Regexp) {
                 // It's REGEXP (not negated). Per SQLite (R-33693-50180): "X REGEXP Y"
-                // is syntactic sugar for the function call "regexp(Y, X)".
+                // is syntactic sugar for the function call "regexp(Y, X)". See the
+                // NOT MATCH arm for the optional (semantically unused) ESCAPE clause.
                 self.consume_keyword(Keyword::Regexp)?;
                 let pattern = self.parse_relational_expression()?;
-                left = Self::build_match_regexp_call("REGEXP", left, pattern);
+                let escape = if self.peek_keyword(Keyword::Escape) {
+                    self.consume_keyword(Keyword::Escape)?;
+                    Some(self.parse_relational_expression()?)
+                } else {
+                    None
+                };
+                left = Self::build_match_regexp_call("REGEXP", left, pattern, escape);
                 continue;
             }
 

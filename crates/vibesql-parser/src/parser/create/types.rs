@@ -32,6 +32,22 @@ impl Parser {
             return Ok((vibesql_types::DataType::UserDefined { type_name }, false));
         }
 
+        // SQLite's grammar allows a string literal wherever an identifier is
+        // legal in a type name (the `ids` production is `ID | STRING`), so
+        // `CAST(x AS 'abcd')` and `CAST(x AS 'ab$ $cd')` are syntactically
+        // valid — the string's contents become the type name verbatim and
+        // affinity is derived from it like any other unrecognized type name
+        // (e_expr-12.3.50/.51: neither string matches the CHAR/INT/etc.
+        // substring rules, so both get NUMERIC affinity). Treat it the same
+        // as a delimited identifier: an opaque type name, optionally followed
+        // by a size specifier.
+        if let Token::String(name) = self.peek() {
+            let type_name = name.clone();
+            self.advance();
+            self.consume_optional_type_arg_list()?;
+            return Ok((vibesql_types::DataType::UserDefined { type_name }, false));
+        }
+
         // Get the type name from the token. Note that identifiers are already
         // normalized to lowercase by the lexer, so we use uppercase for matching
         // but store the lowercase form.
