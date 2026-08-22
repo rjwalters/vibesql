@@ -246,3 +246,90 @@ fn indexed_by_partial_index_implied_succeeds() {
     let plan = eqp(&db, "SELECT x FROM o1 INDEXED BY p2 WHERE z=1");
     assert!(plan.contains("INDEX p2"), "expected p2 to be used: {plan}");
 }
+
+/// Regression test for the join-reordering path (#6405 review follow-up).
+///
+/// A comma-style (CROSS-join) FROM clause with 2..=8 tables is *reorder
+/// eligible*, so at runtime it goes through
+/// `reorder::execute_with_join_reordering` rather than the per-table scan
+/// dispatcher that `EXPLAIN QUERY PLAN` walks. When the reorder path dropped
+/// the `INDEXED BY` hint, EXPLAIN claimed `... USING COVERING INDEX x3` while
+/// the actual `SELECT` returned insertion order — a plan/execution divergence
+/// strictly worse than ignoring the hint in both places.
+///
+/// SQLite's own `indexedby.test` cannot catch this: `indexedby-4.1`..`4.4`
+/// are `do_eqp_test`/`catchsql` checks that assert the EXPLAIN text or the
+/// absence of an error and never inspect a single returned row. So this test
+/// deliberately asserts **real row values in real emitted order**.
+///
+/// The second table has exactly one row, so the nested-loop output order is
+/// determined solely by the hinted table's scan order regardless of which
+/// side the optimizer picks as the driver.
+#[test]
+fn indexed_by_forced_through_join_reordering_multi_table_from() {
+    let mut db = Database::new();
+    run(&mut db, "CREATE TABLE t2(a)");
+    run(&mut db, "CREATE INDEX x3 ON t2(a)");
+    // Insertion order deliberately differs from storage-class key order.
+    run(&mut db, "INSERT INTO t2(a) VALUES(NULL)");
+    run(&mut db, "INSERT INTO t2(a) VALUES(1)");
+    run(&mut db, "INSERT INTO t2(a) VALUES('xyz')");
+    run(&mut db, "INSERT INTO t2(a) VALUES(2)");
+    run(&mut db, "INSERT INTO t2(a) VALUES(3.5)");
+    run(&mut db, "CREATE TABLE t9(z INTEGER)");
+    run(&mut db, "INSERT INTO t9 VALUES (1)");
+
+    let sql = "SELECT quote(t2.a) FROM t2 INDEXED BY x3, t9";
+
+    // The actual SELECT — not just its plan — must honor the hint.
+    let rows = query_strings(&db, sql);
+    assert_eq!(
+        rows,
+        vec!["NULL", "1", "2", "3.5", "'xyz'"],
+        "INDEXED BY must still force index x3 when the FROM clause is reorder-eligible"
+    );
+
+    // ...and EXPLAIN QUERY PLAN must agree with what actually ran.
+    let plan = eqp(&db, sql);
+    assert!(plan.contains("INDEX x3"), "expected EQP to show index x3 in use, got: {plan}");
+}
+
+/// The `indexedby-4.x` query shape (`SELECT ... FROM t1 INDEXED BY i1, t2
+/// WHERE a = c`) with **row-level** assertions, which SQLite's EQP-only
+/// version of these cases never makes.
+///
+/// Forcing an index on one side of a reorder-eligible comma join must not
+/// change *which* rows come back: no rows dropped, none duplicated. This is
+/// the correctness half of the regression above (the ordering half is
+/// covered by `indexed_by_forced_through_join_reordering_multi_table_from`).
+/// Row order here depends on the chosen join order, so results are sorted
+/// before comparison — deliberately, and only in this test.
+#[test]
+fn indexed_by_multi_table_join_returns_correct_rows() {
+    let mut db = Database::new();
+    run(&mut db, "CREATE TABLE t1(a INTEGER, b INTEGER)");
+    run(&mut db, "CREATE INDEX i1 ON t1(a)");
+    run(&mut db, "CREATE INDEX i2 ON t1(b)");
+    run(&mut db, "INSERT INTO t1 VALUES (1, 10)");
+    run(&mut db, "INSERT INTO t1 VALUES (2, 20)");
+    run(&mut db, "INSERT INTO t1 VALUES (3, 30)");
+    run(&mut db, "CREATE TABLE t2b(c INTEGER, d INTEGER)");
+    run(&mut db, "INSERT INTO t2b VALUES (2, 200)");
+    run(&mut db, "INSERT INTO t2b VALUES (3, 300)");
+
+    let hinted = "SELECT t1.b FROM t1 INDEXED BY i1, t2b WHERE t1.a = t2b.c";
+    let unhinted = "SELECT t1.b FROM t1, t2b WHERE t1.a = t2b.c";
+
+    let mut hinted_rows = query_ints(&db, hinted);
+    let mut unhinted_rows = query_ints(&db, unhinted);
+    hinted_rows.sort_unstable();
+    unhinted_rows.sort_unstable();
+
+    assert_eq!(hinted_rows, vec![20, 30], "forced index must not drop or duplicate join rows");
+    assert_eq!(hinted_rows, unhinted_rows, "INDEXED BY must not change the join's result set");
+
+    // Forcing `i1` must also be visible in the plan — and, per the test above,
+    // the plan and the execution now agree about it.
+    let plan = eqp(&db, hinted);
+    assert!(plan.contains("INDEX i1"), "expected i1 to be forced: {plan}");
+}

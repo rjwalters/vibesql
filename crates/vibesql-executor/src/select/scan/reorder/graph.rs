@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use vibesql_ast::{Expression, FromClause, JoinType};
+use vibesql_ast::{Expression, FromClause, IndexHint, JoinType};
 
 /// Information about a table extracted from a FROM clause
 #[derive(Debug, Clone)]
@@ -17,6 +17,17 @@ pub(super) struct TableRef {
     pub(super) subquery: Option<Box<vibesql_ast::SelectStmt>>,
     /// SQL:1999 E051-09: Optional column aliases for derived tables
     pub(super) column_aliases: Option<Vec<String>>,
+    /// SQLite index hint (`INDEXED BY <name>` / `NOT INDEXED`) attached to this
+    /// table reference in the FROM clause (issue #6405).
+    ///
+    /// `INDEXED BY` is a per-table directive, so it survives join reordering:
+    /// reordering picks the *join order*, the hint picks the *index* used to
+    /// scan one table. Carrying it here is what keeps `EXPLAIN QUERY PLAN`
+    /// (which walks the FROM clause directly) and actual execution (which goes
+    /// through the reorder optimizer for reorder-eligible FROM clauses) in
+    /// agreement — dropping it here made EXPLAIN claim an index the runtime
+    /// never used.
+    pub(super) index_hint: Option<IndexHint>,
 }
 
 /// Join condition with its associated join type
@@ -29,7 +40,7 @@ pub(super) struct JoinConditionWithType {
 /// Flatten a nested join tree into a list of table references
 pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
     match from {
-        FromClause::Table { name, alias, column_aliases, .. } => {
+        FromClause::Table { name, alias, column_aliases, index_hint, .. } => {
             tables.push(TableRef {
                 name: name.clone(),
                 alias: alias.clone(),
@@ -37,6 +48,7 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 is_subquery: false,
                 subquery: None,
                 column_aliases: column_aliases.clone(),
+                index_hint: index_hint.clone(),
             });
         }
         FromClause::Subquery { query, alias, column_aliases } => {
@@ -47,6 +59,7 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 is_subquery: true,
                 subquery: Some(query.clone()),
                 column_aliases: column_aliases.clone(),
+                index_hint: None,
             });
         }
         FromClause::Values { alias, column_aliases, .. } => {
@@ -57,6 +70,7 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 is_subquery: false,
                 subquery: None,
                 column_aliases: column_aliases.clone(),
+                index_hint: None,
             });
         }
         FromClause::TableFunction { name, alias, column_aliases, .. } => {
@@ -70,6 +84,7 @@ pub(super) fn flatten_join_tree(from: &FromClause, tables: &mut Vec<TableRef>) {
                 is_subquery: false,
                 subquery: None,
                 column_aliases: column_aliases.clone(),
+                index_hint: None,
             });
         }
         FromClause::Join { left, right, .. } => {
