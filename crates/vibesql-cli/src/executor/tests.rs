@@ -2282,6 +2282,47 @@ fn test_attach_reattach_trigger_body_binds_to_main_on_name_collision() {
 }
 
 #[test]
+fn test_attach_reattach_view_on_view_binds_to_the_attached_schema() {
+    // A view whose body references *another view* in the same attachment is
+    // rewritten by the same rule (`v1` -> `aux.v1`), so it exercises the
+    // reader's view-creation ordering as well as the re-binding. With a
+    // same-named `main.t` under the inner view, a mis-bound chain would
+    // silently surface main's rows through two levels of indirection.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view_on_view.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (3)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM aux.t").unwrap();
+        ex.execute("CREATE VIEW aux.v2 AS SELECT x FROM aux.v1").unwrap();
+        assert_eq!(
+            ex.execute("SELECT x FROM aux.v2").unwrap().rows,
+            vec![vec![Some("3".to_string())]],
+            "sanity: the view chain must read the attachment in the defining session"
+        );
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES (999)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        assert_eq!(
+            ex.execute("SELECT x FROM aux.v2").unwrap().rows,
+            vec![vec![Some("3".to_string())]],
+            "a view-on-view chain must re-bind to the attached schema, not main"
+        );
+    }
+}
+
+#[test]
 fn test_attach_reattach_round_trips_partial_and_expression_index() {
     // Partial (WHERE-predicate) and expression indexes on an attached
     // schema's table must round-trip — including the physical index body,
