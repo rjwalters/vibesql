@@ -168,7 +168,7 @@ where
 
     // Fall back to standard execution (recursive left-deep joins)
     match from {
-        vibesql_ast::FromClause::Table { index_hint: _, name, alias, column_aliases, quoted } => {
+        vibesql_ast::FromClause::Table { index_hint, name, alias, column_aliases, quoted } => {
             // Create TableIdentifier with proper case semantics based on quoted flag
             let identifier = TableIdentifier::new(name, *quoted);
             table::execute_table_scan_with_identifier(
@@ -182,6 +182,7 @@ where
                 limit,
                 outer_row,
                 outer_schema,
+                index_hint.as_ref(),
             )
         }
         vibesql_ast::FromClause::Join {

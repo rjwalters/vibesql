@@ -407,6 +407,8 @@ where
                 None,
                 outer_row,
                 outer_schema,
+                None, /* index_hint not supported in join reordering (#6405: single-table FROM
+                       * only) */
             )?
         };
         let scan_time = scan_start.elapsed();
@@ -1081,6 +1083,7 @@ where
         None,
         outer_row,
         outer_schema,
+        None, // index_hint not supported in join reordering (#6405: single-table FROM only)
     )?;
     let target_scan_time = target_scan_start.elapsed();
 
@@ -1186,6 +1189,7 @@ where
             None,
             outer_row,
             outer_schema,
+            None, // index_hint not supported in join reordering (#6405: single-table FROM only)
         )?;
         let table_scan_time = table_start.elapsed();
 
