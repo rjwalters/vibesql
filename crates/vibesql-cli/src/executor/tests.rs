@@ -2844,3 +2844,293 @@ fn test_attach_reattach_round_trips_a_without_rowid_table() {
         "the WITHOUT ROWID clause itself must survive; got:\n{dump}"
     );
 }
+
+// ============================================================================
+// Index maintenance on ATTACHed-schema tables (#6474)
+//
+// An index on an attached schema's table used to be built once by CREATE
+// INDEX and then never maintained: schema-qualified DML (`INSERT INTO aux.t`)
+// reached the storage index-maintenance code as `"aux.t"` while the index's
+// own metadata recorded a bare `table_name = "t"` (with `schema = "aux"`
+// alongside), so the name compare never matched and every INSERT / UPDATE /
+// DELETE silently left the index body stale.
+// ============================================================================
+
+/// Total number of `(key -> row) `entries in an in-memory index body.
+fn index_entry_count(ex: &SqlExecutor, index_name: &str) -> usize {
+    match ex.db.get_index_data(index_name) {
+        Some(vibesql_storage::IndexData::InMemory { data }) => {
+            data.values().map(|rows| rows.len()).sum()
+        }
+        other => panic!("expected an in-memory index body for '{}', got: {:?}", index_name, other),
+    }
+}
+
+/// Number of distinct keys in an in-memory index body.
+fn index_key_count(ex: &SqlExecutor, index_name: &str) -> usize {
+    match ex.db.get_index_data(index_name) {
+        Some(vibesql_storage::IndexData::InMemory { data }) => data.len(),
+        other => panic!("expected an in-memory index body for '{}', got: {:?}", index_name, other),
+    }
+}
+
+/// `true` when the index body holds a key equal to the single numeric `value`.
+///
+/// Keys are normalized for comparison at maintenance time, so the stored
+/// representation is matched structurally rather than by exact `SqlValue`
+/// variant.
+fn index_has_numeric_key(ex: &SqlExecutor, index_name: &str, value: f64) -> bool {
+    match ex.db.get_index_data(index_name) {
+        Some(vibesql_storage::IndexData::InMemory { data }) => data.keys().any(|key| {
+            key.len() == 1
+                && match &key[0] {
+                    vibesql_types::SqlValue::Integer(n) => *n as f64 == value,
+                    vibesql_types::SqlValue::Bigint(n) => *n as f64 == value,
+                    vibesql_types::SqlValue::Smallint(n) => *n as f64 == value,
+                    vibesql_types::SqlValue::Double(f) => *f == value,
+                    vibesql_types::SqlValue::Real(f) => *f == value,
+                    vibesql_types::SqlValue::Float(f) => f64::from(*f) == value,
+                    vibesql_types::SqlValue::Numeric(f) => *f == value,
+                    _ => false,
+                }
+        }),
+        other => panic!("expected an in-memory index body for '{}', got: {:?}", index_name, other),
+    }
+}
+
+/// Build a fresh main database with `aux` attached and an indexed `aux.t`.
+///
+/// Returns the executor plus the `TempDir` that owns both files (the caller
+/// must keep it alive for the duration of the test).
+fn attached_schema_with_indexes() -> (SqlExecutor, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql").to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql").to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path)).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path)).unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+    // `main` holds no `t`, so the unqualified CREATE INDEX target resolves to
+    // the attached schema through the catalog search path.
+    ex.execute("CREATE INDEX aux_plain_idx ON t(x)").unwrap();
+    ex.execute("CREATE INDEX aux_partial_idx ON t(x) WHERE x > 0").unwrap();
+    ex.execute("CREATE INDEX aux_expr_idx ON t(abs(x))").unwrap();
+
+    // Baseline: CREATE INDEX itself already worked before this fix.
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 1);
+
+    (ex, dir)
+}
+
+#[test]
+fn test_attached_schema_indexes_maintained_by_qualified_dml() {
+    // Schema-qualified DML (`INSERT INTO aux.t ...`) — the issue's own repro.
+    let (mut ex, _dir) = attached_schema_with_indexes();
+
+    // INSERT: a row satisfying the partial predicate lands in every index.
+    ex.execute("INSERT INTO aux.t VALUES (8)").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 2, "plain index must see the new row");
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 2, "8 satisfies x > 0");
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 2, "abs(8) must be indexed");
+    assert!(index_has_numeric_key(&ex, "aux_plain_idx", 8.0));
+    assert!(index_has_numeric_key(&ex, "aux_partial_idx", 8.0));
+
+    // INSERT: a row failing the partial predicate is indexed everywhere but
+    // the partial index — the predicate must still be honored.
+    ex.execute("INSERT INTO aux.t VALUES (-5)").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 3);
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 2, "-5 must not enter the partial index");
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 3);
+    assert!(index_has_numeric_key(&ex, "aux_expr_idx", 5.0), "abs(-5) = 5 must be the stored key");
+
+    // UPDATE: the old key leaves and the new key arrives.
+    ex.execute("UPDATE aux.t SET x = 9 WHERE x = 8").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 3);
+    assert!(index_has_numeric_key(&ex, "aux_plain_idx", 9.0), "updated key must be indexed");
+    assert!(!index_has_numeric_key(&ex, "aux_plain_idx", 8.0), "stale key must be removed");
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 2);
+    assert!(index_has_numeric_key(&ex, "aux_partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "aux_expr_idx", 9.0));
+
+    // UPDATE across the partial predicate boundary: 9 -> -9 leaves the
+    // partial index entirely but stays in the full and expression indexes.
+    ex.execute("UPDATE aux.t SET x = -9 WHERE x = 9").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 3);
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 1, "-9 must drop out of x > 0");
+    assert!(!index_has_numeric_key(&ex, "aux_partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "aux_expr_idx", 9.0), "abs(-9) is still 9");
+
+    // DELETE: entries are withdrawn from every index the row was in.
+    ex.execute("DELETE FROM aux.t WHERE x = 7").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 2);
+    assert!(!index_has_numeric_key(&ex, "aux_plain_idx", 7.0));
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 0, "the last x > 0 row is gone");
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 2);
+    assert!(!index_has_numeric_key(&ex, "aux_expr_idx", 7.0));
+}
+
+#[test]
+fn test_attached_schema_indexes_maintained_by_unqualified_dml() {
+    // The same DML written *unqualified*, resolving to the attached table
+    // only through the catalog search path (no `main.t` / `temp.t` shadows
+    // it). This spelling reaches storage with a bare table name and behaved
+    // differently from the qualified spelling before the fix.
+    let (mut ex, _dir) = attached_schema_with_indexes();
+
+    ex.execute("INSERT INTO t VALUES (8)").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 2);
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 2);
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 2);
+    assert!(index_has_numeric_key(&ex, "aux_plain_idx", 8.0));
+
+    ex.execute("UPDATE t SET x = 9 WHERE x = 8").unwrap();
+    assert!(index_has_numeric_key(&ex, "aux_plain_idx", 9.0));
+    assert!(!index_has_numeric_key(&ex, "aux_plain_idx", 8.0));
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 2);
+
+    ex.execute("DELETE FROM t WHERE x = 9").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 1);
+    assert!(!index_has_numeric_key(&ex, "aux_plain_idx", 9.0));
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 1);
+
+    // The rows themselves agree with the index bodies.
+    let result = ex.execute("SELECT x FROM aux.t").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("7".to_string())]]);
+}
+
+#[test]
+fn test_attached_schema_dml_does_not_maintain_main_schema_indexes() {
+    // Cross-schema contamination guard: `main.t` and `aux.t` both exist with
+    // the same bare name and each has its own index. DML against `aux.t` must
+    // maintain only `aux.t`'s index — matching purely on the bare table name
+    // would update both.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql").to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql").to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path)).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path)).unwrap();
+
+    // Create the attached table and its index BEFORE `main.t` exists, so the
+    // unqualified CREATE INDEX target unambiguously resolves to `aux.t`.
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+    ex.execute("CREATE INDEX aux_idx ON t(x)").unwrap();
+
+    // Now a same-named main-schema table with its own index.
+    ex.execute("CREATE TABLE main.t(x INTEGER)").unwrap();
+    ex.execute("INSERT INTO main.t VALUES (100)").unwrap();
+    // `CREATE INDEX ... ON <schema>.<table>` is not accepted by the parser, so
+    // the main-schema index is created unqualified — which now resolves to
+    // `main.t` (main precedes attached databases in the search path).
+    ex.execute("CREATE INDEX main_idx ON t(x)").unwrap();
+
+    assert_eq!(index_entry_count(&ex, "aux_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "main_idx"), 1);
+
+    // DML on the attached table only.
+    ex.execute("INSERT INTO aux.t VALUES (8)").unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_idx"), 2, "aux.t's index must see the new row");
+    assert_eq!(
+        index_entry_count(&ex, "main_idx"),
+        1,
+        "main.t's index must NOT be touched by DML on aux.t"
+    );
+    assert!(!index_has_numeric_key(&ex, "main_idx", 8.0));
+    assert_eq!(index_key_count(&ex, "main_idx"), 1);
+
+    // DML on the main table only, the mirror image.
+    ex.execute("INSERT INTO main.t VALUES (200)").unwrap();
+    assert_eq!(index_entry_count(&ex, "main_idx"), 2);
+    assert_eq!(
+        index_entry_count(&ex, "aux_idx"),
+        2,
+        "aux.t's index must NOT be touched by DML on main.t"
+    );
+    assert!(!index_has_numeric_key(&ex, "aux_idx", 200.0));
+
+    // Both tables still read back exactly their own rows.
+    let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("7".to_string())], vec![Some("8".to_string())]]);
+    let result = ex.execute("SELECT x FROM main.t ORDER BY x").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("100".to_string())], vec![Some("200".to_string())]]);
+}
+
+#[test]
+fn test_attached_schema_index_answered_query_matches_unindexed_query() {
+    // A stale index is worse than no index: a query the planner can answer
+    // from the index body must return exactly the rows a full scan returns.
+    // Compare the indexed answer against the same query after DROP INDEX.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql").to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql").to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path)).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path)).unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER, label TEXT)").unwrap();
+    for i in 0..40 {
+        ex.execute(&format!("INSERT INTO aux.t VALUES ({}, 'seed-{}')", i, i)).unwrap();
+    }
+    ex.execute("CREATE INDEX aux_q_idx ON t(x)").unwrap();
+    ex.execute("CREATE INDEX aux_q_partial_idx ON t(x) WHERE x > 20").unwrap();
+
+    // DML *after* the index was built — the rows that used to go missing.
+    for i in 40..60 {
+        ex.execute(&format!("INSERT INTO aux.t VALUES ({}, 'post-{}')", i, i)).unwrap();
+    }
+    ex.execute("UPDATE aux.t SET label = 'updated' WHERE x = 45").unwrap();
+    ex.execute("DELETE FROM aux.t WHERE x = 3").unwrap();
+
+    // `INDEXED BY` forces the named index scan (#6475), so these really are
+    // index-answered rather than at the planner's cost-based discretion — a
+    // plain `WHERE` on a 59-row table may well be answered by a full scan,
+    // which would hide a stale index instead of exposing it.
+    let indexed_queries = [
+        "SELECT x, label FROM aux.t INDEXED BY aux_q_idx WHERE x = 45",
+        "SELECT x, label FROM aux.t INDEXED BY aux_q_idx WHERE x = 3",
+        "SELECT x, label FROM aux.t INDEXED BY aux_q_idx WHERE x = 55",
+        "SELECT x, label FROM aux.t INDEXED BY aux_q_idx WHERE x > 20 ORDER BY x",
+        "SELECT count(*) FROM aux.t INDEXED BY aux_q_idx WHERE x >= 40",
+    ];
+    // The same queries with no index available at all (run after DROP INDEX).
+    let scan_queries = [
+        "SELECT x, label FROM aux.t WHERE x = 45",
+        "SELECT x, label FROM aux.t WHERE x = 3",
+        "SELECT x, label FROM aux.t WHERE x = 55",
+        "SELECT x, label FROM aux.t WHERE x > 20 ORDER BY x",
+        "SELECT count(*) FROM aux.t WHERE x >= 40",
+    ];
+
+    let with_indexes: Vec<_> =
+        indexed_queries.iter().map(|q| ex.execute(q).unwrap().rows).collect::<Vec<_>>();
+
+    // Sanity-check a couple of answers directly, so an "equal but both wrong"
+    // outcome cannot pass.
+    assert_eq!(
+        with_indexes[0],
+        vec![vec![Some("45".to_string()), Some("updated".to_string())]],
+        "the updated row must be findable through the index"
+    );
+    assert!(with_indexes[1].is_empty(), "the deleted row must not be findable through the index");
+    assert_eq!(
+        with_indexes[2],
+        vec![vec![Some("55".to_string()), Some("post-55".to_string())]],
+        "a row inserted after CREATE INDEX must be findable through the index"
+    );
+
+    ex.execute("DROP INDEX aux_q_idx").unwrap();
+    ex.execute("DROP INDEX aux_q_partial_idx").unwrap();
+
+    for (query, indexed_rows) in scan_queries.iter().zip(with_indexes) {
+        let scanned_rows = ex.execute(query).unwrap().rows;
+        assert_eq!(
+            indexed_rows, scanned_rows,
+            "index-answered result diverged from the full-scan result for: {}",
+            query
+        );
+    }
+}

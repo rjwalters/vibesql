@@ -487,7 +487,11 @@ impl IndexManager {
         >,
     ) -> Result<(), StorageError> {
         for (index_name, metadata) in &self.indexes {
-            if metadata.table_name == table_name && metadata.unique && !metadata.is_partial() {
+            // Schema-aware table matching (#6474): a UNIQUE index on an
+            // attached-schema table stores a bare `table_name` with the schema
+            // recorded separately, while schema-qualified DML arrives here as
+            // `aux.t` — an exact compare would silently skip the constraint.
+            if metadata.matches_table(table_name) && metadata.unique && !metadata.is_partial() {
                 // Skip expression indexes: storage cannot evaluate expressions
                 // to build the key (expect_column_name would panic). The
                 // executor crate maintains expression indexes separately (see

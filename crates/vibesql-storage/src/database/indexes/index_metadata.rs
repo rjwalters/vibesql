@@ -52,6 +52,18 @@ pub(super) fn make_index_key(schema: &str, index_name: &str) -> String {
     }
 }
 
+/// Split a possibly schema-qualified object name into `(schema, bare_name)`.
+///
+/// Returns `None` for an unqualified name, or for a degenerate form where
+/// either half would be empty (`".t"`, `"aux."`), which is treated as a bare
+/// name so no caller can accidentally match on an empty schema.
+///
+/// Only the *first* dot separates the schema, matching
+/// `Catalog::resolve_table_schema_name`'s `split_once('.')`.
+pub(super) fn split_schema_qualifier(name: &str) -> Option<(&str, &str)> {
+    name.split_once('.').filter(|(schema, bare)| !schema.is_empty() && !bare.is_empty())
+}
+
 /// Threshold for choosing disk-backed indexes (number of table rows)
 /// Tables with more rows than this will use disk-backed B+ tree indexes
 /// Set to very high value (100K) to keep Phase 2 conservative - disk-backed
@@ -130,6 +142,67 @@ impl IndexMetadata {
     #[inline]
     pub fn is_partial(&self) -> bool {
         self.where_clause.is_some()
+    }
+
+    /// The schema that owns the table this index is defined on.
+    ///
+    /// `table_name` is stored exactly as the DDL named it — bare (`t`) when
+    /// `CREATE INDEX ... ON t(x)` was written unqualified, qualified
+    /// (`aux.t`) when it was not. The authoritative owning schema is therefore
+    /// the qualifier embedded in `table_name` when present, and the separately
+    /// recorded [`IndexMetadata::schema`] otherwise.
+    #[inline]
+    fn owning_table_schema(&self) -> &str {
+        match split_schema_qualifier(&self.table_name) {
+            Some((schema, _)) => schema,
+            None => self.schema.as_str(),
+        }
+    }
+
+    /// Whether this index is defined on the table named by `table_name`.
+    ///
+    /// `table_name` is the name a DML statement resolved to, which may be
+    /// bare (`t`) or schema-qualified (`aux.t`) depending on how the statement
+    /// spelled it. The index's own `table_name` is likewise bare or qualified
+    /// depending on how its `CREATE INDEX` spelled it, so a plain string
+    /// compare misses whenever the two spellings disagree.
+    ///
+    /// That mismatch is exactly the ATTACH bug in issue #6474: `CREATE INDEX
+    /// aux_idx ON t(x)` inside an attached-schema session stores
+    /// `table_name = "t"`, `schema = "aux"`, while `INSERT INTO aux.t ...`
+    /// arrives here as `"aux.t"` — so DML silently maintained no index at all
+    /// and the index body went stale.
+    ///
+    /// Matching rule (deliberately *additive* — it never removes a match that
+    /// the previous exact compare made, so no existing behaviour regresses):
+    ///
+    /// 1. Exact, case-insensitive match on the stored name — the historical rule.
+    /// 2. Otherwise, a **schema-qualified** probe matches a differently-spelled stored name only
+    ///    when the bare table names agree *and* the probe's schema is this index's owning schema.
+    ///    Requiring the schema to agree is what keeps `INSERT INTO aux.t` from maintaining a
+    ///    same-named `main.t` index (and vice versa).
+    ///
+    /// An **unqualified** probe still matches on the stored name alone. The
+    /// storage layer has no catalog and so cannot resolve which schema a bare
+    /// name refers to; when a bare name is ambiguous across schemas
+    /// (`main.t` and `aux.t` both exist and DML says `INSERT INTO t`) both
+    /// indexes still match, exactly as before this fix.
+    pub(crate) fn matches_table(&self, table_name: &str) -> bool {
+        if self.table_name.eq_ignore_ascii_case(table_name) {
+            return true;
+        }
+
+        let Some((probe_schema, probe_table)) = split_schema_qualifier(table_name) else {
+            return false;
+        };
+
+        let stored_table = match split_schema_qualifier(&self.table_name) {
+            Some((_, bare)) => bare,
+            None => self.table_name.as_str(),
+        };
+
+        stored_table.eq_ignore_ascii_case(probe_table)
+            && self.owning_table_schema().eq_ignore_ascii_case(probe_schema)
     }
 }
 
