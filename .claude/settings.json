@@ -234,6 +234,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.loom/hooks/guard-background-subagents.sh"
+          }
+        ]
+      }
     ]
   }
 }
