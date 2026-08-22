@@ -2779,9 +2779,19 @@ impl SqlExecutor {
     /// ([`schema_qualify::qualify_unqualified_tables`]): an unqualified table
     /// reference left in the body would otherwise late-bind through
     /// `Catalog::get_table`'s temp → main → attached search order and
-    /// silently read `main`'s same-named table. Trigger bodies are the one
-    /// documented gap — see the `KNOWN LIMITATION (#6477)` note at the
-    /// trigger loop below.
+    /// silently read `main`'s same-named table.
+    ///
+    /// Two documented gaps, both pre-existing name-resolution defects that
+    /// reproduce in a live session with no save/reload, and neither of which
+    /// can prevent the `ATTACH` itself from succeeding:
+    ///
+    /// - **Trigger bodies** are not re-bound to `schema_name` — see the `KNOWN LIMITATION (#6477)`
+    ///   note at the trigger loop below.
+    /// - **Index rebuilds are best-effort**: an index whose bare target-table name is shadowed by a
+    ///   same-named table in `main` (or temp, or an earlier attachment) is skipped with a logged
+    ///   warning rather than rebuilt, because the storage-side body build binds by bare name — see
+    ///   the `KNOWN LIMITATION (#6487)` note at the index loop below. The attachment's tables,
+    ///   rows, views, and triggers still re-home normally; only the index is absent.
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
@@ -2858,8 +2868,70 @@ impl SqlExecutor {
                 columns: storage_meta.columns.clone(),
                 where_clause: catalog_meta.where_clause.clone(),
             };
-            vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+            // KNOWN LIMITATION (#6487): the index body build binds by BARE
+            // table name, so it must be skipped when the bare name does not
+            // resolve to this attachment.
+            //
+            // `CreateIndexExecutor` validates against the *qualified* target
+            // (`aux.t`) but `build_btree_index_body` then hands storage the
+            // **bare** name, and storage re-resolves it through the temp →
+            // main → attached search order. When `main` holds a same-named
+            // table that resolution lands on `main.t` instead, with two bad
+            // outcomes: if `main.t` lacks the indexed column the build errors
+            // (`Column 'z' not found in table 't'`), and if it happens to
+            // have one the body is silently built from `main.t`'s rows and
+            // registered as a `main`-schema index. Propagating either from
+            // here would make an attachment that merely *contains* an index
+            // impossible to re-`ATTACH` at all — strictly worse than
+            // pre-#6407, where indexes were never persisted.
+            //
+            // So the rebuild is best-effort: it is attempted only when the
+            // bare name provably resolves back to this attachment (the same
+            // `resolve_table_schema_name` order storage itself uses), and any
+            // error from the attempt is logged and skipped rather than
+            // propagated. A skipped index degrades the reload to "the index
+            // is missing" — exactly the pre-#6407 behavior — while the tables,
+            // their rows, views, and triggers all still re-home and the
+            // `ATTACH` succeeds. Removing this guard is safe (and desirable)
+            // once #6487 makes the body build bind to the qualified name.
+            // `test_attach_reattach_index_skipped_on_main_table_name_collision`
+            // and its `*_with_matching_column` sibling pin both branches.
+            let resolves_to_attachment = self
+                .db
+                .catalog
+                .resolve_table_schema_name(&storage_meta.table_name)
+                .is_some_and(|resolved| resolved.eq_ignore_ascii_case(schema_name));
+            if !resolves_to_attachment {
+                log::warn!(
+                    "ATTACH '{}' AS {}: skipping rebuild of index '{}' on '{}.{}' — the bare \
+                     table name '{}' resolves to another schema (a same-named table shadows the \
+                     attachment), and the index body build would bind to that table instead \
+                     (#6487). The attached data is unaffected; only the index is missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    storage_meta.table_name,
+                );
+                continue;
+            }
+            if let Err(e) =
+                vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
+            {
+                log::warn!(
+                    "ATTACH '{}' AS {}: failed to rebuild index '{}' on '{}.{}': {} — continuing \
+                     without it (#6487). The attached data is unaffected; only the index is \
+                     missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    e,
+                );
+            }
         }
 
         // Views: re-qualify the (already schema-relative) view name and

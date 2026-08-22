@@ -2448,6 +2448,186 @@ fn test_attach_reattach_round_trips_partial_and_expression_index() {
 }
 
 #[test]
+fn test_attach_reattach_index_skipped_on_main_table_name_collision() {
+    // The missing fixture axis for indexes: a *populated* `main` holding a
+    // same-named table (the configuration the view tests already cover).
+    //
+    // The storage-side index body build binds by BARE table name, so with
+    // `main.t` present the rebuild would resolve `t` to `main.t` instead of
+    // `aux.t` (#6487). Here `main.t` has no `z` column at all, so the build
+    // errors with `Column 'z' not found in table 't'`. That error must NOT
+    // propagate: an attachment that merely *contains* an index would then be
+    // impossible to re-`ATTACH`, which is strictly worse than pre-#6407
+    // (where indexes were never persisted at all). The documented behavior is
+    // that the `ATTACH` succeeds, all data is readable, and only the index is
+    // missing.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_collide.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', -1)").unwrap();
+        ex.execute("CREATE INDEX aux_plain_idx ON t(z)").unwrap();
+        ex.execute("CREATE INDEX aux_partial_idx ON t(x) WHERE z > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // A same-named table in `main`, WITHOUT the indexed `z` column.
+        ex.execute("CREATE TABLE t(x TEXT)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-ROW')").unwrap();
+
+        // The ATTACH must succeed — this is the whole point of the guard.
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str))
+            .expect("ATTACH of an index-bearing attachment must succeed despite a main collision");
+
+        // The attachment's data is fully readable.
+        let result = ex.execute("SELECT x, z FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("a".to_string()), Some("10".to_string())],
+                vec![Some("b".to_string()), Some("-1".to_string())],
+            ]
+        );
+
+        // `main.t` is untouched: no index body was built from its rows, and
+        // no stray `main`-schema index was registered under the aux name.
+        let result = ex.execute("SELECT x FROM t").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("MAIN-ROW".to_string())]]);
+        assert!(
+            ex.db.get_index_data("aux_plain_idx").is_none(),
+            "the shadowed index must be skipped entirely, not built against main.t"
+        );
+        assert!(
+            ex.db.get_index_data("aux_partial_idx").is_none(),
+            "the shadowed partial index must be skipped entirely, not built against main.t"
+        );
+
+        // Queries that could have used the missing index still return correct
+        // results via a full scan.
+        let result = ex.execute("SELECT x FROM aux.t WHERE z = 10").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("a".to_string())]]);
+    }
+}
+
+#[test]
+fn test_attach_reattach_index_skipped_on_main_collision_with_matching_column() {
+    // The second half of the same fixture axis: `main.t` collides on name AND
+    // happens to carry the indexed column, so the storage-side bare-name bind
+    // (#6487) would NOT error — it would silently build the index body from
+    // `main.t`'s rows and register it as a `main`-schema index. That is the
+    // more dangerous branch (wrong data rather than a loud failure), so it is
+    // pinned separately: the index must be skipped here too, and `main.t`
+    // must be left without a phantom index.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_collide2.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('AUX-A', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('AUX-B', 20)").unwrap();
+        ex.execute("CREATE UNIQUE INDEX aux_uniq_idx ON t(z)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // Same name AND a compatible `z` column — the silent-wrong-body case.
+        ex.execute("CREATE TABLE t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-A', 100)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-B', 100)").unwrap();
+
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str))
+            .expect("ATTACH must succeed even when main.t is index-build compatible");
+
+        // Both tables read back their own rows.
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("AUX-A".to_string())], vec![Some("AUX-B".to_string())]]
+        );
+        let result = ex.execute("SELECT x FROM t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("MAIN-A".to_string())], vec![Some("MAIN-B".to_string())]]
+        );
+
+        // No index body was built at all — in particular not one filled with
+        // main.t's rows (which, being duplicate 100s, a UNIQUE index over
+        // main.t could not even have represented).
+        assert!(
+            ex.db.get_index_data("aux_uniq_idx").is_none(),
+            "the shadowed unique index must be skipped, not built against main.t"
+        );
+
+        // main.t keeps its duplicate `z` values: no phantom UNIQUE constraint
+        // leaked onto it from the attachment's index.
+        ex.execute("INSERT INTO t VALUES ('MAIN-C', 100)")
+            .expect("main.t must not have acquired the attachment's UNIQUE index");
+    }
+}
+
+#[test]
+fn test_attach_reattach_index_rebuilds_when_main_has_a_differently_named_table() {
+    // Control for the two collision tests above: the guard must be narrow. A
+    // populated `main` that does NOT shadow the attachment's table name still
+    // gets a fully rebuilt index body — the skip is keyed on name resolution,
+    // not merely on "main is non-empty".
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_nocollide.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', -1)").unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(z) WHERE z > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE mt(x TEXT)").unwrap();
+        ex.execute("INSERT INTO mt VALUES ('MAIN-ROW')").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("a".to_string())], vec![Some("b".to_string())]]);
+
+        // The partial index body was rebuilt from aux.t's rows: exactly the
+        // one row matching `z > 0`.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 1,
+                    "partial index body must contain exactly the 1 row matching z > 0, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected a rebuilt in-memory partial index body, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
 fn test_attach_round_trips_view_and_trigger_under_a_different_alias() {
     // The on-disk attached-schema dump is *standalone*: the writer strips the
     // saving session's schema qualifier, and the loader re-qualifies with
