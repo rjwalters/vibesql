@@ -30,9 +30,13 @@
 //!   (plus itself when `RECURSIVE`), and the outer query sees all of them.
 //! * **Derived-table / join / VALUES aliases.** These never appear as a [`FromClause::Table`] name.
 //! * **Table-valued functions** ([`FromClause::TableFunction`]) — a function name, not a table.
-//! * **Column-reference qualifiers** ([`Expression::ColumnRef`]). `SELECT t.x FROM t` keeps working
-//!   after `t` becomes `aux.t` because the executor matches a bare column qualifier against a
-//!   table's unqualified name.
+//! * **Column-reference qualifiers** ([`Expression::ColumnRef`]). A body written `SELECT t.x FROM
+//!   t` qualifies its columns with the table's *unqualified* name, and the executor does not match
+//!   a bare column qualifier against a schema-qualified table. Rather than rewrite every column
+//!   reference (which would need alias tracking to avoid mangling `a.x` in `FROM t AS a`), an
+//!   unaliased table keeps its bare name as an explicit **correlation name**: `FROM t` becomes
+//!   `FROM aux.t AS t`, which is exactly what the unaliased form already meant, so `t.x` keeps
+//!   resolving. A reference that already carries an alias is left alone.
 //!
 //! ## Known limitation
 //!
@@ -152,8 +156,20 @@ fn qualify_select(stmt: &mut SelectStmt, schema: &str, cte_scope: &mut Vec<Strin
 
 fn qualify_from(from: &mut FromClause, schema: &str, cte_scope: &mut Vec<String>) {
     match from {
-        FromClause::Table { name, .. } => {
+        FromClause::Table { name, alias, .. } => {
             if !name.contains('.') && !cte_scope.iter().any(|c| c.eq_ignore_ascii_case(name)) {
+                // Preserve the bare name as an explicit correlation name when
+                // the reference had no alias of its own. A body written
+                // `SELECT t.x FROM t` qualifies its columns with the table's
+                // *unqualified* name, and the executor does not match a bare
+                // column qualifier against a schema-qualified table — so
+                // rewriting the FROM entry alone would turn a working view
+                // into "Column 'x' not found (searched tables: aux.t)".
+                // `FROM aux.t AS t` keeps `t.x` resolving and is exactly what
+                // the unaliased form already means.
+                if alias.is_none() {
+                    *alias = Some(name.clone());
+                }
                 *name = format!("{}.{}", schema, name);
             }
         }
@@ -480,7 +496,12 @@ mod tests {
 
     fn collect_from(from: &FromClause, out: &mut Vec<String>) {
         match from {
-            FromClause::Table { name, .. } => out.push(name.clone()),
+            // Rendered as `name AS alias` so the correlation-name behavior is
+            // visible to the assertions below, not just the rewritten name.
+            FromClause::Table { name, alias, .. } => out.push(match alias {
+                Some(a) => format!("{} AS {}", name, a),
+                None => name.clone(),
+            }),
             FromClause::Subquery { query, .. } => collect_from_names(query, out),
             FromClause::Join { left, right, condition, .. } => {
                 collect_from(left, out);
@@ -518,7 +539,18 @@ mod tests {
 
     #[test]
     fn qualifies_a_bare_from_table() {
-        assert_eq!(qualified_table_names("SELECT x FROM t"), vec!["aux.t"]);
+        assert_eq!(qualified_table_names("SELECT x FROM t"), vec!["aux.t AS t"]);
+    }
+
+    #[test]
+    fn keeps_the_bare_name_as_a_correlation_name_only_when_unaliased() {
+        // `FROM t` -> `FROM aux.t AS t`, so a body that qualifies its columns
+        // with the table's unqualified name (`t.x`) keeps resolving. An
+        // existing alias is authoritative and must not be overwritten.
+        assert_eq!(qualified_table_names("SELECT t.x FROM t"), vec!["aux.t AS t"]);
+        assert_eq!(qualified_table_names("SELECT a.x FROM t AS a"), vec!["aux.t AS a"]);
+        // Nothing is invented for a reference that was not rewritten.
+        assert_eq!(qualified_table_names("SELECT x FROM main.t"), vec!["main.t"]);
     }
 
     #[test]
@@ -534,28 +566,31 @@ mod tests {
     fn qualifies_both_sides_of_a_join() {
         assert_eq!(
             qualified_table_names("SELECT a.x FROM t AS a JOIN u AS b ON a.x = b.x"),
-            vec!["aux.t", "aux.u"]
+            vec!["aux.t AS a", "aux.u AS b"]
         );
     }
 
     #[test]
     fn qualifies_inside_a_from_subquery() {
-        assert_eq!(qualified_table_names("SELECT x FROM (SELECT x FROM t) AS s"), vec!["aux.t"]);
+        assert_eq!(
+            qualified_table_names("SELECT x FROM (SELECT x FROM t) AS s"),
+            vec!["aux.t AS t"]
+        );
     }
 
     #[test]
     fn qualifies_inside_a_scalar_subquery_and_exists() {
         assert_eq!(
             qualified_table_names("SELECT (SELECT MAX(x) FROM u) AS m FROM t"),
-            vec!["aux.t", "aux.u"]
+            vec!["aux.t AS t", "aux.u AS u"]
         );
         assert_eq!(
             qualified_table_names("SELECT x FROM t WHERE EXISTS (SELECT 1 FROM u)"),
-            vec!["aux.t", "aux.u"]
+            vec!["aux.t AS t", "aux.u AS u"]
         );
         assert_eq!(
             qualified_table_names("SELECT x FROM t WHERE x IN (SELECT y FROM u)"),
-            vec!["aux.t", "aux.u"]
+            vec!["aux.t AS t", "aux.u AS u"]
         );
     }
 
@@ -563,7 +598,7 @@ mod tests {
     fn qualifies_both_arms_of_a_set_operation() {
         assert_eq!(
             qualified_table_names("SELECT x FROM t UNION ALL SELECT y FROM u"),
-            vec!["aux.t", "aux.u"]
+            vec!["aux.t AS t", "aux.u AS u"]
         );
     }
 
@@ -573,7 +608,7 @@ mod tests {
         // table `t` *inside* the CTE body still is.
         assert_eq!(
             qualified_table_names("WITH c AS (SELECT x FROM t) SELECT x FROM c"),
-            vec!["aux.t", "c"]
+            vec!["aux.t AS t", "c"]
         );
     }
 

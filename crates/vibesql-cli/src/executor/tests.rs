@@ -2282,6 +2282,56 @@ fn test_attach_reattach_trigger_body_binds_to_main_on_name_collision() {
 }
 
 #[test]
+fn test_attach_reattach_view_body_may_qualify_columns_with_the_bare_table_name() {
+    // Regression guard for the re-qualification itself: a body written
+    // `SELECT t.x FROM t` names its columns after the table's *unqualified*
+    // name, and the executor does not match a bare column qualifier against a
+    // schema-qualified table. Rewriting the FROM entry to `aux.t` without
+    // keeping `t` as a correlation name turns a working view into
+    // "Column 'x' not found (searched tables: aux.t)" — a fresh breakage
+    // introduced by the fix rather than by the bug it fixes. Asserted with
+    // and without a colliding `main.t` so neither the binding nor the
+    // resolution can regress silently.
+    for with_main_collision in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let main_path = dir.path().join("main.vbsql");
+        let main_path_str = main_path.to_str().unwrap().to_string();
+        let aux_path = dir.path().join("aux_bare_qualifier.vbsql");
+        let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+            ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+            ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+            ex.execute("CREATE VIEW aux.v AS SELECT t.x FROM t WHERE t.x > 0").unwrap();
+            assert_eq!(
+                ex.execute("SELECT x FROM aux.v").unwrap().rows,
+                vec![vec![Some("5".to_string())]],
+                "sanity: the body must work in the defining session"
+            );
+            ex.save_database(&main_path_str).unwrap();
+        }
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            if with_main_collision {
+                ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+                ex.execute("INSERT INTO t VALUES (999)").unwrap();
+            }
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+            assert_eq!(
+                ex.execute("SELECT x FROM aux.v").unwrap().rows,
+                vec![vec![Some("5".to_string())]],
+                "bare-table-name column qualifiers must survive re-qualification \
+                 (main collision: {})",
+                with_main_collision
+            );
+        }
+    }
+}
+
+#[test]
 fn test_attach_reattach_view_on_view_binds_to_the_attached_schema() {
     // A view whose body references *another view* in the same attachment is
     // rewritten by the same rule (`v1` -> `aux.v1`), so it exercises the
