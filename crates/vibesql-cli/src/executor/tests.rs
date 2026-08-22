@@ -3261,3 +3261,141 @@ fn test_attached_schema_index_answered_query_matches_unindexed_query() {
         );
     }
 }
+
+// ============================================================================
+// ON CONFLICT DO UPDATE (upsert) index maintenance (issue #6493)
+//
+// `INSERT ... ON CONFLICT(...) DO UPDATE SET ...` correctly updated the row's
+// column values but never called any index-maintenance function, leaving
+// every user-defined index on the table silently stale (the old key was
+// never removed and the new key never added). Unlike #6474/#6492, this
+// reproduces on an ordinary, non-attached table too — it is a distinct bug in
+// the upsert dispatch path (`insert/on_conflict_update.rs`), not an
+// attached-schema table-name-resolution issue.
+// ============================================================================
+
+#[test]
+fn test_upsert_do_update_maintains_plain_index_exact_repro() {
+    // The issue's own repro: querying by the new indexed value must find the
+    // row, and querying by the old (pre-update) indexed value must not.
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, x INTEGER)").unwrap();
+    ex.execute("INSERT INTO t VALUES (1, 100)").unwrap();
+    ex.execute("CREATE INDEX idx ON t(x)").unwrap();
+
+    ex.execute("INSERT INTO t VALUES (1, 999) ON CONFLICT(id) DO UPDATE SET x = excluded.x")
+        .unwrap();
+
+    // The row's column values are updated correctly (this half already worked).
+    let rows = ex.execute("SELECT id, x FROM t").unwrap().rows;
+    assert_eq!(rows, vec![vec![Some("1".to_string()), Some("999".to_string())]]);
+
+    // `INDEXED BY` forces an index-answered scan (#6475), so these exercise
+    // the index body directly rather than the planner's cost-based discretion.
+    let new_key_hit = ex.execute("SELECT id, x FROM t INDEXED BY idx WHERE x = 999").unwrap().rows;
+    assert_eq!(
+        new_key_hit,
+        vec![vec![Some("1".to_string()), Some("999".to_string())]],
+        "the new key must be findable through the index"
+    );
+    let old_key_hit = ex.execute("SELECT id, x FROM t INDEXED BY idx WHERE x = 100").unwrap().rows;
+    assert!(old_key_hit.is_empty(), "the stale key must not remain in the index");
+}
+
+#[test]
+fn test_upsert_do_update_maintains_plain_partial_and_expression_indexes() {
+    // Non-attached counterpart of `test_attached_schema_indexes_maintained_by_qualified_dml`'s
+    // UPDATE coverage, exercised through the upsert DO UPDATE arm instead of a
+    // plain UPDATE: old key removed, new key added, partial predicate
+    // re-evaluated in both directions (row leaves the partial index, then
+    // re-enters it).
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute("CREATE TABLE t(id INTEGER PRIMARY KEY, x INTEGER)").unwrap();
+    ex.execute("INSERT INTO t VALUES (1, 8)").unwrap();
+    ex.execute("CREATE INDEX plain_idx ON t(x)").unwrap();
+    ex.execute("CREATE INDEX partial_idx ON t(x) WHERE x > 0").unwrap();
+    ex.execute("CREATE INDEX expr_idx ON t(abs(x))").unwrap();
+    assert_eq!(index_entry_count(&ex, "plain_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "partial_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "expr_idx"), 1);
+
+    // Upsert DO UPDATE: the old key (8) leaves and the new key (9) arrives.
+    ex.execute("INSERT INTO t VALUES (1, 9) ON CONFLICT(id) DO UPDATE SET x = excluded.x").unwrap();
+    assert_eq!(index_entry_count(&ex, "plain_idx"), 1);
+    assert!(index_has_numeric_key(&ex, "plain_idx", 9.0), "updated key must be indexed");
+    assert!(!index_has_numeric_key(&ex, "plain_idx", 8.0), "stale key must be removed");
+    assert_eq!(index_entry_count(&ex, "partial_idx"), 1);
+    assert!(index_has_numeric_key(&ex, "partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "expr_idx", 9.0));
+
+    // Upsert DO UPDATE across the partial predicate boundary: 9 -> -9 leaves
+    // the partial index entirely but stays in the full and expression indexes
+    // (the "row moves out of the partial index" edge case).
+    ex.execute("INSERT INTO t VALUES (1, -9) ON CONFLICT(id) DO UPDATE SET x = excluded.x")
+        .unwrap();
+    assert_eq!(index_entry_count(&ex, "plain_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "partial_idx"), 0, "-9 must drop out of x > 0");
+    assert!(!index_has_numeric_key(&ex, "partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "expr_idx", 9.0), "abs(-9) is still 9");
+
+    // Upsert DO UPDATE back across the boundary: -9 -> 5 re-enters the
+    // partial index (the "row moves into the partial index" edge case).
+    ex.execute("INSERT INTO t VALUES (1, 5) ON CONFLICT(id) DO UPDATE SET x = excluded.x").unwrap();
+    assert_eq!(index_entry_count(&ex, "plain_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "partial_idx"), 1, "5 satisfies x > 0 again");
+    assert!(index_has_numeric_key(&ex, "partial_idx", 5.0));
+    assert!(index_has_numeric_key(&ex, "expr_idx", 5.0));
+}
+
+/// Build a fresh main database with `aux` attached, an attached-schema table
+/// with a PRIMARY KEY (needed as an upsert conflict target), and plain,
+/// partial, and expression indexes on it.
+fn attached_schema_with_indexes_and_pk() -> (SqlExecutor, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql").to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql").to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path)).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path)).unwrap();
+    ex.execute("CREATE TABLE aux.t(id INTEGER PRIMARY KEY, x INTEGER)").unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (1, 8)").unwrap();
+    ex.execute("CREATE INDEX aux_plain_idx ON t(x)").unwrap();
+    ex.execute("CREATE INDEX aux_partial_idx ON t(x) WHERE x > 0").unwrap();
+    ex.execute("CREATE INDEX aux_expr_idx ON t(abs(x))").unwrap();
+
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 1);
+    assert_eq!(index_entry_count(&ex, "aux_expr_idx"), 1);
+
+    (ex, dir)
+}
+
+#[test]
+fn test_upsert_do_update_maintains_indexes_attached_schema() {
+    // Attached-schema counterpart (issue #6493): the upsert DO UPDATE arm
+    // must maintain indexes on an attached-schema table exactly as it does on
+    // a main-schema table. This is distinct from #6474/#6492 (attached-schema
+    // table-name resolution for plain INSERT/UPDATE/DELETE) — it exercises
+    // the ON CONFLICT DO UPDATE dispatch path specifically.
+    let (mut ex, _dir) = attached_schema_with_indexes_and_pk();
+
+    // Schema-qualified upsert.
+    ex.execute("INSERT INTO aux.t VALUES (1, 9) ON CONFLICT(id) DO UPDATE SET x = excluded.x")
+        .unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_plain_idx"), 1);
+    assert!(index_has_numeric_key(&ex, "aux_plain_idx", 9.0), "updated key must be indexed");
+    assert!(!index_has_numeric_key(&ex, "aux_plain_idx", 8.0), "stale key must be removed");
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 1);
+    assert!(index_has_numeric_key(&ex, "aux_partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "aux_expr_idx", 9.0));
+
+    // Unqualified upsert, resolving through the catalog search path (no
+    // `main.t` shadows it) — matching
+    // `test_attached_schema_indexes_maintained_by_unqualified_dml`'s coverage
+    // of the unqualified spelling.
+    ex.execute("INSERT INTO t VALUES (1, -9) ON CONFLICT(id) DO UPDATE SET x = excluded.x")
+        .unwrap();
+    assert_eq!(index_entry_count(&ex, "aux_partial_idx"), 0, "-9 must drop out of x > 0");
+    assert!(!index_has_numeric_key(&ex, "aux_partial_idx", 9.0));
+    assert!(index_has_numeric_key(&ex, "aux_expr_idx", 9.0), "abs(-9) is still 9");
+}
