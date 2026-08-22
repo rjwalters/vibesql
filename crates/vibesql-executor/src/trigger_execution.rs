@@ -798,15 +798,36 @@ impl TriggerFirer {
         let saved_changes = db.last_changes_count();
 
         // Scope unqualified table-name resolution in the body to the trigger's
-        // own schema. SQLite resolves the names in a non-temp trigger's body
-        // against the database the trigger belongs to, so a `main` trigger
-        // cannot see a TEMP table of the same name — an unqualified reference to
-        // a table that exists only in temp fails with `no such table: main.<t>`
-        // (trigger1-3.2..3.5). A TEMP trigger keeps normal resolution (temp
-        // shadows main). Nested trigger bodies restore the prior value, so a
-        // temp trigger fired from within a main trigger regains temp visibility.
-        let suppress_temp = !trigger.is_temp();
-        let prev_suppress = db.catalog.set_suppress_temp_shadowing(suppress_temp);
+        // own schema — and ONLY that schema, never falling back to any other
+        // (#6477). SQLite resolves the names in a trigger's body against the
+        // database the trigger belongs to:
+        //   - a `main` trigger cannot see a TEMP table of the same name — an unqualified reference
+        //     to a table that exists only in temp fails with `no such table: main.<t>`
+        //     (trigger1-3.2..3.5);
+        //   - a TEMP trigger keeps normal temp-first resolution (temp shadows main), so it is left
+        //     unrestricted;
+        //   - a trigger owned by an ATTACHed schema resolves its body's unqualified names only
+        //     within that attachment, never `main` or any other attachment — otherwise a same-named
+        //     `main` table silently wins and the write lands in the wrong database (#6477).
+        // Nested trigger bodies restore the prior value, so a trigger fired
+        // from within another trigger's body regains its own schema's view.
+        // The qualifier is canonicalized here because it is used downstream as
+        // a storage lookup *key* (`"<schema>.<table>"` in `Database::tables`),
+        // not just as a comparison operand: the parser stores a trigger's
+        // schema qualifier verbatim as written (`MAIN.tr`, `AUX.tr`) on the
+        // premise that schema comparisons are case-insensitive everywhere
+        // downstream, so a raw `format!("{schema}.{name}")` key would miss the
+        // canonically-named entry and break the trigger on every firing.
+        // `canonical_schema_name` also maps `temp` to the session's temp
+        // schema name.
+        let is_temp_trigger = trigger.is_temp();
+        let owning_schema = match trigger.schema.as_deref() {
+            Some(s) => db.catalog.canonical_schema_name(s),
+            None => vibesql_catalog::DEFAULT_SCHEMA.to_string(),
+        };
+        let restriction = if is_temp_trigger { None } else { Some(owning_schema.clone()) };
+        let prev_restriction =
+            db.catalog.set_restrict_unqualified_resolution_to_schema(restriction);
 
         // Execute each statement in the trigger body with trigger context.
         // A RAISE(IGNORE) inside any statement abandons the rest of this
@@ -823,27 +844,29 @@ impl TriggerFirer {
                 Err(e) => {
                     // Restore before propagating so a failed trigger body does
                     // not corrupt the caller's changes() value or leak the
-                    // temp-shadowing suppression to the caller.
-                    db.catalog.set_suppress_temp_shadowing(prev_suppress);
+                    // resolution restriction to the caller.
+                    db.catalog.set_restrict_unqualified_resolution_to_schema(prev_restriction);
                     db.set_last_changes_count(saved_changes);
                     // A trigger body statement referencing a table that does not
-                    // exist errors `no such table: main.<name>` when the trigger
-                    // itself is NOT in the temp schema — sqlite3 resolves an
-                    // unqualified trigger-body table name in the trigger's own
+                    // exist errors `no such table: <schema>.<name>` when the
+                    // trigger itself is NOT in the temp schema — sqlite3 resolves
+                    // an unqualified trigger-body table name in the trigger's own
                     // schema and qualifies the "missing" report with it
                     // (R-28818-63526; e_delete-2.2.1.1 / e_update-2.2.1). A TEMP
                     // trigger's missing target is left unqualified instead
-                    // (R-31567-38587). With temp shadowing suppressed above, an
-                    // unqualified body reference to a table that exists only in
-                    // temp actually fails the lookup (not just the message),
-                    // matching SQLite (trigger1-3.2..3.5).
-                    let e = if suppress_temp { e.with_main_schema_qualifier() } else { e };
+                    // (R-31567-38587). With resolution restricted above, an
+                    // unqualified body reference to a table that does not exist
+                    // in the trigger's own schema actually fails the lookup (not
+                    // just the message), matching SQLite (trigger1-3.2..3.5) and,
+                    // for an ATTACHed-schema trigger, #6477.
+                    let e =
+                        if !is_temp_trigger { e.with_schema_qualifier(&owning_schema) } else { e };
                     return Err(e);
                 }
             }
         }
 
-        db.catalog.set_suppress_temp_shadowing(prev_suppress);
+        db.catalog.set_restrict_unqualified_resolution_to_schema(prev_restriction);
         db.set_last_changes_count(saved_changes);
         Ok(outcome)
     }
