@@ -6891,30 +6891,66 @@ array set vibesql_temp_master_ok {
 # there). Deliberately narrower than #6404's proposed blanket un-skip across
 # all ~131 ATTACH-touching files in the suite.
 #
-# e_droptrigger.test and e_dropview.test were investigated for this list and
-# deliberately EXCLUDED: both drive `PRAGMA database_list` then query every
-# attached database's `<name>.sqlite_master` via shared helpers
-# (list_all_triggers / list_all_views / list_all_data). VibeSQL's ATTACH
-# engine support (#6310/#6362) does not yet implement `<alias>.sqlite_master`
-# introspection at all — confirmed directly against a single unbroken CLI
-# session, no shim involved:
+# e_droptrigger.test and e_dropview.test were both investigated for this list.
+# Originally BOTH were excluded: they drive `PRAGMA database_list` then query
+# every attached database's `<name>.sqlite_master` via shared helpers
+# (list_all_triggers / list_all_views / list_all_data), and VibeSQL's ATTACH
+# engine support (#6310/#6362) did not implement `<alias>.sqlite_master`
+# introspection AT ALL at the time — confirmed directly against a single
+# unbroken CLI session, no shim involved:
 #   $ vibesql t.db -c "ATTACH 't.db2' AS aux; SELECT name FROM aux.sqlite_master;"
 #   Error executing statement 2: Table 'aux.sqlite_master' not found
 # Adding either file here made genuinely-replayed ATTACH state reach that
 # engine gap, converting previously-graceful "list omits the aux entries, one
 # assertion mismatches" failures into hard errors that cascade into file-scope
 # aborts (e_dropview.test regressed 21/43 pass -> 15/44 pass in local testing).
-# e_droptrigger.test has a SECOND, independent blocker even setting aux.*
-# aside: its droptrigger_reopen_db helper creates a TEMP table `t1` with no
-# coexisting main-schema `t1`, so the shim's strip_temp_table_keyword demotes
-# it to a real persistent table (#5591) — the trigger `CREATE TRIGGER tr1 ...
-# ON t1` this same helper then declares therefore lands in the MAIN trigger
-# namespace instead of TEMP, colliding with the file's other `CREATE TRIGGER
-# tr1 ... ON t2` ("Trigger 'tr1' already exists"), on literally the file's
-# first setup call — same class of TEMP-table-demotion limitation already
-# documented for table.test/autoinc.test in #6429. Both are tracked as
-# follow-up issues rather than fixed here (engine-level work, out of scope for
-# a TCL-shim-only issue).
+#
+# #6436 (merged, PR #6454) fixed `<alias>.sqlite_master`/`sqlite_schema`
+# TABLE-level alias dispatch, closing the hard-error class above — re-verified
+# directly: `ATTACH ...; SELECT name FROM aux.sqlite_master` now returns TABLE
+# rows instead of erroring. This un-blocked e_dropview.test (#6459): re-adding
+# it to this list no longer cascades into hard-error aborts (verified: same 15
+# pre-existing failures reproduce unchanged, zero previously-passing tests
+# regressed) and, combined with populating vibesql_attach_ok below for its
+# individually-verified-safe do_test names, measured net effect 21/36 -> 22/36
+# passing (one new pass, `e_dropview-3.5.2`) plus six previously-blanket-SKIPPED
+# tests now genuinely running with diagnosable `failed` outcomes instead of
+# being hidden behind a skip. A NARROWER, separate residual engine gap remains
+# and blocks most of e_dropview.test's other failures: `<alias>.sqlite_master`
+# still omits VIEWS (only tables are returned) for an attached schema —
+# reproduced directly, no shim involved:
+#   $ vibesql t.db -c "ATTACH 't.db2' AS aux; CREATE TABLE aux.t1(a,b); \
+#         CREATE VIEW aux.v1 AS SELECT * FROM aux.t1; \
+#         SELECT name,type FROM aux.sqlite_master;"
+#   (returns only t1/table — v1/view is missing from the result set, even
+#   though `SELECT * FROM aux.v1` itself works)
+# This blocks e_dropview.test's `list_all_views`/`list_all_data` helpers from
+# ever seeing aux-schema views, so its 1.*/3.*/e_dropview-filescope-err.1
+# failures persist. A SECOND, unrelated engine gap also surfaces here: `CREATE
+# VIEW ... AS SELECT ... FROM t1` (unqualified `t1`) resolves `t1` against the
+# TEMP schema when a same-named TEMP table coexists with a MAIN table,
+# whereas SQLite resolves a CREATE VIEW's unqualified reference to MAIN in
+# this situation — reproduced directly, no shim/ATTACH involved:
+#   $ vibesql t.db -c "CREATE TABLE t1(a,b); INSERT INTO t1 VALUES('a main','b main'); \
+#         CREATE TEMP TABLE t1(a,b); INSERT INTO temp.t1 VALUES('a temp','b temp'); \
+#         CREATE VIEW nv AS SELECT * FROM t1 AS x, t1 AS y; SELECT * FROM nv;"
+#   (returns the TEMP rows; real SQLite returns the MAIN rows here)
+# This blocks e_dropview.test's 2.1 test (and contributes to 1.1/1.2's
+# temp-view naming artifact). Both gaps are genuine VibeSQL engine work,
+# tracked in follow-up issues rather than fixed here (out of scope for a
+# TCL-shim-only issue).
+#
+# e_droptrigger.test remains EXCLUDED: it has a SECOND, independent blocker
+# even setting aux.* aside — its droptrigger_reopen_db helper creates a TEMP
+# table `t1` with no coexisting main-schema `t1`, so the shim's
+# strip_temp_table_keyword demotes it to a real persistent table (#5591) —
+# the trigger `CREATE TRIGGER tr1 ... ON t1` this same helper then declares
+# therefore lands in the MAIN trigger namespace instead of TEMP, colliding
+# with the file's other `CREATE TRIGGER tr1 ... ON t2` ("Trigger 'tr1' already
+# exists"), on literally the file's first setup call — same class of
+# TEMP-table-demotion limitation already documented for table.test/autoinc.test
+# in #6429. Tracked as a follow-up issue rather than fixed here (engine-level
+# work, out of scope for a TCL-shim-only issue).
 variable vibesql_attach_replay_files
 array set vibesql_attach_replay_files {
     trigger1 1
@@ -6923,13 +6959,14 @@ array set vibesql_attach_replay_files {
     table 1
     autoinc 1
     pragma4 1
+    e_dropview 1
 }
 
 # e_createtable.test's ATTACH usage (#6404) is a single unconditional
 # `ATTACH 'test.db2' AS auxa; ATTACH 'test.db3' AS auxb;` at e_createtable-1.0
 # (line ~350), with no DETACH anywhere in the file — the same simple shape as
-# e_expr.test's single ATTACH above. Unlike e_droptrigger.test/e_dropview.test
-# (excluded above), most of e_createtable's ~150 downstream auxa./auxb.-scoped
+# e_expr.test's single ATTACH above. Unlike e_droptrigger.test (excluded
+# above), most of e_createtable's ~150 downstream auxa./auxb.-scoped
 # assertions are plain `CREATE TABLE auxa.foo(...)` / `unknown database %s`
 # error-message checks that never touch `<alias>.sqlite_master` — they only
 # need the attached alias itself to still exist in the next batch, which
@@ -7039,6 +7076,12 @@ array set vibesql_attach_ok {
     pragma4-4.1.1 1
     pragma4-4.2.1 1
     pragma4-4.3.1 1
+    e_dropview-3.5.0 1
+    e_dropview-3.5.1 1
+    e_dropview-3.5.2 1
+    e_dropview-5.1 1
+    e_dropview-5.2 1
+    e_dropview-5.3 1
 }
 
 # e_createtable-1.0 (`ATTACH 'test.db2' AS auxa; ATTACH 'test.db3' AS auxb;`)
@@ -7122,6 +7165,37 @@ array set vibesql_attach_ok {
 #     TABLE` across independent process invocations of the same file persist
 #     correctly), confirming the bug is in this shim bookkeeping, not
 #     storage-layer persistence.
+
+# e_dropview-3.5.0/3.5.1/3.5.2 and e_dropview-5.1/5.2/5.3 (#6459): unlike
+# e_createtable-1.0/table-14.3/autoinc-5.1 above, being merely in
+# vibesql_attach_replay_files is NOT a no-op for e_dropview.test — most of the
+# file's tests reach the shim's ATTACH-replay/register_attach_state machinery
+# fine because their `execsql`/tclquery scripts contain no literal
+# "ATTACH "/"DETACH "/`aux\d*\.\w+` text for uses_sqlite_internals to catch (see
+# the do_select_tests -repair/-tclquery shape: the setup SQL that does the
+# ATTACHing runs via a bare `eval $repair` outside do_test's skip-check, and
+# the do_test-visible script for most tests is just the bare `list_all_views`
+# proc call or a plain `DROP VIEW <name>` with no schema qualifier). Only
+# these six specific do_test bodies literally reference `aux.<name>` in their
+# own SQL/tclquery text (3.5.0/3.5.1/3.5.2's `SELECT/DROP ... aux.v2`; 5.1/5.2/
+# 5.3's `-tclquery` block, which contains a COMMENTED-OUT
+# `#expr {[list_all_views] == "... aux.v1 aux.v2 aux.v3"}` line whose literal
+# "aux.v1" text still matches the regex despite being inside a Tcl comment) —
+# so only these six were individually gated and needed an explicit
+# vibesql_attach_ok entry to stop being blanket-skipped. Verified directly:
+# adding these six converts the file from 21/36 scored (7 blanket SKIPPED,
+# 15 FAILED) to 22/36 scored (0 skipped, 21 FAILED) — one new pass
+# (e_dropview-3.5.2, a do_catchsql_test whose expected error coincides with
+# the residual engine gap's actual error), the previously-hidden six now
+# genuinely running with diagnosable `failed` outcomes (including
+# e_dropview-3.6.0, which stops "cascading from skipped ATTACH test" once
+# 3.5.0-3.5.2 no longer set ::attach_skipped), and the SAME 15 pre-existing
+# failures reproduce byte-for-byte unchanged — zero regressions. The remaining
+# 21 failures are genuine engine gaps (see the vibesql_attach_replay_files doc
+# comment above for the two identified: attached-schema `sqlite_master` still
+# omits views, and CREATE VIEW's unqualified-name resolution prefers TEMP over
+# MAIN when both coexist), not further harness/allow-list gaps — no additional
+# e_dropview.test do_test name is a candidate for this array.
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
 # Returns a list: {should_skip reason} where should_skip is 0/1
