@@ -1327,6 +1327,53 @@ fn test_pragma_cache_spill_negative_argument_is_kib_scaled_by_page_size() {
 }
 
 #[test]
+fn test_pragma_cache_spill_negative_argument_keeps_spilling_enabled() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+
+    // SQLite's `getSafetyLevel()` gates its numeric branch on
+    // `sqlite3Isdigit(*z)` — an ASCII digit in the *first* position, no sign
+    // — so a negative argument matches neither the digit branch nor any
+    // keyword and returns `dflt`, which `pragma.c` supplies as
+    // `(size != 0)`. Every nonzero negative therefore leaves spilling
+    // *enabled*. Verified against SQLite 3.53.4:
+    //   PRAGMA cache_spill=-1024; PRAGMA cache_spill;  -> enabled (nonzero)
+    //
+    // Regression guard for the `-256` / `-1024` / `-2048` family (the natural
+    // "N MiB budget" spellings): their low byte is zero, so treating a
+    // leading `-` as "numeric" and testing `(parsed as u8) != 0` reports
+    // spilling *off*. `-51` — the only negative the other tests cover —
+    // happens to mask the bug because its low byte is nonzero.
+    //
+    // page_size 4096 and the default cache_size of -2000 give
+    // numberOfCachePages = 2048000 / 4096 = 500, and the read-back is
+    // max(500, szSpill).
+    for (arg, expected) in [("-256", "500"), ("-1024", "500"), ("-2048", "512")] {
+        executor.execute("PRAGMA cache_spill=OFF").unwrap();
+        let result = executor.execute("PRAGMA cache_spill").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("0".to_string())]],
+            "cache_spill=OFF should disable spilling"
+        );
+
+        executor.execute(&format!("PRAGMA cache_spill({arg})")).unwrap();
+        let result = executor.execute("PRAGMA cache_spill").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some(expected.to_string())]],
+            "PRAGMA cache_spill({arg}) must leave spilling enabled (SQLite dflt = size != 0)"
+        );
+    }
+
+    // The positive side of the same gate is deliberately unchanged: `256`
+    // *does* take the digit branch, and SQLite's `(u8)sqlite3Atoi("256") == 0`
+    // disables spilling (3.53.4: `PRAGMA cache_spill=256` reads back 0).
+    executor.execute("PRAGMA cache_spill=256").unwrap();
+    let result = executor.execute("PRAGMA cache_spill").unwrap();
+    assert_eq!(result.rows, vec![vec![Some("0".to_string())]]);
+}
+
+#[test]
 fn test_pragma_cache_spill_negative_cache_size_is_kib_scaled() {
     let mut executor = SqlExecutor::new(None).unwrap();
 

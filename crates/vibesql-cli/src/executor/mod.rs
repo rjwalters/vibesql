@@ -3771,9 +3771,17 @@ fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
 
 /// Mirrors SQLite's `sqlite3GetBoolean(z, dflt)` (util.c → `getSafetyLevel`)
 /// for the PRAGMAs whose enabled-flag falls back to a caller-supplied default
-/// rather than to `false`: a numeric spelling is its own truthiness, the
-/// recognized keywords `on`/`no`/`off`/`false`/`yes`/`true`/`extra` map to
+/// rather than to `false`: a **leading-digit** spelling is its own truthiness,
+/// the recognized keywords `on`/`no`/`off`/`false`/`yes`/`true`/`extra` map to
 /// their table values, and **anything else returns `dflt`**.
+///
+/// The digit gate is `sqlite3Isdigit(*z)` — an ASCII digit in the *first*
+/// position, with no sign accepted. A negative spelling such as `-1024` is
+/// therefore **not** numeric here: it falls through every keyword match and
+/// returns `dflt`, which `pragma.c` supplies as `(size != 0)` for
+/// `cache_spill`, i.e. enabled for any nonzero negative argument. Verified
+/// against SQLite 3.53.4: `cache_spill=-1024` reads back enabled, while
+/// `cache_spill=256` reads back disabled (the `(u8)` truncation quirk below).
 ///
 /// `pragma_value_to_bool` above treats an unrecognized spelling as `false`,
 /// which is right for the plain on/off PRAGMAs but wrong for `cache_spill`
@@ -3781,13 +3789,9 @@ fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
 fn pragma_value_to_bool_with_default(value: &vibesql_ast::PragmaValue, dflt: bool) -> bool {
     let text = pragma_value_text(value);
     let trimmed = text.trim();
-    let mut chars = trimmed.chars();
-    let first = chars.next();
-    let numeric = match first {
-        Some(c) if c.is_ascii_digit() => true,
-        Some('-') => chars.next().is_some_and(|c| c.is_ascii_digit()),
-        _ => false,
-    };
+    let first = trimmed.chars().next();
+    // `sqlite3Isdigit(*z)`: ASCII digit only, no sign.
+    let numeric = matches!(first, Some(c) if c.is_ascii_digit());
     if numeric {
         // SQLite returns `(u8)sqlite3Atoi(z)`, i.e. the low byte of the parsed
         // integer, then tests it against zero.
