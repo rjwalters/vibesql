@@ -95,12 +95,35 @@ jobs:
 
   # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
+  #
+  # History (do not let a third occurrence get debugged from scratch):
+  #   - #5342 raised this job's timeout-minutes from 25 to 35 after the suite
+  #     grew into the previous cap.
+  #   - #6479 found the cap being brushed again (~40% timeout-kill rate on
+  #     unrelated branches, always killed mid "Run integration tests") and
+  #     diagnosed the real cause: this used to be a single `test` job that ran
+  #     unit tests, then `cargo clean` + `rm -rf target/release/deps` to save
+  #     disk, then integration tests — forcing the integration step to pay for
+  #     a *second full release rebuild* under the same clock as the first.
+  #     Fixed by splitting into the two independent jobs below (test-unit /
+  #     test-integration), each getting its own dedicated timeout budget and
+  #     its own from-scratch build, running in parallel instead of serialized
+  #     behind one shared 35-minute cap. This also means a timeout-kill (or a
+  #     genuine failure) in one phase no longer masks whether the other phase
+  #     ever got a fair share of the clock — check `gh run view <run-id>
+  #     --json jobs` for the per-job `conclusion` field (`cancelled` = timeout
+  #     kill, `failure` = genuine test failure) without opening either job's
+  #     step list.
+  #   - If this pattern (cap creeping back up against real run times) recurs a
+  #     third time, look for the same shape: redundant rebuilds sharing one
+  #     clock, not just "raise the cap again".
   # ============================================================================
-  test:
+  test-unit:
     runs-on: ubuntu-latest
-    # Recent successful runs take 18-23 min (growing with the test suite); 25 min
-    # left too little headroom and caused timeout-kill flakes (see issue #5342).
-    timeout-minutes: 35
+    # Provisional estimate for a single from-scratch release build + unit test
+    # run (no more back-to-back double build — see history above). Revisit
+    # once several real runs establish an actual measured range.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -116,20 +139,27 @@ jobs:
       - name: Run unit tests
         run: cargo test --release --no-default-features --features parallel,spatial -- --skip run_sqllogictest_suite
 
-      - name: Clean build artifacts to save disk space
-        run: |
-          cargo clean
-          rm -rf target/release/deps
-          df -h
+  test-integration:
+    runs-on: ubuntu-latest
+    # See test-unit above: same provisional budget, independent clock. Runs
+    # on its own runner in parallel with test-unit, so no shared disk/clock
+    # pressure and no need for the old mid-job `cargo clean` workaround.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
 
       - name: Run integration tests
         run: cargo test --release --no-default-features --features parallel,spatial --test '*' -- --skip run_sqllogictest_suite
         continue-on-error: false
-
-      - name: Final cleanup
-        run: |
-          cargo clean
-          df -h
 
   # ============================================================================
   # WASM build check - catches wasm32-only breakage (e.g., getrandom backend
