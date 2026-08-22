@@ -13,12 +13,11 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
-use vibesql_storage::Database;
 
 use super::{graphql, types::*};
 use crate::{
     observability::ServerMetrics,
-    registry::DatabaseRegistry,
+    registry::{DatabaseRegistry, SharedDatabase},
     replication::{
         role_str, ReplicationHandle, SqlError, SQLSTATE_FATAL, SQLSTATE_NOT_LEADER, SQLSTATE_RETRY,
     },
@@ -66,8 +65,15 @@ pub const DATABASE_HEADER: &str = "X-Database-Name";
 pub struct HttpState {
     /// Database registry for shared database access
     pub registry: DatabaseRegistry,
-    /// Legacy database reference for backwards compatibility (e.g., subscriptions, table listing)
-    pub db: Arc<Database>,
+    /// Shared, lock-guarded handle to the standalone HTTP database — the
+    /// **same** registry entry (see [`DEFAULT_DATABASE_NAME`]) that
+    /// `/api/query`, `/api/tables`, GraphQL, and the storage/blob router all
+    /// read and write through (#6448). Used directly by the (synchronous,
+    /// list-only) `list_tables`/`get_table_info` handlers and by the
+    /// subscription event loop; every other handler resolves its own
+    /// [`SharedDatabase`] per-request via `registry.get_or_create` (which
+    /// returns a clone of this same handle for [`DEFAULT_DATABASE_NAME`]).
+    pub db: SharedDatabase,
     /// Subscription manager for real-time updates
     pub subscription_manager: Arc<SubscriptionManager>,
     /// Optional server metrics for observability
@@ -238,19 +244,51 @@ fn sql_error_message(e: &SqlError) -> String {
 /// Create the HTTP API router
 ///
 /// # Arguments
-/// * `db` - Legacy database reference for backwards compatibility (subscriptions, table listing)
+/// * `db` - Shared, lock-guarded handle to the standalone HTTP database — the same registry entry
+///   (`DEFAULT_DATABASE_NAME`) queries execute against (#6448); used directly by
+///   `list_tables`/`get_table_info` and the subscription event loop
 /// * `registry` - Database registry for shared database access
 /// * `subscription_manager` - Subscription manager for real-time updates
 /// * `metrics` - Optional server metrics for observability
 /// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"` escape hatch
 ///   (default off; see [`crate::config::ServerConfig::graphql_allow_raw_where`])
 pub fn create_http_router(
-    db: Arc<Database>,
+    db: SharedDatabase,
     registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
     metrics: Option<ServerMetrics>,
     replication: Option<StdArc<ReplicationHandle>>,
     graphql_allow_raw_where: bool,
+) -> Router {
+    create_http_router_with_storage_config(
+        db,
+        registry,
+        subscription_manager,
+        metrics,
+        replication,
+        graphql_allow_raw_where,
+        vibesql_storage::BlobStorageConfig::default(),
+    )
+}
+
+/// Same as [`create_http_router`], but takes an explicit standalone blob
+/// storage backend config instead of always defaulting to the filesystem
+/// backend rooted at `/var/vibesql/storage`.
+///
+/// `create_http_router` is the production entry point (used by `main.rs` and
+/// every other caller) and always defaults to the filesystem backend, matching
+/// its previous behavior exactly. This variant exists so a test can build the
+/// **same** composite router (`/api/query` and `/api/storage/*` sharing one
+/// registry-backed database, per #6448) with an in-memory backend instead —
+/// without hand-duplicating the route list above and risking drift from it.
+pub(crate) fn create_http_router_with_storage_config(
+    db: SharedDatabase,
+    registry: DatabaseRegistry,
+    subscription_manager: Arc<SubscriptionManager>,
+    metrics: Option<ServerMetrics>,
+    replication: Option<StdArc<ReplicationHandle>>,
+    graphql_allow_raw_where: bool,
+    storage_config: vibesql_storage::BlobStorageConfig,
 ) -> Router {
     let state = HttpState {
         registry: registry.clone(),
@@ -300,7 +338,8 @@ pub fn create_http_router(
         let storage_router = super::storage::create_replicated_storage_router(storage_state);
         main_router.nest("/api/storage", storage_router)
     } else {
-        let storage_router = super::storage::create_storage_router(db, registry);
+        let storage_router =
+            super::storage::create_storage_router_with_config(storage_config, db, registry);
         main_router.nest("/api/storage", storage_router)
     }
 }
@@ -824,7 +863,8 @@ async fn execute_query(
 
 /// List all tables in the database
 async fn list_tables(State(state): State<HttpState>) -> impl IntoResponse {
-    let table_names = state.db.list_tables();
+    let db = state.db.read().await;
+    let table_names = db.list_tables();
 
     Json(json!({
         "tables": table_names,
@@ -837,12 +877,14 @@ async fn get_table_info(
     State(state): State<HttpState>,
     Path(table_name): Path<String>,
 ) -> impl IntoResponse {
+    let db = state.db.read().await;
+
     // Try to get the table (with case-insensitive lookup)
-    let table = state.db.get_table(&table_name);
+    let table = db.get_table(&table_name);
 
     if table.is_none() {
         // Try case-insensitive lookup
-        let table_names = state.db.list_tables();
+        let table_names = db.list_tables();
         if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
             return (
                 StatusCode::NOT_FOUND,
@@ -853,7 +895,7 @@ async fn get_table_info(
     }
 
     // Get schema information
-    if let Some(table) = state.db.get_table(&table_name) {
+    if let Some(table) = db.get_table(&table_name) {
         let schema = &table.schema;
         let pk_columns: Vec<&String> =
             schema.primary_key.as_ref().map(|pk| pk.iter().collect()).unwrap_or_default();

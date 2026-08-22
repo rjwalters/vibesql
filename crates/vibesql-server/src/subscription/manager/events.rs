@@ -1,15 +1,15 @@
 //! Change event handling and notification for subscriptions.
 
-use std::{
-    collections::HashMap,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{collections::HashMap, sync::atomic::Ordering};
 
 use tracing::{debug, trace, warn};
 use vibesql_storage::{change_events::RecvError, Database};
 
 use super::SubscriptionManager;
-use crate::subscription::{pk_prune::PkPruner, SubscriptionId};
+use crate::{
+    registry::SharedDatabase,
+    subscription::{pk_prune::PkPruner, SubscriptionId},
+};
 
 impl SubscriptionManager {
     /// Find all subscriptions affected by a change to a given table
@@ -395,7 +395,9 @@ impl SubscriptionManager {
     ///
     /// # Arguments
     ///
-    /// * `db` - Database reference for re-executing subscription queries
+    /// * `db` - Shared, lock-guarded database handle to re-execute subscription queries against.
+    ///   Acquires a fresh read lock per event (dropped before the next `try_recv`), rather than
+    ///   holding one for the loop's lifetime, so this never blocks a concurrent writer (#6448).
     ///
     /// # Note
     ///
@@ -404,12 +406,13 @@ impl SubscriptionManager {
     pub async fn run_event_loop(
         &self,
         mut change_rx: vibesql_storage::ChangeEventReceiver,
-        db: Arc<Database>,
+        db: SharedDatabase,
     ) {
         loop {
             match change_rx.try_recv() {
                 Ok(event) => {
-                    self.handle_change(event, &db).await;
+                    let guard = db.read().await;
+                    self.handle_change(event, &guard).await;
                 }
                 Err(RecvError::Lagged(n)) => {
                     warn!(lagged_count = n, "SubscriptionManager lagged behind change events");

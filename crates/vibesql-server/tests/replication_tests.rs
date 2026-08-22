@@ -1439,14 +1439,17 @@ async fn start_http_with_raw_where(
     handle: Option<Arc<ReplicationHandle>>,
     graphql_allow_raw_where: bool,
 ) -> (String, oneshot::Sender<()>) {
-    use vibesql_server::{http::create_http_router, registry::DatabaseRegistry};
+    use vibesql_server::{
+        http::create_http_router,
+        registry::{DatabaseRegistry, SharedDatabase},
+    };
     use vibesql_storage::Database;
 
     let listener = TokioTcpListener::bind("127.0.0.1:0").await.expect("bind http");
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel::<()>();
 
-    let db = Arc::new(Database::new());
+    let db = SharedDatabase::new(Database::new());
     let registry = DatabaseRegistry::new();
     let subs = Arc::new(SubscriptionManager::new());
     let app = create_http_router(db, registry, subs, None, handle, graphql_allow_raw_where);

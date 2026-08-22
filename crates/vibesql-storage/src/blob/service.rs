@@ -1,18 +1,9 @@
-// Platform-specific synchronization primitives: `parking_lot` is only declared
-// as a dependency for `cfg(not(target_arch = "wasm32"))` in this crate's
-// Cargo.toml, so the import must be cfg-gated exactly like `database/core.rs`
-// and `columnar_cache.rs` do it. An unconditional `use parking_lot::RwLock;`
-// breaks the wasm32 build with E0432.
-#[cfg(target_arch = "wasm32")]
-use std::sync::RwLock;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 #[cfg(feature = "opendal")]
 use opendal::{services, Operator};
-#[cfg(not(target_arch = "wasm32"))]
-use parking_lot::RwLock;
 use vibesql_types::{DataType, SqlValue};
 
 /// Blob storage service
@@ -31,99 +22,53 @@ use crate::{
 /// `store_metadata()` call. See issue #3482 / #6443.
 const BLOB_METADATA_TABLE: &str = "vibesql_storage";
 
-/// Shared, lock-guarded handle to the [`Database`] that holds blob metadata.
-///
-/// The blob service must persist metadata into the **same** `Database` instance
-/// its caller keeps using — not a private copy. `Database` needs `&mut self` to
-/// create a table or insert a row, while every public method on
-/// [`BlobStorageService`] takes `&self` (the service is shared via `Arc` across
-/// concurrent HTTP handlers), so the shared instance is handed over already
-/// wrapped in an `Arc<RwLock<_>>` that caller and service both hold.
-///
-/// This deliberately replaces the earlier
-/// `Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone())` shape: in
-/// production the caller always keeps its own handle alive, so the `Arc` strong
-/// count is never 1, `try_unwrap` always fell through to `Database::clone()` —
-/// and `Database::clone()` explicitly resets `persistence_engine` and
-/// `change_sender` to `None` (see `database/constructors.rs`). Metadata
-/// therefore landed in a disconnected, never-persisted copy that nothing else
-/// could see. See issue #6443 and PR #6446's review.
-pub type SharedMetadataDb = Arc<RwLock<Database>>;
-
-/// Wrap an owned [`Database`] in the shared handle expected by
-/// [`BlobStorageService::new`].
-///
-/// Provided so callers do not have to name the platform-specific lock type
-/// (`parking_lot::RwLock` on native targets, `std::sync::RwLock` on wasm32).
-/// Clone the returned handle to keep a caller-side reference to the *same*
-/// database the blob service writes metadata into.
-pub fn shared_metadata_db(db: Database) -> SharedMetadataDb {
-    Arc::new(RwLock::new(db))
-}
-
-/// Acquire a read guard on the shared metadata database.
-///
-/// `parking_lot`'s guard is infallible; `std::sync`'s is poisonable, so the
-/// wasm32 path recovers the inner value rather than panicking (a poisoned
-/// metadata lock must not take down the whole storage surface).
-#[cfg(not(target_arch = "wasm32"))]
-fn read_db(db: &RwLock<Database>) -> parking_lot::RwLockReadGuard<'_, Database> {
-    db.read()
-}
-
-/// Acquire a read guard on the shared metadata database (wasm32).
-#[cfg(target_arch = "wasm32")]
-fn read_db(db: &RwLock<Database>) -> std::sync::RwLockReadGuard<'_, Database> {
-    db.read().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Acquire a write guard on the shared metadata database.
-#[cfg(not(target_arch = "wasm32"))]
-fn write_db(db: &RwLock<Database>) -> parking_lot::RwLockWriteGuard<'_, Database> {
-    db.write()
-}
-
-/// Acquire a write guard on the shared metadata database (wasm32).
-#[cfg(target_arch = "wasm32")]
-fn write_db(db: &RwLock<Database>) -> std::sync::RwLockWriteGuard<'_, Database> {
-    db.write().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// Blob storage service for file/blob operations
+///
+/// The service itself holds no database handle (and therefore no lock
+/// primitive of its own — see #6448): the metadata-touching methods
+/// ([`Self::store_metadata`], [`Self::get_metadata`], [`Self::delete_metadata`],
+/// and the convenience [`Self::store`]/[`Self::delete`] wrappers) take the
+/// caller's `Database` by reference. This lets every caller — the standalone
+/// HTTP storage router, a replicated node, a test — persist blob metadata into
+/// whichever `Database` instance (and whichever lock discipline around it)
+/// they already hold, with no private copy and no service-owned lock type to
+/// reconcile with the caller's.
+///
+/// This deliberately replaces the earlier internal
+/// `Arc<parking_lot::RwLock<Database>>` handle (itself a replacement for
+/// `Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone())`, which — because
+/// the caller always kept its own handle alive — deterministically cloned
+/// `Database` and lost its `persistence_engine`/`change_sender`, so metadata
+/// landed in a disconnected copy nothing else could see; see issue #6443 and
+/// PR #6446's review). Owning a lock internally forced every caller onto the
+/// *same* lock primitive; taking `&Database`/`&mut Database` per call instead
+/// lets the standalone HTTP surface use the registry's `tokio`-guarded shared
+/// database — the same instance `/api/query` and `/api/tables` read — so a
+/// blob written via `POST /api/storage/upload` is visible to
+/// `SELECT * FROM vibesql_storage` (issue #6448).
 pub struct BlobStorageService {
     #[cfg(feature = "opendal")]
     operator: Option<Operator>,
     config: BlobStorageConfig,
-    /// Shared handle to the metadata database (see [`SharedMetadataDb`]).
-    ///
-    /// This is the caller's database, not a private copy: everything written
-    /// through `store_metadata()` is immediately visible through any other
-    /// clone of the same handle. The lock guard is always dropped before any
-    /// `.await` point, so it never blocks across suspension.
-    db: SharedMetadataDb,
 }
 
 impl BlobStorageService {
-    /// Create a new blob storage service
-    ///
-    /// `db` is a *shared* handle (see [`SharedMetadataDb`] /
-    /// [`shared_metadata_db`]): the caller keeps its own clone and observes
-    /// every metadata row this service writes.
+    /// Create a new blob storage service.
     #[cfg(feature = "opendal")]
-    pub fn new(config: BlobStorageConfig, db: SharedMetadataDb) -> Self {
+    pub fn new(config: BlobStorageConfig) -> Self {
         let operator = Self::create_operator(&config).ok();
-        Self { operator, config, db }
+        Self { operator, config }
     }
 
     /// Create a new blob storage service (non-opendal build)
     #[cfg(not(feature = "opendal"))]
-    pub fn new(config: BlobStorageConfig, db: SharedMetadataDb) -> Self {
-        Self { config, db }
+    pub fn new(config: BlobStorageConfig) -> Self {
+        Self { config }
     }
 
     /// Create with default configuration (local filesystem)
-    pub fn new_default(db: SharedMetadataDb) -> Self {
-        Self::new(BlobStorageConfig::default(), db)
+    pub fn new_default() -> Self {
+        Self::new(BlobStorageConfig::default())
     }
 
     /// Create an OpenDAL operator based on the configuration
@@ -266,9 +211,45 @@ impl BlobStorageService {
             .map_err(|e| StorageError::Other(format!("Failed to create memory operator: {}", e)))
     }
 
-    /// Store a blob and return its ID
+    /// Store a blob's bytes and metadata, returning the generated ID.
+    ///
+    /// Writes the byte payload to the configured backend first — no database
+    /// lock (if any) held during that I/O — then takes `db` only for the
+    /// brief metadata insert via [`Self::store_metadata`]. A caller that wants
+    /// an even shorter lock scope around a shared, lock-guarded database
+    /// (e.g. only acquiring the lock after the I/O completes) should call
+    /// [`Self::write_bytes`] and [`Self::store_metadata`] directly instead.
     #[cfg(feature = "opendal")]
-    pub async fn store(&self, data: Bytes, content_type: String) -> StorageResult<BlobId> {
+    pub async fn store(
+        &self,
+        db: &mut Database,
+        data: Bytes,
+        content_type: String,
+    ) -> StorageResult<BlobId> {
+        let (id, size) = self.write_bytes(data).await?;
+        let metadata = BlobMetadata::new(id.clone(), size, content_type);
+        self.store_metadata(db, &metadata)?;
+        Ok(id)
+    }
+
+    /// Store a blob and return its ID (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn store(
+        &self,
+        _db: &mut Database,
+        _data: Bytes,
+        _content_type: String,
+    ) -> StorageResult<BlobId> {
+        Err(StorageError::Other(
+            "Blob storage requires the 'opendal' feature to be enabled".to_string(),
+        ))
+    }
+
+    /// Write a blob's bytes to the configured backend and return the
+    /// generated [`BlobId`] and byte length. Does not touch any metadata
+    /// database — pair with [`Self::store_metadata`] to persist metadata.
+    #[cfg(feature = "opendal")]
+    pub async fn write_bytes(&self, data: Bytes) -> StorageResult<(BlobId, i64)> {
         let id = BlobId::new();
         let size = data.len() as i64;
         let path = id.to_path();
@@ -284,16 +265,12 @@ impl BlobStorageService {
             ));
         }
 
-        // Store metadata in database
-        let metadata = BlobMetadata::new(id.clone(), size, content_type);
-        self.store_metadata(&metadata).await?;
-
-        Ok(id)
+        Ok((id, size))
     }
 
-    /// Store a blob and return its ID (non-opendal build - stub)
+    /// Write a blob's bytes (non-opendal build - stub)
     #[cfg(not(feature = "opendal"))]
-    pub async fn store(&self, _data: Bytes, _content_type: String) -> StorageResult<BlobId> {
+    pub async fn write_bytes(&self, _data: Bytes) -> StorageResult<(BlobId, i64)> {
         Err(StorageError::Other(
             "Blob storage requires the 'opendal' feature to be enabled".to_string(),
         ))
@@ -326,13 +303,14 @@ impl BlobStorageService {
         )))
     }
 
-    /// Get metadata for a blob
+    /// Get metadata for a blob.
     ///
-    /// Queries the `vibesql_storage` system table for the row matching `id`.
-    /// Returns an error if the table doesn't exist yet (nothing has ever been
-    /// stored) or no row matches `id`.
-    pub async fn get_metadata(&self, id: &BlobId) -> StorageResult<BlobMetadata> {
-        let db = read_db(&self.db);
+    /// Queries the `vibesql_storage` system table for the row matching `id` in
+    /// `db` — the caller's database, read directly (no internal locking; see
+    /// the type-level docs on [`BlobStorageService`]). Returns an error if the
+    /// table doesn't exist yet (nothing has ever been stored) or no row
+    /// matches `id`.
+    pub fn get_metadata(&self, db: &Database, id: &BlobId) -> StorageResult<BlobMetadata> {
         let Some(table) = db.get_table(BLOB_METADATA_TABLE) else {
             return Err(StorageError::Other(format!("blob metadata not found: {}", id)));
         };
@@ -375,12 +353,40 @@ impl BlobStorageService {
         Err(StorageError::Other(format!("blob metadata not found: {}", id)))
     }
 
-    /// Delete a blob
+    /// Delete a blob's bytes and metadata.
+    ///
+    /// Deletes the byte payload first, then takes `db` only for the brief
+    /// metadata delete via [`Self::delete_metadata`]. See [`Self::store`] for
+    /// why a caller wanting a shorter lock scope should call
+    /// [`Self::delete_bytes`] and [`Self::delete_metadata`] directly instead.
     #[cfg(feature = "opendal")]
-    pub async fn delete(&self, id: &BlobId) -> StorageResult<()> {
+    pub async fn delete(&self, db: &mut Database, id: &BlobId) -> StorageResult<()> {
+        self.delete_bytes(id).await?;
+
+        // Delete metadata from database. Idempotent by design (mirrors the
+        // OpenDAL byte-delete semantics above): deleting a blob whose
+        // metadata was never stored (or already deleted) is not an error.
+        self.delete_metadata(db, id);
+        Ok(())
+    }
+
+    /// Delete a blob (non-opendal build - stub)
+    #[cfg(not(feature = "opendal"))]
+    pub async fn delete(&self, _db: &mut Database, id: &BlobId) -> StorageResult<()> {
+        Err(StorageError::Other(format!(
+            "Blob storage requires the 'opendal' feature to be enabled (blob: {})",
+            id
+        )))
+    }
+
+    /// Delete a blob's bytes from the configured backend. Does not touch any
+    /// metadata database — pair with [`Self::delete_metadata`] to remove
+    /// metadata. Idempotent: deleting a blob that was never stored (or
+    /// already deleted) is not an error.
+    #[cfg(feature = "opendal")]
+    pub async fn delete_bytes(&self, id: &BlobId) -> StorageResult<()> {
         let path = id.to_path();
 
-        // Delete from backend using OpenDAL operator
         if let Some(ref op) = self.operator {
             op.delete(&path)
                 .await
@@ -391,16 +397,12 @@ impl BlobStorageService {
             ));
         }
 
-        // Delete metadata from database. Idempotent by design (mirrors the
-        // OpenDAL byte-delete semantics above): deleting a blob whose
-        // metadata was never stored (or already deleted) is not an error.
-        self.delete_metadata(id);
         Ok(())
     }
 
-    /// Delete a blob (non-opendal build - stub)
+    /// Delete a blob's bytes (non-opendal build - stub)
     #[cfg(not(feature = "opendal"))]
-    pub async fn delete(&self, id: &BlobId) -> StorageResult<()> {
+    pub async fn delete_bytes(&self, id: &BlobId) -> StorageResult<()> {
         Err(StorageError::Other(format!(
             "Blob storage requires the 'opendal' feature to be enabled (blob: {})",
             id
@@ -436,17 +438,14 @@ impl BlobStorageService {
         )))
     }
 
-    /// Store blob metadata in database
+    /// Store blob metadata into the caller's `db`.
     ///
     /// Auto-creates the `vibesql_storage` system table on first use, then
-    /// inserts a row for `metadata`. See issue #3482 / #6443.
-    ///
-    /// Only reachable from the `opendal`-gated `store()`; the non-opendal stub
-    /// build never stores a blob in the first place.
-    #[cfg_attr(not(feature = "opendal"), allow(dead_code))]
-    async fn store_metadata(&self, metadata: &BlobMetadata) -> StorageResult<()> {
-        let mut db = write_db(&self.db);
-
+    /// inserts a row for `metadata`. See issue #3482 / #6443. Public so a
+    /// caller that wants precise lock-scope control (e.g. a shared,
+    /// `tokio`-guarded database) can pair this with [`Self::write_bytes`]
+    /// instead of going through the combined [`Self::store`].
+    pub fn store_metadata(&self, db: &mut Database, metadata: &BlobMetadata) -> StorageResult<()> {
         if db.get_table(BLOB_METADATA_TABLE).is_none() {
             let schema = vibesql_catalog::TableSchema::new(
                 BLOB_METADATA_TABLE.to_string(),
@@ -493,17 +492,14 @@ impl BlobStorageService {
         Ok(())
     }
 
-    /// Delete blob metadata from the `vibesql_storage` system table.
+    /// Delete blob metadata for `id` from the caller's `db`'s
+    /// `vibesql_storage` system table.
     ///
     /// Idempotent: a missing table (nothing ever stored) or a missing row
     /// (already deleted, or never stored) is silently a no-op rather than an
-    /// error, matching the idempotent semantics of blob byte deletion.
-    ///
-    /// Only called from the `opendal`-gated `delete()`; the non-opendal
-    /// stub build never stores metadata in the first place.
-    #[cfg_attr(not(feature = "opendal"), allow(dead_code))]
-    fn delete_metadata(&self, id: &BlobId) {
-        let mut db = write_db(&self.db);
+    /// error, matching the idempotent semantics of blob byte deletion. Public
+    /// for the same lock-scope-control reason as [`Self::store_metadata`].
+    pub fn delete_metadata(&self, db: &mut Database, id: &BlobId) {
         let Some(table) = db.get_table_mut(BLOB_METADATA_TABLE) else {
             return;
         };
@@ -666,8 +662,7 @@ mod tests {
     #[test]
     fn test_blob_url_generation_fs() {
         let config = BlobStorageConfig::default();
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         let id = BlobId::new();
         let url = service.get_url(&id);
@@ -683,8 +678,7 @@ mod tests {
                 "region": "us-east-1"
             }),
         };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         let id = BlobId::new();
         let url = service.get_url(&id);
@@ -699,8 +693,7 @@ mod tests {
                 "bucket": "my-gcs-bucket"
             }),
         };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         let id = BlobId::new();
         let url = service.get_url(&id);
@@ -716,8 +709,7 @@ mod tests {
                 "account_name": "myaccount"
             }),
         };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         let id = BlobId::new();
         let url = service.get_url(&id);
@@ -727,8 +719,7 @@ mod tests {
     #[test]
     fn test_backend_accessor() {
         let config = BlobStorageConfig { backend: "s3".to_string(), config: serde_json::json!({}) };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         assert_eq!(service.backend(), "s3");
     }
@@ -738,13 +729,13 @@ mod tests {
     async fn test_memory_backend_store_and_get() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
+        let mut db = Database::new();
 
         assert!(service.is_initialized());
 
         let data = Bytes::from("Hello, World!");
-        let id = service.store(data.clone(), "text/plain".to_string()).await.unwrap();
+        let id = service.store(&mut db, data.clone(), "text/plain".to_string()).await.unwrap();
 
         let retrieved = service.get(&id).await.unwrap();
         assert_eq!(retrieved, data);
@@ -753,7 +744,7 @@ mod tests {
         assert!(service.exists(&id).await.unwrap());
 
         // Test delete
-        service.delete(&id).await.unwrap();
+        service.delete(&mut db, &id).await.unwrap();
         assert!(!service.exists(&id).await.unwrap());
     }
 
@@ -766,60 +757,50 @@ mod tests {
     async fn test_metadata_store_get_delete_round_trip() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
+        let mut db = Database::new();
 
         let data = Bytes::from("Hello, metadata!");
         let content_type = "text/plain".to_string();
-        let id = service.store(data.clone(), content_type.clone()).await.unwrap();
+        let id = service.store(&mut db, data.clone(), content_type.clone()).await.unwrap();
 
         // Immediately after upload, metadata should be retrievable with the
         // real size and content type (previously always errored: "blob
         // metadata not found").
-        let metadata = service.get_metadata(&id).await.unwrap();
+        let metadata = service.get_metadata(&db, &id).unwrap();
         assert_eq!(metadata.id, id);
         assert_eq!(metadata.size, data.len() as i64);
         assert_eq!(metadata.content_type, content_type);
 
         // Metadata is gone after delete.
-        service.delete(&id).await.unwrap();
-        let err = service.get_metadata(&id).await.unwrap_err();
+        service.delete(&mut db, &id).await.unwrap();
+        let err = service.get_metadata(&db, &id).unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
-    /// Regression test for PR #6446's review finding: metadata must land in
-    /// the **caller's** database, not a private copy.
-    ///
-    /// This mirrors the production call shape (`StorageState::new`): the
-    /// caller constructs the shared handle, keeps its own reference alive, and
-    /// hands a *clone* to the service — so the handle has multiple live
-    /// references for the whole test. The previous
-    /// `Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone())` constructor
-    /// deterministically took the `.clone()` branch under exactly this shape
-    /// (strong count ≥ 2), writing metadata into a disconnected `Database`
-    /// whose `persistence_engine` had been reset to `None`. Every assertion
-    /// below reads through the *caller's* handle, so that failure mode cannot
-    /// silently return.
+    /// Regression test for PR #6446's review finding, restated for #6448:
+    /// blob metadata must land in the **caller's** database, not a private
+    /// copy. Since `store_metadata`/`get_metadata`/`delete_metadata` now take
+    /// `db` by reference instead of the service owning its own lock-guarded
+    /// handle (#6448), there is no private-copy failure mode left to
+    /// reproduce structurally — this asserts the caller's own `Database`
+    /// really does hold the metadata after `store()`, and that it disappears
+    /// again after `delete()`, using the exact `db` variable the caller
+    /// created.
     #[cfg(all(feature = "opendal", feature = "storage-memory"))]
     #[tokio::test]
-    async fn test_metadata_lands_in_caller_shared_database() {
+    async fn test_metadata_lands_in_callers_database() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let caller_db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, Arc::clone(&caller_db));
-
-        // Production shape: the caller's own handle is still alive, so the
-        // strong count is never 1 while the service runs.
-        assert!(Arc::strong_count(&caller_db) >= 2);
+        let service = BlobStorageService::new(config);
+        let mut db = Database::new();
 
         let data = Bytes::from("Hello, shared database!");
-        let id = service.store(data.clone(), "text/plain".to_string()).await.unwrap();
-        assert!(Arc::strong_count(&caller_db) >= 2);
+        let id = service.store(&mut db, data.clone(), "text/plain".to_string()).await.unwrap();
 
-        // The caller — not just the service — must see the metadata table and
-        // the row that was just written.
+        // The caller's own database — not a private copy — holds the
+        // metadata table and the row that was just written.
         {
-            let db = read_db(&caller_db);
             let table = db
                 .get_table(BLOB_METADATA_TABLE)
                 .expect("caller's database must see the vibesql_storage metadata table");
@@ -835,9 +816,8 @@ mod tests {
         }
 
         // ...and must see the row disappear again on delete.
-        service.delete(&id).await.unwrap();
+        service.delete(&mut db, &id).await.unwrap();
         {
-            let db = read_db(&caller_db);
             let table = db.get_table(BLOB_METADATA_TABLE).expect("table still exists after delete");
             let id_str = id.to_string();
             assert!(table.scan().iter().all(
@@ -846,84 +826,80 @@ mod tests {
         }
     }
 
-    /// Same invariant as above, exercised without the OpenDAL byte store so it
-    /// also runs in default-feature builds: a write through the service is
-    /// visible through the caller's clone of the shared handle, and a write
-    /// through the caller's clone is visible to the service.
-    #[tokio::test]
-    async fn test_shared_handle_is_bidirectional() {
-        let caller_db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(BlobStorageConfig::default(), Arc::clone(&caller_db));
+    /// A mutation made directly against `db` (bypassing the service) is
+    /// observed by the service's own reads — there is no separate handle for
+    /// them to disagree about, since both operate on the same `&Database` /
+    /// `&mut Database` reference the caller passes in.
+    #[test]
+    fn test_direct_database_mutation_is_visible_to_service_reads() {
+        let service = BlobStorageService::new(BlobStorageConfig::default());
+        let mut db = Database::new();
 
         let id = BlobId::new();
         service
-            .store_metadata(&BlobMetadata::new(id.clone(), 99, "text/plain".to_string()))
-            .await
+            .store_metadata(&mut db, &BlobMetadata::new(id.clone(), 99, "text/plain".to_string()))
             .unwrap();
 
-        // Service -> caller.
-        assert!(read_db(&caller_db).get_table(BLOB_METADATA_TABLE).is_some());
+        assert!(db.get_table(BLOB_METADATA_TABLE).is_some());
 
-        // Caller -> service: a mutation made through the caller's handle is
-        // observed by the service's reads.
-        write_db(&caller_db).get_table_mut(BLOB_METADATA_TABLE).unwrap().rows_mut().clear();
-        assert!(service.get_metadata(&id).await.is_err());
+        db.get_table_mut(BLOB_METADATA_TABLE).unwrap().rows_mut().clear();
+        assert!(service.get_metadata(&db, &id).is_err());
     }
 
     /// Metadata for a never-uploaded blob is not found (table may not even
     /// exist yet).
-    #[tokio::test]
-    async fn test_get_metadata_nonexistent_blob() {
+    #[test]
+    fn test_get_metadata_nonexistent_blob() {
         let config = BlobStorageConfig::default();
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
+        let db = Database::new();
 
         let id = BlobId::new();
-        let err = service.get_metadata(&id).await.unwrap_err();
+        let err = service.get_metadata(&db, &id).unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
-    #[tokio::test]
-    async fn test_store_metadata_creates_table_and_round_trips() {
+    #[test]
+    fn test_store_metadata_creates_table_and_round_trips() {
         let config = BlobStorageConfig::default();
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
+        let mut db = Database::new();
 
         let id = BlobId::new();
         let metadata = BlobMetadata::new(id.clone(), 2048, "application/json".to_string())
             .with_metadata(serde_json::json!({ "custom": "value" }));
 
-        service.store_metadata(&metadata).await.unwrap();
+        service.store_metadata(&mut db, &metadata).unwrap();
 
         // Table auto-created on first store.
-        assert!(read_db(&service.db).get_table(BLOB_METADATA_TABLE).is_some());
+        assert!(db.get_table(BLOB_METADATA_TABLE).is_some());
 
-        let retrieved = service.get_metadata(&id).await.unwrap();
+        let retrieved = service.get_metadata(&db, &id).unwrap();
         assert_eq!(retrieved.size, 2048);
         assert_eq!(retrieved.content_type, "application/json");
         assert_eq!(retrieved.metadata, Some(serde_json::json!({ "custom": "value" })));
     }
 
-    #[tokio::test]
-    async fn test_delete_metadata_is_idempotent() {
+    #[test]
+    fn test_delete_metadata_is_idempotent() {
         let config = BlobStorageConfig::default();
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
+        let mut db = Database::new();
 
         let id = BlobId::new();
         // No table exists yet — deleting metadata for an unknown blob must
         // not panic or error.
-        service.delete_metadata(&id);
+        service.delete_metadata(&mut db, &id);
 
         let metadata = BlobMetadata::new(id.clone(), 512, "image/png".to_string());
-        service.store_metadata(&metadata).await.unwrap();
-        assert!(service.get_metadata(&id).await.is_ok());
+        service.store_metadata(&mut db, &metadata).unwrap();
+        assert!(service.get_metadata(&db, &id).is_ok());
 
-        service.delete_metadata(&id);
-        assert!(service.get_metadata(&id).await.is_err());
+        service.delete_metadata(&mut db, &id);
+        assert!(service.get_metadata(&db, &id).is_err());
 
         // Deleting again is a no-op, not an error.
-        service.delete_metadata(&id);
+        service.delete_metadata(&mut db, &id);
     }
 
     #[cfg(all(feature = "opendal", feature = "storage-memory"))]
@@ -931,8 +907,7 @@ mod tests {
     async fn test_memory_backend_not_found() {
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let db = shared_metadata_db(Database::new());
-        let service = BlobStorageService::new(config, db);
+        let service = BlobStorageService::new(config);
 
         let id = BlobId::new();
         let result = service.get(&id).await;

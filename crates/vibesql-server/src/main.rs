@@ -15,7 +15,7 @@ use vibesql_server::{
     auth::PasswordStore,
     config::Config,
     connection::{ConnectionHandler, TableMutationNotification},
-    http::create_http_router,
+    http::{create_http_router, DEFAULT_DATABASE_NAME},
     observability::ObservabilityProvider,
     protocol::BackendMessage,
     registry::DatabaseRegistry,
@@ -156,11 +156,17 @@ async fn async_main() -> Result<()> {
     let (mutation_broadcast_tx, _mutation_broadcast_rx) =
         broadcast::channel::<TableMutationNotification>(1024);
 
-    // Create a shared database for HTTP API and subscriptions
-    // TODO: Consider integrating HTTP database into the registry
-    let mut db = Database::new();
-    let change_rx = db.enable_change_events(1024);
-    let db = Arc::new(db);
+    // Create the shared database for the standalone HTTP API and
+    // subscriptions by registering it in the database registry under
+    // `DEFAULT_DATABASE_NAME` (#6448). This is what makes `HttpState.db`
+    // (`/api/tables`, subscriptions) the **same** instance
+    // `registry.get_or_create(DEFAULT_DATABASE_NAME)` resolves for `/api/query`,
+    // GraphQL, and the standalone blob storage router — a write through any of
+    // those surfaces is immediately visible through any of the others.
+    let mut initial_http_db = Database::new();
+    let change_rx = initial_http_db.enable_change_events(1024);
+    database_registry.register_database(DEFAULT_DATABASE_NAME, initial_http_db).await;
+    let db = database_registry.get_or_create(DEFAULT_DATABASE_NAME).await;
 
     // Create the global subscription manager
     let subscription_manager = Arc::new(SubscriptionManager::new());
@@ -177,7 +183,7 @@ async fn async_main() -> Result<()> {
     // HTTP `Database` receives no replicated writes, so its change stream would
     // never fire). On a snapshot install the feed closes; the loop exits and is
     // restarted with a fresh receiver.
-    let db_for_subscription_task = Arc::clone(&db);
+    let db_for_subscription_task = db.clone();
     let subscription_manager_for_loop = Arc::clone(&subscription_manager);
     let replication_for_subs = replication.clone();
     tokio::spawn(async move {
@@ -218,7 +224,7 @@ async fn async_main() -> Result<()> {
         let http_addr: SocketAddr = format!("{}:{}", config.http.host, config.http.port)
             .parse()
             .expect("Invalid HTTP address");
-        let db_for_http = Arc::clone(&db);
+        let db_for_http = db.clone();
         let subscription_manager_for_http = Arc::clone(&subscription_manager);
         // Share the database registry with the HTTP server
         let registry_for_http = database_registry.clone();
