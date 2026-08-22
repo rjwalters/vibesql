@@ -277,13 +277,12 @@ skip-listed) rather than being pulled into A1/A2 as named entries, because
 none is a static skip declaration — per the "Scope of this document" note
 above, this document classifies `vibesql_skip_*` array entries, and these
 PRAGMAs are deliberately left failing, not skipped:
-  - **A2-equivalent (pager/journal-internal):** `cache_size`/`default_cache_size`
-    (pragma-1.*), `synchronous` (pragma-5.*), `lock_status` (pragma-7.3),
-    `page_count`/`max_page_count` (pragma-14.*), `freelist_count`/`cache_spill`
-    (pragma2-1.*/5.*, tracked separately as #6414), proxy locking (pragma-16.*).
+  - **A2-equivalent (pager/journal-internal):** `page_count`/`max_page_count`
+    (pragma-14.*), `freelist_count` (pragma2-1.*/3.2, tracked separately as
+    #6414), proxy locking (pragma-16.*).
   - **A1-equivalent (C-API-only, no SQL surface):** `sqlite3_prepare_v2`
     (pragma4-filescope-err.*, pragma4-2.100 EXPLAIN-opcode simulation),
-    `btree_from_db` (pragma-9.*), `get_pwd` (pragma-9.5), `sqlite3_db_config
+    `btree_from_db` (pragma-9.1.1/9.2.1/9.3.1/9.10/9.18), `sqlite3_db_config
     DEFENSIVE` (pragma-8.1.3), `hexio_write` (pragma-21.1).
   - **testvfs (A1-equivalent, stubbed no-op `proc testvfs` in
     `scripts/tester_vibesql.tcl`, not wired to real VFS-shim behavior):**
