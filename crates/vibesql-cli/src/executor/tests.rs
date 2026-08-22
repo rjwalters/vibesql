@@ -1965,3 +1965,236 @@ fn test_pragma_database_list_canonicalizes_existing_attached_file_path() {
         ]
     );
 }
+
+// ============================================================================
+// ATTACH DATABASE views/triggers/indexes round-trip (#6407)
+// ============================================================================
+
+#[test]
+fn test_attach_reattach_round_trips_view() {
+    // A view defined inside an attached schema — with its captured SQL text
+    // referencing the attachment's own qualifier throughout (`aux.v1`,
+    // `FROM t` resolving against `aux`) — must survive a clean exit and a
+    // fresh session's re-attach of the same file, per the issue #6407
+    // acceptance criteria.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (2)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM t").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x FROM aux.v1 ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("1".to_string())], vec![Some("2".to_string())]],
+            "view must round-trip through a save/exit/reattach cycle"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_round_trips_trigger() {
+    // A trigger defined inside an attached schema must likewise round-trip
+    // (issue #6407 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_trigger.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute(
+            "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('inserted'); END",
+        )
+        .unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // Firing the trigger proves it round-tripped, not just that its
+        // catalog entry exists.
+        ex.execute("INSERT INTO aux.t VALUES (99)").unwrap();
+        let result = ex.execute("SELECT msg FROM aux.log").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("inserted".to_string())]],
+            "trigger must round-trip and fire after a save/exit/reattach cycle"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_round_trips_partial_and_expression_index() {
+    // Partial (WHERE-predicate) and expression indexes on an attached
+    // schema's table must round-trip — including the physical index body,
+    // not just the catalog metadata (issue #6407 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_index.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (-1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (10)").unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(x) WHERE x > 0").unwrap();
+        ex.execute("CREATE INDEX aux_expr_idx ON t(abs(x))").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        // Data itself is intact regardless of the index.
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("-1".to_string())],
+                vec![Some("5".to_string())],
+                vec![Some("10".to_string())],
+            ]
+        );
+
+        // The partial index's WHERE predicate survived in the catalog.
+        let where_clause_present = ex
+            .db
+            .catalog
+            .find_index_by_name("aux_idx")
+            .and_then(|m| m.where_clause.as_ref())
+            .is_some();
+        assert!(where_clause_present, "partial index's WHERE predicate must survive the reload");
+
+        // The physical index body was correctly rebuilt from the
+        // now-populated attached table's live rows — not just its catalog
+        // metadata. A stale/empty body (e.g. if the predicate were silently
+        // dropped during rebuild) would either contain 0 or 3 entries; the
+        // correct partial body contains exactly the 2 rows matching `x > 0`
+        // (5 and 10, not -1). This is a more direct proof than EXPLAIN QUERY
+        // PLAN, whose index-vs-scan choice is a cost-based decision that a
+        // 3-row table may decline regardless of round-trip correctness.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 2,
+                    "partial index body must contain exactly the 2 rows matching \
+                     x > 0 after rebuild, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected an in-memory partial index body, got: {:?}", other),
+        }
+
+        // The expression index also round-tripped and returns correct data
+        // when queried by its indexed expression.
+        let result = ex.execute("SELECT x FROM aux.t WHERE abs(x) = 1").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("-1".to_string())]]);
+    }
+}
+
+#[test]
+fn test_attach_round_trips_view_and_trigger_under_a_different_alias() {
+    // The on-disk attached-schema dump is *standalone*: the writer strips the
+    // saving session's schema qualifier, and the loader re-qualifies with
+    // whatever alias the new session attached under. So a file saved as `aux`
+    // must reload correctly as `other` — this is the property that makes the
+    // qualifier rewrite (rather than verbatim replay) necessary at all.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let side_path = dir.path().join("side.vbsql");
+    let side_path_str = side_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", side_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (-3)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM t").unwrap();
+        ex.execute(
+            "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('fired'); END",
+        )
+        .unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(x) WHERE x > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // Deliberately a *different* alias than the one used at save time.
+        ex.execute(&format!("ATTACH '{}' AS other", side_path_str)).unwrap();
+
+        let result = ex.execute("SELECT x FROM other.v1 ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("-3".to_string())], vec![Some("7".to_string())]],
+            "view must re-home under the new alias, not the saved one"
+        );
+
+        // The partial index body was rebuilt against the new alias's table:
+        // exactly the one saved row matching `x > 0` (7, not -3). A dropped
+        // predicate would give 2.
+        //
+        // Asserted *before* the trigger-firing INSERT below on purpose:
+        // indexes on attached-schema tables are not maintained by DML at all
+        // (a pre-existing gap that reproduces with no save/reload involved —
+        // #6474), so checking afterwards would measure that bug rather than
+        // this round-trip. Tighten to include post-reload DML once #6474 lands.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 1,
+                    "partial index must be rebuilt under the new alias with its \
+                     WHERE predicate intact, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected an in-memory partial index body, got: {:?}", other),
+        }
+
+        ex.execute("INSERT INTO other.t VALUES (8)").unwrap();
+        let result = ex.execute("SELECT msg FROM other.log").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("fired".to_string())]],
+            "trigger must re-home under the new alias and still fire"
+        );
+
+        // The saved alias must NOT leak back into the live session.
+        assert!(
+            ex.execute("SELECT x FROM aux.v1").is_err(),
+            "the save-time alias `aux` must not resolve in a session that \
+             attached the file as `other`"
+        );
+    }
+}

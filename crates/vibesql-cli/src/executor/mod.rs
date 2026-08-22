@@ -407,6 +407,56 @@ fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
     }
 }
 
+/// Translate a catalog-level [`vibesql_catalog::IndexType`] (the type
+/// actually recorded for an index) into the AST-level
+/// [`vibesql_ast::IndexType`] a synthetic `CreateIndexStmt` needs (#6407).
+///
+/// Used only when re-homing an attached schema's indexes on `ATTACH` of an
+/// existing file (`load_attached_schema_from_file`): the loaded standalone
+/// database's catalog metadata is the only surviving record of the original
+/// index's type once its physical body has been left behind in the
+/// throwaway `Database`. `vibesql_catalog::IndexType::Hash` denotes an
+/// auto-generated PRIMARY KEY/UNIQUE-constraint index, which is filtered out
+/// by the `pk_`/`sqlite_autoindex_` name-prefix skip before this is ever
+/// called; it is mapped to a plain (non-unique) `BTree` here purely as a
+/// defensive fallback that can never actually be exercised on that path.
+fn ast_index_type_from_catalog(
+    index_type: &vibesql_catalog::IndexType,
+    unique: bool,
+) -> vibesql_ast::IndexType {
+    fn convert_metric(
+        m: vibesql_catalog::VectorDistanceMetric,
+    ) -> vibesql_ast::VectorDistanceMetric {
+        match m {
+            vibesql_catalog::VectorDistanceMetric::L2 => vibesql_ast::VectorDistanceMetric::L2,
+            vibesql_catalog::VectorDistanceMetric::Cosine => {
+                vibesql_ast::VectorDistanceMetric::Cosine
+            }
+            vibesql_catalog::VectorDistanceMetric::InnerProduct => {
+                vibesql_ast::VectorDistanceMetric::InnerProduct
+            }
+        }
+    }
+
+    match index_type {
+        vibesql_catalog::IndexType::BTree | vibesql_catalog::IndexType::Hash => {
+            vibesql_ast::IndexType::BTree { unique }
+        }
+        vibesql_catalog::IndexType::RTree => vibesql_ast::IndexType::Spatial,
+        vibesql_catalog::IndexType::Fulltext => vibesql_ast::IndexType::Fulltext,
+        vibesql_catalog::IndexType::IVFFlat { metric, lists } => {
+            vibesql_ast::IndexType::IVFFlat { metric: convert_metric(*metric), lists: *lists }
+        }
+        vibesql_catalog::IndexType::Hnsw { metric, m, ef_construction } => {
+            vibesql_ast::IndexType::Hnsw {
+                metric: convert_metric(*metric),
+                m: *m,
+                ef_construction: *ef_construction,
+            }
+        }
+    }
+}
+
 /// Options controlling how the executor opens a database file.
 ///
 /// Bundled into a struct so the `--recover-fallback` opt-in (issue #5807)
@@ -2699,20 +2749,30 @@ impl SqlExecutor {
     }
 
     /// Load an existing on-disk database file into a newly-attached schema
-    /// (#6362 Phase 2).
+    /// (#6362 Phase 2, #6407).
     ///
     /// Loads `path` via [`load_database_file`] (format auto-detection: SQL
     /// dump, binary/JSON snapshot, or SQLite import) into a standalone
     /// `Database`, then re-homes each of its default-schema tables
-    /// (definition + live row data) into `schema_name` of the live session.
-    /// `schema_name` must already be an empty, freshly-attached schema (the
-    /// caller creates it via `Catalog::attach_database` first).
+    /// (definition + live row data), indexes, views, and triggers into
+    /// `schema_name` of the live session. `schema_name` must already be an
+    /// empty, freshly-attached schema (the caller creates it via
+    /// `Catalog::attach_database` first).
     ///
-    /// Scope: only tables round-trip through ATTACH. Views, triggers, and
-    /// indexes present in the loaded file's default schema are not currently
-    /// re-homed — see `Database::save_attached_schema_sql_dump` in
-    /// vibesql-storage for the matching writer-side limitation and rationale
-    /// (tracked as a follow-up in issue #6407).
+    /// Order matters: tables are re-homed first (indexes/views/triggers all
+    /// depend on their target table already existing with its row data),
+    /// then indexes (rebuilt against the live table via
+    /// `CreateIndexExecutor` — partial-predicate and expression-index bodies
+    /// are evaluated fresh rather than transplanted, mirroring
+    /// `rebuild_pending_expression_indexes`), then views, then triggers
+    /// (matching `write_sql_dump_to_file`'s emission order so an `INSTEAD OF`
+    /// trigger's target view already exists).
+    ///
+    /// The loaded file's objects are always schema-relative (the writer,
+    /// `Database::save_attached_schema_sql_dump`, stripped the attachment's
+    /// schema qualifier before persisting), so they are re-qualified here
+    /// with `schema_name` — the alias *this* session attached the file
+    /// under, which need not match the alias used when it was saved.
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
@@ -2726,11 +2786,11 @@ impl SqlExecutor {
             .map(|s| s.list_tables())
             .unwrap_or_default();
 
-        for table_name in table_names {
+        for table_name in &table_names {
             let Some(table_schema) = loaded
                 .catalog
                 .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
-                .and_then(|s| s.get_table(&table_name, true))
+                .and_then(|s| s.get_table(table_name, true))
                 .cloned()
             else {
                 continue;
@@ -2745,6 +2805,93 @@ impl SqlExecutor {
             if let Some(table) = loaded.tables.remove(&src_key) {
                 self.db.tables.insert(format!("{}.{}", schema_name, table_name), table);
             }
+        }
+
+        // Indexes: rebuild the physical index body against the now-populated
+        // attached-schema table rather than transplanting `loaded`'s index
+        // structures (#6407). `IndexColumn`/`where_clause` are shared AST
+        // types between the catalog and executor crates, so the loaded
+        // metadata plugs directly into a synthetic `CreateIndexStmt`.
+        for index_name in loaded.list_indexes() {
+            let lower_name = index_name.to_lowercase();
+            if lower_name.starts_with("pk_")
+                || lower_name.starts_with("sqlite_autoindex_")
+                || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            {
+                continue;
+            }
+            let Some(storage_meta) = loaded.get_index(&index_name) else { continue };
+            let Some(catalog_meta) = loaded.catalog.find_index_by_name(&index_name) else {
+                continue;
+            };
+
+            let index_type =
+                ast_index_type_from_catalog(&catalog_meta.index_type, storage_meta.unique);
+            let create_stmt = vibesql_ast::CreateIndexStmt {
+                if_not_exists: false,
+                index_name: storage_meta.index_name.clone(),
+                schema: None,
+                table_name: format!("{}.{}", schema_name, storage_meta.table_name),
+                index_type,
+                columns: storage_meta.columns.clone(),
+                where_clause: catalog_meta.where_clause.clone(),
+            };
+            vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        // Views: re-qualify the (already schema-relative) view name and
+        // definition with the live session's attachment alias. Views have no
+        // separate `schema` AST field — the qualifier lives directly in the
+        // name (`ViewDefinition::name`), matching how the writer strips it.
+        for view_name in loaded.catalog.list_views() {
+            let Some(view_def) = loaded.catalog.get_view(&view_name) else { continue };
+            if view_def.is_temp() {
+                continue;
+            }
+            let qualified_name = format!("{}.{}", schema_name, view_def.name);
+            let create_stmt = vibesql_ast::CreateViewStmt {
+                view_name: qualified_name,
+                columns: view_def.columns.clone(),
+                query: Box::new(view_def.query.clone()),
+                with_check_option: view_def.with_check_option,
+                or_replace: false,
+                if_not_exists: false,
+                temporary: false,
+                sql_definition: view_def.sql_definition.clone(),
+            };
+            vibesql_executor::ViewExecutor::execute_create_view(&create_stmt, &mut self.db)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        // Triggers: unlike views, triggers carry an explicit `schema` AST
+        // field distinct from their bare name/table, so re-homing is a
+        // direct field-for-field translation from the loaded
+        // `TriggerDefinition` into a synthetic `CreateTriggerStmt`, replayed
+        // through `TriggerExecutor` so target-table/schema validation runs
+        // exactly as it would for a live `CREATE TRIGGER`.
+        for trigger_def in loaded.catalog.iter_triggers() {
+            if trigger_def.is_temp() {
+                continue;
+            }
+            let create_stmt = vibesql_ast::CreateTriggerStmt {
+                if_not_exists: false,
+                schema: Some(schema_name.to_string()),
+                trigger_name: trigger_def.name.clone(),
+                name_source: None,
+                timing: trigger_def.timing.clone(),
+                event: trigger_def.event.clone(),
+                table_name: trigger_def.table_name.clone(),
+                granularity: trigger_def.granularity.clone(),
+                when_condition: trigger_def.when_condition.clone(),
+                triggered_action: trigger_def.triggered_action.clone(),
+            };
+            vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                &mut self.db,
+                &create_stmt,
+                trigger_def.sql_definition.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
         Ok(())
