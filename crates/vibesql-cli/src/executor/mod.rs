@@ -7,6 +7,7 @@ use vibesql_types::SqlValue;
 // Submodules
 mod copy_handler;
 pub mod display;
+mod schema_qualify;
 pub mod validation;
 pub mod wal;
 
@@ -403,6 +404,56 @@ fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
             // Fall back to SQL dump loading (requires executor for parsing)
             vibesql_executor::load_sql_dump(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to load database: {}", e))
+        }
+    }
+}
+
+/// Translate a catalog-level [`vibesql_catalog::IndexType`] (the type
+/// actually recorded for an index) into the AST-level
+/// [`vibesql_ast::IndexType`] a synthetic `CreateIndexStmt` needs (#6407).
+///
+/// Used only when re-homing an attached schema's indexes on `ATTACH` of an
+/// existing file (`load_attached_schema_from_file`): the loaded standalone
+/// database's catalog metadata is the only surviving record of the original
+/// index's type once its physical body has been left behind in the
+/// throwaway `Database`. `vibesql_catalog::IndexType::Hash` denotes an
+/// auto-generated PRIMARY KEY/UNIQUE-constraint index, which is filtered out
+/// by the `pk_`/`sqlite_autoindex_` name-prefix skip before this is ever
+/// called; it is mapped to a plain (non-unique) `BTree` here purely as a
+/// defensive fallback that can never actually be exercised on that path.
+fn ast_index_type_from_catalog(
+    index_type: &vibesql_catalog::IndexType,
+    unique: bool,
+) -> vibesql_ast::IndexType {
+    fn convert_metric(
+        m: vibesql_catalog::VectorDistanceMetric,
+    ) -> vibesql_ast::VectorDistanceMetric {
+        match m {
+            vibesql_catalog::VectorDistanceMetric::L2 => vibesql_ast::VectorDistanceMetric::L2,
+            vibesql_catalog::VectorDistanceMetric::Cosine => {
+                vibesql_ast::VectorDistanceMetric::Cosine
+            }
+            vibesql_catalog::VectorDistanceMetric::InnerProduct => {
+                vibesql_ast::VectorDistanceMetric::InnerProduct
+            }
+        }
+    }
+
+    match index_type {
+        vibesql_catalog::IndexType::BTree | vibesql_catalog::IndexType::Hash => {
+            vibesql_ast::IndexType::BTree { unique }
+        }
+        vibesql_catalog::IndexType::RTree => vibesql_ast::IndexType::Spatial,
+        vibesql_catalog::IndexType::Fulltext => vibesql_ast::IndexType::Fulltext,
+        vibesql_catalog::IndexType::IVFFlat { metric, lists } => {
+            vibesql_ast::IndexType::IVFFlat { metric: convert_metric(*metric), lists: *lists }
+        }
+        vibesql_catalog::IndexType::Hnsw { metric, m, ef_construction } => {
+            vibesql_ast::IndexType::Hnsw {
+                metric: convert_metric(*metric),
+                m: *m,
+                ef_construction: *ef_construction,
+            }
         }
     }
 }
@@ -2699,20 +2750,48 @@ impl SqlExecutor {
     }
 
     /// Load an existing on-disk database file into a newly-attached schema
-    /// (#6362 Phase 2).
+    /// (#6362 Phase 2, #6407).
     ///
     /// Loads `path` via [`load_database_file`] (format auto-detection: SQL
     /// dump, binary/JSON snapshot, or SQLite import) into a standalone
     /// `Database`, then re-homes each of its default-schema tables
-    /// (definition + live row data) into `schema_name` of the live session.
-    /// `schema_name` must already be an empty, freshly-attached schema (the
-    /// caller creates it via `Catalog::attach_database` first).
+    /// (definition + live row data), indexes, views, and triggers into
+    /// `schema_name` of the live session. `schema_name` must already be an
+    /// empty, freshly-attached schema (the caller creates it via
+    /// `Catalog::attach_database` first).
     ///
-    /// Scope: only tables round-trip through ATTACH. Views, triggers, and
-    /// indexes present in the loaded file's default schema are not currently
-    /// re-homed — see `Database::save_attached_schema_sql_dump` in
-    /// vibesql-storage for the matching writer-side limitation and rationale
-    /// (tracked as a follow-up in issue #6407).
+    /// Order matters: tables are re-homed first (indexes/views/triggers all
+    /// depend on their target table already existing with its row data),
+    /// then indexes (rebuilt against the live table via
+    /// `CreateIndexExecutor` — partial-predicate and expression-index bodies
+    /// are evaluated fresh rather than transplanted, mirroring
+    /// `rebuild_pending_expression_indexes`), then views, then triggers
+    /// (matching `write_sql_dump_to_file`'s emission order so an `INSTEAD OF`
+    /// trigger's target view already exists).
+    ///
+    /// The loaded file's objects are always schema-relative (the writer,
+    /// `Database::save_attached_schema_sql_dump`, stripped the attachment's
+    /// schema qualifier before persisting), so they are re-qualified here
+    /// with `schema_name` — the alias *this* session attached the file
+    /// under, which need not match the alias used when it was saved.
+    ///
+    /// Re-qualification covers the view's *body* as well as its name
+    /// ([`schema_qualify::qualify_unqualified_tables`]): an unqualified table
+    /// reference left in the body would otherwise late-bind through
+    /// `Catalog::get_table`'s temp → main → attached search order and
+    /// silently read `main`'s same-named table.
+    ///
+    /// Two documented gaps, both pre-existing name-resolution defects that
+    /// reproduce in a live session with no save/reload, and neither of which
+    /// can prevent the `ATTACH` itself from succeeding:
+    ///
+    /// - **Trigger bodies** are not re-bound to `schema_name` — see the `KNOWN LIMITATION (#6477)`
+    ///   note at the trigger loop below.
+    /// - **Index rebuilds are best-effort**: an index whose bare target-table name is shadowed by a
+    ///   same-named table in `main` (or temp, or an earlier attachment) is skipped with a logged
+    ///   warning rather than rebuilt, because the storage-side body build binds by bare name — see
+    ///   the `KNOWN LIMITATION (#6487)` note at the index loop below. The attachment's tables,
+    ///   rows, views, and triggers still re-home normally; only the index is absent.
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
@@ -2726,11 +2805,11 @@ impl SqlExecutor {
             .map(|s| s.list_tables())
             .unwrap_or_default();
 
-        for table_name in table_names {
+        for table_name in &table_names {
             let Some(table_schema) = loaded
                 .catalog
                 .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
-                .and_then(|s| s.get_table(&table_name, true))
+                .and_then(|s| s.get_table(table_name, true))
                 .cloned()
             else {
                 continue;
@@ -2745,6 +2824,199 @@ impl SqlExecutor {
             if let Some(table) = loaded.tables.remove(&src_key) {
                 self.db.tables.insert(format!("{}.{}", schema_name, table_name), table);
             }
+        }
+
+        // Indexes: rebuild the physical index body against the now-populated
+        // attached-schema table rather than transplanting `loaded`'s index
+        // structures (#6407). `IndexColumn`/`where_clause` are shared AST
+        // types between the catalog and executor crates, so the loaded
+        // metadata plugs directly into a synthetic `CreateIndexStmt`.
+        //
+        // The auto-generated-index filter below deliberately tests
+        // `storage_meta.index_name` (the bare name) rather than the value
+        // yielded by `list_indexes()`, which is the storage *map key*.
+        // `loaded` is a standalone database whose objects all live in the
+        // default schema, so its keys happen to be bare today and testing
+        // either would work — but `make_index_key` prefixes any non-`main`
+        // schema, so a key-based test silently stops excluding auto-indexes
+        // the moment this loop is pointed at a schema-bearing database. That
+        // is exactly the defect that shipped on the writer side in
+        // `save_attached_schema_sql_dump`; filtering on the metadata name
+        // costs nothing and removes the latent trap.
+        for index_key in loaded.list_indexes() {
+            let Some(storage_meta) = loaded.get_index(&index_key) else { continue };
+            let lower_name = storage_meta.index_name.to_lowercase();
+            if lower_name.starts_with("pk_")
+                || lower_name.starts_with("sqlite_autoindex_")
+                || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            {
+                continue;
+            }
+            let Some(catalog_meta) = loaded.catalog.find_index_by_name(&storage_meta.index_name)
+            else {
+                continue;
+            };
+
+            let index_type =
+                ast_index_type_from_catalog(&catalog_meta.index_type, storage_meta.unique);
+            let create_stmt = vibesql_ast::CreateIndexStmt {
+                if_not_exists: false,
+                index_name: storage_meta.index_name.clone(),
+                schema: None,
+                table_name: format!("{}.{}", schema_name, storage_meta.table_name),
+                index_type,
+                columns: storage_meta.columns.clone(),
+                where_clause: catalog_meta.where_clause.clone(),
+            };
+
+            // KNOWN LIMITATION (#6487): the index body build binds by BARE
+            // table name, so it must be skipped when the bare name does not
+            // resolve to this attachment.
+            //
+            // `CreateIndexExecutor` validates against the *qualified* target
+            // (`aux.t`) but `build_btree_index_body` then hands storage the
+            // **bare** name, and storage re-resolves it through the temp →
+            // main → attached search order. When `main` holds a same-named
+            // table that resolution lands on `main.t` instead, with two bad
+            // outcomes: if `main.t` lacks the indexed column the build errors
+            // (`Column 'z' not found in table 't'`), and if it happens to
+            // have one the body is silently built from `main.t`'s rows and
+            // registered as a `main`-schema index. Propagating either from
+            // here would make an attachment that merely *contains* an index
+            // impossible to re-`ATTACH` at all — strictly worse than
+            // pre-#6407, where indexes were never persisted.
+            //
+            // So the rebuild is best-effort: it is attempted only when the
+            // bare name provably resolves back to this attachment (the same
+            // `resolve_table_schema_name` order storage itself uses), and any
+            // error from the attempt is logged and skipped rather than
+            // propagated. A skipped index degrades the reload to "the index
+            // is missing" — exactly the pre-#6407 behavior — while the tables,
+            // their rows, views, and triggers all still re-home and the
+            // `ATTACH` succeeds. Removing this guard is safe (and desirable)
+            // once #6487 makes the body build bind to the qualified name.
+            // `test_attach_reattach_index_skipped_on_main_table_name_collision`
+            // and its `*_with_matching_column` sibling pin both branches.
+            let resolves_to_attachment = self
+                .db
+                .catalog
+                .resolve_table_schema_name(&storage_meta.table_name)
+                .is_some_and(|resolved| resolved.eq_ignore_ascii_case(schema_name));
+            if !resolves_to_attachment {
+                log::warn!(
+                    "ATTACH '{}' AS {}: skipping rebuild of index '{}' on '{}.{}' — the bare \
+                     table name '{}' resolves to another schema (a same-named table shadows the \
+                     attachment), and the index body build would bind to that table instead \
+                     (#6487). The attached data is unaffected; only the index is missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    storage_meta.table_name,
+                );
+                continue;
+            }
+            if let Err(e) =
+                vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
+            {
+                log::warn!(
+                    "ATTACH '{}' AS {}: failed to rebuild index '{}' on '{}.{}': {} — continuing \
+                     without it (#6487). The attached data is unaffected; only the index is \
+                     missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    e,
+                );
+            }
+        }
+
+        // Views: re-qualify the (already schema-relative) view name and
+        // definition with the live session's attachment alias. Views have no
+        // separate `schema` AST field — the qualifier lives directly in the
+        // name (`ViewDefinition::name`), matching how the writer strips it.
+        //
+        // The view's *body* must be re-bound too, not just its name (#6476
+        // review). An unqualified table reference inside the body is
+        // late-bound through `Catalog::get_table`'s temp → main → attached
+        // search order, so a body persisted as `SELECT x FROM t` would
+        // silently read `main.t` whenever `main` happens to hold a same-named
+        // table — returning another database's rows rather than erroring.
+        // `qualify_unqualified_tables` applies SQLite's rule (an unqualified
+        // name in a view body resolves within the schema containing the view)
+        // by rewriting every bare base-table reference to
+        // `<this session's alias>.<table>`; explicitly-qualified references
+        // (`main.mt`, `other.u`) — which the writer never stripped — are left
+        // alone.
+        for view_name in loaded.catalog.list_views() {
+            let Some(view_def) = loaded.catalog.get_view(&view_name) else { continue };
+            if view_def.is_temp() {
+                continue;
+            }
+            let qualified_name = format!("{}.{}", schema_name, view_def.name);
+            let mut query = view_def.query.clone();
+            schema_qualify::qualify_unqualified_tables(&mut query, schema_name);
+            let create_stmt = vibesql_ast::CreateViewStmt {
+                view_name: qualified_name,
+                columns: view_def.columns.clone(),
+                query: Box::new(query),
+                with_check_option: view_def.with_check_option,
+                or_replace: false,
+                if_not_exists: false,
+                temporary: false,
+                sql_definition: view_def.sql_definition.clone(),
+            };
+            vibesql_executor::ViewExecutor::execute_create_view(&create_stmt, &mut self.db)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        // Triggers: unlike views, triggers carry an explicit `schema` AST
+        // field distinct from their bare name/table, so re-homing is a
+        // direct field-for-field translation from the loaded
+        // `TriggerDefinition` into a synthetic `CreateTriggerStmt`, replayed
+        // through `TriggerExecutor` so target-table/schema validation runs
+        // exactly as it would for a live `CREATE TRIGGER`.
+        //
+        // KNOWN LIMITATION (#6477): the trigger's *body* is NOT re-bound to
+        // `schema_name` the way the view body above is. A trigger body is
+        // stored as `TriggerAction::RawSql` and re-parsed when the trigger
+        // fires, and the parser rejects a qualified table name inside a
+        // trigger body outright ("qualified table names are not allowed on
+        // INSERT, UPDATE, and DELETE statements within triggers", matching
+        // SQLite) — so there is no AST to rewrite and no parseable text form
+        // that would express the binding. Its unqualified names therefore
+        // still resolve through `Catalog::get_table`'s temp → main →
+        // attached search order, so a same-named table in `main` wins. That
+        // late binding is pre-existing and reproduces with no save/reload at
+        // all; fixing it means teaching trigger execution to resolve a
+        // body's names in the trigger's own schema, which is #6477's job.
+        // `test_attach_reattach_trigger_body_binds_to_main_on_name_collision`
+        // pins the actual behavior so it cannot change unnoticed.
+        for trigger_def in loaded.catalog.iter_triggers() {
+            if trigger_def.is_temp() {
+                continue;
+            }
+            let create_stmt = vibesql_ast::CreateTriggerStmt {
+                if_not_exists: false,
+                schema: Some(schema_name.to_string()),
+                trigger_name: trigger_def.name.clone(),
+                name_source: None,
+                timing: trigger_def.timing.clone(),
+                event: trigger_def.event.clone(),
+                table_name: trigger_def.table_name.clone(),
+                granularity: trigger_def.granularity.clone(),
+                when_condition: trigger_def.when_condition.clone(),
+                triggered_action: trigger_def.triggered_action.clone(),
+            };
+            vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                &mut self.db,
+                &create_stmt,
+                trigger_def.sql_definition.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
         Ok(())

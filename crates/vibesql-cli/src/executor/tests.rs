@@ -1965,3 +1965,882 @@ fn test_pragma_database_list_canonicalizes_existing_attached_file_path() {
         ]
     );
 }
+
+// ============================================================================
+// ATTACH DATABASE views/triggers/indexes round-trip (#6407)
+// ============================================================================
+
+#[test]
+fn test_attach_reattach_round_trips_view() {
+    // A view defined inside an attached schema — with its captured SQL text
+    // referencing the attachment's own qualifier throughout (`aux.v1`,
+    // `FROM t` resolving against `aux`) — must survive a clean exit and a
+    // fresh session's re-attach of the same file, per the issue #6407
+    // acceptance criteria.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (2)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM t").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x FROM aux.v1 ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("1".to_string())], vec![Some("2".to_string())]],
+            "view must round-trip through a save/exit/reattach cycle"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_round_trips_trigger() {
+    // A trigger defined inside an attached schema must likewise round-trip
+    // (issue #6407 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_trigger.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute(
+            "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('inserted'); END",
+        )
+        .unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // Firing the trigger proves it round-tripped, not just that its
+        // catalog entry exists.
+        ex.execute("INSERT INTO aux.t VALUES (99)").unwrap();
+        let result = ex.execute("SELECT msg FROM aux.log").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("inserted".to_string())]],
+            "trigger must round-trip and fire after a save/exit/reattach cycle"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_binds_to_attached_schema_despite_main_collision() {
+    // The round trip must preserve the view body's *schema binding*, not just
+    // the view's existence (#6476 review). The writer persists the body
+    // schema-relative, so an unqualified table reference in the reloaded body
+    // would late-bind through `Catalog::get_table`'s temp → main → attached
+    // search order and read `main`'s same-named table instead — returning
+    // another database's rows with no error at all.
+    //
+    // Both spellings of the defining body must converge on the attachment:
+    //   * `FROM aux.t` — explicitly qualified, unambiguous at definition time.
+    //   * `FROM t`     — bare, resolved to `aux.t` in the defining session.
+    // SQLite's rule (an unqualified name in a view body resolves within the
+    // schema containing the view) makes both mean `aux.t` forever after.
+    for body in ["SELECT x FROM aux.t", "SELECT x FROM t"] {
+        let dir = tempfile::tempdir().unwrap();
+        let main_path = dir.path().join("main.vbsql");
+        let main_path_str = main_path.to_str().unwrap().to_string();
+        let aux_path = dir.path().join("aux_view_collision.vbsql");
+        let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+            ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+            ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+            ex.execute("INSERT INTO aux.t VALUES (2)").unwrap();
+            ex.execute(&format!("CREATE VIEW aux.v1 AS {}", body)).unwrap();
+
+            let before = ex.execute("SELECT x FROM aux.v1 ORDER BY x").unwrap();
+            assert_eq!(
+                before.rows,
+                vec![vec![Some("1".to_string())], vec![Some("2".to_string())]],
+                "sanity: `{}` must read the attachment in the defining session",
+                body
+            );
+            ex.save_database(&main_path_str).unwrap();
+        }
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            // The collision that every other round-trip test is missing: a
+            // table in `main` with the same bare name as the attachment's.
+            // Without it there is nothing for a mis-bound body to resolve to,
+            // so the wrong binding is unobservable.
+            ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+            ex.execute("INSERT INTO t VALUES (999)").unwrap();
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+            let result = ex.execute("SELECT x FROM aux.v1 ORDER BY x").unwrap();
+            assert_eq!(
+                result.rows,
+                vec![vec![Some("1".to_string())], vec![Some("2".to_string())]],
+                "view body `{}` must still read aux.t after reload, not main.t",
+                body
+            );
+
+            // And the collision itself still resolves normally either way.
+            let main_rows = ex.execute("SELECT x FROM t").unwrap();
+            assert_eq!(main_rows.rows, vec![vec![Some("999".to_string())]]);
+        }
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_binds_to_attached_schema_under_a_different_alias() {
+    // The binding must follow the alias *this* session attached under, not
+    // the one the file was saved with — the whole reason the writer persists
+    // schema-relative in the first place. With a same-named `main.t` present,
+    // a body that failed to re-qualify would silently read main's rows.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_alias_collision.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM aux.t").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES (999)").unwrap();
+        // Saved as `aux`, reloaded as `other`.
+        ex.execute(&format!("ATTACH '{}' AS other", aux_path_str)).unwrap();
+
+        let result = ex.execute("SELECT x FROM other.v1").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("7".to_string())]],
+            "view body must re-bind to the *current* alias's schema, not main"
+        );
+
+        // The save-time alias must not leak back into the live session.
+        assert!(
+            ex.execute("SELECT x FROM aux.v1").is_err(),
+            "the save-time alias `aux` must not be resolvable in this session"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_preserves_an_explicit_main_reference() {
+    // `strip_schema_qualifier` only removes the attachment's *own* qualifier,
+    // so an explicit `main.` reference survives into the persisted body. The
+    // reader must leave it alone: bare means "this attachment", qualified
+    // means "that schema". Rewriting it to `aux.` would be the mirror image
+    // of the bug this whole path exists to prevent.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_main_ref.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES (999)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+        ex.execute("CREATE VIEW aux.vmain AS SELECT x FROM main.t").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x FROM aux.vmain").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("999".to_string())]],
+            "an explicit main.-qualified reference must keep pointing at main"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_binds_a_joined_body_to_the_attached_schema() {
+    // A multi-table body exercises the recursion (both join arms) and the
+    // aliased column qualifiers that survive the rewrite: `a.x`/`b.y` must
+    // still bind after `t`/`u` become `aux.t`/`aux.u`.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_join.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.u(x INTEGER, y TEXT)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (1)").unwrap();
+        ex.execute("INSERT INTO aux.u VALUES (1, 'aux-row')").unwrap();
+        ex.execute("CREATE VIEW aux.vj AS SELECT b.y FROM aux.t AS a JOIN aux.u AS b ON a.x = b.x")
+            .unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE u(x INTEGER, y TEXT)").unwrap();
+        ex.execute("INSERT INTO t VALUES (1)").unwrap();
+        ex.execute("INSERT INTO u VALUES (1, 'main-row')").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        let result = ex.execute("SELECT y FROM aux.vj").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("aux-row".to_string())]],
+            "both join arms must re-bind to the attached schema, not main"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_trigger_body_binds_to_main_on_name_collision() {
+    // KNOWN LIMITATION, pinned deliberately — see #6477.
+    //
+    // A trigger body is stored as `TriggerAction::RawSql` and re-parsed when
+    // the trigger fires, and the parser rejects a qualified table name inside
+    // a trigger body ("qualified table names are not allowed on INSERT,
+    // UPDATE, and DELETE statements within triggers", matching SQLite). So
+    // the view-body rewrite in `schema_qualify` has nothing to operate on
+    // here, and the body's unqualified names still resolve through the
+    // connection-wide temp → main → attached search order: a same-named
+    // `main.log` wins, and the attachment's own `log` never sees the row.
+    //
+    // This asserts the *actual* behavior, not the desired one. Fixing #6477
+    // must flip these two assertions.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_trigger_collision.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute(
+            "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('fired'); END",
+        )
+        .unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE log(msg TEXT)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+
+        let main_log = ex.execute("SELECT msg FROM main.log").unwrap();
+        let aux_log = ex.execute("SELECT msg FROM aux.log").unwrap();
+
+        assert_eq!(
+            main_log.rows,
+            vec![vec![Some("fired".to_string())]],
+            "#6477: the trigger body currently writes to main.log (wrong, but pinned)"
+        );
+        assert!(
+            aux_log.rows.is_empty(),
+            "#6477: the attachment's own log currently stays empty (wrong, but pinned)"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_body_may_qualify_columns_with_the_bare_table_name() {
+    // Regression guard for the re-qualification itself: a body written
+    // `SELECT t.x FROM t` names its columns after the table's *unqualified*
+    // name, and the executor does not match a bare column qualifier against a
+    // schema-qualified table. Rewriting the FROM entry to `aux.t` without
+    // keeping `t` as a correlation name turns a working view into
+    // "Column 'x' not found (searched tables: aux.t)" — a fresh breakage
+    // introduced by the fix rather than by the bug it fixes. Asserted with
+    // and without a colliding `main.t` so neither the binding nor the
+    // resolution can regress silently.
+    for with_main_collision in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let main_path = dir.path().join("main.vbsql");
+        let main_path_str = main_path.to_str().unwrap().to_string();
+        let aux_path = dir.path().join("aux_bare_qualifier.vbsql");
+        let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+            ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+            ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+            ex.execute("CREATE VIEW aux.v AS SELECT t.x FROM t WHERE t.x > 0").unwrap();
+            assert_eq!(
+                ex.execute("SELECT x FROM aux.v").unwrap().rows,
+                vec![vec![Some("5".to_string())]],
+                "sanity: the body must work in the defining session"
+            );
+            ex.save_database(&main_path_str).unwrap();
+        }
+
+        {
+            let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+            if with_main_collision {
+                ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+                ex.execute("INSERT INTO t VALUES (999)").unwrap();
+            }
+            ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+            assert_eq!(
+                ex.execute("SELECT x FROM aux.v").unwrap().rows,
+                vec![vec![Some("5".to_string())]],
+                "bare-table-name column qualifiers must survive re-qualification \
+                 (main collision: {})",
+                with_main_collision
+            );
+        }
+    }
+}
+
+#[test]
+fn test_attach_reattach_view_on_view_binds_to_the_attached_schema() {
+    // A view whose body references *another view* in the same attachment is
+    // rewritten by the same rule (`v1` -> `aux.v1`), so it exercises the
+    // reader's view-creation ordering as well as the re-binding. With a
+    // same-named `main.t` under the inner view, a mis-bound chain would
+    // silently surface main's rows through two levels of indirection.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view_on_view.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (3)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM aux.t").unwrap();
+        ex.execute("CREATE VIEW aux.v2 AS SELECT x FROM aux.v1").unwrap();
+        assert_eq!(
+            ex.execute("SELECT x FROM aux.v2").unwrap().rows,
+            vec![vec![Some("3".to_string())]],
+            "sanity: the view chain must read the attachment in the defining session"
+        );
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES (999)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        assert_eq!(
+            ex.execute("SELECT x FROM aux.v2").unwrap().rows,
+            vec![vec![Some("3".to_string())]],
+            "a view-on-view chain must re-bind to the attached schema, not main"
+        );
+    }
+}
+
+#[test]
+fn test_attach_reattach_round_trips_partial_and_expression_index() {
+    // Partial (WHERE-predicate) and expression indexes on an attached
+    // schema's table must round-trip — including the physical index body,
+    // not just the catalog metadata (issue #6407 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_index.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (-1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (10)").unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(x) WHERE x > 0").unwrap();
+        ex.execute("CREATE INDEX aux_expr_idx ON t(abs(x))").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        // Data itself is intact regardless of the index.
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("-1".to_string())],
+                vec![Some("5".to_string())],
+                vec![Some("10".to_string())],
+            ]
+        );
+
+        // The partial index's WHERE predicate survived in the catalog.
+        let where_clause_present = ex
+            .db
+            .catalog
+            .find_index_by_name("aux_idx")
+            .and_then(|m| m.where_clause.as_ref())
+            .is_some();
+        assert!(where_clause_present, "partial index's WHERE predicate must survive the reload");
+
+        // The physical index body was correctly rebuilt from the
+        // now-populated attached table's live rows — not just its catalog
+        // metadata. A stale/empty body (e.g. if the predicate were silently
+        // dropped during rebuild) would either contain 0 or 3 entries; the
+        // correct partial body contains exactly the 2 rows matching `x > 0`
+        // (5 and 10, not -1). This is a more direct proof than EXPLAIN QUERY
+        // PLAN, whose index-vs-scan choice is a cost-based decision that a
+        // 3-row table may decline regardless of round-trip correctness.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 2,
+                    "partial index body must contain exactly the 2 rows matching \
+                     x > 0 after rebuild, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected an in-memory partial index body, got: {:?}", other),
+        }
+
+        // The expression index also round-tripped and returns correct data
+        // when queried by its indexed expression.
+        let result = ex.execute("SELECT x FROM aux.t WHERE abs(x) = 1").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("-1".to_string())]]);
+    }
+}
+
+#[test]
+fn test_attach_reattach_index_skipped_on_main_table_name_collision() {
+    // The missing fixture axis for indexes: a *populated* `main` holding a
+    // same-named table (the configuration the view tests already cover).
+    //
+    // The storage-side index body build binds by BARE table name, so with
+    // `main.t` present the rebuild would resolve `t` to `main.t` instead of
+    // `aux.t` (#6487). Here `main.t` has no `z` column at all, so the build
+    // errors with `Column 'z' not found in table 't'`. That error must NOT
+    // propagate: an attachment that merely *contains* an index would then be
+    // impossible to re-`ATTACH`, which is strictly worse than pre-#6407
+    // (where indexes were never persisted at all). The documented behavior is
+    // that the `ATTACH` succeeds, all data is readable, and only the index is
+    // missing.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_collide.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', -1)").unwrap();
+        ex.execute("CREATE INDEX aux_plain_idx ON t(z)").unwrap();
+        ex.execute("CREATE INDEX aux_partial_idx ON t(x) WHERE z > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // A same-named table in `main`, WITHOUT the indexed `z` column.
+        ex.execute("CREATE TABLE t(x TEXT)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-ROW')").unwrap();
+
+        // The ATTACH must succeed — this is the whole point of the guard.
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str))
+            .expect("ATTACH of an index-bearing attachment must succeed despite a main collision");
+
+        // The attachment's data is fully readable.
+        let result = ex.execute("SELECT x, z FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("a".to_string()), Some("10".to_string())],
+                vec![Some("b".to_string()), Some("-1".to_string())],
+            ]
+        );
+
+        // `main.t` is untouched: no index body was built from its rows, and
+        // no stray `main`-schema index was registered under the aux name.
+        let result = ex.execute("SELECT x FROM t").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("MAIN-ROW".to_string())]]);
+        assert!(
+            ex.db.get_index_data("aux_plain_idx").is_none(),
+            "the shadowed index must be skipped entirely, not built against main.t"
+        );
+        assert!(
+            ex.db.get_index_data("aux_partial_idx").is_none(),
+            "the shadowed partial index must be skipped entirely, not built against main.t"
+        );
+
+        // Queries that could have used the missing index still return correct
+        // results via a full scan.
+        let result = ex.execute("SELECT x FROM aux.t WHERE z = 10").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("a".to_string())]]);
+    }
+}
+
+#[test]
+fn test_attach_reattach_index_skipped_on_main_collision_with_matching_column() {
+    // The second half of the same fixture axis: `main.t` collides on name AND
+    // happens to carry the indexed column, so the storage-side bare-name bind
+    // (#6487) would NOT error — it would silently build the index body from
+    // `main.t`'s rows and register it as a `main`-schema index. That is the
+    // more dangerous branch (wrong data rather than a loud failure), so it is
+    // pinned separately: the index must be skipped here too, and `main.t`
+    // must be left without a phantom index.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_collide2.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('AUX-A', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('AUX-B', 20)").unwrap();
+        ex.execute("CREATE UNIQUE INDEX aux_uniq_idx ON t(z)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // Same name AND a compatible `z` column — the silent-wrong-body case.
+        ex.execute("CREATE TABLE t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-A', 100)").unwrap();
+        ex.execute("INSERT INTO t VALUES ('MAIN-B', 100)").unwrap();
+
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str))
+            .expect("ATTACH must succeed even when main.t is index-build compatible");
+
+        // Both tables read back their own rows.
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("AUX-A".to_string())], vec![Some("AUX-B".to_string())]]
+        );
+        let result = ex.execute("SELECT x FROM t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("MAIN-A".to_string())], vec![Some("MAIN-B".to_string())]]
+        );
+
+        // No index body was built at all — in particular not one filled with
+        // main.t's rows (which, being duplicate 100s, a UNIQUE index over
+        // main.t could not even have represented).
+        assert!(
+            ex.db.get_index_data("aux_uniq_idx").is_none(),
+            "the shadowed unique index must be skipped, not built against main.t"
+        );
+
+        // main.t keeps its duplicate `z` values: no phantom UNIQUE constraint
+        // leaked onto it from the attachment's index.
+        ex.execute("INSERT INTO t VALUES ('MAIN-C', 100)")
+            .expect("main.t must not have acquired the attachment's UNIQUE index");
+    }
+}
+
+#[test]
+fn test_attach_reattach_index_rebuilds_when_main_has_a_differently_named_table() {
+    // Control for the two collision tests above: the guard must be narrow. A
+    // populated `main` that does NOT shadow the attachment's table name still
+    // gets a fully rebuilt index body — the skip is keyed on name resolution,
+    // not merely on "main is non-empty".
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_idx_nocollide.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x TEXT, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', -1)").unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(z) WHERE z > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute("CREATE TABLE mt(x TEXT)").unwrap();
+        ex.execute("INSERT INTO mt VALUES ('MAIN-ROW')").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        let result = ex.execute("SELECT x FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(result.rows, vec![vec![Some("a".to_string())], vec![Some("b".to_string())]]);
+
+        // The partial index body was rebuilt from aux.t's rows: exactly the
+        // one row matching `z > 0`.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 1,
+                    "partial index body must contain exactly the 1 row matching z > 0, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected a rebuilt in-memory partial index body, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_attach_round_trips_view_and_trigger_under_a_different_alias() {
+    // The on-disk attached-schema dump is *standalone*: the writer strips the
+    // saving session's schema qualifier, and the loader re-qualifies with
+    // whatever alias the new session attached under. So a file saved as `aux`
+    // must reload correctly as `other` — this is the property that makes the
+    // qualifier rewrite (rather than verbatim replay) necessary at all.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let side_path = dir.path().join("side.vbsql");
+    let side_path_str = side_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", side_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (7)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES (-3)").unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT x FROM t").unwrap();
+        ex.execute(
+            "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('fired'); END",
+        )
+        .unwrap();
+        ex.execute("CREATE INDEX aux_idx ON t(x) WHERE x > 0").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        // Deliberately a *different* alias than the one used at save time.
+        ex.execute(&format!("ATTACH '{}' AS other", side_path_str)).unwrap();
+
+        let result = ex.execute("SELECT x FROM other.v1 ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("-3".to_string())], vec![Some("7".to_string())]],
+            "view must re-home under the new alias, not the saved one"
+        );
+
+        // The partial index body was rebuilt against the new alias's table:
+        // exactly the one saved row matching `x > 0` (7, not -3). A dropped
+        // predicate would give 2.
+        //
+        // Asserted *before* the trigger-firing INSERT below on purpose:
+        // indexes on attached-schema tables are not maintained by DML at all
+        // (a pre-existing gap that reproduces with no save/reload involved —
+        // #6474), so checking afterwards would measure that bug rather than
+        // this round-trip. Tighten to include post-reload DML once #6474 lands.
+        match ex.db.get_index_data("aux_idx") {
+            Some(vibesql_storage::IndexData::InMemory { data }) => {
+                let total_entries: usize = data.values().map(|rows| rows.len()).sum();
+                assert_eq!(
+                    total_entries, 1,
+                    "partial index must be rebuilt under the new alias with its \
+                     WHERE predicate intact, got: {:?}",
+                    data
+                );
+            }
+            other => panic!("expected an in-memory partial index body, got: {:?}", other),
+        }
+
+        ex.execute("INSERT INTO other.t VALUES (8)").unwrap();
+        let result = ex.execute("SELECT msg FROM other.log").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![vec![Some("fired".to_string())]],
+            "trigger must re-home under the new alias and still fire"
+        );
+
+        // The saved alias must NOT leak back into the live session.
+        assert!(
+            ex.execute("SELECT x FROM aux.v1").is_err(),
+            "the save-time alias `aux` must not resolve in a session that \
+             attached the file as `other`"
+        );
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Auto-generated indexes must never reach an attached schema's dump (#6476
+// review). `IndexManager::list_indexes()` yields storage *map keys*, and
+// `make_index_key` prefixes every non-`main` schema onto the key — so an
+// attached table's implicit index is keyed `aux.sqlite_autoindex_t_1` /
+// `aux._withoutrowidinternalpk_t`, and a `starts_with(...)` test against the
+// key silently fails to exclude exactly the indexes the filter exists for.
+// `CREATE TABLE` recreates those indexes on reload anyway, and their names are
+// reserved, so emitting them turns the attachment into a write-then-cannot-
+// reopen file:
+//
+//     object name reserved for internal use: sqlite_autoindex_t_1
+//
+// Every other round-trip test above uses a bare `x INTEGER` column — and an
+// `INTEGER PRIMARY KEY` is a rowid alias that gets no implicit index — which is
+// why the whole suite stayed green while a `TEXT PRIMARY KEY`, a `UNIQUE`
+// constraint, or `WITHOUT ROWID` broke. The two tests below are that missing
+// axis; they must filter on the metadata's own bare `index_name`, never the
+// map key, to pass.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_attach_reattach_round_trips_a_non_rowid_primary_key_and_unique_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_pk.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // `x TEXT PRIMARY KEY` is NOT a rowid alias, so it gets an implicit
+        // `sqlite_autoindex_t_1`; the `UNIQUE` column adds `..._t_2`.
+        ex.execute("CREATE TABLE aux.t(x TEXT PRIMARY KEY, y INTEGER UNIQUE, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 1, 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', 2, 20)").unwrap();
+        // A genuine user index alongside them: the fix must exclude only the
+        // auto-generated ones, not stop emitting indexes altogether.
+        ex.execute("CREATE INDEX aux_user_idx ON t(z)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        // The primary regression: the persisted file must still be openable.
+        // Before the fix this fails here with
+        // `object name reserved for internal use: sqlite_autoindex_t_1`.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x, y, z FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("a".to_string()), Some("1".to_string()), Some("10".to_string())],
+                vec![Some("b".to_string()), Some("2".to_string()), Some("20".to_string())],
+            ]
+        );
+        // The constraints themselves survived (they came back via CREATE
+        // TABLE, which is why re-emitting their indexes was redundant).
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('a', 3, 30)").is_err(),
+            "the PRIMARY KEY constraint must still be enforced after re-attach"
+        );
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('c', 1, 30)").is_err(),
+            "the UNIQUE constraint must still be enforced after re-attach"
+        );
+    }
+
+    // …and the dump is clean at the source, so the re-attach above is not
+    // merely surviving a tolerated duplicate.
+    let dump = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(
+        !dump.to_lowercase().contains("sqlite_autoindex_"),
+        "the attached dump must not emit constraint-generated indexes \
+         (CREATE TABLE recreates them, and the name is reserved); got:\n{dump}"
+    );
+    assert!(
+        dump.contains("aux_user_idx"),
+        "the user-defined index must still be emitted; got:\n{dump}"
+    );
+}
+
+#[test]
+fn test_attach_reattach_round_trips_a_without_rowid_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_wor.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // A WITHOUT ROWID table's PK index is keyed
+        // `aux._withoutrowidinternalpk_t` (#5882) and slips the same filter.
+        ex.execute("CREATE TABLE aux.t(k TEXT PRIMARY KEY, v INTEGER) WITHOUT ROWID").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('k1', 1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('k2', 2)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        // Same primary regression as above, via the `_withoutrowidinternalpk_`
+        // prefix rather than `sqlite_autoindex_`.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT k, v FROM aux.t ORDER BY k").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("k1".to_string()), Some("1".to_string())],
+                vec![Some("k2".to_string()), Some("2".to_string())],
+            ]
+        );
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('k1', 9)").is_err(),
+            "the WITHOUT ROWID PRIMARY KEY must still be enforced after re-attach"
+        );
+    }
+
+    let dump = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(
+        !dump.to_lowercase().contains(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX),
+        "the attached dump must not emit the WITHOUT ROWID internal PK index \
+         (it is regenerated from the CREATE TABLE DDL); got:\n{dump}"
+    );
+    assert!(
+        !dump.to_lowercase().contains("sqlite_autoindex_"),
+        "the attached dump must not emit constraint-generated indexes; got:\n{dump}"
+    );
+    assert!(
+        dump.to_uppercase().contains("WITHOUT ROWID"),
+        "the WITHOUT ROWID clause itself must survive; got:\n{dump}"
+    );
+}

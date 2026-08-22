@@ -625,8 +625,9 @@ fn write_create_table_ddl<W: Write>(
 }
 
 impl Database {
-    /// Persist an attached schema's tables (definitions + live row data) to
-    /// its own file, in the reconstructed-DDL SQL-dump format (#6362).
+    /// Persist an attached schema's tables (definitions + live row data),
+    /// indexes, views, and triggers to its own file, in the
+    /// reconstructed-DDL SQL-dump format (#6362 Phase 2, #6407).
     ///
     /// Attached-database persistence is deliberately snapshot-only regardless
     /// of whether the *main* database is WAL-active (see the ATTACH DATABASE
@@ -634,21 +635,27 @@ impl Database {
     /// `.vbsql`-style dump, written and reloaded through the same SQL-dump
     /// machinery as a normal snapshot-only database. The written file is a
     /// standalone, self-contained database — when re-loaded (e.g. by a later
-    /// `ATTACH` of the same path) its tables land in the loader's own default
-    /// schema, exactly like any other `.vbsql` file; the caller is
-    /// responsible for re-homing them into the attachment's schema name in
-    /// the live session.
+    /// `ATTACH` of the same path) its tables/indexes/views/triggers land in
+    /// the loader's own default schema, exactly like any other `.vbsql`
+    /// file; the caller is responsible for re-homing them into the
+    /// attachment's schema name in the live session.
     ///
-    /// Scope (#6362 Phase 2): only tables (schema + row data) round-trip
-    /// through attached-database persistence. Views, triggers, and indexes
-    /// defined inside an attached schema are intentionally not persisted
-    /// here — unlike a default-schema table, their stored SQL text /
-    /// qualifiers are entangled with the attachment's schema name (e.g. a
-    /// captured `CREATE VIEW aux.v1` text cannot be replayed unqualified into
-    /// a standalone reload target without a schema-name rewrite this phase
-    /// does not attempt). This is a disclosed, deliberate limitation,
-    /// analogous to the per-attached-DB WAL/checkpoint lifecycle also being
-    /// out of scope for this phase — tracked as a follow-up in issue #6407.
+    /// Views and triggers defined inside this schema embed the attachment's
+    /// schema qualifier in their captured SQL text (e.g. a `CREATE VIEW
+    /// aux.v1 AS SELECT x FROM aux.t` captured while `aux` was the
+    /// attachment's name). Since the on-disk file is standalone (reloaded
+    /// into an ordinary default schema), that qualifier is stripped via
+    /// [`strip_schema_qualifier`] before being written, so the dump is
+    /// schema-relative and reloads cleanly regardless of what alias a future
+    /// session attaches this same file under (issue #6407). Only the exact
+    /// unquoted `schema_name.` qualifier is stripped — everything else in the
+    /// captured text (including references to *other* schemas) is left
+    /// untouched.
+    ///
+    /// Index metadata (including partial `WHERE` predicates and expression
+    /// columns) is likewise persisted; table names inside `CREATE INDEX` are
+    /// reconstructed from structured metadata (not verbatim text) and are
+    /// already schema-relative, mirroring [`write_create_table_ddl`].
     pub fn save_attached_schema_sql_dump<P: AsRef<Path>>(
         &self,
         schema_name: &str,
@@ -727,6 +734,198 @@ impl Database {
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         }
 
+        // Indexes owned by this attached schema (#6407). Mirrors the main
+        // dump's index-emission loop (`write_sql_dump_to_file`), but instead
+        // of *skipping* attached-schema indexes, this is the attached-schema
+        // dump itself, so we emit exactly the indexes whose owning schema
+        // matches `schema_name`. Table names are reconstructed from
+        // structured metadata (`metadata.table_name`, always bare for an
+        // index — see `CreateIndexExecutor`), so they are already
+        // schema-relative and need no qualifier stripping.
+        writeln!(writer, "-- Indexes")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        for index_key in self.list_indexes() {
+            // Resolve the metadata FIRST and filter on `metadata.index_name`,
+            // never on the iterated value. `IndexManager::list_indexes()`
+            // yields storage *map keys*, and `make_index_key` prefixes every
+            // non-`main` schema onto the key — an attached schema's
+            // auto-generated index is keyed `aux.sqlite_autoindex_t_1`, so a
+            // `starts_with("sqlite_autoindex_")` test against the key is
+            // always false for exactly the indexes this filter exists to
+            // exclude. The main dump's loop (`write_sql_dump_to_file`) gets
+            // away with testing the key because main-schema keys are bare;
+            // that stops holding the moment the same loop is pointed at a
+            // non-`main` schema. Emitting an auto-index here is not cosmetic:
+            // `CREATE TABLE` already recreates it on reload, and the reserved
+            // `sqlite_autoindex_*` / WITHOUT ROWID PK name makes the replayed
+            // statement a hard error ("object name reserved for internal
+            // use"), so the attachment persists fine and can then never be
+            // re-ATTACHed.
+            let Some(metadata) = self.get_index(&index_key) else { continue };
+            if !metadata.schema.eq_ignore_ascii_case(schema_name) {
+                continue;
+            }
+            // Skip auto-generated indexes - these are automatically created by constraints:
+            // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
+            // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE
+            //   constraints (follows SQLite naming convention for implicit indexes)
+            // - the WITHOUT ROWID PK internal index (issue #5882) is regenerated from the CREATE
+            //   TABLE DDL on reload, so it must not be dumped as a CREATE INDEX
+            let lower_name = metadata.index_name.to_lowercase();
+            if lower_name.starts_with("pk_")
+                || lower_name.starts_with("sqlite_autoindex_")
+                || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            {
+                continue;
+            }
+
+            write!(writer, "CREATE")
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            if metadata.unique {
+                write!(writer, " UNIQUE")
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+            }
+            write!(
+                writer,
+                " INDEX {} ON {} (",
+                quote_identifier(&metadata.index_name),
+                quote_identifier(&metadata.table_name)
+            )
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+            for (i, col) in metadata.columns.iter().enumerate() {
+                if i > 0 {
+                    write!(writer, ", ")
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+                use vibesql_ast::IndexColumn;
+                match col {
+                    IndexColumn::Column { column_name, .. } => {
+                        write!(writer, "{}", quote_identifier(column_name)).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                    }
+                    IndexColumn::Expression { expr, .. } => {
+                        use vibesql_ast::pretty_print::ToSql;
+                        let expr_sql = strip_schema_qualifier(&expr.to_sql(), schema_name);
+                        write!(writer, "{}", expr_sql).map_err(|e| {
+                            StorageError::NotImplemented(format!("Write error: {}", e))
+                        })?;
+                    }
+                }
+                use vibesql_ast::OrderDirection;
+                if col.direction() == OrderDirection::Desc {
+                    write!(writer, " DESC")
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+            }
+
+            write!(writer, ")")
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+            // Look up the catalog entry via the schema-qualified table name
+            // (`Catalog::get_index`, exact `schema.table.index` targeting)
+            // rather than `find_index_by_name` (bare-name-only, first match
+            // across every schema): an attached schema could otherwise
+            // collide with a same-named index elsewhere and silently pull
+            // the wrong WHERE predicate. This also sidesteps the storage
+            // `IndexManager`'s schema-prefixed map key (`make_index_key`),
+            // which never matches the catalog's bare `index.name`.
+            let qualified_table = format!("{}.{}", schema_name, metadata.table_name);
+            if let Some(catalog_meta) =
+                self.catalog.get_index(&qualified_table, &metadata.index_name)
+            {
+                if let Some(where_expr) = catalog_meta.where_clause.as_deref() {
+                    use vibesql_ast::pretty_print::ToSql;
+                    let where_sql = strip_schema_qualifier(&where_expr.to_sql(), schema_name);
+                    write!(writer, " WHERE {}", where_sql)
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+            }
+
+            writeln!(writer, ";")
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        // Views owned by this attached schema (#6407). A view created as
+        // `CREATE VIEW aux.v1 AS SELECT x FROM aux.t` stores the qualified
+        // name verbatim (views have no separate `schema` AST field like
+        // indexes/triggers do — see `ViewDefinition::name`), and its captured
+        // `sql_definition` text embeds the same qualifier throughout (name
+        // and any table references). Strip exactly the `schema_name.`
+        // qualifier so the emitted statement is schema-relative and
+        // standalone-loadable.
+        writeln!(writer, "-- Views")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        for view_name in self.catalog.list_views() {
+            let Some(view_def) = self.catalog.get_view(&view_name) else { continue };
+            if view_def.is_temp() {
+                continue;
+            }
+            let owned_by_schema =
+                view_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
+                    || view_def
+                        .name
+                        .split_once('.')
+                        .is_some_and(|(s, _)| s.eq_ignore_ascii_case(schema_name));
+            if !owned_by_schema {
+                continue;
+            }
+
+            let sql = view_def.sql_definition.as_ref().map_or_else(
+                || {
+                    let bare_name =
+                        view_def.name.split_once('.').map(|(_, n)| n).unwrap_or(&view_def.name);
+                    format!("CREATE VIEW {} AS {:?}", bare_name, view_def.query)
+                },
+                |s| s.clone(),
+            );
+            let sql = strip_schema_qualifier(sql.trim_end_matches(';').trim(), schema_name);
+            writeln!(writer, "{};", sql)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
+        // Triggers owned by this attached schema (#6407). Only triggers with
+        // preserved SQL text can round-trip (same limitation as the main
+        // dump); the trigger's `BEGIN ... END` action body is stored as raw
+        // SQL text (`TriggerAction::RawSql`), so the same qualifier-stripping
+        // pass covers both the header (`ON aux.t`) and the body
+        // (`INSERT INTO aux.t2 ...`).
+        writeln!(writer, "-- Triggers")
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        for trigger_def in self.catalog.iter_triggers() {
+            if trigger_def.is_temp() {
+                continue;
+            }
+            let owned_by_schema =
+                trigger_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name));
+            if !owned_by_schema {
+                continue;
+            }
+
+            match trigger_def.sql_definition.as_ref() {
+                Some(sql) => {
+                    let sql = strip_schema_qualifier(sql.trim_end_matches(';').trim(), schema_name);
+                    writeln!(writer, "{};", sql)
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+                None => {
+                    writeln!(
+                        writer,
+                        "-- Skipped trigger '{}' (no preserved SQL text)",
+                        trigger_def.name
+                    )
+                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                }
+            }
+        }
+        writeln!(writer)
+            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+
         writer
             .flush()
             .map_err(|e| StorageError::NotImplemented(format!("Failed to flush buffer: {}", e)))?;
@@ -796,6 +995,126 @@ fn write_table_data<W: Write>(
     }
 
     Ok(())
+}
+
+/// Strip an unquoted `<schema_name>.` qualifier from every position it
+/// appears as a whole-identifier prefix in `sql`, leaving everything else
+/// untouched (issue #6407).
+///
+/// Used when persisting an attached schema's views/triggers/index
+/// expressions to their own standalone file: captured SQL text for an object
+/// created as `CREATE VIEW aux.v1 AS SELECT x FROM aux.t` embeds the
+/// attachment's schema name (`aux`) throughout, which cannot be replayed
+/// into a fresh default-schema reload target without stripping it first. The
+/// caller re-adds the (possibly different) schema name the file is attached
+/// under in the *new* session, so only the exact qualifier used at save time
+/// needs removing here — everything else in the text (including references
+/// to *other* schemas) round-trips byte-for-byte.
+///
+/// This is a lexical, quote-aware scan rather than a full parse: it tracks
+/// single-quoted string literals (`'...'`, with `''`-doubling), double-quoted
+/// identifiers (`"..."`, with `""`-doubling), backtick-quoted identifiers,
+/// and bracket-quoted identifiers (`[...]`) so a qualifier-shaped substring
+/// inside a literal or a quoted identifier is never touched. A match must be
+/// a whole identifier (anchored on a word boundary) immediately followed by
+/// `.`; comparison is ASCII case-insensitive, matching SQL identifier
+/// semantics.
+/// Known limitations, none of which affect any path this function is used
+/// from (all three need SQL text this engine's own DDL reconstruction never
+/// produces):
+///   * A schema name written pre-quoted (e.g. `"aux".v1`) is not recognized — attachment schema
+///     names are ordinary identifiers and are never written quoted here.
+///   * `--` and `/* */` comments are not treated as spans, so a qualifier mentioned *inside a
+///     comment* in the captured SQL is rewritten like any other occurrence. Cosmetic only: the
+///     comment text changes, the statement's meaning does not.
+///   * A **table alias** that happens to equal the schema name is stripped along with real
+///     qualifiers: `SELECT aux.x FROM t AS aux` becomes `SELECT x FROM t AS aux`. Harmless for a
+///     single-table query (the column still resolves), but it can make a join's column reference
+///     ambiguous. Pinned by `strip_schema_qualifier_also_strips_an_alias_matching_the_schema_name`
+///     so the behavior is at least known rather than accidental.
+fn strip_schema_qualifier(sql: &str, schema_name: &str) -> String {
+    // Byte-oriented scan, but every byte that is *emitted* is emitted as part
+    // of a `&str` slice of the original input — never as `byte as char`, which
+    // would decode UTF-8 continuation bytes as Latin-1 and mojibake any
+    // non-ASCII text in the captured SQL (a string literal, a Unicode
+    // identifier, a comment). This is safe because no ASCII byte ever appears
+    // inside a multi-byte UTF-8 sequence, so an ASCII delimiter match can
+    // never land mid-character.
+    let bytes = sql.as_bytes();
+    let mut out = String::with_capacity(sql.len());
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // Copy quoted spans verbatim (never treat their contents as an
+        // identifier to match against).
+        if matches!(b, b'\'' | b'"' | b'`' | b'[') {
+            let (close, doubled) = match b {
+                b'\'' => (b'\'', true),
+                b'"' => (b'"', true),
+                b'`' => (b'`', false),
+                _ => (b']', false),
+            };
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == close {
+                    // A doubled closing delimiter (`''` / `""`) is an escaped
+                    // literal delimiter, not the end of the span.
+                    if doubled && i + 1 < bytes.len() && bytes[i + 1] == close {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            out.push_str(&sql[start..i]);
+            continue;
+        }
+
+        if b.is_ascii_alphabetic() || b == b'_' {
+            let start = i;
+            let mut j = i;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            let ident = &sql[start..j];
+            // The preceding byte must be an ASCII non-word byte. Requiring
+            // ASCII (rather than merely "not an ASCII word byte") keeps a
+            // non-ASCII identifier character — e.g. the `é` in `caféaux.t` —
+            // from being mistaken for a word boundary.
+            let boundary_ok = start == 0 || {
+                let prev = bytes[start - 1];
+                prev.is_ascii() && !(prev.is_ascii_alphanumeric() || prev == b'_')
+            };
+            if boundary_ok
+                && j < bytes.len()
+                && bytes[j] == b'.'
+                && ident.eq_ignore_ascii_case(schema_name)
+            {
+                // Drop the identifier and the following '.' — the qualifier
+                // is elided entirely.
+                i = j + 1;
+                continue;
+            }
+            out.push_str(ident);
+            i = j;
+            continue;
+        }
+
+        // Any other byte: copy the whole UTF-8 character it starts, verbatim.
+        let mut end = i + 1;
+        while end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
+            end += 1;
+        }
+        out.push_str(&sql[i..end]);
+        i = end;
+    }
+
+    out
 }
 
 /// Quote an identifier if it contains special characters or starts with a digit.
@@ -1096,6 +1415,124 @@ mod tests {
         assert!(
             !dump.contains("tr_temp"),
             "temp trigger must NOT appear in the SQL dump, got:\n{dump}"
+        );
+    }
+
+    // ========================================================================
+    // strip_schema_qualifier (#6407)
+    //
+    // The attached-schema dump writer relies on this lexical pass to turn
+    // captured, schema-qualified view/trigger SQL text into the
+    // schema-relative text a standalone reload target can replay. It is the
+    // one place in the round-trip that rewrites user SQL, so its
+    // never-touch-a-literal guarantees are asserted directly rather than only
+    // through the end-to-end ATTACH tests.
+    // ========================================================================
+
+    use super::strip_schema_qualifier as strip;
+
+    #[test]
+    fn test_strip_schema_qualifier_removes_every_occurrence() {
+        assert_eq!(
+            strip("CREATE VIEW aux.v1 AS SELECT aux.t.x FROM aux.t", "aux"),
+            "CREATE VIEW v1 AS SELECT t.x FROM t"
+        );
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_is_case_insensitive() {
+        assert_eq!(strip("SELECT * FROM AuX.t", "aux"), "SELECT * FROM t");
+        assert_eq!(strip("SELECT * FROM aux.t", "AUX"), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_requires_whole_identifier_match() {
+        // Only a whole identifier immediately followed by `.` is a qualifier.
+        assert_eq!(strip("SELECT * FROM myaux.t", "aux"), "SELECT * FROM myaux.t");
+        assert_eq!(strip("SELECT * FROM aux_2.t", "aux"), "SELECT * FROM aux_2.t");
+        assert_eq!(strip("SELECT * FROM auxiliary.t", "aux"), "SELECT * FROM auxiliary.t");
+        // A bare mention with no following `.` is not a qualifier either.
+        assert_eq!(strip("SELECT aux FROM t", "aux"), "SELECT aux FROM t");
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_leaves_other_schemas_alone() {
+        assert_eq!(
+            strip("SELECT * FROM aux.t JOIN other.u ON 1=1", "aux"),
+            "SELECT * FROM t JOIN other.u ON 1=1"
+        );
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_never_edits_string_literals() {
+        // A qualifier-shaped substring inside a string literal is data, not
+        // SQL — rewriting it would silently corrupt the user's values.
+        assert_eq!(
+            strip("SELECT * FROM aux.t WHERE label = 'aux.t is the source'", "aux"),
+            "SELECT * FROM t WHERE label = 'aux.t is the source'"
+        );
+        // `''`-doubling inside the literal must not be read as the end of the
+        // span (which would leave the tail unprotected).
+        assert_eq!(strip("SELECT 'it''s aux.t' FROM aux.t", "aux"), "SELECT 'it''s aux.t' FROM t");
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_never_edits_quoted_identifiers() {
+        // Documented limitation, asserted so a future change is deliberate: a
+        // pre-quoted schema name is left as-is (this engine's own DDL
+        // reconstruction never emits one).
+        assert_eq!(strip(r#"SELECT * FROM "aux".t"#, "aux"), r#"SELECT * FROM "aux".t"#);
+        assert_eq!(strip("SELECT * FROM `aux`.t", "aux"), "SELECT * FROM `aux`.t");
+        assert_eq!(strip("SELECT * FROM [aux].t", "aux"), "SELECT * FROM [aux].t");
+        // A column literally named `aux.x` via quoting is untouched, while an
+        // unquoted qualifier in the same statement still goes.
+        assert_eq!(strip(r#"SELECT "aux.x" FROM aux.t"#, "aux"), r#"SELECT "aux.x" FROM t"#);
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_preserves_non_ascii_text() {
+        // Regression guard: a byte-wise `byte as char` copy decodes UTF-8
+        // continuation bytes as Latin-1 and mojibakes any non-ASCII text.
+        let sql = "SELECT * FROM aux.t WHERE name = 'café ☕ Ünïcödé'";
+        assert_eq!(strip(sql, "aux"), "SELECT * FROM t WHERE name = 'café ☕ Ünïcödé'");
+        // …including outside quotes, where the identifier scanner runs.
+        assert_eq!(strip("-- café note\nSELECT 1", "aux"), "-- café note\nSELECT 1");
+    }
+
+    #[test]
+    fn test_strip_schema_qualifier_no_op_when_schema_absent() {
+        let sql = "CREATE VIEW v1 AS SELECT x FROM t WHERE x > 0";
+        assert_eq!(strip(sql, "aux"), sql);
+    }
+
+    #[test]
+    fn strip_schema_qualifier_also_strips_an_alias_matching_the_schema_name() {
+        // Documented limitation, pinned so it is known rather than accidental
+        // (#6476 review note 1): the scan is lexical, so a *table alias* that
+        // happens to equal the schema name is indistinguishable from a real
+        // schema qualifier and is stripped too.
+        assert_eq!(strip("SELECT aux.x FROM t AS aux", "aux"), "SELECT x FROM t AS aux");
+        // The alias in the FROM clause itself is left intact — only the
+        // `alias.` *prefix* on a column reference is removed.
+        assert_eq!(
+            strip("SELECT aux.x, b.y FROM t AS aux JOIN u AS b ON aux.x = b.x", "aux"),
+            "SELECT x, b.y FROM t AS aux JOIN u AS b ON x = b.x"
+        );
+    }
+
+    #[test]
+    fn strip_schema_qualifier_rewrites_inside_comments() {
+        // Documented limitation, pinned (#6476 review note 2): `--` and
+        // `/* */` are not treated as spans, so a qualifier inside a comment
+        // is rewritten like any other occurrence. Cosmetic — the comment text
+        // changes, the statement's meaning does not.
+        assert_eq!(
+            strip("-- reads aux.t\nSELECT x FROM aux.t", "aux"),
+            "-- reads t\nSELECT x FROM t"
+        );
+        assert_eq!(
+            strip("SELECT x /* from aux.t */ FROM aux.t", "aux"),
+            "SELECT x /* from t */ FROM t"
         );
     }
 }
